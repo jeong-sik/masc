@@ -5227,6 +5227,55 @@ let test_connector_submit_uses_owner_operation_idempotency () =
        | Error error -> fail (Owner_registry.command_error_to_string error))
 ;;
 
+let test_telegram_poll_receipt_is_persisted_owner_operation () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path=temp_dir () in
+  Fun.protect ~finally:(fun()->remove_tree base_path) (fun()->
+    Eio.Switch.run @@ fun sw ->
+    let clock=Eio.Stdenv.clock env in
+    let config=Workspace.default_config base_path in
+    ignore(Workspace.init config ~agent_name:(Some "telegram-owner-test"));
+    let meta=make_meta "telegram-owner" in
+    (match Keeper_meta_store.replace_snapshot config meta with Ok () -> () | Error detail -> fail detail);
+    (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+     | Ok 1 -> () | Ok _ -> fail "owner count" | Error error -> fail(Owner_registry.install_error_to_string error));
+    let post ~url ~body =
+      match Filename.basename(Uri.path(Uri.of_string url)) with
+      | "getMe" -> Ok(200,{|{"ok":true,"result":{"id":777,"is_bot":true,"first_name":"Bot"}}|})
+      | "getUpdates" when Yojson.Safe.Util.member "offset" (Yojson.Safe.from_string body)=`Null ->
+        Ok(200,{|{"ok":true,"result":[{"update_id":99,"message":{"message_id":8,"chat":{"id":-1005},"message_thread_id":7,"from":{"id":123,"is_bot":false,"first_name":"Ada"},"text":"original"}}]}|})
+      | "getUpdates" -> Ok(200,{|{"ok":true,"result":[]}|})
+      | _ -> fail "unexpected API request" in
+    let client=match Telegram_rest_client.create ~token:"fixture" with Ok v->v | Error _->fail "client" in
+    let custody=match Telegram_poll_custody.open_cursor ~post ~clock ~client
+      ~path:(fun ~bot_user_id:_ -> Filename.concat base_path "telegram-cursor.json") () with
+      | Ok v->v | Error error -> fail(Format.asprintf "%a" Telegram_poll_custody.pp_error error) in
+    let seen_id=ref None in
+    let accept ~operation_id update =
+      seen_id:=Some operation_id;
+      Server_telegram_in_process_gateway.For_testing.accept_update ~bot_user_id:777L ~operation_id
+        ~resolve:(fun ~channel_id:_ -> Ok(Some meta.name))
+        ~dispatch_for_delivery:(fun delivery->Gate_keeper_backend.accept_connector ~delivery ~clock ~config) update in
+    let step ()=match Telegram_poll_custody.step ~post ~clock custody ~now:(fun()->Eio.Time.now clock)
+      ~poll_timeout_sec:0 ~accept () with Ok v->v | Error error->fail(Format.asprintf "%a" Telegram_poll_custody.pp_error error) in
+    let first=step () in check int "actual owner receipt advances cursor" 1 first.accepted;
+    let second=step () in check int "confirmed frontier prevents reaccept" 0 second.accepted;
+    let operation_id=Option.get !seen_id in
+    let path=Keeper_chat_operation_store.path_for_keeper
+      ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config) ~keeper_name:meta.name in
+    match Keeper_chat_operation_store.inspect_durable_records ~path with
+    | Ok(Stored_durable_records {chat_operations=[operation];_}) ->
+      check string "SQLite stores original event operation" operation_id (Chat_operation.Operation_id.to_string operation.operation_id);
+      let source=match Keeper_chat_operation_payload.source_of_json operation.source with Ok v->v | Error detail->fail detail in
+      (match source.continuation_channel with
+       | Keeper_continuation_channel.Telegram {bot_user_id=777L;chat_id= -1005L;message_thread_id=Some 7;reply_to_message_id=Some 8;user_id=123L;direct_messages_topic_id=None} -> ()
+       | _ -> fail "durable route differs from original Telegram event");
+      check bool "owner remains queued without running a model" true (match operation.state with Chat_operation.Queued->true | _->false)
+    | Ok _ -> fail "missing/duplicate durable operation"
+    | Error error -> fail(Keeper_chat_operation_store.error_to_string error))
+;;
+
 let test_root_inventory_isolates_invalid_owner_snapshots () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -6029,6 +6078,7 @@ let () =
             "connector submit is owner-idempotent"
             `Quick
             test_connector_submit_uses_owner_operation_idempotency
+        ; test_case "Telegram poll receipt is a durable owner operation" `Quick test_telegram_poll_receipt_is_persisted_owner_operation
         ; test_case
             "root inventory isolates invalid owner snapshots"
             `Quick

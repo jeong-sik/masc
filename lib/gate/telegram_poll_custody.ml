@@ -76,10 +76,10 @@ let open_cursor ?post ?clock ~client ~path () =
   let* bot = Api.get_me ?post ?clock client () |> Result.map_error (fun e -> Api e) in
   if not bot.is_bot then Error (Cursor_refused "getMe is not a bot")
   else
-    let t={client;path;bot_user_id=bot.id} in
+    let t={client;path=path ~bot_user_id:bot.id;bot_user_id=bot.id} in
     let* _ = read_cursor t in Ok t
 
-type ignored_reason = Unbound_chat | Bot_message | Unsupported_update | Empty_message
+type ignored_reason = Unbound_chat | Bot_message | Unsupported_update | Empty_message | Oversized_message
 type disposition = Accepted of Gate_protocol.outbound_message | Intentionally_ignored of ignored_reason
 type report = {generation:int64;next_offset:int64 option;accepted:int;ignored:int;already_committed:int}
 
@@ -175,7 +175,7 @@ let step_with_cursor_writer ~write_cursor ?post ~clock t ~now ~poll_timeout_sec 
               let* disposition = accept ~operation_id update
                 |> Result.map_error (fun detail -> Acceptance_refused {update_id=update.update_id;detail}) in
               let* accepted,ignored = match disposition with
-                | Intentionally_ignored (Unbound_chat | Bot_message | Unsupported_update | Empty_message) -> Ok (0,1)
+                | Intentionally_ignored (Unbound_chat | Bot_message | Unsupported_update | Empty_message | Oversized_message) -> Ok (0,1)
                 | Accepted outbound ->
                   Result.map (fun () -> 1,0) (check_receipt ~operation_id outbound)
                   |> Result.map_error (fun detail -> Acceptance_refused {update_id=update.update_id;detail}) in

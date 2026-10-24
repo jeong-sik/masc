@@ -16,7 +16,7 @@ The observed URL check precedes SDK entry and does not atomically guard input.
 - A wrong initial URL refused before input. A native wait failure after hover
   preserved one completed step and did not run the later navigation.
 - [proof.json](proof.json) binds request/result to production JavaScript SHA-256
-  `ec68b350de8b99c2f49451b26ef99492b2764f021e74d866ca1b6a64512e7558`.
+  `ff96902e331b3b8ea0e3d07b1d4dcb8ebb2d638218104276bc29ed6b1e29d061`.
   [sdk-output.txt](sdk-output.txt) and [native-workflow.png](native-workflow.png)
   record the result. The screenshot was visually inspected.
 - `scripts/check-browser-native-workflow-codec.sh`: five component tests passed;
@@ -27,13 +27,30 @@ The observed URL check precedes SDK entry and does not atomically guard input.
 - `node --test test/test_browser_ego_workflow.cjs test/test_browser_ego_target.cjs
   test/test_browser_ego_drag.cjs`: fourteen production-script scenarios passed.
 
-## Scope still to verify
+## Viewport scope repair
 
-This proves production JavaScript on installed Ego and the OCaml codec/receipt
-component. It does not prove OCaml host dispatch, installed MASC replacement or
-an autonomous Keeper task. Added host/client scenarios require selected suite
-execution. No local Dune build or full regression run is claimed.
+An actual Keeper on candidate `4219c3074e281940ffec9c0d0b12db6f04a0d296`
+reproduced a workflow-only failure: MASC's `viewport` was sent as an SDK scope,
+which Ego rejects. The same Keeper then used `full_page` successfully. Complete
+request/results are in [viewport/keeper-original-host.json](viewport/keeper-original-host.json).
 
-Continue the overall native-first work in issue #45726, including remaining
-input adapters and a real Keeper task. The goal's continuing task space is 4;
-reuse it and finish only when the whole goal ends.
+Viewport now calls `page.snapshot()` with the SDK default, as BrowserRead does;
+full-page still sends the native `full_page` scope. The fixture now enforces
+the installed SDK scope contract: two failures before, seven tests passing
+after. [viewport/sdk-proof.json](viewport/sdk-proof.json) records the fixed
+production script completing two native waits and the viewport snapshot on
+installed Ego in the same approved space 9. The five-step full-page SDK proof
+above was also re-executed with the fixed script. These direct SDK results do
+not prove a replacement host binary; candidate verification is separate.
+
+## Evidence scope
+
+The SDK proof and OCaml component check have their stated scopes. The original
+candidate's real Keeper receipts additionally prove its full-page workflow
+host dispatch and expose its broken viewport branch. They do not prove the
+repaired host binary or installed MASC replacement. No local Dune build or full
+regression run is claimed.
+
+Continue the overall native-first work in issue #45726. The initial space 4
+was found missing before runtime verification; the operator explicitly approved
+continuing in space 9. Reuse 9 and finish only when the whole goal ends.

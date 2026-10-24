@@ -39,7 +39,8 @@ let script = {js|async function nativeWorkflow(page, args) {
     if (receipt?.dialog) return failure(index, step.method, 'answer the JavaScript dialog before continuing', {dialog: receipt.dialog});
   }
   try {
-    const snapshot = await page.snapshot({scope: args.snapshotScope});
+    const snapshot = await (args.snapshotScope === 'viewport'
+      ? page.snapshot() : page.snapshot({scope: args.snapshotScope}));
     if (typeof snapshot !== 'string') throw new Error('ego answered a snapshot that is not text');
     let end = Math.min(args.maxChars, snapshot.length);
     if (end > 0 && end < snapshot.length && snapshot.charCodeAt(end - 1) >= 0xD800

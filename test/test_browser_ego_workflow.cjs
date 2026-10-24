@@ -9,7 +9,12 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
  const calls=[];let url=initial,value='';
  const page={
   async url(){calls.push('url');return url;},async title(){calls.push('title');return 'Fixture';},
-  async snapshot(options){calls.push(['snapshot',options]);return snapshot;},
+  async snapshot(options){
+   calls.push(['snapshot',options]);
+   if(options!==undefined&&!['full_page','only_within_viewport','subtree'].includes(options.scope))
+    throw Error('page.snapshot scope must be one of full_page, only_within_viewport, subtree');
+   return snapshot;
+  },
  };
  for(const method of ['click','dblclick','hover','fill','press','selectOption','goto','waitForURL','waitForSelector','waitForLoadState'])page[method]=async(...args)=>{
   calls.push([method,...args]);if(method===fail)throw Error('native '+method+' failed');
@@ -32,9 +37,15 @@ test('known native sequence navigates, waits and returns one final snapshot',asy
  assert.equal(result.failure,null);assert.equal(result.url,destination);assert.equal(result.snapshot,'native result');
  assert.equal(result.completed.length,5);assert.equal(result.completedEffect,true);
  assert.equal(f.calls.filter(c=>Array.isArray(c)&&c[0]==='snapshot').length,1);
+ assert.equal(f.calls.find(c=>Array.isArray(c)&&c[0]==='snapshot')[1],undefined,'viewport uses the SDK default, not a MASC scope name');
  assert.equal(f.calls[2][0],'waitForURL');
  assert.equal(f.calls[4][2].timeout,90);assert.equal(f.calls[4][2].state,'visible');
  assert.equal(Object.hasOwn(f.calls[1][2],'timeout'),false,'SDK defaults are not replaced');
+});
+test('full-page workflow snapshot uses the native full_page scope',async()=>{
+ const f=fixture();const result=await run(f.page,{...request([]),snapshotScope:'full_page'});
+ assert.equal(result.failure,null);
+ assert.equal(f.calls.find(c=>Array.isArray(c)&&c[0]==='snapshot')[1].scope,'full_page');
 });
 test('a failed SDK wait retains prior effects and never runs later steps',async()=>{
  const f=fixture({fail:'waitForURL'});const result=await run(f.page,request([

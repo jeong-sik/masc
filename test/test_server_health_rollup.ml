@@ -180,6 +180,17 @@ let test_waiting_inventory_fault_is_cached_and_rolled_up () =
   check (list string) "stable cause survives rollup"
     [ "keeper_waiting_inventory:schedule_primary_unusable" ] reasons
 
+let test_memory_dependency_failure_reaches_overall_health () =
+  check bool "Memory dependencies share the background cache" true
+    (R.is_cached "keeper_memory_execution");
+  let status, action, reasons = summary ~sections:
+    ["keeper_memory_execution", `Assoc ["status",`String "degraded";
+      "operator_action_required",`Bool true;
+      "status_reasons",`List [`String "addon_unattached"]]] () in
+  check string "Memory unavailability is not green" "degraded" status;
+  check bool "missing dependency needs operator configuration" true action;
+  check (list string) "cause is joined into health" ["keeper_memory_execution:addon_unattached"] reasons
+
 (* Most cached fields are not sections: keeper_fibers is an int, and
    keeper_config_errors a list. A field with no status says nothing about
    health and must not arrive as unknown. *)
@@ -290,6 +301,8 @@ let () =
             test_observability_artifacts_are_rolled_up
         ; test_case "waiting inventory fault is cached and rolled up" `Quick
             test_waiting_inventory_fault_is_cached_and_rolled_up
+        ; test_case "Memory dependency failure reaches overall health" `Quick
+            test_memory_dependency_failure_reaches_overall_health
         ; test_case "startup degradation is rolled up outside the cache" `Quick
             test_startup_degradation_is_rolled_up_outside_the_cache
         ] )

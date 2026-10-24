@@ -753,6 +753,36 @@ let test_category_edit_preserves_original_export_and_worker () =
            fail "invalid category was silently admitted");
       check int "refusals send no extra worker calls" 2 !calls)
 
+let test_export_reading_retains_typed_provider_wait_without_dispatch () =
+  let tool=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "queue_question";
+    "inputSchema",`Assoc ["type",`String "object"]]) |> unwrap in
+  let make_runner state : Exact.runner = fun ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ ->
+    incr state.resolutions;
+    Ok (fun ~validate:_ -> executed
+      (Exact.Call_refused (Exact.Provider_unavailable {detail="fixture provider is resting"}))) in
+  with_installation ~listing:[exact "original-pending"] ~make_runner
+    ~manifest:(manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n")
+    ~exported_tool:(tool,(fun _ -> fail "a health read invoked the exported tool"))
+    (fun clock config worker state _root ->
+      await clock (fun () -> cycles config >= 1);
+      let before= !(state.resolutions) in
+      let snapshot=Runtime.tool_execution_snapshot ~config ~reserved:[]
+          ~access:Lane_addon_sources.Operator_configuration in
+      (match snapshot.serving with
+       | [entry] ->
+         check (option string) "the declaration owns this route" (Some "quiz") entry.installation_id;
+         check string "the package is observed" "quiz-package" entry.package_id;
+         check bool "cycle has a measured boundary" true (Option.is_some entry.last_cycle_at);
+         (match entry.exact_waiting with
+          | [{Runtime.request_id;output;reason=Exact.Provider_refused (Provider_unavailable {detail})}] ->
+            check string "original request id" "original-pending" request_id;
+            check string "original output" "author" output;
+            check string "typed original cause" "fixture provider is resting" detail
+          | [] | _::_ -> fail "typed provider wait was lost")
+       | [] | _::_::_ -> fail "one live export was expected");
+      check int "observation does not rerun the provider" before !(state.resolutions);
+      check int "no fabricated terminal reached the worker" 0 (List.length !(worker.delivered)))
+
 let test_a_request_that_is_not_final_waits_for_the_next_event () =
   with_installation ~listing:[ exact "r2" ] ~mode:Off (fun clock config worker state  _root->
     await clock (fun () -> cycles config >= 1);
@@ -1705,6 +1735,8 @@ let () =
             test_category_edit_preserves_original_export_and_worker
         ; test_case "a request that is not final waits for the next event" `Quick
             test_a_request_that_is_not_final_waits_for_the_next_event
+        ; test_case "live export preserves original provider wait without dispatch" `Quick
+            test_export_reading_retains_typed_provider_wait_without_dispatch
         ; test_case "a request listed again after delivery ends the cycle" `Quick
             test_a_request_listed_again_after_delivery_ends_the_cycle
         ; test_case "a result larger than the frame is delivered as its size" `Quick

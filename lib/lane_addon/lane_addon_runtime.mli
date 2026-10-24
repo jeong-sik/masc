@@ -414,6 +414,39 @@ type host_issue =
     take precedence in this projection. A detail is the failure's own text and
     may be blank. This diagnostic grants no execution or result authority. *)
 
+type exact_wait = {
+  request_id : string;
+  output : string;
+  reason : Lane_addon_exact.not_final;
+}
+(** An original exact request waiting at the last host cycle. This is an
+    observation, never authority to retry or declare its result. *)
+type tool_execution = {
+  export : tool_export;
+  installation_id : string option;
+  (** [None] for a manual attachment with no declaration owner. *)
+  package_id : string;
+  configuration_revision : string option;
+  (** [None] for a manual attachment; otherwise the applied semantic revision. *)
+  exact_waiting : exact_wait list;
+  last_cycle_at : float option;
+  (** [None] until a host cycle has completed. *)
+  host_issue : host_issue option;
+  (** [None] if the last cycle reported no host issue, including before its
+      first cycle; this is not evidence of a successful provider call. *)
+}
+type tool_execution_snapshot = {
+  serving : tool_execution list;
+  conflicts : Lane_addon_tool_export.conflict list;
+  unready : Lane_addon_unready.t list;
+}
+val tool_execution_snapshot : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> tool_execution_snapshot
+(** The same live export admission as {!tool_export_snapshot}, with the
+    original package/installation and typed last-cycle waits. Reads only the
+    existing manager on its owner domain; no retained-store scan, worker RPC,
+    reconciliation or model call. A later invocation still checks authority. *)
+
 val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)
 

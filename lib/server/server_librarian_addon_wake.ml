@@ -28,8 +28,16 @@ let install ~sw ~config =
   let stopped=Atomic.make false in
   let discover = function
     | Runtime.Configuration_observed | Export_inventory_changed ->
-      let* queued=Keeper_memory_admission_queue.list_keeper_ids ~keepers_dir in
-      let originals,refusals=match Owner.discover_all ~store with
+      (* An absent dependency stops durable history before an original is
+         captured. Its persisted Keeper is still a real owner to notify;
+         the normal serialized lane decides whether it has unread input. *)
+      let persisted,metadata_refusals=match Keeper_meta_store.persisted_keeper_names_read_only_result config with
+        | Ok names -> names,[]
+        | Error detail -> [],[detail] in
+      let queued,queue_refusals=match Keeper_memory_admission_queue.list_keeper_ids ~keepers_dir with
+        | Ok names -> names,[]
+        | Error detail -> [],[detail] in
+      let originals,original_refusals=match Owner.discover_all ~store with
         | Ok originals -> originals,[]
         | Error error -> [],[Owner.error_to_string error] in
       let found=List.fold_left (fun found (original:Owner.retained) ->
@@ -45,7 +53,8 @@ let install ~sw ~config =
         | Ok None -> found
         | Ok (Some (keeper,_installation)) -> {found with keepers=keeper::found.keepers}
         | Error detail -> {found with refusals=detail::found.refusals})
-        {keepers=queued;refusals} originals in
+        {keepers=persisted @ queued;
+         refusals=metadata_refusals @ queue_refusals @ original_refusals} originals in
       Ok {keepers=List.sort_uniq String.compare found.keepers;refusals=List.rev found.refusals}
     | Exact_result_delivered {installation_id;instance_id=_;request_id} ->
       let* scope=match namespace request_id with

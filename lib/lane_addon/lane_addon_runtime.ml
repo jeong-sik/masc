@@ -166,7 +166,9 @@ type host_issue =
   | No_exact_runner
   | No_web_search_runner
 (* A projection of the last cycle; no decision reads it. *)
-type host_status = { cycles : int; waiting : (string * Yojson.Safe.t) list; issue : host_issue option }
+type exact_wait = { request_id : string; output : string; reason : Lane_addon_exact.not_final }
+type host_status = { cycles : int; waiting : (string * Yojson.Safe.t) list;
+  exact_waiting : exact_wait list; observed_at : float option; issue : host_issue option }
 type entry = {
   instance_id : string; run_id : string; package : package; binding : Yojson.Safe.t;
   mutable state : Lifecycle.state; mutable authority : Lifecycle.authority option;
@@ -1039,6 +1041,7 @@ type host_attempt = Deliver of Yojson.Safe.t | Restore of Yojson.Safe.t | Wait o
 let run_host_cycle m e (port : host_port) =
   let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
   let waiting = ref [] in
+  let exact_waiting = ref [] in
   let request_issue = ref None in
   let check_live () = if e.stopping then raise Host_cycle_stopped in
   let current_owner () : Lane_addon_host_delivery.owner = {
@@ -1096,7 +1099,9 @@ let run_host_cycle m e (port : host_port) =
                 Exact_record_failed {request_id = exact.Lane_addon_exact.request_id; detail}) in
         Result.map (function
           | Lane_addon_exact.Final final -> Deliver (Lane_addon_exact.final_to_json final)
-          | Lane_addon_exact.Not_final reason -> Wait (Lane_addon_exact.not_final_to_json reason)) attempt
+          | Lane_addon_exact.Not_final reason ->
+              exact_waiting := {request_id=exact.request_id;output=exact.output;reason} :: !exact_waiting;
+              Wait (Lane_addon_exact.not_final_to_json reason)) attempt
     | Lane_addon_host_request.Read_records {request_id; source_id; start} ->
         (match Lane_addon_records.grants ~operator_owned:(operator_owned ~configuration:e.configuration
             ~source_access:e.source_access) e.binding with
@@ -1246,6 +1251,7 @@ let run_host_cycle m e (port : host_port) =
     if delivered_any then pass () else Ok () in
   let outcome = try pass () with Host_cycle_stopped -> Ok () in
   e.host_status <- { cycles = e.host_status.cycles + 1; waiting = List.rev !waiting;
+    exact_waiting = List.rev !exact_waiting; observed_at = Some (Time_compat.now ());
     issue = (match outcome with Ok () -> !request_issue | Error issue -> Some issue) }
 
 let run_host_watch ~sw ~cleanup_sw ~backend m e port await_change =
@@ -1856,6 +1862,39 @@ let tool_export_snapshot ~config ~access ~reserved = Eio_context.run_on_owner_do
   let reading = current_reading ~config ~access in
   let isolated = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
   ({ exports = isolated.exports; conflicts = isolated.conflicts; unready = reading.unready } : export_snapshot))
+
+type tool_execution = {
+  export : tool_export;
+  installation_id : string option;
+  package_id : string;
+  configuration_revision : string option;
+  exact_waiting : exact_wait list;
+  last_cycle_at : float option;
+  host_issue : host_issue option;
+}
+type tool_execution_snapshot = {
+  serving : tool_execution list;
+  conflicts : Lane_addon_tool_export.conflict list;
+  unready : Lane_addon_unready.t list;
+}
+let tool_execution_snapshot ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
+  let reading = current_reading ~config ~access in
+  let isolated = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
+  let serving = List.filter_map (fun (export : tool_export) ->
+    match List.find_opt (fun ((entry : entry), connection) ->
+      String.equal entry.instance_id export.instance_id
+      && Lane_addon_tool_export.equal_owner connection.export_owner export.owner) reading.ready with
+    | None -> None
+    | Some (entry, _) -> Some {
+        export;
+        installation_id=Option.map (fun (owner : configuration_owner) -> owner.id) entry.configuration;
+        package_id=entry.package.id;
+        configuration_revision=Option.map (fun (owner : configuration_owner) -> owner.revision) entry.configuration;
+        exact_waiting=entry.host_status.exact_waiting;
+        last_cycle_at=entry.host_status.observed_at;
+        host_issue=entry.host_status.issue;
+      }) isolated.exports in
+  ({serving;conflicts=isolated.conflicts;unready=reading.unready} : tool_execution_snapshot))
 
 let tool_export_reading ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
   let reading = current_reading ~config ~access in
@@ -3004,7 +3043,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     refresh_interest; source_access; visibility; last_committed_sources=None; unchanged_source_refreshes=0;
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
-    host_due = false; host_status = { cycles = 0; waiting = []; issue = None };
+    host_due = false; host_status = { cycles = 0; waiting = []; exact_waiting = []; observed_at = None; issue = None };
     cancel_worker = None; cancel_exact = None; exact_request_id = None; configuration; input_installations } in
   let* () = validate_live_connections m e in
   (* Construction only validates the registered host boundary. Discard this

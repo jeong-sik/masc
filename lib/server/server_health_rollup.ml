@@ -20,6 +20,7 @@ let cached_field_names =
     "disk_observation";
     "keeper_fleet_safety";
     "keeper_identity_drift";
+    "keeper_memory_execution";
     "publication_recovery_activation";
     "keeper_reaction_ledger";
     "keeper_owner";

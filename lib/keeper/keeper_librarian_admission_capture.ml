@@ -119,8 +119,8 @@ let scope_of_request_id request_id =
       when String_util.is_lowercase_sha256_hex hash && Yojson.Safe.to_string json=request_id ->
     let+ _=Random_id.parse_uuid_v7 nonce in scope_for_hash hash
   | _ -> Error "Invalid original Librarian execution request ID"
-let package_id="keeper-librarian"
-let tool="admit_memory"
+let package_id = Keeper_librarian_addon.package_id
+let tool = Keeper_librarian_addon.tool Keeper_librarian_addon.Admission
 let observe_record_owner ~base_path ~keepers_dir (retained:Owner.retained) =
   let* fields=object_fields ["schema";"kind";"request_id";"parent_part_id";"owner";"destination";
     "candidate_ids";"batch_text";"input_text";"expected_revision";"now";"retirement_text";"preparation"] retained.request in

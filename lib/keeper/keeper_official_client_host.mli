@@ -291,7 +291,9 @@ val start_held_context :
     {!is_carried_on_resume} selects, named and digested as {!resume_prompt}
     names it, except blocks {!Prompt_block_id.resent_when_held} sends every
     time and World State sections
-    {!Keeper_context_layers.resend_on_resume} sends every time. *)
+    {!Keeper_context_layers.resend_on_resume} sends every time. The issued
+    System Goal observation is also held: a start sends it in the System
+    prompt, while a later changed observation must use the Resume prompt. *)
 
 type carried_summary =
   { label : string
@@ -325,7 +327,12 @@ val resume_prompt :
     historical task reference, the Librarian working state, and the context
     carrier -- one carried context per typed block when [composed_context]
     proves its exact text contains only uniquely named blocks and separators,
-    the whole carrier otherwise. A carried
+    the whole carrier otherwise. The exact Goal observation in
+    [composed_context.system_prompt] is a separate carried [Active_goals]
+    context. An official session holds its first System prompt until native
+    compaction, so a changed/new Goal is sent as a separate encoded User
+    observation, with explicit System-derived source attribution. It is not
+    an extra-context carrier and never joins its blocks. A carried
     context goes out only when [held] does not already name it with the same
     digest, or when its block is {!Prompt_block_id.resent_when_held}. A
     resumed vendor session stores every prompt as history, so re-sending an

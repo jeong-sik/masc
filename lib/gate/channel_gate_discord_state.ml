@@ -111,24 +111,6 @@ let unregister_thread ~thread_id =
     Eio.Mutex.use_rw ~protect:true thread_parent_table_mu
     @@ fun () -> Hashtbl.remove thread_parent_table tid
 
-(* ── Trigger policy registry ──────────────────────────────────────
-   Set once at gateway startup by [set_trigger_policy]. Read by
-   this connector's status projection for dashboard display. Same
-   mutable-ref pattern as [record_ready]. *)
-
-let trigger_policy_ref : Discord_gateway_state.trigger_policy option ref =
-  ref None
-
-let set_trigger_policy (policy : Discord_gateway_state.trigger_policy) =
-  trigger_policy_ref := Some policy
-
-let get_trigger_policy () = !trigger_policy_ref
-
-let trigger_policy_json = function
-  | None -> `Null
-  | Some policy ->
-    `String (Discord_gateway_state.trigger_policy_to_string policy)
-
 let bot_token_opt () = Env_config_discord.bot_token_opt ()
 
 let gateway_state_label = function
@@ -247,7 +229,7 @@ type status = {
   binding_store_error : string option;
   configured_bindings : binding list;
   recent_audit : Yojson.Safe.t list;
-  trigger_policy : Discord_gateway_state.trigger_policy option;
+  trigger_policy : Discord_gateway_state.trigger_policy;
   last_ready : ready_info option;
   bot_user_name : string option;
   guild_count : int;
@@ -304,7 +286,7 @@ let read_status ~audit_limit =
     binding_store_error;
     configured_bindings;
     recent_audit;
-    trigger_policy = get_trigger_policy ();
+    trigger_policy = Runtime_params.get Runtime_settings.discord_trigger_policy;
     last_ready = Atomic.get last_ready;
     bot_user_name = Atomic.get last_bot_user_name;
     guild_count = List.length (current_guild_ids ());
@@ -366,7 +348,8 @@ let status_fields status =
     ("bot_token_present", `Bool status.token_present);
     ("status_source", `String "in_process_gateway");
     ("gateway_state", `String (gateway_state_label status.gateway_state));
-    ("trigger_policy", trigger_policy_json status.trigger_policy);
+    ("trigger_policy",
+     `String (Discord_gateway_state.trigger_policy_to_string status.trigger_policy));
     ("binding_store_path", `String status.binding_store_path);
     ("audit_path", `String status.audit_path);
     ("updated_at", `String status.updated_at);

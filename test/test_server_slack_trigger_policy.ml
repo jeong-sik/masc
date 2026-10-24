@@ -586,23 +586,56 @@ let test_user_only_round_trips_through_the_param () =
       (ps (Gw.User_only "123456789")) (installed_policy ()))
 ;;
 
-(* The connector surface reads a mirror written at gateway startup. A param
-   set has to carry it along, or the screen an operator just used goes on
-   reporting the policy from boot. *)
-let test_setting_the_param_moves_the_display_mirror () =
-  with_clean_override (fun () ->
-    Channel_gate_slack_state.set_trigger_policy Gw.Mention_or_thread;
-    let key = Runtime_params.key Runtime_settings.slack_trigger_policy in
-    (match
-       Server_routes_http_routes_activity.mutate_runtime_param_with_effects
-         ~base_path:"" ~param_key:key
-         (fun () -> Runtime_params.set_by_key_with_change key (`String "mention_only"))
-     with
-     | Ok ((_ : Runtime_params.json_change), (_ : (string * Yojson.Safe.t) list)) -> ()
-     | Error detail -> fail ("param mutation rejected: " ^ detail));
-    check (option string) "the surface reports what was just set"
-      (Some (ps Gw.Mention_only))
-      (Option.map ps (Channel_gate_slack_state.get_trigger_policy ())))
+(* The runtime parameter commits before persistence/audit. Status must follow
+   the committed policy even when the subsequent audit append fails, and
+   clearing an override must expose the configured policy again. *)
+let test_status_follows_param_set_clear_and_failed_audit () =
+  with_temp_dir @@ fun base_path ->
+  with_env Env_config_core.base_path_env_key base_path (fun () ->
+    with_clean_override (fun () ->
+      Runtime_settings.set_slack_trigger_policy_configured Gw.Mention_or_thread;
+      let key = Runtime_params.key Runtime_settings.slack_trigger_policy in
+      let mutate f =
+        match
+          Server_routes_http_routes_activity.mutate_runtime_param_with_effects
+            ~base_path ~param_key:key f
+        with
+        | Ok ((_ : Runtime_params.json_change), (_ : (string * Yojson.Safe.t) list)) -> ()
+        | Error detail -> fail ("param mutation rejected: " ^ detail)
+      in
+      let check_surfaces expected =
+        check string "dispatch reads the committed policy" (ps expected)
+          (installed_policy ());
+        List.iter
+          (fun json ->
+            check string "connector status reads the committed policy" (ps expected)
+              Yojson.Safe.Util.(json |> member "trigger_policy" |> to_string))
+          [ State.status_json (); State.connector_json () ]
+      in
+      mutate (fun () -> Runtime_params.set_by_key_with_change ~base_path key (`String "all"));
+      check_surfaces Gw.All;
+      let retained_status = State.status_json () in
+      mutate (fun () -> Runtime_params.clear_by_key_with_change ~base_path key);
+      check_surfaces Gw.Mention_or_thread;
+      check string "retained status is an immutable observation" "all"
+        Yojson.Safe.Util.(retained_status |> member "trigger_policy" |> to_string);
+      (* A fresh audit destination avoids any previously opened append handle.
+         The parameter file remains writable; only the audit append fails. *)
+      let failing_base = Filename.concat base_path "audit-failure" in
+      let audit_path = Filename.concat
+          (Common.masc_dir_from_base_path ~base_path:failing_base) "param_audit.jsonl" in
+      Fs_compat.mkdir_p audit_path;
+      let audit_failed =
+        try
+          mutate (fun () ->
+            Runtime_params.set_by_key_with_change ~base_path:failing_base key
+              (`String "mention_only"));
+          false
+        with
+        | Sys_error _ | Unix.Unix_error _ | Eio.Io _ -> true
+      in
+      check bool "the post-commit audit append failed" true audit_failed;
+      check_surfaces Gw.Mention_only))
 ;;
 
 let expect_value = function Ok value -> value | Error detail -> fail detail
@@ -881,7 +914,7 @@ let () =
             test_clear_returns_to_configured
         ; test_case "user_only round trips" `Quick
             test_user_only_round_trips_through_the_param
-        ; test_case "a param set moves the display mirror" `Quick
-            test_setting_the_param_moves_the_display_mirror
+        ; test_case "status follows set, clear and post-commit audit failure" `Quick
+            test_status_follows_param_set_clear_and_failed_audit
         ] )
     ]

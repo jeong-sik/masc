@@ -833,7 +833,6 @@ let start ~sw ~env ~state =
               None, None, user_directory)
        in
        let gateway_base_path = (Mcp_server.workspace_config state).Workspace.base_path in
-       State.set_trigger_policy policy;
        let ingress =
          Connector_ingress_lane.create
            ~sw

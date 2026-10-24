@@ -1059,7 +1059,6 @@ let start ~sw ~env ~clock ~state =
     (* An override left on the params surface outlives a restart, so what this
        gateway judges by is the param, not [configured] alone. *)
     let policy = current_trigger_policy () in
-    State.set_trigger_policy policy;
     let ingress =
       Connector_ingress_lane.create
         ~sw

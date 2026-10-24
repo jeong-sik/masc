@@ -27,7 +27,9 @@ val channel : string
 val status_json : ?audit_limit:int -> unit -> Yojson.Safe.t
 (** Runtime status snapshot — bindings, recent audit events, and
     connector liveness from the gateway state machine. [audit_limit]
-    caps the audit-history slice (default [10]). *)
+    caps the audit-history slice (default [10]). Captures the effective
+    runtime trigger policy on each read, including while disconnected;
+    transport lifecycle is reported independently. *)
 
 val connector_json :
   ?audit_limit:int ->
@@ -162,24 +164,6 @@ val unregister_thread : thread_id:string -> unit
 (** Remove a Discord thread from the registry. Called when the gateway
     receives a THREAD_DELETE dispatch or a THREAD_UPDATE with
     [thread_metadata.archived = true]. No-op for blank or unknown ids. *)
-
-(** {2 Trigger policy}
-
-    Set at gateway startup and again whenever an operator changes the
-    [discord.trigger_policy] param, read by [connectors_json] for dashboard
-    display. Same mutable-ref pattern as [record_ready].
-
-    This is a display mirror, not the value anything is judged by: the gateway
-    client reads the param per step. Left un-updated it would keep reporting
-    the boot-time policy and contradict the change on the operator's own
-    screen. *)
-
-val set_trigger_policy : Discord_gateway_state.trigger_policy -> unit
-(** Store the trigger policy the connector surface should report. *)
-
-val get_trigger_policy : unit -> Discord_gateway_state.trigger_policy option
-(** What that surface currently reports, or [None] before any gateway startup
-    has installed one. *)
 
 (** Typed failure modes for Discord REST actions. Closed sum — adding
     a new variant forces every consumer to handle it. *)

@@ -249,56 +249,22 @@ let empty_keeper_cadence_wakeup_summary =
 
 let keeper_cadence_effect_mu = Eio.Mutex.create ()
 
-(* Which side effect a mutated param owes, named rather than tested inline:
-   adding a fourth effect breaks the match below at compile time instead of
-   falling through a chain of string comparisons. The keys come from
+(* Which side effect a mutated param owes. The keys come from
    [Runtime_params.key] so no literal is spelled twice. *)
 type param_effect =
   | Keeper_cadence
-  | Discord_trigger_policy
-  | Slack_trigger_policy
   | No_effect
 
 let effect_of_param_key param_key =
   let is p = String.equal param_key (Runtime_params.key p) in
   if is Runtime_settings.keeper_keepalive_interval_sec then Keeper_cadence
-  else if is Runtime_settings.discord_trigger_policy then Discord_trigger_policy
-  else if is Runtime_settings.slack_trigger_policy then Slack_trigger_policy
   else No_effect
 ;;
 
 let is_keeper_cadence_param param_key =
   match effect_of_param_key param_key with
   | Keeper_cadence -> true
-  | Discord_trigger_policy | Slack_trigger_policy | No_effect -> false
-;;
-
-(* The gateway clients read the policy param on every step, so a set already
-   governs the next inbound message. What does not follow on its own is the
-   display mirror the connector status JSON reads
-   ([Channel_gate_*_state.trigger_policy_json]), which is written at gateway
-   startup. Left alone it would keep reporting the boot-time policy and the
-   operator's own screen would contradict the change they just made.
-
-   The snapshot is parsed rather than re-read from the registry: the value
-   committed in this transaction is the one this mirror must show. *)
-let mirror_trigger_policy ~connector ~parse ~install (change : Runtime_params.json_change) =
-  (match change.new_value with
-   | `String raw ->
-     (match parse raw with
-      | Ok policy -> install policy
-      | Error detail ->
-        Log.Server.error
-          "%s trigger-policy mirror not updated: committed value %S did not \
-           parse (%s)"
-          connector raw detail)
-   | other ->
-     Log.Server.error
-       "%s trigger-policy mirror not updated: committed value is not a JSON \
-        string (%s)"
-       connector
-       (Yojson.Safe.to_string other));
-  []
+  | No_effect -> false
 ;;
 
 let wake_keepers_after_runtime_param_change
@@ -396,18 +362,6 @@ let runtime_param_effect_fields
   =
   match effect_of_param_key param_key with
   | No_effect -> []
-  | Discord_trigger_policy ->
-    mirror_trigger_policy
-      ~connector:"Discord"
-      ~parse:Discord_gateway_state.parse_trigger_policy
-      ~install:Channel_gate_discord_state.set_trigger_policy
-      change
-  | Slack_trigger_policy ->
-    mirror_trigger_policy
-      ~connector:"Slack"
-      ~parse:Slack_gateway_state.parse_trigger_policy
-      ~install:Channel_gate_slack_state.set_trigger_policy
-      change
   | Keeper_cadence ->
     (match change.old_value, change.new_value with
     | `Int previous_interval_s, `Int new_interval_s ->

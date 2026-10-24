@@ -5,7 +5,8 @@
     The in-process Slack gateway ({!Slack_socket_client}, RFC-0317) is the
     only transport. Internal helpers are hidden — only the
     {!Channel_gate_connector.S} surface plus the in-process gateway support is
-    public. *)
+    public. Status captures the effective runtime trigger policy on each read,
+    including while disconnected; transport lifecycle is reported separately. *)
 
 include Channel_gate_connector.S
 
@@ -47,16 +48,6 @@ val clear_startup_error : unit -> unit
 (** Record/clear a fail-closed gateway bootstrap error. [status_json] exposes a
     recorded error as [status = "unhealthy"] instead of presenting an invalid
     configuration as an ordinary disconnected connector. *)
-
-val set_trigger_policy : Slack_gateway_state.trigger_policy -> unit
-(** Store the trigger policy the connector surface should report. Set at
-    gateway startup and again whenever an operator changes the
-    [slack.trigger_policy] param. A display mirror: the socket client reads the
-    param per step, so this is what the screen says, not what is judged by. *)
-
-val get_trigger_policy : unit -> Slack_gateway_state.trigger_policy option
-(** What that surface currently reports, or [None] before any gateway startup
-    has installed one. *)
 
 (** Why the connector cannot do its job. Closed sum: the config boundary
     reports the connector disabled or misconfigured ([Connector_unavailable]

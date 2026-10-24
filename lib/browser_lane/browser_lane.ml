@@ -147,9 +147,19 @@ let reply_policy = function
   | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Session_close | Session_status
   | Page_goto _ | Page_elements _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ -> Reply_window
 
-(* SDK-native selector/ref input needs no MASC execution clock. Scene,
+(* SDK-native navigation and selector/ref input need no MASC execution clock. Scene,
    coordinate and custom-waypoint adapters retain their existing guards. *)
 let ego_reply_policy = function
+  | Page_goto _ -> Executor_owned
+  | Page_act action ->
+    (match action with
+     | Action.Open_tab _ -> Executor_owned
+     | Action.On_tab {interaction=Action.Reload;_} -> Executor_owned
+     | (Action.Open_window _ | Action.Control _
+       | Action.On_tab {interaction=(Action.Upload _ | Action.Set_cookie _ | Action.Delete_cookie _
+         | Action.Set_emulation _ | Action.Clear_emulation | Action.Block_requests _
+         | Action.Unblock_requests | Action.Accept_dialog _ | Action.Dismiss_dialog
+         | Action.Back | Action.Forward | Action.Close_tab);_}) -> reply_policy (Page_act action))
   | Page_interact {action;_} ->
     (match action with
      | Click _ | Fill _ | Select_option _ | Click_target _ | Fill_target _
@@ -168,7 +178,7 @@ let ego_reply_policy = function
   | (Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _
     | Page_network _ | Page_cookies _ | Page_capture _ | Page_scene _ | Page_snapshot _
     | Page_native_workflow _ | Session_open _ | Session_close | Session_status
-    | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
+    | Page_elements _ | Page_context _ | Page_instruct _
     | Page_locate _ | Page_extract _) as verb -> reply_policy verb
 
 (* The CSS scope an elements read carries, top-level or in a frame. Every

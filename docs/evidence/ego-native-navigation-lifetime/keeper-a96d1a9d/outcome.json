@@ -1,0 +1,29 @@
+{
+  "source": "a96d1a9d1f428b8d4832f8a65ad00c2e44086c09",
+  "operation": "ego-native-proof-a96d-navigation-1",
+  "state": "Succeeded",
+  "sdk_space": 25,
+  "page": "p1",
+  "client_id": "d0ec6763-0de9-40b2-9a14-eb71f5783c65",
+  "tool_calls": [
+    {
+      "name": "BrowserGoto",
+      "elapsed_s": 0.0809168815612793,
+      "error": false
+    },
+    {
+      "name": "BrowserAct",
+      "elapsed_s": 0.07685303688049316,
+      "error": false
+    },
+    {
+      "name": "BrowserRead",
+      "elapsed_s": 0.023324966430664062,
+      "error": false
+    }
+  ],
+  "unchanged_submissions": 1,
+  "screenshot_sha256": "c92a9035fe3f468d913d02d0bd781db8d8c3176189a8664521aa1d2c6e3181cb",
+  "screenshot": "root captured after Succeeded and visually inspected",
+  "scope": "real Keeper ordinary goto/reload/native snapshot in isolated candidate, not production deployment"
+}

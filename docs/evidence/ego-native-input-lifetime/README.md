@@ -115,3 +115,48 @@ The three SDK output files retain their payloads with only trailing blank EOF
 lines removed in this evidence follow-up. No runtime source changed after the
 candidate SHA above. The macOS candidate build and real Keeper proof remain
 separate evidence.
+
+## Real Keeper candidate 14c9
+
+Exact macOS build [40106836825](https://github.com/jeong-sik/masc/actions/runs/40106836825)
+succeeded for `14c9f0c701768ed3242e3fcde219b3dfaf9a80ce`. All three downloaded
+binary hashes, dynamic dependencies and embedded source were checked; full
+health independently verified the running executable hash/path and isolated
+state root. [Candidate artifacts](keeper-14c9f0c7/) retain the receipts.
+
+A real glm-coding.glm-5.3-flash Keeper observed the UI, filled the requested
+name, conditional shipping address and email+SMS selection, and submitted once.
+The operation succeeded, with exactly one matching EGO-001 persisted. Server
+processing took 130.01s. The post-submit networkidle native workflow returned
+its final completion snapshot through the original call after 81.93s, beyond
+the former 20-second execution window. It does not prove a single call longer
+than the idle 120-second connection lease: the first post-submit hidden-address
+condition finished immediately and the later networkidle call began 49s after
+submission. Those calls and the initial missing-clientId refusal are retained.
+
+The root reviewer took and visually inspected the completion screenshot after
+the Keeper's operation succeeded; this is not described as a Keeper image-tool
+capture. Provider reasoning and bearer credentials are not copied into the
+artifacts. Keeper shutdown was accepted after the form goal, then the same
+Keeper and space25/p1 were resumed for a separate marker lifetime test. Final
+connection/server cleanup remains pending. This candidate predates the native
+navigation layer and is not evidence that its new binary ran.
+
+The separate marker operation also succeeded on the same candidate and25/p1.
+After one before-effect rejection for missing expectedUrl, the Keeper corrected
+its request. One workflow clicked Start once, waited for the observed #pending
+marker to become hidden with its explicit SDK timeout unchanged, and returned
+one final snapshot after **130.14s**. Both completed steps and the completion
+text reached the original caller. The fixture records exactly one start and
+130.006s server delay. [marker-outcome.json](keeper-14c9f0c7/marker-outcome.json)
+and the retained actual tool record prove a single command beyond the prior
+120-second idle lease, not merely application elapsed time. The marker screenshot
+was captured by the root reviewer after Succeeded and visually inspected.
+
+Final cleanup is now recorded in
+[final-cleanup.json](keeper-14c9f0c7/final-cleanup.json). The later navigation
+candidate used the same25/p1 after this Keeper stopped; its explicit detach
+finished the shared task space once. The older idle SDK required the separate,
+identity-checked stop recorded in old-sdk-stop.json after server SIGTERM.
+Both candidate servers, their workers/SDKs and the two owned fixtures are gone.
+No installed production binary or persisted production state changed.

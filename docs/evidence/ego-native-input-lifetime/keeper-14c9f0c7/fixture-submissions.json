@@ -1,0 +1,19 @@
+[
+  {
+    "id": "EGO-001",
+    "values": {
+      "name": "Ego Native 수명 검증",
+      "delivery": "shipping",
+      "address": "서울시 테스트로 130",
+      "notifications": [
+        "email",
+        "sms"
+      ]
+    },
+    "state": "completed",
+    "accepted_at": 1792856245.429631,
+    "delay_seconds": 130.0,
+    "completed_at": 1792856375.443016,
+    "processing_elapsed_s": 130.00956049999513
+  }
+]

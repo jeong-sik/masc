@@ -550,8 +550,7 @@ let tab_fields = function
 let open_tab t url =
   let* () = http_url url in
   let unknown = "a tab may have been opened: list this connection's tabs before opening another" in
-  match run_step t ~window_s:(window_s (Browser_lane.Page_act (Browser_lane.Action.Open_tab url)))
-          ~step:"page.open" ~args:(obj ["url",str url]) (String.concat "\n" [
+  match run_native_step t ~step:"page.open" ~args:(obj ["url",str url]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
       "  let page;";
       "  let refused = null;";
@@ -612,8 +611,7 @@ let goto t args =
     | Some (`Int id) -> Ok id
     | Some _ | None -> Error (Live.Before_effect "page.goto on an ego connection needs the tabId of a page its space opened") in
   let* label = label_of t id in
-  settled ~id ~action:"goto" (run_step t ~window_s:(window_s (Browser_lane.Page_goto {url; tab_id = Some id}))
-    ~step:"page.goto" ~args:(obj ["label",str label;"url",str url;"tabId",`Int id]) (String.concat "\n" [
+  settled ~id ~action:"goto" (run_native_step t ~step:"page.goto" ~args:(obj ["label",str label;"url",str url;"tabId",`Int id]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
       unblocked_agent_page;
       "    let failure = null;";
@@ -626,8 +624,7 @@ let tab_window id interaction =
 
 let reload t id =
   let* label = label_of t id in
-  settled ~id ~action:"reload" (run_step t ~window_s:(tab_window id Browser_lane.Action.Reload)
-    ~step:"page.reload" ~args:(obj ["label",str label;"tabId",`Int id]) (String.concat "\n" [
+  settled ~id ~action:"reload" (run_native_step t ~step:"page.reload" ~args:(obj ["label",str label;"tabId",`Int id]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
       unblocked_agent_page;
       "    let failure = null;";

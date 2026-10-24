@@ -33,7 +33,7 @@ let make_timestamp_pair seconds_ago =
 
 let with_dashboard_label_thresholds ?quiet ?stuck f =
   let set_or_fail param value =
-    match Lib.Runtime_params.set param value with
+    match Runtime_params.set param value with
     | Ok () -> ()
     | Error msg -> Alcotest.fail msg
   in
@@ -41,12 +41,12 @@ let with_dashboard_label_thresholds ?quiet ?stuck f =
     ~finally:(fun () ->
       Option.iter
         (fun _ ->
-          Lib.Runtime_params.clear
+          Runtime_params.clear
             Lib.Runtime_settings.dashboard_agent_quiet_threshold_sec)
         quiet;
       Option.iter
         (fun _ ->
-          Lib.Runtime_params.clear
+          Runtime_params.clear
             Lib.Runtime_settings.dashboard_agent_stuck_threshold_sec)
         stuck)
     (fun () ->

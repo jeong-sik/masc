@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { signal } from '@preact/signals'
 import { startNavTelemetry, type NavEvent } from './nav-telemetry'
-import { REDIRECTED_FROM_PARAM } from '../router'
 import type { RouteState } from '../types'
 
 function harness() {
@@ -26,7 +25,7 @@ describe('nav-telemetry', () => {
   test('emits initial route on subscribe', () => {
     const h = harness()
     expect(h.events).toEqual([
-      { surface: 'overview', section: null, redirected_from: null },
+      { surface: 'overview', section: null },
     ])
     h.dispose()
   })
@@ -36,8 +35,8 @@ describe('nav-telemetry', () => {
     h.advance(1000)
     h.setRoute({ tab: 'monitoring', params: { section: 'journey' }, postId: null })
     expect(h.events).toEqual([
-      { surface: 'overview', section: null, redirected_from: null },
-      { surface: 'monitoring', section: 'journey', redirected_from: null },
+      { surface: 'overview', section: null },
+      { surface: 'monitoring', section: 'journey' },
     ])
     h.dispose()
   })
@@ -74,33 +73,6 @@ describe('nav-telemetry', () => {
     h.advance(800)
     h.setRoute({ tab: 'monitoring', params: { section: 'journey' }, postId: null })
     expect(h.events.map(e => e.section)).toEqual([null, 'journey', 'agents', 'journey'])
-    h.dispose()
-  })
-
-  test('carries redirected_from when route arrived via redirect', () => {
-    const h = harness()
-    h.advance(1000)
-    h.setRoute({
-      tab: 'workspace',
-      params: {
-        section: 'repositories',
-        [REDIRECTED_FROM_PARAM]: 'monitoring:git-graph',
-      },
-      postId: null,
-    })
-    expect(h.events.at(-1)).toEqual({
-      surface: 'workspace',
-      section: 'repositories',
-      redirected_from: 'monitoring:git-graph',
-    })
-    h.dispose()
-  })
-
-  test('emits redirected_from null for direct navigation', () => {
-    const h = harness()
-    h.advance(1000)
-    h.setRoute({ tab: 'lab', params: { section: 'tools' }, postId: null })
-    expect(h.events.at(-1)?.redirected_from).toBeNull()
     h.dispose()
   })
 

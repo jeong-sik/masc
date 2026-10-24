@@ -3,13 +3,12 @@
 // Aggregate counters only — no PII, no per-event storage on the server.
 
 import { effect, type Signal } from '@preact/signals'
-import { route, REDIRECTED_FROM_PARAM } from '../router'
+import { route } from '../router'
 import type { RouteState } from '../types'
 
 export interface NavEvent {
   surface: string
   section: string | null
-  redirected_from: string | null
 }
 
 export interface NavTelemetryOptions {
@@ -62,8 +61,6 @@ export function startNavTelemetry(
     const r = signal.value
     const surface = r.tab
     const section = r.params.section ?? null
-    const rawRedirected = r.params[REDIRECTED_FROM_PARAM]
-    const redirected_from = rawRedirected && rawRedirected.length > 0 ? rawRedirected : null
     const at = now()
 
     if (
@@ -76,7 +73,7 @@ export function startNavTelemetry(
     }
     last = { surface, section, at }
 
-    send({ surface, section, redirected_from })
+    send({ surface, section })
   })
 
   return dispose

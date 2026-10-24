@@ -19,47 +19,26 @@ let parse_err json_str =
 let test_parse_minimal_surface_only () =
   let event = parse_ok {|{"surface":"overview"}|} in
   check string "surface" "overview" event.surface;
-  check (option string) "section" None event.section;
-  check (option string) "redirected_from" None event.redirected_from
+  check (option string) "section" None event.section
 ;;
 
 let test_parse_schedule_surface_only () =
   let event = parse_ok {|{"surface":"schedule"}|} in
   check string "surface" "schedule" event.surface;
-  check (option string) "section" None event.section;
-  check (option string) "redirected_from" None event.redirected_from
-;;
-
-(* #26826 removed the memory-subsystems component and dropped the section from
-   the lab allowlist in the same commit. The section is retired everywhere, so
-   lab rejects it exactly as monitoring does below. *)
-let test_reject_retired_memory_subsystems_on_lab () =
-  let msg = parse_err {|{"surface":"lab","section":"memory-subsystems"}|} in
-  check
-    bool
-    "mentions section"
-    true
-    (Astring.String.is_infix ~affix:"unknown section" msg)
+  check (option string) "section" None event.section
 ;;
 
 let test_parse_settings_runtime_section () =
   let event = parse_ok {|{"surface":"settings","section":"runtime"}|} in
   check string "surface" "settings" event.surface;
-  check (option string) "section" (Some "runtime") event.section;
-  check (option string) "redirected_from" None event.redirected_from
+  check (option string) "section" (Some "runtime") event.section
 ;;
 
-let test_reject_settings_account_section () =
-  let msg = parse_err {|{"surface":"settings","section":"account"}|} in
-  check
-    bool
-    "mentions section"
-    true
-    (Astring.String.is_infix ~affix:"unknown section" msg)
+let test_parse_settings_account_section () =
+  let event = parse_ok {|{"surface":"settings","section":"account"}|} in
+  check (option string) "section" (Some "account") event.section
 ;;
 
-(* routing was once retired but is a live Settings section again
-   (dashboard #settings?section=routing); repositories is new alongside it. *)
 let test_parse_settings_routing_section () =
   let event = parse_ok {|{"surface":"settings","section":"routing"}|} in
   check string "surface" "settings" event.surface;
@@ -74,11 +53,20 @@ let test_parse_settings_repositories_section () =
 
 let test_parse_full_event () =
   let event =
-    parse_ok {|{"surface":"monitoring","section":"agents","redirected_from":"none"}|}
+    parse_ok {|{"surface":"monitoring","section":"agents"}|}
   in
   check string "surface" "monitoring" event.surface;
-  check (option string) "section" (Some "agents") event.section;
-  check (option string) "redirected_from" None event.redirected_from
+  check (option string) "section" (Some "agents") event.section
+;;
+
+let test_parse_current_section_targets () =
+  List.iter
+    (fun (surface, section) ->
+       let json = `Assoc [ "surface", `String surface; "section", `String section ] in
+       match Dashboard_nav_event.parse_event_json json with
+       | Error msg -> failf "current route %s:%s rejected: %s" surface section msg
+       | Ok event -> check (option string) "section" (Some section) event.section)
+    [ "monitoring", "lane-inventory"; "workspace", "artifacts" ]
 ;;
 
 let test_parse_internal_agents_section () =
@@ -87,18 +75,6 @@ let test_parse_internal_agents_section () =
   in
   check string "surface" "monitoring" event.surface;
   check (option string) "section" (Some "internal-agents") event.section
-;;
-
-let test_parse_redirected () =
-  let event =
-    parse_ok
-      {|{"surface":"workspace","section":"repositories","redirected_from":"monitoring:git-graph"}|}
-  in
-  check
-    (option string)
-    "redirected_from"
-    (Some "monitoring:git-graph")
-    event.redirected_from
 ;;
 
 let test_reject_unknown_surface () =
@@ -119,35 +95,6 @@ let test_reject_unknown_section () =
     (Astring.String.is_infix ~affix:"unknown section" msg)
 ;;
 
-let test_reject_retired_memory_subsystems_target () =
-  let msg = parse_err {|{"surface":"monitoring","section":"memory-subsystems"}|} in
-  check
-    bool
-    "mentions section"
-    true
-    (Astring.String.is_infix ~affix:"unknown section" msg)
-;;
-
-let test_reject_redirected_from_unknown_surface () =
-  let msg =
-    parse_err
-      {|{"surface":"workspace","section":"repositories","redirected_from":"bogus:foo"}|}
-  in
-  check
-    bool
-    "mentions redirected_from"
-    true
-    (Astring.String.is_infix ~affix:"redirected_from" msg)
-;;
-
-let test_reject_redirected_from_self () =
-  let msg =
-    parse_err
-      {|{"surface":"workspace","section":"repositories","redirected_from":"workspace:repositories"}|}
-  in
-  check bool "mentions self" true (Astring.String.is_infix ~affix:"differ" msg)
-;;
-
 let test_reject_missing_surface () =
   let msg = parse_err {|{"section":"journey"}|} in
   check bool "mentions surface" true (Astring.String.is_infix ~affix:"surface" msg)
@@ -159,7 +106,7 @@ let test_reject_malformed_json () =
 ;;
 
 let test_section_null_explicit () =
-  let event = parse_ok {|{"surface":"cockpit","section":null}|} in
+  let event = parse_ok {|{"surface":"overview","section":null}|} in
   check (option string) "section" None event.section
 ;;
 
@@ -172,7 +119,7 @@ let test_record_increments_surface_counter () =
     |> Option.value ~default:0.0
   in
   Dashboard_nav_event.record
-    { surface = "overview"; section = None; redirected_from = None };
+    { surface = "overview"; section = None };
   let after =
     Otel_metric_store.get_metric_value
       "dashboard_surface_open_total"
@@ -183,11 +130,10 @@ let test_record_increments_surface_counter () =
   check (float 1e-9) "incremented by 1" 1.0 (after -. before)
 ;;
 
-let test_record_increments_section_counter_with_redirect_label () =
+let test_record_increments_section_counter () =
   let labels =
     [ "surface", "workspace"
     ; "section", "repositories"
-    ; "redirected_from", "monitoring:git-graph"
     ]
   in
   let before =
@@ -197,7 +143,6 @@ let test_record_increments_section_counter_with_redirect_label () =
   Dashboard_nav_event.record
     { surface = "workspace"
     ; section = Some "repositories"
-    ; redirected_from = Some "monitoring:git-graph"
     };
   let after =
     Otel_metric_store.get_metric_value "dashboard_section_open_total" ~labels ()
@@ -206,36 +151,17 @@ let test_record_increments_section_counter_with_redirect_label () =
   check (float 1e-9) "incremented by 1" 1.0 (after -. before)
 ;;
 
-let test_record_section_counter_redirect_none_label () =
-  let labels = [ "surface", "lab"; "section", "tools"; "redirected_from", "none" ] in
-  let before =
-    Otel_metric_store.get_metric_value "dashboard_section_open_total" ~labels ()
-    |> Option.value ~default:0.0
-  in
-  Dashboard_nav_event.record
-    { surface = "lab"; section = Some "tools"; redirected_from = None };
-  let after =
-    Otel_metric_store.get_metric_value "dashboard_section_open_total" ~labels ()
-    |> Option.value ~default:0.0
-  in
-  check (float 1e-9) "incremented by 1 with 'none' label" 1.0 (after -. before)
-;;
-
 let () =
   Alcotest.run
     "dashboard_nav_event"
     [ ( "parse_event_json"
       , [ test_case "minimal surface only" `Quick test_parse_minimal_surface_only
         ; test_case "schedule surface only" `Quick test_parse_schedule_surface_only
-        ; test_case
-            "retired memory-subsystems is rejected on lab"
-            `Quick
-            test_reject_retired_memory_subsystems_on_lab
         ; test_case "settings runtime section" `Quick test_parse_settings_runtime_section
         ; test_case
-            "rejects settings account section"
+            "settings account section"
             `Quick
-            test_reject_settings_account_section
+            test_parse_settings_account_section
         ; test_case
             "settings routing section"
             `Quick
@@ -245,25 +171,13 @@ let () =
             `Quick
             test_parse_settings_repositories_section
         ; test_case "full event" `Quick test_parse_full_event
+        ; test_case "current section targets" `Quick test_parse_current_section_targets
         ; test_case
             "internal agents section"
             `Quick
             test_parse_internal_agents_section
-        ; test_case "redirected_from accepted" `Quick test_parse_redirected
         ; test_case "rejects unknown surface" `Quick test_reject_unknown_surface
         ; test_case "rejects unknown section" `Quick test_reject_unknown_section
-        ; test_case
-            "rejects retired memory-subsystems target"
-            `Quick
-            test_reject_retired_memory_subsystems_target
-        ; test_case
-            "rejects redirected_from unknown surface"
-            `Quick
-            test_reject_redirected_from_unknown_surface
-        ; test_case
-            "rejects redirected_from = self"
-            `Quick
-            test_reject_redirected_from_self
         ; test_case "rejects missing surface" `Quick test_reject_missing_surface
         ; test_case "rejects malformed json" `Quick test_reject_malformed_json
         ; test_case "explicit null section" `Quick test_section_null_explicit
@@ -274,13 +188,9 @@ let () =
             `Quick
             test_record_increments_surface_counter
         ; test_case
-            "increments section counter with redirect label"
+            "increments section counter"
             `Quick
-            test_record_increments_section_counter_with_redirect_label
-        ; test_case
-            "section counter falls back to 'none' label"
-            `Quick
-            test_record_section_counter_redirect_none_label
+            test_record_increments_section_counter
         ] )
     ]
 ;;

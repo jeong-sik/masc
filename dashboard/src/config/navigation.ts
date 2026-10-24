@@ -500,64 +500,11 @@ export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem
   return sectionItemsForTab(tabId).filter(item => item.hidden !== true)
 }
 
-/**
- * Redirect table for legacy section IDs.
- *
- * Key: (tab, old section) → value: { section, view? }
- *
- * `view` sets the view query param when absent, for canonicalization into
- * fleet-health sub-views.
- *
- * Contract:
- *   - Redirects are applied BEFORE section validation.
- *   - Caller-supplied query params (session_id, operation_id, worker_run_id,
- *     tool, target_id, keeper, agent, ns, range, etc.) are preserved.
- *   - This function MUST remain pure. Side effects (modal open, analytics)
- *     must live in router/app effects, not here.
- *   - Cross-surface redirects are not supported (normalizeRouteParams returns
- *     params for the same tab). Cross-surface routing lives in the router.
- */
-interface SectionRedirect {
-  section: string
-  view?: string
-  params?: Record<string, string>
-}
-
-type TabSectionKey = `${TabId}:${string}`
-
-export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
-  // Dashboard consolidation Phase 1: monitoring surface
-  'monitoring:telemetry':    { section: 'fleet-health', view: 'event-log' },
-  'monitoring:fleet':        { section: 'fleet-health', view: 'comparison' },
-  'monitoring:tool-quality': { section: 'fleet-health', view: 'tool-quality' },
-  'monitoring:gate':          { section: 'fleet-health', view: 'gate' },
-  'monitoring:attribution':   { section: 'fleet-health', view: 'attribution' },
-  'monitoring:fsm-hub':      { section: 'agents', view: 'fsm' },
-  'monitoring:metrics':      { section: 'runtime' },
-  'monitoring:cost': { section: 'runtime', view: 'cost' },
-
-  // Dashboard consolidation Phase 1+6: command surface
-  'command:intervene':    { section: 'operations' },
-  'command:inspector':    { section: 'operations', view: 'inspector' },
-
-  // Dashboard consolidation Phase 1: workspace surface
-  'workspace:goals': { section: 'planning' },
-
-  // Dashboard consolidation Phase 7: per-connector sections collapsed into one picker.
-  'connectors:connector-discord': { section: 'connector-status', params: { connector: 'discord' } },
-  'connectors:connector-imessage': { section: 'connector-status', params: { connector: 'imessage' } },
-  'connectors:connector-slack': { section: 'connector-status', params: { connector: 'slack' } },
-  'connectors:connector-telegram': { section: 'connector-status', params: { connector: 'telegram' } },
-
-
-}
-
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {
   const next = { ...params }
   // Target identity only belongs to these receiver surfaces. Ordinary
   // navigation must not carry an old Lane selection into an unrelated screen.
   if (tabId !== 'monitoring' || !['runtime', 'lane-addons', 'internal-agents'].includes(next.section ?? '')) delete next.lane_target
-  const legacyObservatoryRanges = new Set(['1h', '6h', '24h', '7d'])
 
   if (tabId === 'settings') {
     if (!isSettingsRouteSection(next.section)) {
@@ -571,28 +518,6 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
     delete next.section
     delete next.surface
     return next
-  }
-
-  // Apply redirect table (pure transform: no side effects).
-  const inputSection = next.section
-  if (inputSection) {
-    if (tabId === 'monitoring' && inputSection === 'activity') {
-      const legacyRange = next.ag_range
-      if (legacyRange && !next.range && legacyObservatoryRanges.has(legacyRange)) {
-        next.range = legacyRange
-      }
-      delete next.ag_range
-    }
-
-    const redirect = SECTION_REDIRECTS[`${tabId}:${inputSection}` as TabSectionKey]
-    if (redirect) {
-      for (const [key, value] of Object.entries(redirect.params ?? {})) {
-        if (!next[key]) next[key] = value
-      }
-      if (redirect.view && !next.view) next.view = redirect.view
-      next.section = redirect.section
-      // Cross-surface redirect handled by caller (router) — see contract doc.
-    }
   }
 
   const typedTabId = tabId as NonHomeTabId
@@ -613,14 +538,6 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
 
   // Sections that use the `view` sub-param for internal navigation.
   // For all other sections, `view` is meaningless and must not leak in from prior navigation.
-  // `repositories` / `operations` / `ide-shell` are redirect targets in
-  // `CROSS_SURFACE_SECTION_REDIRECTS` (router.ts) and `SECTION_REDIRECTS`
-  // (this file, line 332+) that carry `view` as part of the canonical destination
-  // (e.g. `monitoring:git-graph → workspace:repositories`,
-  // cockpit IDE `?mode=Split → code:ide-shell?view=split-diff`).
-  // `planning` does not gain `view` via redirect (`workspace:goals → planning`
-  // drops view); instead, direct `replaceRoute` callers pass `view: 'default'`
-  // as the canonical planning entry point (see router.test.ts replaceRoute case).
   const SECTIONS_WITH_VIEW = new Set([
     'fleet-health', 'runtime', 'agents', 'observatory',
     'repositories', 'operations', 'ide-shell', 'planning',

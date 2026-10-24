@@ -4,7 +4,6 @@ import {
   DASHBOARD_SURFACES,
   PRIMARY_DASHBOARD_NAV_ITEMS,
   PRIMARY_DASHBOARD_SURFACES,
-  SECTION_REDIRECTS,
   VISIBLE_DASHBOARD_NAV_ITEMS,
   defaultParamsForTab,
   isSectionlessSurface,
@@ -191,14 +190,6 @@ describe('connectors navigation (Phase 7, post-2026-04-30 merge)', () => {
     expect(result.section).toBe('connector-status')
   })
 
-  it('redirects legacy per-bridge section deep links to connector-status', () => {
-    // The four per-sidecar sub-tabs were merged into the single
-    // all-connectors view on 2026-04-30; deep links to the old
-    // section ids fall back to the default.
-    const result = normalizeRouteParams('connectors', { section: 'connector-slack' })
-    expect(result.section).toBe('connector-status')
-  })
-
   it('keeps only known connector route filters', () => {
     expect(normalizeRouteParams('connectors', {
       section: 'connector-status',
@@ -356,200 +347,38 @@ describe('workspace navigation labels', () => {
   })
 })
 
-describe('route normalization', () => {
-
-  it('redirects telemetry to fleet-health with event-log view (Phase 1)', () => {
-    const result = normalizeRouteParams('monitoring', { section: 'telemetry' })
-    expect(result.section).toBe('fleet-health')
-    expect(result.view).toBe('event-log')
-  })
-
-  it('falls back invalid activity section to default agents and upgrades ag_range to range', () => {
-    const result = normalizeRouteParams('monitoring', {
-      section: 'activity',
-      ag_range: '6h',
-      keeper: 'nova',
-    })
-    expect(result.section).toBe('agents')
-    expect(result.range).toBe('6h')
-    expect(result.ag_range).toBeUndefined()
-    expect(result.keeper).toBe('nova')
-  })
-
-  it('falls back invalid live section to default agents', () => {
-    const result = normalizeRouteParams('monitoring', { section: 'live' })
-    expect(result.section).toBe('agents')
-    expect(result.view).toBeUndefined()
-  })
-
-  it('redirects standalone runtime diagnostics into runtime views', () => {
-    expect(normalizeRouteParams('monitoring', { section: 'cost' })).toMatchObject({
-      section: 'runtime',
-      view: 'cost',
-    })
-  })
-
-  it('redirects attribution into fleet-health', () => {
-    const result = normalizeRouteParams('monitoring', { section: 'attribution' })
-    expect(result.section).toBe('fleet-health')
-    expect(result.view).toBe('attribution')
-  })
-
-  it('falls back invalid activity with unsupported all-range to default agents', () => {
-    const result = normalizeRouteParams('monitoring', {
-      section: 'activity',
-      ag_range: 'all',
-    })
-    expect(result.section).toBe('agents')
-    expect(result.range).toBeUndefined()
-    expect(result.ag_range).toBeUndefined()
-  })
-})
-
-describe('SECTION_REDIRECTS table (consolidation Phase -1)', () => {
-
-  it('is the single source of truth for legacy section remaps', () => {
-    // All entries must produce valid canonical sections after application.
-    // This guards against typos when Phase 1+ adds new entries.
-    for (const [key, redirect] of Object.entries(SECTION_REDIRECTS)) {
-      expect(redirect.section).toMatch(/^[a-z][a-z0-9-]*$/)
-      if (redirect.view !== undefined) {
-        expect(redirect.view).toMatch(/^[a-z][a-z0-9-]*$/)
-      }
-      expect(key).toMatch(/^(monitoring|command|connectors|workspace|lab):/)
-    }
-  })
-})
-
 describe('normalizeRouteParams query param preservation', () => {
-  it('preserves telemetry deep-link params through fleet-health redirect', () => {
-    const result = normalizeRouteParams('monitoring', {
-      section: 'telemetry',
-      session_id: 'sess-1',
-      operation_id: 'op-42',
-      worker_run_id: 'run-7',
+  it('keeps monitor view and diagnostic targets on the canonical section', () => {
+    expect(normalizeRouteParams('monitoring', {
+      section: 'fleet-health', view: 'tool-quality', tool: 'bash',
+      session_id: 'sess-1', operation_id: 'op-42', worker_run_id: 'run-7',
+    })).toEqual({
+      section: 'fleet-health', view: 'tool-quality', tool: 'bash',
+      session_id: 'sess-1', operation_id: 'op-42', worker_run_id: 'run-7',
     })
-    expect(result.section).toBe('fleet-health')
-    expect(result.view).toBe('event-log')
-    expect(result.session_id).toBe('sess-1')
-    expect(result.operation_id).toBe('op-42')
-    expect(result.worker_run_id).toBe('run-7')
   })
 
-  it('preserves tool query param through tool-quality → fleet-health redirect', () => {
-    const result = normalizeRouteParams('monitoring', {
-      section: 'tool-quality',
-      tool: 'bash',
+  it('keeps operations workflow targets on the canonical section', () => {
+    expect(normalizeRouteParams('command', {
+      section: 'operations', target_type: 'operation', target_id: 'op-x',
+      source: 'execution', focus_kind: 'operation',
+    })).toEqual({
+      section: 'operations', target_type: 'operation', target_id: 'op-x',
+      source: 'execution', focus_kind: 'operation',
     })
-    expect(result.section).toBe('fleet-health')
-    expect(result.view).toBe('tool-quality')
-    expect(result.tool).toBe('bash')
-  })
-
-  it('preserves connector intent through old per-connector routes', () => {
-    const result = normalizeRouteParams('connectors', { section: 'connector-slack' })
-    expect(result.section).toBe('connector-status')
-    expect(result.connector).toBe('slack')
-  })
-
-  it('preserves intervene workflow params through operations redirect', () => {
-    const result = normalizeRouteParams('command', {
-      section: 'intervene',
-      target_type: 'operation',
-      target_id: 'op-x',
-      source: 'execution',
-      focus_kind: 'operation',
-    })
-    expect(result.section).toBe('operations')
-    expect(result.target_type).toBe('operation')
-    expect(result.target_id).toBe('op-x')
-    expect(result.source).toBe('execution')
-    expect(result.focus_kind).toBe('operation')
-  })
-
-  it('preserves keeper filter through invalid activity fallback to agents', () => {
-    const result = normalizeRouteParams('monitoring', {
-      section: 'activity',
-      keeper: 'nova',
-      ag_range: '24h',
-    })
-    expect(result.section).toBe('agents')
-    expect(result.keeper).toBe('nova')
-    expect(result.range).toBe('24h')
   })
 })
 
-describe('normalizeRouteParams view param (Phase 1 active)', () => {
+describe('normalizeRouteParams view param', () => {
   it('preserves explicit view param on fleet-health', () => {
     const result = normalizeRouteParams('monitoring', { section: 'fleet-health', view: 'event-log' })
     expect(result.section).toBe('fleet-health')
     expect(result.view).toBe('event-log')
   })
 
-  it('does not inject a view param when absent on a non-redirected section', () => {
+  it('does not inject a view param when absent on the agents section', () => {
     const result = normalizeRouteParams('monitoring', { section: 'agents' })
     expect(result.view).toBeUndefined()
   })
 
-  it('injects view from redirect table when redirect provides one', () => {
-    // telemetry → fleet-health with view=event-log
-    const result = normalizeRouteParams('monitoring', { section: 'telemetry' })
-    expect(result.section).toBe('fleet-health')
-    expect(result.view).toBe('event-log')
-  })
-})
-
-// -----------------------------------------------------------------------------
-// Consolidation redirects — Phase 1 active
-//
-// These tests verify the redirect shape for Phase 1 consolidation where
-// new sections (fleet-health, operations, etc.) replace legacy section IDs.
-// -----------------------------------------------------------------------------
-describe('consolidation redirects (Phase 1)', () => {
-  it.each([
-    ['telemetry', { session_id: 'abc' }, 'fleet-health', 'event-log', { session_id: 'abc' }],
-    ['telemetry', { operation_id: 'op1' }, 'fleet-health', 'event-log', { operation_id: 'op1' }],
-    ['tool-quality', { tool: 'bash' }, 'fleet-health', 'tool-quality', { tool: 'bash' }],
-    ['fleet', {}, 'fleet-health', 'comparison', {}],
-    ['fsm-hub', {}, 'agents', 'fsm', {}],
-    ['metrics', {}, 'runtime', undefined, {}],
-  ])(
-    'monitoring:%s → %s (view: %s) preserves params',
-    (oldSection, extra, expectedSection, expectedView, preserved) => {
-      const result = normalizeRouteParams('monitoring', { section: oldSection, ...extra })
-      expect(result.section).toBe(expectedSection)
-      if (expectedView !== undefined) expect(result.view).toBe(expectedView)
-      for (const [k, v] of Object.entries(preserved)) {
-        expect(result[k]).toBe(v)
-      }
-    },
-  )
-
-  it('command:intervene → operations preserves workflow params', () => {
-    const result = normalizeRouteParams('command', {
-      section: 'intervene',
-      target_id: 'op-1',
-      target_type: 'operation',
-    })
-    expect(result.section).toBe('operations')
-    expect(result.target_id).toBe('op-1')
-    expect(result.target_type).toBe('operation')
-  })
-
-  it('workspace:goals → planning', () => {
-    const result = normalizeRouteParams('workspace', { section: 'goals' })
-    expect(result.section).toBe('planning')
-  })
-
-  it('does not keep command:connectors as an in-surface redirect', () => {
-    const result = normalizeRouteParams('command', { section: 'connectors' })
-    expect(result.section).toBe('operations')
-    expect(result.view).toBeUndefined()
-  })
-
-  it('command:inspector → operations?view=inspector (Phase 6)', () => {
-    const result = normalizeRouteParams('command', { section: 'inspector' })
-    expect(result.section).toBe('operations')
-    expect(result.view).toBe('inspector')
-  })
 })

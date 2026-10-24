@@ -67,6 +67,25 @@ def read_json(path):
     return json.loads(path.read_text(), object_pairs_hook=unique_object)
 
 
+def model_identity(args):
+    return {"provider": args.provider, "model": args.model}
+
+
+def run_identity(args):
+    return {**model_identity(args), "case_id": args.case_id, "run_index": args.run_index,
+            "experiment_digest": args.experiment_digest, "memory_mode": args.memory_mode}
+
+
+def check_receipt(args):
+    row = read_json(args.receipt)
+    expected = {**run_identity(args), "run_id": args.run_id}
+    if not isinstance(row, dict) or any(
+        type(row.get(key)) is not type(value) or row[key] != value
+        for key, value in expected.items()
+    ):
+        raise ValueError("run receipt identity differs from the requested run: " + str(args.receipt))
+
+
 def experiment(args):
     scripts = [
         "scripts/harness_coding_eval.sh", "scripts/run-local.sh",
@@ -177,12 +196,30 @@ def main():
     collect_parser.add_argument("--experiment", required=True, type=Path)
     collect_parser.add_argument("--runs", required=True, type=Path)
     collect_parser.add_argument("--out", required=True, type=Path)
+    for command in ("model-alias", "run-id", "check-receipt"):
+        identity_parser = commands.add_parser(command)
+        identity_parser.add_argument("--provider", required=True)
+        identity_parser.add_argument("--model", required=True)
+        if command != "model-alias":
+            identity_parser.add_argument("--case-id", required=True)
+            identity_parser.add_argument("--run-index", required=True, type=int)
+            identity_parser.add_argument("--experiment-digest", required=True)
+            identity_parser.add_argument("--memory-mode", required=True)
+        if command == "check-receipt":
+            identity_parser.add_argument("--receipt", required=True, type=Path)
+            identity_parser.add_argument("--run-id", required=True)
     args = parser.parse_args()
     try:
         if args.command == "capture":
             capture(args)
-        else:
+        elif args.command == "collect":
             collect(args)
+        elif args.command == "model-alias":
+            print("model-" + digest_bytes(encode(model_identity(args))))
+        elif args.command == "run-id":
+            print("run-" + digest_bytes(encode(run_identity(args))))
+        else:
+            check_receipt(args)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         print("coding-eval experiment refused: " + str(error), file=sys.stderr)
         return 1

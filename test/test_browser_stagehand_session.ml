@@ -13,6 +13,7 @@ module Cdp = Masc.Browser_cdp
 module Wire = Masc.Browser_stagehand_wire
 module Session = Masc.Browser_stagehand_session
 module Backend = Masc.Browser_stagehand_backend
+module Executor = Masc.Browser_stagehand_executor
 
 let obj fields = `Assoc fields
 let str value = `String value
@@ -60,6 +61,8 @@ type fake =
   ; mutable next_delivery : delivery
   ; mutable held_delivery : (unit -> unit) option
   ; mutable answers_refused : bool
+  ; mutable rejection_message : string
+  ; mutable receiver_error : string
   ; mutable act : act_behaviour
   ; mutable held_act : Yojson.Safe.t option
   ; mutable waiting_on_model : (Yojson.Safe.t * Yojson.Safe.t) option
@@ -193,7 +196,7 @@ let browser_receives fake frame =
     else (
       match delivered expression with
       | Some message when fake.answers_refused && Yojson.Safe.Util.member "method" message = `Null ->
-        refuse "Execution context was destroyed."
+         refuse fake.rejection_message
       | Some message ->
         let deliver () =
           answer (obj [ "result", obj [ "type", str "boolean"; "value", `Bool true ] ]);
@@ -205,14 +208,14 @@ let browser_receives fake frame =
           answer
             (obj
                [ "result", obj [ "type", str "object" ]
-               ; "exceptionDetails", obj [ "text", str "Uncaught"; "exception", obj [ "description", str "SyntaxError: Unexpected end of JSON input" ] ]
+                ; "exceptionDetails", obj [ "text", str "Uncaught"; "exception", obj [ "description", str fake.receiver_error ] ]
                ]) in
         (match how with
          | Deliver -> deliver ()
          | Hold_delivery -> fake.held_delivery <- Some deliver
          | Receiver_throws -> receiver_threw ()
          | Receiver_starts_then_throws -> extension_receives fake message; receiver_threw ()
-         | Refuse_delivery -> refuse "Execution context was destroyed.")
+          | Refuse_delivery -> refuse fake.rejection_message)
       | None -> failf "unexpected expression %s" expression)
   | other -> failf "the fake browser got %s" other
 ;;
@@ -247,6 +250,8 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
     ; next_delivery = Deliver
     ; held_delivery = None
     ; answers_refused = false
+    ; rejection_message = "Execution context was destroyed."
+    ; receiver_error = "SyntaxError: Unexpected end of JSON input"
     ; act = Ask_the_model
     ; held_act = None
     ; waiting_on_model = None
@@ -718,7 +723,7 @@ let test_receiver_threw () =
   h.fake.next_delivery <- Receiver_throws;
   (match Session.call h.session goto with
    | Error (Session.Lost detail) ->
-     check string "the thrown cause" "the extension's receiver threw: SyntaxError: Unexpected end of JSON input" detail
+      check string "the safe thrown cause" "the extension's receiver threw" detail
    | _ -> fail "a call whose receiver threw may have taken effect");
   check bool "a live CDP transport does not settle an unknown receiver effect" false
     (Session.quiescent h.session);
@@ -833,6 +838,64 @@ let test_answer_not_delivered () =
   | _ -> fail "the session ended"
 ;;
 
+let test_private_cdp_rejection_is_not_a_public_diagnostic () =
+  with_session @@ fun h ->
+  attached h;
+  h.fake.rejection_message <- "PRIVATE_CDP_PAYLOAD_FIXTURE";
+  h.fake.next_delivery <- Refuse_delivery;
+  let received = List.length h.fake.received_calls in
+  let answer = Executor.execute ~tabs:(Executor.Tabs.create ())
+      ~call:(Session.call h.session) Browser_lane.Tabs_list in
+  (match answer with
+   | Browser_lane.Rejected_before_effect detail ->
+     check string "public refusal excludes the private CDP diagnostic"
+       "the call did not reach Stagehand: Runtime.evaluate rejected" detail
+   | _ -> fail "a rejected CDP delivery must remain a before-effect refusal");
+  check bool "refused input does not poison the live session" true (Session.quiescent h.session);
+  check int "the rejected call never reaches the extension" received (List.length h.fake.received_calls)
+;;
+
+let test_private_receiver_error_is_not_a_public_diagnostic () =
+  with_session @@ fun h ->
+  attached h;
+  h.fake.receiver_error <- "PRIVATE_CDP_PAYLOAD_FIXTURE";
+  h.fake.next_delivery <- Receiver_throws;
+  let answer = Executor.execute ~tabs:(Executor.Tabs.create ())
+      ~call:(Session.call h.session) Browser_lane.Tabs_list in
+  (match answer with
+   | Browser_lane.Refused detail ->
+     check string "public unknown outcome excludes the private receiver exception"
+       "Stagehand did not answer: the extension's receiver threw" detail
+   | _ -> fail "a receiver exception must retain an unknown effect outcome");
+  check bool "redaction does not clear the unknown effect barrier" false (Session.quiescent h.session);
+  check bool "redaction cannot authorize a retry" true
+    (Session.call h.session goto = Error Session.Delivery_unsettled)
+;;
+
+let test_private_answer_rejection_is_not_logged () =
+  with_session @@ fun h ->
+  attached h;
+  h.fake.rejection_message <- "PRIVATE_CDP_PAYLOAD_FIXTURE";
+  h.fake.answers_refused <- true;
+  let tabs = Executor.Tabs.create () in
+  let tab_id = Executor.Tabs.id_of_page tabs "P" in
+  let answer = Executor.execute ~tabs ~call:(Session.call h.session)
+      (Browser_lane.Page_instruct {tab_id; instruction="Read the fixture"}) in
+  (match answer with
+   | Browser_lane.Refused detail ->
+     check string "public model-answer failure excludes the private CDP diagnostic"
+       "Stagehand did not answer: an answer to the extension was not delivered: Runtime.evaluate rejected" detail
+   | _ -> fail "an undelivered model answer must keep its lost outcome");
+  let logged = List.filter_map (function
+    | Session.Reply_not_delivered detail -> Some detail
+    | _ -> None) !(h.events) in
+  check (list string) "the session log contains only the safe delivery classification"
+    ["Runtime.evaluate rejected"] logged;
+  check bool "the ended session cannot replay private input" true
+    (Session.call h.session goto = Error (Session.Connection_gone
+      "an answer to the extension was not delivered: Runtime.evaluate rejected"))
+;;
+
 let test_unsupported_request () =
   with_session
   @@ fun h ->
@@ -918,6 +981,9 @@ let () =
         test_backend_private_readiness_and_close_after_unknown_delivery;
       test_case "a malformed response loses the call" `Quick test_malformed_response;
       test_case "an undelivered model answer ends the session" `Quick test_answer_not_delivered;
+      test_case "CDP rejection does not expose private input" `Quick test_private_cdp_rejection_is_not_a_public_diagnostic;
+      test_case "receiver exception does not expose private input" `Quick test_private_receiver_error_is_not_a_public_diagnostic;
+      test_case "model-answer rejection does not expose private input in logs" `Quick test_private_answer_rejection_is_not_logged;
     ];
   ]
 ;;

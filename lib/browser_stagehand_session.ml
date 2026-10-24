@@ -156,12 +156,12 @@ let deliver link message =
          ; "returnByValue", `Bool true
          ])
   with
-  | Error (Browser_cdp.Command_rejected { message; _ }) -> Error (Refused_delivery ("Runtime.evaluate rejected: " ^ message))
+  | Error (Browser_cdp.Command_rejected _) -> Error (Refused_delivery "Runtime.evaluate rejected")
   | Error (Browser_cdp.Connection_lost reason) -> Error (Delivery_unknown reason)
   | Ok evaluated ->
     (match field "exceptionDetails" evaluated with
      | None -> Ok ()
-     | Some details -> Error (Delivery_unknown ("the extension's receiver threw: " ^ exception_text details)))
+     | Some _ -> Error (Delivery_unknown "the extension's receiver threw"))
 ;;
 
 (* The extension waits for every answer to its requests, and the call that

@@ -19,6 +19,7 @@ let preamble_message : Agent_core.Types.message =
 ;;
 
 let is_synthetic_preamble (message : Agent_core.Types.message) =
+  message.origin = Agent_core.Types.Agent_instruction &&
   match List.assoc_opt preamble_marker_key message.metadata with
   | Some (`Bool true) -> true
   | Some _ | None -> false
@@ -36,13 +37,15 @@ let working_state_marker_key = "masc.librarian_working_state.v1"
 let working_state_metadata = [ (working_state_marker_key, `Bool true) ]
 
 let is_working_state (message : Agent_core.Types.message) =
-  List.mem_assoc working_state_marker_key message.metadata
+  message.origin = Agent_core.Types.Agent_instruction
+  && List.mem_assoc working_state_marker_key message.metadata
 ;;
 
 let unread_context_marker_key = "masc.librarian_unread_context.v1"
 let unread_context_metadata = [unread_context_marker_key,`Bool true]
 let is_unread_context (message : Agent_core.Types.message) =
-  List.mem_assoc unread_context_marker_key message.metadata
+  message.origin = Agent_core.Types.Agent_instruction
+  && List.mem_assoc unread_context_marker_key message.metadata
 
 type budget_error =
   | Reservation_exceeds_capacity of

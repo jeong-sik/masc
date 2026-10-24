@@ -20,8 +20,8 @@ let carried_digest = function
 
 let k = Window.atoms_per_window
 
-let message ?(metadata = []) ~role text : Types.message =
-  { origin = Llm_provider.Types.Conversation;  role
+let message ?(origin=Types.Conversation) ?(metadata = []) ~role text : Types.message =
+  { origin;  role
   ; content = [ Types.Text text ]
   ; name = None
   ; tool_call_id = None
@@ -236,7 +236,7 @@ let test_next_shrink_capacity_clamps_to_lopsided_newest_atom () =
 let test_next_shrink_capacity_ignores_materialized_preamble () =
   let preamble =
     message
-      ~metadata:[ (Window.preamble_marker_key, `Bool true) ]
+      ~origin:Types.Agent_instruction ~metadata:[ (Window.preamble_marker_key, `Bool true) ]
       ~role:Types.User
       "synthetic preamble"
   in
@@ -960,7 +960,7 @@ let test_from_atom_view_keeps_the_atoms_from_the_front () =
    pinned like the per-turn context, but not read as that context. *)
 let test_from_atom_view_keeps_the_working_state_under_its_own_tag () =
   let working_state =
-    message ~metadata:Window.working_state_metadata ~role:Types.User "working-state"
+    message ~origin:Types.Agent_instruction ~metadata:Window.working_state_metadata ~role:Types.User "working-state"
   in
   Alcotest.(check bool) "the working state is not the per-turn context" false
     (Window.is_extra_context working_state);

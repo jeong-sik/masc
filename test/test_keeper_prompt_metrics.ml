@@ -388,7 +388,7 @@ let test_provider_content_messages_removes_typed_prompt_carrier () =
 let test_provider_content_messages_keeps_the_working_state () =
   let working_state =
     { (message "[Librarian working state] summary") with
-      metadata = Runtime_model_input_tail_window.working_state_metadata
+      origin = Llm_provider.Types.Agent_instruction; metadata = Runtime_model_input_tail_window.working_state_metadata
     }
   in
   let history = [ message "history"; message "current user" ] in

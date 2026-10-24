@@ -2505,7 +2505,7 @@ let test_keeper_settles_and_resumes () =
     }
   in
   let working_state : Agent_core.Types.message =
-    { origin = Llm_provider.Types.Conversation;  role = System
+    { origin = Llm_provider.Types.Agent_instruction;  role = System
     ; content = [ Text "MASC_WORKING_STATE two asks answered" ]
     ; name = None
     ; tool_call_id = None
@@ -6183,7 +6183,7 @@ let test_a_working_state_that_displaces_nothing_goes () =
   in
   let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
   let pinned : Agent_core.Types.message =
-    { origin = Llm_provider.Types.Conversation;  role = System
+    { origin = Llm_provider.Types.Agent_instruction;  role = System
     ; content = [ Text working_state ]
     ; name = None
     ; tool_call_id = None

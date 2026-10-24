@@ -7329,7 +7329,7 @@ let test_keeper_resume_sends_changed_working_state_once () =
          let model_input_projection messages =
            let state =
              { (Agent_core.Types.system_msg !working_state) with
-               metadata = Runtime_model_input_tail_window.working_state_metadata
+               origin = Llm_provider.Types.Agent_instruction; metadata = Runtime_model_input_tail_window.working_state_metadata
              }
            in
            Ok (messages @ [ state ])

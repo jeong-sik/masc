@@ -24,6 +24,7 @@ type host_issue =
   | Host_exact_record_failed of { request_id : string; detail : string }
   | Host_ask_record_failed of { request_id : string; detail : string }
   | Host_no_exact_runner
+  | Host_no_web_search_runner
 type host_requests = {
   hr_cycles : int;
   hr_waiting : (string * host_wait) list;
@@ -215,6 +216,7 @@ let host_issue json =
   | "ask_record_failed" ->
       request_detail (fun request_id detail -> Host_ask_record_failed { request_id; detail })
   | "no_exact_runner" -> Ok Host_no_exact_runner
+  | "no_web_search_runner" -> Ok Host_no_web_search_runner
   | other -> Error ("not a host request issue of this host: " ^ other)
 let host_requests json =
   let* hr_cycles = get count "cycles" json in
@@ -1770,6 +1772,7 @@ let host_issue_text = function
   | Host_exact_record_failed { request_id; detail } -> "recording " ^ request_id ^ " failed: " ^ detail
   | Host_ask_record_failed { request_id; detail } -> "recording question " ^ request_id ^ " failed: " ^ detail
   | Host_no_exact_runner -> "this host has no exact-output runner"
+  | Host_no_web_search_runner -> "this host has no web-search runner"
 let host_request_lines item = match item.host_requests with
   | None | Some (Ok { hr_cycles = 0; hr_waiting = []; hr_issue = None }) -> []
   | Some (Error detail) -> [""; "Host requests: unreadable · " ^ detail]

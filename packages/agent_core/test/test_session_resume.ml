@@ -3,6 +3,7 @@ open Agent_core
 (* ── Test helpers ────────────────────────────────────────────── *)
 
 let make_checkpoint
+      ?(provider_binding = None)
       ?(session_id = "sess-original")
       ?(agent_name = "test-agent")
       ?(model = "claude-sonnet-5")
@@ -20,7 +21,7 @@ let make_checkpoint
       ()
   : Checkpoint.t
   =
-  { provider_binding = None; version = Checkpoint.checkpoint_version
+  { provider_binding; version = Checkpoint.checkpoint_version
   ; session_id
   ; agent_name
   ; model
@@ -193,7 +194,7 @@ let test_resume_restores_messages () =
   with_net
   @@ fun net ->
   let cp = make_checkpoint ~messages:sample_messages () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check int) "message count" 4 (List.length (Agent.state agent).messages)
 ;;
 
@@ -203,7 +204,7 @@ let test_resume_restores_context () =
   let ctx = Context.create_sync () in
   Context.set_scoped ctx Context.User "theme" (`String "dark");
   let cp = make_checkpoint ~context:ctx () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check bool)
     "context restored"
     true
@@ -214,7 +215,7 @@ let test_resume_restores_usage () =
   with_net
   @@ fun net ->
   let cp = make_checkpoint ~usage:sample_usage () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check int) "input_tokens" 150 (Agent.state agent).usage.total_input_tokens;
   Alcotest.(check int) "output_tokens" 80 (Agent.state agent).usage.total_output_tokens;
   Alcotest.(check int) "api_calls" 3 (Agent.state agent).usage.api_calls;
@@ -226,7 +227,7 @@ let test_resume_restores_turn_count () =
   with_net
   @@ fun net ->
   let cp = make_checkpoint ~turn_count:5 () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check int) "turn_count" 5 (Agent.state agent).turn_count
 ;;
 
@@ -234,7 +235,7 @@ let test_resume_restores_model () =
   with_net
   @@ fun net ->
   let cp = make_checkpoint ~model:"claude-opus-5-5" () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check string) "model" "claude-opus-5-5" (Agent.state agent).config.model
 ;;
 
@@ -242,7 +243,7 @@ let test_resume_restores_agent_name () =
   with_net
   @@ fun net ->
   let cp = make_checkpoint ~agent_name:"my-agent" () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check string) "name" "my-agent" (Agent.state agent).config.name
 ;;
 
@@ -250,7 +251,7 @@ let test_resume_restores_system_prompt () =
   with_net
   @@ fun net ->
   let cp = make_checkpoint ~system_prompt:(Some "Be concise.") () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check (option string))
     "system_prompt"
     (Some "Be concise.")
@@ -261,7 +262,7 @@ let test_resume_restores_tool_choice () =
   with_net
   @@ fun net ->
   let cp = make_checkpoint ~tool_choice:(Some Types.Any) () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   let tc_str =
     match (Agent.state agent).config.tool_choice with
     | Some Types.Any -> "any"
@@ -277,7 +278,7 @@ let test_resume_none_system_prompt () =
   with_net
   @@ fun net ->
   let cp = make_checkpoint ~system_prompt:None () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check (option string))
     "system_prompt"
     None
@@ -292,7 +293,7 @@ let test_resume_with_tools () =
       Ok { Types.content = Yojson.Safe.to_string input; content_blocks = None; _meta = None })
   in
   let cp = make_checkpoint () in
-  let agent = Agent.resume ~net ~checkpoint:cp ~tools:[ tool ] () in
+  let agent = (Agent.resume ~net ~checkpoint:cp ~tools:[ tool ] () |> Result.get_ok) in
   Alcotest.(check int) "tool count" 1 (Tool_set.size (Agent.tools agent))
 ;;
 
@@ -300,7 +301,7 @@ let test_resume_default_options () =
   with_net
   @@ fun net ->
   let cp = make_checkpoint () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check bool)
     "no provider config"
     true
@@ -319,7 +320,7 @@ let test_resume_custom_options () =
       ()
   in
   let opts = { Agent.default_options with provider_config = Some provider_config } in
-  let agent = Agent.resume ~net ~checkpoint:cp ~options:opts () in
+  let agent = (Agent.resume ~net ~checkpoint:cp ~options:opts () |> Result.get_ok) in
   Alcotest.(check string)
     "custom provider endpoint"
     "http://localhost:8080"
@@ -345,7 +346,7 @@ let test_resume_with_config_override () =
     ; preserve_thinking = Some false
     }
   in
-  let agent = Agent.resume ~net ~checkpoint:cp ~config:cfg () in
+  let agent = (Agent.resume ~net ~checkpoint:cp ~config:cfg () |> Result.get_ok) in
   Alcotest.(check string)
     "exact caller config"
     (Types.show_agent_config cfg)
@@ -380,7 +381,7 @@ let test_resume_empty_checkpoint () =
   with_net
   @@ fun net ->
   let cp = make_checkpoint ~messages:[] ~usage:Types.empty_usage ~turn_count:0 () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check int) "messages" 0 (List.length (Agent.state agent).messages);
   Alcotest.(check int) "turn_count" 0 (Agent.state agent).turn_count;
   Alcotest.(check int) "api_calls" 0 (Agent.state agent).usage.api_calls
@@ -399,7 +400,7 @@ let test_resume_preserves_message_content () =
     ]
   in
   let cp = make_checkpoint ~messages:msgs () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   let first_msg = List.hd (Agent.state agent).messages in
   Alcotest.(check int) "content blocks" 2 (List.length first_msg.content);
   let first_text =
@@ -430,7 +431,7 @@ let test_checkpoint_resume_roundtrip () =
   in
   let json_str = Checkpoint.to_string cp in
   let cp2 = Result.get_ok (Checkpoint.of_string json_str) in
-  let agent = Agent.resume ~net ~checkpoint:cp2 () in
+  let agent = (Agent.resume ~net ~checkpoint:cp2 () |> Result.get_ok) in
   Alcotest.(check string) "agent_name" "rt-agent" (Agent.state agent).config.name;
   Alcotest.(check int) "messages" 4 (List.length (Agent.state agent).messages);
   Alcotest.(check int) "turn_count" 4 (Agent.state agent).turn_count;
@@ -460,7 +461,7 @@ let test_resume_cache_tokens () =
     }
   in
   let cp = make_checkpoint ~usage () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check int)
     "cache_creation"
     30
@@ -475,8 +476,240 @@ let test_resume_custom_model () =
   with_net
   @@ fun net ->
   let cp = make_checkpoint ~model:"my-local-model" () in
-  let agent = Agent.resume ~net ~checkpoint:cp () in
+  let agent = (Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   Alcotest.(check string) "custom model" "my-local-model" (Agent.state agent).config.model
+;;
+
+module Binding_source = Llm_provider.Types.Reasoning_source
+module Binding_projection = Llm_provider.Reasoning_history_projection
+module Binding_provider = Llm_provider.Provider_config
+
+let binding_provider ?(kind=Binding_provider.OpenAI_compat) ?(path="/chat")
+    ?(replay=Llm_provider.Capabilities.Force_preserve_always) ?(model="shared-model") endpoint =
+  let caps = Llm_provider.Capabilities.{openai_compat_chat_capabilities with
+    supports_reasoning=true; reasoning_replay_override=replay} in
+  Binding_provider.make ~kind ~model_id:model ~base_url:endpoint ~request_path:path
+    ~model_capabilities_override:caps ()
+;;
+let binding_source provider =
+  Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config provider |> Result.get_ok
+;;
+let binding_message source =
+  { (Types.assistant_msg "answer") with
+    content=[Types.Thinking {content="reasoning";signature=None};Types.Text "answer"];
+    metadata=Binding_source.metadata source }
+;;
+let binding_checkpoint provider messages =
+  make_checkpoint ~model:provider.Binding_provider.model_id
+    ~provider_binding:(Some(binding_source provider)) ~messages ()
+;;
+let binding_options provider = {Agent.default_options with provider_config=Some provider}
+let binding_resume_ok = function
+  | Ok value -> value
+  | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
+let expect_binding_incompatible = function
+  | Error (Agent_checkpoint.Replay_rejected
+      (Binding_projection.Incompatible_reasoning_artifact {message_index;_})) -> message_index
+  | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
+  | Ok _ -> Alcotest.fail "incompatible reasoning was admitted"
+;;
+let test_binding_exact_resume () = with_net (fun net ->
+  let provider=binding_provider "https://same.example" in
+  let source=binding_source provider in
+  let cp=binding_checkpoint provider [binding_message source] in
+  let before=Checkpoint.to_json cp in
+  let agent=Agent.resume ~net ~checkpoint:cp ~options:(binding_options provider) () |> binding_resume_ok in
+  Alcotest.(check bool) "canonical history retained without projection" true
+    ((Agent.state agent).messages == cp.messages);
+  Alcotest.(check bool) "last producer remains recorded" true
+    (match (Agent.state agent).provider_binding with Some actual -> Binding_source.equal source actual | None -> false);
+  let admitted=Agent.provider_config agent |> Option.get in
+  Alcotest.(check bool) "admitted carrier is request-frozen" true (admitted.request_policy_snapshot<>None);
+  Alcotest.(check bool) "source checkpoint not mutated" true (before=Checkpoint.to_json cp);
+  Agent.close agent)
+;;
+let test_binding_provider_model_and_contract_mismatch () = with_net (fun net ->
+  let original=binding_provider "https://same.example" in
+  let cp=binding_checkpoint original [binding_message(binding_source original)] in
+  let no_replay={original with Binding_provider.model_capabilities_override=Some
+    Llm_provider.Capabilities.{openai_compat_chat_capabilities with reasoning_replay_override=Force_no_replay}} in
+  let targets=[binding_provider ~kind:Binding_provider.Kimi "https://same.example";
+    binding_provider ~model:"other-model" "https://same.example";no_replay] in
+  List.iter(fun target ->
+    let config=Types.default_config ~model:target.Binding_provider.model_id in
+    let result=Agent.resume ~net ~checkpoint:cp ~config ~options:(binding_options target) () in
+    Alcotest.(check int) "kind/model/contract cannot silently discard replay" 0
+      (expect_binding_incompatible result)) targets)
+;;
+let test_binding_declared_rotation () = with_net (fun net ->
+  let original=binding_provider "https://original.example" in
+  let source=binding_source original in
+  let cp=binding_checkpoint original [binding_message source] in
+  List.iter(fun target ->
+    let plan=Agent_checkpoint.build_resume ~checkpoint:cp ~provider_config:target () |> binding_resume_ok in
+    Alcotest.(check bool) "declared text endpoint/path rotation admitted" true
+      (plan.binding_disposition=Agent_checkpoint.Declared_endpoint_rotation);
+    let agent=Agent.resume ~net ~checkpoint:cp ~options:(binding_options target) () |> binding_resume_ok in
+    Alcotest.(check bool) "original reasoning kept" true ((Agent.state agent).messages==cp.messages);
+    Agent.close agent)
+    [binding_provider "https://rotated.example";binding_provider ~path:"/other-chat" "https://original.example"])
+;;
+let test_binding_signed_rotation_refused () = with_net (fun net ->
+  let original=binding_provider ~kind:Binding_provider.Anthropic "https://original.example" in
+  let cp=binding_checkpoint original [binding_message(binding_source original)] in
+  List.iter(fun target ->
+    Alcotest.(check int) "signed endpoint/path source cannot rotate" 0
+      (expect_binding_incompatible(Agent.resume ~net ~checkpoint:cp ~options:(binding_options target) ())))
+    [binding_provider ~kind:Binding_provider.Anthropic "https://rotated.example";
+     binding_provider ~kind:Binding_provider.Anthropic ~path:"/other" "https://original.example"])
+;;
+let test_binding_mixed_history () = with_net (fun net ->
+  let target=binding_provider "https://target.example" in
+  let foreign=binding_provider ~kind:Binding_provider.Kimi "https://foreign.example" in
+  (* Last producer is compatible; an earlier native artifact is not. *)
+  let cp=binding_checkpoint target [binding_message(binding_source foreign);
+    Types.user_msg "later";binding_message(binding_source target)] in
+  Alcotest.(check int) "all artifact producers checked" 0
+    (expect_binding_incompatible(Agent.resume ~net ~checkpoint:cp ~options:(binding_options target) ())))
+;;
+let test_binding_text_only_rebind () = with_net (fun net ->
+  let original=binding_provider "https://original.example" in
+  let target=binding_provider ~kind:Binding_provider.Kimi "https://other.example" in
+  let cp=binding_checkpoint original [Types.assistant_msg "text only"] in
+  let plan=Agent_checkpoint.build_resume ~checkpoint:cp ~provider_config:target () |> binding_resume_ok in
+  Alcotest.(check bool) "text-only source change has explicit disposition" true
+    (plan.binding_disposition=Agent_checkpoint.Rebound_without_replay_loss);
+  let agent=Agent.resume ~net ~checkpoint:cp ~options:(binding_options target) () |> binding_resume_ok in
+  Alcotest.(check bool) "text retained" true ((Agent.state agent).messages==cp.messages);
+  Agent.close agent)
+;;
+let test_binding_explicit_disable () = with_net (fun net ->
+  let original=binding_provider "https://original.example" in
+  let target=binding_provider ~replay:Llm_provider.Capabilities.Force_no_replay ~kind:Binding_provider.Kimi "https://other.example" in
+  let cp=binding_checkpoint original [binding_message(binding_source original)] in
+  let config={ (Types.default_config ~model:target.model_id) with preserve_thinking=Some false} in
+  let plan=Agent_checkpoint.build_resume ~checkpoint:cp ~provider_config:target ~config () |> binding_resume_ok in
+  Alcotest.(check bool) "caller exclusion is explicit" true
+    (plan.binding_disposition=Agent_checkpoint.Replay_disabled_by_caller);
+  let agent=Agent.resume ~net ~checkpoint:cp ~config ~options:(binding_options target) () |> binding_resume_ok in
+  Alcotest.(check bool) "caller exclusion does not destroy canonical reasoning" true ((Agent.state agent).messages==cp.messages);
+  Agent.close agent;
+  let ignores_false=binding_provider ~kind:Binding_provider.Kimi "https://other.example" in
+  Alcotest.(check int) "a wire ignoring false cannot claim caller exclusion" 0
+    (expect_binding_incompatible(Agent.resume ~net ~checkpoint:cp ~config
+      ~options:(binding_options ignores_false) ())))
+;;
+let test_binding_missing_and_corrupt_source () = with_net (fun net ->
+  let target=binding_provider "https://same.example" in
+  let source=binding_source target in
+  let absent={ (binding_message source) with Types.metadata=[]} in
+  let cp=binding_checkpoint target [absent] in
+  (match Agent.resume ~net ~checkpoint:cp ~options:(binding_options target) () with
+   | Error (Agent_checkpoint.Replay_rejected (Binding_projection.Unbound_reasoning_artifact {message_index=0})) -> ()
+   | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
+   | Ok _ -> Alcotest.fail "session source must not be invented as an artifact source");
+  let duplicate={ (binding_message source) with Types.metadata=Binding_source.metadata source @ Binding_source.metadata source} in
+  let cp={cp with messages=[duplicate]} in
+  let config={ (Types.default_config ~model:target.model_id) with preserve_thinking=Some false} in
+  (match Agent.resume ~net ~checkpoint:cp ~config ~options:(binding_options target) () with
+   | Error (Agent_checkpoint.Replay_rejected (Binding_projection.Invalid_reasoning_source _)) -> ()
+   | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
+   | Ok _ -> Alcotest.fail "caller replay exclusion cannot admit corrupt provenance");
+  let wrong_role={absent with Types.role=Types.User} in
+  (match Agent.resume ~net ~checkpoint:{cp with messages=[wrong_role]}
+      ~config ~options:(binding_options target) () with
+   | Error (Agent_checkpoint.Replay_rejected (Binding_projection.Invalid_reasoning_artifact_role {message_index=0})) -> ()
+   | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
+   | Ok _ -> Alcotest.fail "caller replay exclusion cannot admit an invalid reasoning role"))
+;;
+let test_binding_inline_carrier_producers () = with_net (fun net ->
+  let original=binding_provider "https://original.example" in
+  let target=binding_provider ~kind:Binding_provider.Kimi "https://other.example" in
+  List.iter (fun (content,raw_content,block_indices) ->
+    let replay=Types.Inline_content_replay.make ~content ~raw_content ~block_indices |> Result.get_ok in
+    let carrier_metadata=[Types.Inline_content_replay.metadata replay] in
+    let message={ (Types.assistant_msg "") with content;
+      metadata=carrier_metadata @ Binding_source.metadata(binding_source original)} in
+    let cp=binding_checkpoint original [message] in
+    Alcotest.(check int) "metadata-only carrier has a checked producer" 0
+      (expect_binding_incompatible(Agent.resume ~net ~checkpoint:cp ~options:(binding_options target) ()));
+    let unbound={cp with messages=[{message with metadata=carrier_metadata}]} in
+    (match Agent.resume ~net ~checkpoint:unbound ~options:(binding_options target) () with
+     | Error (Agent_checkpoint.Replay_rejected (Binding_projection.Unbound_reasoning_artifact {message_index=0})) -> ()
+     | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
+     | Ok _ -> Alcotest.fail "inline carrier borrowed the session producer");
+    let exact=Agent.resume ~net ~checkpoint:cp ~options:(binding_options original) () |> binding_resume_ok in
+    Alcotest.(check bool) "exact carrier retained" true ((Agent.state exact).messages==cp.messages);
+    Agent.close exact;
+    let excluded=binding_provider ~replay:Llm_provider.Capabilities.Force_no_replay
+      ~kind:Binding_provider.Kimi "https://other.example" in
+    let config={ (Types.default_config ~model:excluded.model_id) with preserve_thinking=Some false} in
+    let agent=Agent.resume ~net ~checkpoint:unbound ~config ~options:(binding_options excluded) () |> binding_resume_ok in
+    Alcotest.(check bool) "explicit exclusion preserves canonical carrier" true
+      ((Agent.state agent).messages==unbound.messages);
+    Agent.close agent)
+    [[],"",[]; [],"<think></think>",[]; [Types.Text "answer"],"answer",[0]])
+;;
+let test_binding_non_dispatch_restore () = with_net (fun net ->
+  let provider=binding_provider "https://same.example" in
+  let cp=binding_checkpoint provider [{ (binding_message(binding_source provider)) with Types.metadata=[]}] in
+  let plan=Agent_checkpoint.build_resume ~checkpoint:cp () |> binding_resume_ok in
+  Alcotest.(check bool) "unconfigured non-dispatch disposition" true
+    (plan.binding_disposition=Agent_checkpoint.Unconfigured_target && plan.provider_config=None);
+  let agent=Agent.resume ~net ~checkpoint:cp () |> binding_resume_ok in
+  Alcotest.(check bool) "unconfigured restore preserves input settlement state" true
+    (Agent.provider_config agent=None && (Agent.state agent).messages==cp.messages);
+  Agent.close agent)
+;;
+let test_binding_direct_old_or_invalid_checkpoint () = with_net (fun net ->
+  let provider=binding_provider "https://same.example" in
+  let cp=binding_checkpoint provider [] in
+  (match Agent.resume ~net ~checkpoint:{cp with version=14} () with
+   | Error (Agent_checkpoint.Invalid_checkpoint_version {expected=15;got=14}) -> ()
+   | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
+   | Ok _ -> Alcotest.fail "old direct checkpoint cannot silently migrate");
+  let source={ (binding_source provider) with Binding_source.canonical_model_id=""} in
+  (match Agent.resume ~net ~checkpoint:{cp with provider_binding=Some source} () with
+   | Error (Agent_checkpoint.Invalid_checkpoint_binding _) -> ()
+   | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
+   | Ok _ -> Alcotest.fail "invalid direct binding must be rejected"))
+;;
+
+let test_binding_hook_cannot_reenable_incompatible_replay () = with_net (fun net ->
+  Eio.Switch.run (fun sw ->
+    List.iter(fun (stream, reenable) ->
+      let original=binding_provider "https://original.example" in
+      let target=binding_provider ~replay:Llm_provider.Capabilities.Force_no_replay ~kind:Binding_provider.Kimi "https://other.example" in
+      let cp=binding_checkpoint original [binding_message(binding_source original)] in
+      let before=Checkpoint.to_json cp in
+      let calls=ref 0 in
+      let response=Provider_mock.text_response "continued without replay" [] in
+      let transport=Llm_provider.Llm_transport.custom ({
+        complete_sync=(fun _ -> incr calls; {response=Ok response;latency_ms=Some 0});
+        complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> incr calls;Ok response)}) in
+      let hooks={Hooks.empty with before_turn_params=Some(function
+        | Hooks.BeforeTurnParams {current_params;_} when reenable ->
+          Hooks.AdjustParams {current_params with preserve_thinking=Some true}
+        | _ -> Hooks.Continue)} in
+      let options={ (binding_options target) with transport=Some transport;hooks} in
+      let config={ (Types.default_config ~model:target.model_id) with
+        preserve_thinking=Some false;max_tokens=Some 16} in
+      let agent=Agent.resume ~net ~checkpoint:cp ~config ~options () |> binding_resume_ok in
+      let result=if stream then Agent.run_stream ~sw ~on_event:ignore agent "next"
+        else Agent.run ~sw agent "next" in
+      (match reenable,result with
+       | true,Error (Error.Config (Error.InvalidConfig {field="reasoning_replay";_})) -> ()
+       | false,Ok _ -> ()
+       | _,Error error -> Alcotest.fail(Error.to_string error)
+       | true,Ok _ -> Alcotest.fail "hook re-enabled incompatible replay"
+       );
+      Alcotest.(check int) "rejected hook never reaches transport; explicit exclusion does"
+        (if reenable then 0 else 1) !calls;
+      Alcotest.(check bool) "checkpoint remains unchanged" true (before=Checkpoint.to_json cp);
+      Alcotest.(check bool) "native artifact remains canonical" true
+        (List.hd (Agent.state agent).messages=List.hd cp.messages);
+      Agent.close agent)
+      [false,false;false,true;true,false;true,true]))
 ;;
 
 (* ── Test runner ─────────────────────────────────────────────── *)
@@ -485,7 +718,20 @@ let () =
   let open Alcotest in
   run
     "Session Resume"
-    [ ( "Session.resume_from"
+    [ "provider replay binding", [
+        test_case "same exact binding retains canonical history" `Quick test_binding_exact_resume;
+        test_case "provider model and replay contract mismatch" `Quick test_binding_provider_model_and_contract_mismatch;
+        test_case "declared text endpoint and path rotation" `Quick test_binding_declared_rotation;
+        test_case "signed source endpoint and path mismatch" `Quick test_binding_signed_rotation_refused;
+        test_case "mixed-producer history" `Quick test_binding_mixed_history;
+        test_case "text-only source change" `Quick test_binding_text_only_rebind;
+        test_case "explicit caller replay exclusion" `Quick test_binding_explicit_disable;
+        test_case "missing and corrupt artifact provenance" `Quick test_binding_missing_and_corrupt_source;
+        test_case "inline Chat carrier producers" `Quick test_binding_inline_carrier_producers;
+        test_case "non-dispatch restoration" `Quick test_binding_non_dispatch_restore;
+        test_case "direct old and invalid checkpoint" `Quick test_binding_direct_old_or_invalid_checkpoint;
+        test_case "hook cannot silently re-enable incompatible replay" `Quick test_binding_hook_cannot_reenable_incompatible_replay]
+    ; ( "Session.resume_from"
       , [ test_case "generates new id" `Quick test_resume_from_generates_new_id
         ; test_case "links session_id" `Quick test_resume_from_links_session_id
         ; test_case "carries turn_count" `Quick test_resume_from_carries_turn_count

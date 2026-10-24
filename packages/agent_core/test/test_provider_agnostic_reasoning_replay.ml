@@ -982,7 +982,7 @@ let test_a_corrupted_tag_in_history_does_not_block_requests () =
        let history = [ u1; corrupted; t1; u2; later; t2 ] in
        let assert_wire body =
          let types = wire_content_types body in
-         check_int (label ^ ": five merged wire messages") 5 (List.length types);
+         check_int (label ^ ": six distinct wire messages") 6 (List.length types);
          check_bool
            (label ^ ": the corrupted block is not sent")
            false
@@ -994,7 +994,7 @@ let test_a_corrupted_tag_in_history_does_not_block_requests () =
          check_bool
            (label ^ ": the block created after the corruption replays")
            true
-           (List.mem "thinking" (List.nth types 3))
+           (List.mem "thinking" (List.nth types 4))
        in
        assert_wire (Backend_anthropic.build_request ~config ~messages:history ~tools ());
        (* Token counting shares the payload builder and had the same refusal. *)
@@ -1509,11 +1509,10 @@ let test_prefix_binding_keeps_thinking_across_chained_rounds () =
       ~tools
       ()
   in
-  (* The tool-result/user merge folds the six history messages into five
-     wire messages; both assistants keep their thinking at their merged
-     positions. *)
+  (* Genuine caller messages remain distinct from tool-result messages.
+     Both assistants keep their thinking at their original wire positions. *)
   let types = wire_content_types body in
-  check_int "five merged wire messages" 5 (List.length types);
+  check_int "six distinct wire messages" 6 (List.length types);
   check_bool
     "round one thinking survives round three"
     true
@@ -1521,7 +1520,7 @@ let test_prefix_binding_keeps_thinking_across_chained_rounds () =
   check_bool
     "round two thinking survives round three"
     true
-    (List.mem "thinking" (List.nth types 3))
+    (List.mem "thinking" (List.nth types 4))
 ;;
 
 (* Every codec has to answer, because the caller asks before it knows which

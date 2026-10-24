@@ -904,7 +904,7 @@ let test_provider_binding_persistence () =
       ~canonical_model_id:"shared-model"
       ~replay_contract:Llm_provider.Reasoning_replay_contract.{
         replay_policy=All_assistant_messages; streaming=No_streaming_reasoning;
-        output_wire=No_output_control}
+        output_wire=No_output_control;content_carrier=Canonical_blocks}
     |> Result.get_ok in
   let cp = make_checkpoint ~model:"shared-model" ~provider_binding:(Some source)
     ~messages:[Types.assistant_msg "no reasoning artifact"] () in
@@ -913,7 +913,7 @@ let test_provider_binding_persistence () =
   let restored = Checkpoint.of_json json |> Result.get_ok in
   Alcotest.(check bool) "text-only checkpoint retains actual producer" true
     (same_binding restored.provider_binding);
-  let state = (Agent_checkpoint.build_resume ~checkpoint:restored ()).state in
+  let state = ((Agent_checkpoint.build_resume ~checkpoint:restored ()) |> Result.get_ok).state in
   Alcotest.(check bool) "state restore retains producer" true (same_binding state.provider_binding);
   let captured = Agent_checkpoint.build_checkpoint ~pending_input:None ~state
     ~tools:Tool_set.empty ~context:restored.context ~mcp_clients:[] () in
@@ -2108,8 +2108,8 @@ let () =
                 ~context:ctx
                 ()
             in
-            let { Agent_checkpoint.state; context = ctx2 } =
-              Agent_checkpoint.build_resume ~checkpoint:cp ()
+            let { Agent_checkpoint.state; context = ctx2; _ } =
+              (Agent_checkpoint.build_resume ~checkpoint:cp () |> Result.get_ok)
             in
             check string "agent_name" "resume-agent" state.config.name;
             check int "turn_count" 3 state.turn_count;
@@ -2130,7 +2130,7 @@ let () =
             Context.set ctx "key" (`String "val");
             let cp = make_checkpoint ~context:ctx () in
             let { Agent_checkpoint.context = ctx2; _ } =
-              Agent_checkpoint.build_resume ~checkpoint:cp ~eio_context:true ()
+              (Agent_checkpoint.build_resume ~checkpoint:cp ~eio_context:true () |> Result.get_ok)
             in
             check_context_backend "rehydrated backend" Context.Eio_mutex ctx2;
             check
@@ -2158,7 +2158,7 @@ let () =
               }
             in
             let { Agent_checkpoint.state; _ } =
-              Agent_checkpoint.build_resume ~checkpoint:cp ~config:override ()
+              (Agent_checkpoint.build_resume ~checkpoint:cp ~config:override () |> Result.get_ok)
             in
             check string "agent_name from caller" "current-agent" state.config.name;
             check string "model from caller" "test-model" state.config.model;
@@ -2194,7 +2194,7 @@ let () =
             in
             let override = Types.default_config ~model:"test-model" in
             let { Agent_checkpoint.state; _ } =
-              Agent_checkpoint.build_resume ~checkpoint:cp ~config:override ()
+              (Agent_checkpoint.build_resume ~checkpoint:cp ~config:override () |> Result.get_ok)
             in
             check
               (option bool)
@@ -2220,7 +2220,7 @@ let () =
             let new_ctx = Context.create_sync () in
             Context.set new_ctx "new" (`String "new-val");
             let { Agent_checkpoint.context = result_ctx; _ } =
-              Agent_checkpoint.build_resume ~checkpoint:cp ~context:new_ctx ()
+              (Agent_checkpoint.build_resume ~checkpoint:cp ~context:new_ctx () |> Result.get_ok)
             in
             check
               bool
@@ -2255,7 +2255,7 @@ let () =
               };
             let cp = Agent.checkpoint ~session_id:"rt-sess" agent in
             let { Agent_checkpoint.state; _ } =
-              Agent_checkpoint.build_resume ~checkpoint:cp ()
+              (Agent_checkpoint.build_resume ~checkpoint:cp () |> Result.get_ok)
             in
             check string "name" "roundtrip-agent" state.config.name;
             check int "turn_count" 7 state.turn_count;
@@ -2284,7 +2284,7 @@ let () =
                         "checkpoint decode failed: %s"
                         (Agent_core.Error.to_string err))
                in
-               let agent = Agent.resume ~net ~checkpoint:decoded () in
+               let agent = (Agent.resume ~net ~checkpoint:decoded () |> Result.get_ok) in
                let resumed_context = Agent.context agent in
                check_context_backend
                  "agent context backend"

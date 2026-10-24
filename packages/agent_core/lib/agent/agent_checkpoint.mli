@@ -8,10 +8,29 @@
 
 (** {1 Resume} *)
 
-(** State recovered from a checkpoint. *)
+type resume_error =
+  | Invalid_checkpoint_version of { expected : int; got : int }
+  | Invalid_checkpoint_binding of string
+  | Replay_rejected of Llm_provider.Reasoning_history_projection.error
+
+val resume_error_to_string : resume_error -> string
+
+type binding_disposition =
+  | Unconfigured_target
+  | Unrecorded_producer
+  | Identical_source
+  | Declared_endpoint_rotation
+  | Rebound_without_replay_loss
+  | Replay_disabled_by_caller
+
+val binding_disposition_to_string : binding_disposition -> string
+
+(** State recovered only after typed replay admission. *)
 type resume_state =
   { state : Types.agent_state
   ; context : Context.t
+  ; provider_config : Llm_provider.Provider_config.t option
+  ; binding_disposition : binding_disposition
   }
 
 (** Build restored state from a checkpoint.
@@ -22,14 +41,19 @@ type resume_state =
     overrides it. Without [config], configuration fields represented by the
     checkpoint are restored over current defaults; non-persisted runtime fields
     use those defaults. Returns state + context; the caller wraps these into
-    [Agent.t]. *)
+    [Agent.t]. When an exact [provider_config] is supplied, its effective model
+    and knobs are overlaid from the restored config and frozen once. Incompatible
+    reasoning returns a typed error before context copying or Agent construction.
+    The admitted carrier is returned so dispatch keeps that snapshot. Without a
+    provider target, restoration cannot dispatch and retains all canonical data. *)
 val build_resume
   :  checkpoint:Checkpoint.t
   -> ?eio_context:bool
   -> ?config:Types.agent_config
+  -> ?provider_config:Llm_provider.Provider_config.t
   -> ?context:Context.t
   -> unit
-  -> resume_state
+  -> (resume_state, resume_error) result
 
 (** {1 Checkpoint creation} *)
 

@@ -61,7 +61,7 @@ let test_checkpoint_roundtrip () =
   Alcotest.(check (option string)) "checkpoint system_prompt"
     (Some "test system prompt") cp.system_prompt;
   (* Resume with different provider — simulates runtime fallback *)
-  let resumed = Agent_core.Agent.resume ~net ~checkpoint:cp () in
+  let resumed = (Agent_core.Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   let resumed_state = Agent_core.Agent.state resumed in
   Alcotest.(check int) "resumed turn_count" 3 resumed_state.turn_count;
   Alcotest.(check int) "resumed messages" 6 (List.length resumed_state.messages);
@@ -108,7 +108,7 @@ let test_multi_runtime_accumulation () =
   let cp_a = Agent_core.Agent.checkpoint agent_a in
   Alcotest.(check int) "cp_a turns" 2 cp_a.turn_count;
   (* Provider B: resume from A, add 1 turn *)
-  let agent_b = Agent_core.Agent.resume ~net ~checkpoint:cp_a () in
+  let agent_b = (Agent_core.Agent.resume ~net ~checkpoint:cp_a () |> Result.get_ok) in
   Agent_core.Agent.set_state agent_b { (Agent_core.Agent.state agent_b) with
     messages = (Agent_core.Agent.state agent_b).messages @ [
       Agent_core.Types.user_msg "t3";
@@ -121,7 +121,7 @@ let test_multi_runtime_accumulation () =
   Alcotest.(check int) "cp_b turns" 3 cp_b.turn_count;
   Alcotest.(check int) "cp_b messages" 6 (List.length cp_b.messages);
   (* Provider C: resume from B — should see all 3 turns *)
-  let agent_c = Agent_core.Agent.resume ~net ~checkpoint:cp_b () in
+  let agent_c = (Agent_core.Agent.resume ~net ~checkpoint:cp_b () |> Result.get_ok) in
   let state_c = Agent_core.Agent.state agent_c in
   Alcotest.(check int) "provider C sees 3 turns" 3 state_c.turn_count;
   Alcotest.(check int) "provider C sees 6 messages" 6 (List.length state_c.messages)
@@ -142,7 +142,7 @@ let test_resume_preserves_checkpoint_model () =
   let cp = Agent_core.Agent.checkpoint agent in
   Alcotest.(check string) "checkpoint model" "anthropic-model" cp.model;
   (* Resume without config override — checkpoint model is preserved *)
-  let resumed = Agent_core.Agent.resume ~net ~checkpoint:cp () in
+  let resumed = (Agent_core.Agent.resume ~net ~checkpoint:cp () |> Result.get_ok) in
   let state = Agent_core.Agent.state resumed in
   Alcotest.(check string) "resumed keeps checkpoint model" "anthropic-model"
     (Agent_core.Types.model_to_string state.config.model)

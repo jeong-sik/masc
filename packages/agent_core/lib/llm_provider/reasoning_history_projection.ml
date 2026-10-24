@@ -39,6 +39,13 @@ type error =
       ; classification : Types.Reasoning_source.classification
       }
   | Invalid_response_replay of { message_index : int; detail : string }
+  | Unbound_reasoning_artifact of { message_index : int }
+  | Incompatible_reasoning_artifact of
+      { message_index : int
+      ; stored : Types.Reasoning_source.t
+      ; target : Types.Reasoning_source.t
+      }
+  | Invalid_reasoning_artifact_role of { message_index : int }
   | Unsupported_reasoning_block of
       { message_index : int
       ; block_index : int
@@ -59,6 +66,13 @@ let error_to_string = function
       "reasoning source is attached to a non-Assistant message at history index %d (%s)"
       message_index
       (Types.Reasoning_source.show_classification classification)
+  | Unbound_reasoning_artifact { message_index } ->
+    Printf.sprintf "stored reasoning has no producing source at history index %d" message_index
+  | Incompatible_reasoning_artifact { message_index; stored; target } ->
+    Printf.sprintf "stored reasoning source is incompatible at history index %d (%s -> %s)"
+      message_index (Types.Reasoning_source.show stored) (Types.Reasoning_source.show target)
+  | Invalid_reasoning_artifact_role { message_index } ->
+    Printf.sprintf "stored reasoning is on a non-Assistant message at history index %d" message_index
   | Invalid_response_replay {message_index; detail} ->
     Printf.sprintf "invalid response replay at history index %d: %s" message_index detail
   | Unsupported_reasoning_block { message_index; block_index; block_kind } ->
@@ -109,6 +123,60 @@ let content_has_reasoning =
   List.exists (function
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> true
     | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+;;
+
+type replay_disposition =
+  | Preserve_reasoning
+  | Caller_excluded_reasoning
+
+type replay_continuity_admission =
+  { capability : Reasoning_dialect.replay_capability
+  ; disposition : replay_disposition
+  }
+
+let validate_replay_continuity_for_provider_config (config : Provider_config.t) messages =
+  Result.bind (validate_and_classify messages) (fun classified ->
+    match Reasoning_dialect.replay_capability_for_provider_config config with
+    | Error detail -> Error (Invalid_reasoning_target detail)
+    | Ok replay_capability ->
+      let disposition = match config.preserve_thinking with
+        | Some false ->
+          (* A temporary absent tools array must not manufacture an exclusion
+             permission that disappears when a hook supplies tools. *)
+          (match (Reasoning_dialect.for_provider_config config).replay_policy with
+           | No_replay -> Caller_excluded_reasoning
+           | Tool_call_assistant_messages_all_history
+           | Tool_call_assistant_messages_latest_user_turn
+           | All_assistant_messages | Provider_opaque_state -> Preserve_reasoning)
+        | None | Some true -> Preserve_reasoning in
+      let rec check = function
+        | [] -> Ok {capability=replay_capability; disposition}
+        | (message_index, (message : Types.message), classification) :: rest ->
+          let ( let* ) = Result.bind in
+          let* inline_replay = Inline_content_replay.of_metadata
+              ~content:message.content message.metadata
+            |> Result.map_error (fun detail -> Invalid_response_replay {message_index;detail}) in
+          if not (content_has_reasoning message.content || Option.is_some inline_replay)
+          then check rest
+          else match message.role with
+          | System | User | Tool -> Error (Invalid_reasoning_artifact_role {message_index})
+          | Assistant ->
+            (match disposition with
+             | Caller_excluded_reasoning -> check rest
+             | Preserve_reasoning -> match classification with
+             | Types.Reasoning_source.Absent ->
+               Error (Unbound_reasoning_artifact {message_index})
+             | Invalid | Duplicate ->
+               Error (Invalid_reasoning_source {message_index; classification})
+             | Present stored ->
+               if Types.Reasoning_source.rotation_admits
+                   ~rotation_policy:replay_capability.rotation
+                   ~stored ~target:replay_capability.target
+               then check rest
+               else Error (Incompatible_reasoning_artifact
+                 {message_index; stored; target=replay_capability.target}))
+      in
+      check classified)
 ;;
 
 let content_has_tool_use =

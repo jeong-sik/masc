@@ -322,12 +322,20 @@ let test_provider_context_retention () =
   Alcotest.(check int) "only Anthropic adds durable context"
     (if retained then 3 else 2) (List.length saved);
   let next_options = { options with provider_config = Some
-    { (Provider_mock.to_provider_config ()) with kind = next_kind } } in
+    { (Provider_mock.to_provider_config ()) with kind = next_kind;
+      model_capabilities_override = (if signed && kind<>next_kind then
+        Some Llm_provider.Capabilities.{openai_compat_chat_capabilities with
+          reasoning_replay_override=Force_no_replay}
+        else None) } } in
   let resumed = Internal_agent.create ~net:env#net
       ~config:{ (Types.default_config ~model:"test-model") with max_tokens = Some 64 }
       ~options:next_options () in
   Internal_agent.set_state resumed
-    { (Internal_agent.state agent) with messages = saved @ [Types.user_msg "next"] };
+    { (Internal_agent.state agent) with
+      config = { (Internal_agent.state agent).config with
+        preserve_thinking = (if signed && kind<>next_kind then Some false
+          else (Internal_agent.state agent).config.preserve_thinking) };
+      messages = saved @ [Types.user_msg "next"] };
   run resumed (Internal_pipeline.Stream { on_event = ignore; on_telemetry = None });
   match !captured with
   | second :: first :: [] ->
@@ -3771,7 +3779,7 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
          in
          let resumed_stages = ref [] in
          let resumed_agent =
-           Agent.resume
+           (Agent.resume
              ~net:(Eio.Stdenv.net env)
              ~checkpoint
              ~tools:resumed_tools
@@ -3780,7 +3788,7 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
              ~checkpoint_sink:(fun snapshot ->
                resumed_stages := snapshot.Agent.stage :: !resumed_stages;
                Ok ())
-             ()
+             () |> Result.get_ok)
          in
          let execution_store = Agent.execution_store ~runtime ~dir ~resume:locator () in
          (match

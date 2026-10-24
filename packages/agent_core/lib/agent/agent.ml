@@ -762,17 +762,21 @@ let resume
       ?config
       ()
   =
-  let { Agent_checkpoint.state; context = ctx } =
-    Agent_checkpoint.build_resume ~checkpoint ~eio_context:true ?config ?context ()
+  let ( let* ) = Result.bind in
+  let* { Agent_checkpoint.state; context = ctx; provider_config; binding_disposition } =
+    Agent_checkpoint.build_resume ~checkpoint ~eio_context:true ?config
+      ?provider_config:options.provider_config ?context ()
   in
-  { mu = Eio.Mutex.create ()
+  Log.debug _log "checkpoint resume admitted"
+    [Log.S ("binding_disposition", Agent_checkpoint.binding_disposition_to_string binding_disposition)];
+  Ok { mu = Eio.Mutex.create ()
   ; state
   ; lifecycle = None
   ; pending_input = checkpoint.pending_input
   ; tools = Tool_set.of_list tools
   ; net
   ; context = ctx
-  ; options
+  ; options = {options with provider_config}
   ; context_fit_admission
   ; model_input_projection
   ; pre_dispatch_serialization_observer

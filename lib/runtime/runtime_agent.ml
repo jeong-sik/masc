@@ -1106,8 +1106,7 @@ let resume_from_checkpoint
         "%s: resume checkpoint_turn_count=%d"
         config.name checkpoint.turn_count;
       let options = { prepared_resume.options with transport } in
-      Ok
-        (Agent_core.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
+      (Agent_core.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
            ~context_fit_admission:prepared_resume.context_fit_admission
            ?model_input_projection:config.model_input_projection
@@ -1116,7 +1115,11 @@ let resume_from_checkpoint
            ?serialization_executor:config.serialization_executor
            ~options ~config:prepared_resume.agent_config
            ?checkpoint_sink:config.checkpoint_sink
-           ()))
+           ())
+      |> Result.map_error (fun error ->
+        Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+          {field="checkpoint.reasoning_replay";
+           detail=Agent_core.Agent_checkpoint.resume_error_to_string error})))
 
 type classified_advanced_outcome =
   | Advanced_completed of Agent_core.Agent.Advanced.completed

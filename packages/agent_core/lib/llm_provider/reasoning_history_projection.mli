@@ -46,6 +46,13 @@ type error =
       ; classification : Types.Reasoning_source.classification
       }
   | Invalid_response_replay of { message_index : int; detail : string }
+  | Unbound_reasoning_artifact of { message_index : int }
+  | Incompatible_reasoning_artifact of
+      { message_index : int
+      ; stored : Types.Reasoning_source.t
+      ; target : Types.Reasoning_source.t
+      }
+  | Invalid_reasoning_artifact_role of { message_index : int }
   | Unsupported_reasoning_block of
       { message_index : int
       ; block_index : int
@@ -54,6 +61,32 @@ type error =
 [@@deriving show]
 
 val error_to_string : error -> string
+
+type replay_disposition =
+  | Preserve_reasoning
+  | Caller_excluded_reasoning
+
+type replay_continuity_admission =
+  { capability : Reasoning_dialect.replay_capability
+  ; disposition : replay_disposition
+  }
+
+val validate_replay_continuity_for_provider_config
+  :  Provider_config.t
+  -> Types.message list
+  -> (replay_continuity_admission, error) result
+(** Validate canonical history and admit its stored reasoning producers before
+    restoring a provider-bound Agent and again before dispatch after hooks and
+    caller input projection. Uses the target's declared rotation rule,
+    including every reasoning-bearing message and validated inline Chat carrier
+    in mixed-producer history. A
+    target that cannot replay the old source does not silently discard it.
+    Explicit [preserve_thinking = Some false] admits caller-owned exclusion only
+    when the resolved dialect actually declares [No_replay]. A wire that ignores
+    that knob cannot pretend to exclude replay. This decision is independent of
+    temporary tool-array suppression. Structure is validated in either case.
+    Returns the resolved capability and the actual exclusion disposition.
+    Never projects or mutates the history. *)
 
 (** [assistant_has_payload] states whether an Assistant message still has a
     representable wire payload after projection. [reasoning_block_supported]

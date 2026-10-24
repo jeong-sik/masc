@@ -229,9 +229,9 @@ let test_agent_elicit_input_without_callback_pauses () =
     Alcotest.(check string) "owned request identity" input.request_id pending.request.request_id;
     let persisted = Checkpoint.to_string (Agent.checkpoint agent) in
     Agent.close agent;
-    let restored = Agent.resume ~net:env#net
+    let restored = (Agent.resume ~net:env#net
       ~checkpoint:(Result.get_ok (Checkpoint.of_string persisted))
-      ~options () in
+      ~options () |> Result.get_ok) in
     Alcotest.(check bool) "pending survives checkpoint and Agent cleanup" true
       (Agent.pending_input restored = Some pending);
     let forged_question = {pending with request={pending.request with question="tampered"}} in
@@ -310,7 +310,7 @@ let test_current_wait_survives_rejection_and_replacement () =
     (Agent.provide_input agent c Hooks.Timeout = Ok ());
   Alcotest.(check bool) "timeout settles with a distinct model observation" true
     (Agent.pending_input agent = None && (Agent.state agent).messages =
-      after_decline.messages @ [Types.user_msg "[Input timed out] question"])
+      after_decline.messages @ [{ (Types.user_msg "[Input timed out] question") with origin=Types.Recovery_instruction }])
 ;;
 
 let test_checkpoint_delta_retains_current_wait () =
@@ -400,8 +400,8 @@ let test_pause_survives_cleanup_and_answer_is_saved () =
   let checkpoint = read_input_checkpoint path in
   Alcotest.(check bool) "first pause is durable without an AfterTurn" true
     (checkpoint.pending_input = Some pending);
-  let restored = Agent.resume ~net:env#net ~checkpoint
-      ~checkpoint_sink:(save_input_checkpoint path) () in
+  let restored = (Agent.resume ~net:env#net ~checkpoint
+      ~checkpoint_sink:(save_input_checkpoint path) () |> Result.get_ok) in
   let forged = {pending with request={pending.request with question="forged question"}} in
   Alcotest.(check bool) "response committed" true
     (Agent.provide_input restored forged (Hooks.Answer (`String "yes")) = Ok ());
@@ -415,7 +415,7 @@ let test_pause_survives_cleanup_and_answer_is_saved () =
 ;;
 
 let test_callback_and_restored_response_prepare_same_model_input () =
-  List.iter (fun (response, expected_text) ->
+  List.iter (fun (response, expected_message) ->
     with_input_checkpoint @@ fun path ->
     Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
     let question : Hooks.elicitation_request =
@@ -450,27 +450,27 @@ let test_callback_and_restored_response_prepare_same_model_input () =
      | Ok _ -> Alcotest.fail "expected original input wait");
     let pending=Option.get (Agent.pending_input waiting) in
     Agent.close waiting;
-    let restored=Agent.resume ~net:env#net ~checkpoint:(read_input_checkpoint path)
-        ~checkpoint_sink:(save_input_checkpoint path) () in
+    let restored=(Agent.resume ~net:env#net ~checkpoint:(read_input_checkpoint path)
+        ~checkpoint_sink:(save_input_checkpoint path) () |> Result.get_ok) in
     let forged={pending with request={pending.request with question="foreign question"}} in
     Alcotest.(check bool) "typed response is durably accepted for the owned question" true
       (Agent.provide_input restored forged response=Ok ());
     Agent.close restored;
     let committed=read_input_checkpoint path in
-    let expected=[Types.user_msg "original";Types.user_msg expected_text] in
+    let expected=[Types.user_msg "original";expected_message] in
     Alcotest.(check bool) "settlement and distinct canonical observation survive close/reopen" true
       (committed.pending_input=None && committed.messages=expected);
     let restored_input=ref None in
     let options={Agent.default_options with hooks={Hooks.empty with
       before_turn_params=Some (capture_input restored_input)}} in
-    let continued=Agent.resume ~net:env#net ~checkpoint:committed ~options () in
+    let continued=(Agent.resume ~net:env#net ~checkpoint:committed ~options () |> Result.get_ok) in
     check_stopped (Agent.run_turn_stream ~sw ~on_event:ignore continued);
     Agent.close continued;
     Alcotest.(check bool) "callback and reopened continuation prepare identical model input" true
       (!callback_input=Some expected && !restored_input=Some expected))
-    [Hooks.Answer (`String "yes"),"[User input] canonical question: \"yes\"";
-     Hooks.Declined,"[Input declined] canonical question";
-     Hooks.Timeout,"[Input timed out] canonical question"]
+    [Hooks.Answer (`String "yes"),Types.user_msg "[User input] canonical question: \"yes\"";
+     Hooks.Declined,Types.user_msg "[Input declined] canonical question";
+     Hooks.Timeout,{ (Types.user_msg "[Input timed out] canonical question") with origin=Types.Recovery_instruction }]
 ;;
 
 let test_accepted_resume_persists_before_parameter_failure () =
@@ -491,7 +491,7 @@ let test_accepted_resume_persists_before_parameter_failure () =
   let result = Agent.run_turn_stream ~sw ~on_event:ignore agent in
   Alcotest.(check bool) "parameter failure remains a failure" true (Result.is_error result);
   Agent.close agent;
-  let restored = Agent.resume ~net:env#net ~checkpoint:(read_input_checkpoint path) () in
+  let restored = (Agent.resume ~net:env#net ~checkpoint:(read_input_checkpoint path) () |> Result.get_ok) in
   Alcotest.(check bool) "cleanup and restore cannot resurrect the old wait" true
     (Agent.pending_input restored = None);
   Agent.close restored

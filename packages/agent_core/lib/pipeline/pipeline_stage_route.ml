@@ -23,6 +23,19 @@ let binding_identity_error ?on_provider_failure detail =
   detailed.error
 ;;
 
+let validate_replay_continuity ?on_provider_failure ~provider_config messages =
+  match Llm_provider.Reasoning_history_projection.validate_replay_continuity_for_provider_config
+      provider_config messages with
+  | Ok _ -> Ok ()
+  | Error refusal ->
+    let error = Error.Config (InvalidConfig
+      {field="reasoning_replay";
+       detail=Llm_provider.Reasoning_history_projection.error_to_string refusal}) in
+    let detailed = Provider_failure_attribution.of_provider_configuration_error error in
+    notify_attribution on_provider_failure detailed.provider_failure;
+    Error detailed.error
+;;
+
 let binding_identity_for_call agent provider_config =
   let transport =
     Binding_identity.transport_for_call ~injected:(Option.is_some agent.options.transport)
@@ -181,7 +194,8 @@ let admit_provider_attempt callback binding =
 let provider_config_for_turn ?on_provider_failure ~turn_config agent =
   match agent.options.provider_config with
   | Some provider_config ->
-    Ok (Agent_turn.provider_config_with_agent_config ~config:turn_config provider_config)
+    Ok (Agent_turn.provider_config_with_agent_config ~config:turn_config provider_config
+        |> Llm_provider.Provider_config.freeze_for_request)
   | None ->
     let error =
       Error.Config
@@ -238,6 +252,8 @@ let dispatch_sync
     binding_identity_for_call agent provider_config
     |> Result.map_error (binding_identity_error ?on_provider_failure)
   in
+  let* () = validate_replay_continuity ?on_provider_failure ~provider_config
+    prep.Agent_turn.effective_messages in
   let* () = admit_provider_attempt before_provider_attempt binding in
   (* Provider label for mapped transport errors: without it every timeout
      reads "Provider 'unknown'" (#28852). *)
@@ -389,6 +405,8 @@ let dispatch_stream
     binding_identity_for_call agent provider_config
     |> Result.map_error (binding_identity_error ?on_provider_failure)
   in
+  let* () = validate_replay_continuity ?on_provider_failure ~provider_config
+    prep.Agent_turn.effective_messages in
   let* () = admit_provider_attempt before_provider_attempt binding in
   (* Provider label for mapped transport errors: without it every timeout
      reads "Provider 'unknown'" (#28852). *)

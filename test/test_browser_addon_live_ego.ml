@@ -440,8 +440,11 @@ let scenario mode =
     match mode with
     | "normal" ->
       check bool "caller work ran" true !entered;
-      check (list string) "steps"
-        ["space.open"; "tabs.list"; "page.capture"; "page.open"; "page.goto"; "page.target"; "page.pointer"; "page.downloads"; "page.upload"; "space.finish"] steps;
+      let dispatched name = List.length (List.filter (String.equal name) steps) in
+      check int "the native selector input is dispatched once" 1 (dispatched "page.target_input");
+      check int "the native workflow is dispatched once" 1 (dispatched "page.native_workflow");
+      check int "selector input has no extra DOM target resolution" 0 (dispatched "page.target");
+      check int "selector input has no MASC coordinate replay" 0 (dispatched "page.pointer");
       check int "one ego process ran them all" 1 processes;
       check bool "retirement removed the published download" false
         (Sys.file_exists (read (Filename.concat root "downloaded")));

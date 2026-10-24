@@ -1,0 +1,229 @@
+{
+  "schema": "masc.goal-outcomes.acceptance.v1",
+  "goal_id": "goal-outcome-driven-work-20261024",
+  "baseline_source_sha": "8eac5c07c290d134a9ef6acb1e298584bf9a1366",
+  "generated_at": "2026-10-24T07:09:57.956101+00:00",
+  "baseline": {
+    "task_counts_by_status": {
+      "cancelled": {
+        "total": 720,
+        "linked": 23,
+        "goalless": 697
+      },
+      "done": {
+        "total": 669,
+        "linked": 40,
+        "goalless": 629
+      },
+      "todo": {
+        "total": 161,
+        "linked": 28,
+        "goalless": 133
+      },
+      "in_progress": {
+        "total": 22,
+        "linked": 4,
+        "goalless": 18
+      },
+      "awaiting_verification": {
+        "total": 2,
+        "linked": 0,
+        "goalless": 2
+      }
+    },
+    "backlog_version": 18267,
+    "source": "authoritative tasks/backlog.json + tasks/goal_task_links.json at same read window; two reads, no atomic cross-store snapshot claim"
+  },
+  "required_case_ids": [
+    "G1",
+    "G2",
+    "G3",
+    "G4",
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5",
+    "A6",
+    "A7"
+  ],
+  "cases": [
+    {
+      "id": "G1",
+      "requirement": "Keeper receives current-revision Goal criterion, measurement, evidence and explicit missing/unavailable state",
+      "state": "measured_pass",
+      "evidence": [
+        "https://github.com/jeong-sik/masc/actions/runs/40078581651",
+        "/tmp/masc-goal-wire-7501aec0/request-000003.request",
+        "/tmp/masc-goal-candidate-7501aec0/server-extraction-receipt.json"
+      ],
+      "source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "scope": "Fresh real Keeper direct request reached actual Ollama /api/chat with correct Goal ID, criterion revision, reported measurement ID/value/evidence; exact serialized request SHA a842806027d75fb9cf1edde83380edde3e519ffbb73fc1d58a0a25e38bfe6b95. Native controlled-HTTP missing/stale/unavailable cases passed separately. Server binary7501 verified; support libraries reused from checked dca bundle with equal upstream library/Python provenance. Not full new bundle installation.",
+      "counterevidence": [
+        "/tmp/masc-goal-canary-dca2013e/.masc/keepers/goal-canary/last-prompt.json",
+        "/tmp/masc-goal-canary-dca2013e/.masc/keepers/goal-canary/provider-inputs/2026-10/24.jsonl"
+      ]
+    },
+    {
+      "id": "G2",
+      "requirement": "Keeper chooses a matching Goal for related work and creates a Task with its goal_id",
+      "state": "reproduced_failure_repair_in_progress",
+      "evidence": [],
+      "scope": "7501 lacked Task-create schema. Exact c6 rebuilt runtime offers Task-create and Goal-measure on the actual first request, but later provider requests lost current Goal revision/measurement; accepted Task task-001 had goal_id null and authoritative Goal links empty. The typed Goal-only retention repair is PR45791; new exact native/real Keeper validation remains pending.",
+      "counterevidence": [
+        "/tmp/masc-goal-wire-7501aec0/request-000003.request",
+        "/tmp/masc-goal-wire-7501aec0/request-000006.response",
+        "/tmp/masc-goal-canary-7501aec0/.masc/tasks/backlog.json",
+        "docs/evidence/2026-10-24-goal-tool-round-context/baseline.json",
+        "/tmp/masc-goal-canary-c6e54ff5/failed-g2-observation.json"
+      ]
+    },
+    {
+      "id": "G3",
+      "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
+      "state": "not_measured",
+      "evidence": []
+    },
+    {
+      "id": "G4",
+      "requirement": "Independent goalless Task creation and execution remain supported",
+      "state": "measured_pass",
+      "evidence": [
+        "/tmp/masc-goal-canary-dca2013e/goalless-create.json",
+        "/tmp/masc-goal-canary-dca2013e/goalless-execution.json",
+        "/tmp/masc-goal-canary-dca2013e/goalless-submit.json",
+        "/tmp/masc-goal-canary-dca2013e/goalless-approval.json"
+      ],
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "scope": "isolated candidate external-agent MCP create→claim→start, actual Node Docker computation, verification submission→controlled operator-proxy approval→Done; goal_id null and no assigned link; not Keeper inference proof"
+    },
+    {
+      "id": "A1",
+      "requirement": "Coding verify, regression and build execute inside the declared supported grading sandbox; Docker and microVM support boundaries are explicit",
+      "state": "measured_pass",
+      "evidence": [
+        "scripts/tests/test_coding_eval_boundary.py",
+        "docs/evidence/2026-10-24-coding-boundary/README.md"
+      ],
+      "scope": "actual Python Docker grading, same captured bytes across verify/regression/build; no host credentials/socket/network",
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f"
+    },
+    {
+      "id": "A2",
+      "requirement": "Changing only Node oracle code with broken solution unchanged cannot pass protected grading",
+      "state": "measured_pass",
+      "evidence": [
+        "docs/evidence/2026-10-24-coding-boundary/observations.json"
+      ],
+      "scope": "actual Node Docker grader rejected both oracle-only edits; unchanged broken implementation hashes; both reference controls pass",
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f"
+    },
+    {
+      "id": "A3",
+      "requirement": "Image bytes and length must match stored identity before judge or operator delivery",
+      "state": "measured_pass",
+      "evidence": [
+        "https://github.com/jeong-sik/masc/actions/runs/40074289285",
+        "/tmp/masc-goal-native-suites-dca2013e/ci-run-tests.log"
+      ],
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "scope": "native filesystem image digest/length/symlink and judge/operator/TUI typed propagation"
+    },
+    {
+      "id": "A4",
+      "requirement": "Model and experiment cohorts retain distinct pass@k, cost and unknown coverage",
+      "state": "measured_pass",
+      "evidence": [
+        "docs/evidence/2026-10-24-coding-eval-cohorts/observations.json",
+        "docs/evidence/2026-10-24-coding-eval-cohorts/duplicate-keys/observations.json",
+        "docs/evidence/2026-10-24-coding-json-integrity/",
+        "docs/evidence/2026-10-24-coding-cohort-identities/",
+        "/tmp/masc-goal-cohort-identities-root-check.txt"
+      ],
+      "scope": "Complete real report source cohort/cost probes, actual Python/shell collector and full-original-identity controls. Distinct org/model versus org-model aliases/run IDs; eight wrong cohort receipt controls refuse; duplicate nested/top-level JSON rejected before re-encoding. Six Python/CLI tests and four transport fixtures pass; no full live-provider coding harness or resume claim.",
+      "source_sha": "2d92eeb337f6e38cc307211d5c662956b8891299",
+      "additional_source_binding": {
+        "duplicate_key_fix": "4493ac314c21e87f1c4a2ed092cf1c9dfccc0866"
+      },
+      "counterevidence": [
+        "https://github.com/jeong-sik/masc/pull/45755#pullrequestreview-5637521780",
+        "coding model aliases/run IDs org/model and org-model collide; actual shell helper reproduction on7501"
+      ]
+    },
+    {
+      "id": "A5",
+      "requirement": "Changed experiment inputs cannot reuse stale resume evidence",
+      "state": "measured_pass",
+      "evidence": [
+        "scripts/tests/test_coding_eval_boundary.py",
+        "docs/evidence/2026-10-24-coding-json-integrity/",
+        "docs/evidence/2026-10-24-coding-cohort-identities/",
+        "/tmp/masc-goal-cohort-identities-root-check.txt"
+      ],
+      "scope": "Complete real report source cohort/cost probes, actual Python/shell collector and full-original-identity controls. Distinct org/model versus org-model aliases/run IDs; eight wrong cohort receipt controls refuse; duplicate nested/top-level JSON rejected before re-encoding. Six Python/CLI tests and four transport fixtures pass; no full live-provider coding harness or resume claim.",
+      "source_sha": "2d92eeb337f6e38cc307211d5c662956b8891299",
+      "counterevidence": [
+        "https://github.com/jeong-sik/masc/pull/45755#pullrequestreview-5637521780",
+        "coding model aliases/run IDs org/model and org-model collide; actual shell helper reproduction on7501"
+      ]
+    },
+    {
+      "id": "A6",
+      "requirement": "Actual producer and judge identity coverage is represented honestly; unknown is not claimed independent",
+      "state": "measured_pass",
+      "evidence": [
+        "https://github.com/jeong-sik/masc/actions/runs/40078581651",
+        "/tmp/masc-goal-native-7501-clean.log"
+      ],
+      "source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "scope": "Native deterministic provider pipeline, submission/verdict persistence and calibration suites passed: raw reported model versus requested fallback, exact admitted source ordinal, reserved metadata spoof/reload, nested unknown identities and pair coverage. This proves actual native code against controlled HTTP peers; it is not live cloud-model independence or model-weight proof."
+    },
+    {
+      "id": "A7",
+      "requirement": "LLM approval, observed external acceptance and human Goal confirmation remain distinct facts",
+      "state": "measured_pass",
+      "evidence": [
+        "docs/evidence/2026-10-24-outcome-api-runtime/",
+        "https://github.com/jeong-sik/masc/actions/runs/40082520098",
+        "docs/evidence/2026-10-24-outcome-dashboard-runtime/"
+      ],
+      "source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "scope": "Real isolated Task API→actual Node Docker computation→immutable evidence reread→controlled operator-proxy approval→durable metric and API reread: lifecycle success1, external acceptance unobserved1. Separate Goal reread remained Executing with0/3 reported measurement and no completion proof/person confirmation. Native model verdict/Goal human policy suites passed separately, not an actual independent LLM verdict for this fixture. Actual AgentDetailOverlay preview now visually captured with real API: completion and lifecycle approval100%, handoff unknown, external acceptance unobserved and Goal human confirmation separate. App module opened the dialog; full roster navigation and production installation remain unclaimed. Test MCP proxy same-origin translation is recorded."
+    }
+  ],
+  "limits": [
+    "No production deployment performed by this campaign. Isolated candidate observations and native fixtures are explicitly scoped.",
+    "Historical Task counts include legitimate independent Tasks; linkage ratio is diagnostic, not a target or gate.",
+    "No full regression. Native29 at7501:26PASS3FAIL; four repaired suites atb9PASS; Goal7 at1eef:6PASS1FAIL (fixture initialization); Task-link receiver rerun pending. macOS build40097972842 dispatched; result not yet read."
+  ],
+  "measured_at": "2026-10-24T13:32:17.232110+00:00",
+  "summary": {
+    "required": 11,
+    "measured_pass": 9,
+    "passed_case_ids": [
+      "G1",
+      "G4",
+      "A1",
+      "A2",
+      "A3",
+      "A4",
+      "A5",
+      "A6",
+      "A7"
+    ],
+    "remaining": [
+      "G2",
+      "G3"
+    ],
+    "goal_complete": false,
+    "native_candidate": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+    "native_result": "40078581651:26PASS3FAIL at7501; repaired4 targeted suites allPASS40082520098 atb9bba3d4b416e269ff1d586f17f81e55c09ad8b3; not full regression or29allPASSonehead",
+    "candidate_build": "40078868804 SUCCESS source7501; server entry extracted/CRC/SHA checked; reused checked compatible support bundle dca; isolated server62470; no production deployment",
+    "reopened_cases": [],
+    "eager_candidate": "c6e54ff523772596ce70a9b158f89c74fedeab17",
+    "eager_build_run": 40095081238,
+    "eager_build_result": "SUCCESS40095081238; exact c6 server firstwire33tools confirms both eager schemas. Real G2 failed association after post-tool Goal context loss; G3 unproven. Keeper explicitly stopped and pause reread.",
+    "retention_candidate": "1eef45b69f395b1819537c116c7df839023da110",
+    "retention_native_result": "40097972974:6PASS1FAIL at1eef. Receiver Goal-carrier assertions3requests passed; actual bundled Task-create MASC not initialized due missing Workspace fixture init; correct link persistence assertion failed. Fix and rerun pending; product unchanged so far."
+  }
+}

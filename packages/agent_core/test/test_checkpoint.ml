@@ -964,7 +964,7 @@ let () =
         ; test_case "a bad leaf under nested tool results fails once with its path" `Quick
             test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path ] )
     ; ( "version"
-      , [ test_case "checkpoint_version is 14" `Quick (fun () ->
+      , [ test_case "checkpoint_version is 15" `Quick (fun () ->
             check int "version" 15 Checkpoint.checkpoint_version)
         ; test_case "version field in to_json" `Quick (fun () ->
             let cp = make_checkpoint () in

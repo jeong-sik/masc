@@ -63,12 +63,12 @@ let saved_line (m : D.preset_manifest) =
   Printf.sprintf "saved preset %s — %s" m.D.pm_name (counts m)
 ;;
 
-let part_lines ~label (part : D.preset_part) =
+let part_lines ~label ~timing (part : D.preset_part) =
   let head =
     Printf.sprintf
       "%s (%s): applied %d, skipped %d"
       label
-      part.D.pp_effect
+      timing
       (List.length part.D.pp_applied)
       (List.length part.D.pp_skipped)
   in
@@ -119,14 +119,26 @@ let default_prompt_lines = function
            Printf.sprintf "  %s · %s" change key) changes
 ;;
 
+let preserved_settings_lines = function
+  | [] -> []
+  | settings ->
+    "저장되지 않은 레인 요청 설정 · 현재 값 유지"
+    :: List.map (fun (lane, setting) ->
+        "  " ^ lane ^ "." ^ (match setting with
+          | D.Preset_max_output_tokens -> "max_output_tokens"
+          | D.Preset_thinking -> "thinking")) settings
+;;
+
 let restore_lines (report : D.preset_restore_report) =
   (Printf.sprintf
-     "restored preset %s (the state before it is %s)"
+     "preset %s 복원 결과 (직전 설정 백업: %s)"
      report.D.prr_restored
      report.D.prr_autosave
-   :: part_lines ~label:"prompt overrides" report.D.prr_prompt_overrides)
-  @ part_lines ~label:"keeper instructions" report.D.prr_instructions
+   :: part_lines ~label:"prompt overrides" ~timing:"즉시 반영" report.D.prr_prompt_overrides)
+  @ part_lines ~label:"keeper instructions" ~timing:"각 Keeper의 다음 up/턴에 반영" report.D.prr_instructions
   @ runtime_lines report.D.prr_runtime
+  @ preserved_settings_lines report.D.prr_preserved_lane_settings
+  @ List.map (fun (lane, reason) -> "레인 복원 제외 · " ^ lane ^ ": " ^ reason) report.D.prr_skipped_lanes
   @ default_prompt_lines report.D.prr_default_prompts
 ;;
 
@@ -169,6 +181,8 @@ let contents_lines (d : D.preset_detail) =
      | D.Preset_settings_unavailable reason -> "설정 비교 불가 · " ^ reason)
   ]
   @ default_prompt_lines d.D.pd_default_prompts
+  @ preserved_settings_lines d.D.pd_preserved_lane_settings
+  @ List.map (fun (lane, reason) -> "레인 복원 제외 · " ^ lane ^ ": " ^ reason) d.D.pd_skipped_lanes
   @ [ ""; "저장된 설정" ]
   @ sized "프롬프트" d.D.pd_overrides
   @ sized "지시문" d.D.pd_instructions
@@ -205,6 +219,8 @@ let detail_lines ~(selected : D.preset_manifest option)
       [ Printf.sprintf "Selected: %s · %s" m.D.pm_name (counts m)
       ; (if String.equal m.D.pm_description "" then "설명 없음" else m.D.pm_description)
       ; "저장 시각 " ^ m.D.pm_created_at
+      ; "복원 범위 · override, Keeper 지시문, Runtime 배정·레인"
+      ; "현재 설정은 _autosave에 먼저 백업됩니다 · 다음 복원은 백업을 덮어씁니다"
       ; (* Which prompts, not how many. A count cannot be chosen between,
            and choosing is what this pane is for. *)
         (match m.D.pm_override_keys with
@@ -241,6 +257,7 @@ let detail_lines ~(selected : D.preset_manifest option)
 let restore_is_clean (report : D.preset_restore_report) =
   report.D.prr_prompt_overrides.D.pp_skipped = []
   && report.D.prr_instructions.D.pp_skipped = []
+  && report.D.prr_skipped_lanes = []
   &&
   match report.D.prr_runtime with
   | D.Preset_runtime_failed _ -> false

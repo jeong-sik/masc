@@ -22,6 +22,8 @@ let report ~skipped ~runtime : D.preset_restore_report =
   ; prr_instructions = { D.pp_effect = "keeper_restart"; pp_applied = [ "analyst"; "spruce" ]; pp_skipped = [] }
   ; prr_runtime = runtime
   ; prr_default_prompts = Masc.Prompt_preset.Defaults_unknown
+  ; prr_preserved_lane_settings = []
+  ; prr_skipped_lanes = []
   }
 
 let test_restore_classifies_commit_warnings () =
@@ -77,6 +79,28 @@ let test_decode_saved_settings_and_effective_prompt_sources () =
   check bool "unknown comparison status is rejected" true
     (Result.is_error (D.decode_preset_detail (payload (`Assoc ["status", `String "unknown"]))))
 
+let test_decode_preserved_and_skipped_lanes () =
+  let preserved = `List [`Assoc ["lane", `String "verifier_exact"; "setting", `String "thinking"]] in
+  let skipped = `List [`Assoc ["lane", `String "unconfigured_exact"; "reason", `String "not registered"]] in
+  let part = `Assoc ["effect", `String "immediate"; "applied", `List []; "skipped", `List []] in
+  let payload preserved = `Assoc ["ok", `Bool true; "report", `Assoc
+    ["restored", `String "morning"; "autosave", `String "_autosave";
+     "prompt_overrides", part; "instructions", part;
+     "runtime", `Assoc ["effect", `String "runtime_commit"; "status", `String "unchanged"];
+     "preserved_lane_settings", preserved; "skipped_lanes", skipped]] in
+  (match D.decode_preset_restore (payload preserved) with
+   | Error message -> fail message
+   | Ok decoded ->
+      check bool "unrecorded settings are typed" true
+        (decoded.D.prr_preserved_lane_settings = ["verifier_exact", D.Preset_thinking]);
+      check bool "unavailable lanes keep their reason" true
+        (decoded.D.prr_skipped_lanes = ["unconfigured_exact", "not registered"]);
+      check bool "a skipped lane requires attention" false (Text.restore_is_clean decoded));
+  List.iter (fun invalid ->
+    check bool "malformed preservation evidence is not dropped" true
+      (Result.is_error (D.decode_preset_restore (payload invalid))))
+    [`Null; `List [`Assoc ["lane", `String "verifier_exact"; "setting", `String "future_setting"]]]
+
 let test_default_drift_is_visible_without_failing_restore () =
   let before = String.make 64 'a' and after = String.make 64 'b' in
   let changes = ["keeper", Some before, Some after; "judge", None, Some after;
@@ -123,5 +147,7 @@ let () =
             test_restore_classifies_commit_warnings
         ; test_case "saved comparison and current effective source decode independently" `Quick
             test_decode_saved_settings_and_effective_prompt_sources
+        ; test_case "preserved request settings and skipped lanes retain typed evidence" `Quick
+            test_decode_preserved_and_skipped_lanes
         ] )
     ]

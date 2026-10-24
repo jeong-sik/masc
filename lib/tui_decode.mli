@@ -1639,6 +1639,8 @@ type preset_settings_match =
   | Preset_settings_differ
   | Preset_settings_unavailable of string
 
+type preset_lane_setting = Preset_max_output_tokens | Preset_thinking
+
 type preset_detail = {
   pd_name : string;
   pd_directory : string;
@@ -1649,6 +1651,9 @@ type preset_detail = {
   pd_instructions : (string * int) list;  (** keeper TOML file name, bytes *)
   pd_assignments : (string * string) list;  (** keeper, runtime id *)
   pd_lanes : string list;
+  pd_preserved_lane_settings : (string * preset_lane_setting) list;
+  (** Settings not recorded by the snapshot; restore keeps their current declarations. *)
+  pd_skipped_lanes : (string * string) list;
 }
 (** What a preset holds, from [/api/v1/presets/show]. Sizes rather than
     bodies: the pane is for deciding whether to apply one, and a 4 KB prompt
@@ -1695,6 +1700,8 @@ type preset_restore_report = {
   prr_instructions : preset_part;
   prr_runtime : preset_runtime_status;
   prr_default_prompts : Prompt_preset.default_comparison;
+  prr_preserved_lane_settings : (string * preset_lane_setting) list;
+  prr_skipped_lanes : (string * string) list;
 }
 
 val decode_presets : Yojson.Safe.t -> (presets_snapshot, string) result

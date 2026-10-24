@@ -827,14 +827,17 @@ let test_openssh_observation_reads_the_dispatch_cache () =
     ; max_concurrent_sessions = 1; env_allowlist = [ "LANG" ]; capabilities = []
     ; private_home = false; allowed_paths = [] }
   in
-  let cached () = Keeper_sandbox_remote.report_openssh ~base_path ~endpoint in
+  let openssh : Keeper_sandbox_remote.openssh =
+    { endpoint; ssh_bin; identity_file = "key"; known_hosts_file = "hosts"
+    ; control_path_dir = Filename.concat base_path "unused-control" }
+  in
+  let cached () = Keeper_sandbox_remote.report_openssh ~base_path openssh in
   (match (cached ()).probe with
    | Probe_not_asked -> ()
    | _ -> fail "an unused endpoint cannot have a probe observation");
   let state =
     Keeper_sandbox_remote.of_openssh ~base_path ~keeper_name:"keeper-a"
-      { endpoint; ssh_bin; identity_file = "key"; known_hosts_file = "hosts"
-      ; control_path_dir = Filename.concat base_path "unused-control" }
+      openssh
   in
   let status, _, stderr = run_request (Keeper_sandbox_remote.runner ~timeout_sec:2.0 state) () in
   check status_testable ("stub dispatch ran: " ^ stderr) (Unix.WEXITED 3) status;
@@ -846,7 +849,34 @@ let test_openssh_observation_reads_the_dispatch_cache () =
   check string "cached observation is exactly the runner's report"
     (Yojson.Safe.to_string (Keeper_tool_lane_status.json_of_report (Keeper_sandbox_remote.report state)))
     (Yojson.Safe.to_string (Keeper_tool_lane_status.json_of_report observed));
-  (match (Keeper_sandbox_remote.report_openssh ~base_path:(base_path ^ "-other") ~endpoint).probe with
+  let assert_unobserved label report =
+    (match report.Keeper_sandbox_remote.probe with
+     | Probe_not_asked -> ()
+     | _ -> fail (label ^ " inherited another endpoint's probe"));
+    check bool (label ^ " has no inherited dispatch") true
+      (Option.is_none report.last_dispatch)
+  in
+  List.iter
+    (fun (label, changed) ->
+       assert_unobserved (label ^ " projection")
+         (Keeper_sandbox_remote.report_openssh ~base_path changed);
+       let runner = Keeper_sandbox_remote.of_openssh ~base_path ~keeper_name:"keeper-a" changed in
+       assert_unobserved (label ^ " runner") (Keeper_sandbox_remote.report runner))
+    [ "host", { openssh with endpoint = { endpoint with host = "changed.invalid" } }
+    ; "user", { openssh with endpoint = { endpoint with user = "other-user" } }
+    ; "port", { openssh with endpoint = { endpoint with port = 2222 } }
+    ; "root", { openssh with endpoint = { endpoint with remote_root = "/new-root" } }
+    ; "key declaration", { openssh with endpoint = { endpoint with identity_file = "new-key" } }
+    ; "key transport", { openssh with identity_file = "resolved-new-key" }
+    ; "host pin", { openssh with known_hosts_file = "resolved-new-hosts" }
+    ; "allowlist", { openssh with endpoint = { endpoint with env_allowlist = [ "TERM" ] } }
+    ; "paths", { openssh with endpoint = { endpoint with allowed_paths = [ "/app" ] } }
+    ; "home policy", { openssh with endpoint = { endpoint with private_home = true } }
+    ; "capabilities", { openssh with endpoint = { endpoint with capabilities = [ "observe" ] } }
+    ; "SSH binary", { openssh with ssh_bin = "another-ssh" }
+    ; "control directory", { openssh with control_path_dir = "another-control" }
+    ];
+  (match (Keeper_sandbox_remote.report_openssh ~base_path:(base_path ^ "-other") openssh).probe with
    | Probe_not_asked -> ()
    | _ -> fail "another workspace cannot see this workspace's observation")
 ;;

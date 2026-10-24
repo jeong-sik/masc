@@ -94,6 +94,23 @@ let test_remote_sandbox_selection () =
   Alcotest.(check bool) "leaving SSH clears endpoint in same request" true
     (Yojson.Safe.Util.member "remote_endpoint" patch = `Null
      && List.mem "remote_endpoint" (assoc_keys patch));
+  let policy_snapshot = match selected with
+    | `Assoc fields -> `Assoc
+        ([ "network_mode", `String "policy"; "sandbox_profile", `String "microvm" ]
+         @ List.filter (fun (key, _) -> not (List.mem key [ "network_mode"; "sandbox_profile" ])) fields)
+    | _ -> Alcotest.fail "invalid policy fixture" in
+  let patch = patch_for Keeper_sandbox_config.Docker policy_snapshot in
+  Alcotest.(check string) "Docker policy becomes its supported default" "none"
+    (Yojson.Safe.Util.member "network_mode" patch |> Yojson.Safe.Util.to_string);
+  Alcotest.(check bool) "Docker repair and endpoint clear share the original revision" true
+    (Yojson.Safe.Util.member "sandbox_profile" patch = `String "docker"
+     && Yojson.Safe.Util.member "remote_endpoint" patch = `Null
+     && List.mem "remote_endpoint" (assoc_keys patch)
+     && Yojson.Safe.Util.member "expected_config_revision" patch
+        = Yojson.Safe.Util.member "config_revision" policy_snapshot);
+  let patch = patch_for Keeper_sandbox_config.Micro_vm policy_snapshot in
+  Alcotest.(check bool) "microVM retains its supported policy mode" false
+    (List.mem "network_mode" (assoc_keys patch));
   match patch_of_edit ~before:remote
       ~after:(`Assoc [ "remote_endpoint", `String "builder" ]) with
   | Ok patch -> Alcotest.(check string) "endpoint is editable" "builder"

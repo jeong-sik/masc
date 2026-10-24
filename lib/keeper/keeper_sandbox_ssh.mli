@@ -18,6 +18,16 @@ val resolve_endpoint :
 (** Resolve the keeper manifest's [remote_endpoint] against runtime.toml.
     Missing configuration and unknown names fail closed. *)
 
+val openssh_configuration :
+  ?ssh_bin:string ->
+  base_path:string ->
+  endpoint:Exec_ssh_endpoint.t ->
+  unit ->
+  Keeper_sandbox_remote.openssh
+(** Resolve the transport's binary, credential path references and control
+    directory exactly as {!create} does. This does not validate, read key
+    contents, create directories, start a runner or contact an endpoint. *)
+
 val create :
   ?ssh_bin:string ->
   base_path:string ->

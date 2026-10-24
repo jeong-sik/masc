@@ -92,27 +92,34 @@ let ensure_control_path_dir path =
          path msg)
 ;;
 
-let create ?ssh_bin ~base_path ~keeper_name
-    ~(endpoint : Exec_ssh_endpoint.t) () =
-  let* () =
-    Exec_ssh_endpoint.validate_destination
-      ~host:endpoint.host ~user:endpoint.user
-  in
+let openssh_configuration ?ssh_bin ~base_path
+    ~(endpoint : Exec_ssh_endpoint.t) () : Keeper_sandbox_remote.openssh =
   let ssh_bin =
     match ssh_bin with
     | Some path -> path
     | None -> Option.value (Atomic.get ssh_bin_override) ~default:"ssh"
   in
   let control_path_dir = Config_dir_resolver.run_ssh_dir ~base_path in
+  { endpoint
+  ; ssh_bin
+  ; identity_file = resolve_path ~base_path endpoint.identity_file
+  ; known_hosts_file = resolve_path ~base_path endpoint.known_hosts_file
+  ; control_path_dir
+  }
+;;
+
+let create ?ssh_bin ~base_path ~keeper_name
+    ~(endpoint : Exec_ssh_endpoint.t) () =
+  let* () =
+    Exec_ssh_endpoint.validate_destination
+      ~host:endpoint.host ~user:endpoint.user
+  in
+  let openssh = openssh_configuration ?ssh_bin ~base_path ~endpoint () in
+  let control_path_dir = openssh.control_path_dir in
   let* () = ensure_control_path_dir control_path_dir in
   Ok
     (Keeper_sandbox_remote.of_openssh ~base_path ~keeper_name
-       { endpoint
-       ; ssh_bin
-       ; identity_file = resolve_path ~base_path endpoint.identity_file
-       ; known_hosts_file = resolve_path ~base_path endpoint.known_hosts_file
-       ; control_path_dir
-       })
+       openssh)
 ;;
 
 let sandbox_endpoint ~base_path (endpoint : Exec_ssh_endpoint.t)

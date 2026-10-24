@@ -18,7 +18,8 @@ let remote_ssh_endpoints_json ~base_path =
         ; "port", `Int endpoint.port
         ; "remote_root", `String endpoint.remote_root
         ; "observation",
-          Keeper_sandbox_remote.report_openssh ~base_path ~endpoint
+          Keeper_sandbox_ssh.openssh_configuration ~base_path ~endpoint ()
+          |> Keeper_sandbox_remote.report_openssh ~base_path
           |> Keeper_tool_lane_status.json_of_report
         ]
     in

@@ -26,6 +26,8 @@ endpoint authority; no local/Docker fallback on SSH failure.
 | Explicit repository materialization has exact identity | Declared URL/revision/destination, actual clone/readback, repeat without loss of dirty work | Gap; #31460 |
 | Optional GitHub workflow works and cancellation cleans up | Keeper-scoped actual auth and repository operation, no token leakage, cancelled remote login cleanup | Unverified; #32910 |
 | Reconnect/restart and transport failures remain truthful | Persisted output reread after server restart; named error on disconnect; explicit cancellation and no orphan | Unverified |
+| Endpoint replacement and trust rotation do not borrow old authority | Same-name host/root/key-path changes invalidate readiness and observations; same-path key/pin rotation and ControlMaster reauthentication are separately exercised | Source review found stale cache keys; repair in progress |
+| Runtime installation includes the required SSH operator tools | Exact-source packaged bootstrap/shim availability and install/readback on the exercised platforms | Audit required; normal runtime package currently lists four operator executables |
 | Operator and Keeper can observe the lane | Current endpoint/shim/last dispatch and errors visible through relevant API, native TUI and browser proof | Unverified |
 | Sustained representative Keeper use | Multi-turn real task with artifacts and measured continuity/performance; compare same workload where needed | Unverified |
 | Review and integration are complete | Native stack membership/current heads, independent source review, targeted checks, verified merge and matching installed candidate | Not started |

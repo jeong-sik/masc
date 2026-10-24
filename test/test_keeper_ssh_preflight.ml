@@ -196,7 +196,7 @@ let with_eio f =
   Fun.protect ~finally:Process_eio.reset_for_testing f
 ;;
 
-let make_state ~base_path ~ssh_bin =
+let state_for_endpoint ~base_path ~ssh_bin endpoint =
   match
     Keeper_sandbox_ssh.create ~ssh_bin ~base_path ~keeper_name:"keeper-a"
       ~endpoint ()
@@ -207,6 +207,9 @@ let make_state ~base_path ~ssh_bin =
 
 let invocation_count path =
   Option.value (int_of_string_opt (String.trim (read_file path))) ~default:0
+;;
+
+let make_state ~base_path ~ssh_bin = state_for_endpoint ~base_path ~ssh_bin endpoint
 ;;
 
 let contains_prefix prefix = function
@@ -230,6 +233,39 @@ let test_ready_ttl_and_force () =
   check (result unit string) "forced ready" (Ok ())
     (Keeper_sandbox_remote.check_preflight ~force:true state);
   check int "force respawned" 16 (invocation_count count_path)
+;;
+
+let test_reconfigured_endpoint_does_not_inherit_readiness () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "60" @@ fun () ->
+  let base_path = temp_dir () in
+  let ssh_bin, count_path = make_stub ~dir:base_path ~mode:"ok" in
+  let state = make_state ~base_path ~ssh_bin in
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+  check (result unit string) "original ready" (Ok ())
+    (Keeper_sandbox_remote.check_preflight state);
+  List.iter
+    (fun (label, declaration) ->
+       let state = state_for_endpoint ~base_path ~ssh_bin declaration in
+       let before = invocation_count count_path in
+       check (result unit string) (label ^ " checked its own endpoint") (Ok ())
+         (Keeper_sandbox_remote.check_preflight state);
+       let after = invocation_count count_path in
+       check bool (label ^ " ran new probes") true (after > before);
+       check (result unit string) (label ^ " caches only its new result") (Ok ())
+         (Keeper_sandbox_remote.check_preflight state);
+       check int (label ^ " second read uses its own cache") after (invocation_count count_path))
+    [ "host", { endpoint with host = "changed.invalid" }
+    ; "root", { endpoint with remote_root = "/changed/root" }
+    ; "key path", { endpoint with identity_file = "changed-key" }
+    ; "host pin", { endpoint with known_hosts_file = "changed-hosts" }
+    ; "allowlist", { endpoint with env_allowlist = [ "TERM" ] }
+    ; "declared paths", { endpoint with allowed_paths = [ "/app" ] }
+    ];
+  let count = invocation_count count_path in
+  check (result unit string) "original cache remains its own" (Ok ())
+    (Keeper_sandbox_remote.check_preflight state);
+  check int "other declarations do not invalidate original evidence" count (invocation_count count_path)
 ;;
 
 let test_zero_ttl_rechecks () =
@@ -287,6 +323,8 @@ let () =
     run "keeper_ssh_preflight"
       [ ( "preflight"
         , [ test_case "ready TTL + force" `Quick test_ready_ttl_and_force
+          ; test_case "reconfigured endpoint has independent readiness" `Quick
+              test_reconfigured_endpoint_does_not_inherit_readiness
           ; test_case "zero TTL rechecks" `Quick test_zero_ttl_rechecks
           ; test_case "named failures" `Quick test_named_failures
           ; test_case "absent GitHub login" `Quick

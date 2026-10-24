@@ -473,15 +473,19 @@ let sandbox_patch ~profile snapshot =
        | None, _ :: _ :: _ ->
          Error ("Press e and set remote_endpoint to one of: " ^ String.concat ", " names)) in
   let endpoint_json = function None -> `Null | Some name -> `String name in
+  let effective_network_mode =
+    match Masc.Keeper_types_profile_sandbox.network_mode_rejection profile network_mode with
+    | None -> network_mode
+    | Some _ -> Masc.Keeper_types_profile_sandbox.default_network_mode_for_profile profile
+  in
   let changes =
     (if current = profile then [] else
        [ "sandbox_profile", `String (Keeper_sandbox_config.sandbox_profile_to_string profile) ])
     @ (if observed_endpoint = endpoint then [] else
          [ "remote_endpoint", endpoint_json endpoint ])
-    @ (match profile, network_mode with
-       | Keeper_sandbox_config.Remote_ssh, Masc.Keeper_types_profile_sandbox.Network_inherit -> []
-       | Remote_ssh, (Network_none | Network_policy) -> [ "network_mode", `String "inherit" ]
-       | (Docker | Micro_vm), (Network_inherit | Network_none | Network_policy) -> []) in
+    @ (if effective_network_mode = network_mode then [] else
+         [ "network_mode", `String
+             (Masc.Keeper_types_profile_sandbox.network_mode_to_string effective_network_mode) ]) in
   match changes with
   | [] -> Ok None
   | _ :: _ -> Ok (Some (`Assoc (("expected_config_revision",revision) :: changes)))

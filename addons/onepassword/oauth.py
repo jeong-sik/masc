@@ -152,6 +152,9 @@ class PrivateStore:
     backend storage under the operator's UID, not an OS isolation boundary.
     Provisioning is explicit; readers never create a missing directory.
     """
+    _record_name = "connection.json"
+    _validate = staticmethod(validate_record)
+
     def __init__(self, directory: Path, *, provision: bool = False):
         if not directory.is_absolute():
             raise ConnectionError("store_path_not_absolute")
@@ -199,7 +202,7 @@ class PrivateStore:
 
     def read(self, root: int) -> dict | None:
         try:
-            fd = os.open("connection.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            fd = os.open(self._record_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                          dir_fd=root)
         except FileNotFoundError:
             return None
@@ -212,11 +215,11 @@ class PrivateStore:
             raise ConnectionError("invalid_connection_record") from None
         finally:
             os.close(fd)
-        validate_record(value)
+        self._validate(value)
         return value
 
     def write(self, root: int, value: dict):
-        validate_record(value)
+        self._validate(value)
         temporary = ".connection-" + secrets.token_hex(16)
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                      0o600, dir_fd=root)
@@ -227,7 +230,7 @@ class PrivateStore:
                 os.fsync(fd)
             if self._directory_identity() != self.identity:
                 raise ConnectionError("secret_store_replaced")
-            os.replace(temporary, "connection.json", src_dir_fd=root, dst_dir_fd=root)
+            os.replace(temporary, self._record_name, src_dir_fd=root, dst_dir_fd=root)
             temporary = None
             os.fsync(root)
         finally:

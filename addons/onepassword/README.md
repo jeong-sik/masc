@@ -48,6 +48,23 @@ status only.
 
 ## Docking contract still to implement
 
+`login.py` now implements a private durable lifecycle on the original companion
+socket. It pins caller/account/Browser/tab, records intent before requests and
+fills, keeps approval links and references in a separate private journal, and
+never reconnects or replays an interrupted fill. Explicit next-page fills retain
+the same grant for username/password/OTP pages. `finish` releases that grant;
+its public result does not certify website authentication. A process lease
+prevents another engine from recovering an active owner's operations. Restart
+records lost original bindings as unknown rather than adopting a new session.
+
+The approval checker follows the [vendor schedule](https://docs.browserbase.com/integrations/1password/agentic-autofill):
+the private link can be retrieved again, and a separate opened acknowledgement
+starts the five-second wait. It uses the declared
+2/5/10-second windows, pauses for the user after two minutes and respects a
+one-minute rate-limit wait. Pausing does not expire the task or create another
+request. The engine supplies individual steps; its worker tools, private approval
+UI, scheduler and Keeper continuation are still to be connected.
+
 The Browser private wire and original-CDP extension loader are now source
 implementation. Package-owned `prepare.js` waits for extension readiness and
 enables whole-browser agentic mode while the page slot remains held.
@@ -57,8 +74,9 @@ the original session. Their results stay on the private backend path; these
 programs are not model tools. The independent host socket broker and two-phase
 Python client are [source implementation](../../docs/design/lane-addon-companion-broker.md).
 Runtime/private-context authority wiring is also source implementation. The
-package negotiates no companion exports until its login lifecycle is ready.
-That lifecycle, installed-host execution and real account verification remain unfinished.
+package negotiates no companion exports until its login engine is connected to
+worker tools and continuation. Installed-host execution and real account
+verification remain unfinished.
 
 1. Extend the private connection controls with approval links, confirmed remote
    revocation and explicit interrupted-exchange recovery. A new account must not
@@ -86,6 +104,9 @@ extension programs against fake APIs (eight scenarios passed).
 The checks use transport fixtures and actual MCP subprocesses, never a personal
 account or real tokens. The private callback checks also verify that public
 status/observations contain none of the fixture OAuth material.
+Login-engine tests use real private files and fabricated credential/Browser
+edges, including one real Unix-socket request/status/fill/release
+flow. They do not execute Chrome, the OCaml broker or a real 1Password account.
 
 ## Install the development status connector
 

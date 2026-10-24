@@ -308,6 +308,11 @@ let build_request_assoc_artifact
     output_token_receipt ~envelope:Types.Openai_chat_max_tokens config
   in
   let assistant_tool_content_format = caps.Capabilities.assistant_tool_content_format in
+  let control_lowering =
+    match Message_origin_lowering.policy_for_provider_config config with
+    | Ok policy -> policy
+    | Error error -> invalid_arg ("Backend_openai_request: " ^ Message_origin_lowering.error_to_string error)
+  in
   (* agent-core boundary — degrade an unrepresentable document to a named text placeholder
      before serialization, rather than relabelling it [image_url] (the audit's
      defect) or rejecting the whole request. Rejection retroactively broke every
@@ -347,6 +352,7 @@ let build_request_assoc_artifact
     let history =
       match
         Backend_openai_serialize.dialect_messages_of_history
+          ~control_lowering
           ~assistant_tool_content_format
           ~replay_capability
           ~stream
@@ -373,13 +379,9 @@ let build_request_assoc_artifact
         ~config
         ~caps
     in
-    (match system_prompt with
-     | Some s when not (Api_common.string_is_blank s) ->
-       [ `Assoc
-           [ "role", `String "system"; "content", `String (Utf8_sanitize.sanitize s) ]
-       ]
-     | _ -> [])
-    @ history
+    match Message_origin_lowering.prepend_system_prompt control_lowering ~system_prompt history with
+    | Ok messages -> messages
+    | Error error -> invalid_arg ("Backend_openai_request: " ^ Message_origin_lowering.error_to_string error)
   in
   (* Per-model capabilities ([caps] above) drive the [top_k] / [min_p]
      sampling-field gates further down; the output-token budget (clamp

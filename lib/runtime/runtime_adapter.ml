@@ -674,6 +674,7 @@ let with_client_history_replay
              ( Llm_provider.Capabilities.Force_no_replay
              | Llm_provider.Capabilities.Force_drop_without_tool_preserve_with_tool
              | Llm_provider.Capabilities.Force_latest_user_turn_tool_calls
+             | Llm_provider.Capabilities.Force_initial_system_latest_user_turn_tool_calls
              | Llm_provider.Capabilities.Force_preserve_always
              | Llm_provider.Capabilities.Force_preserve_with_request_tools )
          ; _

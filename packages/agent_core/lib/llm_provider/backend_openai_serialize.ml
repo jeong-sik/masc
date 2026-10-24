@@ -564,8 +564,11 @@ let openai_assistant_has_wire_payload (dialect : Reasoning_dialect.t) content =
   || (include_reasoning_details && reasoning_details <> None)
 ;;
 
-let typed_history_projection ~replay_capability dialect messages =
+let typed_history_projection
+      ?(control_lowering = Message_origin_lowering.Preserve_positions)
+      ~replay_capability dialect messages =
   Reasoning_history_projection.project
+    ~control_lowering
     ~assistant_has_payload:(openai_assistant_has_wire_payload dialect)
     ~reasoning_block_supported:(function
       | Thinking _ | ReasoningDetails _ -> true
@@ -581,6 +584,7 @@ let typed_history_projection ~replay_capability dialect messages =
 ;;
 
 let render_history_projection
+      ?(control_lowering = Message_origin_lowering.Preserve_positions)
       ?(assistant_tool_content_format = Capability_vocab.Assistant_tool_content_null)
       dialect
       (projection : Reasoning_history_projection.t)
@@ -621,6 +625,11 @@ let render_history_projection
              ~assistant_tool_content_format
              msg
          in
+         let rendered =
+           match Message_origin_lowering.encode_user_boundary control_lowering ~message:msg rendered with
+           | Ok messages -> messages
+           | Error error -> invalid_arg (Message_origin_lowering.error_to_string error)
+         in
          List.rev_append rendered projected)
       []
       (Tool_result_projection.with_image_followups projection.messages)
@@ -641,25 +650,28 @@ let project_history ?(tools_present = false) config messages =
   | Error detail ->
     Error (Reasoning_history_projection.Invalid_reasoning_target detail)
   | Ok replay_capability ->
-    typed_history_projection
-      ~replay_capability
-      (Reasoning_dialect.for_provider_config config)
-      messages
+    Result.bind
+      (Message_origin_lowering.policy_for_provider_config config
+       |> Result.map_error (fun error -> Reasoning_history_projection.Invalid_control_lowering error))
+      (fun control_lowering ->
+        typed_history_projection ~control_lowering
+          ~replay_capability (Reasoning_dialect.for_provider_config config) messages)
 ;;
 
 let dialect_messages_of_history
+      ?(control_lowering = Message_origin_lowering.Preserve_positions)
       ?assistant_tool_content_format
       ~replay_capability
       ~stream
       dialect
       messages
   =
-  match typed_history_projection ~replay_capability dialect messages with
+  match typed_history_projection ~control_lowering ~replay_capability dialect messages with
   | Error _ as error -> error
   | Ok projection ->
     Reasoning_history_projection.observe ~component:"backend_openai" ~stream projection;
     let rendered =
-      render_history_projection ?assistant_tool_content_format dialect projection
+      render_history_projection ~control_lowering ?assistant_tool_content_format dialect projection
     in
     Ok rendered.messages
 ;;
@@ -846,6 +858,7 @@ let ollama_tool_block_role_contract (message : message) =
 ;;
 
 let ollama_messages_of_history
+      ?(control_lowering = Message_origin_lowering.Preserve_positions)
       ~modality_priority
       ~supports_image_input
       ~supports_document_input
@@ -925,7 +938,9 @@ let ollama_messages_of_history
                     ~modality_priority
                     msg
               in
-              render (wire_messages :: rendered) rest)
+              (match Message_origin_lowering.encode_user_boundary control_lowering ~message:msg wire_messages with
+               | Error error -> Error (Message_origin_lowering.error_to_string error)
+               | Ok wire_messages -> render (wire_messages :: rendered) rest))
        in
        render [] (Tool_result_projection.messages projection))
 ;;

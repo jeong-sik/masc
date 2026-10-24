@@ -83,6 +83,11 @@ let build_request_artifact
       ~config
       ~caps
   in
+  let control_lowering =
+    match Message_origin_lowering.policy_for_provider_config config with
+    | Ok policy -> policy
+    | Error error -> invalid_arg ("Backend_ollama.build_request: " ^ Message_origin_lowering.error_to_string error)
+  in
   let projected_messages =
     match project_history ~tools_present:(tools <> []) config messages with
     | Error error ->
@@ -96,6 +101,7 @@ let build_request_artifact
   let provider_messages =
     match
       Backend_openai_serialize.ollama_messages_of_history
+        ~control_lowering
         ~modality_priority:caps.modality_priority
         ~supports_image_input:caps.supports_image_input
         ~supports_document_input:caps.supports_document_input
@@ -103,13 +109,9 @@ let build_request_artifact
     with
     | Error error -> invalid_arg ("Backend_ollama.build_request: " ^ error)
     | Ok messages ->
-      (match system_prompt with
-       | Some s when not (Api_common.string_is_blank s) ->
-         [ `Assoc
-             [ "role", `String "system"; "content", `String (Utf8_sanitize.sanitize s) ]
-         ]
-       | _ -> [])
-      @ messages
+      (match Message_origin_lowering.prepend_system_prompt control_lowering ~system_prompt messages with
+       | Ok messages -> messages
+       | Error error -> invalid_arg ("Backend_ollama.build_request: " ^ Message_origin_lowering.error_to_string error))
   in
   let body = [ "model", `String config.model_id; "messages", `List provider_messages ] in
   (* Emit native thinking control only when the caller supplied it. Some

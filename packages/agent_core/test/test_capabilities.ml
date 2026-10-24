@@ -520,7 +520,9 @@ let test_lookup_qwen_gguf_name () =
       bool
       "qwen3.6 uses chat_template_kwargs"
       true
-      (c.thinking_control_format = Capabilities.Chat_template_kwargs)
+      (c.thinking_control_format = Capabilities.Chat_template_kwargs);
+    check bool "bare Qwen3.6 declares initial-system boundary lowering" true
+      (c.reasoning_replay_override = Capabilities.Force_initial_system_latest_user_turn_tool_calls)
   | None -> fail "should match qwen3.6 model id"
 ;;
 

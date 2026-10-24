@@ -42,7 +42,7 @@ let messages_of_context (ctx : working_context) =
 
 let empty_runtime_checkpoint ~system_prompt ~messages
     ~(context : Agent_core.Context.t) : Agent_core.Checkpoint.t =
-  {
+  { provider_binding = None;
     Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version;
     session_id = "";
     agent_name = "";

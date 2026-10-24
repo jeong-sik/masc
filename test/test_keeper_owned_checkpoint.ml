@@ -18,7 +18,7 @@ let make_checkpoint ~session_id ~turn_count ~marker =
     Agent_core.Types.{ origin = Llm_provider.Types.Conversation;  role = Assistant; content = [Text marker]; name = None;
                       tool_call_id = None; metadata = [] };
   ] in
-  Agent_core.Checkpoint.{
+  Agent_core.Checkpoint.{ provider_binding = None;
     version = checkpoint_version;
     session_id;
     agent_name = "test-agent";

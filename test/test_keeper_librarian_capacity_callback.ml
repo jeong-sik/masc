@@ -227,7 +227,7 @@ let test_prefit_real_continuity ~base_path () =
        with tool_call_id=Some "pending-read" }] in
   let canonical = source @ pending in
   let checkpoint : Agent_core.Checkpoint.t =
-    {version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
+    { provider_binding = None;version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
      agent_name=keeper_id; model="fixture"; system_prompt=None; messages=canonical;
      usage=Agent_core.Types.empty_usage; turn_count=4; created_at=1000.;
      tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
@@ -685,7 +685,7 @@ let test_continuity_only_run_fails_when_the_snapshot_is_refused ~base_path ~regi
   let pending = [Agent_core.Types.user_msg "Do not publish before explicit approval."] in
   let canonical = source @ pending in
   let checkpoint : Agent_core.Checkpoint.t =
-    {version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
+    { provider_binding = None;version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
      agent_name=keeper_id; model="fixture"; system_prompt=None; messages=canonical;
      usage=Agent_core.Types.empty_usage; turn_count=4; created_at=1000.;
      tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
@@ -772,7 +772,7 @@ let test_durable_runtime_returns_refusal_reports ~base_path () =
   let baseline = [Agent_core.Types.user_msg "Already read baseline."] in
   let messages = baseline @ input.messages in
   let checkpoint : Agent_core.Checkpoint.t =
-    {version=Agent_core.Checkpoint.checkpoint_version;session_id=keeper_id;
+    { provider_binding = None;version=Agent_core.Checkpoint.checkpoint_version;session_id=keeper_id;
      agent_name=keeper_id;model="fixture";system_prompt=None;messages;
      usage=Agent_core.Types.empty_usage;turn_count=2;created_at=1000.;tools=[];
      tool_choice=None;disable_parallel_tool_use=false;temperature=None;top_p=None;

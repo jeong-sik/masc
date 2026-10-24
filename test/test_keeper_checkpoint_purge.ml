@@ -445,7 +445,7 @@ let test_config_bounds_are_enforced () =
 
 let checkpoint_fixture () =
     Agent_core.Checkpoint.
-      { version = checkpoint_version
+      { provider_binding = None; version = checkpoint_version
       ; session_id = "trace-purge-fixture"
       ; agent_name = "purge-fixture"
       ; model = "test-model"

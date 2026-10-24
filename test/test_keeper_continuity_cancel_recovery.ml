@@ -14,7 +14,7 @@ let trace_id = "cancel-recovery-trace"
 let keeper_name = "cancel-recovery-keeper"
 let message text = T.make_message ~role:T.User [T.Text text]
 let checkpoint messages : Agent_core.Checkpoint.t =
-  {version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
+  { provider_binding = None;version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
    agent_name=keeper_name; model="fixture"; system_prompt=None; messages;
    usage=T.empty_usage; turn_count=List.length messages; created_at=1000.;
    tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;

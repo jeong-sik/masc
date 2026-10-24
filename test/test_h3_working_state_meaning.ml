@@ -35,7 +35,7 @@ let message text =
   Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text text]
 
 let checkpoint messages : Agent_core.Checkpoint.t =
-  {version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
+  { provider_binding = None;version=Agent_core.Checkpoint.checkpoint_version; session_id=trace_id;
    agent_name=keeper_name; model=fixture_model; system_prompt=None; messages;
    usage=Agent_core.Types.empty_usage; turn_count=List.length messages; created_at=1000.;
    tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;

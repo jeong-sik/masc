@@ -1438,7 +1438,7 @@ let recipe_skill_reference () =
 ;;
 
 let recipe_checkpoint () : Agent_core.Checkpoint.t =
-  { Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
+  { provider_binding = None; Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
   ; session_id = "accepted-session"
   ; agent_name = "keeper-recipe"
   ; model = "recipe-model"

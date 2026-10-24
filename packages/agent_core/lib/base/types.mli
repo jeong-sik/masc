@@ -102,6 +102,10 @@ val add_missing_usage : usage_stats -> usage_stats
 (** Agent state *)
 type agent_state =
   { config : agent_config
+  ; provider_binding : Reasoning_source.t option
+    (** Actual last collected response source, including responses without
+        reasoning. [None] means no producing binding has been recorded; it
+        never borrows the current requested config or a model default. *)
   ; messages : message list
   ; turn_count : int
   ; usage : usage_stats

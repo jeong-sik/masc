@@ -12,6 +12,7 @@ type t = Checkpoint_types.t =
   ; session_id : string
   ; agent_name : string
   ; model : model
+  ; provider_binding : Llm_provider.Types.Reasoning_source.t option
   ; system_prompt : string option
   ; messages : message list
   ; usage : usage_stats
@@ -45,6 +46,7 @@ type identity_patch = Checkpoint_types.identity_patch =
   { session_id : string
   ; agent_name : string
   ; model : model
+  ; provider_binding : Llm_provider.Types.Reasoning_source.t option
   ; created_at : float
   }
 

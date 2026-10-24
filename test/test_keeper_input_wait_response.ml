@@ -16,7 +16,7 @@ let source_checkpoint pending =
   let context = Core.Context.create_sync () in
   Core.Context.set context "retained-entry" (`Assoc ["nested", `String "original"]);
   Core.Checkpoint.
-    { version = checkpoint_version; session_id = "trace-input-response"
+    { provider_binding = None; version = checkpoint_version; session_id = "trace-input-response"
     ; agent_name = "input-response"; model = "opaque-runtime"
     ; system_prompt = Some "Retained system"
     ; messages = [Core.Types.

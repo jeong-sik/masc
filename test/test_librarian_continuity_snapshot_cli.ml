@@ -9,7 +9,7 @@ let read path = In_channel.with_open_bin path In_channel.input_all
 let write path bytes = Out_channel.with_open_bin path (fun oc -> output_string oc bytes)
 
 let checkpoint messages : Agent_core.Checkpoint.t =
-  { version = Agent_core.Checkpoint.checkpoint_version
+  { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
   ; session_id = trace_id; agent_name = keeper_id; model = "fixture-model"
   ; system_prompt = None; messages; usage = Agent_core.Types.empty_usage
   ; turn_count = List.length messages / 2; created_at = 1000.; tools = []

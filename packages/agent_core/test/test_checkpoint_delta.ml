@@ -154,7 +154,7 @@ let checkpoint_gen =
   let* mcp_sessions = list_size (int_range 0 1) mcp_info_gen in
   let* working_context = option yojson_simple_gen in
   return
-    { Checkpoint.version = Checkpoint.checkpoint_version
+    { provider_binding = None; Checkpoint.version = Checkpoint.checkpoint_version
     ; session_id
     ; agent_name
     ; model
@@ -199,7 +199,7 @@ let make_unit_checkpoint
       ?(working_context = None)
       ()
   =
-  { Checkpoint.version = Checkpoint.checkpoint_version
+  { provider_binding = None; Checkpoint.version = Checkpoint.checkpoint_version
   ; session_id
   ; agent_name
   ; model = "claude-sonnet-5"
@@ -688,12 +688,49 @@ let test_apply_delta_rejects_noncanonical_message () =
     (Result.is_error (Checkpoint.apply_delta base invalid_delta))
 ;;
 
+let test_provider_binding_delta () =
+  let module Source = Llm_provider.Types.Reasoning_source in
+  let binding endpoint = Source.create
+    ~provider_kind:Llm_provider.Provider_kind.OpenAI_compat
+    ~provider_instance:(Source.provider_instance ~base_url:endpoint ~request_path:"/chat")
+    ~canonical_model_id:"shared-model"
+    ~replay_contract:Llm_provider.Reasoning_replay_contract.{
+      replay_policy=All_assistant_messages; streaming=No_streaming_reasoning;
+      output_wire=No_output_control} |> Result.get_ok in
+  let base = { (make_unit_checkpoint ()) with provider_binding=Some(binding "https://a.example") } in
+  let after = {base with provider_binding=Some(binding "https://b.example")} in
+  let delta = Checkpoint.compute_delta base after in
+  Alcotest.(check bool) "binding-only change emits identity delta" true
+    (match delta.operations with [Checkpoint.Replace_identity _] -> true | _ -> false);
+  Alcotest.(check bool) "binding participates in checkpoint hash" true
+    (delta.base_checkpoint_hash <> delta.result_checkpoint_hash);
+  let json = Checkpoint.delta_to_json delta in
+  let decoded = Checkpoint.delta_of_json json |> Result.get_ok in
+  let applied = Checkpoint.apply_delta base decoded |> Result.get_ok in
+  Alcotest.(check bool) "JSON delta restores exact binding" true (checkpoint_equal after applied);
+  let unbound = {after with provider_binding=None} in
+  let cleared = Checkpoint.compute_delta after unbound in
+  let applied = Checkpoint.apply_delta after cleared |> Result.get_ok in
+  Alcotest.(check bool) "binding can explicitly become unrecorded" true (checkpoint_equal unbound applied);
+  let edit_identity transform = match json with
+    | `Assoc fields -> `Assoc(List.map(fun(key,value) ->
+      if key="operations" then key,(match value with
+        | `List [`Assoc op] -> `List [`Assoc(transform op)]
+        | value -> value) else key,value) fields)
+    | value -> value in
+  let missing = edit_identity (List.remove_assoc "provider_binding") in
+  let duplicate = edit_identity (fun fields -> ("provider_binding",`Null)::fields) in
+  List.iter (fun json -> Alcotest.(check bool) "invalid identity binding rejected" true
+    (Result.is_error(Checkpoint.delta_of_json json))) [missing;duplicate]
+;;
+
 let () =
   Alcotest.run
     "Checkpoint_delta"
     [ "properties", List.map QCheck_alcotest.to_alcotest [ test_delta_roundtrip_property ]
     ; ( "unit"
-      , [ Alcotest.test_case "delta JSON roundtrip" `Quick test_delta_json_roundtrip
+      , [ Alcotest.test_case "binding-only delta" `Quick test_provider_binding_delta
+        ; Alcotest.test_case "delta JSON roundtrip" `Quick test_delta_json_roundtrip
         ; Alcotest.test_case
             "delta JSON rejects malformed context removed"
             `Quick

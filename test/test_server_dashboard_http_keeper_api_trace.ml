@@ -504,7 +504,7 @@ let make_checkpoint_inventory_meta ~name ~trace_id =
 
 let make_inventory_checkpoint ~session_id ~turn_count ~created_at =
   Agent_core.Checkpoint.
-    { version = checkpoint_version
+    { provider_binding = None; version = checkpoint_version
     ; session_id
     ; agent_name = "checkpoint-inventory-test"
     ; model = "opaque-runtime"

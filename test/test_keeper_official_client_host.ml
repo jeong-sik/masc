@@ -2037,7 +2037,7 @@ let test_a_failed_hook_is_a_turn_level_reject () =
 
 let persistence_checkpoint ~session_id =
   Agent_core.Checkpoint.
-    { version = checkpoint_version
+    { provider_binding = None; version = checkpoint_version
     ; session_id
     ; agent_name = "reject-persistence"
     ; model = "test-model"

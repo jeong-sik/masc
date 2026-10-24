@@ -1,0 +1,71 @@
+{
+  "scope": "actual Reasoning_source module/interface and leaf modules, actual provider-binding codec helpers and checkpoint field builders with fixture checkpoint payload dependencies",
+  "before_base": "f9803add95065c6af4a69bba130308f402785ecd",
+  "sources": {
+    "provider_kind.mli": {
+      "source_sha256": "29a1c58543a11e3baed31d6ea598c32b5e5d5e6d0ab3f3a4f36c75387b1374c4",
+      "compiled_sha256": "29a1c58543a11e3baed31d6ea598c32b5e5d5e6d0ab3f3a4f36c75387b1374c4"
+    },
+    "provider_kind.ml": {
+      "source_sha256": "fffc5db7246ab06882c9832c99e395a19e7edc21836bda6093d3ade1fee7e5b6",
+      "compiled_sha256": "fffc5db7246ab06882c9832c99e395a19e7edc21836bda6093d3ade1fee7e5b6"
+    },
+    "reasoning_replay_contract.mli": {
+      "source_sha256": "a172916eae51b597d857777a6235a6250c00f84b7a760a5a849b909f77436bd6",
+      "compiled_sha256": "a172916eae51b597d857777a6235a6250c00f84b7a760a5a849b909f77436bd6"
+    },
+    "reasoning_replay_contract.ml": {
+      "source_sha256": "a03590c3243ee912f7418c2e5d4a6667d440ee9b1e2b9daf3feb3d9106085a6f",
+      "compiled_sha256": "a03590c3243ee912f7418c2e5d4a6667d440ee9b1e2b9daf3feb3d9106085a6f"
+    },
+    "types.mli:Reasoning_source": {
+      "source_sha256": "27f5d421e33e735cc768812641a620e407d505eab21396ba21a198558c708dd9",
+      "compiled_sha256": "6c8ce54e776ef4094e7c8cbe5517c92fa401730ff1a0ca0341c2811fde61e62a"
+    },
+    "types.ml:Reasoning_source": {
+      "source_sha256": "49e5f654a1b9a16d4dac74956f982cc77bba035d4b323336d92bd129ebdc1a35",
+      "compiled_sha256": "99d1b2ca0420342198940cfb4a88dfbf8c3f0f1b96b93fd2712a25790187c922"
+    },
+    "codec_helpers": {
+      "source_sha256": "e21132c4e98ae768ae1dc49aeff16e1acca5f8ef9d6d663e303b10641cc44254",
+      "compiled_sha256": "951064af7a59c343d74ae66adcba7a565cf86d662ce528d3a6ef9d8bb3a69d7c"
+    },
+    "current_fields": {
+      "source_sha256": "e21132c4e98ae768ae1dc49aeff16e1acca5f8ef9d6d663e303b10641cc44254",
+      "compiled_sha256": "37107c68c2cfe541f34e59b94670799daef7ddffadd2da95175c1d310cc0a3b3"
+    },
+    "before_fields": {
+      "source_sha256": "24158dca583b0edb25a9ee47c4a48f17b05edf7d07ab07863db469080371a911",
+      "compiled_sha256": "34ce241549c7f5e3dbd3b729781305c76805a60d4c13b7c70048d8f04f740030"
+    }
+  },
+  "checks": {
+    "historical_checkpoint_fields_drop_producer": true,
+    "current_field_builder_emits_exact_source": true,
+    "actual_binding_codec_roundtrip": true,
+    "no_artifact_messages_required": true,
+    "explicit_null_roundtrip": true,
+    "unrecorded_field_is_explicit_null": true,
+    "noncanonical_kind_rejected": true,
+    "invalid_endpoint_hash_rejected": true,
+    "missing_model_rejected": true,
+    "duplicate_model_rejected": true,
+    "duplicate_contract_field_rejected": false,
+    "unknown_binding_field_rejected": true,
+    "binding_contains_only_nonsecret_fields": true,
+    "endpoint_difference_is_observable": true,
+    "declared_text_rotation_still_admits": true,
+    "declared_signed_rotation_still_refuses": true
+  },
+  "fixture_dependencies": [
+    "checkpoint record payload types",
+    "non-binding payload encoders",
+    "Error serialization envelope",
+    "metadata type alias"
+  ],
+  "project_linked": false,
+  "delta_executed": false,
+  "pipeline_executed": false,
+  "resume_admission_implemented": false,
+  "provider_called": false
+}

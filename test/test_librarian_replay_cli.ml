@@ -13,7 +13,7 @@ let librarian_replay_exe () =
 ;;
 
 let checkpoint ~trace_id messages : Agent_core.Checkpoint.t =
-  { version = Agent_core.Checkpoint.checkpoint_version
+  { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
   ; session_id = trace_id
   ; agent_name = keeper_id
   ; model = "fixture-model"

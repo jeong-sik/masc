@@ -398,8 +398,12 @@ module Reasoning_source = struct
       fields
   ;;
 
-  let of_json = function
-    | `Assoc fields ->
+  let of_json json =
+    (* Inspect the original value. Tool payload normalization supplies only
+       the duplicate-key witness here; identity bytes are never repaired. *)
+    let _, duplicates = Json_object_keys.deduplicate json in
+    match duplicates, json with
+    | [], `Assoc fields ->
       (match
          ( values_for "provider_kind" fields
          , values_for "provider_instance_id" fields
@@ -429,7 +433,8 @@ module Reasoning_source = struct
                 | Error _ -> None))
           | Some _ | None -> None)
        | _ -> None)
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+    | _ :: _, _
+    | [], (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> None
   ;;
 
   let entry source = key, to_json source

@@ -1066,7 +1066,7 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
       (List.init 5 Fun.id)
   in
   let checkpoint : Agent_core.Checkpoint.t =
-    { version = Agent_core.Checkpoint.checkpoint_version
+    { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = trace_id
     ; agent_name = keeper_name
     ; model = "librarian-stalled-model"

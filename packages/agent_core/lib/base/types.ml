@@ -201,6 +201,7 @@ let add_missing_usage stats =
 (** Agent state *)
 type agent_state =
   { config : agent_config
+  ; provider_binding : Reasoning_source.t option
   ; messages : message list
   ; turn_count : int
   ; usage : usage_stats

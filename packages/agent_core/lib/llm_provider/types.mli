@@ -411,6 +411,12 @@ module Reasoning_source : sig
     -> replay_contract:Reasoning_replay_contract.t
     -> (t, string) result
 
+  val to_yojson : t -> Yojson.Safe.t
+  val of_yojson : Yojson.Safe.t -> (t, string) result
+  (** Exact non-secret persistence codec, shared by message stamps and
+      session checkpoints. Duplicate keys at any depth are rejected. The
+      endpoint is represented only by its hash. *)
+
   val equal : t -> t -> bool
 
   (** [rotation_admits ~rotation_policy ~stored ~target] decides whether a

@@ -407,7 +407,7 @@ let create
   in
   let all_tools = Tool_set.merge (Tool_set.of_list tools) (Tool_set.of_list mcp_tools) in
   let state =
-    { config; messages = config.initial_messages; turn_count = 0; usage = empty_usage }
+    { config; provider_binding = None; messages = config.initial_messages; turn_count = 0; usage = empty_usage }
   in
   let ctx =
     match context with
@@ -433,7 +433,7 @@ let create
 let clone ?(copy_context = false) agent =
   let ctx = if copy_context then Context.copy agent.context else Context.create () in
   let state =
-    { config = agent.state.config
+    { provider_binding = agent.state.provider_binding; config = agent.state.config
     ; messages = agent.state.messages
     ; turn_count = agent.state.turn_count
     ; usage = agent.state.usage

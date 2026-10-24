@@ -13,7 +13,7 @@ let input = Operation.canonical_json (`Assoc ["message", `String "complete origi
   "task", `String "original-task"]) |> require
 let source = `Assoc ["kind", `String "dashboard"]
 let canonical_bytes marker =
-  Agent_core.Checkpoint.to_string Agent_core.Checkpoint.{
+  Agent_core.Checkpoint.to_string Agent_core.Checkpoint.{ provider_binding = None;
     version=checkpoint_version;session_id="original-trace";agent_name="gate-fixture";model="fixture";
     system_prompt=None;messages=[Agent_core.Types.user_msg marker];usage=Agent_core.Types.empty_usage;
     turn_count=3;created_at=1000.;tools=[];tool_choice=None;disable_parallel_tool_use=false;

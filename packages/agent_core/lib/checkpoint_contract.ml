@@ -280,6 +280,7 @@ let current_checkpoint_fields =
   ; "session_id"
   ; "agent_name"
   ; "model"
+  ; "provider_binding"
   ; "system_prompt"
   ; "messages"
   ; "usage"
@@ -728,6 +729,13 @@ let validate_common_checkpoint_fields ~scope fields =
   let* session_id = required_field ~scope "session_id" fields in
   let* agent_name = required_field ~scope "agent_name" fields in
   let* model = required_field ~scope "model" fields in
+  let* provider_binding = required_field ~scope "provider_binding" fields in
+  let* () = match provider_binding with
+    | `Null -> Ok ()
+    | value -> (match Llm_provider.Types.Reasoning_source.of_yojson value with
+      | Ok _ -> Ok ()
+      | Error detail -> scope_errorf scope ".provider_binding: %s" detail)
+  in
   let* system_prompt = required_field ~scope "system_prompt" fields in
   let* turn_count = required_field ~scope "turn_count" fields in
   let* created_at = required_field ~scope "created_at" fields in

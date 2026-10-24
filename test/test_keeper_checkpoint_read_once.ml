@@ -24,7 +24,7 @@ let make_checkpoint ~session_id ~turn_count ~marker =
     ]
   in
   Agent_core.Checkpoint.
-    { version = checkpoint_version
+    { provider_binding = None; version = checkpoint_version
     ; session_id
     ; agent_name = "agent_core-test-runtime"
     ; model = "test-model"

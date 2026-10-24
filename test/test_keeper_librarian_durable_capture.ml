@@ -10,7 +10,7 @@ let keeper_name = "source-capture-reader"
 let get = function Ok value -> value | Error detail -> fail detail
 let message text = Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text text]
 let checkpoint ~trace_id messages turn_count : Agent_core.Checkpoint.t =
-  { version = Agent_core.Checkpoint.checkpoint_version
+  { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
   ; session_id = trace_id
   ; agent_name = keeper_name
   ; model = "fixture-model"

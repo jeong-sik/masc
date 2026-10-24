@@ -240,7 +240,7 @@ let s2_projection_drops_and_notes () =
 (* s4: checkpoint 직렬화 왕복 — failover 후 다음 시도의 근거            *)
 
 let checkpoint_with_messages messages =
-  { Checkpoint.version = Checkpoint.checkpoint_version
+  { provider_binding = None; Checkpoint.version = Checkpoint.checkpoint_version
   ; session_id = "h5-media-checkpoint"
   ; agent_name = "h5-agent"
   ; model = "h5-model"

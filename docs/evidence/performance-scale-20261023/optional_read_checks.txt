@@ -1,0 +1,23 @@
+Testing `optional-read-source'.
+This run has ID `QMN9TRGL'.
+
+  [OK]          fallback              0   absence, empty content and aliases.
+  [OK]          fallback              1   non-directory parent is an error.
+  [OK]          fallback              2   parent permission failure is an error.
+  [OK]          fallback              3   leaf permission failure is an error.
+  [OK]          fallback              4   opened replacement retains original...
+  [OK]          fallback              5   unlinked short read remains an error.
+  [OK]          Eio                   0   absence, empty content and aliases.
+  [OK]          Eio                   1   non-directory parent is an error.
+  [OK]          Eio                   2   parent permission failure is an error.
+  [OK]          Eio                   3   leaf permission failure is an error.
+  [OK]          Eio                   4   opened replacement retains original...
+  [OK]          Eio                   5   unlinked short read remains an error.
+  [OK]          cancellation          0   joins the real reader.
+
+Full test results in `/private/tmp/masc-optional-read-probe-unicode-final-20261023/_build/_tests/optional-read-source'.
+Test Successful in 0.008s. 13 tests run.
+ASSERT baseline reproduces hidden read failure
+Historical short-read misclassification reproduced; candidate rejects it.
+Verified 35 existing fixture files, 898 bytes each, with both readers.
+Verified 350 existing fixture files, 898 bytes each, with both readers.

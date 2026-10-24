@@ -366,8 +366,17 @@ val load_file : string -> string
     A file that vanishes before it is opened is also absent. Other I/O
     failures, including denied or non-directory parents, raise [Sys_error].
     This preserves {!load_file}'s opened-descriptor read across a concurrent
-    atomic replacement; the path need not keep naming that descriptor. *)
+    atomic replacement; the path need not keep naming that descriptor.
+    Only an absent path at open is [None]. Open, read and close form one
+    blocking job; cancellation is checked after that job has released its file. *)
 val load_file_opt : string -> string option
+
+module Optional_read_for_testing : sig
+  val load_file_opt : before_read:(unit -> unit) -> string -> string option
+  (** Run the synchronous hook after the opened file's length is captured,
+      before reading its bytes. The hook runs in the same blocking job and
+      must not perform Eio effects. *)
+end
 
 (** Save string to file (overwrite). A write, flush or close error is raised
     as [Sys_error], on the Eio branch and the inline branch alike: both run

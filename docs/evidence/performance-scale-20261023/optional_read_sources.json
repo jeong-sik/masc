@@ -1,0 +1,12 @@
+{
+  "scope": "Run real Eio/file-read source fragments without building MASC.\n\nOnly fixture writes/removal are supplied locally. Reads, file-kind lookup,\nexception conversion and Eio handoff use the actual source helpers. An explicit\nafter-length hook is inserted into the historical reader to reproduce its\npost-open failure classification; benchmark runs leave that hook empty.\n",
+  "before": "0b4ebf61148ebc0f68844af9ed20ed3dd6f88400",
+  "runner_sha256": "e56fdc9d306ee456b66612787ebef65170fffb44c1214131e921ffe4cf5979ad",
+  "source_sha256": {
+    "before": "ca1443862dd3714054a486f2e495ca0c91956cf752d6af93794fa909b5324225",
+    "lib/fs_compat/fs_compat.ml": "5d51c0ac205b1fa07e6fdaee263c94dd94e01121036fca13077b38d83069b4ea",
+    "test/test_fs_compat.ml": "2b334956f6c0f1225a41dc3e32fac2aaa0564e2e26c657497586d5f95b150198"
+  },
+  "fixture_sha256": "4e8d26f70459ebf96983c7019b213d507563ec4854a622f1768933cf8ae65909",
+  "fixture_bytes": 898
+}

@@ -417,6 +417,16 @@ let test_every_outcome_label_reads_back_as_its_outcome () =
     Keeper_meta_contract.all_proactive_cycle_outcomes
 ;;
 
+let test_unreadable_parent_is_not_absent () =
+  with_temp_workspace @@ fun config ->
+  let parent = Filename.concat config.Workspace.base_path "meta-parent-file" in
+  write_file parent "not a directory";
+  match Keeper_meta_store.read_meta_file_path (Filename.concat parent "keeper.json") with
+  | Error _ -> ()
+  | Ok None -> fail "invalid metadata parent became an absent Keeper"
+  | Ok (Some _) -> fail "metadata read through a non-directory parent succeeded"
+;;
+
 let () =
   run
     "keeper_meta_invalid_recovery"
@@ -453,6 +463,8 @@ let () =
             "a non-directory parent is unreadable, not absent"
             `Quick
             test_gate_refuses_a_non_directory_parent
+        ; test_case "unreadable metadata parent is not absence" `Quick
+            test_unreadable_parent_is_not_absent
         ] )
     ]
 ;;

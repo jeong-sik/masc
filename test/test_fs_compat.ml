@@ -84,11 +84,71 @@ let test_optional_read_leaf_permission () =
     (Fs_compat.load_file_opt path)
 ;;
 
+let test_optional_read_opened_replacement () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "snapshot" in
+  let replacement = Filename.concat base "replacement" in
+  Fs_compat.save_file path "opened snapshot";
+  Fs_compat.save_file replacement "replacement snapshot";
+  let observed = Fs_compat.Optional_read_for_testing.load_file_opt path
+      ~before_read:(fun () -> Unix.rename replacement path) in
+  check (option string) "the open descriptor keeps its original bytes"
+    (Some "opened snapshot") observed;
+  check (option string) "next read observes the replacement"
+    (Some "replacement snapshot") (Fs_compat.load_file_opt path)
+;;
+
+let test_optional_read_unlinked_short_read () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "snapshot" in
+  Fs_compat.save_file path "bytes promised by the opened size";
+  match Fs_compat.Optional_read_for_testing.load_file_opt path
+      ~before_read:(fun () -> Unix.truncate path 0; Unix.unlink path) with
+  | exception Sys_error _ -> ()
+  | None -> fail "an opened file's failed read was reclassified as absence"
+  | Some _ -> fail "an opened file's short read was accepted"
+;;
+
+let test_optional_read_cancellation_joins_reader ~fs () =
+  with_optional_read_fs (Some fs) (fun () ->
+    with_tmp_dir @@ fun base ->
+    let path = Filename.concat base "snapshot" in
+    Fs_compat.save_file path "retained bytes";
+    let entered, signal_entered = Eio.Promise.create () in
+    let context, signal_context = Eio.Promise.create () in
+    let release = Semaphore.Binary.make false in
+    let completed = Atomic.make false in
+    let cancelled = ref false in
+    Eio.Fiber.both
+      (fun () -> Eio.Cancel.sub (fun cancel ->
+        Eio.Promise.resolve signal_context cancel;
+        (match Fs_compat.Optional_read_for_testing.load_file_opt path
+           ~before_read:(fun () ->
+             Eio.Promise.resolve signal_entered ();
+             Semaphore.Binary.acquire release) with
+         | exception Eio.Cancel.Cancelled _ -> cancelled := true
+         | Some _ | None -> fail "cancelled read returned normally");
+        Atomic.set completed true))
+      (fun () ->
+        let cancel = Eio.Promise.await context in
+        Eio.Promise.await entered;
+        Fun.protect ~finally:(fun () -> Semaphore.Binary.release release) (fun () ->
+          Eio.Cancel.cancel cancel Exit;
+          (* Let the cancelled caller resume before releasing its reader. *)
+          Eio.Fiber.yield ();
+          check bool "cancellation waits for the owned reader" false (Atomic.get completed)));
+    check bool "caller received cancellation" true !cancelled;
+    check (option string) "cancellation did not change the stored bytes"
+      (Some "retained bytes") (Fs_compat.load_file_opt path)) ()
+;;
+
 let optional_read_cases =
   [ "absence, empty content and aliases", test_optional_read_absence_and_content
   ; "non-directory parent is an error", test_optional_read_non_directory_parent
   ; "parent permission failure is an error", test_optional_read_parent_permission
   ; "leaf permission failure is an error", test_optional_read_leaf_permission
+  ; "opened replacement retains original bytes", test_optional_read_opened_replacement
+  ; "unlinked short read remains an error", test_optional_read_unlinked_short_read
   ]
 ;;
 
@@ -1041,6 +1101,9 @@ let () =
       , List.map (fun (name, test) ->
           test_case name `Quick (with_optional_read_fs (Some (Eio.Stdenv.fs env)) test))
           optional_read_cases )
+    ; ( "optional read cancellation"
+      , [ test_case "caller cancellation joins the owned reader" `Quick
+            (test_optional_read_cancellation_joins_reader ~fs:(Eio.Stdenv.fs env)) ] )
     ; ( "mkdir_p"
       , [ test_case "creates nested dirs" `Quick test_mkdir_p_creates_nested_dirs
         ; test_case "no shell injection" `Quick test_mkdir_p_does_not_shell_inject

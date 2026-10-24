@@ -190,12 +190,13 @@ let read_meta_file_path_presence path : (meta_presence, string) result =
        up in the unreadable-store registry instead of only in a log line. *)
     Ok (Meta_not_current detail)
   in
-  if not (Fs_compat.file_exists path)
-  then (
+  match Safe_ops.read_file_opt_result path with
+  | Error error -> Error (Safe_ops.read_file_error_to_string error)
+  | Ok None ->
     Problem_report_state.clear ~site:Meta_read ~path;
-    Ok Meta_absent)
-  else (
-    match Safe_ops.read_json_file_safe path with
+    Ok Meta_absent
+  | Ok (Some content) -> (
+    match Safe_ops.parse_json_off_fiber ~context:path content with
     | Error e -> Error e
     | Ok json ->
       (match meta_of_json json with

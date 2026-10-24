@@ -370,6 +370,11 @@ let read_file_result path : (string, read_file_error) result =
 let read_file_safe path : (string, string) result =
   read_file_result path |> Result.map_error read_file_error_to_string
 
+let read_file_opt_result path : (string option, read_file_error) result =
+  try Ok (Fs_compat.load_file_opt path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Read_failed { path; detail = Printexc.to_string exn })
+
 (** Safe integer parsing *)
 let int_of_string_safe str = int_of_string_opt str
 

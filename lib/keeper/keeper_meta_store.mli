@@ -10,6 +10,8 @@
     left exactly as it is, the loss is logged as a WARN, and the boot path
     re-materialises the Keeper from its declaration. [Error] when the file
     cannot be read or is not JSON. The read never writes the file.
+    Existence and byte capture use one optional read; a denied or malformed
+    parent path is a read error, not an absent metadata snapshot.
 
     The parse-failure WARN is emitted on state transitions (new failure,
     changed failure reason, recovery) per (site, path), not on every

@@ -202,25 +202,6 @@ let task_projection_to_string = function
   | Full -> "full"
 ;;
 
-(* The [status] filter, decoded once. The tool schema names the same values
-   ([Masc_domain.valid_task_status_strings]); an unknown one is refused rather
-   than answered with an empty page. *)
-let task_status_filter_of_args args : (Masc_domain.Task_status_tag.t option, string) result =
-  match Json_util.assoc_member_opt "status" args with
-  | None | Some `Null -> Ok None
-  | Some (`String raw) ->
-    (match Masc_domain.Task_status_tag.of_string raw with
-     | Some status -> Ok (Some status)
-     | None ->
-       Error
-         (Printf.sprintf
-            "status must be one of %s, got %S"
-            (String.concat ", " Masc_domain.valid_task_status_strings)
-            raw))
-  | Some (`Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
-    Error "status must be a string"
-;;
-
 (* Cluster sub-dispatch via closed sum type — string [name] is converted
    into [task_op] exactly once at the entry boundary; downstream match
    is exhaustive, so adding a new op forces the compiler to flag every
@@ -340,25 +321,23 @@ let handle_keeper_task_tool_with_outcome
   | Some op ->
     match op with
     | Tasks_list ->
-    let include_done = Safe_ops.json_bool ~default:false "include_done" args in
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
     let projection_and_revision =
-      match task_status_filter_of_args args, task_projection_of_args args,
+      match task_projection_of_args args,
             Snapshot_protocol.if_revision args, Keeper_tasks_list_query.of_args args with
-      | Error message, _, _, _ | _, Error message, _, _ | _, _, Error message, _
-      | _, _, _, Error message -> Error message
-      | Ok status_filter, Ok projection, Ok if_revision, Ok selection ->
-        Ok (status_filter, projection, if_revision, selection)
+      | Error message, _, _ | _, Error message, _ | _, _, Error message -> Error message
+      | Ok projection, Ok if_revision, Ok selection ->
+        Keeper_tasks_list_query.lifecycle_filter_of_args ~selection args
+        |> Result.map (fun lifecycle -> lifecycle, projection, if_revision, selection)
     in
     (match projection_and_revision with
      | Error message ->
        Keeper_tool_execution.failure
          ~class_:Tool_result.Policy_rejection
          (validation_error_json message)
-     | Ok (status_filter, projection, if_revision, selection) ->
+     | Ok (lifecycle, projection, if_revision, selection) ->
        let call_filter =
-         { Keeper_tasks_list_cursor.status = status_filter
-         ; include_done
+         { Keeper_tasks_list_cursor.lifecycle
          ; projection = task_projection_to_string projection
          ; selection
          }
@@ -408,25 +387,6 @@ let handle_keeper_task_tool_with_outcome
          ~message:(Yojson.Safe.to_string data)
          data
      | Ok goal_task_ids, Ok { Workspace.observed_backlog = backlog; recovered_from } ->
-       let visible (task : Masc_domain.task) =
-         match status_filter with
-         | Some status ->
-           Masc_domain.Task_status_tag.equal
-             (Masc_domain.task_status_tag task.task_status)
-             status
-         | None ->
-           let is_cancelled =
-             match task.task_status with
-             | Masc_domain.Cancelled _ -> true
-             | ( Masc_domain.Todo
-               | Masc_domain.Claimed _
-               | Masc_domain.InProgress _
-               | Masc_domain.AwaitingVerification _
-               | Masc_domain.Done _ ) -> false
-           in
-           (include_done || not (Masc_domain.task_status_is_done task.task_status))
-           && not is_cancelled
-       in
        let page_key (task : Masc_domain.task) =
          { Keeper_tasks_list_cursor.priority = task.priority
          ; created_at = task.created_at
@@ -435,7 +395,7 @@ let handle_keeper_task_tool_with_outcome
        in
        let matching =
          backlog.tasks
-         |> List.filter visible
+         |> List.filter (Keeper_tasks_list_query.matches_lifecycle lifecycle)
          |> List.filter (Keeper_tasks_list_query.matches selection ~goal_task_ids)
          |> List.sort (fun (left : Masc_domain.task) right ->
            Keeper_tasks_list_cursor.compare_key (page_key left) (page_key right))
@@ -515,12 +475,7 @@ let handle_keeper_task_tool_with_outcome
                    (if Option.is_none recovered_from
                     then "primary"
                     else "recovery_non_authoritative") )
-             ; ( "status"
-               , Option.fold
-                   ~none:`Null
-                   ~some:(fun value -> `String (Masc_domain.Task_status_tag.to_string value))
-                   status_filter )
-             ; "include_done", `Bool include_done
+             ; "lifecycle", Keeper_tasks_list_query.lifecycle_filter_to_yojson lifecycle
              ; "limit", `Int limit
              ; "projection", `String (task_projection_to_string projection)
              ; "selection", Keeper_tasks_list_query.to_yojson selection

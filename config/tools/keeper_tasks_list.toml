@@ -12,24 +12,28 @@ new_tasks highlights recent off-page rows only on the first page; \
 continuation pages do not repeat that discovery window. Narrow by task_ids, \
 assignee, goal_id or a literal query before paging; all supplied filters \
 are ANDed and must stay the same on continuation pages. Use task_ids with \
-projection=full for known tasks instead of scanning the whole backlog."""
+projection=full for known tasks instead of scanning the whole backlog. Exact \
+task_ids lookups include every lifecycle state when status and include_done \
+are both omitted; general discovery excludes done and cancelled tasks. \
+Explicit lifecycle filters keep their stated meaning."""
 [help]
 short_description = "List MASC backlog tasks visible to this keeper."
 when_to_use = "Use before claiming work, checking awaiting verification items, or diagnosing current task state."
 key_constraints = [
-  "include_done defaults to false.",
+  "Exact task_ids default to all lifecycle states when status and include_done are omitted; general discovery defaults to active tasks.",
+  "Explicit include_done=false excludes done and cancelled; true includes done but still excludes cancelled unless status=cancelled is selected.",
   "Use status to narrow the list when inspecting a specific lifecycle state.",
   "When truncated is true, pass next_cursor as cursor with the same filter to read the rest; the last page carries no next_cursor.",
 ]
 details_markdown = "Rows: id, title, priority, created_at, status, assignee; projection=full adds the task body."
-examples = ["task_ids=['task-123'] projection='full' include_done=true", "goal_id='goal-123' projection='compact'", "query='release' status='todo' limit=20", "status='todo' limit=20 cursor=<next_cursor from the previous page>"]
+examples = ["task_ids=['task-123'] projection='full'", "task_ids=['task-123'] include_done=false", "goal_id='goal-123' projection='compact'", "query='release' status='todo' limit=20", "status='todo' limit=20 cursor=<next_cursor from the previous page>"]
 
 [[params]]
 name = "task_ids"
 type = "array"
 items = { type = "string" }
 min_items = 1
-description = "Exact task IDs to retrieve in one call. Existing status/include_done rules still apply; use status=done or include_done=true for completed tasks, status=cancelled for cancelled tasks."
+description = "Exact task IDs to retrieve in one call. With status and include_done both omitted, returns requested tasks in every lifecycle state, including done and cancelled. Explicit lifecycle filters still apply."
 
 [[params]]
 name = "assignee"
@@ -59,7 +63,7 @@ description = "Filter by task status"
 [[params]]
 name = "include_done"
 type = "boolean"
-description = "Include completed tasks (default: false)"
+description = "Explicit false excludes done and cancelled; true includes done but excludes cancelled. An explicit status takes precedence. When omitted, exact task_ids lookups include every state; general discovery excludes done and cancelled."
 
 [[params]]
 name = "limit"

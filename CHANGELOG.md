@@ -2,6 +2,195 @@
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-10-23
+
+### Upgrade notes
+
+- 명시 Memory 후보는 이제 keeper-librarian Add-on 으로만 처리합니다. Add-on 이 붙어 있지 않으면 후보는 큐에 남고, Keeper 로그에 `Librarian explicit admission is off: no keeper-librarian Add-on is attached; N candidates wait` 가 대기 건수가 바뀔 때마다 한 줄 남습니다 (#45093).
+
+### Fresh state required
+
+- The automation cleanup descriptor now records the instance's profile
+  directory, and a descriptor written by an earlier build is not read. The
+  deploy preflight refuses each native claim slot under
+  `.masc/lane-addons/native-claims/` whose current instance history carries
+  such a descriptor (decoder `Browser_addon_socket.check_retained`), and lists
+  the paths to set aside with it: the slot, and the binding and observations
+  of the instance it names. Stop the server. For each refusal, end any process
+  that still holds a file under `profiles/` of the `mb-…` allocation the
+  history names in `cleanup_context.directory` (`lsof +D <allocation>/profiles`);
+  an earlier build could leave a relaunched Gecko browser there (#45187). Then
+  move aside every path the preflight lists and that allocation, and start the
+  new build (#45403).
+
+### Added
+
+가이드 확인 기록: 작성자가 2026-10-23 PO의 컷 head `2a9f660f086e9cb8e9b0b423694d0fc83c5ad94c` 검색 보고를 확인했습니다. 보고의 범위는 전체 git tree 경로와 Markdown 경로 키워드(open_window, cookie, storage, ump, alphatex, vst, role, portrait, prompt, fleet, accessory), main의 관련 Markdown code search, 후보 문서 본문입니다. ‘가이드 없음’은 이 범위에서 사용 가이드를 찾지 못했다는 뜻입니다. 설계 설명만 있는 항목은 사용 가이드로 세지 않습니다. 검색 원문: MASC Board `p-ac45c699902228e98776559f2ac96584`, PO 댓글 `c-2b014ac505346d7d78b7e97ca391f082`(2026-10-23 10:40 UTC).
+
+- Librarian Addon의 명시 후보 실행을 위해 원래 Keeper·Memory·후보·prompt·schema를 보존하고, host의 판단과 Gate 평가를 같은 원본으로 복원하는 포트를 추가합니다 (#45094).
+- `masc_browser_act` takes `open_window`: it opens a new browser window and returns its tab's `tabId`. It works on the owned Gecko browser and on a connected BiDi Firefox (a background window the connection owns); the extension and Stagehand refuse it. ([#45271](https://github.com/jeong-sik/masc/pull/45271)) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- `set_viewport` on `masc_browser_interact` works on the owned Firefox: the window is resized to the asked viewport plus the browser's own chrome, measured again and corrected, and a size below Firefox's smallest window is refused with the size the page kept. Giving neither `width` nor `height` restores the window's first size. ([#45276](https://github.com/jeong-sik/masc/pull/45276)) Usage: [사용 가이드](docs/design/browser-lane.md).
+- `masc_browser_read mode=cookies` on the owned Firefox also lists the page origin's `localStorage` and `sessionStorage` key names and its IndexedDB database names under `storage`, with counts (at most 100 names per area, each cut at 200 characters). No value is read. ([#45278](https://github.com/jeong-sik/masc/pull/45278)) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조. 참고: [설계 설명](docs/design/browser-capability-parity.md).
+- `masc_browser_act` takes `set_cookie` and `delete_cookie` on the owned Firefox. A cookie is set for the tab's own page host (the domain is not an argument), lives at most 7 days (a session cookie without a lifetime), and holds at most 4096 bytes; the value is never returned. Live BiDi, the extension and Stagehand refuse it. ([#45279](https://github.com/jeong-sik/masc/pull/45279)) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조. 참고: [설계 설명](docs/design/browser-capability-parity.md).
+- `masc_browser_act` takes `set_emulation` and `clear_emulation` on the owned Firefox: a tab's reported location (latitude and longitude, with its geolocation permission), language tag and IANA time zone. They go over the session's BiDi connection. Firefox 158 cannot reset a locale or time zone with null, so clearing sets back the values the tab had before. Clearing restores overrides only and preserves existing permissions; a location grant remains for the owned session. Live BiDi, the extension and Stagehand refuse it. ([#45283](https://github.com/jeong-sik/masc/pull/45283)) Usage: [사용 가이드](docs/design/browser-lane.md).
+- Phrase and imported MIDI projects can save ordered VST effect inserts with frozen presets, edit/reorder/remove them with undo, and use the same verified chain for WAV rendering, arrangement backing and live MIDI monitoring. Residual buffered output is refused explicitly. (#45312) Usage: [사용 가이드](tools/vst/README.md).
+- Edit native UMP event times and explicit note lengths in decimal source seconds with exact host-tick rounding, fixed source zero and read-only clock inspection. (#45381) Usage: [사용 가이드](tools/alphatex/UMP-SOURCE.md).
+- Explain decimal-second native UMP time editing, fixed source clocks and quantization, with independent numeric and source TUI save/reopen evidence. (#45382) Usage: [사용 가이드](tools/alphatex/UMP-SOURCE.md).
+- Carry an explicit optional product role through Addon configuration, catalog, runtime inventory and TUI decoding while preserving worker execution identity across display-only category edits. (#45385) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- Declare primary product roles for all seventeen shipped Addon packages and document current declaration versus original worker categories. (#45386) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- Capture the immutable original of one verifier review attempt — subject, question and lookup grants fixed as data, so a worker can only answer the review and cannot reapply another verification's evidence. (#45390)
+- Edit native UMP event positions and explicit note lengths in fractional quarter-note beats using the opening arrangement tempo, with exact source-clock rounding. (#45393) Usage: [사용 가이드](tools/alphatex/UMP-SOURCE.md).
+- Group Addon inventory, installations, workers and package discovery by explicit product role; preserve the original management target across filtering, reclassification and same-path installation replacement. (#45394) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- Group TUI All Lanes by product role with nonselectable headers, stable original installation/incarnation targets and safe keyboard, search, refresh and stale-frame mouse selection. (#45395) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- Support native zero-duration pointer drags on agent-owned ego pages through the shared browser pointer plan; see the [browser lane guide, What each live connection serves](docs/design/browser-lane.md#what-each-live-connection-serves). #45399
+- Show external Task owners the public completion submission tool, authenticated owner and lifecycle actions in fleet health advisory rows. (#45409) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- `BrowserAct` `block_requests` makes every request from a tab and its frames to the listed hosts fail as a network error on an automation Firefox, through a WebDriver BiDi intercept on that tab. `unblock_requests` lifts that tab's blocks, and closing the session lifts them all. Live BiDi, ego and Stagehand refuse both actions before any effect (#45413) Usage: [사용 가이드](docs/design/browser-lane.md)..
+- `BrowserAct` `back`, `forward` and `reload` work on an ego connection, on the pages an agent opened in its task space. Reload is ego's `page.reload()`; back and forward read the tab's history through `page.cdp`, are refused before any effect when there is no entry that way, and answer once the tab is on that entry and its document has loaded. The receipt matches the live BiDi connection's (#45429). Guide: `skills/browser-lanes/references/connection.md`.
+- Document an eight-bar TUI experiment connecting phrase composition, close and
+  drop-2 voicings, candidate harmony analysis, independent bass/drum lanes,
+  stored SoundFont instruments, and full arrangement MIDI/WAV export (#45434) Usage: [사용 가이드](tools/alphatex/MUSICAL-LAB.md)..
+- Expose invalid prompt surface values and source paths in catalog authoring diagnostics, including file-only group slots. (#45439) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- Exercise HTTP client lease cancellation and partial handoff failures with deterministic Eio mutex and promise scenarios. (#45446)
+- Verify strict delivery-specific frontier records across durable settlement, reread, stale-owner rejection and resume. (#45459)
+- `BrowserRead` `mode=snapshot` returns ego lite's own accessibility snapshot on an ego connection, for a page an agent opened in its task space: the tree with the ref (`ref=12`) ego's element actions accept on each actionable node. `snapshotScope` is `viewport` (default), `full_page`, or `subtree` with `root`, a ref an earlier snapshot of the same page printed. The text is cut at `maxChars` without splitting a surrogate pair, with `truncated` and the full length in `chars`. Other connections refuse it before any effect (#45461). Guide: `skills/browser-lanes/references/connection.md`.
+- Cover nested oneOf outcomes and the observation boundary between pure Add-on hook validation and observed host validation. (#45475)
+- Browse Keeper portrait accessories by ownership, affordability and slot, compare try-on/current outfits, and prepare an editable price-bounded Keeper buy/equip request while preserving existing chat drafts. (#45481) Usage: [사용 가이드](docs/TUI-GUIDE.md).
+- An optional `hitl-auto-judge` Add-on package declaration retains original HITL judgment Exact requests (output `judgment`, tool `judge`). Nothing dispatches to it yet, so the in-process HITL judge and the host-owned decision, terminalisation and consumption are unchanged (#45484) Usage: [사용 가이드](addons/hitl-auto-judge/README.md)..
+- An ego connection reads and answers the JavaScript dialogs of the pages an agent opened in its task space. A listed row of a managed page carries the dialog blocking it, as a live BiDi row does; `BrowserAct` `accept_dialog` (with `text` for a prompt) and `dismiss_dialog` answer it with the dialog in the receipt, and are refused before any effect when none is open. A click or key input that opens a dialog answers with it, and a DOM input the dialog stopped is a partial effect with it. While one is open, reads, moves and input on that page are refused before any effect; closing the tab is not (#45486). Guide: `skills/browser-lanes/references/advanced.md`.
+- Exercise a committed Board post and failed Activity Graph storage through MCP and Agent-Core result consumers. (#45490)
+- Decode prompt authoring diagnostics in the Dashboard catalog, distinguishing absent reports, clean reports and malformed diagnostic payloads. (#45496) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+- Show prompt metadata authoring errors, authored values and source files in the Dashboard list and editor while preserving body overrides. (#45497) 가이드 없음 — 검색 범위는 위 가이드 확인 기록 참조.
+
+### Changed
+
+- Librarian의 명시 후보를 Addon 원본 요청으로 실행하고 host의 absorption·Memory receipt·ACK로 연결합니다. 원래 실행 증거와 첫 Gate 저장 복구를 검사하며 purge는 남은 모델 실행도 취소하고 기다립니다 (#45093).
+- 공유 Addon worker에서 요청 하나의 오류가 다른 Keeper의 처리를 막지 않게 하고, 대기 중인 원본과 새 후보 사이의 반복 self-wake를 방지합니다 (#45093).
+- Retain complete original Librarian input data without provider/checkpoint projections, including nested parsed tool results, ordered speaker metadata and full working contexts. Explicit-candidate admission keeps its separate purpose checks (#45247).
+- Preserve unfinished Librarian work as Pending without advancing Memory cursors or acknowledgements. Suspend later phases of the same wake and expose the distinct waiting state in Dashboard and TUI decoders (#45298).
+- Resolve completed-history input, policy, prompts and schema once for both the original synchronous pass and immutable Addon preparation. (#45322).
+- Retain same-read counterpart source rows, external deduplication evidence and read-only cursor observations without granting ACK authority. (#45323).
+- Capture complete checkpoint and official-client source selections for the actual durable consumer; bind original messages to checkpoint bytes and preserve rich payloads separately. (#45324).
+- Preserve the complete original history source while rebasing only current Memory, and retain independent full successor intent/acknowledgement facts. (#45324).
+- Retain and resume original completed-history Addon requests with separate workspace, Memory and runtime identities; require actual host execution proof before publication. (#45325).
+- Bind fresh-basis requests to their exact predecessor and require the parent’s complete confirmed successor before dispatch. (#45325).
+- Share the original absorption evaluation journal between admission and completed-history adapters while preserving independent purposes and host proof checks. (#45326).
+- Reject replacement-publication events as unsupported original Gate history. (#45326).
+- Discover retained original request scopes through strict owned storage even when Keeper metadata is absent. (#45327).
+- Expose derive_memory for completed-history proposals beside admit_memory; reject cross-purpose calls and preserve both original requests through worker restart. (#45328).
+- Authorize completed-history provider work against its full original host request and wake that same Keeper after actual result delivery or Addon reattachment. (#45335).
+- Recheck the complete acknowledged successor at initial host authorization and actual provider dispatch. (#45335).
+- Revalidate retained source prefixes and compare the complete original Memory basis under the actual disposition write lock before creating new effects. (#45336).
+- Expose typed locked basis supersession separately from uncertain disposition storage failures. (#45336).
+- Publish original history through captured absorption judgments, source locks and actual Memory receipts; recover ACK and both source positions before durable Finished. (#45337).
+- Close only known prepublication Memory-basis conflicts while letting actual original receipts take precedence. (#45337).
+- Route production completed-history work through the configured Addon, resume originals before reselection, and suspend later phases on pending or blocked original publication. (#45338).
+- Resume a single durably linked fresh-basis successor; refuse missing confirmed children and retain actual race and child-loss integration scenarios. (#45338).
+- Keep terminal refusal reasons visible while permitting fresh selection of unread history, and report unavailable Addon attachments without acknowledging source or inventing Memory effects. (#45338).
+- Publishing the exact-output registry can now count an Addon lane toward a required service: an Addon lane whose exact output carries the service's id (for example `hitl_auto_judge_exact`) and holds an admitted slot serves it only when the caller also names that id in the new `addon_served_lane_ids`, which defaults to none. A `runtime.toml` table with the right name is never enough on its own, because it loads without any installation behind it. The registry keeps the list whole and a replacement inherits it. Nothing passes the list yet, so every required service still needs its builtin slot until a later layer attests an Addon that dispatch routes to (#45356).
+- 실제 Candle Python worker의 도구를 Keeper가 검색·로드·호출하는 deferred 경로와 Off·재연결 시 원래 요청 및 권한 보존을 검증하는 통합 검사를 추가합니다 (#45357).
+- Librarian 스택을 최신 요청 저장 계약에 맞춥니다. Gate 재시도는 본문을 먼저 보존한 뒤 digest intent·원본 레코드·ACK 순서로 복구하고, 목록과 본문 복원 및 권한 불확실성 처리를 구분합니다 (#45357).
+- The HITL Auto Judge request now has a named immutable original, `Hitl_judge_original`: the approval id, input hash and sequence with the system prompt, output contract and context bundle, encoded with a closed field set and a digest that ignores key order. It carries no authority or effect, and the approval's decision stays with the host. The worker builds its three judgment messages through the same module, so the original and the request it sends cannot drift. Nothing routes a request through the original yet, so behavior is unchanged (#45365).
+- A HITL judge original can now be retained in the host's original-request store, `Lane_addon_tool_request_owner`, one record per approval attempt (`<approval_id>#<sequence>`) with the request body stored once by digest and a summary of the approval id, input hash and sequence. Restoring checks the request, the attempt identity, the summary and the destination, and a second input for the same attempt is a conflict. It records what was asked and nothing that authorises an effect; the decision, terminalisation and consumption stay with the approval queue. Nothing retains an original yet, so behavior is unchanged (#45369).
+- Share semantic pointer resolution, resolved URL decoding and default drag waypoints across native browser adapters. #45398
+- The Gecko automation backend runs each session on its own profile, which
+  masc creates under `<lane-addons>/gecko-profiles/` and passes to Firefox with
+  `-profile`, and removes under that profile's lock when the session ends.
+  geckodriver no longer gets a fixed Marionette port, so each browser picks
+  its own. A session whose browser reports another `moz:profile` is refused
+  (#45403).
+- Distinguish the TUI feature inventory from Plugins, preserve original navigation targets, and show explicit reselection notices. (#45415)
+- Publish builtin UI roles once from the server inventory for Dashboard and TUI; retain package role ownership and exact action identities. (#45416)
+- Exercise generated media Origin admission and bearer read authority through real HTTP route scenarios. (#45420)
+- Group the TUI package browser by manifest role, with one presented order for rendering, selection, Enter/Right and refresh. #45457
+- Remove the synthetic Dashboard Performance playground and static Cockpit/Inspector overview pages. Inspector opens server configuration directly, and retained focus mode keeps its exit control and full content width (#45466).
+- An ego connection runs all its commands in one `ego-browser nodejs` process instead of one per command. The process connects back to a Unix socket in the connection's private directory and answers each script over it, so a page's dialog and event state in ego's SDK lasts from one command to the next; on ego lite 0.6.0.16 a dialog that outlived its process made every later command to that page time out. A command that does not answer in time, writes past the output limit or is cancelled still stops the process with its group, and the next one starts another (#45485). Guide: `docs/rfc/RFC-browser-live-ego.md`.
+- Show the declared worker service and role in the TUI install preview, without inferring either from the other. #45488
+- Clarify that metric writers prepare child directories beneath an already initialized workspace ownership root. (#45506)
+- Restore release-record omissions for previously merged Add-on validation changes. (#45517)
+- Document pure Add-on hook validation and the caller's observation responsibility. (#45518)
+
+### Fixed
+
+- Workspace Curator 와 Librarian 이 같은 submit-once 모듈로 원본 요청을 worker 에 넣습니다. host 가 보내기 전에 거절한 제출은 "결과 모름"으로 남지 않고 다음 pass 에 다시 제출됩니다 (#45094).
+- VST sessions reject malformed, unknown and duplicate completions, preserve failed-host outcomes against late replies, and enforce the 16 MiB response limit in UTF-8 bytes across stream chunks (#45286).
+- The isolated monitor-worker fixture includes the quantization and captured-time dependencies required by its copied runtime modules (#45286).
+- Failed VST sessions include their retained stderr diagnostics when the host closes, while preserving the original error, cause and code (#45376).
+- Preserve the original Connector event identity in durable Keeper chat, Dashboard provenance, and TUI history without inventing operation or turn ownership. (#45378)
+- Acknowledge Slack ingress only after durable acceptance of its original route and input; recover the earliest recorded route on retry and preserve failures without acknowledgement. (#45379)
+- Include timing and note-transform modules in isolated Worker lifecycle test fixtures. (#45381)
+- `masc browser-lane-setup` commits its runtime.toml tables one after another. A table refused after another was written now prints the written tables and their next steps before the refusal, which names its own table, and the setup wizard no longer says nothing was written. A replan refuses an automation or ego table that someone else wrote since the plan instead of overwriting it (#45389).
+- The browser capability scenario test expects the owned Firefox driver to claim `set_viewport`, which #45276 added. It failed on main because it still asserted the opposite (#45402).
+- Declare browser emulation numeric bounds as TOML floats so tool schema initialization does not abort deployment preflight and application startup. #45405
+- `masc` built from a main that carries #45283 starts again: the `masc_browser_act` tool definition writes the `latitude`, `longitude` and `accuracyMeters` bounds as floats, which the definition loader requires (#45406).
+- Preserve typed Task submission denials and return actionable claim recovery without losing owner resubmission or verification supersede behavior. (#45407)
+- Decide Task submission ownership under the backlog lock instead of a separate tool-layer snapshot check. (#45408)
+- A Gecko browser that leaves its automation worker, for example by
+  relaunching itself to apply a staged update, no longer blocks the browser
+  Add-on. On each configuration pass the host looks at the Gecko profiles of
+  instances whose record says the allocation was released, or that no record
+  names. It removes a free profile under its lock, sends SIGTERM to the
+  process that holds one, and SIGKILL if the same process still holds it 70 s
+  later. A profile it keeps is an issue of the configuration reading. The
+  allocation is released without a worker-written receipt (#45411).
+- Restore Dashboard test typechecking by removing unsupported role-query options while preserving exact accessible-name matching. (#45412)
+- Group Plugin Inspect by role and preserve exact worker/installation targets across Flow, technical, history and action-menu transitions. (#45417)
+- Apply the shared admitted-Origin policy to generated media responses while preserving authenticated read authority. (#45419)
+- Scan original Task history in bounded 64 KiB line slices while preserving physical offsets, continuation anchors, captured prefixes and ordered source failures. #45422
+- Let Task history reads finish under their existing view/workspace cancellation scope instead of failing at the shared ten-second HTTP deadline. #45423
+- Enumerate classified and unclassified Plugin category drift states explicitly so the TUI compiles with fragile-match warnings treated as errors. #45426
+- Open a new phrase from an empty or unselected arrangement. Missing clip
+  metadata no longer throws before the phrase editor opens; explicit and
+  matching-source MIDI pattern selections retain their existing behavior (#45432).
+- A Gecko automation worker that can no longer address its browser session
+  now ends instead of refusing every command until it is detached: a session
+  creation that raised, a command timeout included, failed in transport or
+  answered without a session id, an `invalid session id` reply, or a driver
+  that exits while the worker serves. A creation the driver refused is not a
+  loss, and a loss during the worker's own stop does not interrupt it. The
+  runtime replaces the worker, and the host's Gecko profile pass ends any
+  browser it left (#45433).
+- Multi-tool Exact workers retain the tool identity of bodyless admission refusals and reject reads or retries through another tool, including after restart. (#45437)
+- Retain invalid prompt surface metadata and its declaring file as typed authoring diagnostics without interrupting prompt rendering or overrides. (#45438)
+- Pass the retained request summary when dispatching a captured Add-on tool request, fixing a partial-application compile error (#45444).
+- Transfer pooled HTTP client cleanup ownership only when the idle queue accepts the client or its daemon receives a close signal, including cancellation during release. (#45445)
+- Preserve realtime voice session intent and history when its bridge endpoint is unavailable, and report retained suspended sessions as inactive in Keeper responses (#45448).
+- Keep an uncertain Librarian host result on its original unread-source frontier, preventing a later wake from creating another provider request for the same pending work (#45451).
+- Require owner readiness before a supervisor promotes a runtime or reports it healthy, and document store recovery boundaries. (#45455, #37900)
+- Keep canonical snapshot hashes only on source-guard frontiers, removing unused whole-history encoding and hashing from Codex and Claude Code turns. (#45458)
+- Restore Addon test compilation by declaring the filesystem dependency, covering replacement journal events and connecting actual MCP fixture exit observers (#45462).
+- Exact Add-on workers (Workspace Curator, Candle Appraiser, Keeper Librarian) no longer read and hold every retained request body on each submit, listing and observation. A worker reads its store once at start, one record at a time, then reads only pending requests, so finished classification records no longer push the Curator worker toward its 128 MiB limit. Package revisions move to 0.1.2, 0.1.3 and 0.2.1 (#45469).
+- Keep speculative Add-on schema validation pure so losing oneOf alternatives do not emit rejected logs, counters or span events. (#45474)
+- Declare the Skill configuration library used by the actual deferred Addon worker test so the selected fixture can compile. #45477
+- Enumerate native-session context delivery and acknowledgement cases explicitly so resume validation compiles with fragile-match warnings treated as errors, preserving its existing canonical snapshot checks. #45480
+- Preserve completed Board mutations when Activity Graph projection fails; report the failed projection separately in result metadata. (#45489)
+- Initialize the Board/Task regression fixture's workspace before recording its authoritative Task metric. (#45504)
+- Honor operator-retained Browser Add-on allocations before decoding backend configuration, so older persisted payloads cannot block an explicit handoff or subsequent recovery. Preserve instance, child-settlement and allocation-identity checks. (#45511)
+
+### Documentation
+
+- Explain fractional native UMP beat editing, project-tempo snapshots and exact clock rounding, with source TUI save/reopen evidence and independent numeric verification. (#45396)
+- Propose typed causes for unknown Exact outcomes and interrupted Curator recovery, including consumer contracts and deployment questions (#45431).
+- Align the browser ownership RFC with the Gecko implementation and propose a two-deployment hard cut for the backend split (#45441).
+- Refresh the original 54-item Addon worklist with bounded source, failed execution and merge evidence while preserving every completion criterion (#45449).
+- Record the Librarian terminal-unknown frontier repair, independent source review and authored actual-worker recovery coverage separately from execution results (#45452).
+- Preserve the actual main compile failures, five-file fixture repair identity and independent source review separately from unexecuted behavior checks (#45463).
+- Record Dashboard page-removal scope, retained focus-mode recovery, focused checks and bounded browser observations (#45467).
+- Preserve the original selected compile failure, one-line repair boundary and independent source review for the deferred Addon worker fixture. #45478
+- Explain Candle wardrobe filters, outfit comparison and the Keeper-owned chat request flow, including preserved drafts and the observed purchase price limit. (#45482)
+
+### Internal
+
+- Add `masc.private_browser_profile`, which captures the process that holds a
+  masc-private browser profile's lock and is the only module that may send it
+  SIGKILL. A captured holder keeps no descriptor for the lock file, so releasing
+  it never drops masc's own lock, and Chrome's private profile removal now lives
+  there as well (#45391).
+- `Workspace_memory_revision` stores a ledger or Briefing state once under the SHA-256 of its bytes in `workspace-memory/revisions/<kind>/`, and reads it back only when the bytes hash to the name, decode as that kind and re-encode to the same revision. Writes and reads stay under the workspace base and refuse a symbolic link below it. Nothing calls it yet. The ledger digest now has one definition, `Workspace_memory_ledger.sha256`, and the Briefing digest moved from the execution capture to the revision module; digest values do not change (#45454).
+
+### Known issues
+
+Full regression on this v0.64.0 candidate: **미실행**. The latest completed full regression is [39907019462](https://github.com/jeong-sik/masc/actions/runs/39907019462), head `76aa2393285f3a27a2fe7f994478777371103c48`, TARGET_SUITES empty (full regression), result **failure**. Its 20 failing suites and historical classification are recorded in [v0.63.0 Known issues](#0630---2026-10-23). Those failures have not been rerun on this candidate; neither continuing failure nor resolution is claimed. Candidate RC checks are a separate publication gate and do not establish full regression success.
+
 ## [0.63.0] - 2026-10-23
 
 ### Upgrade notes

@@ -80,7 +80,7 @@ let test_canonical_response_preserves_complete_checkpoint () =
          (after.messages = original.messages @ [Core.Types.user_msg "[Input declined] Original question?"])
      | Core.Hooks.Timeout ->
        check bool "explicit timeout is distinct and preserves original history" true
-         (after.messages = original.messages @ [Core.Types.user_msg "[Input timed out] Original question?"]));
+         (after.messages = original.messages @ [{ (Core.Types.user_msg "[Input timed out] Original question?") with origin=Core.Types.Recovery_instruction }]));
     match prepare env (exact after) owned response with
     | Error (Response.Input_not_current Core.Agent_input_request.No_pending_request) -> ()
     | Error (Source_changed _ | Input_checkpoint_failed _ | Resume_refused _ | Input_not_current Request_not_current)

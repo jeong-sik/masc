@@ -359,6 +359,31 @@ let mark_completed t ~run_id ~outcome ~evaluated_verdict ~tools ?evaluator_runti
   | `Persistence_failed failure -> raise (Sys_error failure.detail)
 ;;
 
+let rec publication_source_error = function
+  | Store.Volatile_store -> "A volatile Goal registry cannot confirm durable publication"
+  | Not_initialized -> "Goal registry startup authority has not been established"
+  | Incomplete_startup _ -> "Goal registry startup history was incomplete or malformed"
+  | Non_regular_history _ -> "Goal registry history is not a regular file"
+  | Invalid_history detail | Read_failed detail -> detail
+  | Incomplete_history -> "Goal registry history has an incomplete tail"
+  | Snapshot_changed -> "Goal registry history changed during observation"
+  | Read_cleanup_failed {primary;detail} ->
+    (match primary with None -> detail | Some error -> publication_source_error error ^ "; " ^ detail)
+;;
+
+let mark_completed_confirmed t ~run_id ~outcome ~evaluated_verdict ~tools ?evaluator_runtime ~elapsed_s () =
+  let completion = Payload.Review_completion
+    {Payload.outcome; evaluated_verdict; evaluator_runtime; elapsed_s; tools} in
+  match Store.reconcile_current t ~id:run_id ~decide:(function
+    | None -> Error ()
+    | Some _ -> Ok (Store.Complete_original completion, ())) with
+  | Ok () -> notify_changed (); `Completed
+  | Error (Store.Decision_refused ()) -> `Unknown
+  | Error (Current_source_unavailable error) -> raise (Sys_error (publication_source_error error))
+  | Error (Invalid_change detail) -> raise (Sys_error detail)
+  | Error (Publication_failed failure) -> raise (Sys_error failure.detail)
+;;
+
 (* Registration and completion are two appends under the registry's own
    mutation lock, so the row is terminal on disk as soon as this returns and
    replay ([replayed_running_completion = None]) keeps it. The id was just

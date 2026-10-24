@@ -3,6 +3,7 @@ module V = Goal_verifier_original
 module R = Goal_verification_run_registry
 module P = Lane_addon_request_progress
 module AR = Task.Anti_rationalization
+module Observer = Lane_addon_request_receipt
 let ( let* ) = Result.bind
 type error = Unavailable of string | Invalid_original of string | Conflict of string
 let error_to_string = function Unavailable d | Invalid_original d | Conflict d -> d
@@ -70,7 +71,44 @@ let same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s 
   expected.evaluated = evaluated_verdict && expected.runtime = evaluator_runtime
   && expected.tools = tools && expected.elapsed = elapsed_s
 
-let publish ~registry retained ~outcome =
+let run_row retained status : R.run =
+  let run = W.run_identity retained in
+  let subject = V.subject (W.original retained) in
+  {run_id=run.run_id; goal_id=subject.goal_id; request_id=subject.request_id;
+   criterion=subject.criterion; review_kind=R.Proof; authority_actor;
+   started_at=run.started_at; status}
+
+let completion_payload retained expected outcome =
+  R.run_to_yojson (run_row retained (R.Completed {outcome;
+    evaluated_verdict=expected.evaluated; evaluator_runtime=expected.runtime;
+    tools=expected.tools; elapsed_s=expected.elapsed}))
+
+let observer_intent ~store retained stage payload =
+  let* payload = invalid (Lane_addon_action.canonical payload) in
+  let observer = P.observer (W.progress retained) in
+  let publication = match stage with Observer.Registration -> observer.registration
+    | Completion -> observer.completion in
+  match publication with
+  | Observer.Pending receipt | Acknowledged receipt ->
+    if Yojson.Safe.equal receipt.payload payload then Ok (retained,receipt)
+    else Error (Conflict "Goal observer intent differs from its exact original publication")
+  | Unobserved ->
+    let* receipt = invalid (Observer.make ~observed_at:(Time_compat.now ()) ~payload) in
+    let* retained = worker (W.record_observer ~store ~retained (Observer.Intended (stage,receipt))) in
+    Ok (retained,receipt)
+
+let observer_ack ~store retained stage (receipt : Observer.receipt) =
+  let observer = P.observer (W.progress retained) in
+  let publication = match stage with Observer.Registration -> observer.registration
+    | Completion -> observer.completion in
+  match publication with
+  | Observer.Acknowledged observed when observed.digest=receipt.digest -> Ok retained
+  | Pending observed when observed.digest=receipt.digest ->
+    worker (W.record_observer ~store ~retained (Observer.Recorded (stage,receipt.digest)))
+  | Unobserved | Pending _ | Acknowledged _ ->
+    Error (Conflict "Goal observer acknowledgement differs from its original intent")
+
+let publish ~store ~registry retained ~outcome =
   let* () = ensure_registered ~registry retained in
   let* expected = completion ~registry retained in
   let* () = match outcome, expected.evaluated with
@@ -82,23 +120,42 @@ let publish ~registry retained ~outcome =
       same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s
       && (observed = outcome || observed = R.Committed) in
   let* prior = read_registry ~registry retained in
+  let* publication = match P.phase (W.progress retained),outcome with
+    | P.Finished _,R.Committed ->
+      let* retained,registration = observer_intent ~store retained Observer.Registration
+        (R.run_to_yojson (run_row retained R.Running)) in
+      let* retained,completion = observer_intent ~store retained Observer.Completion
+        (completion_payload retained expected outcome) in
+      Ok (Some (retained,registration,completion))
+    | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _),
+      (Reviewed | Committed | Superseded _ | Deferred _ | Raised _ | Review_cancelled _) -> Ok None in
   let record_completion () =
-    try R.mark_completed registry ~run_id:(W.run_identity retained).run_id ~outcome
+    try match R.mark_completed_confirmed registry ~run_id:(W.run_identity retained).run_id ~outcome
       ~evaluated_verdict:expected.evaluated ~tools:expected.tools ?evaluator_runtime:expected.runtime
-      ~elapsed_s:expected.elapsed (); Ok ()
+      ~elapsed_s:expected.elapsed () with
+    | `Completed -> Ok true
+    | `Unknown -> Error (Unavailable "Goal run vanished before completion publication")
     with Sys_error detail -> Error (Unavailable detail) in
-  let* () = match prior with
-    | Some row when confirmed row -> Ok ()
+  let* recorded = match prior with
+    | Some row when confirmed row ->
+      (match publication with Some _ -> record_completion () | None -> Ok false)
     | Some {R.status=R.Completed {evaluated_verdict; evaluator_runtime; tools; elapsed_s; _}; _} ->
       if Option.is_some evaluated_verdict
           && not (same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s)
       then Error (Conflict "Goal registry already retains a different structured judgment or its observations")
       else record_completion ()
     | None | Some {R.status=R.Running; _} -> record_completion () in
-  let* observed = read_registry ~registry retained in
-  match observed with
-  | Some row when confirmed row -> Ok ()
-  | None | Some _ -> Error (Unavailable "Goal completion receipt not observed for its exact original")
+  let* () = if recorded then Ok () else
+    let* observed = read_registry ~registry retained in
+    match observed with
+    | Some row when confirmed row -> Ok ()
+    | None | Some _ -> Error (Unavailable "Goal completion receipt not observed for its exact original") in
+  match publication with
+  | None -> Ok ()
+  | Some (retained,registration,completion) ->
+    let* retained = observer_ack ~store retained Observer.Registration registration in
+    let* _ = observer_ack ~store retained Observer.Completion completion in Ok ()
 
 let needs_recovery ~registry retained =
   let terminal ~conflicted =
@@ -123,7 +180,14 @@ let needs_recovery ~registry retained =
      | Some {R.status=R.Completed {evaluated_verdict; evaluator_runtime; tools; elapsed_s; _}; _} ->
        Ok (not (same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s))
      | None | Some {R.status=R.Running; _} -> Ok true)
-  | Finished _ -> terminal ~conflicted:false
+  | Finished _ ->
+    (match (P.observer (W.progress retained)).completion with
+     | Observer.Acknowledged receipt ->
+       let* expected = completion ~registry retained in
+       let* payload = invalid (Lane_addon_action.canonical (completion_payload retained expected R.Committed)) in
+       if Yojson.Safe.equal receipt.payload payload then Ok false
+       else Error (Conflict "Goal final publication acknowledgement differs from its original proof")
+     | Unobserved | Pending _ -> terminal ~conflicted:false)
   | Conflicted _ -> terminal ~conflicted:true
 
 let evidence_json items = `List (List.map Workspace_verification_store.submitted_evidence_item_to_yojson items)
@@ -177,7 +241,7 @@ let commit_proof ~config ~store ~registry retained =
     "criterion", Goal_store.criterion_to_yojson subject.criterion;
     "verification_run_id", `String run.run_id; "authority_actor", `String authority_actor;
     "evidence", `String evidence] in
-  let* () = publish ~registry retained ~outcome:R.Reviewed in
+  let* () = publish ~store ~registry retained ~outcome:R.Reviewed in
   let read_goal callback =
     Goal_store.transact_goal config ~goal_id:subject.goal_id (fun goal ->
       let* record = Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id in
@@ -269,4 +333,8 @@ let commit_proof ~config ~store ~registry retained =
           | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
           | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> Error (worker_error error))
        | Ok None | Error _ -> Error (worker_error error)) in
-  publish ~registry retained ~outcome:R.Committed
+  let* current = worker (W.load ~store ~installation_id ~package_id
+    ~goal_id:subject.goal_id ~request_id:subject.request_id ~attempt:(V.attempt original)) in
+  match current with
+  | Some retained -> publish ~store ~registry retained ~outcome:R.Committed
+  | None -> Error (Unavailable "Goal original vanished after proof commitment")

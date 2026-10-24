@@ -1,4 +1,15 @@
 open Masc
+(* Exercise host publication against an actual replayed durable registry.
+   The global registry is process-wide, as in the production bootstrap. *)
+let () =
+  let directory = Filename.temp_dir "goal-review-registry-" "" in
+  at_exit (fun () -> Fs_compat.clear_fs (); Fs_compat.remove_tree directory);
+  let registry = Goal_verification_run_registry.replay
+    (Filename.concat directory Goal_verification_run_registry.storage_filename) in
+  match Goal_verification_run_registry.install_global registry with
+  | Ok () -> ()
+  | Error Already_installed -> Alcotest.fail "Goal review fixture registry already installed"
+
 module AR = Task.Anti_rationalization
 module A = Verification_authority_tools
 module V = Goal_verifier_original
@@ -613,6 +624,73 @@ let test_actual_bound_suspend_and_drop () =
   exercise false;
   exercise true
 
+let test_finished_publication_survives_registry_retention () = with_workspace (fun config store _ ->
+  let authority, retained = host_prepared config store in
+  let original = W.original retained in
+  let calls = ref 0 in
+  with_reviewer (actual_approve calls) (fun () ->
+    ignore (checked (run store retained authority));
+    let registry_path = Filename.concat config.base_path "goal-review-history.jsonl" in
+    let registry = R.replay registry_path in
+    let original_run = W.run_identity retained in
+    let subject = V.subject original in
+    (* Complete newer observations first: the original is immediately pruned
+       on its first publication, not only after a prior acknowledgement. *)
+    for index = 1 to R.max_completed_retained do
+      let run_id = Printf.sprintf "newer-observation/%d" index in
+      R.register_running registry ~run_id ~goal_id:subject.goal_id ~request_id:subject.request_id
+        ~criterion:subject.criterion ~review_kind:R.Proof ~authority_actor:"verifier_exact"
+        ~started_at:(original_run.started_at +. float_of_int index);
+      R.mark_completed registry ~run_id ~outcome:R.Committed ~evaluated_verdict:None
+        ~tools:[] ~elapsed_s:0. ()
+    done;
+    hosted (H.commit_proof ~config ~store ~registry (host_load store original));
+    Alcotest.(check bool) "actual retention immediately removes the oldest display row" true
+      (R.get registry ~run_id:original_run.run_id = None);
+    let restored_store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+    let restored = host_load restored_store original in
+    let replayed = R.replay registry_path in
+    let before = In_channel.with_open_bin registry_path In_channel.input_all in
+    Alcotest.(check bool) "durable original ACK survives registry replay and pruning" false
+      (hosted (H.needs_recovery ~registry:replayed restored));
+    Alcotest.(check bool) "rechecking does not append another observation" false
+      (hosted (H.needs_recovery ~registry:replayed restored));
+    Alcotest.(check string) "history remains unchanged" before
+      (In_channel.with_open_bin registry_path In_channel.input_all);
+    Alcotest.(check int) "no reviewer redispatch" 1 !calls))
+
+let test_raised_review_retains_actual_tool_observation () = with_workspace (fun config store _ ->
+  let authority,retained = host_prepared config store in
+  let original = W.original retained in
+  let calls = ref 0 in
+  with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
+      ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+    incr calls;
+    let input = `Assoc ["file_path", `String measurement_path] in
+    let result = lookup.AR.dispatch ~name:"tool_read_file" ~args:input in
+    if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
+    on_tool_result ~input result;
+    raise Exit) (fun () ->
+      (try ignore (run store retained authority); Alcotest.fail "review exception was swallowed"
+       with Exit -> ());
+      let restored_store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+      let restored = host_load restored_store original in
+      let tools = checked (W.tool_observations restored) in
+      Alcotest.(check bool) "actual successful lookup survives exception and reload" true
+        (List.exists (fun (tool : Verification_run_registry.tool_observation) ->
+          tool.tool_name="tool_read_file") tools);
+      let registry = R.replay (Filename.concat config.base_path "raised-review-history.jsonl") in
+      hosted (H.publish ~store:restored_store ~registry restored ~outcome:(R.Raised {detail="Exit"}));
+      (match R.get registry ~run_id:(W.run_identity retained).run_id with
+       | Some (R.Review {status=R.Completed {outcome=R.Raised _; tools=observed; _}; _}) ->
+         Alcotest.(check bool) "raised host observation preserves the actual tools" true (observed=tools)
+       | None | Some (R.Review _ | R.Scan_skipped _) -> Alcotest.fail "raised observation is absent");
+      (match run restored_store restored authority with
+       | Error (W.Execution_pending _) -> ()
+       | Ok _ | Error _ -> Alcotest.fail "raised review redispatched its unknown original");
+      Alcotest.(check int) "raised reviewer is never replayed" 1 !calls))
+
 let () = Alcotest.run "retained Goal worker" ["execution", [
   Alcotest.test_case "actual retained visual lookup and restart receipt" `Quick test_actual_retained_lookup_and_restored_receipt;
   Alcotest.test_case "unknown and cancellation never redispatch" `Quick test_unknown_and_cancellation_never_redispatch;
@@ -622,6 +700,8 @@ let () = Alcotest.run "retained Goal worker" ["execution", [
   Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict;
   Alcotest.test_case "actual integral receipt commits after restart and rejects alteration" `Quick test_actual_integral_receipt_commits_after_restart;
   Alcotest.test_case "actual agent restores before lookup and registry" `Quick test_actual_agent_restores_before_lookup_and_registry;
+  Alcotest.test_case "finished publication survives registry retention" `Quick test_finished_publication_survives_registry_retention;
+  Alcotest.test_case "raised review retains actual tool observation" `Quick test_raised_review_retains_actual_tool_observation;
   Alcotest.test_case "actual proof partial write and phase-moved boot" `Quick test_actual_partial_proof_and_nonverifying_boot;
   Alcotest.test_case "actual explicit retry and unknown fence" `Quick test_actual_explicit_retry_and_unknown_fence;
   Alcotest.test_case "reasonless Goal reply needs an explicit linked retry" `Quick test_reasonless_goal_reply_requires_explicit_retry;

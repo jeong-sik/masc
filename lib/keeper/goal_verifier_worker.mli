@@ -81,13 +81,20 @@ val retained_judgment : retained -> (Yojson.Safe.t, error) result
 
 val tool_observations : retained ->
   (Verification_run_registry.tool_observation list, error) result
-(** Restore actual saved observations, including unknown/cancelled dispatch.
+(** Restore actual saved observations, including unknown/cancelled/raised dispatch.
     This passive read grants no judgment, retry or domain effect. *)
 
 val observed_receipt : retained -> (receipt option, error) result
 (** Passive receipt restoration including admission and unknown outcomes.
     Unlike [restored_receipt], a returned value need not be a settled review;
     the caller must use progress for dispatch/commit authority. *)
+
+val record_observer :
+  store:Lane_addon_store.t -> retained:retained ->
+  Lane_addon_request_receipt.event -> (retained, error) result
+(** Persist an actual host publication intent/acknowledgement on this exact
+    original. The host authenticates the payload and confirms publication;
+    the event performs no registry write or domain effect. *)
 
 val run :
   ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
@@ -98,7 +105,7 @@ val run :
   unit -> (receipt, error) result
 (** Restore exact prior judgments first. Otherwise confirm original authority
     and persist dispatch intent before using the actual retained reviewer.
-    Unknown dispatch/cancellation never redispatches; a proven pre-admission
+    Unknown dispatch/cancellation/exception never redispatches; a proven pre-admission
     refusal may reuse the same original. Persist the structured reply and full
     tool observations atomically before returning control to the Goal host.
     Host proof commitment and run-registry publication remain separate. *)

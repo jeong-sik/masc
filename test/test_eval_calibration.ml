@@ -459,7 +459,7 @@ let test_actual_response_pairs_and_unknown_coverage () =
   let identity ~actor ~runtime_id ~model_id suffix =
     match Runtime_response_identity.make ~execution_id:("execution-" ^ suffix)
       ~actor ~runtime_id ~response_id:("response-" ^ suffix) ~provider_id:"provider"
-      ~model_id ~tool_use_id:("call-" ^ suffix) ~provider_turn:1 with
+      ~model_id ~tool_use_id:("call-" ^ suffix) ~provider_turn:1 ~source_tool_use_ordinal:0 with
     | Ok identity -> identity
     | Error detail -> fail detail in
   let producer = identity ~actor:"alice" ~runtime_id:"producer-alias" ~model_id:"model-a" "producer" in

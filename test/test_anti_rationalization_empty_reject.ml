@@ -118,7 +118,7 @@ let test_exact_verdict_response_identity_survives_projection () =
   let identity = match Runtime_response_identity.make ~execution_id:"judge-execution"
     ~actor:"completion-review" ~runtime_id:"actual-winner" ~response_id:"verdict-response"
     ~provider_id:"actual-provider" ~model_id:"reported-model" ~tool_use_id:"accepted-verdict"
-    ~provider_turn:2 with
+    ~provider_turn:2 ~source_tool_use_ordinal:0 with
     | Ok identity -> identity | Error detail -> Alcotest.fail detail in
   with_reviewer
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_

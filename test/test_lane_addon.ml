@@ -1400,7 +1400,7 @@ let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun en
      | Error error ->
          check bool "unknown storage failure is not recoverable" false error.recoverable;
          check bool "projection retains the generic storage error class" true
-           (error.error_class = Agent_core.Types.Unknown)
+           (error.error_class = Some Agent_core.Types.Unknown)
      | Ok _ -> fail "failed result manifest became a successful model receipt"));
   check string "protected cleanup restores the exact complete manifest" outer_bytes
     (read_artifact reference);

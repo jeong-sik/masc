@@ -320,15 +320,52 @@ description = "set_zoom only: actual browser zoom factor (0.3–5), requires exa
 [[params]]
 name = "steps"
 type = "array"
-items = { type = "object", additional_properties = false, params = [
-  { name = "method", type = "string", required = true, enum = ["click", "dblclick", "hover", "fill", "press", "selectOption", "goto", "waitForURL", "waitForSelector", "waitForLoadState"] },
-  { name = "selector", type = "string" }, { name = "text", type = "string" },
-  { name = "key", type = "string" }, { name = "url", type = "string" },
-  { name = "value", type = "string" }, { name = "values", type = "array", items = { type = "string" } },
-  { name = "state", type = "string", enum = ["attached", "detached", "visible", "hidden", "domcontentloaded", "load", "networkidle"] },
-  { name = "timeoutMs", type = "integer", minimum = 0 }
-] }
 description = "workflow only: native Page calls in order. click/dblclick/hover take selector; fill takes selector,text; press takes selector,key; selectOption takes selector and value or distinct values ([] clears); goto takes an absolute HTTP(S) url; waitForURL takes a native string/glob url; waitForSelector takes selector,state (attached/detached/visible/hidden); waitForLoadState takes state (domcontentloaded/load/networkidle). Optional timeoutMs is forwarded to that SDK method; omission uses its default. No cumulative step/time limit or injected script. Locators come from observations; no new intermediate judgment inside this call."
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "method"
+type = "string"
+required = true
+enum = ["click", "dblclick", "hover", "fill", "press", "selectOption", "goto", "waitForURL", "waitForSelector", "waitForLoadState"]
+
+[[params.items.params]]
+name = "selector"
+type = "string"
+
+[[params.items.params]]
+name = "text"
+type = "string"
+
+[[params.items.params]]
+name = "key"
+type = "string"
+
+[[params.items.params]]
+name = "url"
+type = "string"
+
+[[params.items.params]]
+name = "value"
+type = "string"
+
+[[params.items.params]]
+name = "values"
+type = "array"
+items = { type = "string" }
+
+[[params.items.params]]
+name = "state"
+type = "string"
+enum = ["attached", "detached", "visible", "hidden", "domcontentloaded", "load", "networkidle"]
+
+[[params.items.params]]
+name = "timeoutMs"
+type = "integer"
+minimum = 0
 
 [[params]]
 name = "snapshotScope"

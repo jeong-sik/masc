@@ -73,3 +73,33 @@ No Dune build or full regression was run for this declaration-only change.
 `Stacked PRs are not enabled for this repository`. No native PR was created and
 no ordinary PR was substituted. The branch is pushed for review; the change is
 not merged or installed. Installed-runtime verification remains pending.
+
+## Follow-up audit of the remaining client settings
+
+The 37 live Keeper declarations were inspected: 22 explicitly select `small`
+and 15 omit the field. `Keeper_input_policy.default = Small`, so the omissions
+are not a wide-history configuration defect. No redundant per-Keeper override
+was added.
+
+The Antigravity eager exception cannot safely be removed by granting its schema
+directory beside `read_file(*)` in the deny list. Google's
+[CLI permission contract](https://www.antigravity.google/docs/permissions?tab=cli)
+gives deny precedence over allow; it also auto-allows unconfigured workspace
+reads. Removing the blanket deny would therefore require a separate boundary
+change and validation, not just a token optimization. The existing permissions
+were retained.
+
+The existing `keeper_tool_search` is not a substitute schema reader for this
+client: `Keeper_identity_tool_search.load` requires a running Agent Core cell
+and extends that agent's tool set. An official client owns its own set instead.
+The capability search returns discovery candidates; its canonical input-schema
+material participates in a digest but is not returned as a schema-loading
+response. A future Argon lazy path must first deliver the exact frozen schema
+through an actual client-supported boundary and prove discovery/callability;
+merely registering fewer eager tools is insufficient.
+
+Antigravity currently has no observed compaction/reset witness, and its runtime
+therefore resends current carried context with an empty held set. A lower byte
+count obtained by assuming the vendor still holds an earlier block would not
+prove a correct improvement. The large start after a runtime switch and that
+resume policy were left distinct from the fourteen corrected declarations.

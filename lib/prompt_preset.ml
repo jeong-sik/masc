@@ -97,6 +97,7 @@ type restore_report =
   ; default_comparison : default_comparison
   ; preserved_lane_settings : (string * string) list
   ; skipped_lanes : (string * string) list
+  ; skipped_assignments : (string * string) list
   }
 
 let schema_version = 1
@@ -515,6 +516,8 @@ let report_to_json (r : restore_report) : Yojson.Safe.t =
     ; "default_prompts", default_comparison_to_json r.default_comparison
     ; "preserved_lane_settings", preserved_settings_json r.preserved_lane_settings
     ; "skipped_lanes", skipped_lanes_json r.skipped_lanes
+    ; "skipped_assignments", `List (List.map (fun (keeper, reason) ->
+        `Assoc ["keeper", `String keeper; "reason", `String reason]) r.skipped_assignments)
     ]
 ;;
 
@@ -993,24 +996,101 @@ let routing_holds ~current_assignments ~current_lanes ~assignments ~lanes =
        | Current_lane _ -> lane_holds ~current_lanes lane) lanes
 ;;
 
+(* The writer permits keeping a declared-but-catalog-missing assignment in a
+   degraded configuration. A preset must not introduce such an unavailable
+   route merely because that save is legal. Read the same materialized binding
+   and capability lookup used by Runtime's degraded-startup report. *)
+let unavailable_assignments content assignments =
+  match Runtime_toml.parse_string content with
+  | Error errors -> Error (String.concat "; " (List.map parse_error_line errors))
+  | Ok config ->
+    let runtimes, _dropped = Runtime_instance.partition_bindings config config.bindings in
+    Ok (List.filter_map (fun (keeper, id) ->
+      if List.exists (fun (lane : Runtime_schema.lane_decl) -> String.equal lane.id id) config.lane_decls
+      then None (* A declared lane takes precedence over a same-named binding. *)
+      else
+      match List.find_opt (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id) runtimes with
+      | None -> None (* Undeclared or dropped bindings are judged by the writer. *)
+      | Some runtime ->
+        match runtime.execution, Runtime_instance.capabilities_for_runtime runtime with
+        | (Runtime_execution.Codex_app_server _ | Claude_code _
+          | Antigravity_cli _ | Muse_serve _), _ -> None
+        | Runtime_execution.Agent_core _, Some _ -> None
+        | Runtime_execution.Agent_core provider_config, None ->
+          let missing : Runtime.missing_catalog_model =
+            { runtime_id = runtime.id; provider_id = runtime.provider.id
+            ; provider_label = Llm_provider.Provider_config.capability_provider_label provider_config
+            ; model_id = provider_config.model_id } in
+          Some (keeper, Runtime.missing_catalog_model_to_string missing)) assignments)
+;;
+
 let restore_runtime ~commit ~base_path ~assignments ~lanes =
   let path = runtime_toml_path ~base_path in
+  let failed message = Runtime_failed message, [], skipped_lanes lanes in
   match guard (fun () -> Ok (Fs_compat.load_file_opt path)) with
-  | Error message -> Runtime_failed message
-  | Ok None -> Runtime_failed ("runtime.toml missing at " ^ path)
+  | Error message -> failed message
+  | Ok None -> failed ("runtime.toml missing at " ^ path)
   | Ok (Some content) ->
     (match runtime_of_text content with
-     | Error message -> Runtime_failed ("current runtime.toml does not parse: " ^ message)
+     | Error message -> failed ("current runtime.toml does not parse: " ^ message)
      | Ok (current_assignments, current_lanes) ->
+       match unavailable_assignments content assignments with
+       | Error reason -> failed reason
+       | Ok unavailable ->
+       let assignments = List.filter_map (fun (keeper, runtime_id) ->
+         if List.mem_assoc keeper unavailable then
+           Option.map (fun current -> keeper, current) (List.assoc_opt keeper current_assignments)
+         else Some (keeper, runtime_id)) assignments in
        if routing_holds ~current_assignments ~current_lanes ~assignments ~lanes
-       then Runtime_unchanged
+       then Runtime_unchanged, unavailable, skipped_lanes lanes
        else (
-         let text =
-           runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes content
-         in
-         match commit ~runtime_config_path:path text with
-         | Ok receipt -> Runtime_committed receipt
-         | Error message -> Runtime_failed message))
+       let validate = Runtime.validate_config_text ~runtime_config_path:path in
+       let text = runtime_text_with ~current_assignments ~current_lanes ~assignments ~lanes content in
+       let accepted_text, skipped_assignments, skipped_runtime_lanes =
+         match validate text with
+         | Ok () -> text, unavailable, skipped_lanes lanes
+         | Error _ ->
+           (* Use the writer's complete precondition, including catalog-only
+              slots and CLI capabilities. A rejected saved declaration keeps
+              its current value; it does not choose a substitute or discard a
+              subset of a lane's ordered candidates. *)
+           let base = List.fold_left (fun text (keeper_name, _) ->
+             if List.mem_assoc keeper_name assignments then text
+             else Runtime_config_text.remove_runtime_assignment_text text ~keeper_name)
+             content current_assignments in
+           let text, skipped_assignments = List.fold_left
+             (fun (text, skipped) (keeper_name, runtime_id) ->
+               if List.assoc_opt keeper_name current_assignments = Some runtime_id
+               then text, skipped
+               else (
+               let candidate = Runtime_config_text.update_runtime_assignment_text
+                 text ~keeper_name ~runtime_id in
+               match validate candidate with
+               | Ok () -> candidate, skipped
+               | Error reason -> text, (keeper_name, reason) :: skipped))
+             (base, []) assignments in
+           let text, skipped_runtime_lanes = List.fold_left
+             (fun (text, skipped) lane -> match lane.owner with
+               | Unavailable_lane _ -> text, skipped
+               | Current_lane _ ->
+                 if lane_holds ~current_lanes lane then text, skipped
+                 else (
+                 let candidate = runtime_text_with ~current_assignments:[]
+                   ~current_lanes ~assignments:[] ~lanes:[lane] text in
+                 match validate candidate with
+                 | Ok () -> candidate, skipped
+                 | Error reason -> text, (lane_key lane.owner, reason) :: skipped))
+             (text, []) lanes in
+           text, unavailable @ List.rev skipped_assignments,
+             skipped_lanes lanes @ List.rev skipped_runtime_lanes
+       in
+       let result =
+         if String.equal accepted_text content then Runtime_unchanged
+         else match commit ~runtime_config_path:path accepted_text with
+           | Ok receipt -> Runtime_committed receipt
+           | Error message -> Runtime_failed message
+       in
+       result, skipped_assignments, skipped_runtime_lanes))
 ;;
 
 let restore_with_config_commit ~commit ~base_path name =
@@ -1025,12 +1105,12 @@ let restore_with_config_commit ~commit ~base_path name =
   let* () = save ~base_path current in
   let prompt_overrides_result = restore_prompt_overrides ~base_path target.prompt_overrides in
   let instructions_result = restore_instructions ~base_path target.instructions in
-  let runtime_result =
+  let runtime_result, skipped_assignments, skipped_lanes =
     restore_runtime ~commit ~base_path ~assignments:target.assignments ~lanes:target.lanes
   in
   Ok { restored = name; autosave; prompt_overrides_result; instructions_result; runtime_result; default_comparison
      ; preserved_lane_settings = preserved_lane_settings target.lanes
-     ; skipped_lanes = skipped_lanes target.lanes }
+     ; skipped_lanes; skipped_assignments }
 ;;
 
 let restore ~base_path name =

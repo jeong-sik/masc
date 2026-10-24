@@ -78,9 +78,9 @@ let part_lines ~label ~timing (part : D.preset_part) =
 
 let runtime_lines = function
   | D.Preset_runtime_unchanged ->
-    [ "runtime: unchanged — saved assignments and lane declarations already match the file" ]
+    [ "runtime: unchanged — no accepted file changes" ]
   | D.Preset_runtime_committed commit ->
-    [ "runtime: committed — runtime.toml rewritten, assignments applied" ]
+    [ "runtime: committed — accepted file changes applied" ]
     @ (match commit.D.prc_durability with
        | Runtime.Durable -> []
        | Runtime.Durability_unconfirmed { detail } ->
@@ -139,6 +139,7 @@ let restore_lines (report : D.preset_restore_report) =
   @ runtime_lines report.D.prr_runtime
   @ preserved_settings_lines report.D.prr_preserved_lane_settings
   @ List.map (fun (lane, reason) -> "레인 복원 제외 · " ^ lane ^ ": " ^ reason) report.D.prr_skipped_lanes
+  @ List.map (fun (keeper, reason) -> "Runtime 배정 복원 제외 · " ^ keeper ^ ": " ^ reason) report.D.prr_skipped_assignments
   @ default_prompt_lines report.D.prr_default_prompts
 ;;
 
@@ -258,6 +259,7 @@ let restore_is_clean (report : D.preset_restore_report) =
   report.D.prr_prompt_overrides.D.pp_skipped = []
   && report.D.prr_instructions.D.pp_skipped = []
   && report.D.prr_skipped_lanes = []
+  && report.D.prr_skipped_assignments = []
   &&
   match report.D.prr_runtime with
   | D.Preset_runtime_failed _ -> false

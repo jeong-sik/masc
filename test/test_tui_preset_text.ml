@@ -24,6 +24,7 @@ let report ~skipped ~runtime : D.preset_restore_report =
   ; prr_default_prompts = Masc.Prompt_preset.Defaults_unknown
   ; prr_preserved_lane_settings = []
   ; prr_skipped_lanes = []
+  ; prr_skipped_assignments = []
   }
 
 let test_restore_classifies_commit_warnings () =
@@ -48,7 +49,10 @@ let test_restore_classifies_commit_warnings () =
   check bool "failed runtime is not clean" false
     (Text.restore_is_clean (report ~skipped:[] ~runtime:(D.Preset_runtime_failed "invalid TOML")));
   check bool "unchanged runtime is clean" true
-    (Text.restore_is_clean (report ~skipped:[] ~runtime:D.Preset_runtime_unchanged))
+    (Text.restore_is_clean (report ~skipped:[] ~runtime:D.Preset_runtime_unchanged));
+  check bool "a refused assignment requires attention even without a runtime write" false
+    (Text.restore_is_clean { (report ~skipped:[] ~runtime:D.Preset_runtime_unchanged) with
+      prr_skipped_assignments = ["analyst", "unknown Runtime"] })
 
 let test_decode_saved_settings_and_effective_prompt_sources () =
   let payload saved_settings = `Assoc
@@ -87,7 +91,8 @@ let test_decode_preserved_and_skipped_lanes () =
     ["restored", `String "morning"; "autosave", `String "_autosave";
      "prompt_overrides", part; "instructions", part;
      "runtime", `Assoc ["effect", `String "runtime_commit"; "status", `String "unchanged"];
-     "preserved_lane_settings", preserved; "skipped_lanes", skipped]] in
+     "preserved_lane_settings", preserved; "skipped_lanes", skipped;
+     "skipped_assignments", `List [`Assoc ["keeper", `String "analyst"; "reason", `String "unknown Runtime"]]]] in
   (match D.decode_preset_restore (payload preserved) with
    | Error message -> fail message
    | Ok decoded ->
@@ -95,6 +100,8 @@ let test_decode_preserved_and_skipped_lanes () =
         (decoded.D.prr_preserved_lane_settings = ["verifier_exact", D.Preset_thinking]);
       check bool "unavailable lanes keep their reason" true
         (decoded.D.prr_skipped_lanes = ["unconfigured_exact", "not registered"]);
+      check bool "unavailable assignments keep their reason" true
+        (decoded.D.prr_skipped_assignments = ["analyst", "unknown Runtime"]);
       check bool "a skipped lane requires attention" false (Text.restore_is_clean decoded));
   List.iter (fun invalid ->
     check bool "malformed preservation evidence is not dropped" true

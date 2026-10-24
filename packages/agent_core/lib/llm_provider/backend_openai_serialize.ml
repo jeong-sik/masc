@@ -550,14 +550,24 @@ let content_has_visible_assistant_text =
     | Audio _ -> false)
 ;;
 
+(* Returned structured reasoning is a replay carrier. The request's optional
+   output-format switch is a separate contract: a declared details stream must
+   not lose its already-received artifact when that switch is absent. *)
+let replays_reasoning_details (dialect : Reasoning_dialect.t) =
+  match dialect.streaming with
+  | Reasoning_dialect.Delta_field_and_details _ -> true
+  | Reasoning_dialect.No_streaming_reasoning
+  | Reasoning_dialect.Delta_field _
+  | Reasoning_dialect.Template_parser ->
+    (match dialect.output_wire with
+     | Reasoning_dialect.Reasoning_split -> true
+     | Reasoning_dialect.No_output_control -> false)
+;;
+
 let openai_assistant_has_wire_payload (dialect : Reasoning_dialect.t) content =
   let reasoning_content = assistant_reasoning_content_of_blocks content in
   let reasoning_details = assistant_reasoning_details_of_blocks content in
-  let include_reasoning_details =
-    match dialect.output_wire with
-    | Reasoning_dialect.Reasoning_split -> true
-    | Reasoning_dialect.No_output_control -> false
-  in
+  let include_reasoning_details = replays_reasoning_details dialect in
   content_has_visible_assistant_text content
   || content_has_tool_use content
   || (not (Api_common.string_is_blank reasoning_content))
@@ -622,10 +632,7 @@ let render_history_projection
          let include_reasoning = content_has_reasoning wire_message.content in
          let include_reasoning_details =
            include_reasoning
-           &&
-           match dialect.Reasoning_dialect.output_wire with
-           | Reasoning_dialect.Reasoning_split -> true
-           | Reasoning_dialect.No_output_control -> false
+           && replays_reasoning_details dialect
          in
          let rendered =
            messages_of_message_with

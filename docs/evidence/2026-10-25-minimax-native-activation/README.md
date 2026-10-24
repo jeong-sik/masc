@@ -53,3 +53,23 @@ The changed fixture parses and the TOML parses; whitespace checks pass. A
 focused execution of the changed backend codec remains required. No local Dune,
 provider HTTP, installation, complete checkpoint resume, full regression or
 issue closure is claimed.
+
+## Structured replay correction from adversarial review
+
+The expanded M2 fixture exposed a separate source boundary: the serializer
+used the optional output-format request switch to decide whether already
+returned reasoning_details could replay. M2 intentionally sends no unverified
+reasoning_split switch, so this dropped its structured artifact. The renderer
+and its blank-message predicate now share a typed decision: a declared
+Delta_field_and_details response carrier replays details independently of the
+request switch; other carriers retain their existing Reasoning_split rule.
+Source compatibility and replay-policy projection still run first. New
+sync/SSE tool-free opaque-details cases verify that the assistant row itself
+survives without visible text, tool calls or textual reasoning. No switch is
+added just to satisfy the fixture.
+
+Codec-only run40119116449 was requested before this serializer correction at
+source 7a88cf1e8d99fd160fc3819ea7a5dbab032bdc68; its result was not observed
+when this update was authored. It cannot certify the subsequent correction.
+The changed serializer and fixture require the focused codec/reasoning replay
+checks at the corrected candidate. No exact corrected-candidate PASS yet.

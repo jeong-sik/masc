@@ -717,7 +717,18 @@ let test_minimax_native_catalog_replay_for_model model_id =
         (member "tool_calls" replay = `Null && member "reasoning_content" replay = `Null);
       check_int (mode ^ " source mismatch still removes a blank assistant") 2
         (List.length (wire {config with Provider_config.model_id="different-model"})))
-      [" \t "; " \n<think></think> "; " <think> \n </think> "])
+      [" \t "; " \n<think></think> "; " <think> \n </think> "];
+    let details = `List [`Assoc
+        ["type",`String "reasoning.encrypted"; "id",`String "opaque-only";
+         "data",`String "opaque-provider-artifact"]] in
+    let first = parse `Null ["reasoning_details",details] in
+    let history = [msg User [Text "First"]; first; msg User [Text "Next"]] in
+    let wire = Backend_openai_request.build_request ~config ~messages:history ()
+        |> Yojson.Safe.from_string |> member "messages" |> to_list in
+    check_int (model_id ^ mode ^ " opaque details keep the assistant row") 3
+      (List.length wire);
+    check_bool (model_id ^ mode ^ " opaque details survive without output control") true
+      (member "reasoning_details" (List.nth wire 1)=details))
     ["sync", (fun content fields -> sync ~tool:false content fields);
      "stream", (fun content fields -> stream ~tool:false content fields)]
 ;;

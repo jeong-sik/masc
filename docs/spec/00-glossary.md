@@ -896,13 +896,19 @@ status: reference
   [agent-input-wait-ownership 설계](../../docs/design/agent-input-wait-ownership.md)
 
 **Keeper Input Wait Observation (retained-input 대기 관측)**
-: 턴이 완전한 입력으로 진행할 수 있는지를 판단하는 관측 계약(`Keeper_input_wait_observation`).
-  진행 가능이 아니면 이유를 세 갈래 불리언으로 돌려준다 — `trace_changed`(이전 관측
-  뒤 trace가 바뀌어 판단 근거가 오래됐다), `prior_input_unavailable`(이전 턴의
-  관측 입력을 지금 읽을 수 없다), `retained_unavailable`(retained export
-  authority로 지연된 Add-on export를 아직 받지 못해 도구 목록이 불완전하다).
-  세 갈래는 서로 다른 층의 대기다 — trace 신선도, 관측 입력 도달, 도구 지연 로딩
-  도달을 섞어 부르지 않는다(#44963).
+: 턴이 완전한 입력으로 진행할 수 있는지를 Owner mailbox 한 번 읽기로 관측하는
+  계약(`Keeper_input_wait_observation`, `(t, error) result`). 성공은 세
+  갈래다 — `Unobserved`(저널 fresh-history 계약 아래에서만 가능), `Pending`
+  (소유한 대기 요청과 그 정확 참조를 보관), `Consumed`(소유한 정확 참조를
+  보관). 오류는 네 갈래다 — `Owner_unavailable`(Owner mailbox 명령 실패),
+  `Trace_changed`(예상 trace와 실제 trace가 달라 판단 근거가 오래됨),
+  `Prior_input_unavailable`(이전 입력의 정확 참조를 확보하지 못함),
+  `Retained_unavailable`(보관된 정확 참조의 읽기·검증 실패 — checkpoint
+  CAS·신원·세션·턴 검증이 거절한다). 정확 참조 외의 길이 없다 —
+  canonical·history 대체 읽기와 latest-turn 집계 재구성은 금지되고, 이
+  스냅샷은 반환 뒤 낡을 수 있으며 변경 권한을 주지 않는다. 오류 갈래는
+  서로 다른 층을 가리킨다 — Owner 도달, trace 신선도, 이전 입력 존재,
+  보관 artifact 검증을 섞어 부르지 않는다(#44963).
   → [Keeper_input_wait_observation](../../lib/keeper/keeper_input_wait_observation.mli)
 
 **Ask (질문)**
@@ -2423,11 +2429,15 @@ status: reference
   → [Hooks_agent_core](../../packages/agent_core/lib/base/hooks.mli)
 
 **Lane Add-on release 분류 (Native_released·Native_retained)**
-: Native Stack이 운영하는 Lane Add-on release가 도달한 상태를 가리키는 닫힌 어휘
-  (`lane_addon_lifecycle.mli`). `Native_released`는 release·settlement까지
-  확인된 상태고, `Native_retained`는 운영자 retain으로 남아 자원 회수가 아직
-  확인되지 않은 상태다(#45216). retire·retain을 섞어 부르지 않는다 — retire는
-  목적, retain은 상태다.
+: Lane Add-on의 native 설치(호스트 네이티브 설치·incarnation) release가 도달한
+  상태를 가리키는 닫힌 어휘(`lane_addon_lifecycle.mli`). `Native_released`는
+  native retirement(실행 권한 회수)과 실제 admission settlement이 모두
+  확인된 상태고, `Native_retained`는 settlement까지 확인됐지만 호스트가 자원
+  회수를 확인하지 못한 상태다 — 남은 자원은 제자리에 머물고 호스트는 지우지
+  않으며 운영자가 인수한다(#45216). 이 어휘의 Native는 설치 소속을 가리킬
+  뿐 GitHub Native Stack과는 무관하다. retirement은 두 상태 모두에서
+  확인되는 회수 목적이고, retained은 자원이 보존되는 상태다 — 섞어 부르지
+  않는다.
   → [Lane_addon_lifecycle](../../lib/lane_addon/lane_addon_lifecycle.mli)
 
 **Lane Add-on**

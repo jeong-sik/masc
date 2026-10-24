@@ -9,7 +9,7 @@ export function RequestObservationFacts({ observations }: { observations: Reques
     switch (evidence.status) {
       case 'not_dispatched': content = '실행 전 거절'; break
       case 'no_durable_scope': content = '영속 실행 scope 없음 · wire 값 미관측'; break
-      case 'no_matching_call': content = '일치하는 native call 없음 · wire 값 미관측'; break
+      case 'no_matching_call': content = '이번 호출의 request 증거 없음 · wire 값 미관측'; break
       case 'read_failed': content = `요청 증거 읽기 실패: ${evidence.detail}`; break
       case 'recorded': content = html`<div title=${evidence.call_id}>${evidence.requests.length === 0 ? 'provider attempt 없음' : evidence.requests.map(request => {
         const fact = request.provenance

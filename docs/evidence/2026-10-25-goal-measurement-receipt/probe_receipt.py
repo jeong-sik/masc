@@ -14,7 +14,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = Path(__file__).resolve().parent
-BASE = "1c6205ea60bd6fc225450fdda1b9c691b92aa3a2"
+BASE = "895df663fb303ee2fa95c38bbd28b571db9abb62"
 parser = argparse.ArgumentParser()
 parser.add_argument("--canary-snapshot", type=Path)
 parser.add_argument("--receipt-out", type=Path)

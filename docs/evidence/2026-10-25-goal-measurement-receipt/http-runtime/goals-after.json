@@ -1,0 +1,50 @@
+{
+  "status": "ok",
+  "generated_at": "2026-10-24T16:30:42Z",
+  "count": 1,
+  "goals": [
+    {
+      "id": "goal-receipt-http-check",
+      "criterion_revision": "194efd0c49d088643d081da5fc457036",
+      "title": "Controlled receipt transport check",
+      "metric": "note:Transport proof only",
+      "target_value": "HTTP and MCP preserve reported-only and actual Executing lifecycle",
+      "due_date": null,
+      "priority": 3,
+      "phase": "executing",
+      "last_review_note": null,
+      "last_review_at": null,
+      "created_at": "2026-10-24T16:29:41Z",
+      "updated_at": "2026-10-24T16:29:41Z",
+      "verification": {
+        "goal_id": "goal-receipt-http-check",
+        "completion": {
+          "state": "idle"
+        },
+        "submitted_evidence": [],
+        "updated_at": "2026-10-24T16:30:42Z"
+      },
+      "measurement": {
+        "state": "reported",
+        "record": {
+          "id": "702cb5a0eee36a54328530305f2309ad",
+          "goal_id": "goal-receipt-http-check",
+          "criterion_revision": "194efd0c49d088643d081da5fc457036",
+          "observed_value": "MCP probe observation",
+          "evidence": "note:Controlled transport check, no independent verification",
+          "actor": "goal-canary-operator",
+          "recorded_at": "2026-10-24T16:30:42Z"
+        }
+      }
+    }
+  ],
+  "rollup": {
+    "active_count": 1,
+    "verifying_count": 0,
+    "awaiting_confirmation_count": 0,
+    "done_count": 0,
+    "dropped_count": 0,
+    "paused_count": 0,
+    "blocked_count": 0
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "schema": "masc.independent-source-review.v1",
+  "reviewer": "repair_evidence_integrity",
+  "recorded_at": "2026-10-24T16:24:16.650749+00:00",
+  "verdict": "PASS",
+  "head": "ec664e53b7eda6a7dae4eb09daa04b56ad98997d",
+  "base": "3014cfce79636f1e41cc39f6019a3428c6912145",
+  "author_head": "c352e598968c5d6003c584a0dd4d079669974cad",
+  "pr": 45839,
+  "native_stack": {
+    "number": 45750,
+    "position": 15,
+    "size": 15
+  },
+  "scope": "One-file test-only repair. Source P2 closure; no post-repair native execution, CI API read, GitHub approval, model calls, runtime mutation or Goal confirmation. Uncommitted parent documentation excluded.",
+  "changed_files": [
+    "test/test_keeper_direct_goal_provider_wire.ml"
+  ],
+  "raw_binary_delta_sha256": "b8628c1ce59e356d12f270531595ae3f747bfcd4b0ddda75f4f51d1199886192",
+  "test_file_sha256": "358435ec3dd000529979f1b0e447ca3685d2ad2a5aa9e953e749083022b75f70",
+  "author_root_test_byte_equal": true,
+  "product_tree_equality": [
+    {
+      "path": "lib",
+      "base_tree": "cb4a2cad87e55d84ce16a50a7458d5801e65282d",
+      "head_tree": "cb4a2cad87e55d84ce16a50a7458d5801e65282d",
+      "equal": true
+    },
+    {
+      "path": "config",
+      "base_tree": "9cc654caafe2b955f3e2631dfb178ec0af5344af",
+      "head_tree": "9cc654caafe2b955f3e2631dfb178ec0af5344af",
+      "equal": true
+    },
+    {
+      "path": "packages",
+      "base_tree": "e3d2cf0aeac18c66b3248732bc29a9dd9b618fcb",
+      "head_tree": "e3d2cf0aeac18c66b3248732bc29a9dd9b618fcb",
+      "equal": true
+    },
+    {
+      "path": "bin",
+      "base_tree": "290bb3af19d632193fefbdd17f59706e9f2df5a8",
+      "head_tree": "290bb3af19d632193fefbdd17f59706e9f2df5a8",
+      "equal": true
+    },
+    {
+      "path": "dashboard",
+      "base_tree": "b17104035461506f7b6388e625bb2d48836598b1",
+      "head_tree": "b17104035461506f7b6388e625bb2d48836598b1",
+      "equal": true
+    }
+  ],
+  "baseline_native_evidence": {
+    "run": 40110334799,
+    "head": "3014cfce79636f1e41cc39f6019a3428c6912145",
+    "source_file": "/tmp/masc-goal-receipt-3014-native-failure.log",
+    "bytes": 132438,
+    "sha256": "0baaf56c0d34fc5fc41b94cf1a2db4b3e3ac462eb5f4a4c5664d10ec615031c7",
+    "failure": "Direct Goal HTTP Empty case at old line164 expected false for Active Goals presence; actual true. Other five HTTP cases passed; Goal gate and TOML suites passed per parent, not refetched here.",
+    "read_log_lines": [
+      928,
+      929,
+      1002,
+      1003,
+      1005,
+      1006,
+      1028,
+      1030
+    ]
+  },
+  "prior_p2": {
+    "status": "closed_in_source",
+    "reason": "Real receiver now must contain explicit authoritative Active Goals(0), while invented rows and store-unavailable marker are refused. Only Empty branch changes; Current/Revised/measurement-unavailable/Goal-unavailable/tool-loop controls remain unchanged."
+  },
+  "remaining_p0_p2": [],
+  "nonblocking_findings": [
+    {
+      "priority": "P3",
+      "path": "test/test_keeper_direct_goal_provider_wire.ml",
+      "line": 170,
+      "issue": "Criterion-absence needle has two leading spaces, but Markdown loader String.trim at lib/prompt_registry/prompt_registry.ml:256 removes initial indentation. Use the unindented stable criterion text for a sensitive absence check. Required empty heading and no-row assertions already cover the P2 contract."
+    }
+  ],
+  "checks": {
+    "ocaml_parse": {
+      "exit": 0,
+      "stderr": ""
+    },
+    "diff_check": {
+      "exit": 0,
+      "stderr": ""
+    },
+    "post_repair_native": "not run by reviewer"
+  },
+  "unproved_boundaries": [
+    "post-repair native HTTP suite",
+    "actual new-candidate G3 compliance",
+    "full stack approval/merge",
+    "installation or production deployment"
+  ]
+}

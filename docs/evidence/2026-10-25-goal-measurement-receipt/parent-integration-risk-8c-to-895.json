@@ -1,0 +1,74 @@
+{
+  "schema": "masc.independent-source-review.v1",
+  "reviewer": "repair_evidence_integrity",
+  "reviewer_agent": "/root/repair_evidence_integrity",
+  "written_at_utc": "2026-10-24T16:30:40.663206+00:00",
+  "record_kind": "retrospective durable record of source review already performed in this session; not a new code review",
+  "source_checkout": "/tmp/masc-goal-receipt-integration-20261025",
+  "scope_exclusions": [
+    "GitHub APPROVE or merge",
+    "whole Native Stack approval",
+    "new CI API lookup or watch",
+    "native or live-model execution by reviewer",
+    "Goal proof or final human confirmation",
+    "uncommitted root evidence edits"
+  ],
+  "verdict": "FAIL",
+  "verdict_scope": "Inherited integration consumer/test contract at3014; no additional production P0-P2 found in inspected parent delta",
+  "head": "895df663fb303ee2fa95c38bbd28b571db9abb62",
+  "base": "8c3b4ac12ac3f3b4cc399ed6b1cc50633bad4e69",
+  "integrated_candidate": "3014cfce79636f1e41cc39f6019a3428c6912145",
+  "raw_binary_delta_sha256": "0f7548592518580eed160fcb4405a399be1aaa188ef2696d4c0739a8393b9435",
+  "inspected_changed_files": [
+    "lib/keeper/keeper_turn.ml",
+    "lib/keeper/keeper_unified_prompt.ml",
+    "lib/keeper/keeper_unified_prompt.mli",
+    "lib/keeper/keeper_world_observation.ml",
+    "lib/keeper/keeper_world_observation.mli",
+    "test/test_keeper_surface_presence_prompt.ml"
+  ],
+  "source_findings": [
+    {
+      "priority": "P2",
+      "path": "test/test_keeper_direct_goal_provider_wire.ml",
+      "line": 164,
+      "introduced_by_parent": "format_active_goal_summaries Ok[] changed from None to explicit authoritative empty heading; test was not updated",
+      "impact": "Actual HTTP Empty case necessarily sees Active Goals(0) but old assertion requires Active Goals absence. Other Goal/current/revised/unavailable paths remain separate.",
+      "status_at_review": "open",
+      "later_resolution": {
+        "head": "ec664e53b7eda6a7dae4eb09daa04b56ad98997d",
+        "base": "3014cfce79636f1e41cc39f6019a3428c6912145",
+        "author_head": "c352e598968c5d6003c584a0dd4d079669974cad",
+        "later_independent_source_verdict": "PASS; parent integration P2 closed in source; no remaining P0-P2 in one-file test repair",
+        "artifact_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-independent-empty-goal-repair-review-cx8j98vo/review.json",
+        "artifact_sha256": "a6cde40bd4ee13459fd6df13455b6ec5c8b258d14bbf1a833a770ad58d033874",
+        "scope": "Later source repair of Empty native HTTP assertion only; do not rewrite the original3014 assessment as clean integration"
+      }
+    }
+  ],
+  "production_assessment": {
+    "direct_snapshot": "Keeper_turn captures active_goal_summaries once, derives active Goal IDs from that same result, and passes IDs to observe_direct_keeper_msg; that observer no longer rereads the Goal store. The sole production call and test call use the new required argument.",
+    "empty_set": "Successful empty summaries now render Active Goals(0). System Goal carrier/official held-resume path can carry a changed empty set instead of silently retaining only an old nonempty observation.",
+    "unknown": "Typed Goal-store Error is preserved. Nonempty IDs without summaries do not authorize a fabricated empty heading or fallback list.",
+    "receipt_integration": "Parent changes no Goal_store or Goal_measurement files; the new receipt producer/API remains compatible.",
+    "precise_snapshot_limit": "This is one captured direct Goal-set observation shared by IDs and prompt. It is NOT a new atomic Goal+measurement+Task-link store snapshot. active_goal_summaries still loads Goal list, Task/link metadata and measurements separately, with exact criterion revision matching."
+  },
+  "native_history": {
+    "at_original_review": "Source-predicted failure; no CI poll/run by reviewer",
+    "later_baseline_log": {
+      "path": "/tmp/masc-goal-receipt-3014-native-failure.log",
+      "sha256": "0baaf56c0d34fc5fc41b94cf1a2db4b3e3ac462eb5f4a4c5664d10ec615031c7",
+      "head": "3014cfce79636f1e41cc39f6019a3428c6912145",
+      "run": 40110334799,
+      "observed_failure": "Old Empty assertion line164 expectedfalse, receivedtrue; five other HTTP cases passed. The independent later repair review read this local log."
+    },
+    "post_repair_report": {
+      "run": 40111175993,
+      "head": "ec664e53b7eda6a7dae4eb09daa04b56ad98997d",
+      "scope": "actual HTTP six cases",
+      "result": "PASS reported by parent"
+    }
+  },
+  "remaining_production_p0_p2_in_inspected_delta": [],
+  "later_p2_source_state": "closed at ec664e53b7eda6a7dae4eb09daa04b56ad98997d; retained here as historical FAIL rather than backdating PASS"
+}

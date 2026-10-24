@@ -1,0 +1,6 @@
+{
+  "goal_id": "goal-receipt-http-check",
+  "criterion_revision": "194efd0c49d088643d081da5fc457036",
+  "observed_value": "HTTP probe observation",
+  "evidence": "note:Controlled transport check, no independent verification"
+}

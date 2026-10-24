@@ -12,7 +12,7 @@ let with_broker run =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree directory) (fun () ->
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10. (fun () ->
-        let broker=B.create ~sw ~net:(Eio.Stdenv.net env) ~directory ~max_message_bytes:16384 |> ok in
+        let broker=B.create ~sw ~directory ~max_message_bytes:16384 |> ok in
         Eio.Switch.on_release sw (fun () -> B.revoke broker);
         run env sw broker))))
 let connect env sw grant =

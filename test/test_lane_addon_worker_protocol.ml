@@ -9,6 +9,26 @@ def obj(properties):
     return {"type":"object","properties":properties,"required":list(properties),"additionalProperties":False}
 action = obj({"context":obj({"instance_id":{"type":"string"},"incarnation":{"type":"string"}}),
     "request_id":{"type":"string"},"action":obj({"kind":{"type":"string"}})})
+mode = sys.argv[2] if len(sys.argv)>2 else ""
+companion = mode in ["companion","companion-error","companion-bad-output","companion-version","companion-duplicate",
+    "companion-open-output","companion-open-nested","companion-open-array","companion-open-union",
+    "companion-extra-output","companion-extra-nested","companion-extra-array","companion-closed-union",
+    "companion-controller-error"]
+output_schema = schema
+if mode == "companion-open-output":
+    output_schema = dict(schema, additionalProperties=True)
+if mode in ["companion-open-nested","companion-extra-nested"]:
+    details = obj({"status":{"type":"string"}})
+    if mode == "companion-open-nested": details["additionalProperties"] = True
+    output_schema = obj({"value":{"type":"integer"},"details":details})
+if mode in ["companion-open-array","companion-extra-array"]:
+    item = obj({"status":{"type":"string"}})
+    if mode == "companion-open-array": item["additionalProperties"] = True
+    output_schema = obj({"value":{"type":"integer"},"details":{"type":"array","items":item}})
+if mode in ["companion-open-union","companion-closed-union"]:
+    branch = obj({"value":{"type":"integer"}})
+    if mode == "companion-open-union": branch["additionalProperties"] = True
+    output_schema = {"type":"object","oneOf":[branch,obj({"status":{"type":"string"}})]}
 for line in sys.stdin:
     request = json.loads(line)
     if "id" not in request: continue
@@ -21,14 +41,16 @@ for line in sys.stdin:
             open(sys.argv[1]+".waiting","w").close()
             while not os.path.exists(sys.argv[1]+".release"): time.sleep(0.005)
         result = {"tools":[{"name":"lane_observe","inputSchema":{"type":"object"}},
-            {"name":"increment","inputSchema":schema,"outputSchema":schema},
+            {"name":"increment","inputSchema":schema,"outputSchema":output_schema},
             {"name":"lane_act","inputSchema":action}]}
         if len(sys.argv) > 2 and sys.argv[2] in ["host", "duplicate"]:
             result["tools"] += [{"name":name,"inputSchema":{"type":"object"}} for name in ["lane_host_requests","lane_host_result"]]
         if len(sys.argv) > 2 and sys.argv[2] == "duplicate":
             result["tools"].append({"name":"lane_host_requests","inputSchema":{"type":"object"}})
-        if len(sys.argv) > 2 and sys.argv[2] == "context":
+        if (len(sys.argv) > 2 and sys.argv[2] == "context") or companion:
             result["tools"].append({"name":"lane_call","inputSchema":{"type":"object"}})
+        if companion:
+            result["tools"] += [{"name":"lane_companion","inputSchema":{"type":"object"}}] * (2 if mode=="companion-duplicate" else 1)
         if len(sys.argv) > 2 and sys.argv[2] in ["operator", "operator-duplicate"]:
             tool = {"name":"lane_operator","inputSchema":{"type":"object","additionalProperties":False,
                 "properties":{"value":{"type":"string"},"fail":{"type":"boolean"}},"required":["value","fail"]}}
@@ -37,6 +59,15 @@ for line in sys.stdin:
         params = request["params"]
         if len(sys.argv) > 1:
             with open(sys.argv[1],"a") as output: output.write(params["name"]+"\n")
+        if params["name"] == "lane_companion":
+            value = {"version":2 if mode=="companion-version" else 1,"tools":["increment"]}
+            print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":{"content":[],"structuredContent":value}}),flush=True)
+            continue
+        if params["name"] == "lane_controller_snapshot" and mode == "companion-controller-error":
+            result = {"content":[{"type":"text","text":"PRIVATE_CONTROLLER_MARKER"}],
+                "structuredContent":{"private":"PRIVATE_CONTROLLER_MARKER"},"isError":True}
+            print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":result}),flush=True)
+            continue
         if params["name"] == "lane_operator":
             private = params["arguments"]["value"]
             result = {"content":[{"type":"text","text":private}],"structuredContent":{"private":private},
@@ -51,13 +82,97 @@ for line in sys.stdin:
             if params["name"] == "lane_call":
                 assert arguments["tool"] == "increment"
                 assert arguments["caller"] == {"kind":"keeper","name":"receipt-finalizer"}
+                if companion:
+                    assert arguments["companion"]["invocation_id"] == "a"*64
+                    assert "companion" not in arguments["arguments"]
                 arguments = arguments["arguments"]
             value = {"value":arguments["value"]+1}
         result = {"content":[],"structuredContent":value}
+        if companion and params["name"]=="lane_call":
+            result["content"]=[{"type":"text","text":"PRIVATE_CAPABILITY_MARKER"}]
+            result["_meta"]={"private":"a"*64}
+            if mode=="companion-error": result["isError"]=True
+            if mode=="companion-bad-output": result["structuredContent"]={"private":"PRIVATE_CAPABILITY_MARKER"}
+            if mode=="companion-extra-output":
+                result["structuredContent"].update({"app_link":"PRIVATE_APP_LINK_MARKER","token":"PRIVATE_TOKEN_MARKER"})
+            if mode=="companion-extra-nested":
+                result["structuredContent"]["details"]={"status":"ok","token":"PRIVATE_TOKEN_MARKER"}
+            if mode=="companion-extra-array":
+                result["structuredContent"]["details"]=[{"status":"ok","token":"PRIVATE_TOKEN_MARKER"}]
     else: raise RuntimeError(method)
     print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":result}),flush=True)
 |}
 let require = function Ok value -> value | Error _ -> fail "protocol operation failed"
+let companion_context () =
+  Lane_addon_call_context.companion_of_json (`Assoc ["socket_path",`String "/private/companion/s";
+    "invocation_id",`String (String.make 64 'a');"max_message_bytes",`Int 4096]) |> require
+
+let negotiated_companion mode () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+  let calls=Filename.temp_file "companion-protocol-" ".calls" in
+  Fun.protect ~finally:(fun () -> Sys.remove calls) (fun () ->
+    let contract=require (Protocol.contract ~host_requests:false ~action_tool:None
+      ~tool_invocation:Lane_addon_types.Host_context ~exported_tools:["increment"] ~tool_hooks:[] ~max_reply_bytes:4096) in
+    let protocol=Protocol.create ~instance_id:"companion-protocol" ~contract () in
+    let client=require (Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
+      ~command:"python3" ~args:["-c";server;calls;mode] ~max_response_bytes:4096 ()) in
+    Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Protocol.close protocol)) (fun () ->
+      let initialized=Protocol.initialize protocol client in
+      if List.mem mode ["companion-version";"companion-duplicate";"companion-open-output";
+          "companion-open-nested";"companion-open-array";"companion-open-union"] then (
+        check bool "invalid private negotiation cannot publish Ready" true (Result.is_error initialized);
+        check (list string) "failed discovery exposes no companion tools" [] (Protocol.companion_tools protocol))
+      else (
+        require initialized;
+        check (list string) "only named exports receive grants" ["increment"] (Protocol.companion_tools protocol);
+        check bool "private port cannot be exported" true
+          (List.for_all (fun (tool:Mcp_protocol.Mcp_types.tool) -> tool.name<>"lane_companion") (Protocol.exported_tools protocol));
+        let seen=ref [] and finalized=ref 0 in
+        let call ?companion ()=Protocol.call_exported_tool ?companion
+          ~principal:(Lane_addon_call_context.Keeper "receipt-finalizer") ~on_result:(fun result -> seen:=result::!seen)
+          ~finalize_result:(fun ~name:_ ~arguments:_ ~principal:_ ~(result:Mcp_protocol.Mcp_types.tool_result) ->
+            incr finalized;
+            check bool "private metadata never reaches the receipt finalizer" true (result._meta=None);
+            let expected=match result.structured_content with Some value -> Yojson.Safe.to_string value
+              | None -> "private companion operation failed" in
+            check string "only validated public text reaches the receipt finalizer" expected
+              (Agent_core.Mcp.text_of_tool_result result);
+            Ok result)
+          protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 4]) in
+        check bool "named companion tool requires a private grant" true (Result.is_error (call ()));
+        let context=companion_context () in
+        check bool "private authority is checked inside RPC serialization" true
+          (Result.is_error (call ~companion:{Protocol.context;admit=(fun () -> false)} ()));
+        let result=call ~companion:{Protocol.context;admit=(fun () -> true)} () in
+        if List.mem mode ["companion-bad-output";"companion-extra-output";
+            "companion-extra-nested";"companion-extra-array"] then (
+          check bool "public output validation is mandatory without configured hooks" true (Result.is_error result);
+          check int "extra private fields never reach receipt finalization" 0 !finalized;
+          check int "invalid private result reaches no public receipt callback" 0 (List.length !seen))
+        else (
+          let result=require result in
+          check int "one public result reaches the finalizer" 1 !finalized;
+          check int "one validated public receipt" 1 (List.length !seen);
+          check bool "private metadata is discarded" true (result._meta=None);
+          check bool "raw private text does not reach public results" true
+            (Agent_core.Mcp.text_of_tool_result result=(if mode="companion-error" then "private companion operation failed" else "{\"value\":5}"));
+          check bool "only public schema output survives" true
+            (result.structured_content=(if mode="companion-error" then None else Some (`Assoc ["value",`Int 5]))));
+        check string "rejected calls never entered the worker" "lane_companion\nlane_call\n"
+          (In_channel.with_open_bin calls In_channel.input_all))))))
+
+let companion_context_codec () =
+  let module C=Lane_addon_call_context in
+  let companion=companion_context () in
+  let arguments=`Assoc ["value",`Int 4] in
+  let wire=C.to_json_with_controller ~controller:None ~companion:(Some companion)
+    ~principal:(C.Keeper "receipt-finalizer") ~tool:"increment" ~arguments in
+  let decoded=C.of_json wire |> require in
+  check bool "private context leaves original public arguments intact" true (decoded.arguments=arguments);
+  check bool "private descriptor roundtrips only in control envelope" true (decoded.companion=Some companion);
+  List.iter (fun name -> check bool "private port cannot escape through model or action declaration" true
+    (Result.is_error (Protocol.contract ~host_requests:false ~action_tool:name
+      ~tool_invocation:Lane_addon_types.Host_context ~exported_tools:(if name=None then ["lane_companion"] else [])
+      ~tool_hooks:[] ~max_reply_bytes:4096))) [None;Some "lane_companion"]
 
 let standalone_protocol () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let contract = require (Protocol.contract ~host_requests:false ~action_tool:None ~tool_invocation:Lane_addon_types.Direct
@@ -237,7 +352,7 @@ let discovery_race ~cancel () = Eio_main.run (fun env -> Eio.Switch.run (fun sw 
       check int "retired discovery keeps exports unavailable" 0 (List.length (Protocol.exported_tools protocol));
       check bool "retired discovery cannot be revived" true (Result.is_error (Protocol.initialize protocol client)))))))
 
-let with_finalizer_fixture ~hooks ~invocation run = Eio_main.run (fun env ->
+let with_finalizer_fixture ?(mode="context") ~hooks ~invocation run = Eio_main.run (fun env ->
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. (fun () -> Eio.Switch.run (fun sw ->
     let calls=Filename.temp_file "addon-finalizer-" ".calls" in
     Fun.protect ~finally:(fun () -> Sys.remove calls) (fun () ->
@@ -245,10 +360,88 @@ let with_finalizer_fixture ~hooks ~invocation run = Eio_main.run (fun env ->
         ~tool_invocation:invocation ~exported_tools:["increment"] ~tool_hooks:hooks ~max_reply_bytes:4096) in
       let protocol=Protocol.create ~instance_id:"finalizer-test" ~contract () in
       let client=require (Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
-        ~command:"python3" ~args:["-c";server;calls;"context"] ~max_response_bytes:4096 ()) in
+        ~command:"python3" ~args:["-c";server;calls;mode] ~max_response_bytes:4096 ()) in
       Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Protocol.close protocol)) (fun () ->
         require (Protocol.initialize protocol client);
         run protocol (fun () -> In_channel.with_open_bin calls In_channel.input_all))))))
+
+let private_finalizer_failure ~raises () = with_finalizer_fixture ~mode:"companion" ~hooks:[]
+  ~invocation:Lane_addon_types.Host_context (fun protocol calls ->
+    let seen=ref 0 and finalized=ref 0 in
+    let result=Protocol.call_exported_tool
+      ~companion:{Protocol.context=companion_context ();admit=(fun () -> true)}
+      ~principal:(Lane_addon_call_context.Keeper "receipt-finalizer")
+      ~on_result:(fun _ -> incr seen)
+      ~finalize_result:(fun ~name:_ ~arguments:_ ~principal:_ ~(result:Mcp_protocol.Mcp_types.tool_result) ->
+        incr finalized;
+        check bool "finalizer receives no worker private metadata" true (result._meta=None);
+        check string "finalizer receives public text instead of worker private text" "{\"value\":5}"
+          (Agent_core.Mcp.text_of_tool_result result);
+        if raises then failwith "PRIVATE_FINALIZER_MARKER" else Error "PRIVATE_FINALIZER_MARKER")
+      protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 4]) in
+    (match result with
+     | Error (Protocol.Protocol_failed detail) ->
+       check string "private finalizer failure prose is erased" "private invocation finalization failed" detail
+     | Ok _ | Error (Invalid_contract _|Host_refusal _|Invalid_observation _|Stopped) ->
+       fail "private finalizer must return only a fixed protocol failure");
+    check int "the public-safe receipt reaches finalization once" 1 !finalized;
+    check int "no failed finalization reaches public receipt observers" 0 !seen;
+    check string "finalizer failure does not replay the invocation" "lane_companion\nlane_call\n" (calls ()))
+
+let private_finalizer_result_is_projected () = with_finalizer_fixture ~mode:"companion" ~hooks:[]
+  ~invocation:Lane_addon_types.Host_context (fun protocol calls ->
+    let seen=ref [] in
+    let answer=require (Protocol.call_exported_tool
+      ~companion:{Protocol.context=companion_context ();admit=(fun () -> true)}
+      ~principal:(Lane_addon_call_context.Keeper "receipt-finalizer")
+      ~on_result:(fun result -> seen:=result::!seen)
+      ~finalize_result:(fun ~name:_ ~arguments:_ ~principal:_ ~(result:Mcp_protocol.Mcp_types.tool_result) ->
+        check bool "raw worker metadata is absent before host receipt effects" true (result._meta=None);
+        let module S=Mcp_protocol.Mcp_types in
+        Ok {result with structured_content=Some (`Assoc ["value",`Int 9]);
+          content=[S.TextContent {type_="text";text="PRIVATE_FINALIZER_TEXT_MARKER";annotations=None}];
+          _meta=Some (`Assoc ["private",`String "PRIVATE_FINALIZER_META_MARKER"])})
+      protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 4])) in
+    check bool "finalizer output metadata is projected away again" true (answer._meta=None);
+    check string "finalizer output text is replaced by validated public data" "{\"value\":9}"
+      (Agent_core.Mcp.text_of_tool_result answer);
+    check bool "public observer sees only the final validated projection" true (!seen=[answer]);
+    check string "one explicit companion invocation" "lane_companion\nlane_call\n" (calls ()))
+
+let private_controller_failure ~host_refusal () = with_finalizer_fixture ~mode:"companion-controller-error" ~hooks:[]
+  ~invocation:Lane_addon_types.Host_context (fun protocol calls ->
+    let seen=ref 0 and finalized=ref 0 in
+    let authorize ~release_controller:_ ~snapshot ~invoke:_ =
+      match snapshot () with
+      | Error detail ->
+        check string "snapshot removes private text before any mediation error mapping"
+          "private controller snapshot failed" detail;
+        if host_refusal then Error (Lane_addon_call_context.Host_refusal (Unavailable detail))
+        else Error (Lane_addon_call_context.Transport_error detail)
+      | Ok _ -> fail "the fixture controller snapshot must expose an untrusted failure" in
+    let result=Protocol.call_exported_tool ~authorize
+      ~companion:{Protocol.context=companion_context ();admit=(fun () -> true)}
+      ~principal:(Lane_addon_call_context.Keeper "receipt-finalizer")
+      ~on_result:(fun _ -> incr seen)
+      ~finalize_result:(fun ~name:_ ~arguments:_ ~principal:_ ~result -> incr finalized;Ok result)
+      protocol ~name:"increment" ~arguments:(`Assoc ["value",`Int 4]) in
+    (if host_refusal then
+       match result with
+       | Error (Protocol.Host_refusal (Lane_addon_call_context.Unavailable detail)) ->
+         check string "actual host mediation preserves only the fixed snapshot refusal"
+           "private controller snapshot failed" detail
+       | Ok _ | Error (Invalid_contract _|Protocol_failed _|Invalid_observation _|Stopped
+           |Host_refusal (Rejected _|Activity_disabled _|Activity_unobserved _)) ->
+         fail "controller host refusal must contain only the fixed snapshot failure"
+     else match result with
+       | Error (Protocol.Protocol_failed detail) ->
+         check string "controller-origin private prose is erased" "private invocation outcome unknown" detail
+       | Ok _ | Error (Invalid_contract _|Host_refusal _|Invalid_observation _|Stopped) ->
+         fail "private controller failure must remain a fixed transport failure");
+    check int "raw controller failure reaches no public observer" 0 !seen;
+    check int "raw controller failure reaches no finalizer" 0 !finalized;
+    check string "failed controller admission sends no exported invocation"
+      "lane_companion\nlane_controller_snapshot\n" (calls ()))
 
 let finalized_receipt () = with_finalizer_fixture
   ~hooks:[Lane_addon_types.Validate_input;Validate_output] ~invocation:Lane_addon_types.Host_context
@@ -340,6 +533,25 @@ let cancelled_finalizer () = with_finalizer_fixture ~hooks:[] ~invocation:Lane_a
 
 let () = run "Addon engine-independent MCP admission"
   ["protocol",[test_case "actual standalone stdio server preserves admission and hook contracts" `Quick standalone_protocol;
+    test_case "private companion context and reserved port" `Quick companion_context_codec;
+    test_case "companion grants preserve only validated public replies" `Quick (negotiated_companion "companion");
+    test_case "private worker errors lose raw text and metadata" `Quick (negotiated_companion "companion-error");
+    test_case "companion public output validation is mandatory" `Quick (negotiated_companion "companion-bad-output");
+    test_case "companion output schema cannot declare an open object" `Quick (negotiated_companion "companion-open-output");
+    test_case "companion output schema cannot declare a nested open object" `Quick (negotiated_companion "companion-open-nested");
+    test_case "companion output schema cannot declare open array items" `Quick (negotiated_companion "companion-open-array");
+    test_case "companion output schema cannot declare open union branches" `Quick (negotiated_companion "companion-open-union");
+    test_case "closed companion union schema remains usable" `Quick (negotiated_companion "companion-closed-union");
+    test_case "extra private fields cannot enter public receipts or finalizers" `Quick (negotiated_companion "companion-extra-output");
+    test_case "nested private fields cannot enter public receipts or finalizers" `Quick (negotiated_companion "companion-extra-nested");
+    test_case "private array item fields cannot enter public receipts or finalizers" `Quick (negotiated_companion "companion-extra-array");
+    test_case "controller transport failures lose private prose" `Quick (private_controller_failure ~host_refusal:false);
+    test_case "actual controller host refusals lose private prose" `Quick (private_controller_failure ~host_refusal:true);
+    test_case "private finalizer errors are fixed" `Quick (private_finalizer_failure ~raises:false);
+    test_case "private finalizer exceptions are fixed" `Quick (private_finalizer_failure ~raises:true);
+    test_case "private finalizer output is projected again" `Quick private_finalizer_result_is_projected;
+    test_case "unknown companion version cannot become Ready" `Quick (negotiated_companion "companion-version");
+    test_case "duplicate companion port cannot become Ready" `Quick (negotiated_companion "companion-duplicate");
     test_case "private operator port never enters model exports or error detail" `Quick private_operator;
     test_case "host finalization retains original context and allows another RPC" `Quick finalized_receipt;
     test_case "selected output hook validates finalized receipt" `Quick

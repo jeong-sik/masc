@@ -143,7 +143,26 @@ let serve_connection t flow =
                      | P.Prepare _|P.Invoke _ -> write t flow (`Assoc ["value",value]);loop ()) in
             loop ())) in
       Watched_work.run run ~watcher:(fun () -> Eio.Promise.await grant.cancelled))
-let create ~sw ~net ~directory ~max_message_bytes =
+let private_listener ~sw ~directory ~directory_identity ~socket_path =
+  Eio.Cancel.protect (fun () ->
+    let fd,identity=Eio_unix.run_in_systhread (fun () ->
+      let fd=Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+      try Unix.set_nonblock fd;Unix.bind fd (Unix.ADDR_UNIX socket_path);Unix.listen fd 1;
+        fd,Unix.lstat socket_path
+      with exn -> Unix.close fd;raise exn) in
+    (* Eio.Net.listen installs an unconditional path unlink. Import only the
+       descriptor and own removal ourselves, after checking both identities. *)
+    Eio.Switch.on_release sw (fun () -> Eio_unix.run_in_systhread (fun () ->
+      Unix.close fd;
+      try
+        let parent=Unix.lstat directory and current=Unix.lstat socket_path in
+        if parent.st_kind=Unix.S_DIR && parent.st_dev=directory_identity.Unix.st_dev
+          && parent.st_ino=directory_identity.st_ino && current.st_kind=Unix.S_SOCK
+          && current.st_dev=identity.Unix.st_dev && current.st_ino=identity.st_ino
+        then Unix.unlink socket_path
+      with Unix.Unix_error (Unix.ENOENT,_,_) -> ()));
+    Eio_unix.Net.import_socket_listening ~sw ~close_unix:false fd)
+let create ~sw ~directory ~max_message_bytes =
   if max_message_bytes<String.length (Yojson.Safe.to_string (error_json Outcome_unknown))
       || max_message_bytes>=Sys.max_string_length then Error Unavailable else
   let checked=Eio_unix.run_in_systhread (fun () ->
@@ -154,18 +173,25 @@ let create ~sw ~net ~directory ~max_message_bytes =
         ~path:directory info |> Result.map_error (fun _ -> Unavailable) in
       (match Unix.lstat (Filename.concat directory "s") with
        | _ -> Error Unavailable
-       | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ())
+       | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok info)
     with Unix.Unix_error _ -> Error Unavailable) in
-  let* ()=checked in
+  let* directory_identity=checked in
   let socket_path=Filename.concat directory "s" in
   let retired,retire=Eio.Promise.create () and stopped,stop=Eio.Promise.create () in
   let t={socket_path;max_message_bytes;grants=Hashtbl.create 4;retired;retire;stopped;stop;live=true} in
   let ready,resolve_ready=Eio.Promise.create () in
+  let started=ref false in
   Eio.Switch.check sw;
+  Eio.Switch.on_release sw (fun () -> if not !started then (
+    revoke t;
+    ignore (Eio.Promise.try_resolve resolve_ready (Error Unavailable));
+    ignore (Eio.Promise.try_resolve t.stop ())));
   Eio.Fiber.fork_daemon ~sw (fun () ->
+    started:=true;
+    if not t.live then `Stop_daemon else
     Fun.protect ~finally:(fun () -> revoke t;ignore (Eio.Promise.try_resolve t.stop ())) (fun () ->
       let serve () = Eio.Switch.run (fun scope ->
-        let socket=Eio.Net.listen ~sw:scope ~backlog:1 net (`Unix socket_path) in
+        let socket=private_listener ~sw:scope ~directory ~directory_identity ~socket_path in
         Eio.Promise.resolve resolve_ready (Ok ());
         while true do
           Eio.Switch.check scope;
@@ -181,4 +207,13 @@ let create ~sw ~net ~directory ~max_message_bytes =
            ignore (Eio.Promise.try_resolve resolve_ready (Error Unavailable));raise exn
        | _ -> ignore (Eio.Promise.try_resolve resolve_ready (Error Unavailable)));
       `Stop_daemon));
-  Eio.Promise.await ready |> Result.map (fun () -> t)
+  (* Eio starts a fork callback immediately. A cancelled owner can instead
+     decline the fork; no listener exists in that case and neither waiter may
+     depend on the owner's later release hooks to make progress. *)
+  if not !started then (
+    revoke t;
+    ignore (Eio.Promise.try_resolve resolve_ready (Error Unavailable));
+    ignore (Eio.Promise.try_resolve t.stop ()));
+  (try Eio.Promise.await ready |> Result.map (fun () -> t) with
+   | Eio.Cancel.Cancelled _ as exn ->
+       revoke t;Eio.Cancel.protect (fun () -> await_stopped t);raise exn)

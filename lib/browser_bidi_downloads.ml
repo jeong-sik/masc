@@ -192,22 +192,9 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
         let artifacts = Hashtbl.create 16 in
         let read ~context =
           let rows = Browser_downloads.for_context model context in
-          let records = List.map (fun (row : Browser_downloads.download) ->
-            let data = Eio_unix.run_in_systhread (fun () ->
-              Browser_downloads.to_json ~verify:(verify_file ~root:directory) row) in
-            let artifact = match Hashtbl.find_opt artifacts row.id with
-              | Some value -> Some (Ok value)
-              | None -> (match field "path" data with
-                  | Some (`String path) ->
-                    let result = publish_artifact path in
-                    Result.iter (fun value -> Hashtbl.replace artifacts row.id value) result;
-                    Some result
-                  | _ -> None) in
-            match data, artifact with
-            | `Assoc fields, Some (Ok value) -> `Assoc (("artifact",value) :: fields)
-            | `Assoc fields, Some (Error reason) -> `Assoc (("artifactError",`String reason) :: fields)
-            | (`Assoc _, None)
-            | ((`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))), _) -> data) rows in
+          let verify path = Eio_unix.run_in_systhread (fun () -> verify_file ~root:directory path) in
+          let records = List.map
+            (Browser_downloads.published_json ~verify ~publish:publish_artifact ~published:artifacts) rows in
           let state = !failure in
           Ok (`Assoc ["sessionId",`String session_id;"downloads",`List records;
             "observation",`String (if state = None then "connected" else "interrupted");

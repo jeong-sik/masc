@@ -47,8 +47,14 @@ HTML `<dialog>`와 OS 파일 선택창은 이 JS 대화상자 계약에 포함�
 
 ## 다운로드
 
-현재 스키마가 지원할 때 `BrowserRead mode=downloads`를 명시적 automation
-`tabId`로 호출한다. pending/completed/canceled/interrupted 등 반환된 상태를 따른다.
+현재 스키마가 지원할 때 `BrowserRead mode=downloads`를 명시적 automation 또는
+명시적 ego 브라우저의 `tabId`로 호출한다. pending/completed/canceled/interrupted 등
+반환된 상태를 따른다. 끝난 파일은 `artifact`로 받는다.
+
+ego 연결은 그 연결이 한 번이라도 다룬 agent 페이지(연 탭 포함)의 다운로드만 본다.
+다운로드를 일으키는 클릭·이동은 그 단계 안에서 동작 전에 감시를 건다. 연결이 아직
+다루지 않은 페이지가 스스로 시작한 다운로드는 목록에 없다. 명령이 멈춰 ego 프로세스가 다시 뜨면 목록은 그때부터 다시 시작하고, `watchingSince`가
+그 시각이다. 그 전의 다운로드는 목록에 없을 수 있다.
 클릭·파일명·디렉터리 존재만으로 완료를 추측하지 않는다. 완료 상태와 파일 증거가
 다르면 그대로 보고하며, 사용자의 실제 다운로드 폴더를 광범위하게 탐색하지 않는다.
 

@@ -31,6 +31,7 @@ type verb = Masc.Browser_bidi_peer.verb =
   | Page_goto
   | Page_context
   | Page_snapshot
+  | Page_downloads
 type command = { id : string; verb : verb; args : Yojson.Safe.t; actor : string option }
 type poll = Empty | Forward of command | Reject of string
 type exchange_phase = Writing_frame | Awaiting_reply
@@ -79,6 +80,7 @@ let decode_poll json =
       | "page.goto" -> Ok (Forward { id; verb = Page_goto; args; actor })
       | "page.context" -> Ok (Forward { id; verb = Page_context; args; actor })
       | "page.snapshot" -> Ok (Forward { id; verb = Page_snapshot; args; actor })
+      | "page.downloads" -> Ok (Forward { id; verb = Page_downloads; args; actor })
       | _ -> Ok (Reject id)
 
 let command_json ~deadline_ms command =

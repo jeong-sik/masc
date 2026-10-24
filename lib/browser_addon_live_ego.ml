@@ -278,15 +278,21 @@ let remove_capture_directory directory = Eio_unix.run_in_systhread (fun () ->
     | () -> Ok ()
     | exception Unix.Unix_error (code, _, _) -> unix_error directory code)
 
-let run ~env ~owner (configuration : Browser_configuration.live_ego) work =
+(* The ego connection's downloads sit beside the owned Gecko's, in the
+   worker's download folder the broker publishes from. *)
+let downloads_folder = "ego"
+
+let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) work =
   let command = configuration.command in
+  let downloads = {Peer.root = Filename.concat downloads downloads_folder;
+    publish = (fun path -> Eio_unix.run_in_systhread (fun () -> Browser_addon_owner.publish_download owner path))} in
   let startup, started = Eio.Promise.create () and stopping, stop = Eio.Promise.create ()
   and stopped, finish = Eio.Promise.create () in
   let serve_space directory ~version ~engine_version = Eio.Switch.run (fun sw ->
     let session = session ~sw ~env ~command ~directory in
     let ended outcome = Eio.Cancel.protect (fun () -> end_session session); outcome in
     ended @@
-    let* peer = Peer.open_space ~space:configuration.space ~version ~capture_directory:directory
+    let* peer = Peer.open_space ~space:configuration.space ~version ~capture_directory:directory ~downloads
         ~now:(fun () -> Eio.Time.now (Eio.Stdenv.clock env))
         ~run:(runner session) in
     let client_id = Uuidm.v4_gen (Random.State.make_self_init ()) () in

@@ -3,6 +3,7 @@ module Ego = Masc.Browser_addon_live_ego
 module Peer = Masc.Browser_ego_peer
 module Owner = Masc.Browser_addon_owner
 module W = Masc.Browser_addon_wire
+module Broker = Masc.Browser_addon_downloads
 module B = Browser_lane
 let ok = function Ok value -> value | Error detail -> fail detail
 let write path text = Out_channel.with_open_bin path (fun channel -> output_string channel text)
@@ -267,6 +268,15 @@ def run(script,answer):
         page={'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','scrollX':0,'scrollY':0})}
         (root/'clicked').write_text(json.dumps([args['x'],args['y'],args['button']]))
         answer({'guard':page,'receipt':page,'error':None})
+    elif step=='page.downloads':
+        # What the page's download wait saved: <downloads>/<id>, in folders
+        # no one else may write, as ego's saveAs makes them.
+        folder=pathlib.Path(args['downloads'])
+        for level in (folder.parent,folder):level.mkdir(mode=0o700,exist_ok=True)
+        ident='1b000000-0000-4000-8000-0000000000d1';saved=folder/ident
+        saved.write_text('report');(root/'downloaded').write_text(str(saved))
+        answer({'since':'2026-10-23T09:00:00.000Z','rows':[{'id':ident,'label':'p1','url':'https://fixture.test/report.txt',
+            'suggestedFilename':'report.txt','state':'completed','path':str(saved),'reason':None}]})
     elif step=='space.finish':answer(None)
     else:answer(error='unexpected step '+step)
 for raw in stream:
@@ -299,6 +309,7 @@ let scenario mode =
     Eio_main.run (fun env ->
       Time_compat.set_clock (Eio.Stdenv.clock env);
       let owner = ok (Owner.create ~incarnation:"0b000000-0000-4000-8000-000000000071") in
+      ok (Owner.attach_downloads owner (ok (Broker.create ~directory:root)));
       let dispatch command = Owner.dispatch owner {W.incarnation=Owner.incarnation owner;command} in
       let work () =
         entered := true;
@@ -344,6 +355,23 @@ let scenario mode =
         check string "a click" {|{"ok":true,"data":{"tabId":1,"action":"click","urlBefore":"https://fixture.test/","url":"https://fixture.test/","title":"Fixture","scrollX":0,"scrollY":0}}|}
           (Yojson.Safe.to_string (answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Click "#send"}))));
         check string "where ego clicked" {|[200, 300, "left"]|} (read (Filename.concat root "clicked"));
+        (* A download the page saved reaches the caller as a grant of this
+           connection's route, never as a path, and is published from it. *)
+        let actor = "keeper/live-fixture" and route = B.Live_route (Some client.client_id)
+        and verb = B.Page_downloads {tab_id=1} in
+        let row = match Yojson.Safe.Util.(answered (issue verb) |> member "data" |> member "downloads" |> to_list) with
+          | [row] -> row | rows -> failf "%d downloads were listed" (List.length rows) in
+        check bool "the worker keeps the file's path" true (Yojson.Safe.Util.member "path" row = `Null);
+        let id = Yojson.Safe.Util.(row |> member "artifact" |> member "downloadGrant" |> to_string) in
+        (match dispatch (W.Download_claim {id;actor;route;verb}) with
+         | W.Download_reply (Broker.Snapshot descriptor) ->
+           let snapshot = ok (Broker.snapshot_path ~directory:root ~snapshot_id:descriptor.snapshot_id) in
+           check string "the snapshot holds what the page saved" "report" (read snapshot);
+           let receipt = ok (Masc.Browser_download_artifact.publish ~base_path:root snapshot) in
+           check bool "the publication is committed" true (dispatch (W.Download_commit {id;actor;route;verb;receipt}) = W.Receipt);
+           check bool "and the grant released" true (dispatch (W.Download_release {id;actor;route;verb}) = W.Receipt)
+         | W.Download_reply (Broker.Published _) | W.Issue_result _ | Snapshot_result _ | Model_reply _
+         | Poll_result _ | Receipt | Service_refusal _ -> fail "the grant was not claimed for this connection");
         check bool "an input the table refuses never reaches ego" true
           (match issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Activate_tab}) with
            | W.Issue_result (Error (B.Transport_unsupported _)) -> true
@@ -352,7 +380,7 @@ let scenario mode =
         check bool "retirement ends the task space" true (dispatch W.Retire = W.Receipt);
         check bool "retirement answers after the space ended" true (finished ());
         check bool "no client is left" true (B.connected_clients () = [])) in
-      let failure = try Ego.run ~env ~owner {command; space="masc"} work; None with
+      let failure = try Ego.run ~env ~owner ~downloads:(Broker.downloads_directory ~directory:root) {command; space="masc"} work; None with
         | Invalid_argument detail | Sys_error detail -> Some detail in
       (match mode, failure with
        | ("normal" | "late" | "retire"), None -> ()
@@ -370,8 +398,10 @@ let scenario mode =
     | "normal" ->
       check bool "caller work ran" true !entered;
       check (list string) "steps"
-        ["space.open"; "tabs.list"; "page.capture"; "page.open"; "page.goto"; "page.target"; "page.pointer"; "space.finish"] steps;
+        ["space.open"; "tabs.list"; "page.capture"; "page.open"; "page.goto"; "page.target"; "page.pointer"; "page.downloads"; "space.finish"] steps;
       check int "one ego process ran them all" 1 processes;
+      check bool "retirement removed the published download" false
+        (Sys.file_exists (read (Filename.concat root "downloaded")));
       check bool "the screenshot directory is removed, with what a stopped capture left" false
         (Sys.file_exists (read (Filename.concat root "captures")))
     | "late" ->

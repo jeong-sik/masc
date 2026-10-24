@@ -1,4 +1,5 @@
-(** Download evidence comes only from BiDi events, never directory polling. *)
+(** Download evidence comes only from the browser's own download events,
+    BiDi's or ego lite's, never directory polling. *)
 type completion = File of string | Path_unavailable
 type status = Pending | Completed of completion | Canceled | Interrupted of string
 type download = {
@@ -17,6 +18,18 @@ val add_tree : t -> Yojson.Safe.t -> (unit, string) result
 val interrupt : t -> string -> unit
 val for_context : t -> string -> download list
 val to_json : verify:(string -> (string * int, string) result) -> download -> Yojson.Safe.t
+
+(** [to_json] of one row as a read answers it. A completed file that
+    [verify] still finds is handed to [publish] once; the marker it answers
+    is kept in [published] by download id and carried as [artifact] on this
+    and later reads. A failed publication is answered as [artifactError]
+    and tried again on the next read. *)
+val published_json
+  :  verify:(string -> (string * int, string) result)
+  -> publish:(string -> (Yojson.Safe.t, string) result)
+  -> published:(string, Yojson.Safe.t) Hashtbl.t
+  -> download
+  -> Yojson.Safe.t
 
 (** A session-owned service. [console] reads the tab's console entries ({!Browser_console}) from the
     same event stream. [read] remains available after interruption so

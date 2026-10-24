@@ -75,7 +75,9 @@ let () =
         ~socket_path ~max_message_bytes)
       until_stop in
     let ego ()=match live_ego with
-      | Some configuration -> Masc.Browser_addon_live_ego.run ~env ~owner configuration serve
+      | Some configuration ->
+        Masc.Browser_addon_live_ego.run ~env ~owner
+          ~downloads:(Masc.Browser_addon_downloads.downloads_directory ~directory:(Filename.dirname socket_path)) configuration serve
       | None -> serve () in
     let live ()=if !live_bidi then Masc.Browser_addon_live_bidi.run ~env ~owner
       ~directory:(Filename.dirname socket_path) ego else ego () in

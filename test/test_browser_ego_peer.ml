@@ -44,14 +44,18 @@ let () = at_exit (fun () -> List.iter (fun directory ->
   Array.iter (fun name -> Sys.remove (Filename.concat directory name)) (Sys.readdir directory);
   Sys.rmdir directory) !created)
 
+(* Where the peer saves downloads when a case does not look at them; a
+   publication there fails, as without a broker. *)
+let no_downloads = {Peer.root = "/nonexistent/masc-ego-downloads"; publish = (fun _ -> Error "no download broker in this case")}
+
 (* The peer's clock: a runner moves it to stand for the time a run took. *)
 let clock = ref 0.
 let now () = !clock
 
-let opened ?(capture_directory=capture_directory ()) run =
+let opened ?(capture_directory=capture_directory ()) ?(downloads=no_downloads) run =
   let run ~window_s script = let sent = sent_of ~window_s script in
     if sent.step = "space.open" then answered (obj ["spaceId",`Int 51;"ownership",str "agent"]) else run sent in
-  match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory with
+  match Peer.open_space ~downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory with
   | Ok peer -> peer
   | Error detail -> failf "the space did not open: %s" detail
 
@@ -88,7 +92,7 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
     | "tabs.list" -> answered (`List [])
     | "space.finish" -> answered `Null
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   check int "space number" 51 (Peer.space_id peer);
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -96,10 +100,10 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
   check (list string) "opened by name, then held by number"
     [ "space.open \"masc\""; "tabs.list 51"; "space.finish 51" ]
     (List.rev_map (fun (step, space) -> step ^ " " ^ Yojson.Safe.to_string space) !spaces);
-  let user = Peer.open_space ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
+  let user = Peer.open_space ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
       ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 7;"ownership",str "user"])) in
   check bool "a space the operator owns is refused" true (Result.is_error user);
-  let in_use = Peer.open_space ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
+  let in_use = Peer.open_space ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
       ~run:(fun ~window_s:_ _ -> failed "EGO_TASK_SPACE_NAME_IN_USE: masc") in
   check (result reject string) "ego's own refusal is kept" (Error "EGO_TASK_SPACE_NAME_IN_USE: masc") (Result.map ignore in_use)
 
@@ -535,8 +539,9 @@ let test_the_scripts_parse_as_modules () =
     | "page.dialog" -> answered (obj ["dialog",ego_dialog ~default:"def" "prompt" "name?"])
     | "page.target_input" -> answered (obj ["urlBefore",str observed_url;"receipt",obj [];"error",`Null;
         "tab",obj ["url",str observed_url;"title",str "Slack"]])
+    | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
-  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   List.iter (fun (verb, args) -> ignore (dispatch peer verb args))
@@ -544,6 +549,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_elements, obj ["tabId",`Int 1;"within",str "#main"];
       Live.Page_scene, obj ["tabId",`Int 1];
       Live.Page_snapshot, obj ["tabId",`Int 1;"maxChars",`Int 1000;"scope",str "subtree";"root",str "@12"];
+      Live.Page_downloads, obj ["tabId",`Int 1];
       Live.Page_capture, obj ["tabId",`Int 1];
       Live.Page_act, act_args (Lane.Action.Open_tab "https://example.test/");
       Live.Page_goto, obj ["tabId",`Int 1;"url",str "https://example.test/"];
@@ -561,7 +567,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Dismiss_dialog}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
-    ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.snapshot";"page.capture";
+    ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.drag";"page.input";"page.target_input";
      "page.close";"page.reload";"page.history";"page.dialog";"page.dialog";"space.finish"]
     (List.rev_map fst !scripts);
@@ -626,6 +632,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.close" -> answered (obj ["closed",`Bool true])
     | "page.dialog" -> answered (obj ["dialog",ego_dialog "alert" "hello"])
     | "space.hand_off" -> answered `Null
+    | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.target" -> answered resolved
     | "page.pointer" | "page.keyboard" | "page.drag" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
@@ -661,7 +668,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
     | Dialog_answer -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Dismiss_dialog})
     | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}
-    | Operator_handoff -> Page_act (Action.Control Action.Hand_off)) in
+    | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
+    | Download_listing -> Page_downloads {tab_id=1}) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in
@@ -756,7 +764,7 @@ let test_a_snapshot_reads_egos_own_tree () =
       output := in_node (snapshot_stand_in !text ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let snapshot ?(tab_id=1) ?(max_chars=1000) scope =
@@ -842,7 +850,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
       output := in_node (target_stand_in ~url:!url ~blocked:!blocked ~find:!find ~act:!act ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
@@ -950,7 +958,7 @@ let test_the_space_goes_to_the_operator_and_back () =
     match sent.step with
     | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str !ownership])
     | _ -> output := in_node (control_stand_in ~ownership:!ownership ~user_page:!user_page ^ script); Ok !output in
-  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
     | Some line -> after ~prefix:"seen " line
@@ -977,7 +985,7 @@ let test_the_space_goes_to_the_operator_and_back () =
   check bool "with the agent holding the space, a take-over is refused before any effect" true
     (contains (before_effect "a needless take-over" (act Lane.Action.Take_over)) "already holds");
   check string "and ego is not asked to take it" "[]" (seen ());
-  let open_owned_by owner = Peer.open_space ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 52;"ownership",str owner]))
+  let open_owned_by owner = Peer.open_space ~downloads:no_downloads ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 52;"ownership",str owner]))
       ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) in
   check bool "a space handed to the operator still opens, so take_over can bring it back" true
     (Result.is_ok (open_owned_by "agentDelegatedToUser"));
@@ -999,7 +1007,7 @@ let test_history_moves_one_entry () =
         ~same_url:!same_url ~load:!load ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let on_tab ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
@@ -1208,7 +1216,7 @@ let test_dialog_scripts_in_node () =
       let open_, opening, opens_on = !scenario in
       output := in_node (dialog_stand_in ~open_ ~opening ~opens_on ~canned:(canned step) ^ script);
       Ok !output in
-  let peer = match Peer.open_space ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
@@ -1257,6 +1265,172 @@ let test_dialog_scripts_in_node () =
    | Ok _ -> check (list string) "a blocked page still closes" ["close"] (seen ())
    | other -> failf "a close of a blocked page was %s" (failure_kind other))
 
+(* A listing answers ego's rows as Browser_downloads rows. A completed file in
+   the connection's folder is published once and carried as its artifact; a
+   failed publication is said on the row and tried again; a row the wait
+   could not have written is refused. *)
+let test_downloads_are_listed_and_published_once () =
+  let root = Unix.realpath (capture_directory ()) in
+  let saved = "1b000000-0000-4000-8000-0000000000a1" and pending = "1b000000-0000-4000-8000-0000000000a2"
+  and broken = "1b000000-0000-4000-8000-0000000000a3" in
+  let saved_path = Filename.concat root saved in
+  Out_channel.with_open_bin saved_path (fun channel -> Out_channel.output_string channel "report");
+  let published = ref [] and busy = ref true in
+  let downloads = {Peer.root; publish = (fun path ->
+    published := path :: !published;
+    if !busy then Error "the broker is busy" else Ok (obj ["downloadSnapshot",str "snapshot-1"]))} in
+  let row ?(path=`Null) ?(reason=`Null) ~id ~state name = obj ["id",str id;"label",str "p1";
+    "url",str ("https://example.test/" ^ name);"suggestedFilename",str name;"state",str state;"path",path;"reason",reason] in
+  let rows = ref [] and asked = ref [] in
+  let peer = opened ~downloads (fun sent -> match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.downloads" -> asked := sent.args :: !asked;
+      answered (obj ["since",str "2026-10-23T09:00:00.000Z";"rows",`List !rows])
+    | other -> failf "unexpected step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let read () = dispatch peer Live.Page_downloads (obj ["tabId",`Int 1]) in
+  let listed () = match read () with
+    | Ok listing -> listing
+    | Error (Live.Before_effect detail | Live.Outcome_unknown detail | Live.Partial_failure {message=detail;_}) ->
+      failf "the listing failed: %s" detail in
+  rows := [row ~id:saved ~state:"completed" ~path:(str saved_path) "report.txt";
+           row ~id:pending ~state:"pending" "big.zip";
+           row ~id:broken ~state:"interrupted" ~reason:(str "network failed") "broken.txt"];
+  let downloads_of listing = Yojson.Safe.Util.to_list (field "downloads" listing) in
+  (match downloads_of (listed ()) with
+   | first :: _ -> check string "a failed publication is said on its row" "the broker is busy" (text (field "artifactError" first))
+   | [] -> fail "the listing has no rows");
+  busy := false;
+  let listing = listed () in
+  ignore (listed ());
+  check (list string) "the saved file was published on the next read, then kept" [saved_path; saved_path] !published;
+  check int "for its tab" 1 (Yojson.Safe.Util.to_int (field "tabId" listing));
+  check string "since when the page was watched" "2026-10-23T09:00:00.000Z" (text (field "watchingSince" listing));
+  (match downloads_of listing with
+   | [completed; waiting; failed] ->
+     check string "completed" "completed" (text (field "status" completed));
+     check string "its artifact" {|{"downloadSnapshot":"snapshot-1"}|} (Yojson.Safe.to_string (field "artifact" completed));
+     check int "its size" 6 (Yojson.Safe.Util.to_int (field "bytes" completed));
+     check string "its name" "report.txt" (text (field "suggestedFilename" completed));
+     check string "its tab as the context" "1" (text (field "context" completed));
+     check string "pending" "pending" (text (field "status" waiting));
+     check bool "a pending row has no artifact" true (field "artifact" waiting = `Null);
+     check string "interrupted" "interrupted" (text (field "status" failed));
+     check string "and why" "network failed" (text (field "reason" failed))
+   | other -> failf "the listing has %d rows" (List.length other));
+  check string "the script names the connection's folder" root (text (field "downloads" (List.hd !asked)));
+  let refused rows_now = rows := rows_now; before_effect "an unreadable listing" (read ()) in
+  check bool "a file outside the folder is refused" true
+    (String_util.contains_substring
+       (refused [row ~id:saved ~state:"completed" ~path:(str "/tmp/report.txt") "report.txt"]) "outside the connection's download folder");
+  check bool "an id that is not a UUID is refused" true
+    (String_util.contains_substring
+       (refused [row ~id:"../escape" ~state:"pending" "report.txt"]) "not a UUID");
+  let runs = List.length !asked in
+  check bool "a listing names its tab" true
+    (String_util.contains_substring (before_effect "a listing without a tab" (dispatch peer Live.Page_downloads (obj []))) "tabId");
+  check int "and runs nothing without one" runs (List.length !asked)
+
+(* The download wait and the listing in node, against a stand-in for ego with
+   one agent page. [fire] starts a download there, [fail] fails the armed
+   wait while the page stays open, [close] closes the page.
+   Steps run one after another in one node process, as in one ego process;
+   a step whose answer the case does not read prints nothing. *)
+let download_stand_in = {js|
+const fs = await import("node:fs");
+const nodePath = await import("node:path");
+const seen = [];
+process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
+let waiting = [];
+let open = true;
+const page = {
+  info: async () => ({url: "https://example.test/", title: "Files", w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600}),
+  goto: async () => { seen.push("goto"); },
+  waitForEvent: (name, options) => {
+    seen.push("wait " + name + " " + options.timeout);
+    return new Promise((resolve, reject) => waiting.push({resolve, reject}));
+  },
+};
+const download = (name, failure) => ({
+  url: () => "https://example.test/" + name,
+  suggestedFilename: () => name,
+  saveAs: async path => {
+    seen.push("save");
+    if (failure === null) { fs.mkdirSync(nodePath.dirname(path), {recursive: true}); fs.writeFileSync(path, "contents of " + name); }
+  },
+  failure: async () => failure,
+  delete: async () => { seen.push("delete"); },
+});
+const fire = (name, failure) => { const armed = waiting; waiting = []; armed.forEach(wait => wait.resolve(download(name, failure))); };
+const fail = () => { const armed = waiting; waiting = []; armed.forEach(wait => wait.reject(new Error("Target crashed"))); };
+const close = () => { open = false; const armed = waiting; waiting = []; armed.forEach(wait => wait.reject(new Error("No target with given id found"))); };
+const taskSpace = async () => ({
+  ownership: "agent",
+  tabs: async () => open ? [{label: "p1", openedBy: "agent", url: "https://example.test/", title: "Files", targetId: "T1", active: true}] : [],
+  page: () => page,
+});
+const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+const quiet = console.log;
+|js}
+
+let test_the_download_wait_runs_in_node () =
+  let root = Unix.realpath (capture_directory ()) in
+  let published = ref [] in
+  let downloads = {Peer.root; publish = (fun path -> published := path :: !published; Ok (obj ["downloadSnapshot",str "snapshot-1"]))} in
+  let program = ref [download_stand_in] and output = ref "" in
+  let silent script = "console.log = () => {};\n{\n" ^ script ^ "\n}\nconsole.log = quiet;" in
+  let run ~window_s script =
+    let sent = sent_of ~window_s script in
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Files" ~url:"https://example.test/" ~active:true ()])
+    | "page.goto" -> program := silent script :: !program;
+      answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Files"]])
+    | "page.downloads" ->
+      output := in_node (String.concat "\n" (List.rev (("{\n" ^ script ^ "\n}") :: !program)));
+      Ok !output
+    | other -> failf "unexpected step %s" other in
+  let peer = match Peer.open_space ~downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+    | Ok peer -> peer | Error detail -> fail detail in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let goto () = match dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://example.test/"]) with
+    | Ok _ -> () | Error _ -> fail "the move failed" in
+  let between line = program := line :: !program in
+  goto ();
+  between "fire(\"report.txt\", null); await settle();";
+  goto ();
+  between "fire(\"broken.txt\", \"network failed\"); await settle(); fail(); await settle();";
+  goto ();
+  between "close(); await settle();";
+  let listing = match dispatch peer Live.Page_downloads (obj ["tabId",`Int 1]) with
+    | Ok listing -> listing
+    | Error (Live.Before_effect detail | Live.Outcome_unknown detail | Live.Partial_failure {message=detail;_}) ->
+      failf "the listing failed: %s" detail in
+  let seen = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.Util.(to_list (Yojson.Safe.from_string (after ~prefix:"seen " line)) |> List.map to_string)
+    | None -> fail "the stand-in did not say what it saw" in
+  let count name = List.length (List.filter (String.equal name) seen) in
+  let waits = List.filter (String.starts_with ~prefix:"wait download ") seen in
+  check int "one wait on the page, armed again after each download and by the step after a failed wait, not after the page closed"
+    4 (List.length waits);
+  check bool "each with a timeout ego accepts" true
+    (List.for_all (fun wait -> int_of_string (after ~prefix:"wait download " wait) > 0) waits);
+  check int "the moves ran" 3 (count "goto");
+  check int "both downloads were saved" 2 (count "save");
+  check int "and ego's own copies deleted" 2 (count "delete");
+  check bool "watched since a time" true (match field "watchingSince" listing with `String _ -> true | _ -> false);
+  match Yojson.Safe.Util.to_list (field "downloads" listing) with
+  | [completed; failed] ->
+    let path = text (field "path" completed) in
+    check bool "the file is in the connection's folder" true (String.starts_with ~prefix:(root ^ "/") path);
+    check string "with what the browser saved" "contents of report.txt" (In_channel.with_open_bin path In_channel.input_all);
+    check (list string) "and was published" [path] !published;
+    check string "its artifact" {|{"downloadSnapshot":"snapshot-1"}|} (Yojson.Safe.to_string (field "artifact" completed));
+    check string "its name" "report.txt" (text (field "suggestedFilename" completed));
+    check string "the failed one" "interrupted" (text (field "status" failed));
+    check string "says why" "network failed" (text (field "reason" failed))
+  | other -> failf "the listing has %d rows" (List.length other)
+
 let () =
   run "browser_ego_peer" [
     "ego", [
@@ -1281,4 +1455,6 @@ let () =
       test_case "a snapshot target is found by ego and checked first" `Quick test_a_snapshot_target_is_found_by_ego_and_checked_first;
       test_case "the space goes to the operator and back" `Quick test_the_space_goes_to_the_operator_and_back;
       test_case "input acts through the shared page scripts" `Quick test_input_acts_through_the_shared_page_scripts;
+      test_case "downloads are listed and published once" `Quick test_downloads_are_listed_and_published_once;
+      test_case "the download wait runs against a stand-in in node" `Quick test_the_download_wait_runs_in_node;
       test_case "the peer serves what the lane table says" `Quick test_the_peer_serves_what_the_lane_table_says ] ]

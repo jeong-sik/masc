@@ -102,7 +102,7 @@ let run ~env ~owner ~directory work =
           | Error detail -> Printf.eprintf "Gecko profile %s was kept: %s\n%!" path detail)} in
       let driver=Browser_webdriver.create ?binary:configuration.binary ?locate ~profiles ~lost:lose
         ~request:(request ~pool ~clock ~endpoint)
-        ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root:(Filename.concat directory "downloads")
+        ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root:(Browser_addon_downloads.downloads_directory ~directory)
           ~publish:(fun path -> Eio_unix.run_in_systhread (fun () -> Browser_addon_owner.publish_download owner path))) () in
       let close_original=Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
         Browser_addon_owner.revoke owner;

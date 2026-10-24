@@ -95,8 +95,10 @@ let prepare_read ~keeper_name json =
       let* ()=Option.to_result ~none:"screenshot requires an owning Keeper" (Option.map (fun _ -> ()) keeper_name) in
       let* tab_id=tab request in prepared request (Screenshot tab_id) (B.Page_capture {tab_id})
   | `Downloads ->
-      let* ()=match request.route with Browser_selection.Exact B.Automation_route -> Ok ()
-        | Automatic|Exact (Live_route _|Stagehand_route) -> Error "downloads require automation" in
+      (* A live connection that does not list downloads refuses at selection
+         (Browser_lane.live_transport_serves). *)
+      let* ()=match request.route with Browser_selection.Exact (B.Automation_route|Live_route _) -> Ok ()
+        | Automatic|Exact Stagehand_route -> Error "downloads require automation or an explicit live browser" in
       let* tab_id=tab request in prepared request Raw (B.Page_downloads {tab_id})
   | `Console ->
       let* ()=match request.route with Browser_selection.Exact B.Automation_route -> Ok ()

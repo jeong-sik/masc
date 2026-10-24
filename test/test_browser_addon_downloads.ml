@@ -83,6 +83,28 @@ let retirement_and_unpublished () = with_download (fun _root source _contents br
     (Result.is_error (Broker.release broker ~id:"0b000000-0000-4000-8000-000000000099" ~actor ~route ~verb));
   check bool "unpublished original is unconfirmed" true (Result.is_error (Broker.cleanup broker));
   check bool "unpublished source remains" true (Sys.file_exists source))
+(* A live connection this worker runs (the ego connection) is granted what
+   it published, under its own route only; a route that names no
+   connection, and Stagehand, publish nothing and are refused. *)
+let live_route_grants_are_its_own () = with_download (fun _root source _contents broker ->
+  let client value = B.Live_route (Some (ok (B.client_id_of_string value))) in
+  let live=client "1b000000-0000-4000-8000-000000000001"
+  and other=client "1b000000-0000-4000-8000-000000000002" in
+  let marker=ok (Broker.publish broker source) in
+  let bound=ok (Broker.bind broker ~actor ~route:live ~verb (payload source marker)) in
+  let id=match Yojson.Safe.Util.member "downloads" bound with
+    | `List [row] -> Yojson.Safe.Util.(member "artifact" row |> member "downloadGrant" |> to_string)
+    | _ -> fail "missing bound live download row" in
+  check bool "another live connection cannot import it" true
+    (Result.is_error (Broker.claim broker ~id ~actor ~route:other ~verb));
+  check bool "the automation route cannot import it" true
+    (Result.is_error (Broker.claim broker ~id ~actor ~route:B.Automation_route ~verb));
+  ignore (ok (Broker.claim broker ~id ~actor ~route:live ~verb));
+  ok (Broker.release broker ~id ~actor ~route:live ~verb);
+  List.iter (fun (name, route) ->
+    check bool (name ^ " is not granted downloads") true
+      (Result.is_error (Broker.bind broker ~actor ~route ~verb (payload source marker))))
+    ["a live route without a connection",B.Live_route None;"Stagehand",B.Stagehand_route])
 let with_committed_download f = with_download (fun root source contents broker ->
   let marker=ok (Broker.publish broker source) in let id=grant broker source marker in
   let descriptor=descriptor (claim broker id) in commit broker id (publish root descriptor);
@@ -235,4 +257,5 @@ let () = run "browser Addon download ownership" ["transfer",[
   test_case "abandon returns before the original commit is released" `Quick abandon_preserves_an_unreleased_commit;
   test_case "cleanup refuses before the original claim settles" `Quick cleanup_preserves_an_unreleased_claim;
   test_case "cleanup refuses before the original commit is released" `Quick cleanup_preserves_an_unreleased_commit;
-  test_case "unknown downloads survive retirement" `Quick partial_is_preserved]]
+  test_case "unknown downloads survive retirement" `Quick partial_is_preserved;
+  test_case "a live connection's grants are its own" `Quick live_route_grants_are_its_own]]

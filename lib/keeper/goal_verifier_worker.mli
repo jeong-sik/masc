@@ -1,8 +1,8 @@
-(** One actual retained Goal review attempt. Uses the shared original/progress
-    store and the existing tool-capable reviewer. No Goal/Task transition,
-    human confirmation, new attempt allocation or replacement is performed.
-    The serialized host owner selects the original attempt and owns any
-    explicit linked-successor decision after a definite terminal refusal. *)
+(** Retained Goal review execution through the shared original/progress store
+    and existing tool-capable reviewer. The serialized host selects the
+    original, supplies run identities and owns actual Goal transitions and
+    human confirmation. Frontier/commit record its facts; they grant no
+    independent domain authority or unknown-execution replacement. *)
 
 type run_identity = { run_id : string; started_at : float }
 type receipt = {
@@ -38,12 +38,28 @@ val inventory :
     original rejects the inventory; partial results are not a complete list.
     Neither function creates an original, authorizes dispatch or picks a retry. *)
 
+val frontier :
+  store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
+  goal_id:string -> request_id:string -> new_run:(unit -> run_identity) ->
+  (retained option, error) result
+(** Restore the exact linked original before preparing a new input. A definite
+    terminal refusal with typed retryable runtimes may retain one successor;
+    its complete input and fixed run are staged before the parent intent.
+    Restart restores that staged child without calling [new_run] or rendering
+    prompts. Unknown dispatch, missing links and corrupt inventory grant no
+    retry. [None] means no first attempt exists. The host serializes this
+    request under its workspace lease through selection, retention and run. *)
+
 val original : retained -> Goal_verifier_original.t
 val run_identity : retained -> run_identity
 val progress : retained -> Lane_addon_request_progress.t
 val restored_receipt : retained -> (receipt option, error) result
 (** A retained judgment/terminal refusal and all actual tool observations, independent
     of today's lookup availability. Captured/admission/pending returns None. *)
+
+val retained_judgment : retained -> (Yojson.Safe.t, error) result
+(** Complete validated stored judgment for the host's commit payload. Returns
+    an error before judgment; never rebuilds a receipt or a model decision. *)
 
 val run :
   ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
@@ -58,3 +74,17 @@ val run :
     refusal may reuse the same original. Persist the structured reply and full
     tool observations atomically before returning control to the Goal host.
     Host proof commitment and run-registry publication remain separate. *)
+
+val commit :
+  store:Lane_addon_store.t -> retained:retained ->
+  change:Lane_addon_request_progress.change ->
+  observe:(Lane_addon_request_progress.change -> (Yojson.Safe.t, string) result) ->
+  apply:(Lane_addon_request_progress.change -> (unit, string) result) ->
+  (unit, error) result
+(** Host-only application of the retained structured judgment. [change.after]
+    must bind its original_digest and complete receipt. Recovery always uses
+    the original intent, confirms an exact authoritative after-state, or
+    retries only after observing that intent's own before-state. Divergence
+    records a conflict, never permission to rebase or apply another decision.
+    The host authenticates the actual Goal domain payload and owns the proof,
+    run-registry, Candle and human-confirmation boundaries. *)

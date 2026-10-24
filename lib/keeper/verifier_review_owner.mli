@@ -114,3 +114,8 @@ val validate_admission : Yojson.Safe.t -> (unit, string) result
 (** Verify the retained no-dispatch observations and non-verdict result before
     re-admitting the same original. A known execution or unknown result cannot
     be reinterpreted as pre-admission. *)
+
+val retry_result : Yojson.Safe.t -> (unit, string) result
+(** Verify a definite terminal non-verdict and its typed retryable runtime
+    observations. This shared reviewer disposition alone performs no retry;
+    the subject owner must retain and confirm its exact successor first. *)

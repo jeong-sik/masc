@@ -36,6 +36,23 @@ let run_of_json json =
   if Float.is_finite started_at then Ok {run_id; started_at}
   else Error "Goal verifier run time must be finite"
 
+(* The staged successor and its published owner name the very same complete
+   request bytes. In particular, recovery cannot invent another run after the
+   parent intent has become durable. The summary remains an observation index. *)
+let request_json original run =
+  `Assoc ["schema", `String "goal_verifier_request/v1";
+    "original", V.to_json original; "run", run_json run]
+
+let request_of_json json =
+  let* fields = object_fields ["schema"; "original"; "run"] json in
+  let* version = text "schema" fields in
+  let* original_json = field "original" fields in
+  let* original = V.of_json original_json in
+  let* encoded_run = field "run" fields in
+  let* run = run_of_json encoded_run in
+  if version = "goal_verifier_request/v1" then Ok (original, run)
+  else Error "unknown Goal verifier request schema"
+
 let key ~goal_id ~request_id ~attempt =
   if String.trim goal_id = "" || String.trim request_id = "" || attempt < 0 then
     Error "Goal verifier original requires its exact nonblank subject and nonnegative attempt"
@@ -50,15 +67,15 @@ let summary original run =
     "original_digest", `String digest; "run", run_json run])
 
 let validate_record ~installation_id ~package_id (record : Owner.retained) =
-  let* original = decode (V.of_json record.request) in
+  let* original, run = decode (request_of_json record.request) in
   let* expected_key = decode (original_key original) in
   let* fields = decode (object_fields ["schema"; "original_digest"; "run"] record.summary) in
-  let* run_json = decode (field "run" fields) in
-  let* run = decode (run_of_json run_json) in
+  let* summary_run = decode (field "run" fields) in
+  let* summary_run = decode (run_of_json summary_run) in
   let* expected_summary = decode (summary original run) in
-  let* expected_digest = decode (V.digest original) in
+  let* expected_digest = decode (Owner.request_digest (request_json original run)) in
   if record.scope <> scope || record.tool <> tool_name || record.request_id <> expected_key
-    || record.request_digest <> expected_digest
+    || record.request_digest <> expected_digest || summary_run <> run
     || not (Yojson.Safe.equal expected_summary record.summary) then
     invalid "Goal verifier owner identity or complete original differs"
   else if record.installation_id <> installation_id || record.package_id <> package_id then
@@ -77,22 +94,26 @@ let retain ~store ~installation_id ~package_id ~run original =
   let* request_id = decode (original_key original) in
   let* summary = decode (summary original run) in
   let* () = Owner.retain ~store ~scope ~request_id ~installation_id ~package_id
-    ~tool:tool_name ~summary ~request:(V.to_json original)
+    ~tool:tool_name ~summary ~request:(request_json original run)
     |> Result.map_error (fun e -> Store_unavailable (Owner.error_to_string e)) in
   let subject = V.subject original in
   let* loaded = load ~store ~installation_id ~package_id ~goal_id:subject.goal_id
     ~request_id:subject.request_id ~attempt:(V.attempt original) in
   match loaded with Some retained -> Ok retained | None -> invalid "retained Goal original is absent"
 
-let inventory ~store ~installation_id ~package_id =
+let read_all ~store =
   let* records = Owner.load_scope ~store ~scope
     |> Result.map_error (fun e -> Store_unavailable (Owner.error_to_string e)) in
   let* reversed = List.fold_left (fun state (record : Owner.retained) ->
     let* acc = state in
     let* retained = validate_record ~installation_id:record.installation_id ~package_id:record.package_id record in
-    if record.installation_id = installation_id && record.package_id = package_id
-    then Ok (retained::acc) else Ok acc) (Ok []) records in
+    Ok (retained::acc)) (Ok []) records in
   Ok (List.rev reversed)
+
+let inventory ~store ~installation_id ~package_id =
+  let* records = read_all ~store in
+  Ok (List.filter (fun retained -> retained.record.installation_id = installation_id
+    && retained.record.package_id = package_id) records)
 
 let original (retained : retained) = retained.original
 let run_identity (retained : retained) = retained.run
@@ -154,6 +175,18 @@ let restored_receipt retained =
     let* receipt, _ = decode (refusal_receipt retained refusal.evidence) in Ok (Some receipt)
   | Captured | Admission_wait _ | Dispatch_pending _ -> Ok None
 
+let retained_judgment retained =
+  let* judgment = match Progress.phase (progress retained) with
+    | Progress.Judged judgment -> Ok judgment
+    | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
+      Ok commit.judgment
+    | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
+      Error (Execution_pending "Goal review has no retained structured judgment") in
+  let* receipt = decode (receipt_of_json retained judgment) in
+  match receipt.result.AR.verdict with
+  | Some _ -> Ok judgment
+  | None -> invalid "Goal judgment has no structured verdict"
+
 let advance ~store retained event =
   match Owner.advance ~store ~expected:retained.record ~event with
   | Error error -> Error (Store_unavailable (Owner.update_error_to_string error))
@@ -173,6 +206,83 @@ let reload ~store retained =
   | Some current when current.record.request_digest = retained.record.request_digest
       && Yojson.Safe.equal current.record.summary retained.record.summary -> Ok current
   | Some _ -> invalid "Goal original or fixed run changed before execution"
+
+let retryable_refusal retained evidence =
+  let* receipt, disposition = decode (refusal_receipt retained evidence) in
+  let* fields = decode (object_fields ["schema"; "certainty"; "observations"; "result"] disposition) in
+  let* result = decode (field "result" fields) in
+  let* () = if Yojson.Safe.equal result (Verifier_review_owner.result_to_json receipt.result)
+    then Ok () else invalid "Goal refusal differs from its original result" in
+  match receipt.result.AR.retryable_runtimes with
+  | [] -> Ok false
+  | _::_ -> let* () = decode (Verifier_review_owner.retry_result disposition) in Ok true
+
+let frontier ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
+  let* _ = decode (key ~goal_id ~request_id ~attempt:0) in
+  let* records = read_all ~store in
+  let* related = List.fold_left (fun state retained ->
+    let* related = state in
+    let subject = V.subject retained.original in
+    if subject.goal_id <> goal_id || subject.request_id <> request_id then Ok related
+    else if retained.record.installation_id <> installation_id || retained.record.package_id <> package_id
+    then Error (Authority_changed "Goal frontier belongs to another original destination")
+    else Ok (retained::related)) (Ok []) records in
+  let related = List.sort (fun left right -> Int.compare (V.attempt left.original) (V.attempt right.original)) related in
+  let restore_child parent successor =
+    let* encoded = Owner.load_successor_request ~store ~scope successor
+      |> Result.map_error (fun error -> Store_unavailable (Owner.error_to_string error)) in
+    let* child, run = decode (request_of_json encoded) in
+    let* expected = decode (V.successor parent.original) in
+    let* child_key = decode (original_key child) in
+    let* () = if successor.Progress.request_id = child_key
+        && Yojson.Safe.equal (V.to_json expected) (V.to_json child)
+        && run.run_id <> parent.run.run_id then Ok ()
+      else invalid "Goal successor changed its complete original or reused the previous run" in
+    let* child = retain ~store ~installation_id ~package_id ~run child in
+    let* _ = match Progress.phase (progress parent) with
+      | Progress.Subdividing _ -> advance ~store parent (Progress.Successor_observed successor.request_id)
+      | Subdivided _ -> Ok parent
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Conflicted _ | Rejected _ -> invalid "Goal successor has no original parent intent" in
+    Ok child in
+  let rec walk parent rest =
+    match Progress.phase (progress parent), rest with
+    | (Progress.Subdividing (refusal, successor) | Subdivided (refusal, successor)), _ ->
+      let* retryable = retryable_refusal parent refusal.evidence in
+      let* () = if retryable then Ok () else invalid "Goal successor lacks a definite typed retry" in
+      let* child = restore_child parent successor in
+      (match rest with
+       | [] -> walk child []
+       | existing::tail ->
+         if existing.record.request_digest = child.record.request_digest
+           && existing.record.request_id = child.record.request_id
+           && Yojson.Safe.equal existing.record.summary child.record.summary
+         then walk child tail else invalid "Goal inventory differs from its original linked child")
+    | Rejected {stage=Progress.Execution; evidence}, [] ->
+      let* retryable = retryable_refusal parent evidence in
+      if not retryable then Ok (Some parent)
+      else
+        let* child = decode (V.successor parent.original) in
+        let run = new_run () in
+        let* _ = decode (summary child run) in
+        let* () = if run.run_id <> parent.run.run_id then Ok ()
+          else invalid "Goal successor must have a distinct fixed run" in
+        let* request_id = decode (original_key child) in
+        let* successor = Owner.prepare_successor ~store ~scope ~request_id
+          ~request:(request_json child run)
+          |> Result.map_error (fun error -> Store_unavailable (Owner.error_to_string error)) in
+        let* parent = advance ~store parent (Progress.Successor_intended successor) in
+        let* child = restore_child parent successor in
+        Ok (Some child)
+    | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}), [] -> Ok (Some parent)
+    | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Conflicted _ | Rejected {stage=(Progress.Before_dispatch | Progress.Execution);_}), _::_ ->
+      invalid "Goal child exists without the original successor intent" in
+  match related with
+  | [] -> Ok None
+  | first::rest when V.attempt first.original = 0 -> walk first rest
+  | _::_ -> invalid "Goal frontier is missing its first original attempt"
 
 let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
   let* retained = reload ~store retained in
@@ -274,3 +384,63 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
             | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> ())
         | Error _ -> ());
       raise exn
+
+let commit ~store ~retained ~change ~observe ~apply =
+  let* retained = reload ~store retained in
+  let pending detail = Error (Execution_pending detail) in
+  let validate commit =
+    let* receipt = decode (receipt_of_json retained commit.Progress.judgment) in
+    let* digest = decode (V.digest retained.original) in
+    let* encoded = decode (receipt_json retained receipt) in
+    let* () = match receipt.result.AR.verdict, commit.change.after with
+      | Some _, `Assoc fields when List.assoc_opt "original_digest" fields = Some (`String digest)
+          && (match List.assoc_opt "receipt" fields with
+            | Some value -> Yojson.Safe.equal value encoded | None -> false) -> Ok ()
+      | None, _ | Some _, _ -> invalid "Goal commit intent differs from its original structured judgment" in
+    Ok () in
+  let confirm saved commit =
+    match observe commit.Progress.change with
+    | Error detail ->
+      let* _ = advance ~store saved (Progress.Commit_uncertain
+        (`Assoc ["cause", `String "goal_commit_observation_unavailable"; "detail", `String detail])) in
+      pending ("Goal commit observation unavailable: " ^ detail)
+    | Ok observed when Yojson.Safe.equal observed commit.change.after ->
+      let* _ = advance ~store saved (Progress.Commit_observed observed) in Ok ()
+    | Ok observed when Yojson.Safe.equal observed commit.change.before ->
+      let* saved = advance ~store saved (Progress.Commit_retry_observed observed) in
+      (match apply commit.change with
+       | Error detail ->
+         let* _ = advance ~store saved (Progress.Commit_uncertain (`String detail)) in pending detail
+       | Ok () ->
+         (match observe commit.change with
+          | Ok observed when Yojson.Safe.equal observed commit.change.after ->
+            let* _ = advance ~store saved (Progress.Commit_observed observed) in Ok ()
+          | Ok observed ->
+            let* _ = advance ~store saved (Progress.Commit_uncertain observed) in
+            pending "Goal commit returned without its exact authoritative after-state"
+          | Error detail ->
+            let* _ = advance ~store saved (Progress.Commit_uncertain (`String detail)) in pending detail))
+    | Ok observed ->
+      let* _ = advance ~store saved (Progress.Commit_conflicted observed) in
+      pending "Goal commit conflicts with the authoritative original subject" in
+  let recover saved commit =
+    let* () = validate commit in
+    let* saved = match Progress.phase (progress saved) with
+      | Progress.Committing _ -> advance ~store saved (Progress.Commit_uncertain
+          (`Assoc ["cause", `String "original_goal_commit_requires_observation"]))
+      | Commit_unknown _ -> Ok saved
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _
+      | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+        invalid "Goal commit recovery lacks its original intent" in
+    confirm saved commit in
+  match Progress.phase (progress retained) with
+  | Progress.Finished commit -> validate commit
+  | Committing commit | Commit_unknown (commit, _) -> recover retained commit
+  | Judged judgment ->
+    let commit = {Progress.judgment; change} in
+    let* () = validate commit in
+    let* saved = advance ~store retained (Progress.Commit_intended change) in
+    recover saved commit
+  | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
+    pending "Goal proof cannot commit without its original retained judgment"
+  | Conflicted _ -> pending "Goal proof is conflicted; the original host must resolve it"

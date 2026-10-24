@@ -820,7 +820,8 @@ let choose_files ?actor t id ~opener ~paths =
       "        if (failure === null && !multiple) failure = \"the file chooser takes one file, so it was closed with none\";";
       "        if (failure === null) {";
       "          try { set = await chooser.setFiles(args.paths); } catch (error) { failure = \"ego did not set the files: \" + reason(error); }";
-      "        } else failure += await close();";
+      "        }";
+      "        if (failure !== null) failure += await close();";
       "      }";
       "      const dialog = set?.dialog ?? (failure === null ? " ^ open_dialog "page" ^ " : null);";
       "      const tab = " ^ row_after ^ ";";

@@ -1,0 +1,45 @@
+[p1 "Native transfers" | space "masc-ego-native-sdk-20261024"(4): 1 managed, 0 untracked — p1* "Native transfers"]
+root
+  container
+    text "Attach note"
+    textbox [ref=40]
+      button [ref=41]
+        text "파일 선택"
+      text "선택된 파일 없음"
+  textbox [ref=42]
+    button [ref=43]
+      text "파일 선택"
+    text "선택된 파일 없음"
+  textbox [ref=44]
+    button [ref=45]
+      text "파일 선택"
+    text "선택된 파일 없음"
+  text "Drag source"
+  text "Drop target"
+
+DRAG_RECEIPT {"dialog":{"url":"http://localhost:63185/","frameId":"BD56DA250E24433E8B18503DEAFDD5F2","message":"native drag interrupted","type":"alert","hasBrowserHandler":true,"defaultPrompt":""}}
+DIALOG {"url":"http://localhost:63185/","frameId":"BD56DA250E24433E8B18503DEAFDD5F2","message":"native drag interrupted","type":"alert","hasBrowserHandler":true,"defaultPrompt":""}
+POINTER_BEFORE [{"type":"mousemove","buttons":0},{"type":"mousedown","buttons":1}]
+POINTER_AFTER [{"type":"mousemove","buttons":0},{"type":"mousedown","buttons":1},{"type":"mousemove","buttons":0}]
+POINTER_RELEASE [{"type":"mousemove","buttons":0},{"type":"mousedown","buttons":1},{"type":"mousemove","buttons":0},{"type":"mouseup","buttons":0}]
+CHOOSER_MISSING_PATH_ACCEPTED
+CHOOSER_SECOND_SET this file chooser was already handled
+CHOOSER_NEXT_SUCCEEDED
+[p1 "Native transfers" | space "masc-ego-native-sdk-20261024"(4): 1 managed, 0 untracked — p1* "Native transfers"]
+root
+  container
+    text "Attach note"
+    textbox [ref=40]
+      button [ref=41]
+        text "파일 선택"
+      text "masc-ego-no-such-staged-file.txt"
+  textbox [ref=42]
+    button [ref=43]
+      text "파일 선택"
+    text "선택된 파일 없음"
+  textbox [ref=44]
+    button [ref=45]
+      text "파일 선택"
+    text "선택된 파일 없음"
+  text "Drag source"
+  text "Drop target"

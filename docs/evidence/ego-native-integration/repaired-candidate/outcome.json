@@ -1,0 +1,27 @@
+{
+  "source": "7ee0dd6e13086c9faaab9d63b6b13bd901aa4da1",
+  "build_run": 40077681846,
+  "selected_ci_run": 40077677283,
+  "selected_tests": 74,
+  "node_tests": 19,
+  "real_provider": "glm-coding.glm-5.3-flash",
+  "request_id": "ego-native-proof-7ee0-form-2",
+  "request_state": "Succeeded",
+  "sdk_space": 14,
+  "native_workflow_steps": [
+    3,
+    2
+  ],
+  "native_workflow_snapshot_scopes": [
+    "full_page",
+    "viewport"
+  ],
+  "form_submissions": 1,
+  "persisted_values_verified": true,
+  "completion_number": "EGO-001",
+  "pixel_capture": "independent reviewer SDK screenshot, visually inspected; not Keeper-produced",
+  "private_task_verifier": "not reviewed: isolated exact-output registry unavailable; no task-verifier acceptance claim",
+  "production_installation_replaced": false,
+  "full_regression_executed": false,
+  "release_verified": false
+}

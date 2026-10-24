@@ -1,0 +1,20 @@
+{
+  "requested_stops": [
+    {
+      "pid": 93850,
+      "kind": "private MASC candidate server",
+      "signal": "SIGINT"
+    },
+    {
+      "pid": 13682,
+      "kind": "owned HTTP fixture",
+      "signal": "SIGTERM"
+    },
+    {
+      "pid": 78543,
+      "kind": "owned HTTP fixture",
+      "signal": "SIGTERM"
+    }
+  ],
+  "all_listed_pids_after_stop": "absent"
+}

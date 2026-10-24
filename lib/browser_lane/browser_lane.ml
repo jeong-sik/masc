@@ -135,9 +135,18 @@ let reply_timeout_sec = function
 type reply_policy = Reply_window | Executor_owned
 let reply_policy = function
   | Page_native_workflow _ -> Executor_owned
+  | Page_act action ->
+    (match action with
+     | Action.Open_tab _ | Action.Open_window _ | Action.Control _ -> Reply_window
+     | Action.On_tab {interaction;_} ->
+       (match interaction with
+        | Action.Upload _ -> Executor_owned
+        | Action.Set_cookie _ | Action.Delete_cookie _ | Action.Set_emulation _ | Action.Clear_emulation
+        | Action.Block_requests _ | Action.Unblock_requests | Action.Accept_dialog _ | Action.Dismiss_dialog
+        | Action.Back | Action.Forward | Action.Reload | Action.Close_tab -> Reply_window))
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
   | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Session_close | Session_status
-  | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ -> Reply_window
+  | Page_goto _ | Page_elements _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ -> Reply_window
 
 (* The CSS scope an elements read carries, top-level or in a frame. Every
    caller that relays such a read checks the answer against it. *)

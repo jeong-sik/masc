@@ -72,8 +72,9 @@ val space_id : t -> int
     [close_tab] act only on pages an agent opened in the space, and so does
     [page.interact]. [back] and [forward] move one entry in the tab's own
     history and are refused before acting when there is none.
-    [upload] sets the worker's copies of a Keeper's files on one CSS-matched
-    file input of such a page; this connection holds those copies until its
+    [upload] gives the worker's copies of a Keeper's files to ego's native
+    file-input resolver. Its [chosen] receipt describes the staged files handed
+    to the SDK, not a subsequent observation of the page's file list; this connection holds those copies until its
     space has ended, since the page reads them later.
     [accept_dialog] and [dismiss_dialog] answer the JavaScript dialog such a
     page is blocked on; a listed row of a managed page carries the dialog
@@ -99,8 +100,11 @@ val space_id : t -> int
     connection's overlay does. Native input checks the observed URL before calling ego; this is not an
     atomic navigation guard. Ego owns its locator/actionability waits; a method
     failure is uncertain, including a missing or stale target. Re-read a snapshot after page changes or input and on a native
-    stale/unknown ref refusal. Native drags share the observed waypoint
-    contract, require zero duration and release the button in the same run.
+    stale/unknown ref refusal. Selector drags without waypoints use native [dragAndDrop]. A native drag
+    failure attempts mouse-up once; a dialog or missing release proof preserves
+    the same release-uncertain state as raw drag. Coordinate and
+    scene drags retain the observed waypoint contract, require zero duration
+    and release the button in the same run.
     Unconfirmed release blocks further input on this peer; read/finish remain
     available. End this task space before opening a fresh peer. Frames are read
     through the snapshot. Snapshot-target click, fill, hover and double-click

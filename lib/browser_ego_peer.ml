@@ -157,6 +157,10 @@ let with_download_root t = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as args -> args
 let run_step t ~window_s ~step ~args body =
   asked t.run ~window_s ~step ~space:(`Int t.space_id) ~holder:Agent_holds ~args:(with_download_root t args) body
+let run_native_step t ?(window_s = Browser_lane.Native_workflow.max_window_s) ~step ~args body =
+  match t.run_native ~window_s (script ~step ~space:(`Int t.space_id) ~holder:Agent_holds ~args:(with_download_root t args) body) with
+  | Error failure -> Error (Unanswered failure)
+  | Ok output -> answer output
 (* A read has no effect, so however it failed, nothing happened. *)
 let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
@@ -721,27 +725,16 @@ let answer_dialog t id ~accept text =
    badge (Browser_pointer_feedback): MASC, the actor, the interaction. *)
 let cursor_label ~actor ~verb = String.concat " · " ["MASC"; Option.value actor ~default:"agent"; verb]
 
-(* A file input takes the worker's copies of the files a Keeper chose. The
-   selector means what it means for the owned Gecko: one CSS match, a file
-   input itself, multiple when it is given more than one file. ego would
-   also take a label or a container, so the run checks that first and
-   names the input to ego as loc=css:. ego 0.6.0.16 sets a path that does
-   not exist as an empty file without a word, so each path is checked
-   before the run. It reads a file only when the page does, so this
-   connection owns the files' lease from before the upload until its space
-   has ended ({!finish}). *)
-let upload_check = page_function {js|
-const request = arguments[0];
-const nodes = document.querySelectorAll(request.selector);
-if (nodes.length !== 1) return {refused: nodes.length === 0 ? "no element matches the upload selector" : "the upload selector matches " + nodes.length + " elements"};
-const input = nodes[0];
-if (input.localName !== "input" || input.type !== "file") return {refused: "upload requires a file input"};
-if (request.count > 1 && !input.multiple) return {refused: "this file input takes one file"};
-return {ok: true};|js}
-let upload_files = page_function {js|
-const input = document.querySelectorAll(arguments[0].selector)[0];
-return {url: location.href, title: document.title,
-  files: input === undefined || input.files === null ? null : Array.from(input.files, file => ({name: file.name, size: file.size}))};|js}
+(* Ego resolves the file input, including labels, containers, refs and shadow
+   roots. MASC validates staged regular files and holds their lease until the
+   task space ends because Ego reads them when the page does. [chosen] is the
+   staged metadata handed to the SDK, not a post-input DOM observation. *)
+let native_upload_script = {js|async function nativeUpload(page, args) {
+  try {
+    const receipt = await page.setInputFiles(args.selector, args.paths);
+    return {receipt: receipt ?? {}, error: null};
+  } catch (error) { return {receipt: null, error: String(error?.message ?? error)}; }
+}|js}
 (* The name and size a page sees for one of the worker's copies. *)
 let chosen_file path = match Unix.stat path with
   | {Unix.st_kind = Unix.S_REG; st_size; _} -> Some (obj ["name",str (Filename.basename path);"size",`Int st_size])
@@ -756,53 +749,38 @@ let chosen_files = function
       | (Error _ as error), _ -> error) paths (Ok [])
 let upload t id ~selector ~paths =
   let* label = label_of t id in
-  let* _ = chosen_files paths in
-  let interaction = Browser_lane.Action.Upload {target = Browser_lane.Action.File_input selector; paths} in
+  let* chosen = chosen_files paths in
   Browser_lane.Upload_lease.claim ~owner:t.uploads ~paths;
-  match run_step t ~window_s:(tab_window id interaction) ~step:"page.upload"
-          ~args:(obj ["label",str label;"tabId",`Int id;"selector",str selector;"paths",`List (List.map str paths);
-            "check",str upload_check;"files",str upload_files]) (String.concat "\n" [
-      "  const reason = " ^ message ^ ";";
-      page_call;
-      unblocked_agent_page;
+  match run_native_step t ~step:"page.upload"
+          ~args:(obj ["label",str label;"tabId",`Int id;"selector",str selector;"paths",`List (List.map str paths)])
+          (String.concat "\n" [native_upload_script;unblocked_agent_page;
       "    const page = task.page(args.label);";
-      "    const checked = await page.evaluate(pageCall(args.check, JSON.stringify({selector: args.selector, count: args.paths.length})));";
-      "    const found = checked.pageError === undefined ? JSON.parse(checked.answer) : {refused: \"the upload selector could not be read: \" + checked.pageError};";
-      "    if (found.refused !== undefined) emit({ok: false, before: true, error: found.refused});";
+      "    const outcome = await nativeUpload(page, args);";
+      "    if (outcome.error !== null) emit({ok: true, value: {error: outcome.error, dialog: null, tab: null}});";
       "    else {";
-      "      let failure = null;";
-      "      try { await page.setInputFiles(\"loc=css:\" + args.selector, args.paths); } catch (error) { failure = reason(error); }";
-      "      const dialog = " ^ open_dialog "page" ^ ";";
-      "      const after = dialog === null ? await page.evaluate(pageCall(args.files, JSON.stringify({selector: args.selector}))) : null;";
+      "      const dialog = outcome.receipt.dialog ?? " ^ open_dialog "page" ^ ";";
       "      const tab = " ^ row_after ^ ";";
-      "      emit({ok: true, value: {error: failure, dialog, after, tab: tab === undefined ? null : {url: tab.url, title: tab.title}}});";
-      "    }";
-      "  }" ]) with
+      "      emit({ok: true, value: {error: null, dialog, tab: tab === undefined ? null : {url: tab.url, title: tab.title}}});";
+      "    }";"  }"]) with
   | Error failure ->
     Error (effect_failure ~unknown:(Printf.sprintf "the file input of tab %d may have been set: read tab %d before another upload" id id) failure)
   | Ok value ->
-    let receipt extra = obj (["tabId",`Int id;"action",str "upload"] @ tab_fields (field "tab" value) @ extra) in
-    match field "error" value, field "dialog" value, field "after" value with
-    | Some (`String detail), _, _ ->
-      Error (Live.Outcome_unknown (Printf.sprintf "ego did not set the files (%s); read tab %d before another upload" (head detail) id))
-    | Some `Null, Some (`Assoc _ as dialog), _ ->
+    let receipt extra = obj (["tabId",`Int id;"action",str "upload";"chosen",`List chosen] @ tab_fields (field "tab" value) @ extra) in
+    match field "error" value, field "dialog" value with
+    | Some (`String detail), _ ->
+      Error (Live.Outcome_unknown (Printf.sprintf "ego did not confirm setting the files (%s); read tab %d before another upload" (head detail) id))
+    | Some `Null, Some (`Assoc _ as dialog) ->
       (match ego_dialog dialog with
        | Ok dialog -> Ok (receipt ["dialog",Browser_surface.dialog_json dialog])
        | Error reason -> Error (Live.Outcome_unknown ("the upload opened a dialog this connection cannot read: " ^ reason)))
-    | Some `Null, Some `Null, Some after ->
-      (match page_json after with
-       | Ok page -> (match field "files" page with
-         | Some (`List _ as files) -> Ok (receipt ["files",files])
-         | Some _ | None -> Error (Live.Outcome_unknown (Printf.sprintf "the file input of tab %d was not found after the upload" id)))
-       | Error detail -> Error (Live.Outcome_unknown (detail ^ "; read tab " ^ string_of_int id)))
+    | Some `Null, Some `Null -> Ok (receipt [])
     | _ -> Error (Live.Outcome_unknown "ego answered an upload outside its frame")
 
 (* A page that makes its file input only when a control is clicked gets the
-   files through ego's file chooser. The run checks that the opener's CSS
-   selector names one element, arms waitForFileChooser, clicks the opener
+   files through ego's file chooser. The run arms the SDK's default
+   waitForFileChooser and clicks the native opener locator
    through ego with the cursor label and hands the chooser the worker's
-   copies. The click is the effect: a chooser that does not open within
-   [chooser_wait_ms], or one that takes one file when more were given, is
+   copies. The click is the effect: a chooser whose SDK wait fails, or one that takes one file when more were given, is
    reported after it. The page may keep that input out of its document, so
    the receipt lists the files handed to the chooser ([chosen]) rather than
    what an input holds. The lease is held as for a file input. A chooser
@@ -810,32 +788,25 @@ let upload t id ~selector ~paths =
    process ("this Page is already waiting for a file chooser", 0.6.0.16),
    and one process serves this connection, so the run closes a chooser it
    does not fill with setFiles([]), which hands the page nothing. *)
-let chooser_wait_ms = 5000
-let opener_check = page_function {js|
-const nodes = document.querySelectorAll(arguments[0].selector);
-if (nodes.length !== 1) return {refused: nodes.length === 0 ? "no element matches the upload opener" : "the upload opener matches " + nodes.length + " elements"};
-return {ok: true};|js}
 let choose_files ?actor t id ~opener ~paths =
+  let* () = match t.pointer_state with
+    | Released -> Ok ()
+    | Release_uncertain -> Error (Live.Before_effect
+        "ego pointer release is unconfirmed; read the browser, then end this task space before opening a fresh connection") in
   let* label = label_of t id in
   let* chosen = chosen_files paths in
-  let interaction = Browser_lane.Action.Upload {target = Browser_lane.Action.Chooser_opener opener; paths} in
   Browser_lane.Upload_lease.claim ~owner:t.uploads ~paths;
-  match run_step t ~window_s:(tab_window id interaction) ~step:"page.choose_files"
+  match run_native_step t ~step:"page.choose_files"
           ~args:(obj ["label",str label;"tabId",`Int id;"opener",str opener;"paths",`List (List.map str paths);
-            "check",str opener_check;"cursor",str (cursor_label ~actor ~verb:"upload");"waitMs",`Int chooser_wait_ms])
+            "cursor",str (cursor_label ~actor ~verb:"upload")])
           (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
-      page_call;
       unblocked_agent_page;
       "    const page = task.page(args.label);";
-      "    const checked = await page.evaluate(pageCall(args.check, JSON.stringify({selector: args.opener})));";
-      "    const found = checked.pageError === undefined ? JSON.parse(checked.answer) : {refused: \"the upload opener could not be read: \" + checked.pageError};";
-      "    if (found.refused !== undefined) emit({ok: false, before: true, error: found.refused});";
-      "    else {";
       "      let failure = null, chooser = null, set = null;";
-      "      const waiting = page.waitForFileChooser({timeout: args.waitMs});";
+      "      const waiting = page.waitForFileChooser();";
       "      waiting.catch(() => {});";
-      "      try { await page.click(\"loc=css:\" + args.opener, {label: args.cursor}); }";
+      "      try { await page.click(args.opener, {label: args.cursor}); }";
       "      catch (error) { failure = \"ego did not click the opener: \" + reason(error); }";
       "      try { chooser = await waiting; }";
       "      catch (error) { if (failure === null) failure = \"the opener opened no file chooser: \" + reason(error); }";
@@ -849,13 +820,12 @@ let choose_files ?actor t id ~opener ~paths =
       "        if (failure === null && !multiple) failure = \"the file chooser takes one file, so it was closed with none\";";
       "        if (failure === null) {";
       "          try { set = await chooser.setFiles(args.paths); } catch (error) { failure = \"ego did not set the files: \" + reason(error); }";
-      "          if (failure !== null) failure += await close();";
-      "        } else failure += await close();";
+      "        }";
+      "        if (failure !== null) failure += await close();";
       "      }";
-      "      const dialog = set !== null && set.dialog !== undefined && set.dialog !== null ? set.dialog : " ^ open_dialog "page" ^ ";";
+      "      const dialog = set?.dialog ?? (failure === null ? " ^ open_dialog "page" ^ " : null);";
       "      const tab = " ^ row_after ^ ";";
       "      emit({ok: true, value: {error: failure, dialog, tab: tab === undefined ? null : {url: tab.url, title: tab.title}}});";
-      "    }";
       "  }" ]) with
   | Error failure ->
     Error (effect_failure ~unknown:(Printf.sprintf "the opener of tab %d may have been clicked: read tab %d before another upload" id id) failure)
@@ -886,7 +856,7 @@ let choose_files ?actor t id ~opener ~paths =
    transport gate before this peer; the tool description explains snapshots. *)
 let frame_input_refused =
   "an ego connection acts inside frames through target, with no framePath: a ref from the frame's snapshot, or a role or text target, which ego also finds inside frames"
-let frame_upload_refused = "an ego connection uploads only to a file input or opener of the top document"
+let frame_upload_refused = "an ego connection uploads through a native selector or snapshot ref, without framePath; use a locator or ref from that frame"
 
 (* Finding a target and acting on it are two runs, and the command has one
    window for both: a later run gets what is left of it. *)
@@ -1102,7 +1072,7 @@ let ego_locator = function
     Printf.sprintf "loc=role:%s[name%s%s]" role (if exact then "=" else "*=") (Yojson.Safe.to_string (str name))
   | Target_text {text;exact} -> "text=" ^ (if exact then Yojson.Safe.to_string (str text) else text)
 type target_operation = Target_click | Target_fill of string | Target_hover | Target_double_click
-  | Target_select of Browser_lane.option_selection
+  | Target_select of Browser_lane.option_selection | Target_drag of string
 let target_input_script = {js|async function nativeTargetInput(page, args) {
   const reason = error => String(error && error.message || error);
   let refusal = null, urlBefore = null;
@@ -1113,11 +1083,11 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
         refusal = "the tab is at " + urlBefore + ", not at expectedUrl; read it again";
     } catch (error) { refusal = reason(error); }
   };
-  if (!["click", "fill", "hover", "double_click", "select_option"].includes(args.action))
+  if (!["click", "fill", "hover", "double_click", "select_option", "drag_to"].includes(args.action))
     return {before: true, error: "unsupported snapshot target action"};
   await checkUrl();
   if (refusal !== null) return {before: true, error: refusal};
-  let receipt = null, failure = null;
+  let receipt = null, failure = null, pointerReleased = args.action !== "drag_to";
   try {
     switch (args.action) {
       case "click": receipt = await page.click(args.target, {label: args.cursor}); break;
@@ -1125,9 +1095,16 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
       case "hover": receipt = await page.hover(args.target, {label: args.cursor}); break;
       case "double_click": receipt = await page.dblclick(args.target, {label: args.cursor}); break;
       case "select_option": receipt = {selectedValues: await page.selectOption(args.target, args.selection)}; break;
+      case "drag_to": receipt = await page.dragAndDrop(args.target, args.destination, {label: args.cursor}); pointerReleased = !receipt?.dialog; break;
     }
-  } catch (error) { failure = reason(error); }
-  return {urlBefore, receipt, error: failure};
+  } catch (error) {
+    failure = reason(error);
+    if (args.action === "drag_to") {
+      try { await page.mouse.up(); pointerReleased = true; }
+      catch (releaseError) { failure += "; pointer release is unconfirmed: " + reason(releaseError); }
+    }
+  }
+  return {urlBefore, receipt, error: failure, pointerReleased};
 }|js}
 let native_input t ~id ~label ~deadline ~cursor ~expected_url ~locator ~reference ~operation =
   let verb, text = match operation with
@@ -1135,15 +1112,20 @@ let native_input t ~id ~label ~deadline ~cursor ~expected_url ~locator ~referenc
     | Target_fill text -> "fill", str text
     | Target_hover -> "hover", `Null
     | Target_double_click -> "double_click", `Null
-    | Target_select _ -> "select_option", `Null in
+    | Target_select _ -> "select_option", `Null
+    | Target_drag _ -> "drag_to", `Null in
   let selection = match operation with
     | Target_select (Browser_lane.Single_option value) -> obj ["value",str value]
     | Target_select (Browser_lane.Multiple_options values) -> `List (List.map (fun value -> obj ["value",str value]) values)
-    | Target_click | Target_fill _ | Target_hover | Target_double_click -> `Null in
+    | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_drag _ -> `Null in
   let unknown = Printf.sprintf "read tab %d before another step" id in
+  let holds_button = match operation with Target_drag _ -> true
+    | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> false in
+  if holds_button then t.pointer_state <- Release_uncertain;
   let response = run_step t ~window_s:(left t deadline) ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",(match expected_url with Some url -> str url | None -> `Null);"target",str locator;
-        "action",str verb;"text",text;"selection",selection;"cursor",str cursor])
+        "action",str verb;"text",text;"selection",selection;"cursor",str cursor;
+        "destination",(match operation with Target_drag destination -> str destination | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> `Null)])
       (String.concat "\n" [
         target_input_script;
         unblocked_agent_page;
@@ -1155,6 +1137,10 @@ let native_input t ~id ~label ~deadline ~cursor ~expected_url ~locator ~referenc
         "      emit({ok: true, value: {...outcome, tab: after === undefined ? null : {url: after.url, title: after.title}}});";
         "    }";
         "  }" ]) in
+  if holds_button then (match response with
+    | Ok value when field "pointerReleased" value = Some (`Bool true) -> t.pointer_state <- Released
+    | Error (Refused _ | Unanswered (Unstarted _)) -> t.pointer_state <- Released
+    | Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _) | Failed _ | Unreadable _) -> ());
   match response with
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value ->
@@ -1180,7 +1166,7 @@ let native_input t ~id ~label ~deadline ~cursor ~expected_url ~locator ~referenc
            | Target_select _, Some (`List values) when List.for_all (function `String _ -> true | _ -> false) values ->
              Ok ["selectedValues",`List values]
            | Target_select _, (None | Some _) -> outcome "ego answered selection without its selected values"
-           | (Target_click | Target_fill _ | Target_hover | Target_double_click), (None | Some _) -> Ok [] in
+           | (Target_click | Target_fill _ | Target_hover | Target_double_click | Target_drag _), (None | Some _) -> Ok [] in
          Ok (obj (["tabId",`Int id;"action",str verb] @ reference @ ["urlBefore",str url_before]
                   @ tab_fields (Some tab)
                   @ (match popups with [] -> [] | _ :: _ -> ["popups",`List popups])
@@ -1221,9 +1207,14 @@ let interact ?actor t args =
       | Browser_lane.Click _ -> false
       | Browser_lane.Hover target | Browser_lane.Double_click target ->
         (match target with Browser_lane.Selector _ -> false | Browser_lane.Scene_node _ -> true)
+      | Browser_lane.Drag_to {source;destination;via;_} ->
+        (match source,destination with
+         | Browser_lane.Selector _, Browser_lane.Selector _ -> (match via with [] -> false | _::_ -> true)
+         | Browser_lane.Scene_node _, (Browser_lane.Selector _ | Browser_lane.Scene_node _)
+         | Browser_lane.Selector _, Browser_lane.Scene_node _ -> true)
       | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Set_zoom _
       | Browser_lane.Set_viewport _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
-      | Browser_lane.Scroll _ | Browser_lane.Drag_to _ | Browser_lane.Hover_at _
+      | Browser_lane.Scroll _ | Browser_lane.Hover_at _
       | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _ | Browser_lane.Double_click_at _
       | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
       | Browser_lane.Fill_node _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _
@@ -1263,6 +1254,16 @@ let interact ?actor t args =
   | Browser_lane.Select_option {selector;selection} -> on_selector selector (Target_select selection)
   | Browser_lane.Hover (Browser_lane.Selector selector) -> on_selector selector Target_hover
   | Browser_lane.Double_click (Browser_lane.Selector selector) -> on_selector selector Target_double_click
+  | Browser_lane.Drag_to {source;destination;via;_} ->
+    (match source,destination with
+     | Browser_lane.Selector source, Browser_lane.Selector destination ->
+       (match via with
+        | [] -> native_input t ~id ~label ~deadline ~cursor:cursor_text ~expected_url ~locator:source
+            ~reference:["source",obj ["selector",str source];"destination",obj ["selector",str destination]]
+            ~operation:(Target_drag destination)
+        | _::_ -> refused)
+     | Browser_lane.Scene_node _, (Browser_lane.Selector _ | Browser_lane.Scene_node _)
+     | Browser_lane.Selector _, Browser_lane.Scene_node _ -> refused)
   | Browser_lane.Click_at {point; viewport; button} -> pointer viewport point (Press {button; count = 1})
   | Browser_lane.Double_click_at {point; viewport} -> pointer viewport point (Press {button = Browser_lane.Pointer.Primary; count = 2})
   | Browser_lane.Hover_at {point; viewport} -> pointer viewport point Move
@@ -1282,7 +1283,7 @@ let interact ?actor t args =
   | Browser_lane.Fill_target {target; text} -> on_target ~target (Target_fill text)
   | Browser_lane.Hover_target target -> on_target ~target Target_hover
   | Browser_lane.Double_click_target target -> on_target ~target Target_double_click
-  | Browser_lane.Drag_to _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
+  | Browser_lane.Tap_at _ | Browser_lane.Swipe _
   | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Activate_tab -> refused
 
 (* The whole space goes to the operator for a step only a person can take;
@@ -1352,14 +1353,10 @@ let workflow ?actor t args =
   let arguments = match Browser_lane.Native_workflow.to_json request with
     | `Assoc fields -> obj (("label",str label)::("cursor",str (cursor_label ~actor ~verb:"workflow"))::("budgetMs",`Int (Browser_lane.Native_workflow.budget_ms request))::("defaultTimeoutMs",`Int Browser_lane.Native_workflow.default_step_timeout_ms)::("snapshotTimeoutMs",`Int Browser_lane.Native_workflow.snapshot_timeout_ms)::fields)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
-  let source = script ~step:"page.native_workflow" ~space:(`Int t.space_id) ~holder:Agent_holds
-      ~args:(with_download_root t arguments)
+  let result = run_native_step t ~window_s:(Browser_lane.Native_workflow.window_s request) ~step:"page.native_workflow" ~args:arguments
       (String.concat "\n" [Browser_ego_workflow.script;unblocked_agent_page;
         "    const outcome = await nativeWorkflow(task.page(args.label), args);";
         "    emit({ok: true, value: outcome});";"  }"]) in
-  let result = match t.run_native ~window_s:(Browser_lane.Native_workflow.window_s request) source with
-    | Error error -> Error (Unanswered error)
-    | Ok output -> answer output in
   match result with
   | Error error -> Error (effect_failure ~unknown:"native workflow result is unknown; read the same tab before another step; never replay the workflow" error)
   | Ok value ->

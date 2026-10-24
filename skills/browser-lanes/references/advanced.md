@@ -44,12 +44,13 @@ HTML `<dialog>`와 OS 파일 선택창은 이 JS 대화상자 계약에 포함�
 임의 경로를 sandbox 경로로 가장하거나 다른 사용자의 파일로 대체하지 않는다.
 
 명시적 automation 이나 명시적 ego 브라우저에서 쓴다. ego 연결에서는 그 연결이 연
-agent 페이지의 파일 입력에만 쓰고, 영수증의 `files`(이름·크기)가 페이지가 받은
-파일이다. ego 의 브라우저는 파일을 페이지가 읽을 때 읽으므로, 그 연결이 끝날 때까지
+agent 페이지에서 native locator/ref로 파일 입력·label·고유 입력이 있는 container를
+지정한다. 영수증의 `chosen`(이름·크기)은 SDK에 넘긴 staged 파일이며 페이지의
+`input.files`를 다시 관측한 값이 아니다. ego 의 브라우저는 파일을 페이지가 읽을 때 읽으므로, 그 연결이 끝날 때까지
 사본을 들고 있다.
 
 버튼을 눌러야 파일 선택 창이 뜨고 문서에 `input[type=file]` 이 없는 페이지는, ego
-연결에서 `selector` 대신 `opener` 에 그 버튼의 선택자를 준다. 클릭 자체가 효과다.
+연결에서 `selector` 대신 `opener` 에 그 버튼의 native locator/ref를 준다. SDK가 선택 창 대기를 맡고 클릭 자체가 효과다.
 영수증의 `chosen` 은 선택 창에 넘긴 파일이고, 페이지가 받았는지는 페이지를 다시 읽어
 확인한다. 결과를 모름으로 끝나면 버튼이 눌렸을 수 있으니, 다시 누르기 전에 탭을 읽는다.
 automation Firefox 는 `opener` 를 거절한다.

@@ -1,0 +1,124 @@
+TAP version 13
+# Subtest: ego native drag follows observed waypoints and releases
+ok 1 - ego native drag follows observed waypoints and releases
+  ---
+  duration_ms: 1.939417
+  type: 'test'
+  ...
+# Subtest: a native down or movement failure still releases without replay
+ok 2 - a native down or movement failure still releases without replay
+  ---
+  duration_ms: 0.293875
+  type: 'test'
+  ...
+# Subtest: a failed release is explicitly unconfirmed
+ok 3 - a failed release is explicitly unconfirmed
+  ---
+  duration_ms: 0.126125
+  type: 'test'
+  ...
+# Subtest: failure before button down leaves no held input
+ok 4 - failure before button down leaves no held input
+  ---
+  duration_ms: 0.099292
+  type: 'test'
+  ...
+# Subtest: refs and SDK locators use native methods without a separate MASC resolver or wait
+ok 5 - refs and SDK locators use native methods without a separate MASC resolver or wait
+  ---
+  duration_ms: 3.001833
+  type: 'test'
+  ...
+# Subtest: an observed URL mismatch refuses every action before native input
+ok 6 - an observed URL mismatch refuses every action before native input
+  ---
+  duration_ms: 0.254458
+  type: 'test'
+  ...
+# Subtest: native failures stay uncertain and are never replayed
+ok 7 - native failures stay uncertain and are never replayed
+  ---
+  duration_ms: 0.395875
+  type: 'test'
+  ...
+# Subtest: a failed URL read refuses every native action before input
+ok 8 - a failed URL read refuses every native action before input
+  ---
+  duration_ms: 0.241666
+  type: 'test'
+  ...
+# Subtest: native drag failures supplement SDK release without replay, and preserve uncertain release
+ok 9 - native drag failures supplement SDK release without replay, and preserve uncertain release
+  ---
+  duration_ms: 0.218167
+  type: 'test'
+  ...
+# Subtest: native drag interrupted by dialog has no Page follow-up and no release proof
+ok 10 - native drag interrupted by dialog has no Page follow-up and no release proof
+  ---
+  duration_ms: 0.109584
+  type: 'test'
+  ...
+# Subtest: file inputs, labels, wrappers, snapshot refs and frame/shadow locators go directly to the SDK
+ok 11 - file inputs, labels, wrappers, snapshot refs and frame/shadow locators go directly to the SDK
+  ---
+  duration_ms: 1.881667
+  type: 'test'
+  ...
+# Subtest: an SDK failure remains uncertain and does not read or replay input
+ok 12 - an SDK failure remains uncertain and does not read or replay input
+  ---
+  duration_ms: 0.3555
+  type: 'test'
+  ...
+# Subtest: known native sequence navigates, waits and returns one final snapshot
+ok 13 - known native sequence navigates, waits and returns one final snapshot
+  ---
+  duration_ms: 1.199584
+  type: 'test'
+  ...
+# Subtest: full-page workflow snapshot uses the native full_page scope
+ok 14 - full-page workflow snapshot uses the native full_page scope
+  ---
+  duration_ms: 0.13475
+  type: 'test'
+  ...
+# Subtest: a failed SDK wait retains prior effects and never runs later steps
+ok 15 - a failed SDK wait retains prior effects and never runs later steps
+  ---
+  duration_ms: 1.026167
+  type: 'test'
+  ...
+# Subtest: an SDK input error stays uncertain and is never retried
+ok 16 - an SDK input error stays uncertain and is never retried
+  ---
+  duration_ms: 0.157208
+  type: 'test'
+  ...
+# Subtest: a failed read-only wait has no input effect
+ok 17 - a failed read-only wait has no input effect
+  ---
+  duration_ms: 0.134083
+  type: 'test'
+  ...
+# Subtest: dialog or SDK control loss stops the sequence without follow-up reads
+ok 18 - dialog or SDK control loss stops the sequence without follow-up reads
+  ---
+  duration_ms: 0.877833
+  type: 'test'
+  ...
+# Subtest: wrong starting URL refuses before input and final snapshot cuts preserve Unicode
+ok 19 - wrong starting URL refuses before input and final snapshot cuts preserve Unicode
+  ---
+  duration_ms: 0.216417
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 112.521583

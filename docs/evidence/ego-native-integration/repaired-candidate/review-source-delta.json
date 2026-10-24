@@ -1,0 +1,28 @@
+{
+  "binary_source": "7ee0dd6e13086c9faaab9d63b6b13bd901aa4da1",
+  "review_head": "c4ebef7770027002a6f94d3a8e17ffa35e94c660",
+  "changed_paths": [
+    "docs/evidence/ego-native-integration/README.md",
+    "docs/evidence/ego-native-integration/artifact-hashes.json",
+    "docs/evidence/ego-native-integration/original-candidate/build-receipt.json",
+    "docs/evidence/ego-native-integration/original-candidate/fixture-http.txt",
+    "docs/evidence/ego-native-integration/original-candidate/fixture-submissions.json",
+    "docs/evidence/ego-native-integration/original-candidate/fixture.py",
+    "docs/evidence/ego-native-integration/original-candidate/host-identity.json",
+    "docs/evidence/ego-native-integration/original-candidate/idle-host-replacement.json",
+    "docs/evidence/ego-native-integration/original-candidate/keeper-completion.png",
+    "docs/evidence/ego-native-integration/original-candidate/keeper-created.json",
+    "docs/evidence/ego-native-integration/original-candidate/keeper-declaration.json",
+    "docs/evidence/ego-native-integration/original-candidate/keeper-goal-resume.json",
+    "docs/evidence/ego-native-integration/original-candidate/keeper-goal-workflow.json",
+    "docs/evidence/ego-native-integration/original-candidate/keeper-goal.json",
+    "docs/evidence/ego-native-integration/original-candidate/queued-before-replacement.json",
+    "docs/evidence/ego-native-integration/original-candidate/retained-raw-tool-records.json",
+    "docs/evidence/ego-native-integration/original-candidate/tool-trajectory.json",
+    "docs/evidence/ego-native-integration/original-candidate/visible-chat.json",
+    "docs/evidence/ego-native-integration/selected-ci.json",
+    "docs/evidence/ego-native-sdk/README.md",
+    "docs/evidence/ego-native-transfers/README.md"
+  ],
+  "runtime_code_changed": false
+}

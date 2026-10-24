@@ -14,12 +14,18 @@ The ego connection owns no browser process. The worker receives its command
 and task space name as arguments (`--live-ego-command`, `--live-ego-space`),
 not through the cleanup descriptor, because nothing of it needs cleanup after
 the worker. It reads `ego-browser --version`, opens or resumes the task space
-by name, and registers one client. Each command runs `ego-browser nodejs`
-once and answers within the window the server waits for that command, less
-two seconds to deliver the answer; a run that would not is stopped with its
-process group. A stopped effect is answered as an unknown outcome, and a
-result the server no longer waits for is dropped. Either way the connection
-stays, and the Keeper reads that tab again.
+by name, and registers one client. One serial `ego-browser nodejs` process
+serves the connection: the SDK's dialog and event state belongs to that
+process. The installed .20 process-state gap is measured in
+[session evidence](../evidence/ego-native-session-gap/). MASC sends fixed
+scripts through its private session socket; it does not expose host Node
+execution to Keeper-supplied code.
+
+Ordinary commands retain their existing reply window. Native workflows and
+live uploads let SDK waits own their timeouts and use explicit cancellation
+instead of a cumulative command deadline. Cancellation joins the SDK process;
+a lost effect reply remains uncertain and is never replayed. Results no longer
+owned by the original request are dropped, and the Keeper reobserves its page.
 Screenshots pass through a private directory that run creates and removes.
 Detaching ends the task space, which closes the pages it manages and keeps the
 tabs the operator opened there. An ego that cannot start, or a task space name

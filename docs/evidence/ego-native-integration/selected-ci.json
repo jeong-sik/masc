@@ -1,0 +1,16 @@
+{
+  "source": "7ee0dd6e13086c9faaab9d63b6b13bd901aa4da1",
+  "run_id": 40077677283,
+  "conclusion": "success",
+  "full_regression": false,
+  "suites": {
+    "test_browser_addon_live_bidi": 6,
+    "test_browser_native_workflow": 5,
+    "test_browser_lane": 14,
+    "test_browser_addon_wire": 6,
+    "test_browser_ego_peer": 31,
+    "test_browser_addon_client": 1,
+    "test_browser_addon_live_ego": 11
+  },
+  "tests": 74
+}

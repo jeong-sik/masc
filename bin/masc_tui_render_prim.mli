@@ -717,3 +717,30 @@ val studio_panel : width:int -> title:string -> lines:string list -> string list
 
 val lane_run_clock : float -> string
 (** Local [MM-DD HH:MM:SS] timestamp for lane run and harness verdict sidebars. *)
+
+val detail_section_heading : ?first:bool -> string -> (string * string) list
+(** Numbered/grouped section header [  [ Title ]] in [(style, text)] pairs for
+    scrollable detail readers. *)
+
+val detail_section_lines : ?first:bool -> string -> string list
+(** Numbered/grouped section header [  [ Title ]] as pre-styled strings. *)
+
+val split_summary_columns :
+  cols:int ->
+  left_title:string ->
+  left_rows:(string * string) list ->
+  right_title:string ->
+  right_rows:(string * string) list ->
+  (string * string) list
+(** Side-by-side 2-column summary block (with [ │ ] divider on wide viewports and
+    stacked fallback on narrow viewports). *)
+
+val runtime_substrate_tab_strip :
+  Masc_tui_types.state ->
+  cols:int ->
+  before:string ->
+  after:string ->
+  current:[ `Runtime_lanes | `Runtime_all | `Features | `Clients ] ->
+  string
+(** Shared clickable tab strip across [System / Runtime] ([Candidate orders] and
+    [All runtimes]), [Features], and [Clients]. *)

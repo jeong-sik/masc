@@ -1,3 +1,0 @@
-### Fixed
-
-- Restore the shared tool-result projection library boundary and qualify root-library references in affected test entrypoints, carrying the main compile repair onto current main without duplicating Librarian executable dependencies.

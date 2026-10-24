@@ -1,0 +1,18 @@
+{
+  "base_head": "b9bba3d4b416e269ff1d586f17f81e55c09ad8b3",
+  "checks": [
+    {
+      "file": "config/tools/keeper_task_create.toml",
+      "sha256": "577c294b48700e9d33b01f922d8c082445e115f36a40a25bbd6b58d97f937c5d",
+      "defer_loading_field": "absent"
+    },
+    {
+      "file": "config/tools/masc_goal_measure.toml",
+      "sha256": "f604ad246175c1eae4284fd99389deb9219c271000ef48f7e385cfb1aa508895",
+      "defer_loading_field": "absent"
+    }
+  ],
+  "validation": "Python standard TOML parse only, not native loading/dispatch",
+  "canonical_parser_semantics": "Tool_definition_toml.load maps absent defer_loading to Always_loaded",
+  "native_or_live_postfix": "not run"
+}

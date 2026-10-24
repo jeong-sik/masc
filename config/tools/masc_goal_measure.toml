@@ -5,7 +5,6 @@ current criterion_revision from masc_goal_list, the observed value, and
 supporting evidence. This records a reported value; it does not prove
 that the target was reached or change the Goal phase."""
 additional_properties = false
-defer_loading = true
 
 [[params]]
 name = "goal_id"

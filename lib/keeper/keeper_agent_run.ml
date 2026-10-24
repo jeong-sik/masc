@@ -189,6 +189,7 @@ type request_wire_evidence =
   ; serialized_observation :
       Llm_provider.Request_wire_observer.observation option
   ; wire_projected_messages : Agent_core.Types.message list option
+  ; wire_system_prompt : string option
   ; wire_tools : Agent_core.Tool.t list
   }
 
@@ -1806,6 +1807,9 @@ let run_turn
                              ; serialized_observation = serialized
                              ; wire_projected_messages =
                                  !current_request_projected_messages_ref
+                             ; wire_system_prompt = Option.bind acc.extra_system_context_assembly
+                                 (fun assembly -> Option.map (fun (issued : Keeper_context_assembly.system_prompt) ->
+                                     issued.text) assembly.Keeper_context_assembly.system_prompt)
                              ; wire_tools = request_tools
                              }
                            in
@@ -2414,6 +2418,7 @@ let run_turn
          | Some
              { serialized_observation = Some wire
              ; wire_projected_messages = Some messages
+             ; wire_system_prompt = Some system_prompt
              ; wire_tools = tools
              ; _
              } ->
@@ -2424,12 +2429,12 @@ let run_turn
              ~absolute_turn:manifest_keeper_turn_id
              ~runtime_profile:settled_runtime_id
              ~wire
-             ~system_prompt:
-               (Inference_utils.sanitize_text_utf8 turn_system_prompt)
+             ~system_prompt
              ~messages
              ~tools
          | Some { serialized_observation = None; _ }
          | Some { wire_projected_messages = None; _ }
+         | Some { wire_system_prompt = None; _ }
          | None -> ());
         Keeper_turn_record_writer.write
           ~config

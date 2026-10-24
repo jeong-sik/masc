@@ -21,9 +21,9 @@
 
     {1 What is not here}
 
-    The base system prompt is assembled on a different path and is not part of
-    this capture. This store holds the extra system context: the typed
-    blocks appended to that base. *)
+    The base prompt is normally assembled on a different path. When a Goal
+    observation uses an issued system suffix, this same capture also names
+    that effective system carrier and its separate partition. *)
 
 type block =
   { id : Prompt_block_id.t
@@ -40,6 +40,12 @@ type capture =
         (** The complete extra system context as sent. [None] when the turn
             assembled no blocks — distinct from an empty string, which would be
             a block that rendered to nothing. *)
+  ; system_prompt : string option
+  ; system_prompt_partition : Yojson.Safe.t option
+        (** Separate issued system carrier; never counted as extra context.
+            Both [None] mean unrecorded, including an earlier capture without
+            these fields. They do not establish the absence of Goals or a
+            system prompt. Half-present or malformed carriers fail decoding. *)
   }
 
 val path_for : Workspace.config -> string -> string
@@ -55,6 +61,7 @@ val write :
   -> absolute_turn:int
   -> blocks:(Prompt_block_id.t * string) list
   -> assembled:string option
+  -> system_prompt:Keeper_context_assembly.system_prompt option
   -> unit
 
 type read_error =

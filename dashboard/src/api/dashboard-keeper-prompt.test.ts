@@ -35,12 +35,52 @@ const capture = {
   absolute_turn: 17534,
   assembled_bytes: 435,
   assembled: '--- Memory OS Recall ---\nrevision 223\n',
+  system_prompt: null,
+  system_prompt_partition: null,
   blocks: [
     { id: 'memory_os_recall', bytes: 435, text: '--- Memory OS Recall ---\nrevision 223\n' },
   ],
 }
 
 describe('last prompt', () => {
+  it('keeps an earlier capture readable without inventing a system carrier', async () => {
+    const { system_prompt, system_prompt_partition, ...unrecorded } = capture
+    void system_prompt
+    void system_prompt_partition
+    stubFetch(unrecorded)
+    const decoded = await fetchKeeperLastPrompt('exampleorg')
+    expect(decoded.systemPrompt).toBeNull()
+    expect(decoded.systemPromptPartition).toBeNull()
+    expect(decoded.blocks).toHaveLength(1)
+  })
+
+  it('rejects a half-present system carrier', async () => {
+    const { system_prompt_partition, ...incomplete } = capture
+    void system_prompt_partition
+    stubFetch({ ...incomplete, system_prompt: 'base' })
+    await expect(fetchKeeperLastPrompt('exampleorg')).rejects.toThrow('prompt capture')
+  })
+
+  it('keeps the physical system carrier separate from extra context', async () => {
+    const system = 'prior override\n\nGoal observation: 1/3'
+    stubFetch({ ...capture, system_prompt: system,
+      system_prompt_partition: { carrier: 'system_prompt', partition: {
+        schema: 'masc.logical-context-partition.v2', bytes: system.length, spans: [],
+      } },
+    })
+    const decoded = await fetchKeeperLastPrompt('exampleorg')
+    expect(decoded.systemPrompt).toBe(system)
+    expect(decoded.assembled).toBe(capture.assembled)
+    expect(decoded.systemPromptPartition?.carrier).toBe('system_prompt')
+  })
+
+  it('rejects a system observation attributed to an extra carrier', async () => {
+    stubFetch({ ...capture, system_prompt: 'Goal',
+      system_prompt_partition: { carrier: 'extra_system_context', partition: {} },
+    })
+    await expect(fetchKeeperLastPrompt('exampleorg')).rejects.toThrow('prompt capture')
+  })
+
   it('keeps block text byte-for-byte, newlines included', async () => {
     stubFetch(capture)
     const decoded = await fetchKeeperLastPrompt('exampleorg')

@@ -264,7 +264,7 @@ export function KeeperPromptCapture({ keeper }: { keeper: string }) {
       <div class="text-3xs text-[var(--color-fg-muted)]">
         turn ${capture.absoluteTurn} · trace
         <span class="font-mono">${capture.traceId}</span> ·
-        ${ago(capture.capturedAt)} · 합계 ${formatBytes(total)}
+        ${ago(capture.capturedAt)} · 블록 합계 ${formatBytes(total)}
       </div>
       ${capture.blocks.map(block => html`
         <div key=${block.id} class="rounded border border-[var(--color-border-subtle)]">
@@ -282,12 +282,20 @@ export function KeeperPromptCapture({ keeper }: { keeper: string }) {
           ${open === block.id ? html`<div class="p-2 pt-0"><${Pre} text=${block.text} /></div>` : null}
         </div>
       `)}
+      ${capture.systemPrompt === null ? html`<${Muted}>이 캡처에는 System 프롬프트가 기록되지 않음<//>` : html`
+        <details>
+          <summary class="cursor-pointer text-3xs text-[var(--color-fg-muted)]">
+            System 프롬프트 (${formatBytes(utf8Bytes(capture.systemPrompt))})
+          </summary>
+          <div class="pt-1"><${Pre} text=${capture.systemPrompt} /></div>
+        </details>
+      `}
       ${capture.assembled === null
         ? null
         : html`
           <details>
             <summary class="cursor-pointer text-3xs text-[var(--color-fg-muted)]">
-              조립된 전문 (${formatBytes(utf8Bytes(capture.assembled))})
+              Extra context (${formatBytes(utf8Bytes(capture.assembled))})
             </summary>
             <div class="pt-1"><${Pre} text=${capture.assembled} /></div>
           </details>

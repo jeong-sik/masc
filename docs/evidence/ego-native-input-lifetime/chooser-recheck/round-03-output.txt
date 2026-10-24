@@ -34,5 +34,3 @@ root
       text "note.txt"
   paragraph
     text "note.txt"
-
-

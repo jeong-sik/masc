@@ -90,3 +90,17 @@ before file assignment because of invalid/inapplicable semantic locators; their
 logs are preserved. Round 03 inspected the input DOM and used its observed CSS
 selector. This proves production JavaScript with the installed SDK, not full
 host/Keeper integration. The local fixture server ended after each round.
+
+## Current selected CI
+
+[40106834542](https://github.com/jeong-sik/masc/actions/runs/40106834542)
+completed successfully for `14c9f0c701768ed3242e3fcde219b3dfaf9a80ce`.
+[The receipt](selected-ci.json) records all eight selected suites: native workflow
+5, Ego peer 31, live Ego integration 11, lane 14, Add-on client 1, watched work 8,
+selection 9 and reply policy 1 (80 tests total). This includes the formerly
+failing handled-chooser assertion. It is not a full regression run.
+
+The three SDK output files retain their payloads with only trailing blank EOF
+lines removed in this evidence follow-up. No runtime source changed after the
+candidate SHA above. The macOS candidate build and real Keeper proof remain
+separate evidence.

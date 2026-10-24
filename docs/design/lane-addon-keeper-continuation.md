@@ -1,0 +1,108 @@
+# Original Keeper continuation for companion operations
+
+Implementation and design for the remaining continuation work in
+[#45736](https://github.com/jeong-sik/masc/issues/45736). The current version-2
+companion and public login tools do not implement private progress delivery.
+Original source capture and first-writer retention are now source implementation
+in `Lane_addon_companion_origin`, before companion grant issuance. A preparing
+receipt or a private worker's completed fill does not prove the Keeper resumed.
+
+## Ownership before dispatch (source implementation)
+
+The Keeper adapter captures the original invocation from
+`Keeper_tool_runtime.context` at the frozen Add-on export route: Keeper name, original `turn_ref`, `tool_use_id`, task
+source and continuation channel. Use the source context captured for that call;
+the Keeper's subsequently selected task cannot substitute for it. Preserve an
+explicit unrouted channel rather than guessing a conversation.
+
+The Add-on owner first revalidates the exact provider connection, export,
+principal and declaration. Before supplying a companion capability to the worker,
+it commits an original invocation binding containing those coordinates, the
+public tool/input digest and the original continuation. Persist no endpoint capability,
+OAuth material, approval link, credential reference or private program arguments.
+
+A second call with the same source recovers that original binding and refuses
+another grant. It cannot replay a login because the first reply was lost. Changed
+input or destination is a conflict. An unconfirmed binding write permits only
+reconciliation of that binding, never a replacement login. Keeper calls missing
+their original invocation coordinates cannot promise automatic continuation.
+Operator and external-agent calls retain their explicit status flow and receive
+no fabricated Keeper destination. Origin capture uses the root owner's actual
+filesystem capability. Absence of that capability refuses new Keeper companion
+authority; it does not create a replacement filesystem or event loop.
+
+The immutable record contains only original ownership and input identity. It
+is an intent retained before dispatch, not a receipt that a grant, login request,
+fill or wake happened. Private publication and owner-loss records must preserve
+that distinction when the delivery path is connected.
+
+## A private publication control (remaining implementation)
+
+Use the existing independent companion socket, with a new negotiated protocol
+version, for progress publication. Do not send asynchronous work through the
+worker's serialized public MCP request. The worker supplies only an original
+invocation capability, publication ID, typed publication kind and public output.
+It cannot supply a Keeper, task, source, conversation or wake destination.
+
+The host captures the export's output schema with its original invocation and
+validates every worker publication against it before retention or delivery.
+Discard raw worker text, metadata and exception prose at the same boundary as
+ordinary companion tool replies. For 1Password this output contains only the
+operation ID, closed phase, submitted-fill fact and false website-verification
+claim. The package remains responsible for its public projection.
+
+Browser command authority and progress delivery have different lifetimes. A
+released or withdrawn Browser grant permits no more Browser input. A separate
+publication binding may still deliver the final committed result of that same
+invocation, then end explicitly. It cannot bind another Browser or adopt another
+provider connection. Provider retirement closes publication admission; the host
+records loss of that original owner rather than accepting a successor's claim.
+No elapsed-time expiry or replacement operation is introduced.
+
+## Commit, deliver and acknowledge (remaining implementation)
+
+The package commits its changed public state and immutable publication intent
+together before attempting publication. Emit attention, submitted-fill and
+terminal changes from typed transitions; intermediate polling/checking activity
+does not need to wake the Keeper. Publication identity is durable and is reused
+after an uncertain publication acknowledgement. This retry concerns delivery
+only and never replays a request, credential fill or Browser command.
+
+The host commits the exact validated publication before acknowledging it. A
+repeated ID with the same binding and payload reconciles the original delivery;
+a different payload is a conflict. Use a typed `Addon_operation_changed` Keeper
+stimulus carrying the immutable binding/publication identity and original route.
+The public result stays in its canonical host record. Follow the existing owned
+job completion ordering: durable stimulus before wake hint and producer ACK.
+
+Delivery records must distinguish publication accepted, queue entry committed,
+original source consumed and resumed turn observed. Queue admission alone does
+not establish exactly-once consumption: inspect the existing durable queue's
+deduplication and terminal receipts, including a crash between enqueue and the
+publication record's delivery update. Recovery must not turn an acknowledged or
+consumed publication into permission to repeat the operation.
+
+An original provider's loss is a host-originated unavailable/unknown event, not
+a fabricated worker success. The original task remains available for the Keeper
+to reconcile. The same rule applies when a private publication cannot finish
+during worker shutdown.
+
+## Resume and verify (remaining implementation)
+
+The resumed Keeper receives the original invocation coordinates and the public
+state pointer. After a submitted fill it inspects the original Browser tab,
+handles an observed next sign-in page with the same grant where necessary,
+checks actual website authentication, releases the grant and continues its
+original task. A denied or unknown result requires reconciliation rather than
+blind replay. Approval URLs remain in the private operator UI throughout.
+
+Required evidence includes an actual Keeper call, the durable original binding,
+private approval, a fill in the same physical Browser session, a durable
+publication/queue record, and the actual resumed Keeper turn with website and
+task evidence. Source review, fabricated provider tests, compiled artifacts,
+installation and this end-to-end result remain distinct claims.
+
+The new origin fixtures cover real private files, immutable-source conflicts,
+corrupt/unsafe records and cross-process first-writer behavior. They have only
+been parsed in this external coding session; no local Dune build or execution
+has verified them. They do not exercise progress publication or Keeper resumption.

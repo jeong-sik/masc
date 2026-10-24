@@ -181,12 +181,17 @@ val capture_tool_request_owner : config:Workspace.config -> access:Lane_addon_so
     discover the original ID rather than minting another one. This does not
     dispatch, commit or authorize a later RPC. Manual/missing/conflicting
     configuration is refused rather than supplying invented revisions. *)
-val call_exported_tool_with_authority : on_complete:(unit -> unit) -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal option ->
+val call_exported_tool_with_authority : continuation:(Lane_addon_companion_origin.source, Lane_addon_companion_origin.error) result option ->
+  on_complete:(unit -> unit) -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal option ->
   config:Workspace.config -> access:Lane_addon_sources.access -> reserved:string list ->
   export:tool_export -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
 (** Trusted host boundary only: principal must come from host admission,
     never from caller-supplied tool arguments. [access] still controls visibility.
+    A supplied continuation is captured by the Keeper adapter. Only companion
+    exports retain it before granting private authority; an invalid or repeated
+    original invocation cannot dispatch another grant. [None] names a caller
+    without automatic Keeper continuation, not a guessed Keeper destination.
     [on_result] records replies under worker RPC serialization. [on_complete]
     runs on the owner domain after mediation unwinds, including cancellation;
     caller cancellation alone does not run it. Both callbacks must be synchronous

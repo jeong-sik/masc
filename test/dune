@@ -6662,3 +6662,5 @@
 (include stanzas/test_endpoint_mixed_admission.inc)
 
 (include stanzas/test_runtime_model_label_binding.inc)
+
+(include stanzas/test_lane_addon_companion_origin.inc)

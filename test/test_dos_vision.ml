@@ -52,7 +52,7 @@ let test_keeper_screen_carries_the_frame () =
               (fun ~invoke ~detach ->
                 let export = List.find (fun (export : Lane_addon_tool_export.t) ->
                   export.tool.name="masc_dos_screen") (exports ()) in
-                let screen () = Keeper_lane_addon_runtime.call ~config ~keeper_name ~export ~arguments:(`Assoc []) in
+                let screen () = Keeper_lane_addon_runtime.call ~continuation:None ~config ~keeper_name ~export ~arguments:(`Assoc []) in
                 let empty = screen () in
                 check bool "unloaded worker fails at Keeper boundary" true
                   (match empty.disposition with Tool_result.Failed _ -> true | _ -> false);

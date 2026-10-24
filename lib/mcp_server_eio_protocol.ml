@@ -1186,7 +1186,7 @@ let handle_request
                               ~args:(Mcp_server_eio_caller_identity.without_caller_marker arguments)
                               ~handler:(fun ~name ~args:arguments ->
                             let start_time = Tool_timing.start () in
-                            match Machine_addon_host.call ~principal ~config ~access ~reserved ~export ~arguments with
+                            match Machine_addon_host.call ~continuation:None ~principal ~config ~access ~reserved ~export ~arguments with
                             | Ok result ->
                                 wire_result := Some result;
                                 let data = Mcp_protocol.Mcp_types.tool_result_to_yojson result in

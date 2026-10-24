@@ -1,0 +1,30 @@
+{
+  "reviewer": "repair_evidence_integrity separate session",
+  "head": "661becba96bffd341e0968cce48927f360edfa19",
+  "base": "9f024959528a5c0ea12ce59f0c1a63b2a364695d",
+  "root_cherry_pick": "3badb88117794510dac576bf3fc34f0336e17d8a",
+  "byte_equivalence": "all18 changed product/test files equal at author/root",
+  "verdict": "FAIL",
+  "findings": [
+    {
+      "priority": "P2",
+      "trigger": "existing official-client session resumes after Goal creation or criterion/measurement change",
+      "observed_source_failure": "new Goal is only in System override; Claude snapshot-on and Codex resume consume changed System on compaction, while current resume projection sees only messages/Extra and loses this new Goal",
+      "required_repair": "route only issued typed Goal through existing carried/resume path, with truthful System-derived User receipt and no session reset or other-world rebroadcast"
+    },
+    {
+      "priority": "P3",
+      "issue": "retained frontend stdout EOF blank; source-scoped whitespace pass, no unqualified whole diff pass"
+    }
+  ],
+  "other_reviewed": [
+    "prioroverride and noGoal None/Someempty",
+    "UTF8 System/Extra receipt separation",
+    "per-serialization frozen System snapshot",
+    "checkpoint base/history invariance",
+    "historical capture unknown and half-present rejection",
+    "TypeScript metadata mapping"
+  ],
+  "raw_binary_delta_sha256": "d39dae4ecff207afd338a35bda25f3a85f49825f3da0c632c54e13641944606d",
+  "scope": "independent source; no Dune/native execution, GitHub approval or merge"
+}

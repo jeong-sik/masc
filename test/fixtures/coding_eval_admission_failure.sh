@@ -23,7 +23,8 @@ cat > "${case_dir}/verify.sh" <<'VERIFY'
 touch "$1/unexpected-grading"
 VERIFY
 if [[ "$3" == stale ]]; then
-  mkdir -p "${TARGET_DIR}/.masc/playground/docker/coding-eval-fixture-model-l1-calc-add-r1/workspace"
+  fixture_run_id="$(run_id_of fixture model l1-calc-add 1)"
+  mkdir -p "${TARGET_DIR}/.masc/playground/docker/coding-eval-${fixture_run_id}/workspace"
 fi
 call_mcp_tool() { return 1; }
 tool_error_text() { printf '%s' 'controlled admission failure'; }

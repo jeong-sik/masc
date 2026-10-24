@@ -1551,14 +1551,14 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , "deepseek-v4-pro"
       , Extended_thinking
       , Response_format_json
-      , Replay_tool_turn_only
+      , Replay_every_turn
       , Delta_stream "reasoning_content" )
     ; ( "DeepSeek V4 Flash"
       , Provider_qualified "deepseek"
       , "deepseek-v4-flash"
       , Extended_thinking
       , Response_format_json_schema
-      , Replay_tool_turn_only
+      , Replay_every_turn
       , Delta_stream "reasoning_content" )
     ; ( "MiniMax M3 native/openai-compatible"
       , Direct_model

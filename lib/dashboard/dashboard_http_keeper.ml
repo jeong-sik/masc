@@ -5,7 +5,6 @@
     memory bank, and diagnostic summaries. *)
 
 
-open Dashboard_http_helpers
 open Keeper_status_bridge
 
 include Dashboard_http_keeper_detail

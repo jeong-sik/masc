@@ -1,7 +1,6 @@
 open Alcotest
 
 module Tempo = Masc.Tempo
-module Runtime_params = Masc.Runtime_params
 module Runtime_settings = Masc.Runtime_settings
 
 let config_for base_path = Masc.Workspace.default_config base_path

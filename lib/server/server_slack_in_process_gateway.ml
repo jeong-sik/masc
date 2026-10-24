@@ -92,7 +92,7 @@ let resolved_trigger_policy () = Policy_load.resolve ()
    params surface holds one, otherwise what runtime.toml said at boot. Read
    per step by the client, so a change lands on the next message. *)
 let current_trigger_policy () =
-  Runtime_params.get Runtime_settings.slack_trigger_policy
+  Runtime_params.get Connector_trigger_policy.slack
 ;;
 ;;
 
@@ -785,7 +785,7 @@ let start ~sw ~env ~state =
        State.clear_startup_error ();
        (* What env and runtime.toml said, published so the params surface can
           offer it as the value a cleared override returns to. *)
-       Runtime_settings.set_slack_trigger_policy_configured configured;
+       Connector_trigger_policy.set_slack_configured configured;
        (* An override left on the params surface outlives a restart, so what
           this gateway judges by is the param, not [configured] alone. *)
        let policy = current_trigger_policy () in

@@ -94,30 +94,6 @@ val surfaces : surface list
     via {!surfaces_json} and by tests for invariant checks
     (every published key has a registered param). *)
 
-(** {1 Connector trigger surface} *)
-
-val discord_trigger_policy : Discord_gateway_state.trigger_policy Runtime_params.param
-(** Which Discord messages start a turn. With no override the value is what the
-    gateway resolved at startup from [discord.trigger_policy] in runtime.toml,
-    so clearing the override returns to the configured answer rather than to
-    the hardcoded baseline. *)
-
-val slack_trigger_policy : Slack_gateway_state.trigger_policy Runtime_params.param
-(** Which Slack messages start a turn. Mirrors {!discord_trigger_policy}. *)
-
-val set_discord_trigger_policy_configured :
-  Discord_gateway_state.trigger_policy -> unit
-(** Install what the Discord gateway resolved from env and runtime.toml, so
-    {!discord_trigger_policy} reads it when nothing overrides it. Called once
-    from gateway startup, at the point that resolution succeeds. A gateway
-    that does not get that far — no bot token, or a rejected policy — leaves
-    the hardcoded baseline here, which is also the policy nothing is judged by
-    while that connector is down. *)
-
-val set_slack_trigger_policy_configured :
-  Slack_gateway_state.trigger_policy -> unit
-(** Mirrors {!set_discord_trigger_policy_configured}. *)
-
 val schedule_terminal_retention_days : int Runtime_params.param
 (** How many days a finished schedule stays in the schedule ledger after the
     wake that ended it, if nothing else is written about it meanwhile. The

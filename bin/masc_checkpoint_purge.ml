@@ -173,7 +173,7 @@ let () =
      operator set, and that window lives in this workspace's overrides. Without
      this the purge would answer with the shipped default and trim a history
      the operator asked to keep. *)
-  Masc.Runtime_params.restore ~base_path;
+  Runtime_params.restore ~base_path;
   let session_store = Masc.Keeper_fs.session_store_path_for_base_path base_path in
   let runtime_root = Filename.dirname session_store in
   let runtime_keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
@@ -341,7 +341,7 @@ let () =
          (match
             Store.save_agent_core_classified ~session_dir
               ~history_retained:
-                (Masc.Runtime_params.get
+                (Runtime_params.get
                    Masc.Runtime_settings.keeper_checkpoint_history_retained)
               purged
           with

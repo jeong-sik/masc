@@ -3194,7 +3194,9 @@ let test_submitting_response_identity_survives_later_responses_and_reload () =
         ; telemetry = Some { Llm_provider.Types.default_inference_telemetry with
             canonical_model_id = Some model; reported_model = Some (Provider_reported_model model) } } in
       let collect response = ignore (Agent_core.Hooks.invoke_validated hooks.after_turn
-        (Agent_core.Hooks.AfterTurn { turn = 1; response; tool_source_map = None })) in
+        (Agent_core.Hooks.AfterTurn { turn = 1; response; tool_source_map = Some
+          { admitted_tool_sources = [{planned_index=0;source_tool_use_ordinal=0;name_resolution=Registered_name}]
+          ; source_tool_use_count=1 } })) in
       collect (observed "original-model" "original-response");
       let tool = Agent_core.Tool.create ~name:"submit-fixture" ~description:"submit" ~parameters:[]
         (fun _ ->

@@ -118,9 +118,11 @@ receipts remain distinct from successful contract validation.
    uses the installation's selected input/output hooks. A host-selected private Unix socket handles concurrent
    issue/poll/result/disconnect/snapshot requests. One canonical incarnation is
    admitted per process, and every request carries it. Live execution requires
-   the already-selected client ID at dispatch. The exported tool can choose an
-   available browser for unbound work; tab/document operations require their
-   observed selection. There is no retry. Strict codecs retain existing document, viewport, frame and
+   the already-selected client ID at dispatch. The worker chooses no browser:
+   the command names the lane, and for live the client ID, that the host chose
+   from the worker's snapshot, and a route to a client that is not connected
+   or a browser the worker does not run is refused before dispatch. There is
+   no retry. Strict codecs retain existing document, viewport, frame and
    keyboard guards plus partial-effect result bodies. A nested service switch
    owns every accepted connection so idle clients cannot prevent shutdown.
    Retirement fences admission before disconnecting clients and cancelling waits.
@@ -173,9 +175,12 @@ receipts remain distinct from successful contract validation.
    read/scene/screenshot/interact/session/goto invoke its advertised tool with
    the selected input/output hooks. A two-command page read pins the first
    command's concrete connection and refuses changed connection receipts. Bound
-   tab reads require the original client before discovery. The worker issues
-   selection/connection identity from its admitted target; page fields cannot
-   replace it. Pure projections share the existing partial-inventory, scene,
+   tab reads require the original client before discovery. The host chooses
+   the browser from the worker's snapshot (`Browser_addon_host.issue`) and
+   stamps the receipt's selection/connection identity itself; page fields
+   cannot replace it. A snapshot whose reply is lost changes nothing in the
+   browser, so it leaves the worker serving
+   (`Browser_addon_wire.changes_nothing`). Pure projections share the existing partial-inventory, scene,
    navigation, document, viewport and tab checks. Failed tool replies retain
    their original MCP receipt and effect metadata. None of these paths retries
    input or falls back to builtin queues. Read/admin authorization stays at the

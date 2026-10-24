@@ -32,6 +32,12 @@ type command =
       only_if_idle : bool;
     }
 type request = { incarnation : string; command : command }
+val changes_nothing : command -> bool
+(** The worker answers the command by reading its own state: a snapshot, a
+    model listing or wait, or an idle document read, which the worker refuses
+    as busy or times out by itself. A lost or cancelled reply therefore leaves
+    no browser effect whose outcome is unknown; only its reader learns that it
+    failed. *)
 val to_json : request -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (request, string) result
 val verb_of_json : route:Browser_lane.route -> Yojson.Safe.t -> (Browser_lane.verb, string) result

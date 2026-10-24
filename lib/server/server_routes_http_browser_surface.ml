@@ -12,19 +12,19 @@ let read_body request reqd f =
     | json -> reply request reqd (f json))
 (* Public browser commands enter the same advertised-tool middleware as Keeper
    calls. The HTTP authorization boundary supplies the actor; request fields
-   cannot choose a private installation or provide a control envelope. *)
+   cannot choose a private installation or provide a control envelope. The
+   host chooses the browser before the worker runs the command. *)
 let command ~config ~principal arguments =
   let reserved=List.map (fun (schema:Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas in
-  let result=Result.bind (Browser_addon_host.connect ~config
-    ~access:Lane_addon_sources.Unauthenticated ~principal ~reserved)
-    (fun host -> Browser_addon_host.call host ~arguments) in
-  match result with
-  | Ok result -> Mcp_protocol.Mcp_types.tool_result_to_yojson result
-  | Error error ->
-      let failure=Browser_addon_host.error_result ~start_time:(Tool_timing.start ()) error in
-      Mcp_protocol.Mcp_types.tool_result_to_yojson {
-        content=[TextContent {type_="text";text=Tool_result.message failure;annotations=None}];
-        is_error=Some true;structured_content=None;_meta=Lane_addon_tool_result.metadata failure}
+  let failed failure=Mcp_protocol.Mcp_types.tool_result_to_yojson {
+    content=[TextContent {type_="text";text=Tool_result.message failure;annotations=None}];
+    is_error=Some true;structured_content=(match Tool_result.data failure with `Null -> None | data -> Some data);
+    _meta=Lane_addon_tool_result.metadata failure} in
+  match Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated ~principal ~reserved with
+  | Error error -> failed (Browser_addon_host.error_result ~start_time:(Tool_timing.start ()) error)
+  | Ok host -> match Browser_addon_host.command host ~arguments with
+    | Ok result -> Mcp_protocol.Mcp_types.tool_result_to_yojson result
+    | Error failure -> failed failure
 (* The dashboard's browser views see the browser Add-on as an
    unauthenticated caller does, Shared installations only, since the
    CanReadState routes among them serve any read-state caller. *)

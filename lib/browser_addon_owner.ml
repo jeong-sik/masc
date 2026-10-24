@@ -46,7 +46,7 @@ let with_admission t incarnation run =
 let snapshot t = `Assoc [
   "state",`String (match t.phase with Serving -> "serving" | Retired -> "retired");
   "clients",`List (List.map B.client_json (B.connected_clients ()));
-  "owned_backends",Browser_addon_inventory.owned_to_json (Browser_selection.snapshot ())]
+  "owned_backends",Browser_addon_inventory.owned_to_json (Browser_addon_inventory.observe ())]
 let models_enabled t = Option.is_some t.models
 let attach_models t models =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->

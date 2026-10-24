@@ -49,16 +49,20 @@ selects `validate_input` and `validate_output`; an installation can override
 `tool_hooks`, including `[]` to disable these optional checks. Identity,
 incarnation, browser selection and command decoding remain mandatory.
 
-Input arguments contain a `command` with `verb` and `args`, plus optional `lane`
-and `clientId`. An unbound command can select an available browser automatically;
+The host chooses the browser from the worker's snapshot and then calls the
+worker's `browser_command` with that `lane`, and for live its `clientId`; the
+worker runs only that route and states no identity of its own. The public
+command shape that host callers send (the dashboard endpoint below) contains a
+`command` with `verb` and `args`, plus optional `lane` and `clientId`. An
+unbound command lets the host select an available browser automatically;
 tab/document work repeats the returned selection. `page.read` with
 `includeHtml = true` reads document source. The bundled browser skill describes
 guarded input and partial-result handling.
 
 Initial `tabs.list` or `session.open` commands may supply `requiredActions`, using
-the operation names from the browser capability catalog. Automatic selection
-considers those capabilities; explicit connections are checked before dispatch
-too. An explicit `lane = "live"` tab creation requires the observed `clientId`.
+the operation names from the browser capability catalog. The host's automatic
+selection considers those capabilities; explicit connections are checked before
+dispatch too. An explicit `lane = "live"` tab creation requires the observed `clientId`.
 
 `Browser_addon_tools` prepares the existing public browser aliases for this host
 path, retaining contextual/scene/screenshot projections, capability receipts,

@@ -26,10 +26,14 @@ let route_fields = function
   | Lane.Automation_route -> ["lane",`String "automation";"clientId",`Null]
   | Lane.Stagehand_route -> ["lane",`String "stagehand";"clientId",`Null]
 let to_json selected = `Assoc (route_fields selected.route @ ["reason",`String (reason_to_wire selected.reason)])
-let route_of_target = function
-    | Lane.Automation -> Lane.Automation_route | Lane.Stagehand -> Lane.Stagehand_route
-    | Lane.Live_client client -> Lane.Live_route (Some client.info.client_id)
-let bind_target selected target = {selected with route=route_of_target target}
+type browser = Owned_automation | Owned_stagehand | Connected of Lane.client_info
+let route_of_browser = function
+  | Owned_automation -> Lane.Automation_route | Owned_stagehand -> Lane.Stagehand_route
+  | Connected info -> Lane.Live_route (Some info.client_id)
+let backend_of_browser = function
+  | Owned_automation -> Browser_capabilities.Owned_gecko | Owned_stagehand -> Browser_capabilities.Owned_chromium
+  | Connected info -> Browser_capabilities.Connected info.transport
+let bind selected browser = {selected with route=route_of_browser browser}
 let operations_json actions = `List (List.map (fun action -> `String (Browser_capabilities.operation_name action)) actions)
 let error_message = function
   | Binding_required -> "This tab or document belongs to a browser. Repeat its observed lane and clientId."
@@ -50,16 +54,6 @@ let error_to_json error = `Assoc (["code",`String (Lane.choice_case_code (choice
           `Assoc (route_fields route @ ["missingActions",operations_json missing])) candidates)]
     | Unsupported_required_actions {route;missing} -> route_fields route @ ["missingActions",operations_json missing]
     | Binding_required | No_available_browser -> [])
-
-let snapshot () =
-  let work lane =
-    let observed = Lane.inventory_observation (Lane.server_lane_name lane) in
-    let registered = match observed.backend with Lane.Executor_registered value -> value | Lane.Live_clients _ -> false in
-    let locate=match lane with Lane.Server_automation -> Lane.automation_locate_available ()
-      | Lane.Server_stagehand -> Lane.stagehand_models_available () in
-    {activity=observed.activity;registered;session=Lane.server_session_observation lane;locate} in
-  {live_activity=Lane.activity Lane.Lane_name.Live;live_clients=Lane.connected_clients ();
-   automation=work Lane.Server_automation;stagehand=work Lane.Server_stagehand}
 
 let enabled = function Lane.Enabled -> true | Lane.Disabled | Lane.Unobserved -> false
 let stagehand_serves verb = Lane.verb_allowed_on_stagehand verb && match verb with
@@ -169,15 +163,36 @@ let choose ?(required_actions=[]) ~verb ~bound ~snapshot preference =
     (match choose_candidates ~verb ~bound ~snapshot:filtered preference with
      | Error No_available_browser -> Error (Required_actions_unavailable {required=required_actions;candidates})
      | (Ok _ | Error (Binding_required | Ambiguous_browsers _ | Required_actions_unavailable _ | Unsupported_required_actions _)) as result -> result)
-let require_target required target =
-  let models=match target with Lane.Stagehand -> Lane.stagehand_models_available ()
-    | Lane.Automation | Lane.Live_client _ -> false in
-  match effective_missing ~models (Browser_capabilities.backend_of_target target) required with
+let require ~snapshot required browser =
+  let models=match browser with Owned_stagehand -> snapshot.stagehand.locate
+    | Owned_automation | Connected _ -> false in
+  match effective_missing ~models (backend_of_browser browser) required with
   | [] -> Ok ()
-  | missing -> Error (Unsupported_required_actions {route=route_of_target target;missing})
-let resolve ?(required_actions=[]) ~verb ~bound preference = match preference with
-  | Exact (Lane.Live_route None) when bound -> Error Binding_required
-  | Exact ((Lane.Live_route (Some _ | None) | Lane.Automation_route | Lane.Stagehand_route) as route) ->
-      Ok {route;reason=Explicit_browser}
-  | Automatic when bound -> Error Binding_required
-  | Automatic -> choose ~required_actions ~verb ~bound ~snapshot:(snapshot ()) preference
+  | missing -> Error (Unsupported_required_actions {route=route_of_browser browser;missing})
+let target ~verb ~snapshot route =
+  let activity=match route with
+    | Lane.Automation_route -> snapshot.automation.activity
+    | Lane.Stagehand_route -> snapshot.stagehand.activity
+    | Lane.Live_route _ -> snapshot.live_activity in
+  match Lane.activity_rejection_with ~activity (Lane.route_lane_name route) verb with
+  | Some rejection -> Error (Lane.Activity_rejected rejection)
+  | None -> match route with
+    | Lane.Automation_route -> Ok Owned_automation
+    | Lane.Stagehand_route -> Ok Owned_stagehand
+    | Lane.Live_route (Some id) ->
+      (match List.find_opt (fun (info : Lane.client_info) -> Uuidm.equal info.client_id id) snapshot.live_clients with
+       | Some info -> Ok (Connected info)
+       | None -> Error (Lane.Selected_client_disconnected id))
+    | Lane.Live_route None ->
+      match snapshot.live_clients with
+      | [info] -> Ok (Connected info)
+      | [] -> Error Lane.No_live_client
+      | _ :: _ :: _ as several ->
+        Error (Lane.Ambiguous_clients (List.map (fun (info : Lane.client_info) -> info.client_id) several
+          |> List.sort (fun left right -> String.compare (Lane.client_id_to_string left) (Lane.client_id_to_string right))))
+let bound = function
+  | Lane.Page_read {tab_id;_} | Lane.Page_elements {tab_id;_} -> Option.is_some tab_id
+  | Lane.Page_act (Lane.Action.Open_tab _ | Lane.Action.Open_window _ | Lane.Action.Control _) | Lane.Tabs_list | Lane.Session_open _ | Lane.Session_status -> false
+  | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_console _ | Lane.Page_network _ | Lane.Page_cookies _ | Lane.Page_capture _
+  | Lane.Page_scene _ | Lane.Page_snapshot _ | Lane.Page_interact _ | Lane.Session_close | Lane.Page_goto _ | Lane.Page_act (Lane.Action.On_tab _)
+  | Lane.Page_context _ | Lane.Page_instruct _ | Lane.Page_locate _ | Lane.Page_extract _ -> true

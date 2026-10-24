@@ -342,11 +342,9 @@ ID without its transport. Carry that ID into subsequent operations; the
 transport says which [live work](#what-each-live-connection-serves) the
 connection serves before a request is refused for it.
 
-Two answers do not follow that rule. The automation lane's optional document
+One answer does not follow that rule. The automation lane's optional document
 read keeps `clientId: "automation:<session>"`, the session its observer read,
-because the document source requires that string. The interaction route the
-dashboard and TUI call (`Browser_interaction.perform`) returns the browser's
-receipt with neither field; its caller already named the connection.
+because the document source requires that string.
 
 Native transport requires `x-lane: live`, the lane token, and the identity
 headers: `x-browser-client-id`, `x-browser-name`, `x-browser-version`, and

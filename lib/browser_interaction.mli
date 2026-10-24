@@ -7,8 +7,6 @@ val wire_fields : string list
 (** Every other argument name [parse] accepts. The one list the Add-on wire
     parser ([page.interact]) and the tool schema's tests read. *)
 val parse : Yojson.Safe.t -> (request, string) result
-val perform : request -> (Yojson.Safe.t, string) result
-(** Dispatch once to the explicitly selected lane/client/tab. No automatic retry. *)
 val script : string
 (** Fixed DOM implementation. WebDriver supplies the parsed action as argument
     zero; the live extension uses the same function with JSON-encoded data. *)

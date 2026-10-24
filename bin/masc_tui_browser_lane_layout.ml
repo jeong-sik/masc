@@ -3,7 +3,7 @@
    changes neither.
 
    Object analysis puts up to 200 nodes and 50,000 characters into the view
-   (browser_scene_script.ml's nodeLimit, Browser_scene.read's max_chars).
+   (browser_scene_script.ml's nodeLimit, the scene request's maxChars).
    Wrapping them ran on every frame, and twice per keystroke: once in the
    scroll handler asking for the row count, once in the frame. Retaining one
    page is what Masc_tui_board_read_layout does for one Board document

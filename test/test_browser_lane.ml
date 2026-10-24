@@ -31,7 +31,7 @@ let test_colliding_tabs_are_isolated () = with_clients (fun sw connect ->
   check bool "multiple clients require selection" true
     (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route None)
      = Error (Lane.Ambiguous_clients [firefox.client_id; zen.client_id]));
-  let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for
+  let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
     ~target:(target firefox.client_id)
     ~verb:(Lane.Page_interact {frame_path=[];tab_id=1; expected_url=None; action=Lane.Click "#button"}) ~timeout_sec:1.) in
   check bool "Zen cannot consume Firefox's tab-1 click" true
@@ -55,7 +55,7 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
     (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some old.client_id))
      = Error (Lane.Selected_client_disconnected old.client_id));
   check bool "captured target also stays disconnected" true
-    (Lane.issue_for ~target:pinned ~verb:Lane.Tabs_list ~timeout_sec:0.1
+    (Lane.issue_for_actor ~actor:None ~target:pinned ~verb:Lane.Tabs_list ~timeout_sec:0.1
      = Error (Lane.Selected_client_disconnected old.client_id));
   check bool "retired native identity cannot re-register" true
     (Lane.take_command ~client_info:old ~window_sec:0.001 = Error Lane.Client_retired))
@@ -66,7 +66,7 @@ let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connec
   (* Expire the captured target between resolution and issue, without sleeps
      or a clock-dependent scheduling race. No command has been dispatched. *)
   client.connected_until <- Monotonic_deadline.after ~seconds:0.;
-  let answer = Lane.issue_for ~target:pinned
+  let answer = Lane.issue_for_actor ~actor:None ~target:pinned
     ~verb:(Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Scroll {x=0;y=120}}) ~timeout_sec:1. in
   check bool "expiry after target resolution is the same selection failure" true
@@ -76,14 +76,14 @@ let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connec
 let test_timed_out_queue_is_not_executed () = with_clients (fun _ connect ->
   let client = connect Lane.Firefox in
   check bool "unconsumed action times out" true
-    (Lane.issue_for ~target:(target client.client_id)
+    (Lane.issue_for_actor ~actor:None ~target:(target client.client_id)
       ~verb:(Lane.Page_interact {frame_path=[];tab_id=1; expected_url=None; action=Lane.Scroll {x=0;y=10}})
       ~timeout_sec:0.001 = Ok Lane.Timed_out);
   check bool "later poll drops timed-out queued action" true
     (Lane.take_command ~client_info:client ~window_sec:0.002 = Ok None))
 let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
   let client = connect Lane.Zen in
-  let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for
+  let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
     ~target:(target client.client_id) ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   let command = take client in
   ignore (Lane.disconnect_client ~client_id:client.client_id);
@@ -96,12 +96,12 @@ let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
 let test_sources_and_live_policy () = with_clients (fun _ connect ->
   let client = connect Lane.Firefox in
   check bool "missing transport UUID rejected" true (Result.is_error (Lane.client_id_of_string ""));
-  (match Lane.issue_for ~target:(target client.client_id) ~verb:(Lane.Session_open {headless=None}) ~timeout_sec:0.1 with
+  (match Lane.issue_for_actor ~actor:None ~target:(target client.client_id) ~verb:(Lane.Session_open {headless=None}) ~timeout_sec:0.1 with
    | Ok (Lane.Rejected_before_effect _) -> () | _ -> fail "a live session must be rejected before effect");
   (* Navigation is BiDi work on a tab that connection opened; the extension is
      refused as a selection, with nothing queued. *)
   check bool "extension navigation is refused as a selection" true
-    (Lane.issue_for ~target:(target client.client_id) ~verb:(Lane.Page_goto {url="https://example.org";tab_id=Some 2})
+    (Lane.issue_for_actor ~actor:None ~target:(target client.client_id) ~verb:(Lane.Page_goto {url="https://example.org";tab_id=Some 2})
        ~timeout_sec:0.1
      = Error (Lane.Transport_unsupported
          {client_id=client.client_id; transport=client.transport; capability=Lane.Tab_navigation}));
@@ -185,14 +185,14 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
       let name = Lane.live_transport_to_string info.transport ^ " " ^ Lane.live_capability_to_wire capability in
       if Lane.live_transport_serves info.transport capability then begin
         let result = Eio.Fiber.fork_promise ~sw (fun () ->
-          Lane.issue_for ~target:selected ~verb ~timeout_sec:1.) in
+          Lane.issue_for_actor ~actor:None ~target:selected ~verb ~timeout_sec:1.) in
         let command = take info in
         check bool (name ^ " reaches the connection") true (command.verb_json = Lane.verb_json verb);
         ignore (Lane.deliver_result ~client_id:info.client_id ~id:command.id ~payload:(payload name));
         answered result name
       end else begin
         check bool (name ^ " is refused as a selection") true
-          (Lane.issue_for ~target:selected ~verb ~timeout_sec:1.
+          (Lane.issue_for_actor ~actor:None ~target:selected ~verb ~timeout_sec:1.
              = Error (Lane.Transport_unsupported
                  {client_id=info.client_id; transport=info.transport; capability}));
         check int (name ^ " left no waiter") 0 (Hashtbl.length client.waiters);
@@ -285,7 +285,7 @@ let test_optional_document_preserves_existing_work () = with_clients (fun sw con
   let info = connect Lane.Firefox in
   let selected = target info.client_id in
   let primary = Eio.Fiber.fork_promise ~sw (fun () ->
-    Lane.issue_for ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
+    Lane.issue_for_actor ~actor:None ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   let primary_command = take info in
   let client = match selected with Lane.Live_client client -> client | Lane.Automation | Lane.Stagehand -> fail "live target expected" in
   check bool "optional observation refuses while primary request waits" true
@@ -317,7 +317,7 @@ let test_inventory_does_not_prune () = with_clients (fun sw connect ->
   let client = match selected with Lane.Live_client client -> client
     | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
   let pending = Eio.Fiber.fork_promise ~sw (fun () ->
-    Lane.issue_for ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
+    Lane.issue_for_actor ~actor:None ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   ignore (take info);
   client.connected_until <- Monotonic_deadline.after ~seconds:0.;
   check bool "expired client is not counted" true
@@ -332,7 +332,7 @@ let test_inventory_does_not_prune () = with_clients (fun sw connect ->
 let test_duplicate_result_after_lost_ack_is_accepted () = with_clients (fun sw connect ->
   let info = connect Lane.Firefox in
   let pending = Eio.Fiber.fork_promise ~sw (fun () ->
-    Lane.issue_for ~target:(target info.client_id) ~verb:Lane.Tabs_list ~timeout_sec:1.) in
+    Lane.issue_for_actor ~actor:None ~target:(target info.client_id) ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   let command = take info in
   let result = payload "delivered" in
   check bool "first result is delivered" true

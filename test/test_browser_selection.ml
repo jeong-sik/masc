@@ -34,8 +34,6 @@ let test_explicit_binding () =
   let explicit=Lane.Live_route (Some (client "1" Lane.Webdriver_bidi).client_id) in
   selected {route=explicit;reason=Selection.Explicit_browser}
     (Selection.choose ~verb:Lane.Tabs_list ~bound:true ~snapshot:empty (Selection.Exact explicit));
-  selected {route=explicit;reason=Selection.Explicit_browser}
-    (Selection.resolve ~verb:Lane.Tabs_list ~bound:true (Selection.Exact explicit));
   let unnamed=Selection.Exact (Lane.Live_route None) in
   List.iter (fun info ->
     check bool "an unbound live lane cannot adopt a different client's observed tab" true
@@ -43,13 +41,10 @@ let test_explicit_binding () =
         ~snapshot:{empty with live_clients=[info]} unnamed=Error Selection.Binding_required))
     [client "1" Lane.Webdriver_bidi;client "2" Lane.Webdriver_bidi];
   check bool "bound live lane requires client identity before runtime observation" true
-    (Selection.resolve ~verb:Lane.Tabs_list ~bound:true unnamed=Error Selection.Binding_required);
+    (Selection.choose ~verb:Lane.Tabs_list ~bound:true ~snapshot:empty unnamed=Error Selection.Binding_required);
   selected {route=Lane.Live_route None;reason=Selection.Explicit_browser}
-    (Selection.choose ~verb:Lane.Tabs_list ~bound:false ~snapshot:empty unnamed);
-  selected {route=Lane.Live_route None;reason=Selection.Explicit_browser}
-    (Selection.resolve ~verb:Lane.Tabs_list ~bound:false unnamed);
-  check bool "bound automatic selection refuses before observing runtime" true
-    (Selection.resolve ~verb:Lane.Tabs_list ~bound:true Selection.Automatic=Error Selection.Binding_required)
+    (Selection.choose ~verb:Lane.Tabs_list ~bound:false ~snapshot:empty unnamed)
+
 let test_work_lifecycle () =
   let open_=Lane.Session_open {headless=None} in
   selected {route=Lane.Stagehand_route;reason=Selection.Preferred_work_browser} (choose ~verb:open_ empty);
@@ -119,7 +114,8 @@ let test_observation_is_not_dispatch () = Eio_main.run (fun _ ->
   Fun.protect ~finally:(fun () -> Lane.install_activity_observer None;
     Lane.install_stagehand_executor None;Lane.install_server_session_observer Lane.Server_stagehand None) (fun () ->
     selected {route=Lane.Stagehand_route;reason=Selection.Preferred_work_browser}
-      (Selection.resolve ~verb:(Lane.Session_open {headless=None}) ~bound:false Selection.Automatic);
+      (Selection.choose ~verb:(Lane.Session_open {headless=None}) ~bound:false
+        ~snapshot:(Masc.Browser_addon_inventory.observe ()) Selection.Automatic);
     check int "selection opens no browser and sends no command" 0 !dispatched;
     check bool "closed remains closed" true (Lane.server_session_observation Lane.Server_stagehand=Lane.Browser_closed)))
 let test_wire () =
@@ -130,17 +126,33 @@ let test_wire () =
   check string "wire gives exact backend identity and reason"
     {|{"lane":"stagehand","clientId":null,"reason":"preferred_work_browser"}|}
     (Selection.to_json {route=Lane.Stagehand_route;reason=Selection.Preferred_work_browser} |> Yojson.Safe.to_string)
-let test_bind_admitted_identity () = Eio_main.run (fun env ->
-  Time_compat.set_clock (Eio.Stdenv.clock env);
-  Lane.install_activity_observer (Some (fun _ -> Lane.Enabled));
+let test_bind_chosen_identity () =
   let info=client "1" Lane.Webdriver_bidi in
-  Fun.protect ~finally:(fun () -> ignore (Lane.disconnect_client ~client_id:info.client_id);
-    Lane.install_activity_observer None) (fun () ->
-    ignore (Lane.take_command ~client_info:info ~window_sec:0.001);
-    let target=match Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route None) with
-      | Ok target -> target | Error _ -> fail "sole connected client was not admitted" in
-    let explicit : Selection.selected = {route=Lane.Live_route None;reason=Selection.Explicit_browser} in
-    selected {route=route info;reason=Selection.Explicit_browser} (Ok (Selection.bind_target explicit target))))
+  let explicit : Selection.selected = {route=Lane.Live_route None;reason=Selection.Explicit_browser} in
+  match Selection.target ~verb:Lane.Tabs_list ~snapshot:{empty with live_clients=[info]} (Lane.Live_route None) with
+  | Ok browser -> selected {route=route info;reason=Selection.Explicit_browser} (Ok (Selection.bind explicit browser))
+  | Error error -> fail (Lane.selection_error_message error)
+(* The host names the browser from the worker's snapshot with the refusals the
+   worker gives for the same route. *)
+let test_target_from_snapshot () =
+  let first=client "1" Lane.Webdriver_bidi and second=client "2" Lane.Web_extension in
+  let target ?(verb=Lane.Tabs_list) snapshot route=Selection.target ~verb ~snapshot route in
+  check bool "no connected client" true (target empty (Lane.Live_route None)=Error Lane.No_live_client);
+  check bool "several connected clients need a clientId" true
+    (target {empty with live_clients=[second;first]} (Lane.Live_route None)
+     =Error (Lane.Ambiguous_clients [first.client_id;second.client_id]));
+  check bool "a client the snapshot does not hold has left" true
+    (target {empty with live_clients=[first]} (route second)=Error (Lane.Selected_client_disconnected second.client_id));
+  check bool "a named client is that client" true
+    (target {empty with live_clients=[first;second]} (route second)=Ok (Selection.Connected second));
+  let off={empty with automation={empty.automation with activity=Lane.Disabled}} in
+  check bool "a lane that is off refuses new work" true
+    (target off Lane.Automation_route=Error (Lane.Activity_rejected (Lane.Lane_off Lane.Lane_name.Automation)));
+  check bool "a lane that is off still closes its session" true
+    (target ~verb:Lane.Session_close off Lane.Automation_route=Ok Selection.Owned_automation);
+  check bool "the live lane follows the snapshot's live activity" true
+    (target {empty with live_activity=Lane.Unobserved;live_clients=[first]} (route first)
+     =Error (Lane.Activity_rejected Lane.Activity_unavailable))
 let () = run "browser selection" ["policy",[
   test_case "connected login and actual owned sessions" `Quick test_connections_and_sessions;
   test_case "exact browser binding" `Quick test_explicit_binding;
@@ -149,4 +161,5 @@ let () = run "browser selection" ["policy",[
   test_case "inactive owned session inspection and cleanup" `Quick test_inactive_session_cleanup;
   test_case "observation sends no command" `Quick test_observation_is_not_dispatch;
   test_case "selection wire contract" `Quick test_wire;
-  test_case "receipts retain the actual admitted client" `Quick test_bind_admitted_identity]]
+  test_case "receipts retain the chosen client" `Quick test_bind_chosen_identity;
+  test_case "a route names its browser in the snapshot" `Quick test_target_from_snapshot]]

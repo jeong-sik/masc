@@ -22,7 +22,6 @@ type support = Available of invocation
   | Conditional of { invocation : invocation; constraints : string list }
   | Unsupported of string
 type entry = { operation : operation; support : support }
-val backend_of_target : Browser_lane.target -> backend
 val operations : operation list
 val operation_name : operation -> string
 val operation_of_wire : string -> operation option

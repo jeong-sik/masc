@@ -31,7 +31,7 @@ def control(conn):
             return
         if op!="snapshot": raise RuntimeError("fixture exposes snapshot and download grants only")
         with open(os.path.join(a.root,"clients.json")) as src: clients=json.load(src)
-        result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False},"stagehand":{"activity":"disabled","registered":False,"session":"unknown","locate":False}}}}
+        result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"owned_backends":{"automation":{"activity":"enabled","registered":True,"session":"closed","locate":False},"stagehand":{"activity":"enabled","registered":True,"session":"unknown","locate":False}}}}
         conn.sendall((json.dumps(result)+"\n").encode())
 def serve():
     while True:
@@ -83,7 +83,8 @@ let answer_result ~lane ~tool_name ~start_time = function
       "invalid browser backend response"
   | B.Lane_absent ->
     Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable
-      ~effect_disposition:Tool_result.Proven_pre_effect (B.lane_absent_message lane)
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      (Printf.sprintf "the %s browser lane is absent" (B.Lane_name.to_wire lane))
   | B.Timed_out ->
     Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable
       "the browser lane did not answer in time; the dispatched outcome is unknown"
@@ -92,18 +93,9 @@ let answer_result ~lane ~tool_name ~start_time = function
       ~effect_disposition:Tool_result.Proven_pre_effect reason
   | B.Refused reason ->
     Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection reason
-let response ~clients ~route verb answer =
-  let selected={Browser_selection.route;reason=Browser_selection.Explicit_browser} in
-  let connection=match route with
-    | B.Live_route (Some id) ->
-        let client=List.find (fun (client:B.client_info) -> client.client_id=id) clients in
-        B.live_connection_fields ~client_id:id ~transport:client.transport
-    | Automation_route|Stagehand_route -> ["clientId",`Null]
-    | Live_route None -> failwith "fixture must receive a concrete live connection" in
-  let data=match W.reply_to_json (W.Issue_result (Ok answer)) with
-    | `Assoc fields -> `Assoc (fields @ ["browserSelection",Browser_selection.to_json selected;
-        "browserConnection",`Assoc connection])
-    | _ -> failwith "fixture expected issue receipt" in
+(* A worker states no browser identity; the host adds the one it chose. *)
+let response ~route verb answer =
+  let data=W.reply_to_json (W.Issue_result (Ok answer)) in
   let typed=answer_result ~lane:(B.route_lane_name route)
     ~tool_name:(B.verb_to_string verb) ~start_time:(Tool_timing.start ()) answer in
   Mcp_protocol.Mcp_types.tool_result_to_yojson {
@@ -175,13 +167,13 @@ hooks = ["validate_input", "validate_output"]
           let route=match Yojson.Safe.Util.member "lane" arguments,Yojson.Safe.Util.member "clientId" arguments with
             | `String "live",`String raw -> B.Live_route (Some (require (B.client_id_of_string raw)))
             | `String "stagehand",`Null -> B.Stagehand_route
-            | (`String "automation"|`Null),`Null -> B.Automation_route
+            | `String "automation",`Null -> B.Automation_route
             | _ -> failwith "invalid fixture browser connection" in
           let verb=require (W.verb_of_json ~route (Yojson.Safe.Util.member "command" arguments)) in
           let known=match route with B.Live_route (Some id) ->
               List.exists (fun (client:B.client_info) -> client.client_id=id) clients
             | Automation_route|Stagehand_route -> true | Live_route None -> false in
-          let result=if known then response ~clients ~route verb (respond ~route verb)
+          let result=if known then response ~route verb (respond ~route verb)
             else
               let typed=Tool_result.make_err ~tool_name:"browser_command" ~start_time:(Tool_timing.start ())
                 ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect

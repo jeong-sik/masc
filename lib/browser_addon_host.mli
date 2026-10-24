@@ -17,6 +17,12 @@ val error_result : start_time:Tool_timing.started -> Lane_addon_runtime.tool_cal
 val snapshot : t -> (Yojson.Safe.t, Browser_addon_client.error) result
 (** Read-only observation on the same original service. This is not a tool
     invocation and does not select, start or replace a browser. *)
+type snapshot_failure = Snapshot_unavailable of string | Snapshot_unreadable of string
+(** The worker gave no snapshot, or gave one the host cannot decode. *)
+val selection_snapshot : t -> (Browser_addon_observation.published * Browser_selection.snapshot, snapshot_failure) result
+(** The worker's [Snapshot] reply as the host chooses from it. A worker
+    answers only while it serves, so its live lane is on. A lost reply leaves
+    the worker serving ({!Browser_addon_wire.changes_nothing}). *)
 type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
 (** The original successful MCP receipt remains available if a caller's
@@ -24,13 +30,27 @@ type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
 val issue : ?upload_paths:string list -> ?required_actions:Browser_capabilities.operation list ->
   t -> preference:Browser_selection.preference -> Browser_lane.verb ->
   (receipt, Tool_result.result) result
-(** Invoke the advertised tool once and decode its mandatory connection and
-    success receipt. The selected schema hooks remain optional; identity and
-    wire decoding remain mandatory. Failed/partial replies preserve raw data
-    and effect metadata. Malformed post-dispatch replies have unknown effect. *)
+(** Choose the browser from the worker's snapshot, invoke the advertised tool
+    once on that route, and decode its success receipt. An explicit owned
+    route without [required_actions] needs no snapshot. The receipt names the
+    browser the host chose; the worker states no identity. A worker refusal
+    after the snapshot (the client left, the lane turned off) is returned as
+    given, never sent to another browser. The selected schema hooks remain
+    optional; wire decoding remains mandatory. Failed/partial replies preserve
+    raw data and effect metadata. Malformed post-dispatch replies have unknown
+    effect. *)
 
 (** [upload_paths] must be an exact pending host snapshot batch, not caller
     paths, and the selection the owned automation route or an explicit live
     browser. The host prepares worker-owned copies over the original private
     connection, then uses the ordinary exported tool/hooks once. A failed or
     cancelled call is never replayed. *)
+val parse_command : Yojson.Safe.t ->
+  (Browser_selection.preference * Browser_lane.verb * Browser_capabilities.operation list * string option, string) result
+(** The public command shape, decoded before any browser is chosen. *)
+val command : t -> arguments:Yojson.Safe.t -> (Mcp_protocol.Mcp_types.tool_result, Tool_result.result) result
+(** The public command shape: [lane] and [clientId] are optional, so a missing
+    lane leaves the choice to the host, and [requiredActions] and [uploadId]
+    pass as before. The host chooses as {!issue} does and returns the worker's
+    result with the chosen browser's [browserSelection] and
+    [browserConnection], in success and failure alike. *)

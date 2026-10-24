@@ -8,7 +8,6 @@ let input result=Result.map_error (failure ~class_:Tool_result.Policy_rejection
   ~effect_disposition:Tool_result.Proven_pre_effect) result
 let projection result=Result.map_error (failure ~class_:Tool_result.Runtime_failure
   ~effect_disposition:Tool_result.Proven_pre_effect) result
-let surface result=result |> Result.map_error Browser_surface.failure_message |> projection
 let run work =
   let start_time=Tool_timing.start () in
   match work () with Ok data -> Tool_result.make_ok ~tool_name ~start_time ~data () | Error error -> error
@@ -23,7 +22,7 @@ let read host json=run (fun () ->
   let* request=parse Browser_surface.parse_request json in
   let* ()=bound request in
   let* first=Host.issue host ~preference:request.route B.Tabs_list in
-  let* plan=surface (Browser_surface.prepare_read ~tab_id:request.tab_id first.data) in
+  let* plan=projection (Browser_surface.prepare_read ~tab_id:request.tab_id first.data) in
   let* page=match Browser_surface.selected_tab plan with
     | None -> Ok None
     | Some tab ->
@@ -32,7 +31,7 @@ let read host json=run (fun () ->
         let* ()=projection (if Browser_binding.same_connection first.binding next.binding then Ok ()
           else Error "browser changed connection during page observation") in
         Ok (Some next.data) in
-  surface (Browser_surface.project_read plan ~binding:first.binding ~started ~page))
+  projection (Browser_surface.project_read plan ~binding:first.binding ~started ~page))
 let scene host json=run (fun () ->
   let started=Mtime_clock.elapsed_ns () in
   let* request=parse Browser_scene.parse_request json in
@@ -47,7 +46,7 @@ let capture host json=run (fun () ->
   let* ()=bound request in
   let* tab_id=input (Option.to_result ~none:"screenshot requires tabId" request.tab_id) in
   let* receipt=Host.issue host ~preference:request.route (B.Page_capture {tab_id}) in
-  surface (Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data))
+  projection (Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data))
 let interact host json=run (fun () ->
   let* request=parse Browser_interaction.parse json in
   let* receipt=Host.issue host ~preference:request.route
@@ -81,13 +80,11 @@ let goto host json=run (fun () ->
   let* receipt=Host.issue host ~preference:request.route (B.Page_goto {url;tab_id=request.tab_id}) in
   Ok (Browser_binding.annotate receipt.binding receipt.data))
 let clients ~bidi_host host=run (fun () ->
-  let* value=Host.snapshot host |> Result.map_error (function
-    | Browser_addon_client.Unavailable detail|Outcome_unknown detail ->
-        failure ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail) in
-  let* _=projection (Lane_addon_action.canonical value) in
-  let* published=projection (Browser_addon_observation.decode_snapshot value) in
-  let snapshot={Browser_selection.live_activity=B.Enabled;live_clients=published.clients;
-    automation=published.automation;stagehand=published.stagehand} in
+  let* published,snapshot=Host.selection_snapshot host |> Result.map_error (function
+    | Host.Snapshot_unavailable detail ->
+        failure ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail
+    | Snapshot_unreadable detail ->
+        failure ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect detail) in
   let decision verb=match Browser_selection.choose ~verb ~bound:false ~snapshot Browser_selection.Automatic with
     | Ok selected -> `Assoc ["ok",`Bool true;"data",Browser_selection.to_json selected]
     | Error error -> `Assoc ["ok",`Bool false;"error",Browser_selection.error_to_json error] in

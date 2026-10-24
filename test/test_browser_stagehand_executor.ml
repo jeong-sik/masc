@@ -171,11 +171,18 @@ let test_capture_passes_the_surface () =
   Eio_main.run
   @@ fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  Lane.install_activity_observer (Some (fun _ -> Lane.Enabled));
-  Lane.install_stagehand_executor (Some (fun ~actor verb -> Executor.execute ~tabs ~call:(call fake) ?actor verb));
-  let captured = Fun.protect ~finally:(fun () ->
-    Lane.install_activity_observer None; Lane.install_stagehand_executor None) (fun () ->
-    Masc.Browser_surface.capture { Masc.Browser_surface.route = Masc.Browser_selection.Exact Lane.Stagehand_route; tab_id = Some 1 }) in
+  let binding =
+    Masc.Browser_binding.of_browser
+      { Masc.Browser_selection.route = Lane.Stagehand_route; reason = Masc.Browser_selection.Explicit_browser }
+      Masc.Browser_selection.Owned_stagehand
+  in
+  let captured =
+    match Executor.execute ~tabs ~call:(call fake) (Lane.Page_capture { tab_id = 1 }) with
+    | Lane.Answered (`Assoc fields) when List.assoc_opt "ok" fields = Some (`Bool true) ->
+      Masc.Browser_surface.capture_from ~binding ~tab_id:1 ~started:0L
+        (Option.value (List.assoc_opt "data" fields) ~default:`Null)
+    | _ -> Error "the capture was not answered"
+  in
   match captured with
   | Ok data ->
     check string "source" "stagehand" Yojson.Safe.Util.(member "source" data |> to_string);
@@ -189,7 +196,7 @@ let test_capture_passes_the_surface () =
         fake.sent
     in
     check int "only the two capture reads carry scene runtime" 2 (List.length scene_reads)
-  | Error failure -> fail (Masc.Browser_surface.failure_message failure)
+  | Error detail -> fail detail
 ;;
 
 let test_capture_refuses_a_moving_page () =

@@ -300,7 +300,10 @@ def handle(conn):
         req=json.loads(conn.makefile("rb").readline())
         if req["incarnation"]!=a.incarnation: raise RuntimeError("wrong owner")
         op=req["operation"]
-        if op=="snapshot": result={"reply":"receipt"} if a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False},"stagehand":{"activity":"disabled","registered":False,"session":"unknown","locate":False}}}}
+        lose=os.path.join(a.root,"lose-snapshot-"+a.incarnation)
+        lost=False
+        if op=="snapshot" and os.path.exists(lose): os.unlink(lose);lost=True
+        if op=="snapshot": result={"reply":"receipt"} if lost or a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False},"stagehand":{"activity":"disabled","registered":False,"session":"unknown","locate":False}}}}
         elif op=="poll":
             client=dict(req["client"]);client["interactions"]=[];clients[client["clientId"]]=client
             result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}
@@ -343,7 +346,7 @@ for line in sys.stdin:
             with open(os.path.join(a.root,"toolcalls-"+a.incarnation),"a") as out: out.write("once\n")
             event.wait();running=False
             failed=not payload["ok"]
-            value={"reply":"issue","answer":{"status":"answered","payload":payload},"browserSelection":{"lane":"live","clientId":"0c000000-0000-4000-8000-000000000001","reason":"explicit_browser"},"browserConnection":{"clientId":"0c000000-0000-4000-8000-000000000001","transport":"webdriver_bidi"}}
+            value={"reply":"issue","answer":{"status":"answered","payload":payload}}
             if os.path.exists(os.path.join(a.root,"reject-tool-output-"+a.incarnation)): value={}
             result={"content":[],"structuredContent":value,"isError":failed}
             if failed:
@@ -492,6 +495,41 @@ hooks = ["validate_input", "validate_output"]
   ignore (poll client);
   wait clock (fun () -> match R.browser_service_status ~config ~access ~instance_id:id with
     | R.Browser_ready _ -> true | Browser_refresh_needed _|Browser_unavailable|Browser_retired -> false);
+  (* The host reads a snapshot before it chooses a browser. Losing that reply
+     changes nothing in the browser, so the worker keeps serving. *)
+  write (Filename.concat root ("lose-snapshot-"^id)) "once";
+  check bool "a host snapshot whose reply is lost is reported as unknown" true
+    (match call original Browser_addon_wire.Snapshot with
+     | Error (Browser_addon_client.Outcome_unknown _) -> true
+     | Ok _|Error (Browser_addon_client.Unavailable _) -> false);
+  check bool "a lost snapshot reply leaves the worker serving" true
+    (inspect id |> member "phase" |> text "kind"<>"failed"
+     && (match R.browser_service_status ~config ~access ~instance_id:id with
+       | R.Browser_ready _ -> true | Browser_refresh_needed _|Browser_unavailable|Browser_retired -> false));
+  (* The host refuses these before it calls the worker; the tool-call count
+     checked next stays at the one long call. *)
+  let host_refusal ?(class_=Tool_result.Workflow_rejection) name arguments =
+    check bool name true (match Browser_addon_host.command host ~arguments with
+      | Error failure -> Tool_result.failure_class failure=Some class_
+          && (Keeper_tool_execution.of_tool_result failure).failure_effect_disposition=Tool_result.Proven_pre_effect
+      | Ok _ -> false) in
+  host_refusal "requirements ride only discovery or session open" (`Assoc ["requiredActions",`List [`String "hover"];
+    "command",Browser_lane.verb_json (Browser_lane.Page_read {tab_id=Some 7;max_chars=None})]);
+  host_refusal "a live tab is opened only on a named client" (`Assoc ["lane",`String "live";
+    "command",Browser_lane.verb_json (Browser_lane.Page_act (Browser_lane.Action.Open_tab "https://example.org/"))]);
+  List.iter (fun control ->
+    List.iter (fun (label,selection) ->
+      host_refusal (label ^ ": space control keeps its observed live identity")
+        (`Assoc (selection @ ["command",Browser_lane.verb_json
+          (Browser_lane.Page_act (Browser_lane.Action.Control control))])))
+      ["automatic",[];"unnamed live",["lane",`String "live"];
+       "automation",["lane",`String "automation"];"stagehand",["lane",`String "stagehand"]])
+    [Browser_lane.Action.Hand_off;Take_over];
+  host_refusal "a repeated field is refused as input" (`Assoc ["command",Browser_lane.verb_json Browser_lane.Tabs_list;
+    "command",Browser_lane.verb_json Browser_lane.Tabs_list]);
+  write (Filename.concat root ("lose-snapshot-"^id)) "once";
+  host_refusal ~class_:Tool_result.Dependency_unavailable "no snapshot, no automatic choice"
+    (`Assoc ["command",Browser_lane.verb_json Browser_lane.Tabs_list]);
   check string "long MCP export dispatched once" "once\n"
     (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
   let unbound=Browser_addon_view.read host (`Assoc ["lane",`String "live";"tabId",`Int 7]) in
@@ -522,7 +560,7 @@ hooks = ["validate_input", "validate_output"]
     let view=Browser_addon_view.read host (`Assoc []) in
     check bool "view reads the original active page" true (Tool_result.is_success view);
     let data=Tool_result.data view in
-    check string "view retains worker-selected client" (Browser_lane.client_id_to_string client_id) (text "clientId" data);
+    check string "view names the client the host chose" (Browser_lane.client_id_to_string client_id) (text "clientId" data);
     check string "view projection retains page text" "hello" (text "text" (member "page" data)))
     (fun () ->
       wait clock (fun () -> calls "once\nonce\n");

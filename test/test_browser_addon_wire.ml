@@ -86,10 +86,27 @@ let model_ports () =
       (W.of_json (W.to_json request)=Ok request))
     [W.Model_requests;W.Model_result (`Assoc ["request_id",`String "one";"result",`Assoc []]);
      W.Model_wait {after=None};W.Model_wait {after=Some "revision"}]
+(* A read the host makes before it chooses a browser must not decide the
+   worker's lifetime; a browser command that may have started must. *)
+let commands_that_change_nothing () =
+  let issue only_if_idle=W.Issue {route;verb=B.Page_document {tab_id=7};actor=None;timeout_sec=3.;only_if_idle} in
+  List.iter (fun (name,command,expected) -> check bool name expected (W.changes_nothing command))
+    ["snapshot",W.Snapshot,true;"model listing",W.Model_requests,true;"model wait",W.Model_wait {after=None},true;
+     "idle document read",issue true,true;"browser command",issue false,false;"retire",W.Retire,false;
+     "native poll",W.Poll {client={B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi};window_sec=0.},false;
+     "disconnect",W.Disconnect id,false;
+     "upload stage",W.Upload_stage {id="up";actor="keeper";route;verb=B.Tabs_list},false;
+     "upload discard",W.Upload_discard "up",false;
+     "download claim",W.Download_claim {id="dl";actor="keeper";route;verb=B.Tabs_list},false;
+     "download commit",W.Download_commit {id="dl";actor="keeper";route;verb=B.Tabs_list;receipt=`Null},false;
+     "download release",W.Download_release {id="dl";actor="keeper";route;verb=B.Tabs_list},false;
+     "model result",W.Model_result `Null,false;
+     "native delivery",W.Deliver {client_id=id;id="cmd";payload=`Null},false]
 let () = run "browser addon wire" ["boundary",[
   test_case "closed verbs roundtrip" `Quick roundtrips;
   test_case "guards and competing identities" `Quick rejections;
   test_case "a native host cannot poll as ego" `Quick a_native_host_cannot_poll_as_ego;
   test_case "partial effects and receipts" `Quick results;
   test_case "private retirement retains incarnation" `Quick retirement;
-  test_case "private model ports preserve incarnation" `Quick model_ports]]
+  test_case "private model ports preserve incarnation" `Quick model_ports;
+  test_case "commands that change nothing" `Quick commands_that_change_nothing]]

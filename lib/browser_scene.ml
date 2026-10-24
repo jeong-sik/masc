@@ -267,18 +267,6 @@ let project request ~binding ~started json =
   | `Assoc fields -> Ok (`Assoc (("elapsed_ms",`Float elapsed_ms)::List.remove_assoc "elapsed_ms" fields))
   | _ -> Error "scene must be an object"
 
-let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope surface ~max_chars =
-  let started=Mtime_clock.elapsed_ns () in
-  let* tab_id=Option.to_result ~none:(Browser_surface.Unobserved "scene requires tabId") surface.Browser_surface.tab_id in
-  let verb=Browser_lane.Page_scene {tab_id;max_chars;view;scope} in
-  let* selected,target=Browser_surface.resolve_target ~verb surface in
-  let* answer=Browser_lane.issue_for ~target ~verb ~timeout_sec:20.
-    |> Result.map_error (fun error -> Browser_surface.Unselected error) in
-  let* json=Browser_surface.observe_answer ~lane:(Browser_lane.target_lane target) answer in
-  project {surface;view;scope;expected_url;navigation_source;max_chars}
-    ~binding:(Browser_binding.of_target selected target) ~started json
-    |> Result.map_error (fun detail -> Browser_surface.Unobserved detail)
-
 let parse_request = function
   | `Assoc fields ->
       let allowed = ["lane";"clientId";"tabId";"view";"scope";"maxChars";"expectedUrl";"navigationSource"] in
@@ -307,9 +295,3 @@ let parse_request = function
         | Some _ -> Error Browser_page_script.text_cap_refused in
       Ok {surface=request;view;scope;expected_url;navigation_source;max_chars}
   | _ -> Error "scene request must be an object"
-
-let read_request json =
-  let* request=parse_request json in
-  read ?navigation_source:request.navigation_source ?expected_url:request.expected_url
-    ~view:request.view ?scope:request.scope request.surface ~max_chars:request.max_chars
-    |> Result.map_error Browser_surface.failure_message

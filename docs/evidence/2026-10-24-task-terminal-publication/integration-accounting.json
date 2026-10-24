@@ -1,0 +1,327 @@
+{
+  "captured_at": "2026-10-24T08:08:05.221807+00:00",
+  "captured_main": "ac7fe109acc9a54d479317755a24efb556c004b0",
+  "external_top": "12b867257dab1eb5ce57ed2e60c6d0b34da81260",
+  "members": [
+    {
+      "pr": 45442,
+      "state": "closed",
+      "merged": true,
+      "merged_at": "2026-10-24T07:52:35Z",
+      "merge_commit_sha": "06164cf0d14b052e2d8e1ada6532c78114a855d6",
+      "merged_by": "jeong-sik",
+      "head": "49c0d40ed63701bfe81611d3b7d9050bd7da877f",
+      "head_ref": "jazz/verifier-owner-test-fix",
+      "base": "98071cc24b9086bc6f2905b3ddf244d29c5ed0b0",
+      "base_ref": "main",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": null
+        },
+        "id": 2517230,
+        "number": 45472,
+        "position": 1,
+        "size": 11
+      },
+      "author": "anyang-keepers"
+    },
+    {
+      "pr": 45471,
+      "state": "closed",
+      "merged": true,
+      "merged_at": "2026-10-24T07:52:36Z",
+      "merge_commit_sha": "b46d6ae8e0579ba2af23f94b98ec19323290a5f2",
+      "merged_by": "jeong-sik",
+      "head": "a0e61b712c622f2452ce82e5dc09efdf0b797d50",
+      "head_ref": "jazz/verifier-worker-bridge",
+      "base": "49c0d40ed63701bfe81611d3b7d9050bd7da877f",
+      "base_ref": "jazz/verifier-owner-test-fix",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": null
+        },
+        "id": 2517230,
+        "number": 45472,
+        "position": 2,
+        "size": 11
+      },
+      "author": "anyang-keepers"
+    },
+    {
+      "pr": 45524,
+      "state": "closed",
+      "merged": true,
+      "merged_at": "2026-10-24T07:52:37Z",
+      "merge_commit_sha": "2a76185129fee0c5343e4e7d80dd36f0114b53df",
+      "merged_by": "jeong-sik",
+      "head": "c59337618f8507b076e61807536879d5d16e066e",
+      "head_ref": "fix/verifier-captured-endpoint-authority-20261023",
+      "base": "a0e61b712c622f2452ce82e5dc09efdf0b797d50",
+      "base_ref": "jazz/verifier-worker-bridge",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": null
+        },
+        "id": 2517230,
+        "number": 45472,
+        "position": 3,
+        "size": 11
+      },
+      "author": "jeong-sik"
+    },
+    {
+      "pr": 45573,
+      "state": "closed",
+      "merged": true,
+      "merged_at": "2026-10-24T07:52:39Z",
+      "merge_commit_sha": "69ddb390c9d3e33a95f5587d1a0d1f8033c2c99f",
+      "merged_by": "jeong-sik",
+      "head": "264a5a3e26147534f788ff89ebfac8e2df94b1f4",
+      "head_ref": "fix/verifier-task-durable-integration-20261023",
+      "base": "c59337618f8507b076e61807536879d5d16e066e",
+      "base_ref": "fix/verifier-captured-endpoint-authority-20261023",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": null
+        },
+        "id": 2517230,
+        "number": 45472,
+        "position": 4,
+        "size": 11
+      },
+      "author": "jeong-sik"
+    },
+    {
+      "pr": 45637,
+      "state": "closed",
+      "merged": true,
+      "merged_at": "2026-10-24T07:52:40Z",
+      "merge_commit_sha": "78728008e532109aa2ef5776329e030255a96551",
+      "merged_by": "jeong-sik",
+      "head": "cdc7bfe101098cd0a6918d8a868c453cb9dea768",
+      "head_ref": "feat/goal-verifier-original-root-20261023",
+      "base": "264a5a3e26147534f788ff89ebfac8e2df94b1f4",
+      "base_ref": "fix/verifier-task-durable-integration-20261023",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": null
+        },
+        "id": 2517230,
+        "number": 45472,
+        "position": 5,
+        "size": 11
+      },
+      "author": "jeong-sik"
+    },
+    {
+      "pr": 45650,
+      "state": "closed",
+      "merged": true,
+      "merged_at": "2026-10-24T07:52:41Z",
+      "merge_commit_sha": "7228b91b3ff7da3477c5e525d537654bf998ff89",
+      "merged_by": "jeong-sik",
+      "head": "e2e8328bd14108a38184e9072e7b1860ae1b1f3b",
+      "head_ref": "feat/goal-verifier-worker-root-20261023",
+      "base": "cdc7bfe101098cd0a6918d8a868c453cb9dea768",
+      "base_ref": "feat/goal-verifier-original-root-20261023",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": null
+        },
+        "id": 2517230,
+        "number": 45472,
+        "position": 6,
+        "size": 11
+      },
+      "author": "jeong-sik"
+    },
+    {
+      "pr": 45654,
+      "state": "closed",
+      "merged": true,
+      "merged_at": "2026-10-24T07:52:42Z",
+      "merge_commit_sha": "b9a8a48cda223ca0375ffd857294531f98752447",
+      "merged_by": "jeong-sik",
+      "head": "7c753501e1cc9fc24a659f0c9fb6437ef130a842",
+      "head_ref": "feat/goal-verifier-frontier-root-20261023",
+      "base": "e2e8328bd14108a38184e9072e7b1860ae1b1f3b",
+      "base_ref": "feat/goal-verifier-worker-root-20261023",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": null
+        },
+        "id": 2517230,
+        "number": 45472,
+        "position": 7,
+        "size": 11
+      },
+      "author": "jeong-sik"
+    },
+    {
+      "pr": 45671,
+      "state": "closed",
+      "merged": true,
+      "merged_at": "2026-10-24T07:52:43Z",
+      "merge_commit_sha": "17340fa382eafaef0241c91f5ba659ef54685f9c",
+      "merged_by": "jeong-sik",
+      "head": "a950cd418cd4776f21d67f86d88d8eca4cb9267f",
+      "head_ref": "feat/goal-verifier-host-root-20261023",
+      "base": "7c753501e1cc9fc24a659f0c9fb6437ef130a842",
+      "base_ref": "feat/goal-verifier-frontier-root-20261023",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": null
+        },
+        "id": 2517230,
+        "number": 45472,
+        "position": 8,
+        "size": 11
+      },
+      "author": "jeong-sik"
+    },
+    {
+      "pr": 45684,
+      "state": "closed",
+      "merged": true,
+      "merged_at": "2026-10-24T07:52:44Z",
+      "merge_commit_sha": "c85fe4e3e74e91583a088e5fe19a4559c44d3be7",
+      "merged_by": "jeong-sik",
+      "head": "7bb156af04ae0a2823eb1ad023a87b16350ad819",
+      "head_ref": "fix/goal-verifier-blank-verdict-20261024",
+      "base": "a950cd418cd4776f21d67f86d88d8eca4cb9267f",
+      "base_ref": "feat/goal-verifier-host-root-20261023",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": null
+        },
+        "id": 2517230,
+        "number": 45472,
+        "position": 9,
+        "size": 11
+      },
+      "author": "jeong-sik"
+    },
+    {
+      "pr": 45708,
+      "state": "closed",
+      "merged": true,
+      "merged_at": "2026-10-24T07:52:45Z",
+      "merge_commit_sha": "c6122868f1be9e3fe67825a551dc2ed4cb662e5f",
+      "merged_by": "jeong-sik",
+      "head": "af49d305bd5f1ccf9c13751401f9bc373fc30f5d",
+      "head_ref": "fix/goal-host-finished-ack-3c-20261024",
+      "base": "7bb156af04ae0a2823eb1ad023a87b16350ad819",
+      "base_ref": "fix/goal-verifier-blank-verdict-20261024",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": null
+        },
+        "id": 2517230,
+        "number": 45472,
+        "position": 10,
+        "size": 11
+      },
+      "author": "jeong-sik"
+    },
+    {
+      "pr": 45710,
+      "state": "closed",
+      "merged": true,
+      "merged_at": "2026-10-24T07:52:46Z",
+      "merge_commit_sha": "242d12659fd1bdd2e43ef6553c04a4ce92552ed0",
+      "merged_by": "jeong-sik",
+      "head": "12b867257dab1eb5ce57ed2e60c6d0b34da81260",
+      "head_ref": "fix/goal-publication-observation-proof-20261024",
+      "base": "af49d305bd5f1ccf9c13751401f9bc373fc30f5d",
+      "base_ref": "fix/goal-host-finished-ack-3c-20261024",
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": null
+        },
+        "id": 2517230,
+        "number": 45472,
+        "position": 11,
+        "size": 11
+      },
+      "author": "jeong-sik"
+    }
+  ],
+  "all_merge_shas_verified_main_ancestors": true,
+  "approval_audit": {
+    "admitted_premerge_current_head_approvals": 0,
+    "member_count": 11,
+    "effective_premerge_changes_requested": 0,
+    "current_threads_total": 0,
+    "historical_premerge_thread_absence": "not established",
+    "public_readback": "https://github.com/jeong-sik/masc/pull/45710#issuecomment-6381863174"
+  },
+  "old49_author_sequence_preservation": {
+    "verified": true,
+    "original_commit_count": 49,
+    "local_rebased_commit_count": 49,
+    "proof_sha256": "fbc6217477fae4a5e29133e12e82f2aa9a8c535f5c9e6b08d5d63da0e9d69ea3"
+  },
+  "original_closed_refs_written": false,
+  "new_repair_execution": "not run",
+  "historical_audit_main_is_ancestor_of_fixed_candidate_base": true,
+  "prior_candidate": {
+    "base": "d587bf1ffa123a05ae688cbc9fabe8e35221b206",
+    "code_head": "6c9bf61e4cf155723af37125b3173a0730912ec7",
+    "prior_ac7_candidate": "f08c05f2bf509936617092b5e594250df4eb67fc",
+    "whole_native_size": 2,
+    "actual_textual_conflict": [
+      "lib/completion_authority_agent.ml"
+    ],
+    "source_integration_delta_sha256": "4f82c3151c688b38c74310c8f5cc5e0bacb0782e43a79f436695d8ac9f41858a",
+    "source_files_changed_vs_ac7_candidate": [
+      "test/test_completion_trust_harness.ml"
+    ],
+    "execution": "not requested / no result as of 2026-10-24T08:33:26.626702+00:00"
+  },
+  "current_candidate": {
+    "code_head": "44b6daee827adb9ef700c29f8d221220c2024df9",
+    "direct_parent": "6c9bf61e4cf155723af37125b3173a0730912ec7",
+    "branch_main_baseline": "d587bf1ffa123a05ae688cbc9fabe8e35221b206",
+    "repair_patch_sha256": "9e0efaab502cb8052b9d8b3f29419e8b50db4f5fe53ca768cb9ad5c09b65f1a8",
+    "source_files_changed_from_prior": [
+      "lib/completion_authority_agent.ml",
+      "lib/completion_authority_agent.mli",
+      "lib/keeper/verifier_review_publication.ml",
+      "test/test_verifier_review_worker.ml"
+    ],
+    "original13_bytes_preserved": true,
+    "actual_prior_run": 40078689529,
+    "actual_prior_run_conclusion": "compile failure before all 5 suite starts",
+    "prior_cr": 5637557664,
+    "current_execution": {
+      "run": 40095356149,
+      "checkout": "44b6daee827adb9ef700c29f8d221220c2024df9",
+      "PASS": 105,
+      "FAIL": 0,
+      "SKIP": 0,
+      "TODO": 0
+    },
+    "current_formal_approval": {
+      "review": 5638294412,
+      "scope": "code44b6 only; not upper/merge",
+      "replaces_own_cr": 5637557664
+    }
+  },
+  "final_evidence_layer": {
+    "updated_at": "2026-10-24T13:06:23.311365+00:00",
+    "code_head_unchanged": "44b6daee827adb9ef700c29f8d221220c2024df9",
+    "approval_and_merge": "not claimed for new upper head",
+    "installed_runtime": "not claimed"
+  }
+}

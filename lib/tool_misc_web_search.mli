@@ -212,6 +212,16 @@ val handle : tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t
     - [Runtime_failure]: every provider failed. A valid empty result is
       successful and keeps any failed providers in [provider_errors]. *)
 
+val addon_search_runner :
+  query:string -> limit:int option -> (Lane_addon_search_result.result, string) result
+(** The Lane Add-on web-search port's server-side runner (task-2527 E11).
+    Same validation, cache identity/window and provider fallback plan as
+    {!handle}; returns the secret-free port envelope — the serving
+    provider's own typed result data, its name and every per-provider error
+    the chain kept. No credential or cache key is exposed. The server
+    registers this once via
+    [Lane_addon_runtime.register_web_search_runner]. *)
+
 val simulate_for_test :
   query:string ->
   limit:int ->

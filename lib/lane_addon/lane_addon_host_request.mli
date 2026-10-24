@@ -23,6 +23,10 @@ type t =
       (** Questions to the operator. The request id is the question's id. *)
   | Withdraw_ask of { request_id : string; ask_id : string; reason : string }
       (** The package no longer needs the answer to its question [ask_id]. *)
+  | Web_search of Lane_addon_search_result.request
+      (** One secret-free web search (task-2527 E11): the host runs its
+          existing provider chain and delivers the search envelope; no
+          credential, cache key or provider plan crosses the port. *)
 
 val request_id : t -> string
 val to_json : t -> Yojson.Safe.t

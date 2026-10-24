@@ -428,6 +428,15 @@ manifest 에 `[world.asks] operator = true` 가 있는 패키지는 운영자에
 - `[world.asks]` 가 없는 패키지나 수동 Attach 의 질문은 `not_allowed` 다.
 - 기한은 없다. 열린 질문은 답하거나 철회할 때까지 열려 있다.
 
+### 웹 검색
+
+manifest 의 `[world]` 테이블에 `web_search = true` 가 있는 패키지는 host 의 웹 검색을 쓸 수 있다. provider 연쇄와 credential, 캐시, rate limit 은 host 쪽에 남는다. 요청이나 결과 어디에도 비밀 값은 실리지 않는다.
+
+- 요청: `{"kind": "web_search", "request_id", "query", "limit"}`. `limit` 은 1~10, 없으면 host 기본값(5)을 쓴다.
+- `query` 검증, 캐시 창, provider fallback 순서는 Keeper 가 쓰는 `masc_web_search` 도구와 같다. 캐시 창 안의 같은 요청은 캐시에서 답한다.
+- 결과: `{"serving_provider", "provider_errors", "search"}`. `search` 는 provider 고유의 결과 envelope(rows 또는 grounded `context_text` + `sources`)이고, `provider_errors` 는 연쇄가 남긴 provider 별 오류다.
+- runner 가 없으면 주기가 `no_web_search_runner` 이슈로 멈춘다. `[world]` 의 `web_search` 가 없는 패키지의 요청은 `not_allowed` 다.
+
 ### 기록 읽기
 
 운영자가 쓴 TOML 선언은 `binding.records` 로 패키지가 읽을 기록을 정한다. 수동 Attach 나 Keeper 가 소유한 설치가 이 키를 쓰면 instance 를 띄우기 전에 거절된다.

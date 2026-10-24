@@ -1038,6 +1038,83 @@ let handle ~tool_name ~start_time args : Tool_result.result =
          | Error (All_providers_failed detail) ->
              runtime_err ~tool_name ~start_time detail)
 
+(* Lane Add-on web-search port (task-2527 E11): the secret-free projection of
+   the same chain the tool dispatches. Validation, cache identity/window and
+   the provider fallback plan are exactly the tool's — the port documents that
+   parity — and the envelope carries the serving provider's own typed result
+   data, its name and the per-provider errors the chain kept. No credential,
+   key or cache key crosses into the envelope. *)
+let addon_error_pair error =
+  (* The chain's error strings are "provider: class: detail"; the provider
+     name rides as the prefix. *)
+  match String.index_opt error ':' with
+  | Some idx when idx > 0 ->
+      (String.trim (String.sub error 0 idx),
+       String.trim (String.sub error (idx + 1) (String.length error - idx - 1)))
+  | _ -> ("unknown", error)
+
+let addon_search_envelope data =
+  (* The tool envelope wraps the provider's typed result under [result];
+     [provider_errors] rides at the top level only when errors exist. *)
+  let fields = match data with `Assoc fields -> fields | _ -> [] in
+  let provider_errors = match List.assoc_opt "provider_errors" fields with
+    | Some (`List entries) ->
+        List.filter_map (fun entry -> match entry with
+          | `String error -> Some (addon_error_pair error)
+          | _ -> None) entries
+    | _ -> [] in
+  let serving_provider = match List.assoc_opt "result" fields with
+    | Some `Assoc _ -> Option.bind (List.assoc_opt "result" fields)
+        (fun result -> match result with
+           | `Assoc inner -> (match List.assoc_opt "engine" inner with
+              | Some (`String engine) -> Some engine
+              | _ -> None)
+           | _ -> None)
+    | _ -> None in
+  let search = match List.assoc_opt "result" fields with
+    | Some result -> result
+    | None -> data in
+  { Lane_addon_search_result.serving_provider; provider_errors; search }
+
+let addon_search_runner ~query ~limit =
+  match validate_query query with
+  | Error message -> Error message
+  | Ok query ->
+    let limit = max 1 (min 10 (match limit with Some limit -> limit | None -> 5)) in
+    let now = Unix.gettimeofday () in
+    let key = cache_key ~query ~limit in
+    let envelope payload provider_errors =
+      let serving_provider, search = match payload with
+        | Hits response ->
+            (Some response.engine,
+             result_data ~query ~search_url:response.search_url
+               ~engine:response.engine response.hits)
+        | Grounded context ->
+            (Some (provider_to_string Brave_llm_context),
+             grounded_result_data ~query context) in
+      let data = match search, provider_errors with
+        | `Assoc fields, _ :: _ ->
+            `Assoc (("provider_errors",
+                     `List (List.map (fun error -> `String error) provider_errors))
+                    :: fields)
+        | _, [] -> search
+        | _, _ :: _ -> search in
+      cache_store key data now;
+      { Lane_addon_search_result.serving_provider;
+        provider_errors = List.map addon_error_pair provider_errors;
+        search = (match data with
+          | `Assoc fields -> (match List.assoc_opt "result" fields with
+              | Some result -> result
+              | None -> data)
+          | other -> other) } in
+    match cache_lookup key now with
+    | Some cached -> Ok (addon_search_envelope cached)
+    | None ->
+        (match (current_search_impl ()) ~query ~limit with
+         | Ok (payload, provider_errors) -> Ok (envelope payload provider_errors)
+         | Error No_provider_configured -> Error no_provider_configured_message
+         | Error (All_providers_failed detail) -> Error detail)
+
 let simulate_for_test ~query ~limit outcomes : Tool_result.result =
   let start_time = Tool_timing.start () in
   match simulated_search_impl ~outcomes ~query ~limit with

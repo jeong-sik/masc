@@ -8,12 +8,13 @@ type t =
                      sha256 : string; offset : int }
   | Ask of { request_id : string; questions : Keeper_ask.question list; context : string option }
   | Withdraw_ask of { request_id : string; ask_id : string; reason : string }
+  | Web_search of Lane_addon_search_result.request
 
 let request_id = function
   | Exact_output request -> request.Lane_addon_exact.request_id
   | Read_records { request_id; _ } | Read_file { request_id; _ }
   | Read_result { request_id; _ } | Ask { request_id; _ }
-  | Withdraw_ask { request_id; _ } -> request_id
+  | Withdraw_ask { request_id; _ } | Web_search { request_id; _ } -> request_id
 
 let to_json = function
   | Exact_output request -> Lane_addon_exact.request_to_json request
@@ -41,6 +42,7 @@ let to_json = function
   | Withdraw_ask {request_id; ask_id; reason} ->
       `Assoc ["kind", `String "withdraw_ask"; "request_id", `String request_id;
         "ask_id", `String ask_id; "reason", `String reason]
+  | Web_search request -> Lane_addon_search_result.request_to_json request
 
 let text fields key =
   match List.assoc_opt key fields with
@@ -140,6 +142,9 @@ let request_of_json = function
      | Some (`String "read_result") -> read_result fields
      | Some (`String "ask") -> ask fields
      | Some (`String "withdraw_ask") -> withdraw_ask fields
+     | Some (`String "web_search") ->
+       Lane_addon_search_result.request_of_json json
+       |> Result.map (fun request -> Web_search request)
      | Some (`String kind) -> Error ("this host has no request kind " ^ kind)
      | Some _ | None -> Error "a host request requires a string kind")
   | _ -> Error "a host request must be an object"

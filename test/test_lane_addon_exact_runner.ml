@@ -26,7 +26,7 @@ let package : Types.package =
   ; directory = "/nonexistent"; skills_directory = None; action_tool = None
   ; state_storage = Types.Ephemeral; tool_invocation = Types.Direct; tool_hooks = []; worker_service = Types.Mcp_tools; exported_tools = []; outputs = []
   ; refresh_policy = Types.Every_hint; model_access = Types.Model_disabled
-  ; exact_outputs = [ { Types.name = "author"; schema; request_schema=Types.Package_schema_only } ]; operator_asks = false
+  ; exact_outputs = [ { Types.name = "author"; schema; request_schema=Types.Package_schema_only } ]; operator_asks = false; web_search = false
   ; binding_schema = None; presentation = Lane_addon_presentation.empty
   ; execution = Types.Container { runtime = Types.Docker; image = "unused"
       ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } } }

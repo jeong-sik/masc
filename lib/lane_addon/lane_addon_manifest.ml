@@ -239,6 +239,14 @@ let load ~path =
       | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "world.state requires only mode = persistent or ephemeral" in
     let* outputs = output_ports world in
     let* exact_outputs = exact_outputs ~directory:(Filename.dirname path) world in
+    let* web_search = match List.assoc_opt "web_search" world with
+      | None -> Ok false
+      | Some (Otoml.TomlBoolean web_search) -> Ok web_search
+      | Some ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+             | Otoml.TomlOffsetDateTime _
+             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+             | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+             | Otoml.TomlTableArray _ ) -> Error "world.web_search requires true or false" in
     let* operator_asks = match List.assoc_opt "asks" world with
       | None -> Ok false
       | Some (Otoml.TomlTable [("operator", Otoml.TomlBoolean operator)]
@@ -371,7 +379,7 @@ let load ~path =
     else Ok { id; revision; title; ui_category; contributions = List.rev contributions; execution; worker_service; command;
       directory = Filename.dirname path; skills_directory; action_tool; state_storage;
       tool_invocation; exported_tools; tool_hooks; outputs; refresh_policy; model_access;
-      binding_schema; presentation; exact_outputs; operator_asks }
+      binding_schema; presentation; exact_outputs; operator_asks; web_search }
   in
   try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with
   | Sys_error message -> Error (Io_failure message)

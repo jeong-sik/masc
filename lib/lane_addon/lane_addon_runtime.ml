@@ -164,6 +164,7 @@ type host_issue =
   | Exact_record_failed of { request_id : string; detail : string }
   | Ask_record_failed of { request_id : string; detail : string }
   | No_exact_runner
+  | No_web_search_runner
 (* A projection of the last cycle; no decision reads it. *)
 type host_status = { cycles : int; waiting : (string * Yojson.Safe.t) list; issue : host_issue option }
 type entry = {
@@ -258,6 +259,12 @@ let sampling_factory = ref None
 let register_sampling_factory factory = sampling_factory := Some factory
 let exact_runner : (Lane_addon_exact.runner * Lane_addon_exact.execution_authority) option ref = ref None
 let register_exact_runner ~authorize_request runner = exact_runner := Some (runner, authorize_request)
+(* Secret-free web-search port (task-2527 E11): the injected runner wraps the
+   host tool's provider chain; no key, cache key or provider plan crosses
+   this seam — the envelope carries only what the tool already published. *)
+let web_search_runner : (query:string -> limit:int option ->
+  (Lane_addon_search_result.result, string) result) option ref = ref None
+let register_web_search_runner runner = web_search_runner := Some runner
 let github_reader : Lane_addon_records.github ref = ref (fun ~repository_id:_ -> Error "this host has no GitHub reader")
 let register_github_reader reader = github_reader := reader
 let prepare_sampling_handler ~sw ~store ~instance_id ~(package : package) ~binding =
@@ -1011,6 +1018,7 @@ let host_issue_to_json = function
   | Ask_record_failed {request_id; detail} ->
       `Assoc ["kind", `String "ask_record_failed"; "request_id", `String request_id; "detail", `String detail]
   | No_exact_runner -> `Assoc ["kind", `String "no_exact_runner"]
+  | No_web_search_runner -> `Assoc ["kind", `String "no_web_search_runner"]
 
 let host_status_json status =
   `Assoc ["cycles", `Int status.cycles;
@@ -1151,7 +1159,17 @@ let run_host_cycle m e (port : host_port) =
             ~original_request_id ~source_id ~sha256 ~offset ~max_bytes:(Lane_addon_types.max_reply_bytes e.package)) with
          | Ok body -> Ok (Deliver body)
          | Error (Lane_addon_host_delivery.Refused reason) -> Ok (not_allowed reason)
-         | Error (Storage_failed detail) -> Error (Result_delivery_failed {request_id; detail})) in
+         | Error (Storage_failed detail) -> Error (Result_delivery_failed {request_id; detail}))
+    | Lane_addon_host_request.Web_search {request_id; query; limit} ->
+        (match !web_search_runner with
+         | None -> Error No_web_search_runner
+         | Some run ->
+             (match run ~query ~limit with
+              | Ok envelope ->
+                  Ok (Deliver (Lane_addon_host_request.result_arguments ~request_id
+                    ~result:(Lane_addon_search_result.result_to_json envelope)))
+              | Error detail ->
+                  Ok (not_allowed ("host web search failed: " ^ detail)))) in
   let try_request request =
     let request_id = Lane_addon_host_request.request_id request in
     let* retained = offload (fun () -> Lane_addon_host_delivery.restore ~store:m.store ~owner ~request
@@ -1173,7 +1191,8 @@ let run_host_cycle m e (port : host_port) =
       | Lane_addon_host_request.Exact_output _ ->
         publish_owner_event ~root:(Lane_addon_store.root m.store) ~package_id:e.package.id
           (Exact_result_delivered {installation_id=installation_id e;instance_id=e.instance_id;request_id})
-      | Lane_addon_host_request.Read_records _ | Read_file _ | Read_result _ | Ask _ | Withdraw_ask _ -> ());
+      | Lane_addon_host_request.Read_records _ | Read_file _ | Read_result _ | Ask _
+      | Lane_addon_host_request.Withdraw_ask _ | Lane_addon_host_request.Web_search _ -> ());
     Ok () in
   let deliver request result =
     let request_id = Lane_addon_host_request.request_id request in
@@ -1219,7 +1238,8 @@ let run_host_cycle m e (port : host_port) =
                 Hashtbl.replace tried request_id ();
                 (match !request_issue with None -> request_issue := Some issue | Some _ -> ());
                 each delivered_any rest
-            | Error ((Listing_failed _ | Listing_refused _ | Relisted_delivered_request _ | No_exact_runner) as issue) ->
+            | Error ((Listing_failed _ | Listing_refused _ | Relisted_delivered_request _
+                    | No_exact_runner | No_web_search_runner) as issue) ->
                 Error issue in
     let* delivered_any = each false requests in
     if delivered_any then pass () else Ok () in

@@ -22,12 +22,24 @@ val rows : cols:int -> t -> string list
     fencing/joining and terminal sanitization. HTML document whitespace follows
     HTML parsing; original parts and copy bytes are unchanged. Source mode
     keeps standalone CR escaped. *)
+type diagram = {
+  first_row : int;
+  row_count : int;
+  columns : int;
+  image : Masc_tui_resource_diagrams.image;
+}
+val layout : cols:int -> t -> string list * diagram list
+(** One row projection and its prepared PNG slots. Drawing, scrolling and
+    placement use this same result. Source mode contains no image slots. *)
 val rows_with_search : cols:int -> Masc_tui_types.state -> t ->
   (string * Masc_tui_detail_reading.search_mark) list
 (** Original rows and their current literal search marks at this pane width.
     A current landing also requires the exact original reading and query.
     It retains the last search result through ordinary scrolling.
     Unadmitted content and list focus have no document marks. *)
+val layout_with_search : cols:int -> Masc_tui_types.state -> t ->
+  (string * Masc_tui_detail_reading.search_mark) list * diagram list
+(** Search marks and image slots from one immutable layout. *)
 val search_rows : cols:int -> Masc_tui_types.state -> string list option
 (** Search only the currently displayed admitted content. Metadata-only,
     loading another key, failures and withdrawn inventory return [None].

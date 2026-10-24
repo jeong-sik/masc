@@ -50,6 +50,10 @@ val image_id : image -> int
     terminal's reply, so a reply cannot be taken for an answer about a
     picture actually being drawn. *)
 
+val resource_image_id : int -> int
+(** Zero-based document occurrence in the resource image ID namespace,
+    separate from portraits, evidence and capability probes. *)
+
 val evidence_images : image list
 (** The {!image} slots the operator evidence has, in order. A fifth picture in
     one task's evidence has no slot and is listed by its caption only. *)

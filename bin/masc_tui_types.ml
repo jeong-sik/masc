@@ -8516,6 +8516,7 @@ type state = {
   mutable resource_search_position: Masc_tui_resource_reading.search_position;
   mutable resource_focus: pane_focus;
   mutable resource_image_cursor: int;
+  mutable resource_diagrams: Masc_tui_resource_diagrams.t option;
   mutable resource_text_cursor: int;
   mutable resource_save_prompt: resource_save_prompt option;
   (* The Config surface owns the files the server reads. runtime.toml is one;
@@ -15504,6 +15505,7 @@ let create_state
   resource_search_position = Masc_tui_resource_reading.first;
   resource_focus = Left_pane;
   resource_image_cursor = 0;
+  resource_diagrams = None;
   resource_text_cursor = 0;
   resource_save_prompt = None;
   config_pane = Config_runtime;

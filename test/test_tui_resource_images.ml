@@ -164,7 +164,41 @@ let test_markdown_diagrams () =
       check string "retained report source is unchanged" source original
   | {Mcp.rc_kind=Resource_blob _;_} -> fail "expected retained Markdown"
 
+let test_diagram_preparation_ownership () =
+  let module Diagrams = Masc_tui_resource_diagrams in
+  let source = "flowchart LR\n A[계정] --> B[확인]" in
+  let content = "```mermaid\n" ^ source ^ "\n```" in
+  let parts = [text None content] in
+  let create contents = Diagrams.create ~mime_type:(Some "text/markdown")
+    ~contents ~width:640 ~cell_pixels:(8,16) ~colors:None in
+  let cache = create parts in
+  let request = Diagrams.request cache in
+  check (list string) "render request retains exact source" [source] (Diagrams.sources request);
+  check (pair int int) "pending source" (0,1) (Diagrams.progress cache);
+  check bool "original response and geometry own preparation" true
+    (Diagrams.matches ~mime_type:(Some "text/markdown") ~contents:parts
+      ~width:640 ~cell_pixels:(8,16) ~colors:None cache);
+  check bool "equal replacement response is a different observation" false
+    (Diagrams.matches ~mime_type:(Some "text/markdown") ~contents:(List.map Fun.id parts)
+      ~width:640 ~cell_pixels:(8,16) ~colors:None cache);
+  let retired = Diagrams.request (create parts) in
+  let ignored = Diagrams.settle retired ~source (Error "stale render") cache in
+  check bool "another request cannot settle pending work" true (cache == ignored);
+  let failed = Diagrams.settle request ~source (Error "renderer unavailable") cache in
+  check (option string) "failure stays explicit" (Some "renderer unavailable")
+    (Diagrams.failure ~source failed);
+  check (pair int int) "failure is terminal preparation" (1,1) (Diagrams.progress failed);
+  let duplicate = Diagrams.settle request ~source (Error "duplicate") failed in
+  check (option string) "duplicate result cannot replace terminal outcome"
+    (Some "renderer unavailable") (Diagrams.failure ~source duplicate);
+  let reread = create (List.map Fun.id parts) in
+  let rejected = Diagrams.settle (Diagrams.request reread) ~source (Ok "not a PNG") reread in
+  check bool "invalid bytes do not become a displayed image" true
+    (Option.is_none (Diagrams.image ~source rejected));
+  check int "invalid bytes retain a failure" 1 (List.length (Diagrams.failures rejected))
+
 let () = run "resource image sources" ["source decisions", [
+  test_case "diagram preparation owns response and request" `Quick test_diagram_preparation_ownership;
   test_case "Markdown diagrams retain source and part ownership" `Quick test_markdown_diagrams;
   test_case "wire conservation" `Quick test_wire_conservation;
   test_case "malformed parts refused" `Quick test_malformed_parts_refused;

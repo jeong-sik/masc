@@ -38,3 +38,16 @@ protocol rejects requests from callers that do not identify the source format.
 
 Upstream renderer speed claims do not measure this PNG pipeline. Font loading,
 Node startup, rasterization and terminal transmission add their own latency.
+
+Resources document mode prepares closed Markdown Mermaid fences in the
+background. On a Kitty graphics terminal with measured cell geometry, each
+prepared PNG appears in its document position and scrolls with the surrounding
+text. Several diagrams keep separate placements. Resizing or changing the
+observed palette prepares a new snapshot; another resource response cannot
+inherit the previous response's pending render.
+
+`Ctrl-O` opens the selected diagram separately; `,` and `.` select images and
+diagrams within the response. Source mode and literal search retain the text
+reading. Terminals without inline placement support keep the text diagram and
+can use the existing standalone preview. Rendering failures remain visible;
+`r` rereads the resource and retries from the newly admitted response.

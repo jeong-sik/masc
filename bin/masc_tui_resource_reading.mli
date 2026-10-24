@@ -11,13 +11,15 @@ type t = private {
   presentation : Masc_tui_resource_catalog.presentation;
   metadata_expanded : bool;
   confirmation : Masc_tui_artifact_checks.status option;
+  diagrams : Masc_tui_resource_diagrams.t option;
 }
 val create : entry:Masc_tui_resource_catalog.t ->
   contents:Masc_tui_mcp.resource_content list option -> error:string option ->
   requested:bool -> image_cursor:int -> text_cursor:int ->
   revisions:Masc_tui_resource_catalog.report list ->
   presentation:Masc_tui_resource_catalog.presentation -> metadata_expanded:bool ->
-  confirmation:Masc_tui_artifact_checks.status option -> t
+  confirmation:Masc_tui_artifact_checks.status option ->
+  diagrams:Masc_tui_resource_diagrams.t option -> t
 val searchable : t -> bool
 (** The current reading has admitted contents and no read failure. A retained
     same-key body may still be searched while its refresh is pending. *)

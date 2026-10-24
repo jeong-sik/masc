@@ -532,6 +532,25 @@ let test_report_requires_experiment_identity () =
     ; `Assoc (("experiment_digest", `String "old-evidence") :: List.remove_assoc "experiment_digest" fields)
     ; `Assoc (List.remove_assoc "memory_mode" fields)
     ; `Assoc (("memory_mode", `String "imagined-mode") :: List.remove_assoc "memory_mode" fields)
+    ];
+  (* Both orderings are otherwise valid rows, but first-key and last-key JSON
+     consumers assign different cohorts. Refuse the ambiguous wire object. *)
+  List.iter
+    (fun (name, alternative) ->
+       List.iter
+         (fun duplicate_fields ->
+            let json = Yojson.Safe.from_string
+                (Yojson.Safe.to_string (`Assoc duplicate_fields)) in
+            match Coding_eval_report.row_of_json json with
+            | Error message ->
+              check bool (name ^ " is refused as a duplicate object key") true
+                (string_contains message "duplicate object keys")
+            | Ok _ -> Alcotest.failf "duplicate %s chose a cohort by key order" name)
+         [ (name, alternative) :: fields; fields @ [ name, alternative ] ])
+    [ "provider", `String "another-provider"
+    ; "model", `String "another-model"
+    ; "memory_mode", `String "seeded"
+    ; "experiment_digest", `String (String.make 64 'b')
     ]
 ;;
 

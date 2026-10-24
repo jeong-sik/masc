@@ -116,6 +116,12 @@ let row_of_json json =
   let ( let* ) = Result.bind in
   match json with
   | `Assoc fields ->
+    let names = List.map fst fields in
+    let* () =
+      if List.length names = List.length (List.sort_uniq String.compare names)
+      then Ok ()
+      else Error "run row has duplicate object keys"
+    in
     let unknown =
       fields |> List.filter (fun (key, _) -> not (List.mem key row_keys)) |> List.map fst
     in

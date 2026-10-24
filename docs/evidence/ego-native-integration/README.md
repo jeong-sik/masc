@@ -77,8 +77,40 @@ live Ego host integration (11). [selected-ci.json](selected-ci.json) binds the
 source/run/counts. This is the selected set, not the full regression suite.
 Exact-source macOS candidate run:
 [40077681846](https://github.com/jeong-sik/masc/actions/runs/40077681846).
-The repaired candidate's execution evidence is pending; do not infer it from
-the original candidate, component tests, SDK scripts or a dispatched build.
+It completed successfully. All three downloaded executable hashes and local
+dynamic dependencies were verified. The candidate server and Browser Add-on
+started in another private workspace, and full health reported binary source
+`7ee0dd6e` with the expected effective root. The review head had only docs
+changes after that source; [repaired-candidate](repaired-candidate/) retains
+the exact identities and delta.
+
+The first real Keeper attempt reused space 9 and the existing tab, navigated
+to a fresh owned fixture and observed its form/options. The provider then
+repeatedly timed out before its first token. On subsequent recovery the SDK
+reported space 9 missing; a direct independent SDK read confirmed that state.
+The cause of space loss is unproven. At the end of that attempt the new fixture
+had no submission and the Keeper was stopped. The failed attempt is retained.
+The operator then authorized replacement spaces when needed for this goal.
+
+The retry used the reconnected space 14 and its existing p1 tab. A real-provider
+Keeper observed the form and native option values, then executed two native
+workflows: fill name / select shipping / select email+sms, followed after
+observing the conditional address field by fill address / click submit. The
+first returned a full-page snapshot; the second returned the repaired viewport
+snapshot at `/confirmation` with `EGO-001`. Both raw receipts contain every
+requested completed step, `effectStarted=true`, `completedEffect=true` and
+`failure=null`. [keeper-native-workflows.json](repaired-candidate/keeper-native-workflows.json)
+retains the original tool arguments/results, not scripted model responses.
+
+The real request reached `Succeeded`; independent fixture state and the HTTP
+log show exactly one matching submission. An independent SDK screenshot of
+the same final page was visually inspected; it is a reviewer capture, not a
+Keeper-produced image. See [outcome.json](repaired-candidate/outcome.json),
+[operation-result.json](repaired-candidate/operation-result.json) and the
+retained raw tool records/visible chat. The private Keeper Task verifier was
+unavailable because this isolated configuration has no published exact-output
+registry. Browser completion is established by the actual request/receipts,
+persisted application state and rendered page, not by Task verifier approval.
 
 ## Scope and lifecycle
 
@@ -92,5 +124,21 @@ The idle original host was stopped only after Keeper shutdown finalized,
 queued operations were empty and browser host requests had no waiters.
 Normal host cleanup would finish the task space, so its private idle process
 tree was stopped while preserving approved Ego space 9 for candidate replacement.
-Space 9 remained agent-owned with the same p1/p2 pages. It must be finished
-once when the overall goal ends.
+Space 9 remained agent-owned with the same p1/p2 pages at that boundary, then
+was later found missing as recorded above. The final space 14 was ended through
+the normal explicit Browser Add-on detach path after Keeper shutdown finalized
+and queued operations were empty. Detach returned `native_released`; worker
+and SDK PIDs were absent and a direct lookup confirmed space 14 no longer
+existed. No manual SDK signal was needed for that final retirement.
+
+## Existing shutdown observation
+
+Stopping the earlier private repaired-candidate host with SIGINT left its SDK
+child orphaned after the server and worker exited. The verified owned SDK
+process was manually terminated. Source inspection places the same teardown
+structure before this stack (commit `965d3120780`); nested worker/SDK shutdown
+graces provide a plausible race, not a proven cause. Neither that observation
+nor the successful final explicit retirement establishes the cause of space
+loss or provider timeouts. [shutdown-observation.json](repaired-candidate/shutdown-observation.json)
+and [final-cleanup.json](repaired-candidate/final-cleanup.json) preserve the
+different outcomes. No fix of that pre-existing host-shutdown path is claimed.

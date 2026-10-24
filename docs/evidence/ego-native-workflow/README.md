@@ -25,7 +25,8 @@ The observed URL check precedes SDK entry and does not atomically guard input.
   browser receipt against its exact request. This uses library-name aliases and
   does not type-check the host integration.
 - `node --test test/test_browser_ego_workflow.cjs test/test_browser_ego_target.cjs
-  test/test_browser_ego_drag.cjs`: fourteen production-script scenarios passed.
+  test/test_browser_ego_upload.cjs test/test_browser_ego_drag.cjs`: nineteen
+  production-script scenarios passed at the repaired runtime source.
 
 ## Viewport scope repair
 
@@ -51,9 +52,11 @@ host dispatch and expose its broken viewport branch. They do not prove the
 repaired host binary or installed MASC replacement. No local Dune build or full
 regression run is claimed.
 
-Continue the overall native-first work in issue #45726. The initial space 4
-was found missing before runtime verification; the operator explicitly approved
-continuing in space 9. Reuse 9 and finish only when the whole goal ends.
+Later host/Keeper verification is in the [integration audit](../ego-native-integration/).
+It includes the repaired candidate's actual viewport workflow receipt, one
+persisted submission and independent rendered-page inspection. Initial spaces
+4 and 9 were found missing; the operator authorized replacement spaces for this
+goal. Final space 14 ended through explicit Add-on retirement after verification.
 
 ## Tool loader repair
 
@@ -67,4 +70,6 @@ the real loader; [schema-load-after.txt](schema-load-after.txt) loads both
 Interact/Act declarations. [schema-load.json](schema-load.json) binds the
 loader/interfaces and declarations to SHA-256. This is component loading,
 not full server startup or a passing re-execution of those suites.
+The later selected-suite execution and running candidate are recorded separately
+in the integration audit.
 

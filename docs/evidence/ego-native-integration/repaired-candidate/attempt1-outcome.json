@@ -1,0 +1,11 @@
+{
+  "source": "7ee0dd6e13086c9faaab9d63b6b13bd901aa4da1",
+  "completed": false,
+  "provider_failure": "glm-coding first_token timeout",
+  "space9_direct_sdk_read": "Error: task space not found: 9",
+  "space_loss_cause": "unproven",
+  "submissions": 0,
+  "keeper_shutdown_accepted": true,
+  "new_space_permission": "operator subsequently authorized replacement spaces for this goal",
+  "operator_reply": "새 공간 사용을 허용하고 계속 검증"
+}

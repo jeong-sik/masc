@@ -1,0 +1,14 @@
+[
+  {
+    "pid": 22869,
+    "program": "/tmp/masc-ego-runtime-7ee0dd6e/masc"
+  },
+  {
+    "pid": 23002,
+    "program": "masc-browser-addon-worker"
+  },
+  {
+    "pid": 23104,
+    "program": "/Users/dancer/.local/bin/ego-browser"
+  }
+]

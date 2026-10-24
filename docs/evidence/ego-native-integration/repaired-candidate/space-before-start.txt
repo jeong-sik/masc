@@ -1,0 +1,2 @@
+{"spaceId":9,"name":"masc-ego-native-sdk-20261024","ownership":"agent","pages":[{"label":"p1","url":"http://localhost:56011/done?value=native%20workflow&choice=b"},{"label":"p2","url":"http://127.0.0.1:9438/confirmation"}]}
+

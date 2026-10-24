@@ -31,7 +31,7 @@ let string_field key json =
 
 let decode frame =
   match Yojson.Safe.from_string frame with
-  | exception Yojson.Json_error detail -> Error ("invalid CDP JSON: " ^ detail)
+  | exception Yojson.Json_error _ -> Error "invalid CDP JSON"
   | json ->
     (match field "id" json, field "method" json with
      | Some (`Int id), None ->
@@ -195,8 +195,10 @@ let command t ?session method_ params =
       | exception (Eio.Cancel.Cancelled _ as exn) ->
         lost t "a command's caller was cancelled while sending";
         raise exn
-      | exception exn ->
-        lost t ("CDP command send failed: " ^ Printexc.to_string exn);
+      | exception _ ->
+        (* A writer exception may embed the original secret-bearing frame.
+           This reason also becomes a public session observation and log. *)
+        lost t "CDP command send failed";
         false
     in
     (* The deadline ends the connection only for a command still waiting: a
@@ -267,7 +269,7 @@ let connect ~sw ~net ~clock ~url ~max_message ~command_deadline_s ~on_event =
       let builder _ =
         Endpoint.handlers ~on_message
           ~on_close:(fun ~code:_ ~reason:_ -> lost t "CDP websocket closed")
-          ~on_error:(fun detail -> lost t ("CDP websocket error: " ^ detail))
+          ~on_error:(fun _ -> lost t "CDP websocket error")
           ~on_eof:(fun () -> lost t "CDP websocket EOF")
           ()
       in

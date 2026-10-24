@@ -1,0 +1,178 @@
+[
+  {
+    "path": "lib/keeper/keeper_unified_prompt.ml",
+    "cf_blob": "646c56c51814c6daa2843f3d2d6db971213ca371",
+    "public059_blob": "646c56c51814c6daa2843f3d2d6db971213ca371",
+    "identical": true,
+    "current8c_blob": "646c56c51814c6daa2843f3d2d6db971213ca371",
+    "current_same": true
+  },
+  {
+    "path": "lib/prompt_registry/prompt_registry.ml",
+    "cf_blob": "351461ee62b49601a0fbef1fab79ec82b9c809da",
+    "public059_blob": "351461ee62b49601a0fbef1fab79ec82b9c809da",
+    "identical": true,
+    "current8c_blob": "351461ee62b49601a0fbef1fab79ec82b9c809da",
+    "current_same": true
+  },
+  {
+    "path": "lib/prompt_registry/prompt_names.ml",
+    "cf_blob": "97252f0093cfe475a7ef018c8a62e24ac36471f4",
+    "public059_blob": "97252f0093cfe475a7ef018c8a62e24ac36471f4",
+    "identical": true,
+    "current8c_blob": "97252f0093cfe475a7ef018c8a62e24ac36471f4",
+    "current_same": true
+  },
+  {
+    "path": "config/prompts/keeper.md",
+    "cf_blob": "7a18410fc75dedee1757190a040792e64f43cee8",
+    "public059_blob": "7a18410fc75dedee1757190a040792e64f43cee8",
+    "identical": true,
+    "current8c_blob": "7a18410fc75dedee1757190a040792e64f43cee8",
+    "current_same": true
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/types.ml",
+    "cf_blob": "b90149530bd549d281f24e827b26d50c75b6b161",
+    "public059_blob": "b90149530bd549d281f24e827b26d50c75b6b161",
+    "identical": true,
+    "current8c_blob": "b90149530bd549d281f24e827b26d50c75b6b161",
+    "current_same": true
+  },
+  {
+    "path": "lib/runtime/runtime_official_client_write.ml",
+    "cf_blob": "fe672ff06f29d1c5725e03e44af367bd7f9a7321",
+    "public059_blob": "fe672ff06f29d1c5725e03e44af367bd7f9a7321",
+    "identical": true,
+    "current8c_blob": "fe672ff06f29d1c5725e03e44af367bd7f9a7321",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_official_client_session_store.ml",
+    "cf_blob": "4ffa86867ce5a90f10eb217ae26004be33a3e430",
+    "public059_blob": "4ffa86867ce5a90f10eb217ae26004be33a3e430",
+    "identical": true,
+    "current8c_blob": "4ffa86867ce5a90f10eb217ae26004be33a3e430",
+    "current_same": true
+  },
+  {
+    "path": "lib/runtime/runtime_model_input_tail_window.ml",
+    "cf_blob": "b290207a0d2493970b3efd238200af6d2d8b60e6",
+    "public059_blob": "b290207a0d2493970b3efd238200af6d2d8b60e6",
+    "identical": true,
+    "current8c_blob": "b290207a0d2493970b3efd238200af6d2d8b60e6",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_official_task_reference.ml",
+    "cf_blob": "b9ea6d61cb1052067caa59ec30e43be72dca16db",
+    "public059_blob": "b9ea6d61cb1052067caa59ec30e43be72dca16db",
+    "identical": true,
+    "current8c_blob": "b9ea6d61cb1052067caa59ec30e43be72dca16db",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_official_client_context_projection.ml",
+    "cf_blob": "59ebf807bbee2978da96b24dd7e151a1a32cbcc1",
+    "public059_blob": "59ebf807bbee2978da96b24dd7e151a1a32cbcc1",
+    "identical": true,
+    "current8c_blob": "59ebf807bbee2978da96b24dd7e151a1a32cbcc1",
+    "current_same": true
+  },
+  {
+    "path": "lib/types/prompt_block_id.ml",
+    "cf_blob": "f48da820a199b2d53ef0057ed1cdeda43620a97c",
+    "public059_blob": "f48da820a199b2d53ef0057ed1cdeda43620a97c",
+    "identical": true,
+    "current8c_blob": "f48da820a199b2d53ef0057ed1cdeda43620a97c",
+    "current_same": true
+  },
+  {
+    "path": "lib/types/prompt_block_id.mli",
+    "cf_blob": "236a77f4807d63e43889b4caae55d676dd29cb13",
+    "public059_blob": "236a77f4807d63e43889b4caae55d676dd29cb13",
+    "identical": true,
+    "current8c_blob": "236a77f4807d63e43889b4caae55d676dd29cb13",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_context_layers.ml",
+    "cf_blob": "6693aac62c8bcee85e76aa60fad31bac8bf09fc5",
+    "public059_blob": "6693aac62c8bcee85e76aa60fad31bac8bf09fc5",
+    "identical": true,
+    "current8c_blob": "6693aac62c8bcee85e76aa60fad31bac8bf09fc5",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_context_layers.mli",
+    "cf_blob": "665b3838ee6d519ff650cc66dd47d6f5b4be3fa5",
+    "public059_blob": "665b3838ee6d519ff650cc66dd47d6f5b4be3fa5",
+    "identical": true,
+    "current8c_blob": "665b3838ee6d519ff650cc66dd47d6f5b4be3fa5",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_context_assembly.ml",
+    "cf_blob": "b947bdc7b2d9ca3b7ca049e1d7c3b8d8d936ede4",
+    "public059_blob": "b947bdc7b2d9ca3b7ca049e1d7c3b8d8d936ede4",
+    "identical": true,
+    "current8c_blob": "b947bdc7b2d9ca3b7ca049e1d7c3b8d8d936ede4",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_context_assembly.mli",
+    "cf_blob": "04d21f10131d19c60faaf4baea5de12ffa09556b",
+    "public059_blob": "04d21f10131d19c60faaf4baea5de12ffa09556b",
+    "identical": true,
+    "current8c_blob": "04d21f10131d19c60faaf4baea5de12ffa09556b",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_official_client_context_codec.ml",
+    "cf_blob": "86b9723a49c7704bb2359cb3bbed2f69d2910211",
+    "public059_blob": "86b9723a49c7704bb2359cb3bbed2f69d2910211",
+    "identical": true,
+    "current8c_blob": "86b9723a49c7704bb2359cb3bbed2f69d2910211",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_official_client_context_codec.mli",
+    "cf_blob": "db04d8c746c5b7d2dff669766bd3564efdd71ce5",
+    "public059_blob": "db04d8c746c5b7d2dff669766bd3564efdd71ce5",
+    "identical": true,
+    "current8c_blob": "db04d8c746c5b7d2dff669766bd3564efdd71ce5",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_context_submission_link.ml",
+    "cf_blob": "1af74526fb98a718d27892435399b4cc8f8a7749",
+    "public059_blob": "1af74526fb98a718d27892435399b4cc8f8a7749",
+    "identical": true,
+    "current8c_blob": "1af74526fb98a718d27892435399b4cc8f8a7749",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_context_submission_link.mli",
+    "cf_blob": "56baca2bd241c337c8fe3ee9a05e848013699f91",
+    "public059_blob": "56baca2bd241c337c8fe3ee9a05e848013699f91",
+    "identical": true,
+    "current8c_blob": "56baca2bd241c337c8fe3ee9a05e848013699f91",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_direct_turn_context.ml",
+    "cf_blob": "bce129415f9b0bb4f335a48c253851d5a5920081",
+    "public059_blob": "bce129415f9b0bb4f335a48c253851d5a5920081",
+    "identical": true,
+    "current8c_blob": "bce129415f9b0bb4f335a48c253851d5a5920081",
+    "current_same": true
+  },
+  {
+    "path": "lib/keeper/keeper_run_prompt.ml",
+    "cf_blob": "6887edf652fd54add6e023cea74c39a81962f2a2",
+    "public059_blob": "6887edf652fd54add6e023cea74c39a81962f2a2",
+    "identical": true,
+    "current8c_blob": "6887edf652fd54add6e023cea74c39a81962f2a2",
+    "current_same": true
+  }
+]

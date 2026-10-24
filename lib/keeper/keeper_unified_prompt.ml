@@ -207,9 +207,9 @@ type goal_summary =
   ; summary_held_task_link : held_task_link
   }
 
-(** Format active goals with their titles (RFC-0315). The only rendering of
-    the Active Goals layer: a caller that resolves no summaries renders no
-    layer, rather than falling back to a list this layer does not scope.
+(** Format active Goal rows with their titles (RFC-0315). Empty summaries
+    supply no rows; the authoritative observation still carries its heading.
+    Unobserved summaries do not authorize a fallback Goal list.
     A [Verifying] goal is annotated: completion is requested and the proof is
     being judged out-of-band, so the keeper keeps working the linked tasks
     instead of re-requesting completion. *)
@@ -1157,7 +1157,6 @@ let format_active_goal_summaries = function
   | Error unavailable ->
     Some (render_fragment Prompt_names.keeper_world_active_goals_unavailable
             (goal_store_unavailable_fragment_vars unavailable) ^ "\n\n")
-  | Ok [] -> None
   | Ok summaries ->
     Some
       (render_fragment Prompt_names.keeper_world_active_goals_heading
@@ -1493,13 +1492,13 @@ let prepare_prompt_internal
        resolved them (RFC-0315). The count and the list are read off the same
        list, so the heading can never claim goals the body does not show. *)
     | Keeper_context_layers.Active_goals ->
-      let source =
-        match observation.active_goals, active_goal_summaries with
-        | Error unavailable, _ | _, Some (Error unavailable) -> Error unavailable
-        | Ok _, Some (Ok summaries) -> Ok summaries
-        | Ok _, None -> Ok []
-      in
-      format_active_goal_summaries source
+      (match observation.active_goals, active_goal_summaries with
+       | Error unavailable, _ | _, Some (Error unavailable) ->
+         format_active_goal_summaries (Error unavailable)
+       | Ok _, Some (Ok summaries) ->
+         format_active_goal_summaries (Ok summaries)
+       | Ok [], None -> format_active_goal_summaries (Ok [])
+       | Ok (_ :: _), None -> None)
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->

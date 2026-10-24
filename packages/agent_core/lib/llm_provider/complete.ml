@@ -90,15 +90,15 @@ let open_bound ~operation ~parameter ~clock = function
 
 type model_identity = Reported_model | Configured_model_fallback
 
-(* A prepared body is serialization evidence even if admission or another
-   pre-dispatch contract rejects the call. Injected transports own a different
+(* A prepared body remains serialization evidence across rejection or
+   interruption. Injected transports own a different
    projection, so the native prepared body cannot certify their request. *)
-let before_dispatch ~transport ~admitted_body result =
+let preserve_prepared_body ~transport ~admitted_body ~unobserved result =
   match transport, admitted_body with
   | None, Some body ->
     Completion_outcome.after_serialization
       ~request:(Prepared_completion_request.admitted_body_request body) result
-  | Some _, _ | None, None -> Completion_outcome.before_serialization result
+  | Some _, _ | None, None -> unobserved result
 ;;
 
 let complete_prepared_sync
@@ -183,7 +183,8 @@ let complete_prepared_sync
           body_deadline, call_window, Some body, Some key) body)
   in
   match preflight with
-  | Error err -> before_dispatch ~transport ~admitted_body (Error err)
+  | Error err -> preserve_prepared_body ~transport ~admitted_body
+      ~unobserved:Completion_outcome.before_serialization (Error err)
   | Ok (body_deadline, call_window, admitted_body, cache_key) ->
     let m =
       match metrics with
@@ -314,19 +315,22 @@ let complete_prepared_sync
             | Ok transport_result -> transport_result
             | Error Provider_admission.Permit_wait_expired ->
               call_deadline_exceeded
-                ~wrap:(before_dispatch ~transport ~admitted_body)
+                ~wrap:(preserve_prepared_body ~transport ~admitted_body
+                  ~unobserved:Completion_outcome.before_serialization)
                 ~phase:Http_client.Queue
                 ~stage:"before a provider admission permit was granted"
             | Error Provider_admission.Permit_granted_as_deadline_passed ->
               (* Nothing was sent, and the permit went straight back. Still
                  the queue phase, said as what happened. *)
               call_deadline_exceeded
-                ~wrap:(before_dispatch ~transport ~admitted_body)
+                ~wrap:(preserve_prepared_body ~transport ~admitted_body
+                  ~unobserved:Completion_outcome.before_serialization)
                 ~phase:Http_client.Queue
                 ~stage:"with a provider admission permit granted as the deadline passed"
             | Error Provider_admission.Work_expired ->
               call_deadline_exceeded
-                ~wrap:Completion_outcome.interrupted_unobserved
+                ~wrap:(preserve_prepared_body ~transport ~admitted_body
+                  ~unobserved:Completion_outcome.interrupted_unobserved)
                 ~phase:Http_client.Non_streaming_body
                 ~stage:"during the provider round trip")
        in
@@ -563,7 +567,8 @@ let complete_prepared_stream
         admission_bound
   in
   match preflight with
-  | Error err -> before_dispatch ~transport ~admitted_body (Error err)
+  | Error err -> preserve_prepared_body ~transport ~admitted_body
+      ~unobserved:Completion_outcome.before_serialization (Error err)
   | Ok admission_window ->
     let on_event = emit_stream_event on_event in
     let request_config = config in
@@ -691,7 +696,8 @@ let complete_prepared_stream
                  " admission_snapshot=after_wait max_slots=%d active=%d available=%d queue_length=%d"
                  snapshot.max_slots snapshot.active snapshot.available snapshot.queue_length
            in
-           before_dispatch ~transport ~admitted_body
+           preserve_prepared_body ~transport ~admitted_body
+             ~unobserved:Completion_outcome.before_serialization
              (Error
                (Http_client.TimeoutError
                 { message =

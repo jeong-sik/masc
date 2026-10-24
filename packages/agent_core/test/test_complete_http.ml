@@ -4756,6 +4756,58 @@ let test_prepared_rejection_retains_serialization () =
     [false; true]
 ;;
 
+let test_prepared_wrong_mode_retains_serialization () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let config = make_config "http://127.0.0.1:1" in
+  let prepared = Complete.prepare_request ~config ~messages () in
+  List.iter (fun stream ->
+    let serialized = match Complete.admit_request_body ~stream prepared with
+      | Ok request -> request | Error _ -> fail "fixture serialization failed" in
+    let outcome = if stream then
+      Complete.complete_serialized ~sw ~net:env#net serialized ()
+    else Complete.complete_stream_serialized ~sw ~net:env#net serialized
+      ~on_event:(fun _ -> ()) () in
+    (match outcome.result with
+     | Error (Http_client.AcceptRejected _) -> ()
+     | Error _ | Ok _ -> fail "wrong streaming shape must reject before dispatch");
+    match outcome.request_provenance with
+    | Completion_outcome.Serialized _ -> ()
+    | Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
+    | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved ->
+      fail "wrong mode rejection discarded the supplied serialization") [false; true]
+;;
+
+let test_prepared_work_timeout_retains_serialization () =
+  Eio_main.run @@ fun env ->
+  try Eio.Switch.run @@ fun sw ->
+    let clock = Eio_mock.Clock.make () in
+    let captured = ref None in
+    let url = start_mock_server ~sw ~net:env#net ~capture_body:captured
+      ~on_request:(fun () ->
+        Eio_mock.Clock.set_time clock 1.;
+        Eio.Fiber.await_cancel ()) (anthropic_response "must time out") in
+    let config = make_config url in
+    let prepared = Complete.prepare_request ~config ~messages () in
+    let serialized = match Complete.admit_request_body ~stream:false prepared with
+      | Ok request -> request | Error _ -> fail "fixture serialization failed" in
+    let outcome = Complete.complete_serialized ~sw ~net:env#net ~clock
+      ~call_timeout_s:1. serialized () in
+    (match outcome.result with
+     | Error (Http_client.TimeoutError {phase=Http_client.Non_streaming_body;_}) -> ()
+     | Error _ | Ok _ -> fail "peer-triggered clock must expire the provider round trip");
+    (match outcome.request_provenance with
+     | Completion_outcome.Serialized request ->
+       let body = match !captured with Some body -> body
+         | None -> fail "deadline moved before peer received the request" in
+       check string "interruption preserves known peer body"
+         Digestif.SHA256.(digest_string body |> to_hex) request.body_sha256
+     | Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
+     | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved ->
+       fail "work timeout discarded known prepared serialization");
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
 let () =
   run
     "complete_http"
@@ -4774,6 +4826,10 @@ let () =
             `Quick test_public_unobserved_and_preflight
         ; test_case "prepared evidence survives pre-dispatch rejection"
             `Quick test_prepared_rejection_retains_serialization
+        ; test_case "wrong mode rejection preserves prepared evidence"
+            `Quick test_prepared_wrong_mode_retains_serialization
+        ; test_case "work timeout preserves prepared evidence"
+            `Quick test_prepared_work_timeout_retains_serialization
         ; test_case "failed serialization invents no receipt"
             `Quick test_native_completion_before_serialization ] )
     ; ( "Vertex native", [test_case "OAuth native sync and streaming tool response" `Quick test_vertex_native_transport; test_case "refresh failure blocks HTTP" `Quick test_refresh_failure_prevents_http] )

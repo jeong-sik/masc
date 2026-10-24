@@ -2,6 +2,11 @@
 # Standalone component execution: real codec/receipt sources and interfaces,
 # with library-name aliases only. This does not type-check the host integration.
 set -eu
+# Resolve a proof path in the caller's directory before entering the scratch build.
+if [ "${1-}" = --proof ] && [ "$#" -eq 2 ]; then
+  proof_dir=$(CDPATH= cd -- "$(dirname -- "$2")" && pwd)
+  set -- --proof "$proof_dir/$(basename -- "$2")"
+fi
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 check_dir=$(mktemp -d)
 trap 'rm -rf "$check_dir"' EXIT HUP INT TERM

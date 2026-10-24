@@ -2,6 +2,19 @@ module AR = Masc.Task.Anti_rationalization
 module V = Masc.Verifier_review_original
 module O = Masc.Verifier_review_owner
 
+let string_of_retain_error = function
+  | O.Original_invalid detail -> "Original_invalid: " ^ detail
+  | O.Identity_mismatch detail -> "Identity_mismatch: " ^ detail
+  | O.Retain_store_unavailable detail -> "Retain_store_unavailable: " ^ detail
+  | O.Already_retained request_id -> "Already_retained: " ^ request_id
+;;
+
+let string_of_load_error = function
+  | O.Load_store_unavailable detail -> "Load_store_unavailable: " ^ detail
+  | O.Not_found -> "Not_found"
+  | O.Corrupt_original detail -> "Corrupt_original: " ^ detail
+;;
+
 let sample_image : AR.evidence_image =
   { image_reference = "artifact:evidence/shot.png"
   ; image_sha256 = "def456"
@@ -30,7 +43,7 @@ let sample_question : AR.verdict_question =
 let sample_root : AR.lookup_root = AR.Producer_tree [ "a"; "b" ]
 let sample_schemas = [ "lookup_read" ]
 
-let make_original ~verification_id ~attempt =
+let prepare_original ~request ~verification_id ~attempt =
   match
     V.prepare
       ~verification_id
@@ -38,23 +51,29 @@ let make_original ~verification_id ~attempt =
       ~question:sample_question
       ~lookup_root:sample_root
       ~lookup_schemas:sample_schemas
-      sample_request
+      request
   with
   | Ok original -> original
   | Error detail -> failwith ("prepare failed: " ^ detail)
 
-let tmp_store () =
-  let dir = Filename.temp_file "verifier-owner" "" in
-  Unix.unlink dir;
-  Unix.mkdir dir 0o700;
-  Masc.Lane_addon_store.create ~root:dir
+let make_original ~verification_id ~attempt =
+  prepare_original ~request:sample_request ~verification_id ~attempt
+
+let with_workspace f =
+  let base_path = Filename.temp_dir "verifier-owner-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path; Fs_compat.clear_fs ())
+    (fun () -> f base_path)
+
+let tmp_store base_path =
+  Masc.Lane_addon_store.create ~root:(Filename.concat base_path "request-ownership")
 
 let test_round_trip () =
-  let store = tmp_store () in
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
   let original = make_original ~verification_id:"vrf-x" ~attempt:0 in
   (match O.retain ~store ~verification_id:"vrf-x" ~attempt:0 ~installation_id:"masc.verifier" ~package_id:"masc.verifier.review" original with
    | Ok () -> ()
-   | Error _ -> failwith "retain failed");
+   | Error err -> failwith ("retain failed: " ^ string_of_retain_error err));
   match O.load ~store ~verification_id:"vrf-x" ~attempt:0 with
   | Ok loaded ->
     assert (V.verification_id loaded = "vrf-x");
@@ -66,10 +85,11 @@ let test_round_trip () =
     (match req.evidence_images with
      | [ img ] -> assert (img.image_sha256 = "def456")
      | _ -> failwith "evidence image not preserved")
-  | Error _ -> failwith "load failed after retain"
+  | Error err -> failwith ("load failed after retain: " ^ string_of_load_error err)
 
 let test_retain_is_idempotent () =
-  let store = tmp_store () in
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
   let original = make_original ~verification_id:"vrf-y" ~attempt:0 in
   let once = O.retain ~store ~verification_id:"vrf-y" ~attempt:0 ~installation_id:"i" ~package_id:"p" original in
   let twice = O.retain ~store ~verification_id:"vrf-y" ~attempt:0 ~installation_id:"i" ~package_id:"p" original in
@@ -78,51 +98,56 @@ let test_retain_is_idempotent () =
    | _ -> failwith "same original should retain idempotently")
 
 let test_different_original_at_same_key_rejected () =
-  let store = tmp_store () in
+  (* The conflict is about the same attempt slot holding a different body.
+     Keep verification_id and attempt identical and change only the request
+     body, so the conflict is [Already_retained], not [Identity_mismatch]. *)
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
   let first = make_original ~verification_id:"vrf-z" ~attempt:0 in
-  (* make a genuinely different original by bumping the attempt field in the value *)
   let different =
-    match V.of_json (V.to_json first) with
-    | Ok value ->
-      (match V.to_json value with
-       | `Assoc fields ->
-         `Assoc (List.map (fun (k, v) -> if k = "attempt" then k, `Int 1 else k, v) fields)
-       | _ -> failwith "unexpected")
-    | Error e -> failwith e
-  in
-  let different =
-    match V.of_json different with Ok v -> v | Error e -> failwith e
+    prepare_original
+      ~request:{ sample_request with AR.task_description = "Different original" }
+      ~verification_id:"vrf-z"
+      ~attempt:0
   in
   (match O.retain ~store ~verification_id:"vrf-z" ~attempt:0 ~installation_id:"i" ~package_id:"p" first with
    | Ok () -> ()
-   | Error _ -> failwith "first retain failed");
-  match O.retain ~store ~verification_id:"vrf-z" ~attempt:0 ~installation_id:"i" ~package_id:"p" different with
-  | Ok () -> failwith "different original at same key must be rejected"
-  | Error (O.Already_retained _) -> ()
-  | Error _ -> ()
+   | Error err -> failwith ("first retain failed: " ^ string_of_retain_error err));
+  (match O.retain ~store ~verification_id:"vrf-z" ~attempt:0 ~installation_id:"i" ~package_id:"p" different with
+   | Ok () -> failwith "different body at same key must be rejected as Already_retained"
+   | Error (O.Already_retained _) -> ()
+   | Error err -> failwith ("wrong rejection: " ^ string_of_retain_error err));
+  (* the original body must still be the one stored, not the rejected body *)
+  (match O.load ~store ~verification_id:"vrf-z" ~attempt:0 with
+   | Ok loaded ->
+     let req = V.review_request loaded in
+     assert (req.AR.task_description = "Desc")
+   | Error err -> failwith ("readback after conflict failed: " ^ string_of_load_error err))
 
 let test_retry_is_new_attempt () =
   (* a retry under a fresh attempt key must not clobber the prior attempt *)
-  let store = tmp_store () in
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
   let first = make_original ~verification_id:"vrf-r" ~attempt:0 in
   (match O.retain ~store ~verification_id:"vrf-r" ~attempt:0 ~installation_id:"i" ~package_id:"p" first with
    | Ok () -> ()
-   | Error _ -> failwith "retain attempt 0 failed");
+   | Error err -> failwith ("retain attempt 0 failed: " ^ string_of_retain_error err));
   (* attempt 1 is a different key, so it stores independently *)
   let retried = make_original ~verification_id:"vrf-r" ~attempt:1 in
   (match O.retain ~store ~verification_id:"vrf-r" ~attempt:1 ~installation_id:"i" ~package_id:"p" retried with
    | Ok () -> ()
-   | Error _ -> failwith "retain attempt 1 failed");
+   | Error err -> failwith ("retain attempt 1 failed: " ^ string_of_retain_error err));
   (* both are readable independently *)
   (match O.load ~store ~verification_id:"vrf-r" ~attempt:0 with
    | Ok v -> assert (V.attempt v = 0)
-   | Error _ -> failwith "attempt 0 lost");
+   | Error err -> failwith ("attempt 0 lost: " ^ string_of_load_error err));
   (match O.load ~store ~verification_id:"vrf-r" ~attempt:1 with
    | Ok v -> assert (V.attempt v = 1)
-   | Error _ -> failwith "attempt 1 lost")
+   | Error err -> failwith ("attempt 1 lost: " ^ string_of_load_error err))
 
 let test_load_not_found () =
-  let store = tmp_store () in
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
   match O.load ~store ~verification_id:"vrf-none" ~attempt:0 with
   | Error O.Not_found -> ()
   | _ -> failwith "absent key must be Not_found"
@@ -132,15 +157,20 @@ let test_different_destination_rejected () =
      Retaining the same original under a different installation or package
      must not silently pass: it is an [Already_retained] conflict, never an
      overwrite of the first destination. *)
-  let store = tmp_store () in
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
   let original = make_original ~verification_id:"vrf-d" ~attempt:0 in
   (match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"masc.verifier" ~package_id:"masc.verifier.review" original with
    | Ok () -> ()
-   | Error _ -> failwith "first retain failed");
-  match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"other.install" ~package_id:"masc.verifier.review" original with
+   | Error err -> failwith ("first retain failed: " ^ string_of_retain_error err));
+  (match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"other.install" ~package_id:"masc.verifier.review" original with
   | Ok () -> failwith "same original under a different installation must not pass"
   | Error (O.Already_retained _) -> ()
-  | Error _ -> ()
+  | Error err -> failwith ("wrong rejection: " ^ string_of_retain_error err));
+  (* the first destination must still accept the same original afterwards *)
+  (match O.retain ~store ~verification_id:"vrf-d" ~attempt:0 ~installation_id:"masc.verifier" ~package_id:"masc.verifier.review" original with
+   | Ok () -> ()
+   | Error err -> failwith ("original destination must still accept after rejected overwrite: " ^ string_of_retain_error err))
 
 let () =
   test_round_trip ();

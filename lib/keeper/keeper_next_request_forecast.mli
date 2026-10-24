@@ -147,6 +147,9 @@ type t =
   { keeper : string
   ; trace_id : string
   ; checkpoint_messages : int
+        (** Atoms the saved history holds: as the newest turn-boundary line
+            states it when there is one, else the parsed checkpoint's own
+            count. *)
   ; wake_line_bytes : int
         (** The wake line as the composition's encoder counts it, the
             figure the assembly subtracts from the transmitted bytes. *)
@@ -161,7 +164,14 @@ type t =
 val forecast : config:Workspace.config -> keeper_name:string -> (t, string) result
 (** [Error] when the keeper is unknown or its checkpoint cannot be read. A
     checkpoint of a version this build supersedes is the fresh state the next
-    turn starts from: the forecast carries no saved history. *)
+    turn starts from: the forecast carries no saved history.
+
+    When the keeper's turn-boundary store states where the last completed
+    turn left the history, the forecast answers from that line and parses no
+    checkpoint: [checkpoint_messages] is the line's [end_atom] and the
+    carried range each candidate projects opens on the wake line at that
+    boundary. The checkpoint is read only for a keeper whose store states no
+    atom position yet. *)
 
 val to_json : t -> Yojson.Safe.t
 

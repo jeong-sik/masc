@@ -104,6 +104,7 @@ type stimulus_payload =
      minutes. *)
   | Composition_completed of composition_completion
   | Owned_job_completed of owned_job_completion
+  | Addon_operation_changed of addon_operation_change
   (* A completion authority approved this Keeper's submitted evidence. The
      rejection twin ([Completion_authority_rejected]) has always woken the
      producer; the approval ended the loop in silence — the Board receipt is
@@ -186,6 +187,11 @@ and owned_job_completion =
   ; oj_source : Keeper_owned_job_identity.source
   ; oj_channel : Keeper_continuation_channel.t
   }
+
+and addon_operation_change =
+  { ao_origin_id:string; ao_publication_id:string
+  ; ao_source:Keeper_owned_job_identity.source
+  ; ao_channel:Keeper_continuation_channel.t }
 
 and composition_terminal =
   | Composition_succeeded
@@ -275,6 +281,9 @@ let composition_completion_post_id (cc : composition_completion) =
 let owned_job_completion_post_id (completion : owned_job_completion) =
   "keeper-job:" ^ Keeper_owned_job_identity.Job_id.to_string completion.oj_job_id
 
+let addon_operation_change_post_id (change:addon_operation_change) =
+  "addon-publication:" ^ change.ao_origin_id ^ ":" ^ change.ao_publication_id
+
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
 let ask_answered_post_id (a : ask_answered) = "keeper-ask:" ^ a.ask_id
@@ -323,7 +332,7 @@ let scheduled_wake (stimulus : stimulus) =
   | Workspace_message _
   | Delegate_completed _
   | Composition_completed _
-  | Tool_result_ready _ | Owned_job_completed _ -> None
+  | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ -> None
 ;;
 
 type t =
@@ -357,7 +366,7 @@ let identity_payload = function
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Ask_answered _
     | Completion_authority_rejected _ | Workspace_message _
-    | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _
+    | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ | Task_outcome _
     ) as payload ->
     payload
 
@@ -427,7 +436,7 @@ let stimulus_identity_equal a b =
       | Bootstrap | Fusion_completed _
       | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
       | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-      | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ )
+      | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ | Task_outcome _ )
     , ( Board_signal
           { kind =
               ( Post_created | Post_updated _ | Comment_added _
@@ -446,7 +455,7 @@ let stimulus_identity_equal a b =
       | Bootstrap | Fusion_completed _
       | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
       | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-      | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ ) ) ->
+      | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ | Task_outcome _ ) ) ->
     identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =
@@ -536,6 +545,7 @@ let payload_kind_label = function
   | Composition_completed _ -> "keeper_composition_completed"
   | Tool_result_ready _ -> "tool_result_ready"
   | Owned_job_completed _ -> "owned_job_completed"
+  | Addon_operation_changed _ -> "addon_operation_changed"
   | Task_outcome _ -> "task_outcome"
 
 (* RFC-0377: the batch-intake predicate needs the routed channel without
@@ -552,7 +562,7 @@ let connector_attention_channel = function
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-  | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ ->
+  | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ | Task_outcome _ ->
     None
 
 let summary (queue : t) : string =
@@ -834,6 +844,11 @@ let payload_to_yojson = function
       ; "keeper", `String dc.dc_keeper
       ; "terminal", terminal
       ]
+  | Addon_operation_changed change ->
+    `Assoc ["kind",`String "addon_operation_changed";
+      "origin_id",`String change.ao_origin_id;"publication_id",`String change.ao_publication_id;
+      "source",Keeper_owned_job_identity.source_to_json change.ao_source;
+      "channel",Keeper_continuation_channel.to_yojson change.ao_channel]
   | Owned_job_completed completion ->
     `Assoc [ "kind", `String "owned_job_completed"
            ; "job_id", `String (Keeper_owned_job_identity.Job_id.to_string completion.oj_job_id)
@@ -1313,6 +1328,26 @@ let payload_of_yojson json =
     Ok
       (Composition_completed
          { cc_request_id = request_id; cc_tool = tool; cc_terminal = terminal })
+  | "addon_operation_changed" ->
+    let* ()=exact_fields ~context ~expected:["kind";"origin_id";"publication_id";"source";"channel"] fields in
+    let* ao_origin_id=string_field ~context "origin_id" fields in
+    let* ao_publication_id=string_field ~context "publication_id" fields in
+    let* source=required_field ~context "source" fields in
+    let* ao_source=Keeper_owned_job_identity.source_of_json source in
+    let* channel=required_field ~context "channel" fields in
+    let* ao_channel=Keeper_continuation_channel.of_yojson channel in
+    let valid_id=match Uuidm.of_string ao_publication_id with
+      | Some uuid -> Uuidm.to_string uuid=ao_publication_id | None -> false in
+    let valid_source=match ao_source.turn_ref with
+      | None -> false
+      | Some turn -> ao_source.trace_id=Some (Ids.Turn_ref.trace_id turn)
+          && ao_source.keeper_turn_id=Some (Ids.Turn_ref.absolute_turn turn)
+          && Option.exists (fun id -> id<>"" && String.trim id=id
+              && String.for_all (fun c -> Char.code c>=32 && Char.code c<>127) id) ao_source.tool_use_id in
+    if valid_id && valid_source && String.length ao_origin_id=64
+       && String.for_all (function '0'..'9'|'a'..'f' -> true | _ -> false) ao_origin_id
+    then Ok (Addon_operation_changed {ao_origin_id;ao_publication_id;ao_source;ao_channel})
+    else Error "invalid original addon publication coordinates"
   | "owned_job_completed" ->
     let* () = exact_fields ~context ~expected:["kind";"job_id";"source";"channel"] fields in
     let* id = string_field ~context "job_id" fields in
@@ -1347,6 +1382,14 @@ let stimulus_of_yojson json =
   let* arrived_at = float_field ~context "arrived_at_unix" fields in
   let* payload_json = required_field ~context "payload" fields in
   let* payload = payload_of_yojson payload_json in
+  let* ()=match payload with
+    | Addon_operation_changed change ->
+        if post_id=addon_operation_change_post_id change then Ok ()
+        else Error "addon publication source identity differs"
+    | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _ | Schedule_due _
+    | Connector_attention _ | Hitl_resolved _ | Ask_answered _ | Completion_authority_rejected _
+    | Task_outcome _ | Task_cancelled _ | Workspace_message _ | Delegate_completed _
+    | Composition_completed _ | Owned_job_completed _ -> Ok () in
   Ok { post_id; urgency; arrived_at; payload }
 
 let schema = "keeper.event_queue.v3"
@@ -1389,6 +1432,7 @@ let continuation_channel_of_payload = function
   | Ask_answered answered -> Some answered.channel
   | Owned_job_completed completion -> Some completion.oj_channel
   | Tool_result_ready _ -> None
+  | Addon_operation_changed change -> Some change.ao_channel
   | Schedule_due wake -> wake.result_delivery
   | Board_signal _
   | Board_attention _

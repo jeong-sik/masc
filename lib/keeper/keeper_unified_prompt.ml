@@ -665,7 +665,7 @@ let answered_ask_rows (observation : Keeper_world_observation.world_observation)
       Some (event, answered_by, input)
     | Keeper_world_observation.Board_post_created | Keeper_world_observation.Board_post_updated
     | Keeper_world_observation.Fusion_completed | Keeper_world_observation.Composition_completed
-    | Keeper_world_observation.Owned_job_completed _
+    | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _
     | Keeper_world_observation.Board_comment_added _
     | Keeper_world_observation.Board_reaction_changed _ | Keeper_world_observation.Board_vote_cast _
     | Keeper_world_observation.Delegate_completed _ | Keeper_world_observation.Schedule_due _
@@ -812,7 +812,7 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed
-         | Keeper_world_observation.Owned_job_completed _ -> None)
+         | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ -> None)
       events
   in
   match rows with
@@ -863,7 +863,7 @@ let format_task_outcome_observations
          | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed
-         | Keeper_world_observation.Owned_job_completed _ -> None)
+         | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ -> None)
       events
   in
   match rows with
@@ -918,7 +918,7 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed
-         | Keeper_world_observation.Owned_job_completed _ -> None)
+         | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ -> None)
       events
   in
   match rows with

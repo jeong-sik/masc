@@ -162,7 +162,10 @@ ACK records exact-envelope host admission; it is not Keeper consumption. Storage
 uncertainty fences the old engine so it cannot overwrite already committed
 publication IDs. These private file scenarios are tested with fabricated
 credential/Browser edges. Actual publication transport and Keeper wake remain
-unconnected; public login replies and observations contain no outbox or secrets.
+unconnected to the worker. The host now has canonical publication retention, a
+typed original-source Keeper queue producer and strict observation intake; those
+APIs have not received a real worker publication or resumed a Keeper. Public login
+replies and observations contain no outbox or secrets.
 
 ## Verification
 

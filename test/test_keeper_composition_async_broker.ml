@@ -49,7 +49,7 @@ let composition_results ~base_path =
       | Event_queue.Task_outcome _
       | Event_queue.Task_cancelled _
       | Event_queue.Workspace_message _
-      | Event_queue.Tool_result_ready _ | Event_queue.Owned_job_completed _
+      | Event_queue.Tool_result_ready _ | Event_queue.Owned_job_completed _ | Event_queue.Addon_operation_changed _
       | Event_queue.Delegate_completed _ -> None)
 ;;
 

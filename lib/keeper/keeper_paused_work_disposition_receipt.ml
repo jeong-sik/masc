@@ -71,6 +71,7 @@ let continuation_binding_of_source source =
      goes back where the human is waiting. *)
   | Keeper_event_queue.Ask_answered answered -> Routed answered.channel
   | Keeper_event_queue.Owned_job_completed completion -> Routed completion.oj_channel
+  | Keeper_event_queue.Addon_operation_changed change -> Routed change.ao_channel
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Tool_result_ready _

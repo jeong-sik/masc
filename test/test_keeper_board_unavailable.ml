@@ -139,6 +139,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_missing _
    | Keeper_heartbeat_stimulus_intake.Stimulus_job_unavailable _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_addon_unavailable _
    | Keeper_heartbeat_stimulus_intake.Stimulus_completion_rejection_obsolete
    | Keeper_heartbeat_stimulus_intake.Stimulus_completion_rejection_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_not_answered _ ->
@@ -160,6 +161,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_missing _
    | Keeper_heartbeat_stimulus_intake.Stimulus_job_unavailable _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_addon_unavailable _
    | Keeper_heartbeat_stimulus_intake.Stimulus_completion_rejection_obsolete
    | Keeper_heartbeat_stimulus_intake.Stimulus_completion_rejection_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_not_answered _ ->
@@ -444,7 +446,8 @@ let test_unread_rejection_authority_retains_source_and_allows_siblings () =
       | Keeper_heartbeat_stimulus_intake.Connector_read_failed _
       | Keeper_heartbeat_stimulus_intake.Connector_item_missing _
       | Keeper_heartbeat_stimulus_intake.Ask_read_failed _
-      | Keeper_heartbeat_stimulus_intake.Job_result_unavailable _) ->
+      | Keeper_heartbeat_stimulus_intake.Job_result_unavailable _
+      | Keeper_heartbeat_stimulus_intake.Addon_result_unavailable _) ->
     fail "unread canonical authority lost its typed retry outcome"
 ;;
 

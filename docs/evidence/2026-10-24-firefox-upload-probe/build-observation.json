@@ -1,0 +1,250 @@
+{
+  "schema_version": 1,
+  "observation_time_utc": "2026-10-24T06:13:53.825650+00:00",
+  "captured_main": {
+    "sha": "fd75478aa3146c4e3910773ad00336dd0adba472",
+    "tree": "7b6204ea042a6fa4a654cd454aa7ac68f90537ce",
+    "source_input_digest": "58e4deff0a184b30ba12d54c621433edc60b0407fc94a14f7dfbcb21dbb4d475",
+    "matching_run_in_latest_observation": false,
+    "new_compilation_claim": false
+  },
+  "workflow": {
+    "path": ".github/workflows/main-minimal-build.yml",
+    "schedule": "7,37 * * * *",
+    "sha256": "bc839702e9bd2c274608285a354d29e52efaa4738b1543b04269b36f70295025",
+    "candidate_sha_input": false,
+    "main_only_job_guard": true
+  },
+  "actual_runs": [
+    {
+      "run_id": 40067402060,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/40067402060",
+      "head_sha": "574bdc1d1a2e7a62b876c88c3d9b634000cf2227",
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-10-24T05:44:00Z",
+      "updated_at": "2026-10-24T05:52:51Z",
+      "job_id": 120793433335,
+      "decoded_log_sha256": "9ebad9c55cbfd579f042450e3007aeec8f14be2b96343f535e7866463d2bf806",
+      "source_receipt_cache_hit": false,
+      "source_input_digest": "e8de8609e8ec7e78005ae70b4284914453bc5f740009e2d5c27104120080209e",
+      "source_receipt_cache_observation": {
+        "line": 265,
+        "text": "2026-10-24T05:44:16.4668280Z Cache not found for input keys: main-build-receipt-v2-ubuntu24-20261012.334.1-e8de8609e8ec7e78005ae70b4284914453bc5f740009e2d5c27104120080209e"
+      },
+      "dune_artifact_cache_restored_from": "main-dune-v1-ubuntu24-20261012.334.1-3c0946eac3e406876c24d8601c2dfd5ec2fc3298",
+      "actual_build": {
+        "targets": [
+          "bin/main_eio.exe",
+          "bin/masc_tui.exe",
+          "bin/masc_browser_host.exe",
+          "bin/deployment_preflight_helper.exe"
+        ],
+        "outcome": "success",
+        "executed_not_skipped": true
+      },
+      "actual_check": {
+        "target": "@check",
+        "outcome": "failure",
+        "executed_not_skipped": true,
+        "tests": "compiled/type-checked, not executed"
+      },
+      "toolchain": {
+        "runner_os": "Ubuntu 24.04.5 x86_64",
+        "runner_image": "ubuntu-24.04",
+        "image_version": "20261012.334.1",
+        "compiler_contract": "exactly OCaml 5.5.1",
+        "switch": "ci-5-5-1",
+        "executed_compiler_path": "/home/runner/.opam/ci-5-5-1/bin/ocamlc.opt",
+        "compiler_version_stdout": "not separately printed",
+        "opam_download_version_in_successful_bootstrap": "2.5.0",
+        "dune_installed_version_stdout": "not separately printed",
+        "source_dune_contract": "lang dune 3.22; package dune >= 3.22",
+        "toolchain_dependency_cache_key": "opam-linux-X64-agent_core-otel-02-5.5.1-ubuntu24-20261012.334.1-eccec640fe5cf8615bf2ff7c0f0b3a204fb08b6fbb7cf48079d69e724c426044-v4",
+        "pin_action": "success, 13 external pins installed; full exact refs retained in decoded log",
+        "install_deps_action": "success with --with-test",
+        "toolchain_actions_sha256": {
+          ".github/actions/setup-ocaml-toolchain/action.yml": "058a80ab00aaa3afbf71943f410b6c7ab259b7600cef1d4e851653d7148fb2bd",
+          ".github/actions/pin-ocaml-deps/action.yml": "599debe72291cd9f4e3f166a164f2df3c012cec05dd814fa82055cb74a256bd0",
+          ".github/actions/install-ocaml-deps/action.yml": "f1d87dd4a75248a12174276d9bc33f8e35e2e84b54c62efa8c006f08976dc079"
+        }
+      },
+      "receipt_written_and_saved": false,
+      "compiler_error": {
+        "generated_file": "test/firefox_controls_probe.ml",
+        "generated_line": 294,
+        "source_file": "scripts/fixtures/firefox_controls_probe.ml",
+        "source_line": 263,
+        "message": "The field selector is not part of the record argument for the Browser_lane__Browser_action.interaction.Upload constructor",
+        "error_log_line": 790,
+        "exit_code": 1,
+        "infrastructure_failure": false
+      }
+    },
+    {
+      "run_id": 40065856949,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/40065856949",
+      "head_sha": "f326c4cfe9e2b4547f3b76f6e8d8f164971dc0a0",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-24T05:20:18Z",
+      "updated_at": "2026-10-24T05:29:21Z",
+      "job_id": 120788844489,
+      "decoded_log_sha256": "1d2adb4a31648c7fd379280e6dddb148059d6e34d2392ae4f735b3d5626a25c2",
+      "source_receipt_cache_hit": false,
+      "source_input_digest": "5961f90d34fe7d2f778df846b6087eaacef4a8a6f9bde9a765047b908bcd2ad1",
+      "source_receipt_cache_observation": {
+        "line": 264,
+        "text": "2026-10-24T05:20:39.6197875Z Cache not found for input keys: main-build-receipt-v2-ubuntu24-20261012.334.1-5961f90d34fe7d2f778df846b6087eaacef4a8a6f9bde9a765047b908bcd2ad1"
+      },
+      "dune_artifact_cache_restored_from": "main-dune-v1-ubuntu24-20261012.334.1-c2dfa238ebd318a9152e70d874ac2cbf68ae2ad8",
+      "actual_build": {
+        "targets": [
+          "bin/main_eio.exe",
+          "bin/masc_tui.exe",
+          "bin/masc_browser_host.exe",
+          "bin/deployment_preflight_helper.exe"
+        ],
+        "outcome": "success",
+        "executed_not_skipped": true
+      },
+      "actual_check": {
+        "target": "@check",
+        "outcome": "success",
+        "executed_not_skipped": true,
+        "tests": "compiled/type-checked, not executed"
+      },
+      "toolchain": {
+        "runner_os": "Ubuntu 24.04.5 x86_64",
+        "runner_image": "ubuntu-24.04",
+        "image_version": "20261012.334.1",
+        "compiler_contract": "exactly OCaml 5.5.1",
+        "switch": "ci-5-5-1",
+        "executed_compiler_path": "not printed in successful compiler output",
+        "compiler_version_stdout": "not separately printed",
+        "opam_download_version_in_successful_bootstrap": "2.5.0",
+        "dune_installed_version_stdout": "not separately printed",
+        "source_dune_contract": "lang dune 3.22; package dune >= 3.22",
+        "toolchain_dependency_cache_key": "opam-linux-X64-agent_core-otel-02-5.5.1-ubuntu24-20261012.334.1-eccec640fe5cf8615bf2ff7c0f0b3a204fb08b6fbb7cf48079d69e724c426044-v4",
+        "pin_action": "success, 13 external pins installed; full exact refs retained in decoded log",
+        "install_deps_action": "success with --with-test",
+        "toolchain_actions_sha256": {
+          ".github/actions/setup-ocaml-toolchain/action.yml": "058a80ab00aaa3afbf71943f410b6c7ab259b7600cef1d4e851653d7148fb2bd",
+          ".github/actions/pin-ocaml-deps/action.yml": "599debe72291cd9f4e3f166a164f2df3c012cec05dd814fa82055cb74a256bd0",
+          ".github/actions/install-ocaml-deps/action.yml": "f1d87dd4a75248a12174276d9bc33f8e35e2e84b54c62efa8c006f08976dc079"
+        }
+      },
+      "receipt_written_and_saved": true
+    }
+  ],
+  "source_identity_comparison": [
+    {
+      "sha": "574bdc1d1a2e7a62b876c88c3d9b634000cf2227",
+      "files": {
+        "scripts/fixtures/firefox_controls_probe.ml": {
+          "sha256": "b0c819f34b44cd474def7d8e2e09fa65b7d33c92a4c3e54c1abdd52c1a001f78",
+          "git_blob": "e0e275cb3e7b1e2456dd690aedb2acfc9cfa2af6"
+        },
+        "scripts/fixtures/firefox_download_artifact_probe.ml": {
+          "sha256": "2984a96cbfee38cb1ad43c2890f2d59f12061db2e7d37090bc82c59c0320dd9e",
+          "git_blob": "d2ed5d0262db51caafcf487b17d031b24a6cd892"
+        },
+        "test/dune": {
+          "sha256": "376a76a98c9b57c3e77f24676ceb9b99239cad9b03a7a8f597566ce53ba2c4a6",
+          "git_blob": "7e98c1236aef72a07d4649694342fad2772cc82e"
+        },
+        "lib/browser_lane/browser_action.ml": {
+          "sha256": "3b2103a89d49cd6d9b395b014a56c2d8840cabbef0022efc32cb45d3d01cbab6",
+          "git_blob": "d0663d5a498525ee0e9cd79f7b1587fc14e45ec7"
+        },
+        "lib/browser_lane/browser_action.mli": {
+          "sha256": "c066cf74176796335c842bf209e0c9b8c3156fd10fe723d902d0e4e97a5f8cc0",
+          "git_blob": "e2d045fc9306ef3084b4580ae88cba930b005472"
+        },
+        "dune-project": {
+          "sha256": "be1b2ceac1d2d73f5f1ef166c07e334556d104d9f4a58f5a536142712c46b66f",
+          "git_blob": "8ef11725ceb76da61052525c676c6689244538cd"
+        },
+        "masc.opam": {
+          "sha256": "cfc163fe0f3b9cab99f174e14873318f38ce1d96ec391071209ca7fda6bf5fe0",
+          "git_blob": "46d4b52e3dcbab141f418d9e21474a5e38715f3c"
+        }
+      }
+    },
+    {
+      "sha": "fd75478aa3146c4e3910773ad00336dd0adba472",
+      "files": {
+        "scripts/fixtures/firefox_controls_probe.ml": {
+          "sha256": "b0c819f34b44cd474def7d8e2e09fa65b7d33c92a4c3e54c1abdd52c1a001f78",
+          "git_blob": "e0e275cb3e7b1e2456dd690aedb2acfc9cfa2af6"
+        },
+        "scripts/fixtures/firefox_download_artifact_probe.ml": {
+          "sha256": "2984a96cbfee38cb1ad43c2890f2d59f12061db2e7d37090bc82c59c0320dd9e",
+          "git_blob": "d2ed5d0262db51caafcf487b17d031b24a6cd892"
+        },
+        "test/dune": {
+          "sha256": "3a018db45be2fd593f15fc6e56f628b4a9433cbcfca20a1d5d341df4018581bb",
+          "git_blob": "3209c5078f131575d3a2645595709ea3bf845773"
+        },
+        "lib/browser_lane/browser_action.ml": {
+          "sha256": "3b2103a89d49cd6d9b395b014a56c2d8840cabbef0022efc32cb45d3d01cbab6",
+          "git_blob": "d0663d5a498525ee0e9cd79f7b1587fc14e45ec7"
+        },
+        "lib/browser_lane/browser_action.mli": {
+          "sha256": "c066cf74176796335c842bf209e0c9b8c3156fd10fe723d902d0e4e97a5f8cc0",
+          "git_blob": "e2d045fc9306ef3084b4580ae88cba930b005472"
+        },
+        "dune-project": {
+          "sha256": "e40f4987f5458738e9f7820be2b27c62fa65b052d5842ce3810460c162f4b393",
+          "git_blob": "73f8edb2526a6b8ea197aa60a4de1c6fb510c550"
+        },
+        "masc.opam": {
+          "sha256": "b5582cc17fb319eb3676deb0b5fb5e38513d25da0e8e80b552d341d2a2236493",
+          "git_blob": "133ae3bfad66206830634f1fbc373b8de64c0ab2"
+        }
+      }
+    }
+  ],
+  "generator_and_signature_comparison": [
+    {
+      "sha": "f326c4cfe9e2b4547f3b76f6e8d8f164971dc0a0",
+      "generator_stanza_sha256": "f665e341383fb5b0b4781fbbd6a69d8ba67a635f52172894a3e46162692f3e09",
+      "generator_stanza": "(rule\n (targets firefox_controls_probe.ml)\n (deps ../scripts/fixtures/firefox_controls_probe.ml ../scripts/fixtures/firefox_download_artifact_probe.ml)\n (action\n  (with-stdout-to %{targets}\n   (progn\n    (echo \"module Driver = Masc.Browser_webdriver\\nmodule Browser_action = Browser_lane.Action\\nmodule Browser_bidi_downloads = Masc.Browser_bidi_downloads\\n\")\n    (cat %{dep:../scripts/fixtures/firefox_download_artifact_probe.ml})\n    (cat %{dep:../scripts/fixtures/firefox_controls_probe.ml})))))\n\n(executable\n (name firefox_controls_probe)\n (modules firefox_controls_probe)\n (libraries masc masc.browser_lane eio eio_main eio.unix yojson unix base64))\n\n",
+      "fixture_sha256": "b0c819f34b44cd474def7d8e2e09fa65b7d33c92a4c3e54c1abdd52c1a001f78",
+      "upload_constructor": "| Upload of { selector : string; paths : string list }",
+      "fixture_expression": "act upload (Browser_action.Upload {selector=\"#upload\";paths})) with"
+    },
+    {
+      "sha": "574bdc1d1a2e7a62b876c88c3d9b634000cf2227",
+      "generator_stanza_sha256": "f665e341383fb5b0b4781fbbd6a69d8ba67a635f52172894a3e46162692f3e09",
+      "generator_stanza": "(rule\n (targets firefox_controls_probe.ml)\n (deps ../scripts/fixtures/firefox_controls_probe.ml ../scripts/fixtures/firefox_download_artifact_probe.ml)\n (action\n  (with-stdout-to %{targets}\n   (progn\n    (echo \"module Driver = Masc.Browser_webdriver\\nmodule Browser_action = Browser_lane.Action\\nmodule Browser_bidi_downloads = Masc.Browser_bidi_downloads\\n\")\n    (cat %{dep:../scripts/fixtures/firefox_download_artifact_probe.ml})\n    (cat %{dep:../scripts/fixtures/firefox_controls_probe.ml})))))\n\n(executable\n (name firefox_controls_probe)\n (modules firefox_controls_probe)\n (libraries masc masc.browser_lane eio eio_main eio.unix yojson unix base64))\n\n",
+      "fixture_sha256": "b0c819f34b44cd474def7d8e2e09fa65b7d33c92a4c3e54c1abdd52c1a001f78",
+      "upload_constructor": "| Upload of { target : upload_target; paths : string list }",
+      "fixture_expression": "act upload (Browser_action.Upload {selector=\"#upload\";paths})) with"
+    },
+    {
+      "sha": "fd75478aa3146c4e3910773ad00336dd0adba472",
+      "generator_stanza_sha256": "f665e341383fb5b0b4781fbbd6a69d8ba67a635f52172894a3e46162692f3e09",
+      "generator_stanza": "(rule\n (targets firefox_controls_probe.ml)\n (deps ../scripts/fixtures/firefox_controls_probe.ml ../scripts/fixtures/firefox_download_artifact_probe.ml)\n (action\n  (with-stdout-to %{targets}\n   (progn\n    (echo \"module Driver = Masc.Browser_webdriver\\nmodule Browser_action = Browser_lane.Action\\nmodule Browser_bidi_downloads = Masc.Browser_bidi_downloads\\n\")\n    (cat %{dep:../scripts/fixtures/firefox_download_artifact_probe.ml})\n    (cat %{dep:../scripts/fixtures/firefox_controls_probe.ml})))))\n\n(executable\n (name firefox_controls_probe)\n (modules firefox_controls_probe)\n (libraries masc masc.browser_lane eio eio_main eio.unix yojson unix base64))\n\n",
+      "fixture_sha256": "b0c819f34b44cd474def7d8e2e09fa65b7d33c92a4c3e54c1abdd52c1a001f78",
+      "upload_constructor": "| Upload of { target : upload_target; paths : string list }",
+      "fixture_expression": "act upload (Browser_action.Upload {selector=\"#upload\";paths})) with"
+    }
+  ],
+  "source_reuse_scope": "The non-documentation input digests for f326,574,fd754 are all different. No receipt-based source equality carry from either observed execution to captured fd754 is justified. Restored Dune artifacts did not skip execution of the build/check commands.",
+  "limits": [
+    "Prior c2dfa main build remains historical and separate from these executions.",
+    "The latest failed run built all four executables; its failure is the test-tree @check only.",
+    "Preceding f326 run actually built/type-checked and saved a receipt for its own inputs.",
+    "Neither observation proves compilation of current combined fd754 inputs.",
+    "No installed runtime replacement, live effect, deployment or new test execution is claimed."
+  ],
+  "validation_capability": {
+    "main_minimal_build": "No source-SHA input, main-only job; cannot select the repair candidate.",
+    "authorized_existing_pair": [
+      "merge-compile.yml --ref main -f sha=<frozen top> -f pr=<top PR>: four executables",
+      "main-check.yml --ref <frozen top branch>: existing full-tree @check, including generated Firefox probe"
+    ],
+    "request_state": "Not yet requested when this evidence commit was assembled. A request is not a result; actual checkout SHA governs later scope."
+  }
+}

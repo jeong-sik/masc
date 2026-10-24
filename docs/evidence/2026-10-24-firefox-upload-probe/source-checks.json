@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "recorded_at_utc": "2026-10-24T06:24:16.231968+00:00",
+  "base_sha": "fd75478aa3146c4e3910773ad00336dd0adba472",
+  "code_pr": 45717,
+  "code_head": "785a76ef673ed7e437ca100066a410a0dfc9d83b",
+  "changed_files": [
+    "changelog.d/45717.md",
+    "scripts/fixtures/firefox_controls_probe.ml"
+  ],
+  "fixture": {
+    "path": "scripts/fixtures/firefox_controls_probe.ml",
+    "line": 263,
+    "before_sha256": "b0c819f34b44cd474def7d8e2e09fa65b7d33c92a4c3e54c1abdd52c1a001f78",
+    "after_sha256": "ccc97d6f837e804f388c605739d4d1c3b11bb7c420d9a6681f68f32fe4c1eeb2",
+    "only_reviewed_expression_changed": true
+  },
+  "canonical_mli": {
+    "path": "lib/browser_lane/browser_action.mli",
+    "lines": [
+      26,
+      28
+    ],
+    "sha256": "c066cf74176796335c842bf209e0c9b8c3156fd10fe723d902d0e4e97a5f8cc0",
+    "reviewed_contract": "File_input of string | Chooser_opener of string; Upload of {target : upload_target; paths : string list}",
+    "modified": false
+  },
+  "performed": [
+    {
+      "command": "ocamlc -version",
+      "result": "5.5.1",
+      "exit_code": 0
+    },
+    {
+      "command": "ocamlc -stop-after parsing -impl scripts/fixtures/firefox_controls_probe.ml",
+      "exit_code": 0,
+      "scope": "parser only; no type-check or link"
+    },
+    {
+      "command": "ocamlc -stop-after parsing -intf lib/browser_lane/browser_action.mli",
+      "exit_code": 0,
+      "scope": "parser only; canonical interface read directly"
+    },
+    {
+      "command": "git diff --check fd75478aa3146c4e3910773ad00336dd0adba472 785a76ef673ed7e437ca100066a410a0dfc9d83b",
+      "exit_code": 0
+    }
+  ],
+  "scope_limits": [
+    "No local Dune, compiled OCaml type-check, link, suite, Firefox interaction, install or deployment was performed.",
+    "Only the reviewed expression differs in the fixture; the staging lease, snapshot/readback and assertions are byte-preserved.",
+    "The exact selected CI requests and results must be recorded separately after publication."
+  ]
+}

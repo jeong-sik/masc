@@ -23,6 +23,7 @@ import { declarationIdentity, laneTargetLabel, type LaneNavigationTarget } from 
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 import { addonCategoryGroups, categoryGroup, categoryLabel, groupAddonCategories, workerCategory, type AddonCategoryFilter } from '../lib/lane-addon-category'
 import { LaneAddonCategoryFilter } from './lane-addon-category-filter'
+import { LaneAddonOperator } from './lane-addon-operator'
 
 const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transparent'
 const buttonClass = `${inputClass} cursor-pointer disabled:opacity-50`
@@ -579,7 +580,8 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
         </div></td>
       <td>${item.run_id}<div>${item.revision}</div></td>
       <td>${item.phase.kind}${(item.phase.message || item.error) && html`<p role="status">${item.phase.message ?? item.error}</p>`}
-        <${LaneAddonHostRequests} instance=${item} /></td>
+        <${LaneAddonHostRequests} instance=${item} />
+        <${LaneAddonOperator} key=${`${authority?.workspaceRoot}:${authority?.epoch}:${authority?.connectionGeneration}:${item.instance_id}:${item.incarnation}`} instance=${item} authority=${authority} /></td>
       <td>${item.observation_seq} / ${item.rows_count}</td>
       <td class="space-x-2"><button class=${buttonClass} disabled=${item.runtime_presence !== 'live' || item.phase.kind === 'detached' || item.phase.kind === 'detaching' || item.phase.kind === 'observing'} onClick=${() => act(() => observeLaneAddon(item.instance_id))}>Observe</button>
       <button class=${buttonClass} disabled=${item.phase.kind === 'detached' || staleRemoval(configuration, item)} onClick=${() => { if (!staleRemoval(configuration, item)) act(() => detachLaneAddon(item.instance_id)) }}>${staleRemoval(configuration, item) ? 'Resolve TOML before removal' : item.configuration === null ? 'Remove worker' : 'Remove TOML + worker'}</button>

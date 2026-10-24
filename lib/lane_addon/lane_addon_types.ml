@@ -71,6 +71,7 @@ type package = {
   exact_outputs : exact_output list; operator_asks : bool; web_search : bool;
 }
 let host_requests_tool = "lane_host_requests"
+let operator_tool = "lane_operator"
 let same_execution_package left right =
   {left with ui_category=None} = {right with ui_category=None}
 let host_result_tool = "lane_host_result"
@@ -86,13 +87,15 @@ let container_runtime (package : package) = match package.execution with
   | Container container -> Some container.runtime
   | Host_process _ -> None
 let validate_exported_tools ~action_tool names =
-  if List.exists (fun name -> String.trim name = "" || String.trim name <> name) names then
+  if action_tool = Some operator_tool then
+    Error "private operator port cannot be an action tool"
+  else if List.exists (fun name -> String.trim name = "" || String.trim name <> name) names then
     Error "exported tools require non-blank names without surrounding whitespace"
   else
     let sorted = List.sort_uniq String.compare names in
     if List.length sorted <> List.length names then Error "duplicate exported tool name"
     else if List.exists (fun name -> name = "lane_observe" || name = Lane_addon_call_context.tool_name
-      || name = host_requests_tool || name = host_result_tool
+      || name = host_requests_tool || name = host_result_tool || name = operator_tool
       || name = Machine_input_history.tool_name
       || name = Machine_controller_contract.snapshot_tool || name = Machine_controller_contract.release_tool
       || Some name = action_tool) sorted then

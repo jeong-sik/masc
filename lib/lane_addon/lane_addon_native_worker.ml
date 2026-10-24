@@ -64,6 +64,13 @@ let exported_tools t = match t.phase with
   | Serving -> Protocol.exported_tools t.protocol | Initializing | Validating_owner | Retired -> []
 let action_schema t = match t.phase with
   | Serving -> Protocol.action_schema t.protocol | Initializing | Validating_owner | Retired -> None
+let operator_schema t = match t.phase with
+  | Serving -> Protocol.operator_schema t.protocol | Initializing | Validating_owner | Retired -> None
+let call_operator t ~admit ~arguments = match t.phase with
+  | Initializing | Validating_owner | Retired -> Error Protocol.Operator_unavailable
+  | Serving ->
+      try Protocol.call_operator t.protocol ~admit ~arguments with
+      | Eio.Cancel.Cancelled _ as exn -> request_stop t; raise exn
 let call t work =
   match t.phase with
   | Initializing | Validating_owner | Retired -> Error (Protocol Protocol.Stopped)

@@ -1,0 +1,10 @@
+{
+  "fixture_listeners_stopped": [
+    {
+      "pid": 75844,
+      "command": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/masc-installed-addon-role-proof-20261024/replacement/fixture.py"
+    }
+  ],
+  "fixture_port_closed": true,
+  "own_tmux_server_closed": true
+}

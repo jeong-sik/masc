@@ -3,7 +3,9 @@
     Provider request boundaries pass the complete typed history through this
     module before converting messages to wire JSON. The projection validates
     provenance for the whole history and never infers compatibility from model
-    names, endpoint strings, or generated prose. *)
+    names, endpoint strings, or generated prose. Declared control lowering runs
+    before replay selection; diagnostic indices retain canonical source
+    coordinates even when controls consolidate into one System frame. *)
 
 type reasoning_replay_drop_reason =
   | Replay_policy_excluded of Reasoning_replay_contract.replay_policy
@@ -33,6 +35,7 @@ type t =
 [@@deriving show]
 
 type error =
+  | Invalid_control_lowering of Message_origin_lowering.error
   | Invalid_reasoning_target of string
   | Invalid_reasoning_source of
       { message_index : int
@@ -58,7 +61,8 @@ val error_to_string : error -> string
     [replay_capability] is the one record resolved from the provider config:
     replay target, replay contract, and the declared rotation policy. *)
 val project
-  :  assistant_has_payload:(Types.content_block list -> bool)
+  :  ?control_lowering:Message_origin_lowering.policy
+  -> assistant_has_payload:(Types.content_block list -> bool)
   -> reasoning_block_supported:(Types.content_block -> bool)
   -> replay_capability:Reasoning_dialect.replay_capability
   -> Types.message list

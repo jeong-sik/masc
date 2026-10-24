@@ -42,6 +42,7 @@ type reasoning_replay_override =
   | Force_no_replay
   | Force_drop_without_tool_preserve_with_tool
   | Force_latest_user_turn_tool_calls
+  | Force_initial_system_latest_user_turn_tool_calls
   | Force_preserve_always
   | Force_preserve_with_request_tools
 
@@ -539,6 +540,7 @@ let reasoning_replay_table =
   ; "drop_without_tool", Force_drop_without_tool_preserve_with_tool
   ; "drop_without_tool_preserve_with_tool", Force_drop_without_tool_preserve_with_tool
   ; "latest_user_turn_tool_calls", Force_latest_user_turn_tool_calls
+  ; "initial_system_latest_user_turn_tool_calls", Force_initial_system_latest_user_turn_tool_calls
   ; "preserve_always", Force_preserve_always
   ; "preserve_with_request_tools", Force_preserve_with_request_tools
   ]

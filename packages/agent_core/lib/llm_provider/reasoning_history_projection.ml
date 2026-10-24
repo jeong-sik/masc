@@ -28,6 +28,7 @@ type t =
 [@@deriving show]
 
 type error =
+  | Invalid_control_lowering of Message_origin_lowering.error
   | Invalid_reasoning_target of string
   | Invalid_reasoning_source of
       { message_index : int
@@ -46,6 +47,7 @@ type error =
 [@@deriving show]
 
 let error_to_string = function
+  | Invalid_control_lowering error -> Message_origin_lowering.error_to_string error
   | Invalid_reasoning_target detail -> "invalid reasoning target: " ^ detail
   | Invalid_reasoning_source { message_index; classification } ->
     Printf.sprintf
@@ -225,6 +227,7 @@ let replay_selected
 ;;
 
 let project
+      ?(control_lowering = Message_origin_lowering.Preserve_positions)
       ~assistant_has_payload
       ~reasoning_block_supported
       ~(replay_capability : Reasoning_dialect.replay_capability)
@@ -235,7 +238,23 @@ let project
     replay_capability.contract.Reasoning_replay_contract.replay_policy
   in
   let rotation_policy = replay_capability.rotation in
-  match validate_and_classify messages with
+  (* Validate canonical source stamps before consolidating control messages;
+     lowering must never hide corrupt metadata by replacing its carrier. *)
+  let classified =
+    Result.bind (validate_and_classify messages) (fun canonical ->
+      match control_lowering with
+      | Message_origin_lowering.Preserve_positions -> Ok canonical
+      | Initial_system_native_tools | Initial_system_tool_response_media ->
+        Result.bind
+          (Message_origin_lowering.lower control_lowering messages
+           |> Result.map_error (fun error -> Invalid_control_lowering error))
+          (fun lowered ->
+            Result.map
+              (List.map2 (fun source_index (_, message, source) -> source_index, message, source)
+                 lowered.source_indices)
+              (validate_and_classify lowered.messages)))
+  in
+  match classified with
   | Error _ as error -> error
   | Ok classified_messages ->
     let latest_user_message_index = find_latest_user_message_index classified_messages in
@@ -349,7 +368,12 @@ let project_for_provider_config
   match Reasoning_dialect.replay_capability_for_provider_config ~tools_present config with
   | Error detail -> Error (Invalid_reasoning_target detail)
   | Ok replay_capability ->
-    project ~assistant_has_payload ~reasoning_block_supported ~replay_capability messages
+    Result.bind
+      (Message_origin_lowering.policy_for_provider_config config
+       |> Result.map_error (fun error -> Invalid_control_lowering error))
+      (fun control_lowering ->
+        project ~control_lowering ~assistant_has_payload ~reasoning_block_supported
+          ~replay_capability messages)
 ;;
 
 let summarize_drops drops =

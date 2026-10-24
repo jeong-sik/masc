@@ -2409,11 +2409,104 @@ let test_request_tools_selects_full_history_reasoning () =
        projection.reasoning_replay_drops)
 ;;
 
+let test_initial_system_control_lowering () =
+  let caps = {latest_user_turn_capabilities with
+      reasoning_replay_override = Force_initial_system_latest_user_turn_tool_calls;
+      supports_image_input = true; modality_priority = Modality.Visual_first} in
+  let config = Provider_config.make ~kind:OpenAI_compat ~model_id:"initial-system-fixture"
+      ~base_url:"https://template.example" ~system_prompt:"Configured system policy"
+      ~preserve_thinking:false ~max_tokens:1024 ~model_capabilities_override:caps () in
+  let source = source_for_config config in
+  let tool id = ToolUse {id; name="inspect"; input=`Assoc []} in
+  let reasoning content = Thinking {content; signature=None} in
+  let control origin text = message ~origin User [Text text] in
+  let messages =
+    [ message System [Text "Canonical system policy"]
+    ; message User [Text "Old human query"]
+    ; with_source source Assistant [reasoning "OLD_REASONING"; tool "old"]
+    ; message Tool [tool_result "old"]
+    ; control Recovery_instruction "OLD_RECOVERY"
+    ; message User [Text "Current human query"]
+    ; with_source source Assistant [reasoning "CURRENT_REASONING"; tool "current"]
+    ; message Tool [tool_result "current"]
+    ; control Recovery_instruction "ANSWERED_RECOVERY"
+    ; message Assistant [Text "Recovery answered"]
+    ; control Recovery_instruction "CURRENT_RECOVERY"
+    ; control Historical_system_context "HISTORICAL_CONTEXT"
+    ; control System_context "CURRENT_CONTEXT"
+    ; control Agent_instruction "CURRENT_AGENT_INSTRUCTION" ] in
+  let body messages config = Backend_openai_request.build_request ~config ~messages ()
+      |> Yojson.Safe.from_string in
+  let open Yojson.Safe.Util in
+  let wire = body messages config |> member "messages" |> to_list in
+  check_bool "one initial System plus original transcript roles" true
+    (List.map (fun item -> member "role" item |> to_string) wire
+     = ["system"; "user"; "assistant"; "tool"; "user"; "assistant"; "tool"; "assistant"]);
+  let system = List.hd wire |> member "content" |> to_string in
+  let system_lines = String.split_on_char '\n' system in
+  check_bool "configured and canonical system policy are both present" true
+    (List.mem "Configured system policy" system_lines && List.mem "Canonical system policy" system_lines);
+  let reasoning_values wire = List.filter_map (fun item ->
+    match member "reasoning_content" item with `String text -> Some text | _ -> None) wire in
+  Alcotest.(check (list string)) "only current trajectory reasoning survives controls"
+    ["CURRENT_REASONING"] (reasoning_values wire);
+  let new_human = messages @ [message User [Text "<tool_response>Real new human</tool_response>"]] in
+  Alcotest.(check (list string)) "actual human closes the trajectory regardless of text"
+    [] (body new_human config |> member "messages" |> to_list |> reasoning_values);
+  Alcotest.(check (list string)) "preserve_thinking=true is still explicit full-history opt-in"
+    ["OLD_REASONING";"CURRENT_REASONING"]
+    (body messages {config with preserve_thinking=Some true}
+     |> member "messages" |> to_list |> reasoning_values);
+  (match Backend_openai_serialize.project_history config messages with
+   | Error error -> Alcotest.fail (Reasoning_history_projection.error_to_string error)
+   | Ok projection ->
+     Alcotest.(check (list int)) "diagnostics retain canonical source coordinates" [2]
+       (List.map (fun (drop : Reasoning_history_projection.reasoning_replay_drop) ->
+          drop.message_index) projection.reasoning_replay_drops));
+  let lower = match Message_origin_lowering.lower Initial_system_tool_response_media messages with
+    | Ok lower -> lower | Error error -> Alcotest.fail (Message_origin_lowering.error_to_string error) in
+  (match lower.messages with
+   | {role=System; content=[Text text]; _} :: _ ->
+     let active = String.split_on_char '\n' text in
+     check_bool "answered and past recoveries are not standalone active instructions" true
+       (not (List.mem "OLD_RECOVERY" active) && not (List.mem "ANSWERED_RECOVERY" active));
+     check_bool "fresh recovery remains active" true (List.mem "CURRENT_RECOVERY" active)
+   | _ -> Alcotest.fail "missing consolidated System");
+  let invalid = messages @ [message ~origin:System_context User
+      [image_block ~media_type:"image/png" ~data:"image" ()]] in
+  (match Backend_openai_serialize.project_history config invalid with
+   | Error (Invalid_control_lowering (Non_text_control {message_index=14})) -> ()
+   | Error error -> Alcotest.fail (Reasoning_history_projection.error_to_string error)
+   | Ok _ -> Alcotest.fail "template cannot hoist image context to System");
+  (match Backend_openai_serialize.project_history config [control Recovery_instruction "Continue"] with
+   | Error (Invalid_control_lowering Missing_caller_query) -> ()
+   | Error error -> Alcotest.fail (Reasoning_history_projection.error_to_string error)
+   | Ok _ -> Alcotest.fail "control cannot manufacture a human query");
+  (match Message_origin_lowering.policy_for_provider_config {config with kind=Anthropic} with
+   | Error Unsupported_codec -> ()
+   | Error error -> Alcotest.fail (Message_origin_lowering.error_to_string error)
+   | Ok _ -> Alcotest.fail "initial-system policy cannot rewrite a signed Anthropic prefix");
+  let image = image_block ~media_type:"image/png" ~data:"png" () in
+  let image_history = [message User [Text "Inspect"];
+    with_source source Assistant [reasoning "MEDIA_REASONING"; tool "media"];
+    message Tool [ToolResult {tool_use_id="media";content="image";outcome=Tool_succeeded;
+      json=None;content_blocks=Some [Text "image result";image]}];
+    control System_context "Still the same query"] in
+  let media_wire = body image_history config |> member "messages" |> to_list in
+  let followup = List.rev media_wire |> List.hd |> member "content" |> to_list in
+  check_bool "protocol opening is before media even with Visual_first" true
+    (member "text" (List.hd followup) = `String "<tool_response>");
+  check_bool "protocol closing follows every media part" true
+    (member "text" (List.rev followup |> List.hd) = `String "</tool_response>")
+;;
+
 let () =
   Alcotest.run
     "provider_agnostic_reasoning_replay"
     [ ( "typed replay projection"
-      , [ Alcotest.test_case "request tools select full-history replay" `Quick
+      , [ Alcotest.test_case "initial System preserves the native caller boundary" `Quick
+            test_initial_system_control_lowering
+        ; Alcotest.test_case "request tools select full-history replay" `Quick
             test_request_tools_selects_full_history_reasoning
         ; Alcotest.test_case
             "provider replay policy matrix"

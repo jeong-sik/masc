@@ -58,7 +58,8 @@ val project_history
     dispatcher. *)
 
 val dialect_messages_of_history
-  :  ?assistant_tool_content_format:Capability_vocab.assistant_tool_content_format
+  :  ?control_lowering:Message_origin_lowering.policy
+  -> ?assistant_tool_content_format:Capability_vocab.assistant_tool_content_format
   -> replay_capability:Reasoning_dialect.replay_capability
   -> stream:bool
   -> Reasoning_dialect.t
@@ -73,7 +74,8 @@ val dialect_messages_of_history
     message's native [images] field; they never introduce a user-query boundary.
     Image source and capability admission match ordinary native image input. *)
 val ollama_messages_of_history
-  :  modality_priority:Modality.priority
+  :  ?control_lowering:Message_origin_lowering.policy
+  -> modality_priority:Modality.priority
   -> supports_image_input:bool
   -> supports_document_input:bool
   -> Types.message list

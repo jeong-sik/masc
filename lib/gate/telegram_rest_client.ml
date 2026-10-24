@@ -88,7 +88,7 @@ let update json =
     | [Edited json] -> Result.map (fun m -> Edited_message m) (message json)
     | [Ignored json] -> Result.map (fun _ -> Unsupported) (object_fields "update payload" json)
     | [] -> Ok Unsupported
-    | _ :: _ -> invalid "multiple update kinds" in
+    | _ :: _ :: _ -> invalid "multiple update kinds" in
   Ok {update_id;kind}
 
 let api_result ~status ~body =

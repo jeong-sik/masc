@@ -4,6 +4,8 @@
 type t
 
 val prepare :
+  active_goal_summaries:
+    (Keeper_unified_prompt.goal_summary list, Goal_store.unavailable) result ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   held_task_skills:Keeper_world_observation_inputs.held_task_skills list ->
   task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
@@ -17,7 +19,7 @@ val prepare :
   turn_instructions_text:string ->
   unit ->
   t
-(** Eagerly render the common Task, Skills and Lane context once. The original
+(** Eagerly render the common Goal, Task, Skills and Lane context once. The original
     conversation, approval observation, worktree, telemetry and instructions
     are retained with it. Memory and wiki observations are captured, while their
     retrieval routes remain request-specific. A new turn, changed observation or

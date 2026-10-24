@@ -1153,6 +1153,18 @@ let goal_store_unavailable_fragment_vars
   ]
 ;;
 
+let format_active_goal_summaries = function
+  | Error unavailable ->
+    Some (render_fragment Prompt_names.keeper_world_active_goals_unavailable
+            (goal_store_unavailable_fragment_vars unavailable) ^ "\n\n")
+  | Ok [] -> None
+  | Ok summaries ->
+    Some
+      (render_fragment Prompt_names.keeper_world_active_goals_heading
+         [ "count", string_of_int (List.length summaries) ]
+       ^ "\n" ^ format_goal_summaries summaries ^ "\n\n")
+;;
+
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
@@ -1487,17 +1499,7 @@ let prepare_prompt_internal
         | Ok _, Some (Ok summaries) -> Ok summaries
         | Ok _, None -> Ok []
       in
-      (match source with
-       | Error unavailable ->
-         Some (render_fragment Prompt_names.keeper_world_active_goals_unavailable
-                 (goal_store_unavailable_fragment_vars unavailable) ^ "\n\n")
-       | Ok [] -> None
-       | Ok summaries ->
-         Some
-           (render_fragment
-              Prompt_names.keeper_world_active_goals_heading
-              [ "count", string_of_int (List.length summaries) ]
-            ^ "\n" ^ format_goal_summaries summaries ^ "\n\n"))
+      format_active_goal_summaries source
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->

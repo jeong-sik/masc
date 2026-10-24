@@ -126,6 +126,12 @@ val active_goal_summaries :
     and terminal phases drop out. An unreadable primary returns [Error]
     without using or repairing the recovery copy. *)
 
+val format_active_goal_summaries :
+  (goal_summary list, Goal_store.unavailable) result -> string option
+(** The shared Active Goals prompt layer, including current criterion and
+    measurement provenance. [Ok []] omits the layer; [Error] renders the
+    authoritative store failure. This projection grants no effect authority. *)
+
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->

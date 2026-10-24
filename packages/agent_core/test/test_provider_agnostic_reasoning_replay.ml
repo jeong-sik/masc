@@ -2384,7 +2384,29 @@ let test_request_tools_selects_full_history_reasoning () =
   check_bool "enabled replay contract" true
     (enabled.contract.replay_policy = All_assistant_messages);
   check_bool "disabled replay contract" true
-    (disabled.contract.replay_policy = No_replay)
+    (disabled.contract.replay_policy = No_replay);
+  let previous_source : Reasoning_source.t =
+    { source with replay_contract =
+        {source.replay_contract with replay_policy = Tool_call_assistant_messages_all_history} } in
+  let previous_history = List.map (fun (item : message) ->
+    match item.role with
+    | Assistant -> {item with metadata = Reasoning_source.metadata previous_source}
+    | User | System | Tool -> item) messages in
+  (match Backend_openai_serialize.project_history ~tools_present:true config previous_history with
+   | Error error -> Alcotest.fail (Reasoning_history_projection.error_to_string error)
+   | Ok projection ->
+     check_int "a changed producing contract is not migrated by request-tools selection" 0
+       (reasoning_block_count projection.messages);
+     check_int "both artifacts retain an explicit incompatibility reason" 2
+       (List.length projection.reasoning_replay_drops);
+     List.iter (fun (drop : Reasoning_history_projection.reasoning_replay_drop) ->
+       match drop.reason with
+       | Incompatible_reasoning_source actual ->
+         check_bool "excluded source is the previous producing contract" true
+           (Reasoning_source.equal previous_source actual)
+       | Replay_policy_excluded _ | Missing_reasoning_source | Reasoning_on_non_assistant ->
+         Alcotest.fail "policy transition must be classified as source incompatibility")
+       projection.reasoning_replay_drops)
 ;;
 
 let () =

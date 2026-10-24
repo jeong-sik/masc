@@ -18,8 +18,7 @@ type binding = {
     It must never retire a replacement Browser. *)
 type t
 type grant
-val create : sw:Eio.Switch.t -> net:[> `Generic ] Eio.Net.ty Eio.Resource.t ->
-  directory:string -> max_message_bytes:int -> (t, error) result
+val create : sw:Eio.Switch.t -> directory:string -> max_message_bytes:int -> (t, error) result
 (** The caller supplies an existing canonical, owned 0700 directory outside
     retained Lane data and agent work disks. The owner switch joins connections;
     [revoke] ends admission and signals cancellation. [await_stopped] observes

@@ -106,6 +106,35 @@ let private_reply_boundary () = Eio_main.run (fun env ->
         check bool "malformed private reply never echoes payload fragments" true
           (once {|{"reply":"extension","value":"PRIVATE_TOKEN_MARKER|} W.Model_requests
             =Error (Client.Outcome_unknown "malformed browser service reply"))))))
+let private_admission_after_connect () = Eio_main.run (fun env ->
+  let directory=Filename.temp_dir "bac-admit-" "" in
+  let path=Filename.concat directory "s" in
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path;Unix.rmdir directory)
+    (fun () -> Eio.Switch.run (fun sw ->
+      let net=Eio.Stdenv.net env and clock=Eio.Stdenv.clock env in
+      Eio.Time.with_timeout_exn clock 5. (fun () ->
+      Eio_context.with_test_env ~sw ~clock ~net ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+        let socket=Eio.Net.listen ~sw ~backlog:1 net (`Unix path) in
+        let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
+          ~max_message_bytes:4096 ~control_timeout_sec:1. ~available:(fun () -> true)) in
+        let received=Eio.Fiber.fork_promise ~sw (fun () ->
+          let flow,_=Eio.Net.accept ~sw socket in
+          let buffer=Cstruct.create 1 in
+          match Eio.Flow.single_read flow buffer with
+          | count -> count
+          | exception End_of_file -> 0) in
+        let admissions=ref 0 and cancellations=ref 0 in
+        let result=Client.call_companion client
+          ~admit:(fun () -> incr admissions; !admissions=1)
+          ~on_cancel_after_dispatch:(fun () -> incr cancellations)
+          (Masc.Browser_extension_protocol.Release "0b000000-0000-4000-8000-000000000001") in
+        check bool "post-connect authority denial refuses before writing" true
+          (match result with Error (Client.Unavailable _) -> true | Ok _|Error (Client.Outcome_unknown _) -> false);
+        check int "authority is read again after connect" 2 !admissions;
+        check int "denied extension never reaches the Browser worker" 0 (Eio.Promise.await_exn received);
+        check int "pre-dispatch refusal does not claim unknown effects" 0 !cancellations)))))
+
 let ()=run "browser addon private client" ["transport",[
   test_case "silent peer timeout cancellation and revoked connection" `Quick scenario;
+  test_case "fresh companion admission after connect" `Quick private_admission_after_connect;
   test_case "private payload errors and distinct reply kinds" `Quick private_reply_boundary]]

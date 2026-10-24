@@ -17,6 +17,10 @@ val call : t -> on_cancel_after_dispatch:(unit -> unit) -> Browser_addon_wire.co
     Cancellation after writing invokes
     the owner's callback under cancellation protection, then propagates. *)
 val revoke : t -> unit
+val call_companion : t -> admit:(unit -> bool) -> on_cancel_after_dispatch:(unit -> unit) ->
+  Browser_extension_protocol.command -> (Browser_addon_wire.reply, error) result
+(** Host-only private extension path. Rechecks original authority after connect
+    and immediately before writing; errors never include request/exception text. *)
 (** Admission only. Caller still owns worker termination and resource cleanup. *)
 val transfer_download : t -> id:string -> actor:string -> route:Browser_lane.route ->
   verb:Browser_lane.verb ->

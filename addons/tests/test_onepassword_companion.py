@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 MODULE = Path(__file__).resolve().parents[1] / "onepassword" / "companion.py"
 SPEC = importlib.util.spec_from_file_location("onepassword_companion_fixture", MODULE)
@@ -20,10 +21,11 @@ sys.modules[SPEC.name] = bridge
 SPEC.loader.exec_module(bridge)
 INSTANCE = "0b000000-0000-4000-8000-000000000021"
 OPERATION = "0b000000-0000-4000-8000-000000000022"
+WITHDRAW = {"invocation_id": "a" * 64, "withdraw": True}
 
 
 class Host:
-    def __init__(self, handler, maximum=16384):
+    def __init__(self, handler, maximum=16384, max_connections=1):
         # Keep Unix socket names below the OS path bound in this fixture.
         self.directory = tempfile.TemporaryDirectory(prefix="opc-", dir="/tmp")
         self.path = str(Path(self.directory.name).resolve() / "s")
@@ -38,11 +40,12 @@ class Host:
 
         def run():
             try:
-                connection, _ = self.listener.accept()
-                self.connections += 1
-                connection.settimeout(2)
-                with connection, connection.makefile("rb") as reader:
-                    handler(self, connection, reader)
+                for _ in range(max_connections):
+                    connection, _ = self.listener.accept()
+                    self.connections += 1
+                    connection.settimeout(2)
+                    with connection, connection.makefile("rb") as reader:
+                        handler(self, connection, reader)
             except Exception as error:
                 self.errors.append(error)
         self.thread = threading.Thread(target=run, daemon=True)
@@ -226,6 +229,275 @@ class CompanionTests(unittest.TestCase):
                 with self.assertRaises(BlockingIOError):
                     listener.accept()
                 self.assertIsNone(client.operation_id)
+
+    def test_unbound_withdrawal_disposes_only_original_nonce_and_caches_success(self):
+        def handler(host, connection, reader):
+            self.assertEqual(host.read(reader), WITHDRAW)
+            host.write(connection, {"withdrawn": True})
+
+        host = self.host(handler)
+        client = bridge.Companion(host.descriptor)
+        self.addCleanup(client.close)
+        self.assertIsNone(client.withdraw())
+        host.thread.join(2)
+        self.assertFalse(host.thread.is_alive())
+        self.assertIsNone(client.operation_id)
+        self.assertEqual(host.messages, [WITHDRAW])
+        self.assertEqual(host.connections, 1)
+        with patch.object(bridge.socket, "socket", side_effect=AssertionError("cached withdrawal created a socket")):
+            self.assertIsNone(client.withdraw())
+            client.close()
+            client.cancel()
+            self.assertIsNone(client.withdraw())
+            with self.assertRaisesRegex(bridge.BridgeError, "^not_started$"):
+                client.bind(browser_instance_id=INSTANCE, tab_id=7)
+
+    def test_withdrawal_closes_original_bound_socket_before_credentialless_control(self):
+        departed = threading.Event()
+
+        def handler(host, connection, reader):
+            if host.connections == 1:
+                host.bind(connection, reader)
+                self.assertEqual(reader.read(1), b"")
+                departed.set()
+            else:
+                self.assertTrue(departed.is_set())
+                self.assertEqual(host.read(reader), WITHDRAW)
+                host.write(connection, {"withdrawn": True})
+
+        host = self.host(handler, max_connections=2)
+        client = self.connect(host)
+        self.addCleanup(client.close)
+        client.withdraw()
+        host.thread.join(2)
+        self.assertEqual(host.connections, 2)
+        self.assertEqual(len(host.messages), 2)
+        self.assertEqual(host.messages[1], WITHDRAW)
+        self.assertEqual(client.operation_id, OPERATION)
+        with self.assertRaisesRegex(bridge.BridgeError, "^not_started$"):
+            client.invoke(program="async()=>({})", arguments={})
+
+    def test_unknown_withdrawal_can_be_explicitly_retried_without_replaying_bind(self):
+        def handler(host, connection, reader):
+            self.assertEqual(host.read(reader), WITHDRAW)
+            host.write(connection, {"withdrawn": host.connections == 2})
+
+        host = self.host(handler, max_connections=2)
+        client = bridge.Companion(host.descriptor)
+        self.addCleanup(client.close)
+        with self.assertRaisesRegex(bridge.BridgeError, "^outcome_unknown$"):
+            client.withdraw()
+        self.assertEqual(host.connections, 1)
+        with self.assertRaisesRegex(bridge.BridgeError, "^not_started$"):
+            client.bind(browser_instance_id=INSTANCE, tab_id=7)
+        client.withdraw()
+        host.thread.join(2)
+        self.assertEqual(host.connections, 2)
+        self.assertEqual(host.messages, [WITHDRAW, WITHDRAW])
+        self.assertIsNone(client.operation_id)
+
+    def test_withdrawal_acknowledgement_is_exact_finite_and_boolean(self):
+        for raw in [b'{"withdrawn":1}', b'{"withdrawn":1.0}', b'{"withdrawn":false}',
+                    b'{"withdrawn":"true"}', b'{"withdrawn":true,"token":"PRIVATE_TOKEN_MARKER"}',
+                    b'{"withdrawn":true,"withdrawn":true}', b'{"withdrawn":1e999}',
+                    b'{"withdrawn":-1e999}', b'{"error":"PRIVATE_PROVIDER_MARKER"}']:
+            with self.subTest(raw=raw):
+                def handler(host, connection, reader):
+                    self.assertEqual(host.read(reader), WITHDRAW)
+                    connection.sendall(raw + b"\n")
+
+                host = self.host(handler)
+                client = bridge.Companion(host.descriptor)
+                self.addCleanup(client.close)
+                with self.assertRaises(bridge.BridgeError) as caught:
+                    client.withdraw()
+                self.assertEqual(str(caught.exception), "outcome_unknown")
+                self.assertNotIn("PRIVATE_", repr(caught.exception))
+                self.assertEqual(host.connections, 1)
+
+    def test_cancel_interrupts_withdrawal_and_explicit_cleanup_can_retry(self):
+        entered, departed = threading.Event(), threading.Event()
+
+        def handler(host, connection, reader):
+            self.assertEqual(host.read(reader), WITHDRAW)
+            if host.connections == 1:
+                entered.set()
+                self.assertEqual(reader.read(1), b"")
+                departed.set()
+            else:
+                host.write(connection, {"withdrawn": True})
+
+        host = self.host(handler, max_connections=2)
+        client = bridge.Companion(host.descriptor)
+        self.addCleanup(client.close)
+        outcomes = []
+
+        def withdraw():
+            try:
+                client.withdraw()
+            except bridge.BridgeError as error:
+                outcomes.append(error.code)
+
+        waiter = threading.Thread(target=withdraw, daemon=True)
+        waiter.start()
+        self.assertTrue(entered.wait(2))
+        client.cancel()
+        waiter.join(2)
+        self.assertFalse(waiter.is_alive())
+        self.assertEqual(outcomes, ["outcome_unknown"])
+        self.assertTrue(departed.wait(2))
+        client.withdraw()
+        host.thread.join(2)
+        self.assertEqual(host.messages, [WITHDRAW, WITHDRAW])
+
+    def test_close_interrupts_withdrawal_and_permanently_seals_both_admissions(self):
+        entered, departed = threading.Event(), threading.Event()
+
+        def handler(host, connection, reader):
+            self.assertEqual(host.read(reader), WITHDRAW)
+            entered.set()
+            self.assertEqual(reader.read(1), b"")
+            departed.set()
+
+        host = self.host(handler)
+        client = bridge.Companion(host.descriptor)
+        self.addCleanup(client.close)
+        outcomes = []
+
+        def withdraw():
+            try:
+                client.withdraw()
+            except bridge.BridgeError as error:
+                outcomes.append(error.code)
+
+        waiter = threading.Thread(target=withdraw, daemon=True)
+        waiter.start()
+        self.assertTrue(entered.wait(2))
+        client.close()
+        waiter.join(2)
+        self.assertFalse(waiter.is_alive())
+        self.assertTrue(departed.wait(2))
+        self.assertEqual(outcomes, ["outcome_unknown"])
+        with patch.object(bridge.socket, "socket", side_effect=AssertionError("sealed handle created a socket")):
+            client.cancel()
+            with self.assertRaisesRegex(bridge.BridgeError, "^not_started$"):
+                client.withdraw()
+            with self.assertRaisesRegex(bridge.BridgeError, "^not_started$"):
+                client.bind(browser_instance_id=INSTANCE, tab_id=7)
+
+    def test_close_before_withdrawal_registration_creates_no_new_socket(self):
+        with tempfile.TemporaryDirectory(prefix="opc-seal-", dir="/tmp") as directory:
+            path = str(Path(directory).resolve() / "s")
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                listener.bind(path)
+                listener.listen(1)
+                listener.setblocking(False)
+                client = bridge.Companion({"socket_path": path, "invocation_id": "d" * 64,
+                                           "max_message_bytes": 4096})
+                self.addCleanup(client.close)
+                entered, proceed = threading.Event(), threading.Event()
+                cancel_original = client.interrupt
+
+                def paused_original_cleanup():
+                    cancel_original()
+                    entered.set()
+                    proceed.wait()
+
+                client.interrupt = paused_original_cleanup
+                outcomes, failures = [], []
+
+                def withdraw():
+                    try:
+                        client.withdraw()
+                    except bridge.BridgeError as error:
+                        outcomes.append(error.code)
+                    except BaseException as failure:
+                        failures.append(failure)
+
+                waiter = threading.Thread(target=withdraw, daemon=True)
+                waiter.start()
+                try:
+                    self.assertTrue(entered.wait(2))
+                    client.close()
+                    with patch.object(bridge.socket, "socket", side_effect=AssertionError("post-close socket creation")):
+                        proceed.set()
+                        waiter.join(2)
+                    self.assertFalse(waiter.is_alive())
+                    self.assertEqual(failures, [])
+                    self.assertEqual(outcomes, ["not_started"])
+                    with self.assertRaises(BlockingIOError):
+                        listener.accept()
+                finally:
+                    proceed.set()
+                    waiter.join(2)
+
+    def test_original_call_late_error_cannot_interrupt_credentialless_disposal(self):
+        invoke_entered, withdrawal_entered, allow_ack = (
+            threading.Event(), threading.Event(), threading.Event())
+        error_entered, allow_error = threading.Event(), threading.Event()
+
+        def handler(host, connection, reader):
+            if host.connections == 1:
+                host.bind(connection, reader)
+                host.read(reader)
+                invoke_entered.set()
+                self.assertEqual(reader.read(1), b"")
+            else:
+                self.assertEqual(host.read(reader), WITHDRAW)
+                withdrawal_entered.set()
+                self.assertTrue(allow_ack.wait(2))
+                host.write(connection, {"withdrawn": True})
+
+        host = self.host(handler, max_connections=2)
+        client = self.connect(host)
+        self.addCleanup(client.close)
+        cancel_original = client.interrupt
+
+        def delayed_original_error():
+            if threading.current_thread().name == "original-invoke-fixture":
+                error_entered.set()
+                allow_error.wait()
+            cancel_original()
+
+        client.interrupt = delayed_original_error
+        invoke_outcomes, withdrawal_outcomes = [], []
+
+        def invoke():
+            try:
+                client.invoke(program="async()=>({})", arguments={})
+            except bridge.BridgeError as error:
+                invoke_outcomes.append(error.code)
+
+        def withdraw():
+            try:
+                withdrawal_outcomes.append(client.withdraw())
+            except bridge.BridgeError as error:
+                withdrawal_outcomes.append(error.code)
+
+        caller = threading.Thread(target=invoke, name="original-invoke-fixture", daemon=True)
+        cleanup = threading.Thread(target=withdraw, daemon=True)
+        caller.start()
+        try:
+            self.assertTrue(invoke_entered.wait(2))
+            cleanup.start()
+            self.assertTrue(error_entered.wait(2))
+            self.assertTrue(withdrawal_entered.wait(2))
+            allow_error.set()
+            caller.join(2)
+            self.assertEqual(invoke_outcomes, ["outcome_unknown"])
+            self.assertTrue(cleanup.is_alive())
+            allow_ack.set()
+            cleanup.join(2)
+            self.assertFalse(cleanup.is_alive())
+            self.assertEqual(withdrawal_outcomes, [None])
+            self.assertEqual(host.connections, 2)
+        finally:
+            allow_error.set()
+            allow_ack.set()
+            client.close()
+            caller.join(2)
+            if cleanup.ident is not None:
+                cleanup.join(2)
 
     def test_invalid_or_oversized_arguments_send_no_private_command(self):
         def handler(host, connection, reader):

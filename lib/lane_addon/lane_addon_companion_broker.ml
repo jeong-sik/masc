@@ -6,7 +6,7 @@ type binding = {
   execute:P.command -> (Yojson.Safe.t,P.error) result;
   finish:completion -> unit;
 }
-type phase = Pending | Claimed | Withdrawn
+type phase = Pending | Accepted | Claimed | Withdrawn
 type t = {
   socket_path:string; max_message_bytes:int;
   grants:(string,grant) Hashtbl.t;
@@ -20,6 +20,8 @@ and grant = {
   cancelled:unit Eio.Promise.t; cancel:unit Eio.Promise.u;
   mutable phase:phase;
 }
+type opening = Bind of string * selection | Withdraw of string
+type connection_start = Binding of grant * selection | Withdrawal of string
 let ( let* )=Result.bind
 let error_json = function
   | Unavailable -> `Assoc ["error",`String "unavailable"]
@@ -33,9 +35,12 @@ let cancel grant =
   grant.phase<-Withdrawn;
   Hashtbl.remove grant.broker.grants grant.invocation_id;
   ignore (Eio.Promise.try_resolve grant.cancel ())
+let accept grant = match grant.phase with
+  | Pending when grant.broker.live && not (Eio.Promise.is_resolved grant.cancelled) -> grant.phase<-Accepted
+  | Pending | Accepted | Claimed | Withdrawn -> ()
 let end_invocation grant = match grant.phase with
   | Pending -> cancel grant
-  | Claimed | Withdrawn -> ()
+  | Accepted | Claimed | Withdrawn -> ()
 let descriptor grant = `Assoc ["socket_path",`String grant.broker.socket_path;
   "invocation_id",`String grant.invocation_id;"max_message_bytes",`Int grant.broker.max_message_bytes]
 let issue broker ~bind =
@@ -49,13 +54,22 @@ let parse raw =
   match Yojson.Safe.from_string raw with
   | value -> Lane_addon_action.canonical value |> Result.map_error (fun _ -> Not_started)
   | exception Yojson.Json_error _ -> Error Not_started
+let capability = function
+  | `String value when String.length value=64
+      && String.for_all (fun c -> c>='0' && c<='9' || c>='a' && c<='f') value -> Ok value
+  | _ -> Error Not_started
 let handshake = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=["invocation_id";"withdraw"] ->
+      let* invocation_id=capability (List.assoc "invocation_id" fields) in
+      (match List.assoc "withdraw" fields with
+       | `Bool true -> Ok (Withdraw invocation_id) | _ -> Error Not_started)
   | `Assoc fields when List.sort String.compare (List.map fst fields)
       = ["browser_instance_id";"invocation_id";"tab_id"] ->
       (match List.assoc "invocation_id" fields,List.assoc "browser_instance_id" fields,List.assoc "tab_id" fields with
-       | `String invocation_id,`String browser_instance_id,`Int tab_id when tab_id>=0 ->
+       | raw_invocation_id,`String browser_instance_id,`Int tab_id when tab_id>=0 ->
+           let* invocation_id=capability raw_invocation_id in
            let* _=Browser_lane.client_id_of_string browser_instance_id |> Result.map_error (fun _ -> Not_started) in
-           Ok (invocation_id,{browser_instance_id;tab_id})
+           Ok (Bind (invocation_id,{browser_instance_id;tab_id}))
        | _ -> Error Not_started)
   | _ -> Error Not_started
 let read t reader =
@@ -73,7 +87,7 @@ let matches grant selection = function
   | P.Invoke {operation_id;_} | P.Release operation_id -> operation_id=grant.operation_id
 let admitted grant = grant.broker.live && match grant.phase with
   | Claimed -> not (Eio.Promise.is_resolved grant.cancelled)
-  | Pending | Withdrawn -> false
+  | Pending | Accepted | Withdrawn -> false
 let while_peer_waits grant reader work =
   let departed=ref false in
   let result=Watched_work.run (fun () ->
@@ -93,17 +107,26 @@ let serve_connection t flow =
     ~max_size:(t.max_message_bytes+1) in
   let select () =
     let* value=read t reader in
-    let* invocation_id,selection=handshake value in
-    match Hashtbl.find_opt t.grants invocation_id with
-    | Some ({phase=Pending;_} as grant) when t.live ->
-        (* Consume before calling the host factory, which can yield while it
-           freshly reads declarations. Another socket cannot steal the bind. *)
-        grant.phase<-Claimed;
-        Ok (grant,selection)
-    | Some {phase=(Pending|Claimed|Withdrawn);_}|None -> Error Not_started in
+    let* opening=handshake value in
+    match opening with
+    | Withdraw invocation_id -> Ok (Withdrawal invocation_id)
+    | Bind (invocation_id,selection) ->
+        match Hashtbl.find_opt t.grants invocation_id with
+        | Some ({phase=(Pending|Accepted);_} as grant) when t.live ->
+            (* Consume before calling the host factory, which can yield while it
+               freshly reads declarations. Another socket cannot steal the bind. *)
+            grant.phase<-Claimed;
+            Ok (Binding (grant,selection))
+        | Some {phase=(Pending|Accepted|Claimed|Withdrawn);_}|None -> Error Not_started in
   match select () with
   | Error error -> write t flow (error_json error)
-  | Ok (grant,selection) ->
+  | Ok (Withdrawal invocation_id) ->
+      (* This credentialless control can only remove authority. Absence is an
+         authoritative no-grant result, so lost acknowledgements are safely
+         reconciled using the same nonce. No binding factory or Browser input. *)
+      Option.iter cancel (Hashtbl.find_opt t.grants invocation_id);
+      write t flow (`Assoc ["withdrawn",`Bool true])
+  | Ok (Binding (grant,selection)) ->
     Fun.protect ~finally:(fun () -> cancel grant) (fun () ->
       let run () =
         if not (admitted grant) then write t flow (error_json Not_started) else

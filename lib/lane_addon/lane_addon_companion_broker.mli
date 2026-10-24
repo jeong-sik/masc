@@ -23,15 +23,22 @@ val create : sw:Eio.Switch.t -> directory:string -> max_message_bytes:int -> (t,
     retained Lane data and agent work disks. The owner switch joins connections;
     [revoke] ends admission and signals cancellation. [await_stopped] observes
     the listener and its connection scopes after cancellation/cleanup have joined.
-    There are no model-request ports, deadlines, payload logs or automatic retry. *)
+    There are no model-request ports, deadlines, payload logs or automatic retry.
+    A credentialless first frame may withdraw its exact invocation nonce.
+    Its acknowledgement proves admission removed, not Browser settlement.
+    Repeating withdrawal of an absent nonce cannot bind or dispatch input. *)
 val issue : t -> bind:(selection -> (binding, error) result) -> (grant, error) result
 (** [bind] captures one exact owner after checking the original host principal
     and declarations. Binding itself must send no Browser input. The first
     authenticated connection consumes the grant before any yielding work. *)
 val descriptor : grant -> Yojson.Safe.t
+val accept : grant -> unit
+(** Mark a successfully validated exported invocation as accepted. An original
+    unclaimed grant can bind after its public reply, until this provider ends.
+    This never restores a cancelled, consumed or revoked grant. *)
 val end_invocation : grant -> unit
-(** Revoke an unused grant after the exported call returns. A connection already
-    claimed by that invocation remains bound for its background login job. *)
+(** Withdraw an unaccepted unused grant. Accepted or already claimed grants
+    remain with their original provider for background binding/execution. *)
 val cancel : grant -> unit
 (** Cancel an unused or claimed original invocation, including after dispatch. *)
 val revoke : t -> unit

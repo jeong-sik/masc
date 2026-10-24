@@ -565,6 +565,38 @@ let test_native_drag_and_release () =
   check string "reads remain available" "served"
     (failure_kind (dispatch peer Live.Page_read (obj ["tabId",`Int 1])))
 
+let test_chooser_upload_respects_uncertain_pointer_release () =
+  let directory = Unix.realpath (capture_directory ()) in
+  let path = Filename.concat directory "owned-upload.txt" in
+  Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel "fixture");
+  let raw_drag = Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0} in
+  let native_drag = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";via=[];duration_ms=0} in
+  List.iter (fun (name, drag) ->
+    let asked = ref [] in
+    let peer = opened (fun sent ->
+      asked := sent.step :: !asked;
+      match sent.step with
+      | "tabs.list" -> answered tabs
+      | "page.drag" -> input_answer ~released:false ~error:(str "pointer release unconfirmed") ()
+      | "page.target_input" -> answered (obj ["error",str "pointer release unconfirmed";"pointerReleased",`Bool false])
+      | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
+      | other -> failf "%s unexpectedly dispatched %s" name other) in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    check string (name ^ " leaves release uncertain") "unknown"
+      (failure_kind (dispatch peer Live.Page_interact (interact_args drag)));
+    let upload target = dispatch peer Live.Page_act
+      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target;paths=[path]}})) in
+    let before = List.length !asked in
+    check bool (name ^ " blocks chooser upload before its click") true
+      (String_util.contains_substring
+        (before_effect "chooser upload after uncertain release" (upload (Lane.Action.Chooser_opener "#attach")))
+        "pointer release is unconfirmed");
+    check int (name ^ " dispatches no chooser SDK script") before (List.length !asked);
+    check string (name ^ " permits upload without pointer input") "served"
+      (failure_kind (upload (Lane.Action.File_input "#file")));
+    check string (name ^ " delegates file-input upload to SDK") "page.upload" (List.hd !asked)
+  ) ["raw drag", raw_drag; "native drag", native_drag]
+
 let png = "\137PNG\r\n\026\nfixture"
 let state ~url ~width = in_page (obj ["url",str url;"title",str "Slack";
   "viewport",obj ["width",`Int width;"height",`Int 600]])
@@ -1803,6 +1835,7 @@ let () =
   run "browser_ego_peer" [
     "ego", [
       test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
+      test_case "chooser upload respects uncertain pointer release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
       test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;

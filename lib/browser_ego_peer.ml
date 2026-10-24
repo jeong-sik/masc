@@ -789,6 +789,10 @@ let upload t id ~selector ~paths =
    and one process serves this connection, so the run closes a chooser it
    does not fill with setFiles([]), which hands the page nothing. *)
 let choose_files ?actor t id ~opener ~paths =
+  let* () = match t.pointer_state with
+    | Released -> Ok ()
+    | Release_uncertain -> Error (Live.Before_effect
+        "ego pointer release is unconfirmed; read the browser, then end this task space before opening a fresh connection") in
   let* label = label_of t id in
   let* chosen = chosen_files paths in
   Browser_lane.Upload_lease.claim ~owner:t.uploads ~paths;

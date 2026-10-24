@@ -43,5 +43,3 @@ root
     text "선택된 파일 없음"
   text "Drag source"
   text "Drop target"
-
-

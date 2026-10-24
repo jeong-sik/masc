@@ -23,5 +23,3 @@ root
         text "파일 선택"
       text "staged.txt"
   text "staged.txt:29"
-
-

@@ -1,0 +1,1 @@
+Fix native MiniMax Chat replay activation through ordinary provider/model lookup, including explicit M2 variants and M3/M3.1-Flash. Preserve complete assistant content through sync/SSE history without changing hosted Ollama policy.

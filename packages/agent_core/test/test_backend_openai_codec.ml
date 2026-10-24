@@ -517,22 +517,22 @@ let test_parse_reasoning_details_and_tool_calls_coexist () =
      | _ -> false)
 ;;
 
-(* #27924: use the shipped native MiniMax model declaration, canonical
-   assistant-history projection and final request builder together. The older
-   details fixture above chooses its replay dialect by hand. These are offline
-   codec fixtures, not evidence for Ollama-hosted MiniMax or native API access. *)
-let test_minimax_native_catalog_replay () =
-  let caps = require_model_capabilities "minimax-m3" in
+(* #27924: exercise the shipped declared provider and each exact native row.
+   No capability override may bypass production resolution. These are offline
+   codec fixtures, not evidence of provider HTTP acceptance or Ollama behavior. *)
+let test_minimax_native_catalog_replay_for_model model_id =
   let config =
     Provider_config.make
       ~kind:Provider_config.OpenAI_compat
       ~provider_id:"minimax"
-      ~model_id:"minimax-m3"
+      ~model_id
       ~base_url:"https://api.minimax.io"
       ~request_path:"/v1/chat/completions"
-      ~model_capabilities_override:caps
       ()
   in
+  let caps = match Provider_config.capabilities_for_config_model config with
+    | Some caps -> caps
+    | None -> Alcotest.failf "native MiniMax catalog did not resolve %S" model_id in
   check_bool "native catalog declares exact scalar Chat replay" true
     (caps.content_inline_reasoning=Capabilities.Think_tags_with_chat_replay);
   let dialect_contract = Reasoning_dialect.replay_contract (Reasoning_dialect.for_provider_config config) in
@@ -587,7 +587,7 @@ let test_minimax_native_catalog_replay () =
       List.iter (Complete_stream_acc.accumulate_event acc) events
     in
     let chunk delta finish = Yojson.Safe.to_string
-        (`Assoc ["id", `String "mini-response"; "model", `String "minimax-m3";
+        (`Assoc ["id", `String "mini-response"; "model", `String model_id;
                  "choices", `List [`Assoc ["index", `Int 0; "delta", `Assoc delta;
                                            "finish_reason", finish]]]) in
     let indexed_call = match call with
@@ -637,7 +637,7 @@ let test_minimax_native_catalog_replay () =
   in
   List.iter (fun (mode, parse) -> List.iter
     (fun (label, content, fields, expected_reasoning) ->
-       let label = mode ^ ": " ^ label in
+       let label = model_id ^ ": " ^ mode ^ ": " ^ label in
        let first = parse content fields in
        let history =
          [ msg User [Text "Weather?"]
@@ -720,6 +720,25 @@ let test_minimax_native_catalog_replay () =
       [" \t "; " \n<think></think> "; " <think> \n </think> "])
     ["sync", (fun content fields -> sync ~tool:false content fields);
      "stream", (fun content fields -> stream ~tool:false content fields)]
+;;
+
+let test_minimax_native_catalog_replay () =
+  List.iter test_minimax_native_catalog_replay_for_model
+    [ "MiniMax-M2"; "MiniMax-M2.1"; "MiniMax-M2.1-highspeed"
+    ; "MiniMax-M2.5"; "MiniMax-M2.5-highspeed"
+    ; "MiniMax-M2.7"; "MiniMax-M2.7-highspeed"
+    ; "MiniMax-M3"; "MiniMax-M3.1-Flash"
+    ];
+  List.iter (fun model_id ->
+    let config = Provider_config.make ~kind:Provider_config.Ollama
+        ~provider_id:"ollama_cloud" ~model_id ~base_url:"https://ollama.com"
+        ~request_path:"/api/chat" () in
+    match Provider_config.capabilities_for_config_model config with
+    | None -> Alcotest.failf "hosted MiniMax catalog did not resolve %S" model_id
+    | Some caps ->
+      check_bool "native carrier does not replace hosted MiniMax policy" true
+        (caps.content_inline_reasoning=Capabilities.No_content_inline_reasoning))
+    ["minimax-m2.7"; "minimax-m3"]
 ;;
 
 let test_inline_carrier_validation_and_synthetic_stream () =

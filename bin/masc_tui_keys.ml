@@ -1001,9 +1001,9 @@ let for_surface = function
       ; b Navigate "{ / }" "older / newer revision" ~detail:Detail_only
           ~help:"read the adjacent published report revision from its validated history"
       ; b Navigate ", / ." "image" ~detail:Detail_only
-          ~help:"select the previous or next image part in the loaded resource"
+          ~help:"select the previous or next image or Mermaid diagram in the loaded resource"
       ; b Act "Ctrl-O" "preview image" ~detail:Detail_only
-          ~help:"open the selected image from the retained resource bytes"
+          ~help:"open the selected image or Pele diagram from the retained resource bytes"
       ; b Navigate "( / )" "text part" ~detail:Detail_only
           ~help:"select the previous or next original text part for copying"
       ; b Act "s" "save original" ~detail:Detail_only

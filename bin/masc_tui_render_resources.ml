@@ -168,6 +168,8 @@ let render_resources (state : state) =
        ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
+    let content_origin = strip_rows + lines_ended_since pane_buf ~start:0
+      + (if pane_buf == buf then 0 else lines_ended_since buf ~start:0) in
     let content_height = pane_rows in
     (match reading with
      | None ->
@@ -175,7 +177,7 @@ let render_resources (state : state) =
            box_empty pane_buf pane_cols
          done
      | Some reading ->
-         let rendered = Masc_tui_resource_document.rows_with_search ~cols:pane_cols state reading in
+         let rendered,pictures = Masc_tui_resource_document.layout_with_search ~cols:pane_cols state reading in
          let total_lines = List.length rendered in
          let position = Masc_tui_scroll.Position.clamp ~count:total_lines
              ~height:content_height state.resource_scroll in
@@ -195,7 +197,26 @@ let render_resources (state : state) =
                     ("* " ^ Masc_tui_theme.strip_sgr line)
                 | No_match -> box_line pane_buf pane_cols ("  " ^ line))
            | None -> box_empty pane_buf pane_cols
-         done);
+         done;
+         List.iteri (fun index (picture : Masc_tui_resource_document.diagram) ->
+           let image_id = Masc_tui_graphics.resource_image_id index in
+           let top = max scroll picture.first_row in
+           let bottom = min (scroll+content_height) (picture.first_row+picture.row_count) in
+           if top >= bottom then
+             Masc_tui_portrait_view.hold_png ~image_id ~key:picture.image.key
+           else begin
+             let cut = top-picture.first_row in
+             let first_px = cut*picture.image.height/picture.row_count in
+             let last_px = (bottom-picture.first_row)*picture.image.height/picture.row_count in
+             Masc_tui_portrait_view.request_png {
+               png_image_id=image_id;
+               png_row=content_origin+top-scroll;
+               png_column=(if split then keeper_roster_pane_cols else 0)+framed_content_column+2;
+               png_cols=picture.columns;png_rows=bottom-top;
+               png_crop=Some {top_px=first_px;height_px=max 1 (last_px-first_px)};
+               png_key=picture.image.key;png_data=picture.image.png;
+             }
+           end) pictures);
     box_bottom pane_buf pane_cols
   in
   (if split then begin

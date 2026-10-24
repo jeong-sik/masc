@@ -504,6 +504,7 @@ type async_msg =
   | Keeper_tool_approvals_loaded of
       Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
   | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
+  | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * (string, string) result
   | Sent_image_ready of {
       generation : int;
       view : surface;
@@ -1006,7 +1007,7 @@ let rec workspace_message_is_read = function
   | Acting_pane_changes_loaded _
   | Code_blame_loaded _
   | Code_lsp_answered _
-  | Resource_read _
+  | Resource_read _ | Resource_diagram_ready _
   | Github_identity_view_loaded _
   | Identity_providers_loaded _
   | Observer_opened _
@@ -1209,7 +1210,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
     | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
     | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)
-    | Code_lsp_answered (_, _) | Resource_exported _ | Resource_read (_, _)
+    | Code_lsp_answered (_, _) | Resource_exported _ | Resource_read (_, _) | Resource_diagram_ready _
     | Github_identity_view_loaded (_, _) | Identity_providers_loaded (_, _, _)
     | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
     | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
@@ -1346,7 +1347,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
   | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
   | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)
-  | Code_lsp_answered (_, _) | Resource_exported _ | Resource_read (_, _)
+  | Code_lsp_answered (_, _) | Resource_exported _ | Resource_read (_, _) | Resource_diagram_ready _
   | Github_identity_view_loaded (_, _) | Identity_providers_loaded (_, _, _)
   | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
   | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)

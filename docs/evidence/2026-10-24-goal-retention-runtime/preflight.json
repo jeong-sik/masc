@@ -1,0 +1,11 @@
+{
+  "observed_at": "2026-10-24T13:31:44.956101+00:00",
+  "model": {
+    "name": "gemma4:e2b",
+    "digest": "7fbdbf8f5e45a75bb122155ed546e765b4d9c53a1285f62fd9f506baa1c5a47e",
+    "size": 7162405886,
+    "modified_at": "2026-09-09T11:17:51.832244335+09:00"
+  },
+  "image": "sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d",
+  "scope": "local registry and Docker identity; not weight independence attestation"
+}

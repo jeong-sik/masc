@@ -1,0 +1,132 @@
+{
+  "at": "2026-10-24T09:35:25.868015+00:00",
+  "worktree": "/tmp/masc-goal-terminal-repair-20261024",
+  "published_code_head": "6c9bf61e4cf155723af37125b3173a0730912ec7",
+  "published_evidence_head": "a24ab0f6f5903f63e0ede16d1dcfaafc71a0dc18",
+  "actual_parent": "d587bf1ffa123a05ae688cbc9fabe8e35221b206",
+  "patch": "/tmp/goal-terminal-publication-observation-guard-repair-20261024/repair-v2.patch",
+  "patch_sha256": "9e0efaab502cb8052b9d8b3f29419e8b50db4f5fe53ca768cb9ad5c09b65f1a8",
+  "files": [
+    {
+      "path": "lib/completion_authority_agent.ml",
+      "sha256": "86560523b2c242564e2713267c301c10bebc8a5cd8e845a7cb1fa85a41e32ad7",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/completion_authority_agent.ml"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "validation": "prior parser evidence; bytes unchanged"
+    },
+    {
+      "path": "lib/completion_authority_agent.mli",
+      "sha256": "f21405aa170a21804b845ee7936bc1f16a6fcb08a6162acf483cb1a2e1730b6a",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/completion_authority_agent.mli"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "validation": "prior parser evidence; bytes unchanged"
+    },
+    {
+      "path": "lib/keeper/verifier_review_publication.ml",
+      "sha256": "667e6ad3a051bb7b292a3d41aa35545c5516053287947e4153a04d3cd263016d",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/lib/keeper/verifier_review_publication.ml"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "validation": "prior parser evidence; bytes unchanged"
+    },
+    {
+      "path": "test/test_verifier_review_worker.ml",
+      "sha256": "6ce0b54dc1f259c9052d3b525327d19e419766538339e91225ed01885e61fa90",
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "/tmp/masc-goal-terminal-repair-20261024/test/test_verifier_review_worker.ml"
+      ],
+      "exit": 0,
+      "stderr": "",
+      "validation": "fresh parser check after absent-registry fixture correction"
+    }
+  ],
+  "unchanged_prior_source_files": [
+    "lib/keeper/verifier_review_commit_intent.ml",
+    "lib/keeper/verifier_review_commit_intent.mli",
+    "lib/keeper/verifier_review_owner.ml",
+    "lib/keeper/verifier_review_owner.mli",
+    "lib/keeper/verifier_review_publication.mli",
+    "lib/keeper/verifier_review_worker.ml",
+    "lib/keeper/verifier_review_worker.mli",
+    "lib/lane_addon/lane_addon_tool_request_owner.ml",
+    "lib/lane_addon/lane_addon_tool_request_owner.mli",
+    "lib/verification_run_registry.ml",
+    "lib/verification_run_registry.mli",
+    "test/test_completion_trust_harness.ml",
+    "test/test_verification_run_registry.ml"
+  ],
+  "whitespace": {
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "changes": [
+    "warning4 closed run_status fallback",
+    "require captured execution/before for every commit phase before Worker entry",
+    "single private commitment runner with production fixed real effects and For_testing scoped delegating wrappers",
+    "existing missing-observer case expanded across Judged/Committing/Commit_unknown, each with missing negative and real observed positive sibling"
+  ],
+  "suite_case_declarations": 18,
+  "negative_assertions": [
+    "strict Intent.prepare/decode and actual pre-call Host.observe prove valid original/judgment/before",
+    "exact canonical missing-observation error",
+    "actual shared runner observe0/apply0",
+    "actual process_original_once refusal",
+    "raw actual backlog bytes and exact Owner events unchanged",
+    "no competing registry bytes",
+    "reviewer remains initial1"
+  ],
+  "positive_assertions": [
+    "same-phase actual observed judgment+Registration pair",
+    "same host runner real apply1 and before/after reads2",
+    "actual Task Done",
+    "actual production recovery publishes original Approved and durable ACK",
+    "reviewer remains initial1"
+  ],
+  "claims": {
+    "parser_only": true,
+    "typecheck": false,
+    "execution": false,
+    "commit": false,
+    "push": false,
+    "CI_query_or_request": false
+  },
+  "supersedes_patch_sha256": "1d19ac40217ec57adec4282862d87d2cb81d87a5b6ca93ab9310777865de1d42",
+  "additional_fixture_correction": "R.replay absent file stays absent: compare optional raw bytes, not an unconditional load; no artificial registry initialization"
+}

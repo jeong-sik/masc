@@ -1,0 +1,300 @@
+{
+  "recorded_at_utc": "2026-10-24T08:47:08.050891+00:00",
+  "run": 40078689529,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/40078689529",
+  "job": 120827487514,
+  "head": "6c9bf61e4cf155723af37125b3173a0730912ec7",
+  "actual_checkout_head": "6c9bf61e4cf155723af37125b3173a0730912ec7",
+  "conclusion": "failure",
+  "conclusion_provenance": "Parent observed terminal run once; this readback queried jobs/raw logs/artifacts once for existing completed run, never re-queried run status or watched.",
+  "parent_completion": {
+    "run": 40078689529,
+    "head": "6c9bf61e4cf155723af37125b3173a0730912ec7",
+    "created_at": "2026-10-24T08:36:18Z",
+    "completed_at": "2026-10-24T08:41:20Z",
+    "conclusion": "failure",
+    "provenance": "Root observed completed run once at useful work boundary; no run-status re-query by main_build"
+  },
+  "checkout_evidence": [
+    {
+      "line": 3,
+      "text": "2026-10-24T08:36:24.9082660Z   ref: 6c9bf61e4cf155723af37125b3173a0730912ec7"
+    },
+    {
+      "line": 69,
+      "text": "2026-10-24T08:36:25.1645007Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 6c9bf61e4cf155723af37125b3173a0730912ec7"
+    },
+    {
+      "line": 71,
+      "text": "2026-10-24T08:36:33.3892727Z  * branch              6c9bf61e4cf155723af37125b3173a0730912ec7 -> FETCH_HEAD"
+    },
+    {
+      "line": 72,
+      "text": "2026-10-24T08:36:33.3903431Z [command]/usr/bin/git rev-parse --verify --quiet 6c9bf61e4cf155723af37125b3173a0730912ec7^{object}"
+    },
+    {
+      "line": 73,
+      "text": "2026-10-24T08:36:33.3930244Z 6c9bf61e4cf155723af37125b3173a0730912ec7"
+    },
+    {
+      "line": 80,
+      "text": "2026-10-24T08:36:33.4031397Z [command]/usr/bin/git checkout --progress --force 6c9bf61e4cf155723af37125b3173a0730912ec7"
+    },
+    {
+      "line": 143,
+      "text": "2026-10-24T08:36:35.9576098Z Note: switching to '6c9bf61e4cf155723af37125b3173a0730912ec7'."
+    },
+    {
+      "line": 163,
+      "text": "2026-10-24T08:36:35.9737669Z 6c9bf61e4cf155723af37125b3173a0730912ec7"
+    }
+  ],
+  "artifact": {
+    "id": 12554168212,
+    "name": "suite-runner-log",
+    "size_in_bytes": 5031,
+    "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12554168212",
+    "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12554168212/zip",
+    "expired": false,
+    "created_at": "2026-10-24T08:41:18Z",
+    "expires_at": "2026-11-07T08:41:17Z",
+    "updated_at": "2026-10-24T08:41:18Z",
+    "digest": "sha256:29c5f3cec81a6fe90460200ff0e43353927d990f94f15223127f291ec82ef05c",
+    "workflow_run": {
+      "id": 40078689529,
+      "repository_id": 1136640865,
+      "head_repository_id": 1136640865,
+      "head_branch": "fix/task-goal-terminal-publication-20261024",
+      "head_sha": "6c9bf61e4cf155723af37125b3173a0730912ec7"
+    }
+  },
+  "artifact_zip_digest_matches_advertised": true,
+  "failure_kind": "compile_fatal_warning",
+  "diagnostic": {
+    "file": "lib/keeper/verifier_review_publication.ml",
+    "source_lines": [
+      109,
+      118
+    ],
+    "characters": [
+      24,
+      78
+    ],
+    "warning": 4,
+    "name": "fragile-match",
+    "detail": "Tuple fallback status wildcard remains exhaustive when constructors are added to Verification_run_registry.run_status. Repository compiler flags enable warning4 and treat warnings as errors.",
+    "raw_error_block": [
+      {
+        "line": 6,
+        "text": "File \"lib/keeper/verifier_review_publication.ml\", lines 109-118, characters 24-78:"
+      },
+      {
+        "line": 7,
+        "text": "109 | ........................match P.phase (O.progress retained),execution.status with"
+      },
+      {
+        "line": 8,
+        "text": "110 |     | P.Finished commit,R.Completed {outcome;_} -> Ok (commit,outcome)"
+      },
+      {
+        "line": 9,
+        "text": "111 |     | Conflicted (commit,observed),R.Completed _ ->"
+      },
+      {
+        "line": 10,
+        "text": "112 |       let outcome=match terminal_authority_of_conflict ~task_id:execution.task_id observed with"
+      },
+      {
+        "line": 11,
+        "text": "113 |         | Ok authority -> R.Superseded_by {authority}"
+      },
+      {
+        "line": 12,
+        "text": "114 |         | Error detail -> R.Commit_failed {detail} in"
+      },
+      {
+        "line": 13,
+        "text": "115 |       Ok (commit,outcome)"
+      },
+      {
+        "line": 14,
+        "text": "116 |     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _"
+      },
+      {
+        "line": 15,
+        "text": "117 |       | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _"
+      },
+      {
+        "line": 16,
+        "text": "118 |       | Subdivided _),_ -> Error \"review has no terminal retained commit fact\"..."
+      },
+      {
+        "line": 17,
+        "text": "Error (warning 4 [fragile-match]): this pattern-matching is fragile."
+      },
+      {
+        "line": 18,
+        "text": "  It will remain exhaustive when constructors are added to type Masc__Verification_run_registry.run_status."
+      }
+    ],
+    "tested_source_file_sha256": "4e305d9ff3ff3ccd9c3614e17df4567294adab3e3e8aee31b563ac6c1ded2df2"
+  },
+  "targeted_runner_markers": [
+    {
+      "line": 1,
+      "text": "[targeted] EIO_BACKEND=<unset> timeout=600s per suite"
+    },
+    {
+      "line": 2,
+      "text": "[targeted] dune build test/test_goal_verifier_worker.exe test/test_goal_verification_agent.exe test/test_verifier_review_worker.exe test/test_completion_trust_harness.exe test/test_verification_run_registry.exe test/fixtures/verifier-image-lookup.png config/prompts/agent_core.md config/prompts/candle_appraiser_grade.md config/prompts/candle_appraiser_relation.md config/prompts/candle_appraiser_weights.md config/prompts/eval.calibration.few_shot.md config/prompts/exec_policy.md config/prompts/fusion.judge.md config/prompts/goal_verification.md config/prompts/judge.md config/prompts/keeper.autonomous.wake.txt config/prompts/keeper.md config/prompts/lane_cli_probe.md config/prompts/librarian.md config/prompts/mcp.md config/prompts/mcp.tool_help.md config/prompts/play.agent_guide.md config/prompts/subset_rewrite.md config/prompts/tool_failure.md config/prompts/tool_guidance.md config/prompts/tool_help.md config/prompts/verification.md config/prompts/workspace_memory_briefing.md config/prompts/workspace_memory_curator.md config/prompts/agent_core.md config/prompts/candle_appraiser_grade.md config/prompts/candle_appraiser_relation.md config/prompts/candle_appraiser_weights.md config/prompts/eval.calibration.few_shot.md config/prompts/exec_policy.md config/prompts/fusion.judge.md config/prompts/goal_verification.md config/prompts/judge.md config/prompts/keeper.autonomous.wake.txt config/prompts/keeper.md config/prompts/lane_cli_probe.md config/prompts/librarian.md config/prompts/mcp.md config/prompts/mcp.tool_help.md config/prompts/play.agent_guide.md config/prompts/subset_rewrite.md config/prompts/tool_failure.md config/prompts/tool_guidance.md config/prompts/tool_help.md config/prompts/verification.md config/prompts/workspace_memory_briefing.md config/prompts/workspace_memory_curator.md"
+    }
+  ],
+  "suites": [
+    {
+      "suite": "test/test_goal_verifier_worker",
+      "selected_build_target": "test/test_goal_verifier_worker.exe",
+      "execution": "not_started_compile_blocker",
+      "case_counts_observed": {
+        "OK": 0,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "alcotest_summary": [],
+      "runner_start": null,
+      "runner_terminal": null,
+      "limits": "No claim that this target individually compiled; shared selected build failed before any suite start."
+    },
+    {
+      "suite": "test/test_goal_verification_agent",
+      "selected_build_target": "test/test_goal_verification_agent.exe",
+      "execution": "not_started_compile_blocker",
+      "case_counts_observed": {
+        "OK": 0,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "alcotest_summary": [],
+      "runner_start": null,
+      "runner_terminal": null,
+      "limits": "No claim that this target individually compiled; shared selected build failed before any suite start."
+    },
+    {
+      "suite": "test/test_verifier_review_worker",
+      "selected_build_target": "test/test_verifier_review_worker.exe",
+      "execution": "not_started_compile_blocker",
+      "case_counts_observed": {
+        "OK": 0,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "alcotest_summary": [],
+      "runner_start": null,
+      "runner_terminal": null,
+      "limits": "No claim that this target individually compiled; shared selected build failed before any suite start."
+    },
+    {
+      "suite": "test/test_completion_trust_harness",
+      "selected_build_target": "test/test_completion_trust_harness.exe",
+      "execution": "not_started_compile_blocker",
+      "case_counts_observed": {
+        "OK": 0,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "alcotest_summary": [],
+      "runner_start": null,
+      "runner_terminal": null,
+      "limits": "No claim that this target individually compiled; shared selected build failed before any suite start."
+    },
+    {
+      "suite": "test/test_verification_run_registry",
+      "selected_build_target": "test/test_verification_run_registry.exe",
+      "execution": "not_started_compile_blocker",
+      "case_counts_observed": {
+        "OK": 0,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "alcotest_summary": [],
+      "runner_start": null,
+      "runner_terminal": null,
+      "limits": "No claim that this target individually compiled; shared selected build failed before any suite start."
+    }
+  ],
+  "totals_observed": {
+    "selected_suites": 5,
+    "started_suites": 0,
+    "completed_suites": 0,
+    "OK": 0,
+    "FAIL": 0,
+    "SKIP": 0,
+    "TODO": 0
+  },
+  "assertion_execution": "No assertions or new incident cases executed: shared build failed first. Zero case failures is not suite PASS; suites are unexecuted, not Alcotest skipped.",
+  "old55pass": "Historical run40068481261 atcd155 only; no execution result carried to6c9.",
+  "toolchain_observation": "Actual ocamlopt.opt invocation path /home/runner/.opam/ci-5-5-1/bin; jobs metadata Setup OCaml toolchain and dependency install succeeded; no infrastructure failure observed.",
+  "files": {
+    "artifacts-plugin.json": {
+      "bytes": 1023,
+      "sha256": "dd3644725ffdc27e6bf2669681896ca74cb6e86b03362632c11df04499138139"
+    },
+    "tested-verifier_review_publication.ml": {
+      "bytes": 9027,
+      "sha256": "4e305d9ff3ff3ccd9c3614e17df4567294adab3e3e8aee31b563ac6c1ded2df2"
+    },
+    "checkout-step.log": {
+      "bytes": 12259,
+      "sha256": "723e37af5c173119e4a8d02f6c827ee035e46f58771208594840136d6b3be571"
+    },
+    "jobs-raw.json": {
+      "bytes": 5608,
+      "sha256": "bba144cf68e26c9c0b91296c6e4434483a4b8aa4a036addeed927f55cf781823"
+    },
+    "job-120827487514.log": {
+      "bytes": 103874,
+      "sha256": "6b15673c47179e382eb063050380239420734f2b5fc05504e58dd08778fa5b5a"
+    },
+    "workflow-log-members.json": {
+      "bytes": 784,
+      "sha256": "eb4dc10b8676722e242199510e8933bee9c5f7da750ceac75cfbf437db81df41"
+    },
+    "suite-runner-log.zip": {
+      "bytes": 5031,
+      "sha256": "29c5f3cec81a6fe90460200ff0e43353927d990f94f15223127f291ec82ef05c"
+    },
+    "workflow-logs.zip": {
+      "bytes": 50297,
+      "sha256": "273a46eb8898e4def73f71bddb80e70e61082c574654920e86d2973590aecf0a"
+    },
+    "plugin-job-log-response.json": {
+      "bytes": 108923,
+      "sha256": "0037c5b7c55b73ecf2e2624ba66fb72383a9b21c49dc57f3308bdd40456f1471"
+    },
+    "test-step.log": {
+      "bytes": 34528,
+      "sha256": "bcfc398814f1209c0863af753b83b3f58978e140eb4b65e1bd01ad40c3a0db93"
+    },
+    "ci-run-tests.log": {
+      "bytes": 30560,
+      "sha256": "ad8258390b9bb66aa6f68ac2a0d7c26b370b80d0691b0a2cd4317ae0ae0caa3b"
+    },
+    "parent-observed-completion.json": {
+      "bytes": 302,
+      "sha256": "a13c15ad1b974b3bd626a7be6fdadf7792dadcb5a4594d883f799af56962dca3"
+    }
+  },
+  "mutations": {
+    "source": false,
+    "new_ci": false,
+    "ci_cancel": false,
+    "runtime": false,
+    "remote_write": false,
+    "merge": false
+  },
+  "remaining": "Only the observed fatal-warning blocker is established. A later corrected compile/suite execution is required for any new candidate claim; no rerun requested here."
+}

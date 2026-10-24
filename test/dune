@@ -343,7 +343,7 @@
 (test
  (name test_tui_keeper_config)
  (modules test_tui_keeper_config)
- (libraries alcotest masc_tui_keeper_config masc_tui_runtime_config_receipt yojson str))
+ (libraries alcotest masc.config masc_tui_keeper_config masc_tui_runtime_config_receipt yojson str))
 
 (test
  (name test_tui_keeper_sandbox)

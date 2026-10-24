@@ -457,7 +457,7 @@ let sandbox_patch ~profile snapshot =
     | Some _ -> Error "remote endpoint was not observed as a name or null" in
   let* network_mode = match member "network_mode" snapshot with
     | Some (`String raw) ->
-      (match Masc.Keeper_types_profile_sandbox.network_mode_of_string raw with
+      (match Masc.Keeper_types_profile.network_mode_of_string raw with
        | Some mode -> Ok mode
        | None -> Error "unknown observed sandbox network mode")
     | Some _ | None -> Error "sandbox network mode was not observed" in
@@ -474,9 +474,9 @@ let sandbox_patch ~profile snapshot =
          Error ("Press e and set remote_endpoint to one of: " ^ String.concat ", " names)) in
   let endpoint_json = function None -> `Null | Some name -> `String name in
   let effective_network_mode =
-    match Masc.Keeper_types_profile_sandbox.network_mode_rejection profile network_mode with
+    match Masc.Keeper_types_profile.network_mode_rejection profile network_mode with
     | None -> network_mode
-    | Some _ -> Masc.Keeper_types_profile_sandbox.default_network_mode_for_profile profile
+    | Some _ -> Masc.Keeper_types_profile.default_network_mode_for_profile profile
   in
   let changes =
     (if current = profile then [] else
@@ -485,7 +485,7 @@ let sandbox_patch ~profile snapshot =
          [ "remote_endpoint", endpoint_json endpoint ])
     @ (if effective_network_mode = network_mode then [] else
          [ "network_mode", `String
-             (Masc.Keeper_types_profile_sandbox.network_mode_to_string effective_network_mode) ]) in
+             (Masc.Keeper_types_profile.network_mode_to_string effective_network_mode) ]) in
   match changes with
   | [] -> Ok None
   | _ :: _ -> Ok (Some (`Assoc (("expected_config_revision",revision) :: changes)))

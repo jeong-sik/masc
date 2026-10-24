@@ -1597,6 +1597,80 @@ let test_a_package_without_world_asks_is_not_allowed_to_ask () =
     check string "not allowed" "not_allowed" (text "status" (result_of "q4" worker));
     check bool "and nothing is recorded" true (Runtime.installation_questions ~config = Ok []))
 
+let web_search id =
+  Lane_addon_host_request.to_json (Web_search {
+    request_id=id; query="original evidence"; limit=Some 3})
+
+let search_manifest = manifest ^ "\n[world]\nweb_search=true\n"
+
+let search_result search : Lane_addon_search_result.result = {
+  serving_provider=Some "fixture-provider";
+  provider_errors=["previous-provider", "unavailable"];
+  search;
+}
+
+let install_search_runner calls result _clock _config =
+  Runtime.register_web_search_runner (fun ~query ~limit ->
+    calls := (query, limit) :: !calls;
+    Ok result);
+  fun () -> ()
+
+let check_search_result expected actual =
+  let decoded = Lane_addon_search_result.result_of_json actual |> unwrap in
+  check (option string) "the serving provider survives delivery"
+    expected.Lane_addon_search_result.serving_provider decoded.serving_provider;
+  check (list (pair string string)) "previous provider failures survive delivery"
+    expected.provider_errors decoded.provider_errors;
+  check bool "the complete provider result survives delivery" true (expected.search = decoded.search)
+
+let test_web_search_requires_the_package_declaration () =
+  let calls = ref [] in
+  let result = search_result (`Assoc ["rows", `List []]) in
+  with_installation ~listing:[web_search "undeclared-search"]
+    ~owner_setup:(install_search_runner calls result)
+    (fun clock _config worker _ _root ->
+      await clock (fun () -> delivered "undeclared-search" worker);
+      check string "another host port does not grant web search" "not_allowed"
+        (text "status" (result_of "undeclared-search" worker));
+      check (list (pair string (option int))) "the host provider runner was never called" [] !calls)
+
+let test_web_search_delivers_one_decodable_result () =
+  let calls = ref [] in
+  let result = search_result (`Assoc ["rows", `List [
+    `Assoc ["url", `String "https://example.invalid/evidence"; "title", `String "Original source"]]]) in
+  with_installation ~manifest:search_manifest ~listing:[web_search "inline-search"]
+    ~owner_setup:(install_search_runner calls result)
+    (fun clock _config worker _ _root ->
+      await clock (fun () -> delivered "inline-search" worker);
+      check_search_result result (result_of "inline-search" worker);
+      check (list (pair string (option int))) "the original query and limit reach the runner once"
+        ["original evidence", Some 3] !calls)
+
+let test_web_search_retains_the_original_result_without_rerunning () =
+  let calls = ref [] in
+  let result = search_result (`Assoc ["context_text", `String (String.make 12000 's');
+    "sources", `List [`String "https://example.invalid/full-source"]]) in
+  with_installation ~manifest:search_manifest
+    ~owner_setup:(install_search_runner calls result)
+    (fun clock _config worker _ _root ->
+      let complete, marker = capture_retained_result worker ~id:"retained-search" ~source_id:None in
+      let request = web_search "retained-search" in
+      worker.listing := [request];
+      publish_lane_change ();
+      await clock (fun () -> Option.is_some !complete);
+      check_search_result result (Option.get !complete);
+      check bool "search continuations carry no record source authority" true
+        (member "source_id" (Option.get !marker) = `Null);
+      worker.on_deliver := ignore;
+      worker.listing := [request];
+      publish_lane_change ();
+      await clock (fun () -> List.length (List.filter (fun arguments ->
+        text "request_id" arguments="retained-search") !(worker.delivered))=2);
+      check bool "relisting restores the same retained result" true
+        (result_of "retained-search" worker = Option.get !marker);
+      check (list (pair string (option int))) "retained recovery does not call the provider again"
+        ["original evidence", Some 3] !calls)
+
 let () =
   Mirage_crypto_rng_unix.use_default ();
   run "lane add-on host request cycle"
@@ -1699,4 +1773,11 @@ let () =
             test_an_oversized_operator_answer_uses_source_free_continuations
         ; test_case "only the package withdraws its question" `Quick test_only_the_package_withdraws_its_question
         ; test_case "a package without world.asks is not allowed to ask" `Quick
-            test_a_package_without_world_asks_is_not_allowed_to_ask ] ) ]
+            test_a_package_without_world_asks_is_not_allowed_to_ask ] )
+    ; ( "web search"
+      , [ test_case "the manifest declaration precedes provider execution" `Quick
+            test_web_search_requires_the_package_declaration
+        ; test_case "an inline result decodes at the worker delivery boundary" `Quick
+            test_web_search_delivers_one_decodable_result
+        ; test_case "retained results reconstruct and restore without another provider call" `Quick
+            test_web_search_retains_the_original_result_without_rerunning ] ) ]

@@ -117,7 +117,7 @@ type eval_result = {
   pass_at_k : float;       (** Probability of at least 1 pass in k runs *)
   mean_score : float;       (** Mean weighted score across runs *)
   consistency : float;      (** Std dev of scores (lower = more consistent) *)
-  total_cost_usd : float option;   (** Sum of known run costs, or [None]. *)
+  total_cost_usd : float option;   (** Full cost of every run, or [None]. *)
   ci95_low : float;         (** Lower bound of 95% confidence interval for mean_score *)
   ci95_high : float;        (** Upper bound of 95% confidence interval for mean_score *)
   min_runs_met : bool;      (** Whether the [min_runs_for_ci] requirement is satisfied *)
@@ -318,9 +318,16 @@ let t_critical_95_for_df = function
   | _ -> 1.960
 
 let sum_costs costs =
-  match List.filter_map Fun.id costs with
+  match costs with
   | [] -> None
-  | known -> Some (List.fold_left ( +. ) 0.0 known)
+  | _ :: _ ->
+    List.fold_left
+      (fun total cost ->
+         match total, cost with
+         | Some total, Some cost -> Some (total +. cost)
+         | None, (Some _ | None) | Some _, None -> None)
+      (Some 0.0)
+      costs
 
 (** Build eval_result from a list of eval_runs for one scenario. *)
 let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : eval_result =

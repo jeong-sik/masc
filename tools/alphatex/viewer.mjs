@@ -52,7 +52,7 @@ if (values.help) {
     + '  --music opens the terminal music library: phrases, arrangements and recorded takes.\n'
     + '  --arrange opens MIDI/WAV region editing; --project also reopens saved arrangements.\n'
     + '  --midi-file song.mid imports SMF for editing/export/MIDI audition; --midi-pattern N selects an SMF2 pattern.\n'
-    + '  --midi-file song.midi2 opens native MIDI2 Clip editing and export, preserving its original clock and UMP.\n'
+    + '  --midi-file song.midi2 opens native MIDI2 Clip editing/export; --midi-output=ID selects native MIDI2 audition.\n'
     + '  --output UID selects sequencer audio output; :output UID changes it in the editor.\n'
     + '  --midi-output=ID selects MIDI output; Space pauses/resumes; :seek moves within a playing source; :stop ends it.\n'
     + '  Arrangement: combine --output and --midi-output, or use :mixed-output AUDIO_UID with per-source MIDI ports.\n'

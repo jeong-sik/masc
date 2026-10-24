@@ -126,7 +126,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   if ((initialDocument ?? loaded?.project)?.kind === 'midi-clip') {
     if (pattern !== undefined) throw new Error('MIDI2 Clip has one sequence; SMF pattern selection does not apply')
     const { viewMidiClip } = await import('./midi-clip-tui.mjs')
-    return viewMidiClip({ loaded, initialDocument, root, embedded, signal })
+    return viewMidiClip({ loaded, initialDocument, root, embedded, signal, midiOutput })
   }
   if (loaded?.project.kind === 'arrangement') {
     const { viewArrangement } = await import('./arrangement-tui.mjs')

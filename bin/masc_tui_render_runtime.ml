@@ -190,6 +190,8 @@ let runtime_detail_field ~width ~style label value =
 
 let runtime_bool = function true -> "yes" | false -> "no"
 
+let runtime_detail_section = detail_section_heading
+
 (* A route is not a candidate. This reading remains available when the
    inventory is empty, and retains diagnostics beside a last-good snapshot. *)
 let runtime_routes_detail_lines state ~width =
@@ -200,50 +202,58 @@ let runtime_routes_detail_lines state ~width =
     | None -> []
     | Some value -> field ~style:(Theme.warn ()) label value
   in
-  let resolved =
-    match state.runtime_surface with
-    | None -> field "Resolved" "Configuration has not been read"
-    | Some snapshot ->
-        let resolved = snapshot.Tui_decode.rss_resolved in
-        let route label values =
-          match values with
-          | [] -> field label "none"
-          | values ->
-              List.mapi
-                (fun index value ->
-                  field (Printf.sprintf "%s %d" label (index + 1)) value)
-                values
-              |> List.concat
-        in
-        let dropped =
-          List.filter
-            (fun id -> not (List.exists (String.equal id) resolved.rrs_media_failover))
-            resolved.rrs_media_failover_declared
-        in
-        field "Source" (Option.value resolved.rrs_config_path ~default:"unavailable")
-        @ field "Recorded" resolved.rrs_generated_at_iso
-        @ field "Default route" (Option.value resolved.rrs_default_route ~default:"none")
-        @ field "Entry runtime" (Option.value resolved.rrs_default_runtime_id ~default:"none")
-        @ route "Declared media" resolved.rrs_media_failover_declared
-        @ route "Admitted media" resolved.rrs_media_failover
-        @ route "Unresolved media" dropped
-        @ optional "Probe read error" snapshot.rss_probe_error
-        @ (match snapshot.rss_probe with
-           | None -> field "Probe" "unavailable; no observation has been read"
-           | Some probe ->
-               field "Probe status" (Masc.Tui_decode_runtime_probe.runtime_probe_status_to_string probe.rps_status)
-               @ List.concat_map (field ~style:(Theme.warn ()) "Probe error") probe.rps_errors
-               @ List.concat_map (field "Probe limitation") probe.rps_limitations)
-  in
-  optional "Runtime read warning" state.runtime_surface_error
-  @ resolved
-  @ (match state.runtime_lane_notice with
+  let notice_and_stale =
+    (match state.runtime_lane_notice with
      | None -> []
      | Some notice ->
          field ~style:(runtime_lane_notice_style notice) "Action result"
            (Masc_tui_types.runtime_lane_notice_text notice))
-  @ List.concat_map (field ~style:(Theme.warn ()) "Stale configuration")
-      (Masc_tui_types.runtime_lane_stale_lines state)
+    @ List.concat_map (field ~style:(Theme.warn ()) "Stale configuration")
+        (Masc_tui_types.runtime_lane_stale_lines state)
+  in
+  match state.runtime_surface with
+  | None ->
+      runtime_detail_section ~first:true "1. 기본 라우트 · 진입 런타임 (Default Routes)"
+      @ optional "Runtime read warning" state.runtime_surface_error
+      @ field "Resolved" "Configuration has not been read"
+      @ notice_and_stale
+  | Some snapshot ->
+      let resolved = snapshot.Tui_decode.rss_resolved in
+      let route label values =
+        match values with
+        | [] -> field label "none"
+        | values ->
+            List.mapi
+              (fun index value ->
+                field (Printf.sprintf "%s %d" label (index + 1)) value)
+              values
+            |> List.concat
+      in
+      let dropped =
+        List.filter
+          (fun id -> not (List.exists (String.equal id) resolved.rrs_media_failover))
+          resolved.rrs_media_failover_declared
+      in
+      runtime_detail_section ~first:true "1. 기본 라우트 · 진입 런타임 (Default Routes)"
+      @ field "Default route" (Option.value resolved.rrs_default_route ~default:"none")
+      @ field "Entry runtime" (Option.value resolved.rrs_default_runtime_id ~default:"none")
+      @ field "Source" (Option.value resolved.rrs_config_path ~default:"unavailable")
+      @ field "Recorded" resolved.rrs_generated_at_iso
+      @ notice_and_stale
+      @ runtime_detail_section "2. 미디어 Failover 순서 (Media Failover)"
+      @ route "Admitted media" resolved.rrs_media_failover
+      @ route "Declared media" resolved.rrs_media_failover_declared
+      @ route "Unresolved media" dropped
+      @ runtime_detail_section "3. 연결 진단 · 프로브 상태 (Probe & Diagnostics)"
+      @ optional "Runtime read warning" state.runtime_surface_error
+      @ optional "Probe read error" snapshot.rss_probe_error
+      @ (match snapshot.rss_probe with
+         | None -> field "Probe" "unavailable; no observation has been read"
+         | Some probe ->
+             field "Probe status"
+               (Masc.Tui_decode_runtime_probe.runtime_probe_status_to_string probe.rps_status)
+             @ List.concat_map (field ~style:(Theme.warn ()) "Probe error") probe.rps_errors
+             @ List.concat_map (field "Probe limitation") probe.rps_limitations)
 ;;
 
 let runtime_detail_lines state target ~width =
@@ -286,13 +296,9 @@ let runtime_detail_lines state target ~width =
            runtime_detail_field ~width ~style:(Theme.warn ()) "Runtime"
              "This runtime row is no longer present in the refreshed projection")
   | Some (runtime, lanes, position, probe) ->
-      let fields =
+      let model_fields =
         runtime_detail_field ~width ~style:Ansi.reset "Runtime ID" runtime.ro_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Provider" runtime.ro_provider
-        @ runtime_detail_field ~width ~style:Ansi.reset "Quota scope" (runtime_quota_scope_label runtime)
-        @ runtime_detail_field ~width ~style:Ansi.reset "Response-local quota scope"
-            (Option.value ~default:"not reported" runtime.ro_quota_scope)
-        @ runtime_detail_field ~width ~style:Ansi.reset "Connection / provider ID" runtime.ro_provider_id
         @ runtime_detail_field ~width ~style:Ansi.reset "Model" runtime.ro_model
         @ runtime_detail_field ~width ~style:Ansi.reset "Effective context"
             (Printf.sprintf "%d tokens" runtime.ro_effective_max_context)
@@ -304,20 +310,26 @@ let runtime_detail_lines state target ~width =
              | None -> "not specified")
         @ runtime_detail_field ~width ~style:Ansi.reset "Local runtime"
             (runtime_bool runtime.ro_is_local)
+      in
+      let connection_fields =
+        runtime_detail_field ~width ~style:Ansi.reset "Connection / provider ID" runtime.ro_provider_id
+        @ runtime_detail_field ~width ~style:Ansi.reset "Quota scope" (runtime_quota_scope_label runtime)
+        @ runtime_detail_field ~width ~style:Ansi.reset "Response-local quota scope"
+            (Option.value ~default:"not reported" runtime.ro_quota_scope)
+      in
+      let assignment_fields =
+        (match position with
+         | None -> []
+         | Some (lane, at, total) ->
+             (* The lane is named because "Used by lanes" below can now hold
+                several, and a position without its lane is a place in an
+                unnamed list. *)
+             runtime_detail_field ~width ~style:Ansi.reset "Lane position"
+               (Printf.sprintf "%d of %d in %s" at total lane))
         @ runtime_detail_field ~width ~style:Ansi.reset "Used by lanes"
             (match lanes with [] -> "unassigned" | values -> String.concat ", " values)
         @ runtime_detail_field ~width ~style:Ansi.reset "Default runtime"
             (runtime_bool runtime.ro_is_default)
-      in
-      let candidate =
-        match position with
-        | None -> []
-        | Some (lane, at, total) ->
-            (* The lane is named because "Used by lanes" above can now hold
-               several, and a position without its lane is a place in an
-               unnamed list. *)
-            runtime_detail_field ~width ~style:Ansi.reset "Lane position"
-              (Printf.sprintf "%d of %d in %s" at total lane)
       in
       let quota =
         match runtime_quota_badge runtime with
@@ -355,22 +367,22 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.reset "Probe status"
               (runtime_probe_status_label row.rpp_status)
             @ runtime_detail_field ~width ~style:Ansi.reset "Probe transport" transport
+            @ (match row.rpp_latency_ms with
+               | None -> []
+               | Some value ->
+                   runtime_detail_field ~width ~style:Ansi.reset "Latency"
+                     (Printf.sprintf "%.0fms" value))
+            @ (match row.rpp_http_status with
+               | None -> []
+               | Some value ->
+                   runtime_detail_field ~width ~style:Ansi.reset "HTTP status"
+                     (string_of_int value))
             @ runtime_detail_field ~width ~style:Ansi.reset "Checked at"
                 (Terminal_text.short_timestamp row.rpp_checked_at)
             (* No Reachable row: the decoder admits a probe only when its
                reachable flag agrees with its status, so the row could only
                repeat the status two rows above it -- "reachable" then
                "yes". *)
-            @ (match row.rpp_http_status with
-               | None -> []
-               | Some value ->
-                   runtime_detail_field ~width ~style:Ansi.reset "HTTP status"
-                     (string_of_int value))
-            @ (match row.rpp_latency_ms with
-               | None -> []
-               | Some value ->
-                   runtime_detail_field ~width ~style:Ansi.reset "Latency"
-                     (Printf.sprintf "%.0fms" value))
             @ (match runtime_probe_annotation ~status:row.rpp_status row.rpp_error with
                | None -> []
                | Some (Runtime_probe_note note) ->
@@ -445,8 +457,14 @@ let runtime_detail_lines state target ~width =
           runtime_detail_field ~width ~style:(Theme.warn ()) "Last failure"
             (Terminal_text.single_line (runtime_failed_attempt_text attempt))
       in
-      fields @ candidate @ evidence_lines @ usage_lines @ quota @ rate_limit @ failed_attempt
-      @ keeper_lines @ probe_lines @ probe_limitations
+      runtime_detail_section ~first:true "1. 현재 상태 · 연결 진단 (Health & Probe)"
+      @ probe_lines @ failed_attempt @ quota @ rate_limit @ usage_lines @ probe_limitations
+      @ runtime_detail_section "2. 레인 배정 · 실행 성적 (Assignment & History)"
+      @ assignment_fields @ keeper_lines @ evidence_lines
+      @ runtime_detail_section "3. 모델 · 컨텍스트 스펙 (Model & Context)"
+      @ model_fields
+      @ runtime_detail_section "4. 쿼터 범위 · 계정 연결 (Quota & Connection)"
+      @ connection_fields
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
@@ -545,7 +563,6 @@ let render_runtime (state : state) =
           (screen_title " MASC System / Runtime") reading_note timestamp
           (connection_badge state)
     | Some snapshot ->
-        let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
         let probe_status =
           match snapshot.Masc.Tui_decode.rss_probe with
           | None -> (Theme.warn ()) ^ "probe unavailable" ^ Ansi.reset
@@ -558,44 +575,20 @@ let render_runtime (state : state) =
             (Theme.warn ()) ^ " / read failed" ^ Ansi.reset
           else ""
         in
-        let all_count =
-          List.length snapshot.rss_resolved.Masc.Tui_decode.rrs_runtimes
+        let current =
+          match state.runtime_mode with
+          | Masc_tui_types.Runtime_lanes -> `Runtime_lanes
+          | Masc_tui_types.Runtime_all -> `Runtime_all
         in
-        (* Features counts the shared inventory, including plugins. A missing
-           inventory read is unknown rather than zero or an exact-lane count. *)
-        let feature_reading =
-          Option.map
-            (fun (snapshot : Masc.Tui_decode_lane_inventory.snapshot) ->
-              string_of_int (List.length snapshot.rows))
-            state.lane_inventory
+        let title = screen_title " MASC System / Runtime" in
+        let after =
+          Printf.sprintf "  %s%s  %s  %s" probe_status probe_read timestamp
+            (connection_badge state)
         in
-        let lanes_active = state.runtime_mode = Masc_tui_types.Runtime_lanes in
-        Printf.sprintf "%s  %s  %s%s  %s  %s"
-          (screen_title " MASC System / Runtime")
-          (tab_strip
-             ~width:
-               (tab_strip_width ~cols
-                  ~before:(screen_title " MASC System / Runtime" ^ tab_strip_gap)
-                  ~after:
-                    (Printf.sprintf "  %s%s  %s  %s" probe_status probe_read
-                       timestamp (connection_badge state)))
-             ~press:pressable
-             [ ( tab_entry_label "Candidate orders"
-                   (Some
-                      (Printf.sprintf "%s, %s"
-                         (Masc_tui_message_layout.count_noun lane_count "lane")
-                         (Masc_tui_message_layout.count_noun
-                            (List.length snapshot.rss_candidates) "slot")))
-               , lanes_active
-               , Press_runtime_mode Masc_tui_types.Runtime_lanes )
-             ; ( tab_entry_label "All runtimes" (Some (string_of_int all_count))
-               , not lanes_active
-               , Press_runtime_mode Masc_tui_types.Runtime_all )
-             ; ( tab_entry_label "Features" feature_reading
-               , false
-               , Press_standalone_lanes )
-             ])
-          probe_status probe_read timestamp (connection_badge state)
+        Printf.sprintf "%s  %s%s" title
+          (runtime_substrate_tab_strip state ~cols
+             ~before:(title ^ tab_strip_gap) ~after ~current)
+          after
   in
   let authority_rows = Masc_tui_types.runtime_authority_rows ~cols state in
   let selection_rows = runtime_selection_summary_for_viewport ~rows ~cols state in

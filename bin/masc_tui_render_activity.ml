@@ -36,6 +36,8 @@ let system_logs_status state = match System_logs_view.source state.system_logs w
   | Server -> "Server  " ^ connection_badge state
   | This_tui -> System_logs_view.source_label This_tui
 
+let system_log_detail_section = detail_section_heading
+
 let system_log_detail_lines (state : state) ~seq ~width =
   let entry =
     Option.bind (system_logs_page state).lp_snapshot (fun snapshot ->
@@ -55,23 +57,28 @@ let system_log_detail_lines (state : state) ~seq ~width =
         Option.map string_of_int entry.sl_turn
         |> Option.value ~default:Masc_tui_theme.Glyph.no_value
       in
-      let fields =
-        system_log_detail_field ~width ~style:Ansi.dim "Origin"
-          (System_logs_view.source_label (System_logs_view.source state.system_logs))
-        @ system_log_detail_field ~width ~style:Ansi.dim "Sequence"
-          (string_of_int entry.sl_seq)
-        @ system_log_detail_field ~width ~style:Ansi.dim "Timestamp" entry.sl_ts
+      let core_fields =
+        system_log_detail_section ~first:true
+          "1. 로그 메시지 · 핵심 상태 (Message & Severity)"
         @ system_log_detail_field ~width ~style:level_style "Level"
             (Masc.Tui_decode.system_log_level_label entry.sl_level |> String.trim)
-        @ system_log_detail_field ~width ~style:Ansi.dim "Category"
-            (system_log_category_text entry)
-        @ system_log_detail_field ~width ~style:Ansi.dim "Source"
-            (Masc.Tui_decode.system_log_source_label entry.sl_source)
-        @ system_log_detail_field ~width ~style:Ansi.dim "Module" entry.sl_module
-        @ system_log_detail_field ~width ~style:Ansi.dim "Keeper" keeper
-        @ system_log_detail_field ~width ~style:Ansi.dim "Turn" turn
         @ system_log_detail_field ~width ~style:Ansi.reset "Message"
             entry.sl_message
+        @ system_log_detail_field ~width ~style:Ansi.reset "Timestamp" entry.sl_ts
+        @ system_log_detail_field ~width ~style:Ansi.reset "Category"
+            (system_log_category_text entry)
+      in
+      let metadata_fields =
+        system_log_detail_section "2. 발생 위치 · 메타데이터 (Origin & Context)"
+        @ system_log_detail_field ~width ~style:Ansi.dim "Keeper" keeper
+        @ system_log_detail_field ~width ~style:Ansi.dim "Turn" turn
+        @ system_log_detail_field ~width ~style:Ansi.dim "Module" entry.sl_module
+        @ system_log_detail_field ~width ~style:Ansi.dim "Source"
+            (Masc.Tui_decode.system_log_source_label entry.sl_source)
+        @ system_log_detail_field ~width ~style:Ansi.dim "Origin"
+            (System_logs_view.source_label (System_logs_view.source state.system_logs))
+        @ system_log_detail_field ~width ~style:Ansi.dim "Sequence"
+            (string_of_int entry.sl_seq)
       in
       let details =
         (* One name for the section, whichever branch draws it: the empty
@@ -79,17 +86,18 @@ let system_log_detail_lines (state : state) ~seq ~width =
            the same part of the pane answered to two names depending on
            whether it had anything in it. Caps for the heading, the way every
            other detail pane spells one. *)
-        match entry.sl_details with
-        | `Null -> [ Ansi.dim, "  STRUCTURED DETAILS  none" ]
-        | json ->
-            let source =
-              "```json\n" ^ Yojson.Safe.pretty_to_string json ^ "\n```"
-            in
-            (Ansi.bold, "  STRUCTURED DETAILS")
-            :: (document_markdown ~width source
-                |> List.map (fun line -> Ansi.reset, "  " ^ line))
+        system_log_detail_section "3. 구조화 상세 (STRUCTURED DETAILS)"
+        @ (match entry.sl_details with
+           | `Null -> [ Ansi.dim, "  STRUCTURED DETAILS  none" ]
+           | json ->
+               let source =
+                 "```json\n" ^ Yojson.Safe.pretty_to_string json ^ "\n```"
+               in
+               (Ansi.bold, "  STRUCTURED DETAILS")
+               :: (document_markdown ~width source
+                   |> List.map (fun line -> Ansi.reset, "  " ^ line)))
       in
-      fields @ details
+      core_fields @ metadata_fields @ details
 
 let render_system_log_detail (state : state) seq =
   let terminal_rows, cols = get_terminal_size () in

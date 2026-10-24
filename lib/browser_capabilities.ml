@@ -66,7 +66,7 @@ let gecko_only backend invocation constraints = match backend with
 let snapshot_target backend ~action = match backend with
   | Connected Browser_lane.Ego_task_space -> conditional ~action Interact
       [observed;"target is {ref} from the latest snapshot of the same page, {role, name, exact} or {text, exact}, given alone with expectedUrl.";
-       "Refused before any effect when the tab is not at expectedUrl or the target names no element or several (ego lists the candidates); ego brings the target into view and acts.";
+       "The URL is checked before SDK entry. Ego owns locator resolution, actionability and auto-scrolling; native method failures, including missing or ambiguous targets, leave the result uncertain and are never replayed.";
        "The receipt lists the pages the action opened as popups (tabIds) and a JavaScript dialog it raised; the dialog stays open.";ego_agent_pages]
   | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium ->
     Unsupported "Only an ego connection acts on its own snapshot targets; use selector or documentId/nodeId instead."
@@ -173,11 +173,11 @@ let support backend operation = match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium -> conditional ~action:"click" Interact
           [observed;target;"Uses native pointer input; captures/checks the current URL when expectedUrl is omitted."]
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"click" Interact
-          [observed;target;"Uses ego's native mouse input at the target; captures/checks the current URL when expectedUrl is omitted.";ego_agent_pages]
+          [observed;"Selector uses Ego SDK locators and native click, including iframe/shadow traversal and auto-scrolling. Scene references retain MASC identity and coordinate guards.";"The URL read before SDK entry is reported; it is not an atomic navigation guard.";ego_agent_pages]
       | Safari_unavailable -> missing)
     | Hover -> (match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium -> conditional ~action:"hover" Interact [observed;target]
-      | Connected Browser_lane.Ego_task_space -> conditional ~action:"hover" Interact [observed;target;ego_agent_pages]
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"hover" Interact [observed;"Selector uses native Ego hover and auto-scrolling. Scene references retain MASC identity and coordinate guards.";ego_agent_pages]
       | Connected Browser_lane.Web_extension ->
         Unsupported "WebExtension does not serve trusted hover; the selected tab must not be silently moved to another browser."
       | Safari_unavailable -> missing)
@@ -221,11 +221,15 @@ let support backend operation = match backend with
     | Fill_snapshot_target -> snapshot_target backend ~action:"fill"
     | Hover_snapshot_target -> snapshot_target backend ~action:"hover"
     | Double_click_snapshot_target -> snapshot_target backend ~action:"double_click"
-    | Fill -> dom_input backend (conditional ~action:"fill" Interact
-        [observed;target;"Replaces the value of a text input or textarea and emits input/change, or replaces the content of a contenteditable editor with insertText (the editor gets input events); this is not trusted keyboard typing or submission."])
+    | Fill -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"fill" Interact
+          [observed;"Selector uses native Ego fill, locator resolution and auto-scrolling. Scene references retain the MASC DOM adapter. Fill does not press Enter or submit.";ego_agent_pages]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
+        dom_input backend (conditional ~action:"fill" Interact
+          [observed;target;"Replaces the value of a text input or textarea and emits input/change, or replaces the content of a contenteditable editor with insertText (the editor gets input events); this is not trusted keyboard typing or submission."]))
     | Double_click -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"double_click" Interact
-          [observed;target;"ego's native double click; application behavior must be observed afterward.";ego_agent_pages]
+          [observed;"Selector uses native Ego double click and SDK actionability. Scene references retain MASC identity and coordinate guards; observe the application result.";ego_agent_pages]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
         if native backend then conditional ~action:"double_click" Interact
           [observed;target;"Native double click; application behavior must be observed afterward."] else missing)
@@ -255,7 +259,9 @@ let support backend operation = match backend with
            "Only automatic zoom mode is supported; per-origin scope may also affect and persist for same-origin tabs. Re-read the scene/screenshot afterward."]
       | Connected (Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
     | Select_option -> (match backend with
-      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Owned_chromium ->
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"select_option" Interact
+          [observed;"Pass value or distinct values ([] clears). Ego receives exact {value} objects and returns its native selected values. Disabled options are programmatically selectable. Native method failures are uncertain and are never replayed.";ego_agent_pages]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium ->
           dom_input backend (conditional ~action:"select_option" Interact
             [observed;"Pass one select's selector and either value for a single-choice select or distinct values for a multiple select ([] clears it). Missing, ambiguous or disabled requested options are refused before any effect.";
              "Replaces the selection, emits input and change once, and reports selectedValues after page handlers. This is DOM selection, not trusted pointer input."])

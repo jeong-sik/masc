@@ -3,7 +3,35 @@
 기본 탐색은 browser-lanes 본문으로 이어간다. 범위·참조·URL 거절,
 복잡한 컨트롤이나 이미지 관측이 필요한 경우 이 참조를 읽는다.
 
-## 범위와 변경된 페이지
+## Ego Lite의 snapshot과 native 입력
+
+`ego_task_space` 연결에서는 `BrowserRead mode=snapshot`으로 Ego 접근성 트리를 읽는다.
+기본은 viewport이며, 화면 밖 본문에는 `snapshotScope=full_page`, 특정 iframe·하위 트리에는
+`snapshotScope=subtree`와 앞선 snapshot의 `root`(예: `@12`)를 쓴다. snapshot의 ref는
+scene의 documentId/nodeId와 다른 식별자다.
+
+click·fill·hover·double_click은 관측한 `target: {ref: 12}`를 우선 쓴다. role/name이나
+text target도 사용할 수 있으나, 같은 이름이 프레임 안팎에 있으면 ref로 구분한다.
+`expectedUrl`은 snapshot에 나온 최상위 탭 URL이며 `framePath`를 섞지 않는다.
+조작 뒤나 stale/unknown ref 오류 뒤에는 같은 탭의 새 snapshot으로 이어간다.
+
+Ego의 `selector` 입력도 SDK가 직접 처리한다. 관측한 `@12`, `loc=role:…`, `text=…`,
+`loc=css:…` 또는 CSS를 사용하며 임의의 Playwright locator 문법을 추측하지 않는다.
+일치하는 실행 대상은 하나여야 한다. CSS는 열린 shadow root를 찾고, 최상위 문서에
+실행 가능한 대상이 없으면 iframe도 찾는다. click·fill·hover는 SDK가 대상까지 자동으로
+스크롤한다. Ego locator를 다른 연결의 top-document CSS selector로 옮겨 쓰지 않는다.
+
+`select_option`은 native `page.selectOption`으로 선택한다. 단일 값은 `value`,
+다중 선택은 중복 없는 `values`를 쓰며 `values: []`는 전체 해제다. MASC는 인자 형식을
+검사하고 선택 동작은 SDK에 맡긴다. 이 API는 programmatic selection이므로 비활성
+option도 선택할 수 있고 trusted 포인터 클릭을 뜻하지 않는다. 응답 뒤 현재 폼에서
+실제 선택 결과를 확인한다.
+
+text·elements·scene/regions는 목적에 맞게 추가한다. TUI에서 받은 scene node는 그
+documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔 추측하지 않는다.
+동작 오류는 이미 효과가 있었을 수 있다. 현재 페이지를 읽기 전에 입력을 반복하지 않는다.
+
+## scene/regions의 범위와 변경된 페이지
 
 - `expectedUrl`·`scope`·`navigationSource`는 최상위 문서의 `mode=scene` 또는
   `mode=regions` 읽기에서만 지원된다. 이 읽기에서는 받은 `url`을 expectedUrl로 쓴다.
@@ -36,7 +64,7 @@
 다른 연결이 요청됐다면 연결 선택으로 돌아간다.
 
 
-## 읽기 선택과 조작 대상
+## scene/regions의 읽기 선택과 조작 대상
 
 BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된 영역의
 `documentId`·`nodeId`를 `scope`로 전달하면 그 요소 아래의 화면에 보이는 내용을 읽는다.
@@ -46,7 +74,7 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 
 ## 관측하고 조작하기
 
-- 먼저 다음 결정에 필요한 정보를 정한다. 내용 확인은 `mode=text`, 화면 안의 조작 대상과
+- Ego 이외의 연결에서는 다음 결정에 필요한 정보를 정한다. 내용 확인은 `mode=text`, 화면 안의 조작 대상과
   참조는 지원되는 `mode=scene`, 추가 컨트롤 정보는 `mode=elements`로 읽는다.
   세 mode를 관례적으로 모두 호출하지 않는다. `truncated=true`이면 같은 scope·같은 한도의
   읽기를 그대로 반복하지 않는다. 잘림 원인이 출력 한도이면 스키마가 허용하는 더 큰 maxChars로
@@ -66,7 +94,7 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
   `>`와 따옴표, 기존 CSS escape를 보존한다. JSON 표시용 escape를 문자열에
   다시 삽입하거나 모든 backslash를 일괄 제거하지 않는다.
   긴 `nth-of-type` 경로를 기억으로 재작성하거나 실패한 경로의 숫자를 고치지 않는다.
-- selector 는 문서에서 하나뿐인 id(`#…`)가 있으면 거기서 시작한다. 그 앞부분을
+- CSS selector는 문서에서 하나뿐인 id(`#…`)가 있으면 거기서 시작한다. 그 앞부분을
   elements 의 `within` 에 그대로 넘기면 그 영역의 컨트롤만 다시 읽는다.
 - 페이지 안의 입력(click, fill, select_option, scroll, 키)은 어느 브라우저에서나
   `BrowserInteract`를 쓰고 직전 URL을 `expectedUrl`로 전달한다. `BrowserAct`는
@@ -74,8 +102,8 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
   별개의 동작이다.
 - `page_url_changed`로 거절되면 현재 URL과 대상을 다시 관측한다. 목적지 URL을
   expectedUrl로 추측하거나 URL 검사만 통과시키려고 과거 값을 바꾸지 않는다.
-- 조작 후 다시 읽어 실제 결과를 확인한다. 요소를 못 찾으면 같은 프레임에서
-  scene이 지원되면 scene을, 그렇지 않으면 elements를 다시 읽어 대상을 고른다.
+- 조작 후 다시 읽어 실제 결과를 확인한다. Ego의 대상 오류는 새 snapshot으로,
+  다른 연결은 같은 프레임의 scene 또는 elements로 대상을 다시 고른다.
   입력·관측이 바뀌지 않은 실패 호출을 그대로 반복하지 않는다.
 - 카드사·옵션 선택은 글자 text보다 관측된 control을 고른다. 숨겨진 native
   radio/checkbox에는 연결된 label이 control로 나타나며 `checked`는 연결된 입력의
@@ -88,11 +116,6 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 
 
 ## 이미지와 큰 응답
-
-ego 연결에서 `mode=snapshot`으로 관측한 AX `target`은 click·fill뿐 아니라 hover·double_click에도 쓴다.
-프레임 내부 ref도 ego가 해석한다. `expectedUrl`은 관측한 최상위 탭의 URL이며 `framePath`를 섞지 않는다.
-같은 이름이 바깥 문서에도 있으면 role/text보다 관측한 ref로 대상을 구분한다. 이 경로가 다른 연결의
-AX 지원이나 ego의 명시적 `framePath` 읽기·조작을 뜻하지는 않는다. 입력 뒤 실제 앱 결과를 다시 확인한다.
 
 `click_at`·`scroll_at`은 현재 screenshot의 `viewport`와 정규화된 `point`를 쓴다.
 `click_at`은 `button`(`primary` 기본, `middle`, `secondary`)으로 가운데·오른쪽 클릭도 한다.
@@ -108,7 +131,12 @@ AX 지원이나 ego의 명시적 `framePath` 읽기·조작을 뜻하지는 않�
 연결에 반복하지 않는다. 필요한 조작을 지원하는 현재 페이지의 관측된 컨트롤이 있으면
 요청 범위 안에서 사용하고, 그렇지 않으면 미수행 상태를 남긴다.
 
-`select_option`은 `selector`로 고른 `<select>` 하나를 조작한다. 단일 선택에는 `value`, 다중 선택에는 중복 없는 `values` 배열을 쓰며 둘을 섞지 않는다. `values: []`는 다중 선택을 모두 해제한다. 요청한 옵션이 없거나 모호하거나 비활성이면 어느 옵션도 바꾸지 않고 거절한다. 선택을 교체하고 `input`·`change`를 한 번씩 보낸 뒤 실제 `selectedValues`를 돌려준다. 페이지 이벤트가 선택을 다시 바꾸면 부분 효과로 실패하므로 현재 폼을 다시 읽는다. 이는 DOM 값 변경이며 신뢰된 포인터 클릭이 아니다.
+Ego 이외의 연결에서 `select_option`은 CSS로 고른 `<select>` 하나를 조작한다.
+단일 선택에는 `value`, 다중 선택에는 중복 없는 `values` 배열을 쓰며 둘을 섞지 않는다.
+`values: []`는 다중 선택을 모두 해제한다. 요청한 옵션이 없거나 모호하거나 비활성이면
+어느 옵션도 바꾸지 않고 거절한다. 선택을 교체하고 `input`·`change`를 한 번씩 보낸 뒤
+실제 `selectedValues`를 돌려준다. 페이지 이벤트가 선택을 다시 바꾸면 부분 효과로
+실패하므로 현재 폼을 다시 읽는다. 이는 DOM 값 변경이며 trusted 포인터 클릭이 아니다.
 
 마우스를 올려야 나타나는 컨트롤(예: 메시지 줄의 리액션 버튼)은 `webdriver_bidi`
 연결 하나에서 이 순서로 한다. 올리기 전에 읽은 목록에 그 컨트롤이 없는 것은 정상이다.

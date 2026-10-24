@@ -382,7 +382,7 @@ let test_input_acts_through_the_shared_page_scripts () =
   (* A click: its target is found, and the run that finds it takes five seconds. *)
   by_step ["page.target",(fun _ -> clock := !clock +. 5.; answered resolved); "page.pointer",(fun _ -> input_answer ())];
   let before = runs () in
-  (match interact (Lane.Click "#send") with
+  (match interact (Lane.Click_node {document_id="d1";node_id="send"}) with
    | Ok receipt -> check string "the click"
        {|{"tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","scrollX":0,"scrollY":0}|}
        (Yojson.Safe.to_string receipt)
@@ -400,25 +400,25 @@ let test_input_acts_through_the_shared_page_scripts () =
   (* Refused before any input. *)
   by_step ["page.target",(fun _ -> answered (in_page (obj ["interactionFailure",obj ["message",str "element_not_found"]])))];
   let before = runs () in
-  check string "a target the page does not have" "element_not_found" (before_effect "a missing target" (interact (Lane.Click "#gone")));
+  check string "a target the page does not have" "element_not_found" (before_effect "a missing target" (interact (Lane.Click_node {document_id="d1";node_id="gone"})));
   check (list string) "sends no input" ["page.target"] (steps_since before);
   by_step ["page.target",(fun _ -> answered resolved);"page.pointer",(fun _ -> refused "observed_viewport_changed")];
   check string "a page that moved since it was observed" "observed_viewport_changed"
-    (before_effect "a moved page" (interact (Lane.Click "#send")));
+    (before_effect "a moved page" (interact (Lane.Click_node {document_id="d1";node_id="send"})));
   (* After the input was sent. *)
   by_step ["page.target",(fun _ -> answered resolved);"page.pointer",(fun _ -> input_answer ~error:(str "Target closed") ())];
-  (match interact (Lane.Click "#send") with
+  (match interact (Lane.Click_node {document_id="d1";node_id="send"}) with
    | Error (Live.Outcome_unknown detail) -> check bool "says to read the tab" true (String_util.contains_substring detail "read tab 1")
    | other -> failf "a failed click was %s" (failure_kind other));
   by_step ["page.target",(fun _ -> answered resolved);"page.pointer",(fun _ -> Error Peer.Timed_out)];
-  check string "a stopped click" "unknown" (failure_kind (interact (Lane.Click "#send")));
+  check string "a stopped click" "unknown" (failure_kind (interact (Lane.Click_node {document_id="d1";node_id="send"})));
   (* The other pointer gestures. *)
   by_step ["page.target",(fun _ -> answered resolved);"page.pointer",(fun _ -> input_answer ())];
   let gesture name action =
     (match interact action with Ok _ -> () | other -> failf "%s was %s" name (failure_kind other));
     (last ()).args in
-  check bool "a hover presses nothing" true (field "button" (gesture "a hover" (Lane.Hover (Lane.Selector "#menu"))) = `Null);
-  check int "a double click clicks twice" 2 (to_int (field "count" (gesture "a double click" (Lane.Double_click (Lane.Selector "#row")))));
+  check bool "a hover presses nothing" true (field "button" (gesture "a hover" (Lane.Hover (Lane.Scene_node {document_id="d1";node_id="menu"}))) = `Null);
+  check int "a double click clicks twice" 2 (to_int (field "count" (gesture "a double click" (Lane.Double_click (Lane.Scene_node {document_id="d1";node_id="row"})))));
   let point = {Lane.Pointer.x=0.5;y=0.25} in
   let before = runs () in
   let right = gesture "a right click" (Lane.Click_at {point;viewport;button=Lane.Pointer.Secondary}) in
@@ -442,7 +442,7 @@ let test_input_acts_through_the_shared_page_scripts () =
   check string "a named key" "Enter" (keys (Lane.Press_key {document_id="d1";key=chord ~key:"Enter" ~modifiers:[]}));
   (* The DOM edits. *)
   by_step ["page.input",(fun _ -> dom_answer (obj ["action",str "fill";"url",str observed_url;"title",str "Slack"]))];
-  let fill = Lane.Fill {selector="#message";text="hi"} in
+  let fill = Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"} in
   (match interact fill with
    | Ok receipt -> check string "the fill" {|{"tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack"}|}
        (Yojson.Safe.to_string receipt)
@@ -456,9 +456,9 @@ let test_input_acts_through_the_shared_page_scripts () =
   let elsewhere = {Lane.Pointer.x=0.75;y=0.5} in
   let before = runs () in
   check string "inside a frame" "before effect"
-    (failure_kind (dispatch peer Live.Page_interact (interact_args ~frame_path:["iframe"] (Lane.Click "#send"))));
+    (failure_kind (dispatch peer Live.Page_interact (interact_args ~frame_path:["iframe"] (Lane.Click_node {document_id="d1";node_id="send"}))));
   check string "the operator's tab" "before effect"
-    (failure_kind (dispatch peer Live.Page_interact (interact_args ~tab_id:2 (Lane.Click "#send"))));
+    (failure_kind (dispatch peer Live.Page_interact (interact_args ~tab_id:2 (Lane.Click_node {document_id="d1";node_id="send"}))));
   check string "control characters" "before effect" (failure_kind (interact (Lane.Type_text {document_id="d1";text="a\nb"})));
   check string "a key ego cannot press" "before effect"
     (failure_kind (interact (Lane.Press_key {document_id="d1";key=chord ~key:"é" ~modifiers:["Control"]})));
@@ -468,6 +468,48 @@ let test_input_acts_through_the_shared_page_scripts () =
     [Lane.Tap_at {point;viewport}; Lane.Swipe {from=point;to_=elsewhere;viewport;via=[];duration_ms=0};
      Lane.Set_zoom {factor=1.5}; Lane.Set_viewport Lane.Browser_default; Lane.Activate_tab];
   check int "none of those ran a script" before (runs ())
+
+(* Selector requests must reach ego unchanged, without a MASC target/DOM run.
+   The SDK owns matching, scrolling and selection; native errors are uncertain. *)
+let test_selector_input_uses_ego_sdk () =
+  let asked = ref [] and native_error = ref `Null in
+  let peer = opened (fun sent ->
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.target_input" ->
+      asked := sent :: !asked;
+      let receipt = if field "action" sent.args = str "select_option" then
+          obj ["selectedValues",`List [str "b"]] else obj [] in
+      answered (obj ["urlBefore",str observed_url;"receipt",receipt;"error",!native_error;
+        "tab",obj ["url",str observed_url;"title",str "Slack"]])
+    | other -> failf "selector input invoked its own adapter: %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let selector = "loc=role:button[name=\"Send\"]" in
+  let actions = [Lane.Click selector; Lane.Fill {selector;text="hello"};
+    Lane.Hover (Lane.Selector selector); Lane.Double_click (Lane.Selector selector);
+    Lane.Select_option {selector;selection=Lane.Single_option "b"};
+    Lane.Select_option {selector;selection=Lane.Multiple_options ["a";"b"]}] in
+  List.iter (fun action ->
+    match dispatch peer Live.Page_interact (interact_args action) with
+    | Ok receipt ->
+      let sent = List.hd !asked in
+      check string "SDK locator is unchanged" selector (text (field "target" sent.args));
+      check string "explicit result identifies the locator" selector (text (field "selector" receipt));
+      (match action with
+       | Lane.Select_option _ -> check bool "selection is returned" true (field "selectedValues" receipt = `List [str "b"])
+       | Lane.Activate_tab | Lane.Click _ | Lane.Fill _ | Lane.Set_zoom _ | Lane.Set_viewport _
+       | Lane.Double_click _ | Lane.Double_click_at _ | Lane.Type_text _ | Lane.Press_key _
+       | Lane.Scroll _ | Lane.Hover _ | Lane.Drag_to _ | Lane.Hover_at _ | Lane.Tap_at _
+       | Lane.Swipe _ | Lane.Click_at _ | Lane.Scroll_at _ | Lane.Drag _ | Lane.Follow_link _
+       | Lane.Click_node _ | Lane.Fill_node _ | Lane.Click_target _ | Lane.Fill_target _
+       | Lane.Hover_target _ | Lane.Double_click_target _ -> ())
+    | other -> failf "native selector was %s" (failure_kind other)) actions;
+  check int "one native run per input" (List.length actions) (List.length !asked);
+  native_error := str "native input reply lost";
+  let before = List.length !asked in
+  check string "a native failure is uncertain" "unknown"
+    (failure_kind (dispatch peer Live.Page_interact (interact_args (Lane.Click selector))));
+  check int "no automatic replay" (before + 1) (List.length !asked)
 
 let test_native_drag_and_release () =
   let sent = ref [] and mode = ref "success" in
@@ -562,12 +604,12 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_capture, obj ["tabId",`Int 1];
       Live.Page_act, act_args (Lane.Action.Open_tab "https://example.test/");
       Live.Page_goto, obj ["tabId",`Int 1;"url",str "https://example.test/"];
-      Live.Page_interact, interact_args (Lane.Click "#send");
+      Live.Page_interact, interact_args (Lane.Click_node {document_id="d1";node_id="send"});
       Live.Page_interact, interact_args (Lane.Hover_at {point={x=0.5;y=0.5};viewport});
       Live.Page_interact, interact_args (Lane.Scroll_at {point={x=0.5;y=0.5};viewport;x=0;y=120});
       Live.Page_interact, interact_args (Lane.Type_text {document_id="d1";text="hi"});
       Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0});
-      Live.Page_interact, interact_args (Lane.Fill {selector="#message";text="hi"});
+      Live.Page_interact, interact_args (Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"});
       Live.Page_interact, interact_args (Lane.Fill_target {target=Lane.Target_ref 5;text="hi"});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload});
@@ -829,11 +871,10 @@ let test_a_snapshot_reads_egos_own_tree () =
   check int "and none of them ran a script" runs (List.length !asked)
 
 (* The target script runs in node against a stand-in for ego's agent page at
-   [url]. [find] is what its waitForSelector does, [act] what its click or
-   fill answers; with an open dialog the page answers no URL read, as ego's
+   [url]. [act] is what its native Page method answers; with an open dialog the page answers no URL read, as ego's
    does. The stand-in prints the calls the script made and the cursor label
    each click carried; ego's fill takes no options. *)
-let target_stand_in ~url ~blocked ~find ~act = Printf.sprintf {js|
+let target_stand_in ~url ~blocked ~act = Printf.sprintf {js|
 const seen = [];
 const labels = [];
 let currentUrl = %s;
@@ -842,7 +883,6 @@ process.on("exit", () => { console.log("seen " + JSON.stringify(seen)); console.
 const page = {
   info: async () => { seen.push("info"); return dialogOpen ? {url: currentUrl, dialog: {type: "alert", message: "Hold on", defaultPrompt: ""}} : {url: currentUrl}; },
   url: async () => { seen.push("url"); if (dialogOpen) throw new Error("PageDialogOpenedError: Runtime.evaluate cannot run while a JavaScript alert dialog is open"); return currentUrl; },
-  waitForSelector: async (target, options) => { seen.push("wait " + target + " " + options.state); %s },
   click: async (target, options) => { seen.push("click " + target); labels.push(options === undefined ? null : options.label); %s },
   fill: async (target, text, options) => { seen.push("fill " + target + " " + text + (options === undefined ? "" : " with options")); %s },
   hover: async target => { seen.push("hover " + target); %s },
@@ -853,10 +893,10 @@ const taskSpace = async () => ({
   tabs: async () => [{label: "p1", openedBy: "agent", url: currentUrl, title: "Slack"}],
   page: () => page,
 });
-|js} (Yojson.Safe.to_string (`String url)) blocked find act act act act
+|js} (Yojson.Safe.to_string (`String url)) blocked act act act act
 
 let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
-  let url = ref observed_url and blocked = ref false and find = ref "return true;" and act = ref "return {};" in
+  let url = ref observed_url and blocked = ref false and act = ref "return {};" in
   let asked = ref [] and output = ref "" in
   let run ~window_s script =
     let sent = sent_of ~window_s script in
@@ -865,7 +905,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     | "tabs.list" -> answered tabs
     | "page.target_input" ->
       asked := sent :: !asked;
-      output := in_node (target_stand_in ~url:!url ~blocked:!blocked ~find:!find ~act:!act ^ script);
+      output := in_node (target_stand_in ~url:!url ~blocked:!blocked ~act:!act ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
@@ -884,13 +924,13 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     (Yojson.Safe.to_string (obj ["tabId",`Int 1;"action",str "click";"target",obj ["ref",`Int 12];
       "urlBefore",str observed_url;"url",str observed_url;"title",str "Slack"]))
     (answer "ref click" (click (Lane.Target_ref 12)));
-  check string "the dialog check and the wait come before the click" {|["info","url","wait @12 attached","url","click @12"]|} (seen ());
+  check string "the dialog and URL checks come before native input" {|["info","url","click @12"]|} (seen ());
   check string "ego's click carries the cursor label" {|["MASC · agent · click"]|} (printed "labels ");
   ignore (answer "named click" (on ~actor:"keeper/sangsu" (Lane.Click_target (Lane.Target_ref 12))));
   check string "and names the actor" {|["MASC · keeper/sangsu · click"]|} (printed "labels ");
   ignore (answer "role" (click (Lane.Target_role {role="button";name="Say \"hi\"";exact=true})));
   check string "a role target is ego's role locator with a JSON name"
-    {|["info","url","wait loc=role:button[name=\"Say \\\"hi\\\"\"] attached","url","click loc=role:button[name=\"Say \\\"hi\\\"\"]"]|} (seen ());
+    {|["info","url","click loc=role:button[name=\"Say \\\"hi\\\"\"]"]|} (seen ());
   ignore (answer "part of a name" (click (Lane.Target_role {role="link";name="Docs";exact=false})));
   check bool "a part of a name is name*=" true (contains (seen ()) {|loc=role:link[name*=\"Docs\"]|});
   ignore (answer "text" (click (Lane.Target_text {text="Send";exact=false})));
@@ -898,13 +938,13 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   ignore (answer "exact text" (click (Lane.Target_text {text="Send now";exact=true})));
   check bool "an exact text is ego's quoted text" true (contains (seen ()) {|click text=\"Send now\"|});
   ignore (answer "fill" (on (Lane.Fill_target {target=Lane.Target_ref 5;text="Ada"})));
-  check string "a fill gives ego its text and no label, which ego's fill refuses" {|["info","url","wait @5 attached","url","fill @5 Ada"]|} (seen ());
+  check string "a fill gives ego its text and no label, which ego's fill refuses" {|["info","url","fill @5 Ada"]|} (seen ());
   ignore (answer "hover" (on (Lane.Hover_target (Lane.Target_ref 12))));
   check string "hover uses ego's element resolver and native input"
-    {|["info","url","wait @12 attached","url","hover @12"]|} (seen ());
+    {|["info","url","hover @12"]|} (seen ());
   ignore (answer "double-click" (on (Lane.Double_click_target (Lane.Target_ref 12))));
   check string "double-click uses ego's element resolver and native input"
-    {|["info","url","wait @12 attached","url","double_click @12"]|} (seen ());
+    {|["info","url","double_click @12"]|} (seen ());
   act := {|return {popups: [{label: "p7", targetId: "T7"}]};|};
   check bool "an opened page is answered with its tab number" true
     (contains (answer "popup" (click (Lane.Target_ref 4))) {|"popups":[{"tabId":4,"label":"p7"}]|});
@@ -914,7 +954,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     (contains with_dialog {|"dialog":{"type":"prompt","message":"Name?","defaultValue":"Ada"}|});
   check bool "and the tab's row still says where the page is" true
     (contains with_dialog (Printf.sprintf {|"url":%S|} observed_url));
-  check string "the page itself is not read after the dialog" {|["info","url","wait @3 attached","url","click @3"]|} (seen ());
+  check string "the page itself is not read after the dialog" {|["info","url","click @3"]|} (seen ());
   act := "return {};";
   let runs = List.length !asked in
   let refused label result = match result with
@@ -930,28 +970,15 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     (contains (refused "moved page" (click (Lane.Target_ref 12))) "not at expectedUrl");
   check bool "and ego is not asked to find the target" false (contains (seen ()) "wait");
   url := observed_url;
-  find := {|page.url = async () => { throw new Error("Target closed"); }; return true;|};
-  ignore (refused "URL re-read failed" (click (Lane.Target_ref 12)));
-  check bool "a failed URL re-read sends no click" false (contains (seen ()) "click");
-  find := {|throw new Error('Locator text="A" matched 2 elements (2 visible, 0 hidden). Candidates: 1. button "A"; 2. button "A".');|};
-  check bool "several matches are refused before any effect, with ego's candidates" true
-    (contains (refused "ambiguous" (click (Lane.Target_text {text="A";exact=true}))) "matched 2 elements");
-  check bool "and nothing is clicked" false (contains (seen ()) "click");
-  find := {|currentUrl = "https://app.slack.com/other"; return true;|};
-  List.iter (fun action ->
-    check bool "navigation while finding a target is refused before input" true
-      (contains (refused "redirect during target wait" (on action)) "not at expectedUrl");
-    check bool "the new page receives no click or fill" false
-      (contains (seen ()) "click" || contains (seen ()) "fill"))
-    [Lane.Click_target (Lane.Target_ref 12);
-     Lane.Fill_target {target=Lane.Target_ref 12;text="Ada"};
-     Lane.Hover_target (Lane.Target_ref 12); Lane.Double_click_target (Lane.Target_ref 12)];
-  find := "return true;";
+  act := {|throw new Error('Locator text="A" matched 2 elements');|};
+  (match click (Lane.Target_text {text="A";exact=true}) with
+   | Error (Live.Outcome_unknown detail) -> check bool "native ambiguity is uncertain" true (contains detail "matched 2 elements")
+   | other -> failf "native ambiguity was %s" (failure_kind other));
   act := {|throw new Error("Target closed");|};
   (match click (Lane.Target_ref 12) with
    | Error (Live.Outcome_unknown detail) -> check bool "a failed click is unknown and asks for a read" true (contains detail "read tab 1")
    | other -> failf "a failed click was %s" (failure_kind other));
-  check int "each of them was one run" (runs + 9) (List.length !asked);
+  check int "each of them was one run" (runs + 4) (List.length !asked);
   let before = List.length !asked in
   check bool "an operator tab is refused without a run" true
     (match dispatch peer Live.Page_interact (interact_args ~tab_id:2 (Lane.Click_target (Lane.Target_ref 1))) with
@@ -1171,13 +1198,13 @@ let test_an_input_that_opens_a_dialog_answers_with_it () =
     | "page.target" -> answered resolved
     | "page.pointer" -> answered (obj ["guard",page_summary;"dialog",ego_dialog "confirm" "sure?";"tab",row;"error",`Null;"pointerReleased",`Bool true])
     | other -> failf "unexpected step %s" other);
-  (match interact (Lane.Click "#send") with
+  (match interact (Lane.Click_node {document_id="d1";node_id="send"}) with
    | Ok receipt -> check string "the click and the dialog it opened"
        {|{"tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"confirm","message":"sure?"}}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "a click that opened a dialog was %s" (failure_kind other));
   reply := (fun _ -> answered (obj ["dialog",ego_dialog "alert" "saved";"tab",row]));
-  (match interact (Lane.Fill {selector="#message";text="hi"}) with
+  (match interact (Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"}) with
    | Error (Live.Partial_failure {tab_id; receipt; message}) ->
      check int "the tab" 1 tab_id;
      check string "where it is and the dialog"
@@ -1186,7 +1213,7 @@ let test_an_input_that_opens_a_dialog_answers_with_it () =
      check bool "says to answer it" true (String_util.contains_substring message "accept_dialog or dismiss_dialog")
    | other -> failf "a fill the dialog stopped was %s" (failure_kind other));
   reply := (fun _ -> refused "tab 1 is blocked on a JavaScript dialog; list the tabs to read it, and answer it with accept_dialog or dismiss_dialog before another step");
-  check string "a blocked page" "before effect" (failure_kind (interact (Lane.Fill {selector="#message";text="hi"})))
+  check string "a blocked page" "before effect" (failure_kind (interact (Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"})))
 
 (* The dialog scripts in node, against a stand-in for ego: one agent page,
    [open] the dialog it is blocked on, and [opening] the one the next click
@@ -1263,14 +1290,14 @@ let test_dialog_scripts_in_node () =
   check string "none open" "no dialog is open in this tab" (before_effect "a dismissal with none open" (act Lane.Action.Dismiss_dialog));
   check (list string) "and nothing was answered" ["info"] (seen ());
   scenario := (`Null, ego_dialog "confirm" "sure?", "click");
-  (match interact (Lane.Click "#send") with
+  (match interact (Lane.Click_node {document_id="d1";node_id="send"}) with
    | Ok receipt -> check string "the click and its dialog"
        {|{"tabId":1,"action":"click","urlBefore":"https://app.slack.com/","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"confirm","message":"sure?"}}|}
        (Yojson.Safe.to_string receipt)
    | other -> failf "a click that opened a dialog was %s" (failure_kind other));
   check (list string) "no page script after the dialog opened, and ego's click carried its label" ["info";"evaluate";"click MASC · agent · click";"info"] (seen ());
   scenario := (`Null, alert, "evaluate");
-  (match interact (Lane.Fill {selector="#message";text="hi"}) with
+  (match interact (Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"}) with
    | Error (Live.Partial_failure {receipt; _}) -> check string "a fill the dialog stopped"
        {|{"tabId":1,"action":"fill","url":"https://app.slack.com/","title":"Slack","dialog":{"type":"alert","message":"saved"}}|}
        (Yojson.Safe.to_string receipt)
@@ -1635,7 +1662,7 @@ let test_input_frame_paths_are_refused_with_the_way_that_works () =
   let says label needle result =
     check bool label true (String_util.contains_substring (before_effect label result) needle) in
   says "frame input names target" "acts inside frames through target"
-    (dispatch peer Live.Page_interact (interact_args ~frame_path:["#frame"] (Lane.Click "#send")));
+    (dispatch peer Live.Page_interact (interact_args ~frame_path:["#frame"] (Lane.Click_node {document_id="d1";node_id="send"})));
   says "an upload into a frame names the top document" "top document"
     (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=["#frame"];
       interaction=Lane.Action.Upload {target=Lane.Action.File_input "#file";paths=["/tmp/note.txt"]}})))
@@ -1774,7 +1801,8 @@ let () =
       test_case "the dialog scripts run against a stand-in in node" `Quick test_dialog_scripts_in_node;
       test_case "a snapshot target is found by ego and checked first" `Quick test_a_snapshot_target_is_found_by_ego_and_checked_first;
       test_case "the space goes to the operator and back" `Quick test_the_space_goes_to_the_operator_and_back;
-      test_case "input acts through the shared page scripts" `Quick test_input_acts_through_the_shared_page_scripts;
+      test_case "scene input preserves shared identity checks" `Quick test_input_acts_through_the_shared_page_scripts;
+      test_case "selectors use ego SDK" `Quick test_selector_input_uses_ego_sdk;
       test_case "downloads are listed and published once" `Quick test_downloads_are_listed_and_published_once;
       test_case "the download wait runs against a stand-in in node" `Quick test_the_download_wait_runs_in_node;
       test_case "an upload keeps its files until the space ends" `Quick test_an_upload_keeps_its_files_until_the_space_ends;

@@ -837,7 +837,9 @@ let commit_verdict
         | None ->
           let cause = Commit_failed { detail = Masc_domain.masc_error_to_string error } in
           Stalled cause, registry_outcome_of_stop_cause cause)
-     | _ ->
+     | Masc_domain.Task (Masc_domain.Task_error.NotFound _ | AlreadyClaimed _
+         | NotClaimed _ | InvalidId _ | TransitionRejected _ | VerificationSuperseded _)
+     | Agent _ | Auth _ | System _ ->
        let cause = Commit_failed { detail = Masc_domain.masc_error_to_string error } in
        Stalled cause, registry_outcome_of_stop_cause cause)
 ;;

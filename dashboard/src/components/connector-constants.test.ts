@@ -7,7 +7,6 @@ import {
   channelIcon,
   connectorAccentStyle,
   isInProcessConnector,
-  sidecarCommands,
 } from './connector-constants'
 
 describe('connector vocabulary constants', () => {
@@ -35,18 +34,8 @@ describe('isInProcessConnector', () => {
     expect(isInProcessConnector('discord')).toBe(true)
     expect(isInProcessConnector('slack')).toBe(true)
     expect(isInProcessConnector('imessage')).toBe(true)
-    expect(isInProcessConnector('telegram')).toBe(false)
+    expect(isInProcessConnector('telegram')).toBe(true)
     expect(isInProcessConnector('unknown')).toBe(false)
-  })
-})
-
-describe('sidecarCommands', () => {
-  it('uses the known sidecar dir for external connectors', () => {
-    expect(sidecarCommands('telegram').start).toBe('cd sidecars/telegram-bot && ./run.sh')
-    expect(sidecarCommands('telegram').stop).toBe('cd sidecars/telegram-bot && ./run.sh stop')
-  })
-  it('falls back to a derived dir for unknown connectors', () => {
-    expect(sidecarCommands('whatsapp').start).toBe('cd sidecars/whatsapp-bot && ./run.sh')
   })
 })
 

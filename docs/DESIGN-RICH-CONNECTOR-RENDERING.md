@@ -133,7 +133,7 @@ Legend: ✅ supported · ⚠️ partial / degraded · ❌ silently dropped / uns
 **Finding:** All three consume only `GateResponse.reply` (plain text) and ignore `GateResponse.structured`. Images embedded as `![alt](url)` are sent as text. Telegram chunking splits inside markdown entities. iMessage has no length guard. CLI prints raw text with no markdown awareness.
 
 **Improvements:**
-- **Telegram** (`sidecars/telegram-bot/src/formatters.py`, `bot.py`)
+- **Telegram** (`lib/keeper/keeper_telegram_render.ml`, `keeper_chat_telegram.ml`)
   - Use `parse_mode="HTML"` and convert rich blocks to Telegram HTML (`<b>`, `<i>`, `<code>`, `<pre>`).
   - Detect image URLs/files and send via `send_photo`/`send_document`/`send_audio`.
   - Chunk on codepoint boundaries and avoid splitting inside links/code fences.
@@ -373,7 +373,7 @@ Add tests:
 - `test_keeper_chat_slack.ml` — inline image → Block Kit image block; mrkdwn escape; long reply chunks.
 - `test_channel_gate_metrics.ml` — every unsupported block emits a downgrade/drop metric.
 - `test_gate_keeper_backend.ml` — `GateResponse.structured` includes final blocks and correlation ids.
-- `sidecars/telegram-bot/tests/test_formatters.py` — MarkdownV2 escape; scalar-aware chunking.
+- `test/test_telegram_native_gateway.ml` — committed block selection, HTML escape and lossless chunking.
 - `sidecars/shared/tests/test_gate_response.py` — structured event/poll payload parsing remains backward-compatible.
 - `dashboard/src/components/chat/markdown-blocks.test.ts` — ordered list, empty table header, unmatched backticks.
 - `dashboard/src/components/common/markdown-renderer.test.ts` — XSS sanitization, fence repair correctness.
@@ -418,7 +418,7 @@ Acceptance criteria:
 ### MASC Python sidecars
 - `sidecars/shared/gate_shared/gate_response.py`
 - `sidecars/shared/gate_shared/gate_client_base.py`
-- `sidecars/telegram-bot/src/formatters.py`, `bot.py`
+- `lib/keeper/keeper_telegram_render.ml`, `keeper_chat_telegram.ml`
 - `sidecars/cli-connector/src/bot.py`
 
 ### MASC Dashboard

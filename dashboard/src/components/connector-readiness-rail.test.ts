@@ -18,7 +18,6 @@ import {
 
 const noop: RailHandlers = {
   openConfig: () => {},
-  toggleProcess: () => {},
   expandHeader: () => {},
   scrollToBindings: () => {},
 }
@@ -26,7 +25,7 @@ const noop: RailHandlers = {
 describe('deriveRail', () => {
   it('all bad/idle when sidecar is down with no gate signal and no keepers', () => {
     const pills = deriveRail(
-      { sidecarUp: false, hasSidecarProcess: true, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
+      { gatewayAvailable: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
       noop,
     )
     expect(pills.find(p => p.key === 'token')?.state).toBe('bad')
@@ -37,7 +36,7 @@ describe('deriveRail', () => {
 
   it('all ok when running, gate healthy, has bindings', () => {
     const pills = deriveRail(
-      { sidecarUp: true, hasSidecarProcess: true, gateHealthy: true, bindingCount: 2, keeperCount: 3 },
+      { gatewayAvailable: true, gateHealthy: true, bindingCount: 2, keeperCount: 3 },
       noop,
     )
     expect(pills.every(p => p.state === 'ok')).toBe(true)
@@ -46,7 +45,7 @@ describe('deriveRail', () => {
 
   it('bindings warn when keepers exist but bindings = 0', () => {
     const pills = deriveRail(
-      { sidecarUp: true, hasSidecarProcess: true, gateHealthy: true, bindingCount: 0, keeperCount: 1 },
+      { gatewayAvailable: true, gateHealthy: true, bindingCount: 0, keeperCount: 1 },
       noop,
     )
     expect(pills.find(p => p.key === 'bindings')?.state).toBe('warn')
@@ -54,7 +53,7 @@ describe('deriveRail', () => {
 
   it('gate bad when gate explicitly unhealthy', () => {
     const pills = deriveRail(
-      { sidecarUp: true, hasSidecarProcess: true, gateHealthy: false, bindingCount: 0, keeperCount: 0 },
+      { gatewayAvailable: true, gateHealthy: false, bindingCount: 0, keeperCount: 0 },
       noop,
     )
     expect(pills.find(p => p.key === 'gate')?.state).toBe('bad')
@@ -64,16 +63,15 @@ describe('deriveRail', () => {
     const calls: string[] = []
     const handlers: RailHandlers = {
       openConfig: () => calls.push('config'),
-      toggleProcess: () => calls.push('process'),
       expandHeader: () => calls.push('header'),
       scrollToBindings: () => calls.push('bindings'),
     }
     const pills = deriveRail(
-      { sidecarUp: false, hasSidecarProcess: true, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
+      { gatewayAvailable: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
       handlers,
     )
     pills.forEach(p => p.onClick())
-    expect(calls).toEqual(['config', 'process', 'header', 'bindings'])
+    expect(calls).toEqual(['config', 'header', 'header', 'bindings'])
   })
 })
 
@@ -89,7 +87,7 @@ describe('ConnectorReadinessRail rendering', () => {
 
   it('renders 4 pills with data-rail-state matching deriveRail output', () => {
     const pills = deriveRail(
-      { sidecarUp: true, hasSidecarProcess: true, gateHealthy: true, bindingCount: 0, keeperCount: 1 },
+      { gatewayAvailable: true, gateHealthy: true, bindingCount: 0, keeperCount: 1 },
       noop,
     )
     render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
@@ -108,7 +106,7 @@ describe('ConnectorReadinessRail rendering', () => {
     // appears in the visible DOM — "진행 중" is reserved for the
     // aria-label / title so AT users still hear the busy state.
     const pills = deriveRail(
-      { sidecarUp: false, hasSidecarProcess: true, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
+      { gatewayAvailable: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
       noop,
       { process: true },
     )
@@ -151,7 +149,7 @@ describe('ConnectorReadinessRail rendering', () => {
       openConfig: () => { opened += 1 },
     }
     const pills = deriveRail(
-      { sidecarUp: false, hasSidecarProcess: true, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
+      { gatewayAvailable: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
       handlers,
     )
     render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
@@ -162,7 +160,7 @@ describe('ConnectorReadinessRail rendering', () => {
 
   it('each pill carries a screen-reader aria-label and a keyboard focus ring', () => {
     const pills = deriveRail(
-      { sidecarUp: false, hasSidecarProcess: true, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
+      { gatewayAvailable: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
       noop,
     )
     render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
@@ -178,7 +176,7 @@ describe('ConnectorReadinessRail rendering', () => {
 
   it('inflight pill sets aria-busy="true"', () => {
     const pills = deriveRail(
-      { sidecarUp: false, hasSidecarProcess: true, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
+      { gatewayAvailable: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
       noop,
       { process: true },
     )
@@ -189,7 +187,7 @@ describe('ConnectorReadinessRail rendering', () => {
 
   it('decorative glyph + label spans are aria-hidden so AT only reads the aria-label', () => {
     const pills = deriveRail(
-      { sidecarUp: true, hasSidecarProcess: true, gateHealthy: true, bindingCount: 1, keeperCount: 1 },
+      { gatewayAvailable: true, gateHealthy: true, bindingCount: 1, keeperCount: 1 },
       noop,
     )
     render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
@@ -203,27 +201,27 @@ describe('ConnectorReadinessRail rendering', () => {
 
   it('detail text is NOT in the visible DOM (stat-panel layout — no truncation at narrow widths)', () => {
     // Regression guard against the screenshot bug: under the old
-    // 2-row layout, detail text "설정됨 (sidecar 부팅 통과)" truncated
+    // 2-row layout, detail text "게이트웨이 설정됨" truncated
     // to "설." at narrow column widths. The stat-panel redesign removes
     // that visible text entirely — detail is available only to hover
     // (title) and AT (aria-label). This test pins the invariant so a
     // future regression re-introducing the detail <span> is caught.
     const pills = deriveRail(
-      { sidecarUp: true, hasSidecarProcess: true, gateHealthy: true, bindingCount: 2, keeperCount: 3 },
+      { gatewayAvailable: true, gateHealthy: true, bindingCount: 2, keeperCount: 3 },
       noop,
     )
     render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
     const tokenPill = container.querySelector('[data-rail-pill="token"]') as HTMLButtonElement
     // Visible text should be the label only — no detail sentence.
     const visibleText = tokenPill.textContent?.trim() ?? ''
-    expect(visibleText).not.toContain('설정됨 (sidecar 부팅 통과)')
+    expect(visibleText).not.toContain('게이트웨이 설정됨')
     // The detail IS available to AT + hover.
-    expect(tokenPill.getAttribute('aria-label')).toContain('설정됨 (sidecar 부팅 통과)')
+    expect(tokenPill.getAttribute('aria-label')).toContain('게이트웨이 설정됨')
   })
 
   it('each pill uses the stat-panel vertical layout + threshold-color gradient', () => {
     const pills = deriveRail(
-      { sidecarUp: true, hasSidecarProcess: true, gateHealthy: true, bindingCount: 1, keeperCount: 1 },
+      { gatewayAvailable: true, gateHealthy: true, bindingCount: 1, keeperCount: 1 },
       noop,
     )
     render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
@@ -298,7 +296,7 @@ describe('ConnectorReadinessRail layout', () => {
   // symmetrically.
   it('uses a 4-column grid (not flex-wrap) so pill widths are equal', () => {
     const pills = deriveRail(
-      { sidecarUp: true, hasSidecarProcess: true, gateHealthy: true, bindingCount: 1, keeperCount: 1 },
+      { gatewayAvailable: true, gateHealthy: true, bindingCount: 1, keeperCount: 1 },
       noop,
     )
     render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
@@ -311,7 +309,7 @@ describe('ConnectorReadinessRail layout', () => {
 
   it('renders exactly 4 pill buttons regardless of state mix', () => {
     const pills = deriveRail(
-      { sidecarUp: false, hasSidecarProcess: true, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
+      { gatewayAvailable: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
       noop,
     )
     render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)

@@ -265,7 +265,6 @@ describe('ConnectorStatusPanel', () => {
     expect(fetchGateKeepers).toHaveBeenCalled()
     expect(text).toContain('커넥터')
     expect(text).toContain('혼합 연결')
-    expect(text).toContain('Discord는 서버 내장 gateway')
     expect(text).toContain('connected')
     expect(text).toContain('Discord')
     expect(text).toContain('sangsu')
@@ -822,76 +821,6 @@ describe('ConnectorStatusPanel', () => {
     expect(bobGroup!.querySelector('[data-channel-id="999888"]')).not.toBeNull()
   })
 
-  it('shows sidecar-off empty state when no bindings and sidecar offline', async () => {
-    // Discord (RFC-0203) and Slack (RFC-0317) are in-process and do not
-    // render the sidecar-off panel anymore; use Telegram as the
-    // representative external sidecar for this assertion. The in-process
-    // hint case is covered by the follow-up test below.
-    const telegramConnector = {
-      ...sampleConnectorsResponse().connectors[0],
-      connector_id: 'telegram',
-      display_name: 'Telegram',
-      channel: 'telegram',
-      available: false,
-      connected: false,
-      stale: false,
-      status: 'offline',
-      status_path: '/tmp/telegram_status.json',
-      configured_bindings: [],
-    }
-    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
-    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
-      connectors: [telegramConnector],
-    }))
-    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
-
-    const { ConnectorStatusPanel } = await loadComponentWithApi({
-      fetchGateStatus,
-      fetchGateConnectors,
-      fetchGateKeepers,
-      lastEvent: signal(null),
-    })
-
-    render(html`<${ConnectorStatusPanel} />`, container)
-    await flushUi()
-
-    const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-    expect(text).toContain('사이드카 미시작')
-    expect(text).toContain('cd sidecars/telegram-bot && ./run.sh')
-    expect(text).toContain('사이드카 status 파일이')
-    expect(text).toContain('/tmp/telegram_status.json')
-    expect(text).toContain('관찰되지 않았습니다')
-    expect(text).toContain('Start')
-    expect(text).toContain('status')
-    expect(text).toContain('tail logs')
-
-    // Regression guard for the screenshot bug: when a connector card's
-    // brand accent is green (iMessage), the outer card renders a green
-    // gradient; a neutral `bg-[var(--color-bg-elevated)]` panel sitting inside it
-    // used to read as a "success" tint ("not started" painted green).
-    // The panel now uses informational amber + a Portainer-style left
-    // stripe so it's unambiguously "needs action" regardless of the
-    // parent connector's brand color.
-    const panel = container.querySelector('[data-sidecar-not-started-panel]') as HTMLElement | null
-    expect(panel).toBeTruthy()
-    expect(panel!.className).toContain('bg-[var(--warn-10)]')
-    expect(panel!.className).toContain('border-l-[var(--color-warn)]')
-    // And the explicit "Not running" status chip is the one AT users hear.
-    const chip = panel!.querySelector('[data-sidecar-status-chip]')
-    expect(chip).toBeTruthy()
-    expect(chip!.getAttribute('aria-label')).toContain('실행 중 아님')
-    expect(chip!.textContent).toContain('실행 중 아님')
-
-    const copyLabels = Array.from(panel!.querySelectorAll<HTMLButtonElement>('[data-copy-button]'))
-      .map(button => button.getAttribute('aria-label'))
-    expect(copyLabels).toEqual([
-      'Copy Telegram sidecar start command',
-      'Copy Telegram sidecar tail logs command',
-      'Copy Telegram sidecar status command',
-      'Copy Telegram sidecar stop command',
-    ])
-  })
-
   // RFC-0203 §Phase 3 — Discord runs in-process. When the gateway
   // hasn't connected (e.g. DISCORD_BOT_TOKEN unset), the operator
   // sees the in-process hint panel instead of the sidecar-off panel,
@@ -1019,7 +948,6 @@ describe('ConnectorStatusPanel', () => {
 
     const afterText = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(afterText).toContain('Browser → Server')
-    expect(afterText).toContain('Server → Sidecar')
     expect(afterText).toContain('keeper dir 2')
   })
 

@@ -11,8 +11,8 @@ import {
 describe('deriveMascPaths', () => {
   it('returns the repo-relative conventions', () => {
     const paths = deriveMascPaths()
-    expect(paths.keepersDir).toBe('config/keepers/')
-    expect(paths.sidecarsDir).toBe('sidecars/')
+    expect(paths.keepersDir).toBe('<config-root>/keepers/')
+    expect(paths.runtimeConfigPath).toBe('<config-root>/runtime.toml')
   })
 })
 
@@ -48,6 +48,6 @@ describe('ConnectorPathsStrip', () => {
     }
     const rows = container.querySelectorAll('[data-paths-row]')
     const labels = Array.from(rows).map(r => r.getAttribute('data-paths-row'))
-    expect(labels).toEqual(['키퍼', '사이드카'])
+    expect(labels).toEqual(['키퍼', '서버 설정'])
   })
 })

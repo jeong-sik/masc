@@ -1,39 +1,12 @@
 # Connector Config Schema (SSOT)
 
-Dashboard "커넥터" surface is meant to let an operator configure and control
-each sidecar without hand-editing files. This document enumerates what config
-each sidecar actually reads, where it reads it from, and how the dashboard
-should surface it in a form.
+Discord, iMessage, Slack and Telegram run inside the MASC server. Credentials
+and paths resolve through the server configuration boundary: an explicitly set
+nonblank environment value takes precedence over its runtime.toml override.
+Relative binding and audit paths resolve against the effective base path.
+The dashboard exposes connection state, setup instructions and Keeper bindings.
 
-The remaining external sidecars share the following resolution order via
-Pydantic `BaseSettings` + `TomlConfigSettingsSource`:
-
-```
-env  >  runtime TOML  >  field defaults
-```
-
-- External-sidecar TOML path: `${MASC_BASE_PATH}/.gate/runtime/<name>/config.toml`
-- Env file: `sidecars/<name>-bot/.env` (cwd-relative at process start)
-- Dashboard should **write the TOML**, not the `.env` — TOML is the persistent
-  surface, `.env` is developer scratch.
-
-Discord, Slack and iMessage are not sidecars. Their in-process OCaml gateways
-read what they need from the server environment, as documented in their
-sections below. Telegram is the one external sidecar left.
-
-## Common fields (all sidecars)
-
-| Field | Env alias | Default | Notes |
-|---|---|---|---|
-| `gate_base_url` | `GATE_BASE_URL` | `http://localhost:8935` | MASC server. Loopback host relaxes auth. |
-| `gate_api_token` | `GATE_API_TOKEN` | `""` | Required unless `gate_base_url` is loopback. |
-| `gate_timeout_sec` | `GATE_TIMEOUT_SEC` | 120 | int/float seconds, must be positive. |
-| `status_cache_ttl_sec` | `STATUS_CACHE_TTL_SEC` | 15 | gate status cache. |
-| `keeper_cache_ttl_sec` | `KEEPER_CACHE_TTL_SEC` | 30 | keeper discovery cache. |
-| `binding_store_path` | `<NAME>_BINDING_STORE_PATH` | `.gate/runtime/<name>/bindings.json` | runtime-bind file. |
-| `status_path` | `<NAME>_STATUS_PATH` | `.gate/runtime/<name>/status.json` | heartbeat written by sidecar. |
-
-## Per-sidecar required/unique fields
+## Connector settings
 
 ### Discord (in-process gateway — RFC-0203 §Phase 3)
 
@@ -201,38 +174,40 @@ Slack-specific setup:
 3. **OAuth & Permissions** → Bot Token Scopes: `chat:write`, `app_mentions:read`, `im:history`, `im:read` → install → `xoxb-…`.
 4. **Event Subscriptions** → enable → subscribe bot events: `app_mention`, `message.im`.
 
-### Telegram (`sidecars/telegram-bot/src/config.py`)
+### Telegram (native long polling)
 
-| Field | Env alias | Type | Required | Notes |
-|---|---|---|---|---|
-| `telegram_bot_token` | `TELEGRAM_BOT_TOKEN` | str | **yes** | `@BotFather` → `/newbot`. |
-| `default_keeper` | `TELEGRAM_DEFAULT_KEEPER` | str | no (`sangsu`) | |
-| `admin_user_ids` | `TELEGRAM_ADMIN_USER_IDS` | csv int | no | comma-separated Telegram user IDs. |
+Modules: `lib/server/server_telegram_in_process_gateway.ml`,
+`lib/gate/channel_gate_telegram_state.ml`, `lib/gate/telegram_poll_custody.ml`,
+`lib/keeper/keeper_chat_telegram.ml` and `lib/keeper/keeper_telegram_render.ml`.
 
-Telegram-specific setup:
+| Setting | Resolution | Default |
+|---|---|---|
+| Bot credential | `TELEGRAM_BOT_TOKEN` | required |
+| Bindings | `TELEGRAM_BINDING_STORE_PATH`, then `MASC_TELEGRAM_BINDING_STORE_PATH` | `.gate/runtime/telegram/bindings.json` |
+| Binding audit | `TELEGRAM_BINDING_AUDIT_PATH`, then `MASC_TELEGRAM_BINDING_AUDIT_PATH` | `.gate/runtime/telegram/binding_audit.jsonl` |
 
-1. Message `@BotFather` → `/newbot` → name + username → receive token.
-2. Optional `/setprivacy` → disable to let bot see group messages (or mention-only).
-3. Get user IDs via `@userinfobot` for `admin_user_ids`.
+1. Obtain a bot token from [@BotFather](https://t.me/BotFather).
+2. Set `TELEGRAM_BOT_TOKEN` in the server environment or runtime.toml and restart
+   MASC. Set group privacy according to which messages the bot should receive.
+3. Bind the numeric chat ID to a Keeper through the dashboard. Group chat IDs
+   can be negative. Unreadable binding state refuses acknowledgment.
 
-## Dashboard UI and Backend Endpoints
+The authenticated bot ID owns its cursor under
+`<base-path>/.gate/runtime/telegram/<bot-id>/cursor.json`. The cursor advances
+only after durable Keeper acceptance or an explicit ignored-message decision.
+The native continuation retains chat, forum/direct-message topic, reply and
+user coordinates. Terminal delivery renders the exact persisted assistant turn
+as balanced Telegram HTML chunks. Private/local media references and binary
+attachments without a public reference remain explicit delivery failures;
+partial sends record successful message IDs and do not imply automatic resume.
 
-For each connector the dashboard renders:
+## Dashboard and backend
 
-1. **Status header**: `healthy | degraded | failing`, heartbeat age, bot identity.
-2. **Lifecycle bar**: `Start` · `Stop` · `Restart` · `Tail logs` via
-   `POST /api/v1/sidecar/start?name=<id>`, `POST /api/v1/sidecar/stop?name=<id>`,
-   `GET /api/v1/sidecar/status?name=<id>`, and `GET /api/v1/sidecar/logs?name=<id>`.
-3. **Config form**: generated from the Pydantic JSON schema exposed by
-   `GET /api/v1/sidecar/schema?name=<id>` (`BotConfig.model_json_schema()`).
-   - Secret fields (`*_token`, `gate_api_token`) render masked.
-   - Enums (`reply_mode`) render as segmented controls.
-   - CSV fields (`admin_user_ids`) render as a tag input with integer validation.
-4. **Setup guide**: per-connector instructions for platform steps (Discord token,
-   Slack Socket Mode, Telegram BotFather, iMessage Full Disk Access).
-5. **Config persistence**: `GET /api/v1/sidecar/config?name=<id>` reads and
-   `POST` / `PUT /api/v1/sidecar/config?name=<id>` writes
-   `${MASC_BASE_PATH}/.gate/runtime/<id>/config.toml`.
+Connection state comes from `GET /api/v1/gate/connectors`. Keeper bindings use
+`POST /api/v1/gate/connector/bind?name=<id>` and
+`POST /api/v1/gate/connector/unbind?name=<id>`. Configuration panels provide
+credential/permission instructions. Gateways start with the server; connection
+configuration and actual remote connectivity are separate observations.
 
 ## References
 

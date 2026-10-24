@@ -1,15 +1,4 @@
-// ConnectorPathsStrip — collapsible disclosure panel that answers the
-// "where is my config?" question in one glance.
-//
-// Operators repeatedly ask "where does this keeper's TOML live?" or
-// "where is the sidecar run script?" and today the only answer is a code
-// tour or Slack. This strip surfaces the repo-relative conventions:
-//
-//   - Keepers dir  : config/keepers/ — keeper TOML
-//   - Sidecars dir : sidecars/       — sidecar run.sh scripts
-//
-// Collapsed by default so the main overview strip stays dense.
-
+// Connector configuration conventions; config-root is resolved by the server.
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { CopyableCode } from './common/copyable-code'
@@ -23,15 +12,15 @@ export function _testResetPathsStrip() {
 
 export interface MascPaths {
   keepersDir: string
-  sidecarsDir: string
+  runtimeConfigPath: string
 }
 
 /** Repo-relative conventions. Stable regardless of runtime state, so the
     cold-start / pre-runtime view shows the same paths. */
 export function deriveMascPaths(): MascPaths {
   return {
-    keepersDir: 'config/keepers/',
-    sidecarsDir: 'sidecars/',
+    keepersDir: '<config-root>/keepers/',
+    runtimeConfigPath: '<config-root>/runtime.toml',
   }
 }
 
@@ -66,7 +55,7 @@ export function ConnectorPathsStrip() {
       >
         <span>
           <span class="mr-2 text-3xs uppercase tracking-4">경로</span>
-          <span class="font-mono">${paths.sidecarsDir}</span>
+          <span class="font-mono">${paths.runtimeConfigPath}</span>
         </span>
         <span>${open ? '▴' : '▾'}</span>
       </button>
@@ -74,7 +63,7 @@ export function ConnectorPathsStrip() {
         ? html`
             <div id="connector-paths-body" class="space-y-1.5 border-t border-[var(--color-border-default)] px-3 py-2">
               <${PathRow} label="키퍼" value=${paths.keepersDir} hint="keeper TOML 설정 파일" />
-              <${PathRow} label="사이드카" value=${paths.sidecarsDir} hint="sidecar 스크립트 (run.sh) 위치" />
+              <${PathRow} label="서버 설정" value=${paths.runtimeConfigPath} hint="서버의 유효 config-root 아래 runtime.toml" />
             </div>
           `
         : null}

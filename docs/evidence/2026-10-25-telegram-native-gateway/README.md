@@ -3,7 +3,7 @@
 Native Stack #45832 adds bot-owned poll custody (#45819), Keeper ingress and
 terminal delivery (#45831), removes the external poller (#45834), and changes
 the dashboard to native setup (#45836). These are source changes; the issue
-#24497 remains open. The final evidence commit changes documentation only.
+#24497 remains open. The follow-up also consolidates the connector ID vocabulary used by navigation and setup.
 
 ## Measured dashboard behavior
 
@@ -143,3 +143,25 @@ configuration module. The native fixture now uses the repository's shared
 module ownership in the existing test SSOT. Production and Owner sources remain
 unchanged. A new narrow request covers native gateway/custody/REST execution;
 no native gateway suite PASS is attributed to these failed builds.
+
+## Completed native follow-up
+
+[Run 40111688477](https://github.com/jeong-sik/masc/actions/runs/40111688477)
+at `08563e81e95089d5dd9739a9390341c9935327a8` completed **SUCCESS**:
+8 native gateway cases, 10 poll custody cases, and 6 REST cases. See the
+[execution excerpt](native-followup.txt). The production and OCaml test inputs
+are unchanged at the subsequent dashboard/evidence head (empty diff over
+`lib`, `bin`, `test`, `config`, Dune inputs and `scripts/ci`). These 24 cases
+are separate from the 92 Owner cases recorded above. Full regression, browser
+native-workflow suites, deployed gateway and actual Telegram/model reply remain
+unverified. Earlier pending entries above record the sequence of observations.
+
+The original issue also named duplicated connector ID literals. Navigation and
+gateway setup now import one neutral `config/connector-ids.ts` vocabulary; the
+route filter uses its typed membership predicate.
+
+The existing navigation and connector-constants suites passed **31 tests** after
+this consolidation. Command from dashboard:
+`pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/config/navigation.test.ts src/components/connector-constants.test.ts`.
+See [the execution output](connector-ids-followup.txt). This is a separate run
+from the earlier 140 cases; suite overlap is not counted as new unique coverage.

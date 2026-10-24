@@ -1,4 +1,5 @@
 import type { RouteState, TabId } from '../types'
+import { isKnownConnectorId } from './connector-ids'
 
 type SurfaceId = TabId
 export const SETTINGS_ROUTE_SECTION_IDS = [
@@ -21,14 +22,6 @@ const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
 
 function isSettingsRouteSection(value: string | undefined): value is SettingsRouteSectionId {
   return !!value && SETTINGS_ROUTE_SECTION_SET.has(value)
-}
-
-const CONNECTOR_ROUTE_IDS = ['discord', 'imessage', 'slack', 'telegram'] as const
-type ConnectorRouteId = typeof CONNECTOR_ROUTE_IDS[number]
-const CONNECTOR_ROUTE_ID_SET = new Set<string>(CONNECTOR_ROUTE_IDS)
-
-function isConnectorRouteId(value: string | undefined): value is ConnectorRouteId {
-  return !!value && CONNECTOR_ROUTE_ID_SET.has(value)
 }
 
 export type DashboardSurfaceIcon =
@@ -63,8 +56,7 @@ type SurfaceSectionId =
   | 'skills' // SKILL.md catalog keepers load at turn start, with usage (RFC skills-as-tools §2.6).
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
-  // connectors (Phase 7: top-level surface — channel bridges; discord,
-  // imessage and slack run in-process, telegram still via a sidecar)
+  // connectors (top-level surface for server-owned channel gateways)
   // Per-connector sub-tabs (discord/imessage/slack/telegram) were merged into
   // connector-status on 2026-04-30; selection happens inside the page via
   // ConnectorOverviewStrip rather than top-level navigation.
@@ -531,7 +523,7 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
     delete next.surface
   }
 
-  if (tabId === 'connectors' && !isConnectorRouteId(next.connector)) {
+  if (tabId === 'connectors' && !isKnownConnectorId(next.connector)) {
     delete next.connector
   }
   delete next.operation

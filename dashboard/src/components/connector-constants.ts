@@ -1,6 +1,6 @@
-// Connector vocabulary for the server-owned gateways.
-export const KNOWN_CONNECTOR_IDS = ['discord', 'imessage', 'slack', 'telegram'] as const
-export type KnownConnectorId = (typeof KNOWN_CONNECTOR_IDS)[number]
+import { KNOWN_CONNECTOR_IDS, type KnownConnectorId } from '../config/connector-ids'
+
+export { KNOWN_CONNECTOR_IDS, type KnownConnectorId } from '../config/connector-ids'
 
 // Every registered connector runs in the MASC server.
 export const IN_PROCESS_CONNECTOR_IDS = KNOWN_CONNECTOR_IDS

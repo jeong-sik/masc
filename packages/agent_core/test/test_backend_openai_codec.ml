@@ -563,15 +563,15 @@ let test_minimax_native_catalog_replay () =
     | Ok message -> message
     | Error error -> Alcotest.fail (show_assistant_message_error error)
   in
-  let sync content fields =
+  let sync ?(tool = true) content fields =
     match Parse.parse_openai_response_result_json
             ~content_inline_reasoning:caps.content_inline_reasoning
-            (response_json ~content ~finish_reason:"tool_calls"
-               ~message_fields:(("tool_calls", `List [call]) :: fields) ()) with
+            (response_json ~content ~finish_reason:(if tool then "tool_calls" else "stop")
+               ~message_fields:((if tool then ["tool_calls", `List [call]] else []) @ fields) ()) with
     | Ok response -> assistant response
     | Error error -> Alcotest.fail (Parse.parse_error_to_string error)
   in
-  let stream content fields =
+  let stream ?(tool = true) content fields =
     let dialect = Reasoning_dialect.for_provider_config config in
     let inline_reasoning = match caps.content_inline_reasoning with
       | Capabilities.Think_tags | Capabilities.Think_tags_with_chat_replay -> true
@@ -600,8 +600,8 @@ let test_minimax_native_catalog_replay () =
        feed (chunk fields `Null);
        String.iter (fun byte -> feed (chunk ["content",`String (String.make 1 byte)] `Null)) text
      | _ -> feed (chunk (("content", content) :: fields) `Null));
-    feed (chunk ["tool_calls", `List [indexed_call]] `Null);
-    feed (chunk [] (`String "tool_calls"));
+    if tool then feed (chunk ["tool_calls", `List [indexed_call]] `Null);
+    feed (chunk [] (`String (if tool then "tool_calls" else "stop")));
     feed "[DONE]";
     match Complete_stream_acc.finalize_stream_acc acc with
     | Ok response -> assistant response
@@ -689,7 +689,37 @@ let test_minimax_native_catalog_replay () =
          (member "content" changed = (if String.trim expected_visible="" then `Null else `String expected_visible));
        check_string (label ^ " answer without thinking retained") "Sunny"
          (member "content" (List.nth wire 3) |> to_string))
-    cases) ["sync", sync; "stream", stream]
+    cases) ["sync", (fun content fields -> sync content fields);
+            "stream", (fun content fields -> stream content fields)];
+  (* No tool or independent reasoning may make the payload predicate true.
+     Exercise the real parser/accumulator, response cache, persisted message
+     codec, source policy, projection, serializer and final request builder. *)
+  List.iter (fun (mode, parse) ->
+    List.iter (fun raw ->
+      let first = parse (`String raw) [] in
+      let saved = Agent_core.Checkpoint.message_to_json first
+          |> Yojson.Safe.to_string |> Yojson.Safe.from_string in
+      let restored = match Agent_core.Checkpoint.message_of_json saved with
+        | Ok message -> message
+        | Error _ -> Alcotest.fail "tool-free MiniMax checkpoint round-trip failed" in
+      let history = [msg User [Text "First"]; restored; msg User [Text "Next"]] in
+      let wire config = Backend_openai_request.build_request ~config ~messages:history ()
+          |> Yojson.Safe.from_string |> member "messages" |> to_list in
+      let rendered = wire config in
+      check_int (mode ^ " tool-free blank carrier keeps its history row") 3
+        (List.length rendered);
+      let replay = List.nth rendered 1 in
+      check_string (mode ^ " retained row remains assistant") "assistant"
+        (member "role" replay |> to_string);
+      check_string (mode ^ " tool-free scalar bytes survive final request") raw
+        (member "content" replay |> to_string);
+      check_bool (mode ^ " no fabricated tool props up the empty carrier") true
+        (member "tool_calls" replay = `Null && member "reasoning_content" replay = `Null);
+      check_int (mode ^ " source mismatch still removes a blank assistant") 2
+        (List.length (wire {config with Provider_config.model_id="different-model"})))
+      [" \t "; " \n<think></think> "; " <think> \n </think> "])
+    ["sync", (fun content fields -> sync ~tool:false content fields);
+     "stream", (fun content fields -> stream ~tool:false content fields)]
 ;;
 
 let test_inline_carrier_validation_and_synthetic_stream () =

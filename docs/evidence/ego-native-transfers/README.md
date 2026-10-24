@@ -6,11 +6,15 @@ or ref unchanged. The upload receipt's `chosen` describes regular staged files
 handed to the SDK, not a readback of input.files or proof of submission. Sandbox
 file authorization, private staging and the task-space file lease remain.
 Chooser waits use the SDK default and host cancellation, without MASC's own
-5000ms or command deadline. Cleanup of an unanswered chooser remains.
+5000ms or command deadline. Cleanup of a captured chooser not handed files
+remains. Once setFiles enters, the SDK owns its cleanup even on failure.
 
 Selector-to-selector drag without waypoints calls `page.dragAndDrop` directly.
 Coordinate, scene-identity and custom-waypoint drags retain their distinct
-MASC contract and raw button-release cleanup.
+MASC contract and raw button-release cleanup. The SDK's native drag can be
+interrupted before release. On an error MASC sends native mouse.up once;
+missing/failed release or a dialog keeps the existing release-uncertain state,
+so later input is refused while observation/dialog handling/finish remain.
 
 ## Evidence
 
@@ -22,6 +26,15 @@ MASC contract and raw button-release cleanup.
 - [proof.json](proof.json) binds those results to both production function
   hashes; [sdk-output.txt](sdk-output.txt) and the inspected
   [native-transfers.png](native-transfers.png) record the observed state.
+- [chooser-failure.txt](chooser-failure.txt): while the chooser was captured,
+  the fixture changed its file input to text. SDK setFiles failed with
+  "Node is not a file input element"; without a second setFiles call, the next
+  chooser and upload succeeded in the same process.
+- [drag-dialog.txt](drag-dialog.txt): an owned mousedown handler opened an
+  alert. Native drag returned a dialog after mouse-down, with no mouse-up.
+  After dismissal a mouse move reported buttons=0, and explicit mouse.up
+  generated the missing event. This is evidence of absent release, not a claim
+  that subsequent movement preserved a pressed button.
 - Node production-boundary tests cover unchanged native selectors and uncertain
   failure without replay. OCaml sources parse; full host tests remain separate.
 

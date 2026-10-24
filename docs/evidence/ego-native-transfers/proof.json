@@ -31,7 +31,7 @@
       }
     },
     {
-      "selector": "@34",
+      "selector": "@54",
       "result": {
         "receipt": {},
         "error": null
@@ -39,9 +39,10 @@
     }
   ],
   "drag": {
-    "urlBefore": "http://localhost:61992/",
+    "urlBefore": "http://localhost:64412/",
     "receipt": {},
-    "error": null
+    "error": null,
+    "pointerReleased": true
   },
   "state": {
     "events": [
@@ -89,8 +90,8 @@
       }
     ]
   },
-  "snapshot": "[p1 \"Native transfers\" | space \"masc-ego-native-sdk-20261024\"(4): 1 managed, 0 untracked — p1* \"Native transfers\"]\nroot\n  container\n    text \"Attach note\"\n    textbox [ref=34]\n      button [ref=35]\n        text \"파일 선택\"\n      text \"note.txt\"\n  textbox [ref=36]\n    button [ref=37]\n      text \"파일 선택\"\n    text \"note.txt\"\n  textbox [ref=38]\n    button [ref=39]\n      text \"파일 선택\"\n    text \"note.txt\"\n  text \"Drag source\"\n  text \"Drop target\"\n  text \"Native drop completed\"\n",
+  "snapshot": "[p1 \"Native transfers\" | space \"masc-ego-native-sdk-20261024\"(4): 1 managed, 0 untracked — p1* \"Native transfers\"]\nroot\n  container\n    text \"Attach note\"\n    textbox [ref=54]\n      button [ref=55]\n        text \"파일 선택\"\n      text \"note.txt\"\n  textbox [ref=56]\n    button [ref=57]\n      text \"파일 선택\"\n    text \"note.txt\"\n  textbox [ref=58]\n    button [ref=59]\n      text \"파일 선택\"\n    text \"note.txt\"\n  text \"Drag source\"\n  text \"Drop target\"\n  text \"Native drop completed\"\n",
   "upload_sha256": "d5ac2e21ff041c75a7082025a271e66d8ee5a17dd4cf217019044acd3011e96a",
-  "target_sha256": "b8ac9144579793c4551c02759b50be8a9c319820a130d15444fcb3448749bcc2",
+  "target_sha256": "308019b72c1f090c8c59095d7e4b573773ce53f82d89ad54698278009615e77d",
   "scope": "Production native upload and target-input JavaScript on installed Ego; not host/Keeper dispatch or deployment proof."
 }

@@ -41,13 +41,15 @@ installed MASC replacement, or autonomous Keeper scenario is claimed here.
 
 The overall native-first objective remains open:
 
-1. Allow an agent's known action sequence, native wait and final snapshot to
-   execute through one broker command. Keep host Node filesystem/process access
+1. The workflow layer implements a known action sequence, native wait and
+   final snapshot in one broker command (see ../ego-native-workflow/). Its host
+   dispatch and real Keeper behavior still need verification. Keep host Node filesystem/process access
    outside the browser capability; do not expose the worker's host AsyncFunction
    to Keeper-provided JavaScript or build another locator/composition engine.
-2. Audit the remaining Ego input helpers (scene targets, direct link navigation,
-   scrolling, native drag, upload/dialog/download) against SDK methods. Keep
-   only demonstrated gaps and MASC ownership/artifact responsibilities.
+2. The transfers layer audits the remaining input adapters (see
+   ../ego-native-transfers/), delegates uploads/default selector drag and
+   retains demonstrated SDK gaps plus MASC ownership/artifact responsibilities.
+   Its integrated host behavior still needs verification.
 3. Verify the resulting host path and a real Keeper task, including human
    handoff and uncertain input. Source/fixture results alone do not close this.
 

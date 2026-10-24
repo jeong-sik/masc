@@ -100,7 +100,9 @@ val space_id : t -> int
     connection's overlay does. Native input checks the observed URL before calling ego; this is not an
     atomic navigation guard. Ego owns its locator/actionability waits; a method
     failure is uncertain, including a missing or stale target. Re-read a snapshot after page changes or input and on a native
-    stale/unknown ref refusal. Selector drags without waypoints use native [dragAndDrop]. Coordinate and
+    stale/unknown ref refusal. Selector drags without waypoints use native [dragAndDrop]. A native drag
+    failure attempts mouse-up once; a dialog or missing release proof preserves
+    the same release-uncertain state as raw drag. Coordinate and
     scene drags retain the observed waypoint contract, require zero duration
     and release the button in the same run.
     Unconfirmed release blocks further input on this peer; read/finish remain

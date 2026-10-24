@@ -170,7 +170,7 @@ let initialize t client =
               tool.name=companion_tool) tools with
             | [] -> Ok []
             | [_] when t.contract.tool_invocation=Host_context ->
-                let* reply=Agent_core.Mcp.call_tool_full client ~name:companion_tool ~arguments:(`Assoc [])
+                let* reply=Agent_core.Mcp.call_tool_full client ~name:companion_tool ~arguments:(`Assoc ["version",`Int 2])
                   |> Result.map_error (fun _ -> Protocol_failed "private companion handshake failed") in
                 let* value=match reply.is_error,reply.structured_content with
                   | (None|Some false),Some value -> Lane_addon_action.canonical value
@@ -179,7 +179,7 @@ let initialize t client =
                 (match value with
                  | `Assoc fields when List.sort String.compare (List.map fst fields)=["tools";"version"] ->
                    (match List.assoc "version" fields,List.assoc "tools" fields with
-                    | `Int 1,`List names ->
+                    | `Int 2,`List names ->
                       let* names=List.fold_left (fun result -> function
                         | `String name when List.mem name t.contract.exported_tools -> Result.map (fun names -> name::names) result
                         | _ -> Error (Protocol_failed "invalid companion export name")) (Ok []) names in

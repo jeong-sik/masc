@@ -67,6 +67,43 @@ let unused_grant () = with_broker (fun env sw broker ->
   check bool "normal return withdraws unused private admission" true
     (receive reader=`Assoc ["error",`String "not_started"]);
   check int "withdrawn grant calls no factory" 0 !binds)
+let accepted_grant_binds_after_return () = with_broker (fun env sw broker ->
+  let binds=ref 0 in
+  let finished,finish=Eio.Promise.create () in
+  let grant=issue broker ~bind:(fun _ -> incr binds;Ok {
+    B.execute=(fun _ -> Ok released);finish=(fun _ -> Eio.Promise.resolve finish ())}) in
+  B.accept grant;
+  B.end_invocation grant;
+  check int "accepted invocation has not eagerly selected a Browser" 0 !binds;
+  let flow,reader=connect env sw grant in send flow (handshake grant);
+  let operation_id=operation reader in
+  check int "background bind consumes only the original accepted grant" 1 !binds;
+  send flow (P.to_json (P.Release operation_id));
+  check bool "original operation settles after public invocation return" true
+    (receive reader=`Assoc ["value",released]);
+  Eio.Promise.await finished;
+  B.accept grant;
+  B.end_invocation grant;
+  let again,again_reader=connect env sw grant in send again (handshake grant);
+  check bool "accept never resurrects a consumed original grant" true
+    (receive again_reader=`Assoc ["error",`String "not_started"]);
+  check int "no replacement factory is called" 1 !binds)
+let accepted_grant_can_be_withdrawn () = with_broker (fun env sw broker ->
+  let binds=ref 0 in
+  let grant=issue broker ~bind:(fun _ -> incr binds;Error B.Not_started) in
+  B.accept grant;B.end_invocation grant;
+  let withdrawal=`Assoc ["invocation_id",field "invocation_id" (B.descriptor grant);"withdraw",`Bool true] in
+  let control,control_reader=connect env sw grant in send control withdrawal;
+  check bool "unused accepted nonce is withdrawn through the private control socket" true
+    (receive control_reader=`Assoc ["withdrawn",`Bool true]);
+  let repeated,repeated_reader=connect env sw grant in send repeated withdrawal;
+  check bool "absent nonce withdrawal is idempotent and creates no binding" true
+    (receive repeated_reader=`Assoc ["withdrawn",`Bool true]);
+  B.accept grant;
+  let flow,reader=connect env sw grant in send flow (handshake grant);
+  check bool "cancelled deferred admission cannot be restored by accept" true
+    (receive reader=`Assoc ["error",`String "not_started"]);
+  check int "withdrawal sends no Browser input" 0 !binds)
 let pipelined_command_is_not_dispatched () = with_broker (fun env sw broker ->
   let calls=ref 0 in
   let finished,finish=Eio.Promise.create () in
@@ -161,6 +198,8 @@ let cancelled_invocation_joins_bind () = with_broker (fun env sw broker ->
 let ()=run "private companion broker" ["invocation authority",[
   test_case "one original connection and safe release" `Quick normal_binding_and_consumption;
   test_case "unused invocation grant is withdrawn" `Quick unused_grant;
+  test_case "accepted grant binds after public invocation return" `Quick accepted_grant_binds_after_return;
+  test_case "accepted deferred grant remains cancellable" `Quick accepted_grant_can_be_withdrawn;
   test_case "buffered pipelining is refused before effect" `Quick pipelined_command_is_not_dispatched;
   test_case "peer loss cancels and joins original execute" `Quick peer_loss_joins_execute;
   test_case "peer loss cancels and joins initial bind" `Quick peer_loss_joins_bind;

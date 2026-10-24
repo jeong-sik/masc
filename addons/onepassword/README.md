@@ -65,10 +65,16 @@ before admission returns. Closing rejects new work, cancels original handles and
 joins the worker. Unexpected background errors expose a fixed failure without
 printing private tracebacks.
 
-Initial host bind is still synchronous admission. The public MCP connection must
-preserve an original grant while binding moves to the worker before claiming
-nonblocking end-to-end dispatch. Worker exports and the approval UI are not yet
-connected to this executor.
+Initial host binding now runs on the same owned worker after admission returns.
+The version-2 companion contract retains the successful invocation's original
+grant for that bind; unsupported hosts fail negotiation. Status reads and socket
+cancellation stay available while the initial bind waits. Worker exports and
+the approval UI are not yet connected to this executor.
+Cancelling a queued login also withdraws its not-yet-bound host nonce through
+an independent credentialless control. Only an acknowledged withdrawal permits
+a confirmed cancellation; uncertain disposal stays unknown, including on a
+repeated close. Closing seals original and withdrawal sockets before another
+handle can inherit them.
 
 The approval checker follows the [vendor schedule](https://docs.browserbase.com/integrations/1password/agentic-autofill):
 the private link can be retrieved again, and a separate opened acknowledgement

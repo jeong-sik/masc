@@ -10,7 +10,7 @@ const url = 'https://example.test/observed';
 const actions = {click:'click',fill:'fill',hover:'hover',double_click:'dblclick',select_option:'selectOption',drag_to:'dragAndDrop'};
 function page({redirect=false,failed=false}={}) {
   const calls=[];
-  const p={async url(){calls.push('url');return redirect?'https://example.test/other':url;}};
+  const p={async url(){calls.push('url');return redirect?'https://example.test/other':url;},mouse:{async up(){calls.push('up');}}};
   // No MASC waitForSelector or evaluate: the native method owns actionability.
   for(const method of Object.values(actions))p[method]=async(...args)=>{
     calls.push([method,...args]);if(failed)throw Error('reply lost after native input');
@@ -48,4 +48,15 @@ test('a failed URL read refuses every native action before input',async()=>{
     const {p,calls}=page();p.url=async()=>{calls.push('url');throw Error('page closed');};
     const result=await input(p,args(action));assert.equal(result.before,true);assert.equal(result.error,'page closed');assert.deepEqual(calls,['url']);
   }
+});
+
+test('native drag failures supplement SDK release without replay, and preserve uncertain release',async()=>{
+ for(const releaseFails of [false,true]){
+  let drags=0,ups=0;const p={url:async()=>url,dragAndDrop:async()=>{drags++;throw Error('drag interrupted');},mouse:{up:async()=>{ups++;if(releaseFails)throw Error('control lost');}}};
+  const result=await input(p,args('drag_to'));assert.equal(drags,1);assert.equal(ups,1);assert.equal(result.pointerReleased,!releaseFails);assert.match(result.error,/drag interrupted/);
+ }
+});
+test('native drag interrupted by dialog has no Page follow-up and no release proof',async()=>{
+ const p={url:async()=>url,dragAndDrop:async()=>({dialog:{type:'alert',message:'drag stopped'}})};
+ const result=await input(p,args('drag_to'));assert.equal(result.pointerReleased,false);assert.equal(result.receipt.dialog.message,'drag stopped');
 });

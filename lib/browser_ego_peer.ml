@@ -816,7 +816,6 @@ let choose_files ?actor t id ~opener ~paths =
       "        if (failure === null && !multiple) failure = \"the file chooser takes one file, so it was closed with none\";";
       "        if (failure === null) {";
       "          try { set = await chooser.setFiles(args.paths); } catch (error) { failure = \"ego did not set the files: \" + reason(error); }";
-      "          if (failure !== null) failure += await close();";
       "        } else failure += await close();";
       "      }";
       "      const dialog = set?.dialog ?? (failure === null ? " ^ open_dialog "page" ^ " : null);";
@@ -1083,7 +1082,7 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
     return {before: true, error: "unsupported snapshot target action"};
   await checkUrl();
   if (refusal !== null) return {before: true, error: refusal};
-  let receipt = null, failure = null;
+  let receipt = null, failure = null, pointerReleased = args.action !== "drag_to";
   try {
     switch (args.action) {
       case "click": receipt = await page.click(args.target, {label: args.cursor}); break;
@@ -1091,10 +1090,16 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
       case "hover": receipt = await page.hover(args.target, {label: args.cursor}); break;
       case "double_click": receipt = await page.dblclick(args.target, {label: args.cursor}); break;
       case "select_option": receipt = {selectedValues: await page.selectOption(args.target, args.selection)}; break;
-      case "drag_to": receipt = await page.dragAndDrop(args.target, args.destination, {label: args.cursor}); break;
+      case "drag_to": receipt = await page.dragAndDrop(args.target, args.destination, {label: args.cursor}); pointerReleased = !receipt?.dialog; break;
     }
-  } catch (error) { failure = reason(error); }
-  return {urlBefore, receipt, error: failure};
+  } catch (error) {
+    failure = reason(error);
+    if (args.action === "drag_to") {
+      try { await page.mouse.up(); pointerReleased = true; }
+      catch (releaseError) { failure += "; pointer release is unconfirmed: " + reason(releaseError); }
+    }
+  }
+  return {urlBefore, receipt, error: failure, pointerReleased};
 }|js}
 let native_input t ~id ~label ~deadline ~cursor ~expected_url ~locator ~reference ~operation =
   let verb, text = match operation with
@@ -1109,6 +1114,9 @@ let native_input t ~id ~label ~deadline ~cursor ~expected_url ~locator ~referenc
     | Target_select (Browser_lane.Multiple_options values) -> `List (List.map (fun value -> obj ["value",str value]) values)
     | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_drag _ -> `Null in
   let unknown = Printf.sprintf "read tab %d before another step" id in
+  let holds_button = match operation with Target_drag _ -> true
+    | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> false in
+  if holds_button then t.pointer_state <- Release_uncertain;
   let response = run_step t ~window_s:(left t deadline) ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",(match expected_url with Some url -> str url | None -> `Null);"target",str locator;
         "action",str verb;"text",text;"selection",selection;"cursor",str cursor;
@@ -1124,6 +1132,10 @@ let native_input t ~id ~label ~deadline ~cursor ~expected_url ~locator ~referenc
         "      emit({ok: true, value: {...outcome, tab: after === undefined ? null : {url: after.url, title: after.title}}});";
         "    }";
         "  }" ]) in
+  if holds_button then (match response with
+    | Ok value when field "pointerReleased" value = Some (`Bool true) -> t.pointer_state <- Released
+    | Error (Refused _ | Unanswered (Unstarted _)) -> t.pointer_state <- Released
+    | Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _) | Failed _ | Unreadable _) -> ());
   match response with
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value ->
@@ -1187,12 +1199,17 @@ let interact ?actor t args =
     | Browser_lane.Double_click _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Ok () in
   let* expected_url, action =
     let needs_resolution = match request.action with
-      | Browser_lane.Click _ | Browser_lane.Hover (Browser_lane.Selector _)
-      | Browser_lane.Double_click (Browser_lane.Selector _)
-      | Browser_lane.Drag_to {source=Browser_lane.Selector _;destination=Browser_lane.Selector _;via=[];_} -> false
+      | Browser_lane.Click _ -> false
+      | Browser_lane.Hover target | Browser_lane.Double_click target ->
+        (match target with Browser_lane.Selector _ -> false | Browser_lane.Scene_node _ -> true)
+      | Browser_lane.Drag_to {source;destination;via;_} ->
+        (match source,destination with
+         | Browser_lane.Selector _, Browser_lane.Selector _ -> (match via with [] -> false | _::_ -> true)
+         | Browser_lane.Scene_node _, (Browser_lane.Selector _ | Browser_lane.Scene_node _)
+         | Browser_lane.Selector _, Browser_lane.Scene_node _ -> true)
       | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Set_zoom _
       | Browser_lane.Set_viewport _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
-      | Browser_lane.Scroll _ | Browser_lane.Drag_to _ | Browser_lane.Hover_at _
+      | Browser_lane.Scroll _ | Browser_lane.Hover_at _
       | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _ | Browser_lane.Double_click_at _
       | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
       | Browser_lane.Fill_node _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _
@@ -1232,10 +1249,16 @@ let interact ?actor t args =
   | Browser_lane.Select_option {selector;selection} -> on_selector selector (Target_select selection)
   | Browser_lane.Hover (Browser_lane.Selector selector) -> on_selector selector Target_hover
   | Browser_lane.Double_click (Browser_lane.Selector selector) -> on_selector selector Target_double_click
-  | Browser_lane.Drag_to {source=Browser_lane.Selector source;destination=Browser_lane.Selector destination;via=[];_} ->
-    native_input t ~id ~label ~deadline ~cursor:cursor_text ~expected_url ~locator:source
-      ~reference:["source",obj ["selector",str source];"destination",obj ["selector",str destination]]
-      ~operation:(Target_drag destination)
+  | Browser_lane.Drag_to {source;destination;via;_} ->
+    (match source,destination with
+     | Browser_lane.Selector source, Browser_lane.Selector destination ->
+       (match via with
+        | [] -> native_input t ~id ~label ~deadline ~cursor:cursor_text ~expected_url ~locator:source
+            ~reference:["source",obj ["selector",str source];"destination",obj ["selector",str destination]]
+            ~operation:(Target_drag destination)
+        | _::_ -> refused)
+     | Browser_lane.Scene_node _, (Browser_lane.Selector _ | Browser_lane.Scene_node _)
+     | Browser_lane.Selector _, Browser_lane.Scene_node _ -> refused)
   | Browser_lane.Click_at {point; viewport; button} -> pointer viewport point (Press {button; count = 1})
   | Browser_lane.Double_click_at {point; viewport} -> pointer viewport point (Press {button = Browser_lane.Pointer.Primary; count = 2})
   | Browser_lane.Hover_at {point; viewport} -> pointer viewport point Move
@@ -1255,7 +1278,7 @@ let interact ?actor t args =
   | Browser_lane.Fill_target {target; text} -> on_target ~target (Target_fill text)
   | Browser_lane.Hover_target target -> on_target ~target Target_hover
   | Browser_lane.Double_click_target target -> on_target ~target Target_double_click
-  | Browser_lane.Drag_to _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
+  | Browser_lane.Tap_at _ | Browser_lane.Swipe _
   | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Activate_tab -> refused
 
 (* The whole space goes to the operator for a step only a person can take;

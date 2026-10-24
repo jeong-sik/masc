@@ -480,7 +480,7 @@ let test_selector_input_uses_ego_sdk () =
       asked := sent :: !asked;
       let receipt = if field "action" sent.args = str "select_option" then
           obj ["selectedValues",`List [str "b"]] else obj [] in
-      answered (obj ["urlBefore",str observed_url;"receipt",receipt;"error",!native_error;
+      answered (obj ["urlBefore",str observed_url;"pointerReleased",`Bool true;"receipt",receipt;"error",!native_error;
         "tab",obj ["url",str observed_url;"title",str "Slack"]])
     | other -> failf "selector input invoked its own adapter: %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -1680,7 +1680,8 @@ let test_input_frame_paths_are_refused_with_the_way_that_works () =
 (* The chooser SDK stand-in has no DOM evaluator. Its native click
    opens a file chooser when [opens] holds, one that takes several files when
    [multiple] does; its setFiles answers [set], or throws when [fails] holds.
-   setFiles([]) closes the chooser. *)
+   Every entered setFiles disposes the chooser, including backend failure;
+   setFiles([]) handles a captured chooser that was never filled. *)
 let chooser_stand_in ~opens ~multiple ~set ~fails ~click_fails = Printf.sprintf {js|
 const fs = await import("node:fs");
 const nodePath = await import("node:path");
@@ -1689,12 +1690,16 @@ process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
 let waiting = null;
 let activeChooser = false;
 let clickFails = %b;
+let setFails = %b;
+let chooserHandled = false;
 const chooser = {
   isMultiple: async () => %b,
   setFiles: async paths => {
-    if (paths.length === 0) { activeChooser = false; seen.push("closed"); return {}; }
-    if (%b) throw new Error("Target closed");
+    if (chooserHandled) { seen.push("duplicate set"); throw new Error("this file chooser was already handled"); }
+    chooserHandled = true;
     activeChooser = false;
+    if (paths.length === 0) { seen.push("closed"); return {}; }
+    if (setFails) throw new Error("Node is not a file input element");
     seen.push("chosen " + paths.map(path => nodePath.basename(path) + "/" + fs.statSync(path).size).join(",")); return %s;
   },
 };
@@ -1706,7 +1711,7 @@ const page = {
   },
   click: async (selector, options) => {
     seen.push("click " + selector + " " + options.label);
-    if (waiting !== null) { if (%b) { activeChooser = true; waiting.resolve(chooser); } else waiting.reject(new Error("page.waitForFileChooser timed out after 5000ms")); }
+    if (waiting !== null) { if (%b) { activeChooser = true; chooserHandled = false; waiting.resolve(chooser); } else waiting.reject(new Error("page.waitForFileChooser timed out after 5000ms")); }
     if (selector === "#none") throw new Error("native selector not found");
     if (clickFails) throw new Error("click response lost");
     return {};
@@ -1717,7 +1722,7 @@ const taskSpace = async () => ({
   tabs: async () => [{label: "p1", openedBy: "agent", url: "https://example.test/", title: "Form", targetId: "T1", active: true}],
   page: () => page,
 });
-|js} click_fails multiple fails (Yojson.Safe.to_string set) opens
+|js} click_fails fails multiple (Yojson.Safe.to_string set) opens
 
 let test_the_chooser_script_runs_in_node () =
   let directory = Unix.realpath (capture_directory ()) in
@@ -1732,8 +1737,8 @@ let test_the_chooser_script_runs_in_node () =
     | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
     | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Form" ~url:"https://example.test/" ~active:true ()])
     | "page.choose_files" ->
-      let recovery = if !click_fails then
-          "\nclickFails = false; const savedLog = console.log; console.log = () => {};\n{\n"
+      let recovery = if !click_fails || !fails then
+          "\nclickFails = false; setFails = false; const savedLog = console.log; console.log = () => {};\n{\n"
           ^ script ^ "\n}\nconsole.log = savedLog;\n"
         else "" in
       output := in_node (chooser_stand_in ~opens:!opens ~multiple:!multiple ~set:!set ~fails:!fails ~click_fails:!click_fails
@@ -1762,7 +1767,10 @@ let test_the_chooser_script_runs_in_node () =
   fails := true;
   check bool "a setFiles that fails is reported after the click" true
     (String_util.contains_substring (unknown "a failed setFiles" (choose [path])) "ego did not set the files");
-  check bool "and that chooser is closed too" true (List.mem "closed" (seen ()));
+  check bool "the SDK owns cleanup after setFiles was entered" false (List.mem "closed" (seen ()));
+  check bool "no second setFiles is attempted on a handled chooser" false (List.mem "duplicate set" (seen ()));
+  check bool "the next chooser succeeds after SDK-owned failure cleanup in the same process" true
+    (List.mem "chosen note.txt/5" (seen ()));
   fails := false;
   click_fails := true;
   check bool "a click whose response fails retains its original outcome uncertainty" true

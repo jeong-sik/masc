@@ -176,12 +176,22 @@ val persist_binary_body :
     filed. Exposed so a test builds a filed item through the same filing the
     capture path uses. *)
 
+type binary_body_identity_mismatch =
+  { expected_bytes : int
+  ; actual_bytes : int
+  ; expected_sha256 : string
+  ; actual_sha256 : string
+  }
+
 type read_binary_error =
   | Not_binary  (** the item is not a binary artifact *)
   | Body_not_filed
       (** the item was decoded from persistence, not captured, so no body
           was ever filed under a request *)
   | Body_unreadable of string  (** the filed body file cannot be read *)
+  | Body_identity_mismatch of binary_body_identity_mismatch
+      (** The complete filed bytes differ from the submitted size or SHA-256.
+          Neither the judge nor the operator receives these bytes. *)
   | Over_delivery_ceiling of { bytes : int; ceiling : int }
       (** the filed body is [bytes] long and the judge delivery ceiling
           {!verification_evidence_max_bytes} is [ceiling] *)
@@ -193,7 +203,9 @@ val read_binary_body_base64 :
   submitted_evidence_item ->
   (string, read_binary_error) result
 (** The filed body of a binary artifact read back as base64 for an attached
-    media block. [Error] names why it was not delivered — see
+    media block. One bounded owned-file read validates the no-follow path,
+    regular descriptor and stable identity; complete bytes are checked against
+    the submitted size and SHA-256 before encoding. [Error] names why it was not delivered — see
     {!read_binary_error}; in every case the judge then rests on the
     reference-and-hash line in the prompt (RFC-0436 §4.4/§4.5). *)
 

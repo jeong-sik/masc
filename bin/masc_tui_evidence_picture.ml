@@ -30,6 +30,7 @@ let reading = function
   | Decode.Preview_withheld Decode.Withheld_not_image_format -> Not_an_image
   | Decode.Preview_withheld
       ((Decode.Withheld_body_not_filed | Decode.Withheld_body_unreadable
+       | Decode.Withheld_body_identity_mismatch _
        | Decode.Withheld_over_delivery_ceiling _
        | Decode.Withheld_over_response_budget) as withheld) ->
       Unreadable (Withheld withheld)
@@ -39,6 +40,8 @@ let cause_text = function
   | Withheld Decode.Withheld_not_image_format -> "not an image"
   | Withheld Decode.Withheld_body_not_filed -> "the server holds no copy of the bytes"
   | Withheld Decode.Withheld_body_unreadable -> "the server could not read its copy of the bytes"
+  | Withheld (Decode.Withheld_body_identity_mismatch _) ->
+      "the server's copy does not match the submitted size or sha256"
   | Withheld (Decode.Withheld_over_delivery_ceiling { bytes; ceiling }) ->
       Printf.sprintf "%dB is over the %dB the server sends" bytes ceiling
   | Withheld Decode.Withheld_over_response_budget ->
@@ -169,6 +172,7 @@ let prepare_preview ~draws_pixels ~convert ~free_slots preview =
   | Decode.Preview_withheld Decode.Withheld_not_image_format -> Binary_only, free_slots
   | Decode.Preview_withheld
       ((Decode.Withheld_body_not_filed | Decode.Withheld_body_unreadable
+       | Decode.Withheld_body_identity_mismatch _
        | Decode.Withheld_over_delivery_ceiling _
        | Decode.Withheld_over_response_budget) as withheld) ->
       Unshown (Withheld withheld), free_slots

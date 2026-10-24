@@ -76,3 +76,5 @@ checkpoint. Its native execution, a new exact-build Keeper experiment and a
 visible browser check are pending. No live G2/G3 success is claimed here.
 
 Independent source review of661becba found a P2 in official-client Resume: changed Goal observation is absent from the carried prompt while vendor sessions retain their first System until compaction. This is a source blocker, not merely missing test evidence. Repair of that typed carried path is in progress. Regular HTTP and official Resume scopes must remain separate. See independent-source-review.json.
+
+The subsequent source-review repair for official held sessions and its bounded baseline/repaired execution are recorded in [official-resume-repair.md](official-resume-repair.md). The earlier source FAIL above is preserved at its own head; corrected native and final independent review remain pending.

@@ -172,6 +172,8 @@ type carried_body =
   | Whole_text
   | World_state_sections of world_state_section list
 
+type carried_source = Message_context | Issued_system_goal
+
 (* One carried context a turn composes: its name and digest, whether a resume
    sends it again when the session holds the same bytes, the message a
    resume renders for it, and what a resume compares. *)
@@ -180,6 +182,7 @@ type carried =
   ; resent_when_held : bool
   ; message : Agent_core.Types.message
   ; body : carried_body
+  ; source : carried_source
   }
 
 let carried_message context message =
@@ -187,6 +190,7 @@ let carried_message context message =
   ; resent_when_held = false
   ; message
   ; body = Whole_text
+  ; source = Message_context
   }
 ;;
 
@@ -285,6 +289,7 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
            ; resent_when_held = Prompt_block_id.resent_when_held block
            ; message = extra_system_context_message text
            ; body = block_body assembly block
+           ; source = Message_context
            })
         blocks
     | None -> [ carried_message Session_store.Context_carrier message ])
@@ -292,7 +297,17 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
 ;;
 
 let carried_context ~composed_context messages =
-  List.concat_map (carried_of_message ~composed_context) messages
+  let goal = match Option.bind composed_context (fun assembly ->
+      assembly.Keeper_context_assembly.system_prompt) with
+    | None | Some {goal_text = None; _} -> []
+    | Some {goal_text = Some text; _} ->
+      [{ held = { Session_store.context = Session_store.Context_block Prompt_block_id.Active_goals
+                ; sha256 = sha256_hex text }
+       ; resent_when_held = Prompt_block_id.resent_when_held Prompt_block_id.Active_goals
+       ; message = user_message text
+       ; body = Whole_text
+       ; source = Issued_system_goal }] in
+  goal @ List.concat_map (carried_of_message ~composed_context) messages
 ;;
 
 (* What the session holds once it has this carried context: the context under
@@ -351,14 +366,17 @@ let start_held_context ?composed_context messages =
 
 (* Blocks sent together read as one carrier, as they do on a start. *)
 let is_block item =
-  match item.held.Session_store.context with
-  | Session_store.Context_block _ -> true
-  | Session_store.Context_section _
-  | Session_store.Context_section_row _
-  | Session_store.Context_carrier
-  | Session_store.Librarian_working_state
-  | Session_store.Librarian_unread
-  | Session_store.Historical_task_reference -> false
+  match item.source with
+  | Issued_system_goal -> false
+  | Message_context ->
+    (match item.held.Session_store.context with
+     | Session_store.Context_block _ -> true
+     | Session_store.Context_section _
+     | Session_store.Context_section_row _
+     | Session_store.Context_carrier
+     | Session_store.Librarian_working_state
+     | Session_store.Librarian_unread
+     | Session_store.Historical_task_reference -> false)
 ;;
 
 let block_text item =
@@ -632,11 +650,11 @@ let rec rendered_messages = function
          take_blocks [text] [id] (List.rev (sent_unchanged sent))
            (List.rev (sent_held_rows sent)) (List.rev (sent_notices sent)) rest in
        (extra_system_context_message (String.concat resume_section_separator (List.rev texts)),
-        Some (List.rev ids, List.rev unchanged, List.rev held_rows))
-       :: List.rev_map (fun notice -> unchanged_sections_message notice, None) notices
+        Some (List.rev ids, List.rev unchanged, List.rev held_rows), Message_context)
+       :: List.rev_map (fun notice -> unchanged_sections_message notice, None, Message_context) notices
        @ rendered_messages rest
-     | _ -> ((sent_item sent).message,None) :: rendered_messages rest)
-  | sent :: rest -> ((sent_item sent).message,None) :: rendered_messages rest
+     | _ -> ((sent_item sent).message,None,(sent_item sent).source) :: rendered_messages rest)
+  | sent :: rest -> ((sent_item sent).message,None,(sent_item sent).source) :: rendered_messages rest
 ;;
 
 let resume_prompt ~goal ~held ?composed_context messages =
@@ -650,13 +668,16 @@ let resume_prompt ~goal ~held ?composed_context messages =
     | Sent _ -> None) deliveries in
   let context_projection =
     sent |> rendered_messages
-    |> List.map (fun ((message : Agent_core.Types.message),selection) ->
+    |> List.map (fun ((message : Agent_core.Types.message),selection,source) ->
       Keeper_context_submission_link.concat ~separator:""
         [Keeper_context_submission_link.literal (history_role_label message.role);
-         Keeper_context_submission_link.encoded_carrier ~assembly:composed_context
-           ~selected_blocks:(Option.map (fun (ids, _, _) -> ids) selection)
-           ?omitted_sections:(Option.map (fun (_, unchanged, _) -> unchanged) selection)
-           ?omitted_rows:(Option.map (fun (_, _, held_rows) -> held_rows) selection) message])
+         (match source with
+          | Issued_system_goal -> Keeper_context_submission_link.encoded_system_goal
+              ~assembly:composed_context message
+          | Message_context -> Keeper_context_submission_link.encoded_carrier ~assembly:composed_context
+              ~selected_blocks:(Option.map (fun (ids, _, _) -> ids) selection)
+              ?omitted_sections:(Option.map (fun (_, unchanged, _) -> unchanged) selection)
+              ?omitted_rows:(Option.map (fun (_, _, held_rows) -> held_rows) selection) message)])
     |> Keeper_context_submission_link.concat ~separator:resume_section_separator
     |> Keeper_context_submission_link.trim in
   let composed = held_of_carried carried in
@@ -724,8 +745,11 @@ let resume_prompt ~goal ~held ?composed_context messages =
     else Keeper_context_submission_link.concat ~separator:resume_section_separator
       [context_projection;Keeper_context_submission_link.literal goal] in
   let context_projection = List.fold_left (fun projection item ->
-    Keeper_context_submission_link.omit_held ~assembly:composed_context
-      ~blocks:(Option.map (fun id -> [id]) (block_id item)) item.message projection)
+    match item.source with
+    | Issued_system_goal -> Keeper_context_submission_link.omit_held_system_goal
+        ~assembly:composed_context item.message projection
+    | Message_context -> Keeper_context_submission_link.omit_held ~assembly:composed_context
+        ~blocks:(Option.map (fun id -> [id]) (block_id item)) item.message projection)
     context_projection omitted in
   { prompt = Keeper_context_submission_link.text context_projection; held_context; context_projection
   ; unchanged_sections = List.concat_map sent_unchanged sent

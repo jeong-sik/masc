@@ -125,7 +125,9 @@ val attach :
     with no deadline of its own: the caller bounds it. An attached session with
     an unknown delivery refuses all later calls, including [Wire.Close], with
     [Delivery_unsettled]. The browser owner's explicit close still shuts down
-    its original resources. *)
+    its original resources. Delivery failures expose safe classifications;
+    CDP rejection messages and receiver exception details are not forwarded
+    into the call result or session log. *)
 val call : t -> Wire.call -> (Yojson.Safe.t, call_failure) result
 val quiescent : t -> bool
 (** Nonblocking observation: attached, transport alive and no in-flight,

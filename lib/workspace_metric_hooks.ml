@@ -296,6 +296,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~candidate_kind ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
     let verdict_call = ref Task.Anti_rationalization.empty_verdict_call in
+    let evaluator_execution = ref None in
     let { Task.Anti_rationalization.schemas = lookup_schemas
         ; dispatch = dispatch_lookup
         }
@@ -312,6 +313,7 @@ let install () =
       verdict_call := call;
       match answer with
       | Task.Anti_rationalization.Verdict_recorded verdict ->
+        evaluator_execution := Runtime_response_identity_scope.current ();
         Tool_result.ok
           ~tool_name:name
           ~start_time
@@ -408,7 +410,8 @@ let install () =
               ("task completion verdict protocol violation: " ^ detail))
        | None ->
          (match !selected_runtime_id with
-          | Some selected_runtime_id -> Ok {Task.Anti_rationalization.selected_runtime_id;verdict= !verdict_call.recorded}
+          | Some selected_runtime_id -> Ok {Task.Anti_rationalization.selected_runtime_id;
+              verdict= !verdict_call.recorded; evaluator_execution= !evaluator_execution}
           | None -> Error (Agent_core.Error.Internal "verifier dispatch omitted its selected runtime")))
     | Error err ->
       Error err);

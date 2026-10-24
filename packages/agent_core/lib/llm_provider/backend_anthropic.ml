@@ -185,7 +185,7 @@ let parse_response json =
   ; stop_reason
   ; content
   ; usage
-  ; telemetry = Some Types.default_inference_telemetry
+  ; telemetry = Some (Types.with_reported_model ~model None)
   }
 ;;
 

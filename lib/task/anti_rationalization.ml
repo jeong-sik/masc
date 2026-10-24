@@ -61,6 +61,7 @@ type verdict =
 type reviewer_reply =
   { selected_runtime_id : string
   ; verdict : verdict option
+  ; evaluator_execution : Runtime_response_identity.t option
   }
 
 let outcome_observer_fn
@@ -115,6 +116,7 @@ type review_result =
   { verdict : verdict option
   ; evaluator_runtime : string
   ; generator_runtime : string option
+  ; evaluator_execution : Runtime_response_identity.t option
   ; gate : gate
   ; fallback_reason : string option
   ; retryable_runtimes : string list
@@ -618,6 +620,7 @@ let run
       { verdict = None
       ; evaluator_runtime = unresolved_evaluator_runtime
       ; generator_runtime
+      ; evaluator_execution = None
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
       ; retryable_runtimes = []
@@ -635,6 +638,7 @@ let run
       { verdict = None
       ; evaluator_runtime = unresolved_evaluator_runtime
       ; generator_runtime
+      ; evaluator_execution = None
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
       ; retryable_runtimes = []
@@ -654,6 +658,7 @@ let run
          { verdict = None
          ; evaluator_runtime = first_slot
          ; generator_runtime
+         ; evaluator_execution = None
          ; gate = Evaluator_unavailable
          ; fallback_reason = Some detail
          ; retryable_runtimes = []
@@ -791,7 +796,7 @@ let run
        in
        let rec attempt ~retryable_runtimes ~model_absent_runtimes ((slot, _) as candidate) remaining =
          match run_attempt candidate with
-         | Ok {verdict=Some verdict;selected_runtime_id=slot}, _nested_retryable_runtimes, _, _ ->
+         | Ok {verdict=Some verdict;selected_runtime_id=slot;evaluator_execution}, _nested_retryable_runtimes, _, _ ->
            (match verdict with
             | Approve reason ->
               task_info
@@ -807,12 +812,13 @@ let run
              { verdict = Some verdict
              ; evaluator_runtime = slot
              ; generator_runtime
+             ; evaluator_execution
              ; gate = Structured_tool
              ; fallback_reason = None
              ; retryable_runtimes = []
              ; model_absent_runtimes = []
              }
-         | Ok {verdict=None;selected_runtime_id=slot}, nested_retryable_runtimes, nested_model_absent, _ ->
+         | Ok {verdict=None;selected_runtime_id=slot;evaluator_execution=_}, nested_retryable_runtimes, nested_model_absent, _ ->
            let retryable_runtimes = append_unique retryable_runtimes nested_retryable_runtimes in
            let model_absent_runtimes = append_unique model_absent_runtimes nested_model_absent in
            let detail =
@@ -835,6 +841,7 @@ let run
                 { verdict = None
                 ; evaluator_runtime = slot
                 ; generator_runtime
+                ; evaluator_execution = None
                 ; gate = Invalid_verdict
                 ; fallback_reason = Some detail
                 ; retryable_runtimes
@@ -889,6 +896,7 @@ let run
                 { verdict = None
                 ; evaluator_runtime = slot
                 ; generator_runtime
+                ; evaluator_execution = None
                 ; gate = Evaluator_unavailable
                 ; fallback_reason = Some detail
                 ; retryable_runtimes

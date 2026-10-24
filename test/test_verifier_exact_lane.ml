@@ -71,7 +71,7 @@ let recording_reviewer calls behaviors =
     calls := !calls @ [ evaluator_runtime ];
     match List.assoc_opt evaluator_runtime behaviors with
     | Some behavior -> Result.map
-        (fun verdict -> {AR.selected_runtime_id=evaluator_runtime;verdict}) behavior
+        (fun verdict -> {AR.selected_runtime_id=evaluator_runtime; evaluator_execution = None;verdict}) behavior
     | None ->
       Error
         (Agent_core.Error.Internal
@@ -493,7 +493,7 @@ let test_recorded_images_ride_to_the_reviewer_as_blocks () =
            ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
            ~on_runtime_attempt_error:_ () ->
          received := goal_blocks;
-         Ok {AR.selected_runtime_id="slot-a";verdict=Some (AR.Approve "")})
+         Ok {AR.selected_runtime_id="slot-a"; evaluator_execution = None;verdict=Some (AR.Approve "")})
     (fun () ->
        ignore (review_with image_request ());
        (match !received with
@@ -561,7 +561,7 @@ let test_acquired_candidate_kinds_survive_failover () =
     Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
       (fun () -> Error "new acquisition is now fenced");
     if evaluator_runtime = "catalog" then rate_limited
-    else Ok {AR.selected_runtime_id=evaluator_runtime; verdict=Some (AR.Approve "")}
+    else Ok {AR.selected_runtime_id=evaluator_runtime; evaluator_execution = None; verdict=Some (AR.Approve "")}
   in
   with_lane_and_reviewer ~slots:(fun () -> Error "installed below") ~reviewer
     (fun () ->

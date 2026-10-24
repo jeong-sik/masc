@@ -982,6 +982,11 @@ module Response_replay = struct
   ;;
 end
 
+type reported_model =
+  | Provider_reported_model of string
+  | Provider_model_not_reported
+[@@deriving show, yojson]
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option
@@ -991,6 +996,7 @@ type inference_telemetry =
   ; provider_kind : Provider_kind.t option
   ; reasoning_effort : string option
   ; canonical_model_id : string option
+  ; reported_model : reported_model option [@default None]
   ; reasoning_source : Reasoning_source.t option
   ; reasoning_prefix : Reasoning_prefix.t option [@default None]
   ; response_replay : Response_replay.t option [@default None]
@@ -1010,6 +1016,7 @@ let default_inference_telemetry : inference_telemetry =
   ; provider_kind = None
   ; reasoning_effort = None
   ; canonical_model_id = None
+  ; reported_model = None
   ; reasoning_source = None
   ; reasoning_prefix = None
   ; response_replay = None
@@ -1019,6 +1026,11 @@ let default_inference_telemetry : inference_telemetry =
   ; prefill_ms = None
   }
 ;;
+
+let with_reported_model ~model telemetry =
+  let telemetry = Option.value ~default:default_inference_telemetry telemetry in
+  { telemetry with reported_model = Some
+      (if String.trim model = "" then Provider_model_not_reported else Provider_reported_model model) }
 
 (** API response *)
 type api_response =

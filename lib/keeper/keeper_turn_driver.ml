@@ -1749,6 +1749,7 @@ let run_named
     ?net
     ()
   : (named_run_result, Agent_core.Error.t) result =
+  Runtime_response_identity_scope.without_identity (fun () ->
   let session_id = Keeper_request_source.trace_id input_source in
   let tool_requirement = match output_contract with
     | Tool_verdict -> Keeper_required_tools.Required
@@ -3256,7 +3257,7 @@ let run_named
           , provider_attempt_dispatch ~request_serialized:!request_serialized
               turn_result ))))
        ))))
-    attempt_candidates
+    attempt_candidates)
 
 
 module For_testing = struct

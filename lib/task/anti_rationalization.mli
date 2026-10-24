@@ -71,6 +71,7 @@ type verdict =
 type reviewer_reply =
   { selected_runtime_id : string
   ; verdict : verdict option
+  ; evaluator_execution : Runtime_response_identity.t option
   }
 (** The runtime that actually answered, not a lane alias requested by the
     caller. A successful dispatch without a verdict still names its owner. *)
@@ -95,6 +96,9 @@ type review_result =
   { verdict : verdict option
   ; evaluator_runtime : string
   ; generator_runtime : string option
+  ; evaluator_execution : Runtime_response_identity.t option
+        (** Exact native response and tool invocation that supplied the
+            accepted verdict. Missing capture stays unknown. *)
   ; gate : gate
   ; fallback_reason : string option
   ; retryable_runtimes : string list

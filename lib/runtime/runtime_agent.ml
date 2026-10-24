@@ -105,6 +105,7 @@ type config =
   session_id : string option;
   description : string option;
   runtime_id : string option;
+  execution_actor : string option;
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
   serialization_executor : Agent_core.Agent.serialization_executor option;
@@ -1185,7 +1186,7 @@ type run_input =
       }
   | Continue_from_checkpoint
 
-let run_blocks_internal
+let run_blocks_internal_in_scope
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
@@ -1538,6 +1539,18 @@ let run_blocks_internal
         }
     in
     Error (Keeper_internal_error.core_error_of_masc_internal_error typed_internal_error))
+
+let run_blocks_internal ~sw ~net ~(config : config) ?agent_core_checkpoint ?on_event
+    ?on_yield ?on_resume ?agent_ref ?cooperative_yield_probe ~run_input goal_blocks =
+  Runtime_response_identity_scope.with_scope ~actor:config.execution_actor
+    ~runtime_id:(runtime_id_of_config config) ~provider_id:config.provider_cfg.provider_id
+    (fun ~hooks:identity_hooks ~wrap_tool ->
+      let hooks = match config.hooks with
+        | None -> identity_hooks
+        | Some hooks -> Agent_core.Hooks.compose ~outer:identity_hooks ~inner:hooks in
+      let config = { config with hooks = Some hooks; tools = List.map wrap_tool config.tools } in
+      run_blocks_internal_in_scope ~sw ~net ~config ?agent_core_checkpoint ?on_event
+        ?on_yield ?on_resume ?agent_ref ?cooperative_yield_probe ~run_input goal_blocks)
 
 let run_blocks
     ~sw

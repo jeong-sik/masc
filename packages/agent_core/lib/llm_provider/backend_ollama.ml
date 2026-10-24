@@ -424,9 +424,10 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
         ; reasoning_tokens
         }
     in
+    let model = Cli_common_json.member_str "model" json in
     Ok
       { id = json |> member "model" |> to_string_option |> Option.value ~default:"ollama"
-      ; model = Cli_common_json.member_str "model" json
+      ; model
       ; stop_reason
       ; content =
           thinking_blocks
@@ -443,7 +444,7 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
                    | Inline_reasoning_split.Reasoning content -> Thinking { signature = None; content }) pieces)
           @ tool_blocks
       ; usage
-      ; telemetry
+      ; telemetry = Some (Types.with_reported_model ~model telemetry)
       }
 ;;
 

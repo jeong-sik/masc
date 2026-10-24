@@ -40,6 +40,9 @@ val patch_telemetry
   -> ?reasoning_prefix:Types.Reasoning_prefix.t option
   -> int option
   -> Types.api_response
+(** Request metadata and presentation fallback only. The raw parser's
+    [reported_model] observation is preserved; this function cannot turn a
+    configured fallback into provider-reported model evidence. *)
 
 val emit_tool_call_metrics
   :  Metrics.t

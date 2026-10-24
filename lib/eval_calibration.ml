@@ -69,6 +69,8 @@ type verdict_record = {
   gate : Task.Anti_rationalization.gate;  (** Typed gate — was stringly-typed *)
   evaluator_runtime : string;
   generator_runtime : string option;
+  producer_execution : Runtime_response_identity.t option;
+  evaluator_execution : Runtime_response_identity.t option;
   fallback_reason : string option; (** Evaluator or verdict-format failure detail. *)
   timestamp : float;
 }
@@ -150,6 +152,8 @@ let verdict_record_to_json (r : verdict_record) : Yojson.Safe.t =
     ("gate", `String (Task.Anti_rationalization.gate_to_string r.gate));
     ("evaluator_runtime", `String r.evaluator_runtime);
     ("generator_runtime", Json_util.string_opt_to_json r.generator_runtime);
+    ("producer_execution", (match r.producer_execution with None -> `Null | Some value -> Runtime_response_identity.to_yojson value));
+    ("evaluator_execution", (match r.evaluator_execution with None -> `Null | Some value -> Runtime_response_identity.to_yojson value));
     ("timestamp", `Float r.timestamp);
   ] in
   let extra = match r.fallback_reason with
@@ -172,7 +176,11 @@ let label_record_to_json (r : label_record) : Yojson.Safe.t =
 (* Record writing                                                    *)
 (* ================================================================ *)
 
+let identity_matching predicate identity =
+  Option.bind identity (fun identity -> if predicate identity then Some identity else None)
+
 let record_verdict
+    ?producer_execution
     ~(task_id : string)
     ~(req : Task.Anti_rationalization.review_request)
     ~(result : Task.Anti_rationalization.review_result)
@@ -191,6 +199,10 @@ let record_verdict
       ; gate = result.gate
       ; evaluator_runtime = result.evaluator_runtime
       ; generator_runtime = result.generator_runtime
+      ; producer_execution = identity_matching
+          (fun identity -> String.equal identity.Runtime_response_identity.actor req.agent_name) producer_execution
+      ; evaluator_execution = identity_matching
+          (fun identity -> String.equal identity.Runtime_response_identity.runtime_id result.evaluator_runtime) result.evaluator_execution
       ; fallback_reason = result.fallback_reason
       ; timestamp = Unix.gettimeofday ()
       }
@@ -464,6 +476,25 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
     if verdicts_with_generator = 0 then `Null
     else `Float (float_of_int distinct_runtime_count /. float_of_int verdicts_with_generator)
   in
+  let identity_field name row =
+    match row with
+    | `Assoc fields ->
+      (match List.filter (fun (key, _) -> String.equal key name) fields with
+       | [ _, json ] -> (match Runtime_response_identity.of_yojson json with Ok value -> Some value | Error _ -> None)
+       | [] | _ :: _ -> None)
+    | _ -> None in
+  let identity_observation =
+    List.filter_map (fun row ->
+      if string_field row "record_type" <> record_type_to_string Verdict_record
+         || Option.is_none (verdict_of_string (string_field row "verdict")) then None
+      else
+        let producer_identity = identity_field "producer_execution" row
+          |> identity_matching (fun identity -> String.equal identity.Runtime_response_identity.actor (string_field row "agent_name")) in
+        let evaluator_identity = identity_field "evaluator_execution" row
+          |> identity_matching (fun identity -> String.equal identity.Runtime_response_identity.runtime_id (string_field row "evaluator_runtime")) in
+        Some (producer_identity, evaluator_identity)) records
+    |> Runtime_response_identity.summarize_pairs
+    |> Runtime_response_identity.pair_summary_to_yojson in
   `Assoc [
     ("total_verdicts", `Int total_verdicts);
     ("approve_count", `Int approve_count);
@@ -477,14 +508,7 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
     ("verdicts_with_generator_runtime", `Int verdicts_with_generator);
     ("distinct_runtime_count", `Int distinct_runtime_count);
     ("distinct_runtime_rate", distinct_runtime_rate);
-    (* Runtime slots can alias the same model and their configuration may
-       change after submission. Neither name proves a producer/judge model
-       pair. Keep the missing observation visible until the request and
-       verdict retain their actual execution identities. *)
-    ("model_identity_observation", `Assoc
-       [ "kind", `String "unobserved"
-       ; "verdict_count", `Int total_verdicts
-       ]);
+    ("model_identity_observation", identity_observation);
     ("recent_fallback_reasons",
      `List (List.rev_map (fun s -> `String s) recent_fallback_reasons));
   ]

@@ -175,6 +175,15 @@ let unread_image_to_yojson
       `Assoc [ "kind", `String "body_not_filed" ]
     | Workspace_verification_store.Body_unreadable detail ->
       `Assoc [ "kind", `String "body_unreadable"; "detail", `String detail ]
+    | Workspace_verification_store.Body_identity_mismatch
+        { expected_bytes; actual_bytes; expected_sha256; actual_sha256 } ->
+      `Assoc
+        [ "kind", `String "body_identity_mismatch"
+        ; "expected_bytes", `Int expected_bytes
+        ; "actual_bytes", `Int actual_bytes
+        ; "expected_sha256", `String expected_sha256
+        ; "actual_sha256", `String actual_sha256
+        ]
     | Workspace_verification_store.Over_delivery_ceiling { bytes; ceiling } ->
       `Assoc
         [ "kind", `String "over_delivery_ceiling"

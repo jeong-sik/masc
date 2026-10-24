@@ -3,7 +3,55 @@
 Related issue: #45567. Native Stack #45588; source layers #45586, #45587, #45601.
 This records source cleanup and a candidate Dashboard preview. It does not record a merge, installed bundle replacement, server restart, or transport repair.
 
-## Fixed source identities
+## Integration refresh (2026-10-24)
+
+All four native layers were rebased together onto fixed main
+`c2dfa238ebd318a9152e70d874ac2cbf68ae2ad8` in a separate Git directory.
+Only the canonical routing layer conflicted: main had already removed the
+`command:gate` alias and its two tests through #45534. The obsolete redirect
+maps and tests remain deleted. Main's newer Command and Actions descriptions
+remain intact. Comparing the old and rebased complete stack, `router.test.ts`
+is byte-identical; `navigation.ts` differs only in those two inherited
+descriptions. No new route or context policy was introduced by the rebase.
+
+| Layer | Rebased source head |
+| --- | --- |
+| #45586 disconnected components/styles | `e39d08557bea97b2ff547e5dbb22a1ac11f4c4f9` |
+| #45587 context observation | `d7060b6c2659ab083eaa6c8bd36a32c9092fa4c5` |
+| #45601 canonical routing | `ca86f4298f6257bbcf2de0a2da8704cff3fe670e` |
+
+Fresh execution against top `4a94c8cc5f9d6ed71e81c2e7cfd6257cf9f1917f`
+passed the same **498 tests in 16 suites** (13.27 s), `tsc --noEmit`,
+ESLint on changed existing frontend files, and a private frontend production
+build (9.86 s). Its build identity records that exact top. Only this evidence
+update follows that execution; frontend and OCaml source inputs are unchanged.
+[Validation receipt](integration-20261024/validation.json) includes commands,
+exit codes, full-log hashes, and committed logs or the marked build-log excerpt.
+No local Dune build or OCaml execution was performed. Existing chunk-size
+advice is not a failed build or a measured performance result.
+
+One owned Ego TaskSpace (1) rendered the private candidate bundle, backed by a
+GET-only proxy to the installed server `107c58401723313611f7c599bbe15225de5910da`.
+The actual Command panel showed a collapsed seven-Keeper unobserved note;
+expansion displayed their usage-scope-unavailable reasons, with **zero context
+invalid-payload alerts**. Both screenshots were visually inspected. The proxy
+forwarded zero writes and rejected the two POSTs attempted by automatic nav
+telemetry/MCP setup. It did not forward browser credentials or Origin, so
+visible auth errors and a reconnect indication do not establish a production
+transport failure or repair. The bundle mismatch warning came from the
+server's installed bundle metadata (`25faf147...`), while the candidate's own
+build identity is recorded separately. No action button was used.
+[Observation receipt](integration-20261024/browser-observation.json) records
+private screenshot hashes, response hash, scope and cleanup. Screenshots contain
+live workspace data and remain local. The owned space finished with no retained
+pages, and the preview listener was confirmed closed. No installed assets,
+artifact workflow, runtime records, or server process were changed.
+
+Old-head approvals remain historical; the rebased four heads require current
+independent source review. This refresh does not claim merge, deployment,
+current server test execution, or actual context occupancy observability.
+
+## Original source identities (2026-10-23)
 
 | Layer | Head | Review base |
 | --- | --- | --- |
@@ -17,7 +65,7 @@ Independent source and review-response agents inspected these exact identities. 
 
 - Removed eleven disconnected chat molecule adapters and five dedicated test files. Import/reachability inspection included dynamic imports and worker URLs. The production chat primitives, VirtualList, worker entry points, and adaptive FPS utility remain.
 - Removed orphan telemetry/FSM/waterfall/demo styling. The retained virtual-list rules already exist identically in `keeper-v2/perf.css`, which remains imported by the application.
-- Removed four retired route aliases in #45586, then the remaining eighteen aliases and their two redirect maps in #45601. One of those eighteen, `command:gate`, is also removed by the separate unmerged #45534; this stack does not include that PR's broader Gate UI/Memory Lens cleanup. Reconcile that one-line overlap when integrating the stacks.
+- Removed four retired route aliases in #45586, then the remaining eighteen aliases and their two redirect maps in #45601. At the original observation time, `command:gate` also overlapped separate #45534. That PR subsequently merged at `f6a07d33a7c5d2a552377eac950c6dee7c0dec89`; the 2026-10-24 restack below reconciles its alias/test deletions and retains main's newer descriptions. The broader Gate UI/Memory Lens work comes from main.
 - Removed the unused activity range conversion and redirect-only client/server telemetry field, parser, and metric label. Canonical navigation event counters remain. Server allowlists now match fifteen current surfaces and the current section lists, including Lane Inventory, Artifacts, and Account.
 - Retained canonical section, connector-filter, workflow-target, cockpit-mode, and malformed-section fallback behavior. Deleted tests whose only subject was retired routing/components.
 

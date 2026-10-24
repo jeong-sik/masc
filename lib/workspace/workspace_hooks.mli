@@ -146,13 +146,15 @@ val get_default_runtime_id_fn : (unit -> string) Atomic.t
     install their own slot list rather than inherit a silent runtime default. *)
 val get_verifier_exact_lane_slots_fn : (unit -> ((string * Types_core.verifier_slot_kind) list, string) result) Atomic.t
 
+(** Record a Task terminal lifecycle observation. Approval is not external
+    acceptance and does not move a Goal or replace human Goal confirmation. *)
 val record_task_metric_fn :
   (Workspace_utils_backend_setup.config ->
    agent_id:string ->
    task_id:string ->
    started_at:float ->
    completed_at:float option ->
-   success:bool ->
+   terminal:Task_outcome_measurement.terminal ->
    error_message:string option ->
    collaborators:string list ->
    handoff_from:string option ->

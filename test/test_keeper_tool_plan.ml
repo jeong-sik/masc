@@ -869,6 +869,8 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
       ; period_start = 1755400000.0
       ; period_end = 1755500000.0
       ; record_count = 4
+      ; outcome_basis = Task_outcome_measurement.Task_lifecycle
+      ; external_acceptance = Task_outcome_measurement.Unobserved { completed_tasks = 2 }
       ; total_tasks = 3
       ; conflicting_tasks = 0
       ; completed_tasks = 2
@@ -1087,7 +1089,7 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
                  ; ( "components"
                    , `Assoc
                        [ "completion", `Float (2.0 /. 3.0)
-                       ; "reliability", `Float 0.5
+                       ; "task_lifecycle_success", `Float 0.5
                        ; "speed", `Float 1.0
                        ; "handoff_task_success", `Float 1.0
                        ] )
@@ -1105,13 +1107,16 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
           "handoff_task_success_rate"] then `Null
           else if List.mem key ["completed_tasks"; "successful_tasks"; "failed_tasks";
             "completed_handoff_tasks"; "successful_handoff_tasks"] then `Int 0
+          else if key = "external_acceptance" then
+            Task_outcome_measurement.external_acceptance_to_yojson
+              (Task_outcome_measurement.Unobserved { completed_tasks = 0 })
           else if key = "task_completion_rate" then `Float 0.0 else value)) fields)
     | other -> other in
   accepts "masc_get_metrics" pending_metrics;
   accepts "masc_agent_fitness"
     (`Assoc [ "count", `Int 1; "agents", `List [ `Assoc [
       "agent_id", `String "albini"; "metrics", pending_metrics;
-      "components", `Assoc [ "completion", `Float 0.0; "reliability", `Null;
+      "components", `Assoc [ "completion", `Float 0.0; "task_lifecycle_success", `Null;
         "speed", `Null; "handoff_task_success", `Null ] ] ] ]);
   (* Host lane: [file_bytes] present, [via] absent; [next_offset] and
      [last_line_partial] co-occur on a window cut mid-line. *)

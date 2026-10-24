@@ -2969,6 +2969,7 @@
 (include stanzas/test_keeper_tool_matrix.inc)
 
 (include stanzas/test_keeper_task_outcomes.inc)
+(include stanzas/test_task_outcome_measurement.inc)
 (include stanzas/test_keeper_store_boot_reconcile.inc)
 
 (include stanzas/test_keeper_task_create_typed_failure.inc)

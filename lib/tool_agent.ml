@@ -104,8 +104,9 @@ let min_avg_time metrics_list =
       | None -> Some time
       | Some previous -> Some (Float.min previous time)) None
 
-(** Missing outcomes and undefined speed ratios remain null. Handoff is Task
-    success with an observed handoff reference, not a delivery receipt. *)
+(** These are Task lifecycle components, not external result quality. Missing
+    outcomes and undefined speed ratios remain null. Handoff is Task success
+    with an observed handoff reference, not a delivery receipt. *)
 let components_for ~min_avg metrics =
   let speed = match min_avg, metrics.Metrics_store_eio.avg_completion_time_s with
     | Some minimum, Some average when average > 0.0 -> Some (Float.min 1.0 (minimum /. average))
@@ -113,7 +114,7 @@ let components_for ~min_avg metrics =
   let number = function None -> `Null | Some value -> `Float value in
   `Assoc [
     "completion", `Float metrics.Metrics_store_eio.task_completion_rate;
-    "reliability", number metrics.Metrics_store_eio.task_success_rate;
+    "task_lifecycle_success", number metrics.Metrics_store_eio.task_success_rate;
     "speed", number speed;
     "handoff_task_success", number metrics.Metrics_store_eio.handoff_task_success_rate;
   ]

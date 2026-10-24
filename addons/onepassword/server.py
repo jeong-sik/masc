@@ -262,7 +262,9 @@ def serve(worker):
                                         {"name": "lane_call", "description": "Private host caller port.",
                                          "inputSchema": CONTROL_SCHEMA},
                                         {"name": "lane_operator", "description": "Private authenticated operator controls.",
-                                         "inputSchema": OPERATOR_SCHEMA}]}
+                                         "inputSchema": OPERATOR_SCHEMA},
+                                        {"name": "lane_companion", "description": "Private host companion protocol negotiation.",
+                                         "inputSchema": EMPTY}]}
                 case "tools/call":
                     try:
                         match params.get("name"):
@@ -272,9 +274,15 @@ def serve(worker):
                                 value = worker.admitted(params.get("arguments"))
                             case "lane_operator":
                                 value = worker.operator(params.get("arguments"))
+                            case "lane_companion":
+                                if params.get("arguments") != {}:
+                                    raise InvalidInput("invalid private companion handshake")
+                                # Login exports opt in when their lifecycle is
+                                # connected. Safe status never receives a grant.
+                                value = {"version": 1, "tools": []}
                             case _:
                                 raise InvalidInput("use the host-admitted exported tool")
-                        result = (tool_result(value) if params.get("name") != "lane_operator" else
+                        result = (tool_result(value) if params.get("name") not in {"lane_operator", "lane_companion"} else
                                   {"content": [], "structuredContent": value, "isError": False})
                     except InvalidInput:
                         result = {"content": [{"type": "text", "text": "connector input or caller refused"}],

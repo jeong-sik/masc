@@ -90,7 +90,7 @@ let make_backend ?observe_step () =
           | Ok image -> Some image | Error detail -> Alcotest.fail detail);
                 host = None; resource = Lifecycle.Container_resource (Store.digest instance_id);
         exported_tools = (fun () -> exported_tools);
-        call_exported_tool = (fun ~on_result:_ ~authorize ~principal ~name:_ ~arguments ->
+        call_exported_tool = (fun ~companion:_ ~on_result:_ ~authorize ~principal ~name:_ ~arguments ->
           state.principals := principal :: !(state.principals);
           state.export_arguments := arguments :: !(state.export_arguments);
           let invoke admission =
@@ -108,6 +108,7 @@ let make_backend ?observe_step () =
               Error (Lane_addon_call_context.Transport_error "release fixture unavailable"))
               ~snapshot:(fun () -> Ok !(state.controller)) ~invoke);
         operator_schema=(fun () -> None);
+      companion_tools=(fun () -> []);
         call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);
         action_schema = (fun () -> None);
         act = (fun ~arguments:_ -> Error "read-only fixture");

@@ -66,6 +66,8 @@ let action_schema t = match t.phase with
   | Serving -> Protocol.action_schema t.protocol | Initializing | Validating_owner | Retired -> None
 let operator_schema t = match t.phase with
   | Serving -> Protocol.operator_schema t.protocol | Initializing | Validating_owner | Retired -> None
+let companion_tools t = match t.phase with
+  | Serving -> Protocol.companion_tools t.protocol | Initializing | Validating_owner | Retired -> []
 let call_operator t ~admit ~arguments = match t.phase with
   | Initializing | Validating_owner | Retired -> Error Protocol.Operator_unavailable
   | Serving ->
@@ -82,9 +84,9 @@ let observe t ~binding ~sources = call t (fun () -> Protocol.observe t.protocol 
 let act t ~arguments = call t (fun () -> Protocol.act t.protocol ~arguments)
 let host_requests t = call t (fun () -> Protocol.host_requests t.protocol)
 let host_result t ~arguments = call t (fun () -> Protocol.host_result t.protocol ~arguments)
-let call_exported_tool ?on_result ?finalize_result ?authorize ?principal t ~name ~arguments =
+let call_exported_tool ?on_result ?companion ?finalize_result ?authorize ?principal t ~name ~arguments =
   call t (fun () ->
-    Protocol.call_exported_tool ?on_result ?finalize_result ?authorize ?principal t.protocol ~name ~arguments)
+    Protocol.call_exported_tool ?on_result ?companion ?finalize_result ?authorize ?principal t.protocol ~name ~arguments)
 
 let start ~sw ~clock ~grace_seconds ~admission ~launcher ~contract ~command ?cwd ?env
     ?artifact_store ?(on_created = fun _ -> Ok ()) () =

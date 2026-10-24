@@ -620,11 +620,120 @@ let test_terminal_unknown_effect_readback () =
       (List.length terminal.settled_tool_results))
 ;;
 
+let test_native_request_provenance_reopen () =
+  List.iter (fun stream -> List.iter (fun succeeds ->
+    Eio_main.run @@ fun env ->
+    try Eio.Switch.run @@ fun sw ->
+      let net = Eio.Stdenv.net env in
+      let captured = ref None in
+      let response =
+        {|{"id":"receipt-response","type":"message","role":"assistant","model":"receipt-model","content":[{"type":"text","text":"answer"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}|} in
+      let response = if stream && succeeds then
+        String.concat "\n\n"
+          [ "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"receipt-response\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"receipt-model\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":2,\"output_tokens\":0}}}"
+          ; "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}"
+          ; "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"answer\"}}"
+          ; "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}"
+          ; "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}"
+          ; "event: message_stop\ndata: {\"type\":\"message_stop\"}"
+          ; ""; "" ]
+        else response in
+      let socket = Eio.Net.listen net ~sw ~backlog:4 ~reuse_addr:true
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+      let port = match Eio.Net.listening_addr socket with
+        | `Tcp (_, port) -> port | `Unix _ -> fail "expected loopback TCP peer" in
+      let server = Cohttp_eio.Server.make ~callback:(fun _ _ body ->
+        captured := Some Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all);
+        let headers = Cohttp.Header.init_with "content-type"
+          (if stream && succeeds then "text/event-stream" else "application/json") in
+        Cohttp_eio.Server.respond_string ~headers
+          ~status:(if succeeds then `OK else `Bad_request) ~body:response ()) () in
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+      let runtime = Agent.create_execution_runtime ~sw
+        ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~domain_count:1
+        |> Result.map_error Error.to_string |> value in
+      let dir = make_dir (Eio.Stdenv.fs env) "agent_core-request-reopen-" in
+      Fun.protect ~finally:(fun () -> Eio.Path.rmtree ~missing_ok:true dir) (fun () ->
+        let locator = ref None in
+        let store = Agent.execution_store ~runtime ~dir
+          ~on_scope_ready:(fun exact -> locator := Some exact; Ok ()) () in
+        let config = Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.Anthropic ~model_id:"receipt-model"
+          ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
+          ~request_path:"/v1/messages" ~max_tokens:200
+          ~model_capabilities_override:
+            { Llm_provider.Capabilities.anthropic_capabilities with max_output_tokens = Some 100 } () in
+        let options = { Agent.default_options with provider_config=Some config } in
+        let agent = Agent.create ~net ~options
+          ~config:{(Types.default_config ~model:"receipt-model") with
+            name="receipt-agent"; max_tokens=Some 200}
+          ~pre_dispatch_serialization_observer:(fun _ ->
+            Error {Llm_provider.Request_wire_observer.reason="observer unavailable"}) () in
+        let result = if stream then Agent.run_stream ~sw ~execution_store:store
+          ~on_event:(fun _ -> ()) agent "answer once"
+        else Agent.run ~sw ~execution_store:store agent "answer once" in
+        (match succeeds, result with
+         | true, Ok _ | false, Error _ -> ()
+         | true, Error error -> fail (Error.to_string error)
+         | false, Ok _ -> fail "provider failure became success");
+        let locator = match !locator with Some value -> value
+          | None -> fail "run has no durable scope locator" in
+        let read () =
+          let projection = projection_value (Agent.open_execution_projection ~runtime ~dir locator) in
+          projection_value (Projection.read_page projection
+            ~after:(Projection.beginning_cursor projection) ~limit:128 ()) in
+        let snapshot page = List.filter_map (fun (event : Projection.event) ->
+          match event.payload with
+          | Projection.Node_updated {node_id;update=Projection.Provider_request_snapshot fact} ->
+            Some (node_id, fact)
+          | Projection.Node_opened _ | Projection.Node_updated _ | Projection.Node_closed _ -> None)
+          page.Projection.events in
+        let first = read () in
+        let first_node, fact = match snapshot first with
+          | [entry] -> entry | _ -> fail "each provider attempt must own one returned request fact" in
+        check bool "receipt belongs to its provider attempt" true
+          (List.exists (fun (node : Projection.node) ->
+            Projection.Node_id.equal node.node_id first_node &&
+            match node.kind with
+            | Projection.Provider_attempt _ -> true
+            | Projection.Agent_run _ | Projection.Agent_turn _ | Projection.Output_block _
+            | Projection.Tool_invocation _ | Projection.Tool_attempt -> false) (node_kinds first));
+        (match fact with
+         | Llm_provider.Completion_outcome.Serialized request ->
+           let body = match !captured with Some body -> body
+             | None -> fail "provider never received the body" in
+           check int "persisted body length" (String.length body) request.body_bytes;
+           check string "persisted body SHA256"
+             Digestif.SHA256.(digest_string body |> to_hex) request.body_sha256;
+           check (option int) "persisted requested value" (Some 200)
+             (Llm_provider.Types.output_token_receipt_requested request.output_token_receipt);
+           check (option int) "persisted wire value"
+             (Some Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "max_tokens" |> to_int))
+             (Llm_provider.Types.output_token_receipt_effective request.output_token_receipt)
+         | Llm_provider.Completion_outcome.Not_serialized
+         | Llm_provider.Completion_outcome.Cache_reused _
+         | Llm_provider.Completion_outcome.External_unobserved
+         | Llm_provider.Completion_outcome.Interrupted_unobserved ->
+           fail "native serialized evidence was lost before durable projection");
+        let reopened = read () in
+        match snapshot reopened with
+        | [(node, restored)] ->
+          check bool "reopen retains owning attempt" true (Projection.Node_id.equal first_node node);
+          check bool "reopen retains exact request fact" true
+            (Llm_provider.Completion_outcome.equal_request_provenance fact restored)
+        | _ -> fail "durable reopen lost or duplicated request provenance");
+      Eio.Switch.fail sw Exit
+    with Exit -> ()) [true; false]) [false; true]
+;;
+
 let () =
   Alcotest.run
     "Execution projection"
     [ ( "authority"
       , [ test_case "live and restart projection" `Quick test_live_and_restart_projection
+        ; test_case "native sync/stream request evidence survives errors and reopen"
+            `Quick test_native_request_provenance_reopen
         ; test_case "settled invocation projection" `Quick test_settled_invocation_projection
         ; test_case "terminal callback failure readback" `Quick test_terminal_callback_failure_readback
         ; test_case "terminal unknown-effect readback" `Quick test_terminal_unknown_effect_readback

@@ -49,3 +49,11 @@ val cache_reused
   :  request:Complete_common.serialized_http_request
   -> 'a
   -> 'a t
+
+(** Durable read projection of request facts. Decoding validates the receipt,
+    body length and digest, but cannot establish dispatch or reconstruct the
+    private live request artifact. No constructor for a live outcome is exposed. *)
+val request_provenance_to_yojson : request_provenance -> Yojson.Safe.t
+val request_provenance_of_yojson : Yojson.Safe.t -> (request_provenance, string) result
+val equal_request_provenance : request_provenance -> request_provenance -> bool
+val pp_request_provenance : Format.formatter -> request_provenance -> unit

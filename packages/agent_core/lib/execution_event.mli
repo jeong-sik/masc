@@ -103,6 +103,7 @@ val node_kind : node -> node_kind
     classification cannot disagree with an untyped JSON label. *)
 type node_update =
   | Provider_event of Yojson.Safe.t
+  | Provider_request_snapshot of Llm_provider.Completion_outcome.request_provenance
   | Provider_response_snapshot of Llm_provider.Types.api_response
   | Output_delta of Yojson.Safe.t
   | Output_snapshot of Llm_provider.Types.content_block

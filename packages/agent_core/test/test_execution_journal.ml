@@ -1007,7 +1007,7 @@ let test_streaming_provider_identity_and_projection () =
            ]
        ; children = [ { value = child; _ } ]
        ; materialized =
-           Journal.Provider_attempt_state { response = Some materialized_response }
+           Journal.Provider_attempt_state { response = Some materialized_response; _ }
        ; _
        }
      when Event.Node_id.equal (Event.node_id child) output
@@ -1757,6 +1757,63 @@ let test_closed_abort_transaction_stages_one_batch () =
   | _ -> fail "closed abort transaction did not close its run"
 ;;
 
+let test_request_snapshot_single_assignment () =
+  Eio_main.run @@ fun _env ->
+  let config = Llm_provider.Provider_config.make ~kind:OpenAI_compat
+    ~model_id:"receipt-model" ~base_url:"https://provider.test"
+    ~model_capabilities_override:Llm_provider.Capabilities.default_capabilities () in
+  let prepared = Llm_provider.Complete.prepare_request ~config ~messages:[] () in
+  let serialized = Llm_provider.Complete.admit_request_body ~stream:false prepared
+    |> Result.map_error (fun _ -> "fixture body was refused") |> require_codec_ok in
+  let fact = (Llm_provider.Complete.serialized_outcome serialized ()).request_provenance in
+  let journal = require_ok (Journal.create ()) in
+  let run = require_started_run (Journal.start_run journal ~agent_name:"request-snapshot") in
+  let turn = require_opened_node (Journal.open_node journal ~run
+    ~parent:(Journal.run_root run) ~kind:(Event.Agent_turn {ordinal=0})) in
+  let attempt = require_opened_node (Journal.open_node journal ~run ~parent:turn
+    ~kind:(provider_attempt 0)) in
+  ignore (require_ok (Journal.update_node journal ~node:attempt
+    (Event.Provider_request_snapshot fact)));
+  (match Journal.update_node journal ~node:attempt (Event.Provider_request_snapshot fact) with
+   | Error (Journal.Invariant_violation (Journal.Provider_request_already_materialized _)) -> ()
+   | Error _ | Ok _ -> fail "a second request snapshot replaced the owning attempt's evidence");
+  (match Journal.update_node journal ~node:turn (Event.Provider_request_snapshot fact) with
+   | Error (Journal.Invariant_violation (Journal.Invalid_update_for_node _)) -> ()
+   | Error _ | Ok _ -> fail "a request snapshot was accepted on an agent-turn node");
+  let before_response = Option.get (Journal.find_node journal attempt) in
+  (match before_response.materialized with
+   | Journal.Provider_attempt_state {response=None;request_provenance=Some observed} ->
+     check bool "request evidence does not invent a provider response" true
+       (Llm_provider.Completion_outcome.equal_request_provenance fact observed)
+   | Journal.Provider_attempt_state _ | Journal.Agent_run_state | Journal.Agent_turn_state
+   | Journal.Output_block_state _ | Journal.Tool_invocation_state _ | Journal.Tool_attempt_state ->
+     fail "independent request snapshot failed to materialize");
+  let update = Event.Provider_request_snapshot fact in
+  let wire = require_codec_ok (Event.node_update_to_yojson update) in
+  (match require_codec_ok (Event.node_update_of_yojson wire) with
+   | Event.Provider_request_snapshot restored ->
+     check bool "request snapshot codec roundtrip" true
+       (Llm_provider.Completion_outcome.equal_request_provenance fact restored)
+   | Event.Provider_event _ | Event.Provider_response_snapshot _ | Event.Output_delta _
+   | Event.Output_snapshot _ | Event.Tool_input_delta _ | Event.Tool_input_snapshot _
+   | Event.Tool_progress _ | Event.Tool_result _ -> fail "request snapshot changed kind");
+  let json = Llm_provider.Completion_outcome.request_provenance_to_yojson fact in
+  let fields = Yojson.Safe.Util.to_assoc json in
+  let request = List.assoc "request" fields |> Yojson.Safe.Util.to_assoc in
+  let replace key replacement fields = (key,replacement) :: List.remove_assoc key fields in
+  let with_request request = `Assoc (replace "request" (`Assoc request) fields) in
+  let malformed =
+    [ `Assoc (("state", `String "serialized") :: fields)
+    ; `Assoc (replace "state" (`String "unknown") fields)
+    ; `Assoc (replace "request" `Null fields)
+    ; with_request (replace "body_bytes" (`Int (-1)) request)
+    ; with_request (replace "body_sha256" (`String "00") request)
+    ; with_request (("raw_prompt", `String "must not be admitted") :: request) ] in
+  List.iter (fun json ->
+    match Llm_provider.Completion_outcome.request_provenance_of_yojson json with
+    | Error _ -> () | Ok _ -> fail "malformed persisted request fact was admitted") malformed
+;;
+
 let () =
   run
     "Execution journal"
@@ -1819,7 +1876,9 @@ let () =
             test_closed_abort_transaction_stages_one_batch
         ] )
     ; ( "codec"
-      , [ test_case
+      , [ test_case "request snapshot is exact and single assignment"
+            `Quick test_request_snapshot_single_assignment
+        ; test_case
             "round-trip and exact schema"
             `Quick
             test_codec_roundtrip_and_exactness

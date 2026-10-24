@@ -104,6 +104,16 @@ let before_provider_attempt t binding =
 
 let provider (t : t) = t.provider
 
+let record_provider_request_provenance (t : t) provenance =
+  match t.turn, t.provider with
+  | Transient _, None | Durable _, None -> Ok ()
+  | Durable _, Some provider ->
+    Execution_agent_scope.record_provider_request_provenance provider provenance
+    |> Result.map_error core_error
+  | Transient _, Some _ ->
+    Error (core_error Execution_agent_scope.Invocation_locator_mismatch)
+;;
+
 let record_provider_response (t : t) response =
   match t.turn, t.provider with
   | Transient _, None -> Ok ()

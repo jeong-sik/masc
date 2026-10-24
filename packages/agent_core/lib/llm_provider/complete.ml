@@ -38,6 +38,12 @@ type fit_error = Prepared_completion_request.fit_error =
 
 let prepare_request = Prepared_completion_request.prepare
 let admit_request_body = Prepared_completion_request.admit_serialized_body
+let serialized_outcome serialized result =
+  Completion_outcome.after_serialization
+    ~request:(Prepared_completion_request.admitted_body_request
+      (Prepared_completion_request.serialized_admitted_body serialized)) result
+;;
+
 type 'clock measurement_next_stage = 'clock Prepared_completion_request.next_stage =
   | Completion of { call_window : 'clock Deadline_window.t }
   | Stream of

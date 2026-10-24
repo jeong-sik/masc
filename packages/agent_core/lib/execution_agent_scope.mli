@@ -149,6 +149,19 @@ val open_provider_attempt
 
 val resume_provider_attempt : turn -> (provider_resume, error) result
 
+(** Persist the returned request fact once on its exact provider attempt,
+    independently of whether a response or an error was returned. *)
+val record_provider_request_provenance
+  :  provider_attempt
+  -> Llm_provider.Completion_outcome.request_provenance
+  -> (unit, error) result
+
+(** [None] means this attempt has no returned request fact recorded. The value
+    is read from the authoritative reducer, including after restart. *)
+val provider_request_provenance
+  :  provider_attempt
+  -> (Llm_provider.Completion_outcome.request_provenance option, error) result
+
 (** Materialize the exact provider response once on its owning attempt. *)
 val record_provider_response
   :  provider_attempt

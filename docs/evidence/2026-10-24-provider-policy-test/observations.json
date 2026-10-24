@@ -1,0 +1,30 @@
+{
+  "base": "43162710e28f61375ece2d6497de9892705ef691",
+  "failed_candidate": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+  "source_receipts": {
+    "packages/agent_core/lib/llm_provider/provider_config.ml": {
+      "base_and_candidate_identical": true,
+      "sha256": "40d5c362977c4db95a439f2346442dcbd17fa0bebc2a266e595e414d1bd8c133"
+    },
+    "packages/agent_core/models.toml": {
+      "base_and_candidate_identical": true,
+      "sha256": "88b702fcc77c085cae3b4e718a97afb2b213bd36ec0b60a2654b5e6c9a43344d"
+    },
+    "packages/agent_core/test/test_provider_config.ml": {
+      "before_repair_base_and_failed_candidate_identical": true,
+      "original_test_sha256": "df3efd0ff254c8fceebcc45b005a5a6eb56f7aac95463fc31833517baba824a2"
+    },
+    "43162710e28f61375ece2d6497de9892705ef691": {
+      "thinking_fragment_sha256": "723c7c267ee67dd4065e1e12b0dfb1b014efdc2839eb7e35e61c9799d92501e7",
+      "result": "4 actual-source thinking projection checks passed",
+      "checks_passed": 4
+    },
+    "7501aec032012869d8b979e0d14e1a9a9464ace7": {
+      "thinking_fragment_sha256": "723c7c267ee67dd4065e1e12b0dfb1b014efdc2839eb7e35e61c9799d92501e7",
+      "result": "4 actual-source thinking projection checks passed",
+      "checks_passed": 4
+    }
+  },
+  "config_input_port": "module Provider_config = struct type t = {enable_thinking : bool option} end\n",
+  "scope": "Actual unchanged thinking projection with typed config input port; no complete request builder, native linking, Dune, CI or live provider execution"
+}

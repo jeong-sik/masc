@@ -1,0 +1,106 @@
+{
+  "base_head": "51b59a7a16943e3cf5245c7fb380ae6c0e3c66df",
+  "ocaml_scope": "parse only; not whole native typecheck/link",
+  "ocaml": [
+    {
+      "file": "bin/masc_tui_context_inspector.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_assembly.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_layers.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_layers.mli",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_submission_link.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_direct_turn_context.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_direct_turn_context.mli",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_next_request_forecast.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_official_client_context_projection.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_run_prompt.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_run_prompt.mli",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools_hooks.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_turn.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/types/prompt_block_id.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/types/prompt_block_id.mli",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "test/test_keeper_direct_goal_provider_wire.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "test/test_keeper_prompt_capture.ml",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "test/test_turn_record.ml",
+      "exit": 0,
+      "diagnostic": ""
+    }
+  ],
+  "dashboard_command": [
+    "pnpm",
+    "exec",
+    "vitest",
+    "run",
+    "src/api/dashboard-turn-records.test.ts"
+  ],
+  "dashboard_exit": 0,
+  "native_receiver_test": "authored, not run locally",
+  "local_dune": "not run"
+}

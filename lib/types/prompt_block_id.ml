@@ -1,6 +1,7 @@
 type t =
   | Keeper_instructions
   | Dynamic_context
+  | Active_goals
   | Temporal_summary
   | Memory_os_recall
   | Librarian_working_context
@@ -11,18 +12,20 @@ let equal a b =
   match a, b with
   | Keeper_instructions, Keeper_instructions
   | Dynamic_context, Dynamic_context
+  | Active_goals, Active_goals
   | Temporal_summary, Temporal_summary
   | Librarian_working_context, Librarian_working_context
   | Memory_os_recall, Memory_os_recall
   | Operator_note, Operator_note
   | Skill_compositions, Skill_compositions -> true
-  | ( Keeper_instructions | Dynamic_context | Temporal_summary | Memory_os_recall
+  | ( Keeper_instructions | Dynamic_context | Active_goals | Temporal_summary | Memory_os_recall
     | Librarian_working_context | Operator_note | Skill_compositions )
   , _ -> false
 
 let to_string = function
   | Keeper_instructions -> "keeper_instructions"
   | Dynamic_context -> "dynamic_context"
+  | Active_goals -> "active_goals"
   | Temporal_summary -> "temporal_summary"
   | Memory_os_recall -> "memory_os_recall"
   | Librarian_working_context -> "librarian_working_context"
@@ -32,6 +35,7 @@ let to_string = function
 let of_string = function
   | "keeper_instructions" -> Ok Keeper_instructions
   | "dynamic_context" -> Ok Dynamic_context
+  | "active_goals" -> Ok Active_goals
   | "temporal_summary" -> Ok Temporal_summary
   | "memory_os_recall" -> Ok Memory_os_recall
   | "librarian_working_context" -> Ok Librarian_working_context
@@ -42,6 +46,7 @@ let of_string = function
 let all_known =
   [ Keeper_instructions
   ; Dynamic_context
+  ; Active_goals
   ; Temporal_summary
   ; Memory_os_recall
   ; Librarian_working_context
@@ -60,11 +65,12 @@ let cache_rank = function
      then the independently versioned Librarian index. *)
   | Memory_os_recall -> 2
   | Librarian_working_context -> 3
-  | Dynamic_context -> 4
-  | Temporal_summary -> 5
+  | Active_goals -> 4
+  | Dynamic_context -> 5
+  | Temporal_summary -> 6
   (* An operator speaking mid-turn is the newest thing in the assembly and the
-     only block that rides a post-tool round; it stays last on both counts. *)
-  | Operator_note -> 6
+     newest instruction in a post-tool round; it stays last on both counts. *)
+  | Operator_note -> 7
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context
@@ -75,14 +81,14 @@ let cache_rank = function
 let injected_on_post_tool_round = function
   | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
   | Skill_compositions -> false
-  | Keeper_instructions | Operator_note -> true
+  | Keeper_instructions | Active_goals | Operator_note -> true
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context assembly
    a resume carries; it answers [false] because a resumed session already holds
    the system prompt it recorded at its first launch. *)
 let resent_when_held = function
-  | Keeper_instructions | Dynamic_context | Temporal_summary | Memory_os_recall
+  | Keeper_instructions | Dynamic_context | Active_goals | Temporal_summary | Memory_os_recall
   | Librarian_working_context | Skill_compositions -> false
   | Operator_note -> true
 ;;

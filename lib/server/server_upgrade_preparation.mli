@@ -33,6 +33,18 @@ module For_testing : sig
 end
 
 type replacement_readiness = Owner_draining | Port_busy | Replacement_can_start
+type termination_outcome =
+  | Not_requested of error
+  | Requested of (replacement_readiness, error) result
+(** A confirmed identity-bound termination request remains [Requested] even if
+    observing lease/port release fails. None of these states proves process exit. *)
+
+val request_termination_and_observe :
+  t -> observe:(unit -> (replacement_readiness, error) result) -> termination_outcome
+(** Requests once through {!request_termination}, then observes readiness.
+    Pre-request refusal never invokes [observe]. Observation errors, including
+    Unix/file failures, preserve the confirmed request; cancellation propagates. *)
+
 val replacement_readiness :
   run_dir:string -> base_path:string -> port:int -> (replacement_readiness, error) result
 (** Observe kernel lease release and loopback bind availability after requesting

@@ -87,6 +87,16 @@ let suggest_loopback_port () =
 module For_testing = struct let prepare = prepare_with end
 
 type replacement_readiness = Owner_draining | Port_busy | Replacement_can_start
+type termination_outcome =
+  | Not_requested of error
+  | Requested of (replacement_readiness, error) result
+let request_termination_and_observe owner ~observe =
+  match request_termination owner with
+  | Error error -> Not_requested error
+  | Ok () ->
+    let readiness =
+      try observe () with Unix.Unix_error _ | Sys_error _ -> Error Owner_unavailable in
+    Requested readiness
 let replacement_readiness ~run_dir ~base_path ~port =
   match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
   | Ok owner -> Owner_process_identity.close owner; Ok Owner_draining

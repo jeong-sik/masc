@@ -90,8 +90,10 @@ let cleanup_joins_exact_settlement () = with_allocation (fun _ _ sw owned path -
 
 let unnotified_settlement_is_abandoned () = with_allocation (fun _ _ _ owned path ->
   let completions = ref [] in
-  ignore (A.on_finish owned (fun completion -> completions := completion :: !completions; Ok ()) |> ok);
-  check bool "unused settlement registration does not strand cleanup" true (A.cleanup owned = Ok (A.Paths_retained (Filename.dirname path)));
+  let (_notify : B.completion -> unit) =
+    A.on_finish owned (fun completion -> completions := completion :: !completions; Ok ()) |> ok in
+  check bool "unused settlement registration does not strand cleanup" true
+    (A.cleanup owned = Ok (A.Paths_retained (Filename.dirname path)));
   check bool "missing broker notification is abandonment, never release" true (!completions = [B.Abandoned]))
 
 let cancelled_owner_retains_unknown_settlement () = with_temp_root (fun root _ ->
@@ -99,7 +101,7 @@ let cancelled_owner_retains_unknown_settlement () = with_temp_root (fun root _ -
   (match Eio.Switch.run (fun sw ->
      let owned = A.create ~sw ~max_message_bytes:16384 |> ok in
      retained := Some owned;
-     ignore (A.on_finish owned (fun _ -> incr calls; Ok ()) |> ok);
+     let (_notify : B.completion -> unit) = A.on_finish owned (fun _ -> incr calls; Ok ()) |> ok in
      Eio.Switch.fail sw Stop_owner)
    with
    | () -> fail "owner cancellation must remain visible"

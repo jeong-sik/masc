@@ -1,23 +1,18 @@
 # Completion-authority observations survive this turn's tool loop
 
-## Candidate review status
+## Current candidate and actual outcomes
 
-Candidate `2be9d21697fb4c9da9aafd769f5fa691bae2e757` is **source FAIL, P2**.
-Its product and direct-test files match author e9f72f1. Independent execution
-found that Official Start puts the event in the vendor's fixed System; when
-the next local turn has no event, Resume sends no corresponding observation.
-The initial System event can therefore outlive its intended current-turn scope.
-The ordinary HTTP retention result remains narrower evidence. The
-[independent finding](independent-source-review-e9-fail.json) and
-[lifetime counterexample](independent-official-lifetime-counterexample.json)
-are preserved while the Official carrier is repaired.
+Source `32805eb764eab2710262446e925b0ea5c3a44c08` contains the Official Start carrier correction described below. The [independent author-source review](independent-source-review-8266-pass.json) is PASS at `8266d74301eba653741fe4b0c1fafd7cbe7081f5`; [the integration binding](integration-binding-3280.json) checks equality of its 15 changed product/direct-test files with 328. This is source review, not a full native, vendor, deployment or model success claim.
 
-Native run [40114401559](https://github.com/jeong-sik/masc/actions/runs/40114401559)
-at this candidate stopped during compilation: the new fixture used unqualified
-constructor `Text`. None of the six selected executables ran. This is recorded
-in [the native receipt](native-result-2be9.json), not counted as six behavior
-failures. The new carrier and fixture corrections require their own review
-and check results. Latest actual acceptance remains **9/11**.
+Native run [40116634161](https://github.com/jeong-sik/masc/actions/runs/40116634161) at source328 compiled and executed. Six selected suites passed **245 tests**. The Claude runtime suite had **three explicit failures** (lifecycle 0, 8 and 13), then reached its existing 600-second suite timeout after lifecycle47; it did not complete. Those failures remain open for investigation. The source review predates this native counterevidence.
+
+The [actual Qwen experiment at earlier source2be](qwen-runtime/README.md) preserves initial execution failure, rejection recovery and the first positive approval. Unforced matching Goal association passed; after delivered approval the model performed no Goal measurement or remaining work, so **G3 failed**. Rejection input retention was observed across tool rounds; postapproval retention was unexercised because there was no tool call. This is a single ordinary HTTP cohort, not a population claim or a successful Goal.
+
+The [actual dashboard evidence](ui-runtime/README.md) reproduces an inspector render error from missing `prompt.completion_authority` metadata, then confirms the one-entry repair. The final screen's 795-byte decision block equals the API; API, persisted capture and actual request20 System hashes agree. Two targeted Vitest suites passed 39 tests. TypeScript checking still has the same two existing `keeper-stream.test.ts` errors after the new missing-metadata error is repaired. This UI uses the isolated2be backend and the recorded frontend source plus the one-entry repair; it does not validate native Official transport or production installation.
+
+## Preserved earlier failures
+
+Earlier candidate `2be9d21697fb4c9da9aafd769f5fa691bae2e757` received **source FAIL, P2**: Official Start put the event in the vendor's fixed System, allowing it to outlive the current turn. The [independent finding](independent-source-review-e9-fail.json) and [counterexample](independent-official-lifetime-counterexample.json) remain intact. Native run [40114401559](https://github.com/jeong-sik/masc/actions/runs/40114401559) stopped during compilation at unqualified `Text`; none of its six executables ran. [Its receipt](native-result-2be9.json) remains a compile failure, not six behavior failures.
 
 ## Repair implementation and scoped checks
 

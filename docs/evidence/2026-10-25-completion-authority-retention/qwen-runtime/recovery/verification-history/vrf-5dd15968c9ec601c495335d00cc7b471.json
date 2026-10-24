@@ -1,0 +1,29 @@
+{
+  "id": "vrf-5dd15968c9ec601c495335d00cc7b471",
+  "task_id": "task-001",
+  "output": {
+    "producer_execution": null,
+    "evidence_refs": [
+      "artifact:workspace/acceptance.json",
+      "note:Updated alpha to true in acceptance.json"
+    ],
+    "task_title": "Set alpha to true in acceptance.json",
+    "required_artifacts": [ "artifact:workspace/acceptance.json" ],
+    "submitted_evidence": [
+      {
+        "kind": "artifact",
+        "reference": "artifact:workspace/acceptance.json",
+        "content": "{\n  \"alpha\": true,\n  \"beta\": true,\n  \"gamma\": true\n}\n",
+        "bytes": 53,
+        "truncated": false
+      },
+      {
+        "kind": "note",
+        "content": "Updated alpha to true in acceptance.json"
+      }
+    ]
+  },
+  "criteria": [ "alpha is explicitly set to true" ],
+  "worker": "goal-canary",
+  "created_at": 1792862413.466226
+}

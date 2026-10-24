@@ -1,0 +1,860 @@
+{
+  "scope": "Read-only filesystem observation; no API, model call, Keeper message, approval, link, measurement, source/runtime mutation. Writes only external private evidence. No raw thinking copied. Independent runtime observation is not source approval or Official path proof. Sequential file reads, no atomic snapshot claim.",
+  "observed_at": "2026-10-24T17:20:43.814402+00:00",
+  "read_window_started_at": "2026-10-24T17:20:43.759413+00:00",
+  "goal_id": "goal-canary-three-results",
+  "criterion_revision": "323f43fbb45eda9a26d334f519d40239",
+  "state": {
+    "identity.json": {
+      "source_sha": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+      "binary": "/tmp/masc-goal-runtime-2be9d216/masc",
+      "base_path": "/private/tmp/masc-goal-canary-2be9d216-qwen",
+      "pid": 84191,
+      "port": 65337,
+      "provider_proxy_port": 65268,
+      "model": "qwen3:8b",
+      "production_deployment": false
+    },
+    ".masc/tasks/backlog.json": {
+      "tasks": [
+        {
+          "id": "task-001",
+          "title": "Set alpha to true in acceptance.json",
+          "description": "Update alpha to true in workspace/acceptance.json as the first step toward completing all three flags",
+          "priority": 3,
+          "files": [],
+          "created_at": "2026-10-24T17:18:30Z",
+          "created_by": "goal-canary",
+          "contract": {
+            "completion_contract": [
+              "alpha is explicitly set to true"
+            ],
+            "required_evidence": [
+              "artifact:workspace/acceptance.json"
+            ]
+          },
+          "handoff_context": {
+            "summary": "Updated alpha to true in acceptance.json",
+            "evidence_refs": [
+              "artifact:workspace/acceptance.json"
+            ],
+            "updated_at": "2026-10-24T17:20:13Z",
+            "updated_by": "goal-canary"
+          },
+          "status": "awaiting_verification",
+          "assignee": "goal-canary",
+          "started_at": "2026-10-24T17:18:48Z",
+          "submitted_at": "2026-10-24T17:20:13Z",
+          "verification_id": "vrf-5dd15968c9ec601c495335d00cc7b471"
+        }
+      ],
+      "pending_completion_rejections": [],
+      "delivered_completion_rejections": [],
+      "pending_completion_approvals": [],
+      "task_deletion_receipts": [],
+      "task_creation_receipts": [],
+      "last_updated": "2026-10-24T17:20:13Z",
+      "version": 5
+    },
+    ".masc/goals.json": {
+      "version": 3,
+      "updated_at": "2026-10-24T17:16:09Z",
+      "goals": [
+        {
+          "id": "goal-canary-three-results",
+          "criterion_revision": "323f43fbb45eda9a26d334f519d40239",
+          "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+          "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+          "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+          "due_date": null,
+          "priority": 1,
+          "phase": "executing",
+          "last_review_note": null,
+          "last_review_at": null,
+          "created_at": "2026-10-24T17:16:09Z",
+          "updated_at": "2026-10-24T17:16:09Z"
+        }
+      ],
+      "pending_events": [],
+      "pending_notifications": []
+    },
+    ".masc/goal_measurements.json": {
+      "version": 1,
+      "measurements": [
+        {
+          "id": "685442347e915f0c4e1b25d460bfd3dc",
+          "goal_id": "goal-canary-three-results",
+          "criterion_revision": "323f43fbb45eda9a26d334f519d40239",
+          "observed_value": "0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread",
+          "evidence": "note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.",
+          "actor": "goal-canary-operator",
+          "recorded_at": "2026-10-24T17:16:09Z"
+        }
+      ]
+    },
+    ".masc/keepers/goal-canary.json": {
+      "schema": "masc.keeper_meta.v2",
+      "name": "goal-canary",
+      "instructions": "This Keeper performs ordinary artifact work in this isolated workspace. Use actual persisted files as evidence and follow the user request.",
+      "trace_id": "trace-1792862169652-00000",
+      "created_at": "2026-10-24T17:16:09Z",
+      "updated_at": "2026-10-24T17:20:13Z",
+      "total_turns": 0,
+      "total_input_tokens": 0,
+      "total_output_tokens": 0,
+      "total_tokens": 0,
+      "total_cost_usd": {
+        "known_cost_usd": 0.0,
+        "priced_readings": 0,
+        "unpriced_readings": 0,
+        "unresolved_readings": 0,
+        "unobserved_attempts": 0,
+        "history": "complete"
+      },
+      "last_turn_ts": 0.0,
+      "last_input_tokens": 0,
+      "last_output_tokens": 0,
+      "last_total_tokens": 0,
+      "usage_cursor": null,
+      "last_usage_resolution": null,
+      "last_latency_ms": 0,
+      "proactive_count_total": 0,
+      "last_proactive_ts": 0.0,
+      "proactive_visible_count_total": 0,
+      "last_visible_proactive_ts": 0.0,
+      "last_proactive_outcome": "never_started",
+      "last_proactive_reason": "",
+      "last_proactive_preview": "",
+      "message_scope_ack_id": null,
+      "last_runtime_attempt": null,
+      "paused": false,
+      "latched_reason": null,
+      "current_task_id": null,
+      "keeper_id": "keeper-afb60ee0-75b2-4aed-bb92-a8c7bea01cdf",
+      "agent_core_env": {}
+    }
+  },
+  "files": [
+    {
+      "path": "/tmp/masc-goal-canary-2be9d216-qwen/identity.json",
+      "exists": true,
+      "bytes": 299,
+      "sha256": "8e69c866c149e0d5f167f0093aa666c84155dc6547d03f1ff470c6cf4be0c490"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-2be9d216-qwen/.masc/tasks/backlog.json",
+      "exists": true,
+      "bytes": 1241,
+      "sha256": "a5b30b759c0670409d7a137c626c85e7e010f54bb1501c5e39ee3dcae434f1b2"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-2be9d216-qwen/.masc/goals.json",
+      "exists": true,
+      "bytes": 798,
+      "sha256": "1d05b5a73bc34c70274aeb4d07d0ecc47c9645e7ae6ecac34a9703ad0db9dd59"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-2be9d216-qwen/.masc/goal_measurements.json",
+      "exists": true,
+      "bytes": 536,
+      "sha256": "7755c630ebdd3b27ce68cd184c9d1ea20a1552a8bdf1f8f6e9c88b34295cd0b7"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-2be9d216-qwen/.masc/keepers/goal-canary.json",
+      "exists": true,
+      "bytes": 1281,
+      "sha256": "c40bc649e1d3d3451ef58177f97348251e9a80fc4c604ee0ad8617e53524d4f3"
+    },
+    {
+      "path": "/tmp/masc-goal-canary-2be9d216-qwen/.masc/keepers/goal-canary/event-queue-v19.json",
+      "exists": false
+    }
+  ],
+  "goal_link_files": [
+    {
+      "path": "/tmp/masc-goal-canary-2be9d216-qwen/.masc/tasks/goal_task_links.json",
+      "exists": true,
+      "bytes": 153,
+      "sha256": "00f8ae8bf1715c0799c1856b0d53339dbb95c00d1f68ce9607294f9504111733",
+      "value": {
+        "version": 1,
+        "last_updated": "2026-10-24T17:18:30Z",
+        "links": [
+          {
+            "goal_id": "goal-canary-three-results",
+            "task_ids": [
+              "task-001"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "path": "/tmp/masc-goal-canary-2be9d216-qwen/.masc/tasks/goal_task_links.json.last-good",
+      "exists": true,
+      "bytes": 153,
+      "sha256": "00f8ae8bf1715c0799c1856b0d53339dbb95c00d1f68ce9607294f9504111733",
+      "value": {
+        "version": 1,
+        "last_updated": "2026-10-24T17:18:30Z",
+        "links": [
+          {
+            "goal_id": "goal-canary-three-results",
+            "task_ids": [
+              "task-001"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "wire": [
+    {
+      "request_id": "request-000002",
+      "request_sha256": "5e1a02856a1ba4486c6608655b84029df82e3c5b237441923a2418ff752e990e",
+      "request_bytes": 76907,
+      "response_sha256": "348c63ec9b4d6b5ea99835811872383637e89bfc565d68f5f17c3cf03937d0df",
+      "response_bytes": 99991,
+      "response_complete": true,
+      "partial_response_lines": [],
+      "model_alias": "qwen3:8b",
+      "options": {
+        "temperature": 0.4
+      },
+      "goal_in_system": true,
+      "revision_in_system": true,
+      "new_reporting_instruction_in_system": true,
+      "offered_tools": [
+        "Execute",
+        "Grep",
+        "Read",
+        "Edit",
+        "Write",
+        "WebSearch",
+        "WebFetch",
+        "BrowserTabs",
+        "BrowserSession",
+        "BrowserGoto",
+        "BrowserInstruct",
+        "keeper_lane_status",
+        "keeper_tools_list",
+        "keeper_capability_search",
+        "keeper_context_status",
+        "keeper_artifact_read",
+        "keeper_memory_search",
+        "keeper_tasks_list",
+        "keeper_task_claim",
+        "keeper_task_create",
+        "keeper_task_done",
+        "masc_goal_measure",
+        "keeper_candle_balance",
+        "keeper_candle_catalog",
+        "keeper_candle_purchase",
+        "keeper_candle_equip",
+        "keeper_candle_gift",
+        "masc_board_post",
+        "masc_board_list",
+        "masc_board_post_get",
+        "masc_board_comment",
+        "masc_board_search",
+        "keeper_tool_search"
+      ],
+      "tool_calls": [
+        {
+          "id": "call_qbe3nhrg",
+          "function": {
+            "index": 0,
+            "name": "Read",
+            "arguments": {
+              "file_path": "workspace/acceptance.json",
+              "cwd": "."
+            }
+          }
+        }
+      ],
+      "last_tool_feedback": null,
+      "public_response": "",
+      "response_terminal": [
+        {
+          "created_at": "2026-10-24T17:18:01.449287Z",
+          "done_reason": "stop",
+          "eval_count": 745,
+          "prompt_eval_count": 17045
+        }
+      ],
+      "provider_errors": [],
+      "raw_thinking_codepoints_count_only": 3326
+    },
+    {
+      "request_id": "request-000003",
+      "request_sha256": "21ff02797d0928816109f71a11e1febf68065c9edc27ccc7faf48fae369821dc",
+      "request_bytes": 79087,
+      "response_sha256": "36e77387c0b91b78e2402ea8014186195ec144962ae90c3887451d089f0f7dcf",
+      "response_bytes": 44590,
+      "response_complete": true,
+      "partial_response_lines": [],
+      "model_alias": "qwen3:8b",
+      "options": {
+        "temperature": 0.4
+      },
+      "goal_in_system": true,
+      "revision_in_system": true,
+      "new_reporting_instruction_in_system": true,
+      "offered_tools": [
+        "Execute",
+        "Grep",
+        "Read",
+        "Edit",
+        "Write",
+        "WebSearch",
+        "WebFetch",
+        "BrowserTabs",
+        "BrowserSession",
+        "BrowserGoto",
+        "BrowserInstruct",
+        "keeper_lane_status",
+        "keeper_tools_list",
+        "keeper_capability_search",
+        "keeper_context_status",
+        "keeper_artifact_read",
+        "keeper_memory_search",
+        "keeper_tasks_list",
+        "keeper_task_claim",
+        "keeper_task_create",
+        "keeper_task_done",
+        "masc_goal_measure",
+        "keeper_candle_balance",
+        "keeper_candle_catalog",
+        "keeper_candle_purchase",
+        "keeper_candle_equip",
+        "keeper_candle_gift",
+        "masc_board_post",
+        "masc_board_list",
+        "masc_board_post_get",
+        "masc_board_comment",
+        "masc_board_search",
+        "keeper_tool_search"
+      ],
+      "tool_calls": [
+        {
+          "id": "call_ii9k4j5r",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_create",
+            "arguments": {
+              "title": "Set alpha to true in acceptance.json",
+              "description": "Update alpha to true in workspace/acceptance.json as the first step toward completing all three flags",
+              "goal_id": "goal-canary-three-results",
+              "contract": {
+                "completion_contract": [
+                  "alpha is explicitly set to true"
+                ],
+                "required_evidence": [
+                  "artifact:workspace/acceptance.json"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "last_tool_feedback": {
+        "role": "tool",
+        "tool_name": "Read",
+        "content": "{\"ok\":true,\"path\":\"/private/tmp/masc-goal-canary-2be9d216-qwen/.masc/playground/docker/goal-canary/./workspace/acceptance.json\",\"bytes\":56,\"truncated\":false,\"offset\":1,\"returned_lines\":5,\"content\":\"{\\n  \\\"alpha\\\": false,\\n  \\\"beta\\\": false,\\n  \\\"gamma\\\": false\\n}\\n\",\"via\":\"docker\"}"
+      },
+      "public_response": "",
+      "response_terminal": [
+        {
+          "created_at": "2026-10-24T17:18:30.643309Z",
+          "done_reason": "stop",
+          "eval_count": 410,
+          "prompt_eval_count": 17576
+        }
+      ],
+      "provider_errors": [],
+      "raw_thinking_codepoints_count_only": 1463
+    },
+    {
+      "request_id": "request-000004",
+      "request_sha256": "bced84e1a480eae7c2b27397c0b96aa920a1c7dc30eedec73bdff566485f6606",
+      "request_bytes": 81286,
+      "response_sha256": "85ad3ef20de9f96440934a86ebbbf1a46fb4d5e858cbf53f39f428306e2e6fd1",
+      "response_bytes": 32558,
+      "response_complete": true,
+      "partial_response_lines": [],
+      "model_alias": "qwen3:8b",
+      "options": {
+        "temperature": 0.4
+      },
+      "goal_in_system": true,
+      "revision_in_system": true,
+      "new_reporting_instruction_in_system": true,
+      "offered_tools": [
+        "Execute",
+        "Grep",
+        "Read",
+        "Edit",
+        "Write",
+        "WebSearch",
+        "WebFetch",
+        "BrowserTabs",
+        "BrowserSession",
+        "BrowserGoto",
+        "BrowserInstruct",
+        "keeper_lane_status",
+        "keeper_tools_list",
+        "keeper_capability_search",
+        "keeper_context_status",
+        "keeper_artifact_read",
+        "keeper_memory_search",
+        "keeper_tasks_list",
+        "keeper_task_claim",
+        "keeper_task_create",
+        "keeper_task_done",
+        "masc_goal_measure",
+        "keeper_candle_balance",
+        "keeper_candle_catalog",
+        "keeper_candle_purchase",
+        "keeper_candle_equip",
+        "keeper_candle_gift",
+        "masc_board_post",
+        "masc_board_list",
+        "masc_board_post_get",
+        "masc_board_comment",
+        "masc_board_search",
+        "keeper_tool_search"
+      ],
+      "tool_calls": [
+        {
+          "id": "call_37zn6uj6",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_claim",
+            "arguments": {
+              "task_id": "task-001"
+            }
+          }
+        }
+      ],
+      "last_tool_feedback": {
+        "role": "tool",
+        "tool_name": "keeper_task_create",
+        "content": "{\"ok\":true,\"result\":\"Added task-001: Set alpha to true in acceptance.json\",\"goal_id\":\"goal-canary-three-results\",\"typed_outcome\":{\"kind\":\"Progress\"}}"
+      },
+      "public_response": "",
+      "response_terminal": [
+        {
+          "created_at": "2026-10-24T17:18:48.702014Z",
+          "done_reason": "stop",
+          "eval_count": 258,
+          "prompt_eval_count": 18025
+        }
+      ],
+      "provider_errors": [],
+      "raw_thinking_codepoints_count_only": 1073
+    },
+    {
+      "request_id": "request-000005",
+      "request_sha256": "8551572cd05217536b885d0212f81ebf890f9c6308f9ea73f3093d319174eae6",
+      "request_bytes": 83281,
+      "response_sha256": "9d144eb4125ca92a1f5d265f87417b9ce94b264da1514580181ebfc4a29efe04",
+      "response_bytes": 26893,
+      "response_complete": true,
+      "partial_response_lines": [],
+      "model_alias": "qwen3:8b",
+      "options": {
+        "temperature": 0.4
+      },
+      "goal_in_system": true,
+      "revision_in_system": true,
+      "new_reporting_instruction_in_system": true,
+      "offered_tools": [
+        "Execute",
+        "Grep",
+        "Read",
+        "Edit",
+        "Write",
+        "WebSearch",
+        "WebFetch",
+        "BrowserTabs",
+        "BrowserSession",
+        "BrowserGoto",
+        "BrowserInstruct",
+        "keeper_lane_status",
+        "keeper_tools_list",
+        "keeper_capability_search",
+        "keeper_context_status",
+        "keeper_artifact_read",
+        "keeper_memory_search",
+        "keeper_tasks_list",
+        "keeper_task_claim",
+        "keeper_task_create",
+        "keeper_task_done",
+        "masc_goal_measure",
+        "keeper_candle_balance",
+        "keeper_candle_catalog",
+        "keeper_candle_purchase",
+        "keeper_candle_equip",
+        "keeper_candle_gift",
+        "masc_board_post",
+        "masc_board_list",
+        "masc_board_post_get",
+        "masc_board_comment",
+        "masc_board_search",
+        "keeper_tool_search"
+      ],
+      "tool_calls": [
+        {
+          "id": "call_d9nq792t",
+          "function": {
+            "index": 0,
+            "name": "Edit",
+            "arguments": {
+              "old_string": "false",
+              "new_string": "true",
+              "replace_all": true,
+              "cwd": ".",
+              "file_path": "workspace/acceptance.json"
+            }
+          }
+        }
+      ],
+      "last_tool_feedback": {
+        "role": "tool",
+        "tool_name": "keeper_task_claim",
+        "content": "{\"result\":\"goal-canary claimed task-001 Task auto-started — begin work now.\",\"claim_observation\":{\"event_type\":\"collaboration.todo.claim_observed\",\"observed_at\":1792862328.752808,\"substrate\":{\"kind\":\"todo_claim\",\"source\":\"masc.workspace\",\"workspace_id\":null},\"actor\":{\"id\":\"goal-canary\",\"role\":null,\"display_name\":null},\"todo_claim\":{\"todo_id\":\"task-001\",\"state\":\"claim_verified\",\"scope_widened\":false,\"claimed_by\":\"goal-canary\",\"winner_actor_id\":\"goal-canary\"}},\"claimed_task\":{\"task_id\":\"task-001\",\"title\":\"Set alpha to true in acceptance.json\",\"priority\":3,\"goal_id\":\"goal-canary-three-results\"}}"
+      },
+      "public_response": "",
+      "response_terminal": [
+        {
+          "created_at": "2026-10-24T17:19:08.505261Z",
+          "done_reason": "stop",
+          "eval_count": 232,
+          "prompt_eval_count": 18464
+        }
+      ],
+      "provider_errors": [],
+      "raw_thinking_codepoints_count_only": 876
+    },
+    {
+      "request_id": "request-000006",
+      "request_sha256": "afc48a93d3fc4519f5eee393448f2d88210b388de3f0d55ece12163fe323d483",
+      "request_bytes": 84630,
+      "response_sha256": "5e87ada55ba67a4b9068cb78631d6c99c538cf6eb685e9ec4b569cc102afce0a",
+      "response_bytes": 23335,
+      "response_complete": true,
+      "partial_response_lines": [],
+      "model_alias": "qwen3:8b",
+      "options": {
+        "temperature": 0.4
+      },
+      "goal_in_system": true,
+      "revision_in_system": true,
+      "new_reporting_instruction_in_system": true,
+      "offered_tools": [
+        "Execute",
+        "Grep",
+        "Read",
+        "Edit",
+        "Write",
+        "WebSearch",
+        "WebFetch",
+        "BrowserTabs",
+        "BrowserSession",
+        "BrowserGoto",
+        "BrowserInstruct",
+        "keeper_lane_status",
+        "keeper_tools_list",
+        "keeper_capability_search",
+        "keeper_context_status",
+        "keeper_artifact_read",
+        "keeper_memory_search",
+        "keeper_tasks_list",
+        "keeper_task_claim",
+        "keeper_task_create",
+        "keeper_task_done",
+        "masc_goal_measure",
+        "keeper_candle_balance",
+        "keeper_candle_catalog",
+        "keeper_candle_purchase",
+        "keeper_candle_equip",
+        "keeper_candle_gift",
+        "masc_board_post",
+        "masc_board_list",
+        "masc_board_post_get",
+        "masc_board_comment",
+        "masc_board_search",
+        "keeper_tool_search"
+      ],
+      "tool_calls": [
+        {
+          "id": "call_m2swz9fa",
+          "function": {
+            "index": 0,
+            "name": "Read",
+            "arguments": {
+              "cwd": ".",
+              "file_path": "workspace/acceptance.json"
+            }
+          }
+        }
+      ],
+      "last_tool_feedback": {
+        "role": "tool",
+        "tool_name": "Edit",
+        "content": "[masc:blob sha256=f24414f5416b65592522ab7f0435e0caf9d57ef311fbf3035830f225bba33c80 bytes=1295 mime=application/vnd.masc.tool-result-manifest+json preview=\"\"]"
+      },
+      "public_response": "",
+      "response_terminal": [
+        {
+          "created_at": "2026-10-24T17:19:22.361344Z",
+          "done_reason": "stop",
+          "eval_count": 192,
+          "prompt_eval_count": 18795
+        }
+      ],
+      "provider_errors": [],
+      "raw_thinking_codepoints_count_only": 754
+    },
+    {
+      "request_id": "request-000007",
+      "request_sha256": "8c7791cc1590d1f58ef4414eb4b3fd1fdf37fb685523f5740b28ec39ac013df6",
+      "request_bytes": 85954,
+      "response_sha256": "0bd25d4a5fcfe7cb23b5d01906fe6871ec92bc759f13928d77c19eeb0bdb2ba8",
+      "response_bytes": 92884,
+      "response_complete": true,
+      "partial_response_lines": [],
+      "model_alias": "qwen3:8b",
+      "options": {
+        "temperature": 0.4
+      },
+      "goal_in_system": true,
+      "revision_in_system": true,
+      "new_reporting_instruction_in_system": true,
+      "offered_tools": [
+        "Execute",
+        "Grep",
+        "Read",
+        "Edit",
+        "Write",
+        "WebSearch",
+        "WebFetch",
+        "BrowserTabs",
+        "BrowserSession",
+        "BrowserGoto",
+        "BrowserInstruct",
+        "keeper_lane_status",
+        "keeper_tools_list",
+        "keeper_capability_search",
+        "keeper_context_status",
+        "keeper_artifact_read",
+        "keeper_memory_search",
+        "keeper_tasks_list",
+        "keeper_task_claim",
+        "keeper_task_create",
+        "keeper_task_done",
+        "masc_goal_measure",
+        "keeper_candle_balance",
+        "keeper_candle_catalog",
+        "keeper_candle_purchase",
+        "keeper_candle_equip",
+        "keeper_candle_gift",
+        "masc_board_post",
+        "masc_board_list",
+        "masc_board_post_get",
+        "masc_board_comment",
+        "masc_board_search",
+        "keeper_tool_search"
+      ],
+      "tool_calls": [
+        {
+          "id": "call_024us845",
+          "function": {
+            "index": 0,
+            "name": "keeper_task_done",
+            "arguments": {
+              "task_id": "task-001",
+              "result": "Updated alpha to true in acceptance.json",
+              "evidence_refs": [
+                "artifact:workspace/acceptance.json"
+              ]
+            }
+          }
+        }
+      ],
+      "last_tool_feedback": {
+        "role": "tool",
+        "tool_name": "Read",
+        "content": "{\"ok\":true,\"path\":\"/private/tmp/masc-goal-canary-2be9d216-qwen/.masc/playground/docker/goal-canary/./workspace/acceptance.json\",\"bytes\":53,\"truncated\":false,\"offset\":1,\"returned_lines\":5,\"content\":\"{\\n  \\\"alpha\\\": true,\\n  \\\"beta\\\": true,\\n  \\\"gamma\\\": true\\n}\\n\",\"via\":\"docker\"}"
+      },
+      "public_response": "",
+      "response_terminal": [
+        {
+          "created_at": "2026-10-24T17:20:13.43698Z",
+          "done_reason": "stop",
+          "eval_count": 712,
+          "prompt_eval_count": 19091
+        }
+      ],
+      "provider_errors": [],
+      "raw_thinking_codepoints_count_only": 3155
+    },
+    {
+      "request_id": "request-000008",
+      "request_sha256": "6d301ead7edf98024995182863b153ebe959b5a8426f3d3dadf2ed8c4e212d85",
+      "request_bytes": 89715,
+      "response_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "response_bytes": 0,
+      "response_complete": false,
+      "partial_response_lines": [],
+      "model_alias": "qwen3:8b",
+      "options": {
+        "temperature": 0.4
+      },
+      "goal_in_system": true,
+      "revision_in_system": true,
+      "new_reporting_instruction_in_system": true,
+      "offered_tools": [
+        "Execute",
+        "Grep",
+        "Read",
+        "Edit",
+        "Write",
+        "WebSearch",
+        "WebFetch",
+        "BrowserTabs",
+        "BrowserSession",
+        "BrowserGoto",
+        "BrowserInstruct",
+        "keeper_lane_status",
+        "keeper_tools_list",
+        "keeper_capability_search",
+        "keeper_context_status",
+        "keeper_artifact_read",
+        "keeper_memory_search",
+        "keeper_tasks_list",
+        "keeper_task_claim",
+        "keeper_task_create",
+        "keeper_task_done",
+        "masc_goal_measure",
+        "keeper_candle_balance",
+        "keeper_candle_catalog",
+        "keeper_candle_purchase",
+        "keeper_candle_equip",
+        "keeper_candle_gift",
+        "masc_board_post",
+        "masc_board_list",
+        "masc_board_post_get",
+        "masc_board_comment",
+        "masc_board_search",
+        "keeper_tool_search"
+      ],
+      "tool_calls": [],
+      "last_tool_feedback": {
+        "role": "tool",
+        "tool_name": "keeper_task_done",
+        "content": "{\"result\":\"task-001 in_progress → awaiting_verification\",\"evidence_capture\":{\"verification_id\":\"vrf-5dd15968c9ec601c495335d00cc7b471\",\"diagnostics\":[]},\"disposition\":\"completed\",\"typed_outcome\":{\"kind\":\"Progress\"}}"
+      },
+      "public_response": "",
+      "response_terminal": [],
+      "provider_errors": [],
+      "raw_thinking_codepoints_count_only": 0
+    }
+  ],
+  "excluded_empty_request_bodies": [
+    {
+      "request": "request-000001.request",
+      "request_bytes": 0
+    }
+  ],
+  "pending_wire": [
+    "request-000008"
+  ],
+  "artifact": {
+    "path": "/tmp/masc-goal-canary-2be9d216-qwen/.masc/playground/docker/goal-canary/workspace/acceptance.json",
+    "bytes": 53,
+    "sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856",
+    "content": "{\n  \"alpha\": true,\n  \"beta\": true,\n  \"gamma\": true\n}\n",
+    "value": {
+      "alpha": true,
+      "beta": true,
+      "gamma": true
+    }
+  },
+  "verifications": [
+    {
+      "path": "/tmp/masc-goal-canary-2be9d216-qwen/.masc/verifications/vrf-5dd15968c9ec601c495335d00cc7b471.json",
+      "exists": true,
+      "bytes": 870,
+      "sha256": "a5207b8f3ad8db9b470ad87b99aee6c06af550ac2dfbfab68fc245e5d1d98e8c",
+      "value": {
+        "id": "vrf-5dd15968c9ec601c495335d00cc7b471",
+        "task_id": "task-001",
+        "output": {
+          "producer_execution": null,
+          "evidence_refs": [
+            "artifact:workspace/acceptance.json",
+            "note:Updated alpha to true in acceptance.json"
+          ],
+          "task_title": "Set alpha to true in acceptance.json",
+          "required_artifacts": [
+            "artifact:workspace/acceptance.json"
+          ],
+          "submitted_evidence": [
+            {
+              "kind": "artifact",
+              "reference": "artifact:workspace/acceptance.json",
+              "content": "{\n  \"alpha\": true,\n  \"beta\": true,\n  \"gamma\": true\n}\n",
+              "bytes": 53,
+              "truncated": false
+            },
+            {
+              "kind": "note",
+              "content": "Updated alpha to true in acceptance.json"
+            }
+          ]
+        },
+        "criteria": [
+          "alpha is explicitly set to true"
+        ],
+        "worker": "goal-canary",
+        "created_at": 1792862413.466226
+      },
+      "artifact_checks": [
+        {
+          "reference": "artifact:workspace/acceptance.json",
+          "declared_bytes": 53,
+          "content_bytes": 53,
+          "content_sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856",
+          "truncated": false,
+          "equal_current_artifact": true
+        }
+      ]
+    }
+  ],
+  "owner_operation": {
+    "id": "kmsg-87931f3ea479204a01030b4ca169bf1c",
+    "source": "/tmp/masc-goal-canary-2be9d216-qwen/.masc/keeper_chat_events/goal-canary/kmsg-87931f3ea479204a01030b4ca169bf1c.jsonl",
+    "source_sha256": "f5abfdb1aa5915c66cf925d2df085b475c2eb6fcf4d311cccc897c0baeaa0149",
+    "event_type_counts": {
+      "run_started": 1,
+      "text_message_start": 1,
+      "agent_core_runtime_attempt_started": 1,
+      "agent_core_stream_connected": 7,
+      "agent_core_content_block_start": 13,
+      "agent_core_thinking_delta": 2491,
+      "model_content_activity": 2497,
+      "tool_call_start": 6,
+      "tool_call_args_snapshot": 6,
+      "agent_core_content_block_stop": 12,
+      "tool_call_end": 6,
+      "agent_core_stream_message_delta": 6,
+      "agent_core_stream_message_stop": 6,
+      "tool_result_ready": 6
+    },
+    "partial_event_lines": [],
+    "selected_public_terminal_events": [],
+    "run_finished": false
+  },
+  "read_errors": []
+}

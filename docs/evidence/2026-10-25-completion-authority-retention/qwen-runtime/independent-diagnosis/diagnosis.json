@@ -1,0 +1,640 @@
+{
+  "schema": "masc.independent-bounded-runtime-diagnosis.v1",
+  "observed_at_utc": "2026-10-24T17:50:19.762086+00:00",
+  "candidate_source": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+  "scope": {
+    "read_only_inputs": "retained raw public wire Tool arguments/feedback and fresh System/extra context, existing observer snapshots and exact git source",
+    "own_output_directory": "/tmp/masc-independent-2be9-diagnosis-20261025",
+    "no_canary_or_product_mutations": true,
+    "no_runtime_messages_or_API_calls": true,
+    "no_thinking_fields_selected_read_or_published": true,
+    "no_new_CI_results_read": true,
+    "source_helper_limit": "Only actual pure evidence-list/classifier functions with minimal declared record ports executed; no full lifecycle/FS capture/native suite/vendor/model execution."
+  },
+  "new_findings": [
+    {
+      "id": "capture-diagnostic-attribution",
+      "classification": "confirmed source defect; strong runtime attribution with unavailable original request body",
+      "actual_fact": "Raw response15 and17 keeper_task_done arguments are structurally identical. The failed receipt contains kind=artifact_unreadable/code=invalid_reference without a reference, not a typed artifact read-error.",
+      "source_path": "Rejected Task handoff stores bare previous verification_id. Transition creates the next verification before updating Task handoff and passes that old Task to Verification_protocol. Its concrete_verification_evidence merges current claim with old Task handoff, so the previous bare vrf is unresolvable; current artifact path is syntactically valid and remains alongside it. After the first submission commits the new handoff, the identical second submission loses the inherited bare vrf.",
+      "actual_source_helper_checks_passed": 5,
+      "raw_arguments_changed": false,
+      "artifact_read_failure_established": false,
+      "missing_original_4048_record": true,
+      "what_remains_unknown": "4048 full submitted_evidence was not retained, so its exact artifact body/size/read outcome cannot be reconstructed. No artifact filesystem race or changed model reference is established.",
+      "bounded_next_repair": "Use the current submission handoff as the one evidence-list authority when preparing verification, rather than re-merging the old Task handoff. Keep required artifacts separate; do not teach the model to retry the same valid ref."
+    },
+    {
+      "id": "intermediate-record-disappearance",
+      "classification": "expected supersede path supported by exact source, actual unlink syscall unobserved",
+      "actual_fact": "request17 Task query points at4048 AwaitingVerification; request18 feedback points at a42 after awaiting->awaiting resubmission, and4048 file is absent.",
+      "source_path": "workspace_task_transitions.ml486-490 records old pending verification_id;789-804 invokes verification_delete_request_fn before new submission notification; Verification.delete_request228-232 unlinks the superseded request.",
+      "limit": "This explains why observer could miss the intermediate record; it is not evidence of corruption, and the deleted body is still unknown."
+    },
+    {
+      "id": "postapproval-fresh-vs-history",
+      "classification": "delivered current approval with stale public terminal; internal model cause unproved",
+      "actual_fact": "request20 leading System has the current a42 final Approved Task Outcome with task/verification/operator keys and no old rejection section. Fresh Extra has Gate pending_count=0, task_outcome_pending trigger and explicitly historical recent-work context; no Current Task section or fresh AwaitingVerification assertion. The provider returns zero Tool calls and a nonempty public report claiming no final verdict yet.",
+      "fresh_state_contradiction_found": false,
+      "note_on_gate": "Current Approval Authority is the Gate observation, expressly says Gate state does not prove effect application; it is not a contradictory Task verification receipt.",
+      "historical_stale_state": "Historical keeper_task_done receipts still say AwaitingVerification, including the successful a42 submission; historical Task-list Tool results include externalized blobs. These precede the actual approval and are superseded by current System. No postapproval known-ID Task query ran.",
+      "history_preservation": {
+        "original_owner_request_preserved": true,
+        "all_preapproval_tool_call_ids_in_order_preserved": true,
+        "tool_call_count": 16,
+        "history_call_ids": [
+          [
+            "call_qbe3nhrg",
+            "Read"
+          ],
+          [
+            "call_ii9k4j5r",
+            "keeper_task_create"
+          ],
+          [
+            "call_37zn6uj6",
+            "keeper_task_claim"
+          ],
+          [
+            "call_d9nq792t",
+            "Edit"
+          ],
+          [
+            "call_m2swz9fa",
+            "Read"
+          ],
+          [
+            "call_024us845",
+            "keeper_task_done"
+          ],
+          [
+            "call_koaofn4p",
+            "keeper_tasks_list"
+          ],
+          [
+            "call_83opmsp8",
+            "keeper_tasks_list"
+          ],
+          [
+            "call_04had5ai",
+            "Edit"
+          ],
+          [
+            "call_8sfq1du4",
+            "Read"
+          ],
+          [
+            "call_5huyo7bd",
+            "Write"
+          ],
+          [
+            "call_gvynt4z3",
+            "Read"
+          ],
+          [
+            "call_zo0wd5ez",
+            "keeper_task_done"
+          ],
+          [
+            "call_eyxpuovu",
+            "keeper_tasks_list"
+          ],
+          [
+            "call_ok2cxahq",
+            "keeper_task_done"
+          ],
+          [
+            "call_9g6ib85b",
+            "keeper_tasks_list"
+          ]
+        ],
+        "request_message_count": 38
+      },
+      "context_loss_assessment": "No observed host omission of current approval or original objective, no missing historical Tool-call IDs, no refusal/overflow/truncation marker was found. Provider-internal context handling is not observed, and complete historical text retention is not claimed because some Tool bodies are blob references.",
+      "provider_terminal": [
+        {
+          "created_at": "2026-10-24T17:40:49.031797Z",
+          "done": true,
+          "done_reason": "stop",
+          "prompt_eval_count": 21604,
+          "eval_count": 565
+        }
+      ],
+      "public_answer": "### Current Status Summary\n- **File State**: `workspace/acceptance.json` has `alpha: true`, `beta: false`, `gamma: false` (confirmed by latest `Read`).\n- **Task State**: `task-001` is `awaiting_verification` with no active errors in the latest `keeper_task_done` call.\n- **Verification**: The system is validating the evidence (`artifact:workspace/acceptance.json`), but no final verdict has been issued yet.\n\n---\n\n### Next Steps\n1. **Wait for Verification**: The system will finalize the approval of `task-001` shortly. No further action is needed until the verification result is confirmed.\n2. **Proceed to Beta/Gamma**: Once approved, the next step will be to update `beta` and `gamma` as per the original request.\n3. **No Unnecessary Changes**: Beta and gamma remain `false` until the task is officially approved to avoid premature modifications.\n\n---\n\n### Final Answer\nThe file `workspace/acceptance.json` now has `alpha: true`, and the system is verifying the change. No further action is required until the verification completes. Beta and gamma remain unchanged as requested.",
+      "actual_persisted_task": {
+        "id": "task-001",
+        "title": "Set alpha to true in acceptance.json",
+        "description": "Update alpha to true in workspace/acceptance.json as the first step toward completing all three flags",
+        "priority": 3,
+        "files": [],
+        "created_at": "2026-10-24T17:18:30Z",
+        "created_by": "goal-canary",
+        "contract": {
+          "completion_contract": [
+            "alpha is explicitly set to true"
+          ],
+          "required_evidence": [
+            "artifact:workspace/acceptance.json"
+          ]
+        },
+        "handoff_context": {
+          "summary": "Set alpha to true in acceptance.json with beta/gamma as false",
+          "evidence_refs": [
+            "artifact:workspace/acceptance.json"
+          ],
+          "updated_at": "2026-10-24T17:32:52Z",
+          "updated_by": "goal-canary"
+        },
+        "status": "done",
+        "assignee": "goal-canary",
+        "completed_at": "2026-10-24T17:38:27Z",
+        "notes": "Controlled operator-proxy canary approval after exact retained artifact inspection: alpha=true, beta=false, gamma=false; first Task only. No independent LLM verdict or human Goal completion confirmation claim."
+      },
+      "terminal_boundary": {
+        "source_ack_utc": "2026-10-24T17:40:49.087937+00:00",
+        "receipt_kind": "turn_completed",
+        "exact_source_post_id": "task-outcome:task-001",
+        "exact_source_verification_id": "vrf-a42e77c7eac0e45281d6cd2245840243",
+        "source_incarnation": 2,
+        "pending_source_count": 0,
+        "pending_wire": [],
+        "keeper_total_turns": 3
+      },
+      "interpretation_limit": "A one-case stale report despite correct current delivery supports history/current-input competition as a hypothesis, not a causal proof of model-only failure or a reason for new gates, forced requeue, caps or repeated warnings."
+    }
+  ],
+  "source_map": [
+    {
+      "path": "lib/keeper/keeper_tool_task_runtime.ml",
+      "source_sha256": "dc0bea014d5a1ebfd5b42cba8705d342a0f655e88df3ce525acf7585e6cb08da",
+      "anchors": [
+        {
+          "needle": "let parse_keeper_task_done_evidence_refs",
+          "lines_1based": [
+            243
+          ]
+        },
+        {
+          "needle": "let evidence_artifact_reader",
+          "lines_1based": [
+            294
+          ]
+        },
+        {
+          "needle": "let args_for_transition =",
+          "lines_1based": [
+            957,
+            1023,
+            1120
+          ]
+        }
+      ]
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "source_sha256": "3ea4a72707e50dd4fa0af3b9ec4e7478faf358100805237af68f0f4876280fa0",
+      "anchors": [
+        {
+          "needle": "prepare_verification_request ~task ~assignee",
+          "lines_1based": [
+            373
+          ]
+        },
+        {
+          "needle": "verification_submission_evidence_refs",
+          "lines_1based": [
+            357
+          ]
+        },
+        {
+          "needle": "superseded_verification_id",
+          "lines_1based": [
+            28,
+            486,
+            782,
+            789
+          ]
+        },
+        {
+          "needle": "evidence_refs = [ verification_id ]",
+          "lines_1based": [
+            973
+          ]
+        }
+      ]
+    },
+    {
+      "path": "lib/verification_protocol.ml",
+      "source_sha256": "9911a557f9536b39c6a6f059e037e37b973a92cd57676d28ef13c912c0262894",
+      "anchors": [
+        {
+          "needle": "let submit_request_spec",
+          "lines_1based": [
+            30
+          ]
+        },
+        {
+          "needle": "concrete_verification_evidence",
+          "lines_1based": [
+            50
+          ]
+        },
+        {
+          "needle": "let create_submit_request",
+          "lines_1based": [
+            127
+          ]
+        },
+        {
+          "needle": "snapshot_submitted_evidence_json",
+          "lines_1based": [
+            179
+          ]
+        }
+      ]
+    },
+    {
+      "path": "lib/task/tool_task_completion_review.ml",
+      "source_sha256": "eaf8d55d006b3de9dc9113325861db48e43a10ee068bd3fccbab030ecc421d73",
+      "anchors": [
+        {
+          "needle": "let submitted_evidence_sources",
+          "lines_1based": [
+            56
+          ]
+        },
+        {
+          "needle": "let concrete_verification_evidence",
+          "lines_1based": [
+            99
+          ]
+        }
+      ]
+    },
+    {
+      "path": "lib/workspace/workspace_verification_store.ml",
+      "source_sha256": "be43bfd6f180b78f1238088e1583800d12ce5ece7105eb50545b45cf62384473",
+      "anchors": [
+        {
+          "needle": "let valid_producer_relative_path",
+          "lines_1based": [
+            184
+          ]
+        },
+        {
+          "needle": "let inspect_producer_relative_artifact",
+          "lines_1based": [
+            320
+          ]
+        },
+        {
+          "needle": "let snapshot_submitted_evidence_item",
+          "lines_1based": [
+            381
+          ]
+        },
+        {
+          "needle": "let submission_receipt",
+          "lines_1based": [
+            412
+          ]
+        }
+      ]
+    },
+    {
+      "path": "lib/workspace/workspace_verification_snapshot.ml",
+      "source_sha256": "5f5123e9fc847d3a01caa077d2583aeeb41470dfb17ef529be634c881b954b7c",
+      "anchors": [
+        {
+          "needle": "let invalid_reference_code",
+          "lines_1based": [
+            67
+          ]
+        },
+        {
+          "needle": "let submitted_evidence_item_fields",
+          "lines_1based": [
+            120
+          ]
+        }
+      ]
+    },
+    {
+      "path": "lib/workspace_metric_hooks.ml",
+      "source_sha256": "cdef10b0a577a526b87baf6408bb7da703825d624743766be63069f40757edb4",
+      "anchors": [
+        {
+          "needle": "Atomic.set Workspace_hooks.verification_submit_request_fn",
+          "lines_1based": [
+            498
+          ]
+        },
+        {
+          "needle": "Atomic.set Workspace_hooks.verification_delete_request_fn",
+          "lines_1based": [
+            507
+          ]
+        }
+      ]
+    },
+    {
+      "path": "lib/verification.ml",
+      "source_sha256": "ab7a7475bbfe1030d1892c2aa7cd5d510eb28cbb53e12411575022dd0b701dc6",
+      "anchors": [
+        {
+          "needle": "let delete_request",
+          "lines_1based": [
+            228
+          ]
+        }
+      ]
+    }
+  ],
+  "success_a42_capture": {
+    "id": "vrf-a42e77c7eac0e45281d6cd2245840243",
+    "task_id": "task-001",
+    "output": {
+      "producer_execution": null,
+      "evidence_refs": [
+        "artifact:workspace/acceptance.json",
+        "note:Set alpha to true in acceptance.json with beta/gamma as false"
+      ],
+      "task_title": "Set alpha to true in acceptance.json",
+      "required_artifacts": [
+        "artifact:workspace/acceptance.json"
+      ],
+      "submitted_evidence": [
+        {
+          "kind": "artifact",
+          "reference": "artifact:workspace/acceptance.json",
+          "content": "{\n  \"alpha\": true,\n  \"beta\": false,\n  \"gamma\": false\n}\n",
+          "bytes": 55,
+          "truncated": false
+        },
+        {
+          "kind": "note",
+          "content": "Set alpha to true in acceptance.json with beta/gamma as false"
+        }
+      ]
+    },
+    "criteria": [
+      "alpha is explicitly set to true"
+    ],
+    "worker": "goal-canary",
+    "created_at": 1792863172.152029
+  },
+  "evidence": [
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000011.request",
+      "bytes": 86670,
+      "sha256": "9bc9e6d38da24b6fe922b841755b8ec276b35b29a77d31d5ffb89ec6c5e0e707"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000015.request",
+      "bytes": 96593,
+      "sha256": "f8b35ae7a5c64521815a506b364ea28d5171b09abf441ce8d6bfbd36a983e737"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000016.request",
+      "bytes": 98622,
+      "sha256": "5efa35d2f1d2383db6012e8a8a5e4f2cf6972c03a289dfe28cef672486c9795d"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000017.request",
+      "bytes": 101419,
+      "sha256": "acfae7a58dbe4a1db05ee04efb16090d95ce6ddfc07d5314ce82abea2ac032fc"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000018.request",
+      "bytes": 103884,
+      "sha256": "9d67acdb39eebec237681c61a88d9dc23530d6c900eebbcd266b629b4dac75c7"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000019.request",
+      "bytes": 107176,
+      "sha256": "3954aa705db2cfd8a89d7e04f1912d62ea80b5795cd12ece6c03e3c88abdc1f4"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000020.request",
+      "bytes": 93914,
+      "sha256": "960b61b065e42051ce6228682c886b4aaf798a9da8b8e5e361065e70b7f313c5"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000015.response",
+      "bytes": 40757,
+      "sha256": "19163bc2c01fb18386281f3149e1992748dcd27b49bbb36f0d605c5555915b99"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000017.response",
+      "bytes": 51780,
+      "sha256": "75647f68ddf086c2a71bedf9f8d13e788df8a7be46f0fdb60a8708e7af748421"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000020.response",
+      "bytes": 75006,
+      "sha256": "74a4cfc3a59eb961156093fd44d5cbbda64ac2c67fbde57344c557d907fbeec3"
+    },
+    {
+      "path": "/tmp/masc-goal-2be9-qwen-postapproval/diagnosis.json",
+      "bytes": 12213,
+      "sha256": "7825f33336239f843a988893a0108f327dae9f093ed5d1c719f642e57aa2eb59"
+    },
+    {
+      "path": "/tmp/masc-goal-2be9-qwen-recovery/verification-source.json",
+      "bytes": 914,
+      "sha256": "5116671a04d2ffac65240edc960b1114615c12f934358ea7620e0ecc4d41332d"
+    },
+    {
+      "path": "/tmp/masc-goal-2be9-qwen-recovery/intermediate-capture-failure.json",
+      "bytes": 4059,
+      "sha256": "4767fb3ae0d3c85340bba2cce59b204ad0f579f51a83957f9f533e0fe0503bf5"
+    },
+    {
+      "path": "/tmp/masc-independent-2be9-diagnosis-20261025/handoff-probe.json",
+      "bytes": 3606,
+      "sha256": "ea18954559edddc7c412834d684396f61e1d1597a9e8214c71b2e9e879d30bad"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000001.response",
+      "bytes": 1741,
+      "sha256": "2d7115b0500aa8b760bd532f2f189d3b61378101dc05621c4870edbcd2b997bb"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000002.response",
+      "bytes": 99991,
+      "sha256": "348c63ec9b4d6b5ea99835811872383637e89bfc565d68f5f17c3cf03937d0df"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000003.response",
+      "bytes": 44590,
+      "sha256": "36e77387c0b91b78e2402ea8014186195ec144962ae90c3887451d089f0f7dcf"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000004.response",
+      "bytes": 32558,
+      "sha256": "85ad3ef20de9f96440934a86ebbbf1a46fb4d5e858cbf53f39f428306e2e6fd1"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000005.response",
+      "bytes": 26893,
+      "sha256": "9d144eb4125ca92a1f5d265f87417b9ce94b264da1514580181ebfc4a29efe04"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000006.response",
+      "bytes": 23335,
+      "sha256": "5e87ada55ba67a4b9068cb78631d6c99c538cf6eb685e9ec4b569cc102afce0a"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000007.response",
+      "bytes": 92884,
+      "sha256": "0bd25d4a5fcfe7cb23b5d01906fe6871ec92bc759f13928d77c19eeb0bdb2ba8"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000008.response",
+      "bytes": 47115,
+      "sha256": "0871b64a9ee651b0ae574e5d5c96e010a0af101dea99e88aa5c6bf9fad831363"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000009.response",
+      "bytes": 51726,
+      "sha256": "9aa1f32a94526efebe4236fb51e446b8c5d4b07c9d702a36848f1bcb0157a018"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000010.response",
+      "bytes": 76317,
+      "sha256": "a16211b70f9604fa3e9c3753bc6b7d0c81425d3df209cf251a5a530ede2934e4"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000011.response",
+      "bytes": 44359,
+      "sha256": "3644a5dda064b4aaff3014dbe849986e709266c312a9e6d2a61f98ac863ef9f7"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000012.response",
+      "bytes": 36024,
+      "sha256": "d69790c79ede8b6ad21c11d21fa91f70f2ffdb2b3e4ab562f935953beaba9573"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000013.response",
+      "bytes": 79189,
+      "sha256": "933ec808c44c95aa51f2aef973a0ea04b9c76d623f9a0eb1f396c06e9f7c9a1e"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000014.response",
+      "bytes": 78988,
+      "sha256": "244cafdc8d7a9cd9fb9e7a8c4922108af30f0f7554b97b3cad20324484ba3cb0"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000016.response",
+      "bytes": 41078,
+      "sha256": "2a8e8f75f0d87b92c33d6c3c73ac4f3d03bf5bb4dd7ba97715ee3cb96e440926"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000018.response",
+      "bytes": 51674,
+      "sha256": "3add459072cefab21777036047a422eb449b599cb23f322b2601c99b2cece88b"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000019.response",
+      "bytes": 78656,
+      "sha256": "f2da544a3d38b474d224092a34601f12a8aac33f50016c0be9166a5c15cda700"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000015.receipt.json",
+      "bytes": 383,
+      "sha256": "7d2e17dd0f0f8f0edbda31a4e17998d69a2e244af63b75b220928c67c2df950d"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000016.receipt.json",
+      "bytes": 383,
+      "sha256": "f1e93a716a33fe901f7eec339ef372387333d6998b709fec04dda83636f23b11"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000017.receipt.json",
+      "bytes": 384,
+      "sha256": "8f9d609a76287f1dd3e066bf605b2fc3d8ba0e74259a20d4086013d895229f33"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000018.receipt.json",
+      "bytes": 384,
+      "sha256": "64e5c7e1f76de159a53e0ec862ff81665402880f0e1d7741b24e37ac0faf0fc4"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000019.receipt.json",
+      "bytes": 387,
+      "sha256": "5144279f991f84183e1fbdbe4997d89aa3f6a3d444e55c14c9c319e9aaa14331"
+    },
+    {
+      "path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000020.receipt.json",
+      "bytes": 386,
+      "sha256": "5df8d025cd82e706eb4198f5ce249130487d8ee967e6a9ec8439785e0fd1d59a"
+    }
+  ],
+  "own_artifact_hashes": [
+    {
+      "path": "/tmp/masc-independent-2be9-diagnosis-20261025/public-wire-extract.json",
+      "sha256": "e18bb7881b1eff804bfaaacdeecb48ead89c8be4513ada11752d7e5e13a83e86"
+    },
+    {
+      "path": "/tmp/masc-independent-2be9-diagnosis-20261025/handoff-probe.json",
+      "sha256": "ea18954559edddc7c412834d684396f61e1d1597a9e8214c71b2e9e879d30bad"
+    },
+    {
+      "path": "/tmp/masc-independent-2be9-diagnosis-20261025/handoff_probe.ml",
+      "sha256": "25bf0bcf8e4cdaea34535da592b91582efea4c9833b3cf4b3d5522924ab3d9de"
+    }
+  ],
+  "not_claimed": [
+    "Recovered4048 original request or artifact bytes",
+    "Observed actual supersede unlink syscall",
+    "A single lost notice caused postapproval failure",
+    "Fresh input contradictory Task state",
+    "Provider internal context truncation absent",
+    "Successful G3 or model behavior improvement on8266",
+    "Any328 native/macOS result"
+  ],
+  "wire_integrity_checks": [
+    {
+      "sequence": 15,
+      "request_sha256": "f8b35ae7a5c64521815a506b364ea28d5171b09abf441ce8d6bfbd36a983e737",
+      "response_sha256": "19163bc2c01fb18386281f3149e1992748dcd27b49bbb36f0d605c5555915b99",
+      "receipt_status": 200,
+      "both_raw_hashes_match_proxy_receipt": true
+    },
+    {
+      "sequence": 16,
+      "request_sha256": "5efa35d2f1d2383db6012e8a8a5e4f2cf6972c03a289dfe28cef672486c9795d",
+      "response_sha256": "2a8e8f75f0d87b92c33d6c3c73ac4f3d03bf5bb4dd7ba97715ee3cb96e440926",
+      "receipt_status": 200,
+      "both_raw_hashes_match_proxy_receipt": true
+    },
+    {
+      "sequence": 17,
+      "request_sha256": "acfae7a58dbe4a1db05ee04efb16090d95ce6ddfc07d5314ce82abea2ac032fc",
+      "response_sha256": "75647f68ddf086c2a71bedf9f8d13e788df8a7be46f0fdb60a8708e7af748421",
+      "receipt_status": 200,
+      "both_raw_hashes_match_proxy_receipt": true
+    },
+    {
+      "sequence": 18,
+      "request_sha256": "9d67acdb39eebec237681c61a88d9dc23530d6c900eebbcd266b629b4dac75c7",
+      "response_sha256": "3add459072cefab21777036047a422eb449b599cb23f322b2601c99b2cece88b",
+      "receipt_status": 200,
+      "both_raw_hashes_match_proxy_receipt": true
+    },
+    {
+      "sequence": 19,
+      "request_sha256": "3954aa705db2cfd8a89d7e04f1912d62ea80b5795cd12ece6c03e3c88abdc1f4",
+      "response_sha256": "f2da544a3d38b474d224092a34601f12a8aac33f50016c0be9166a5c15cda700",
+      "receipt_status": 200,
+      "both_raw_hashes_match_proxy_receipt": true
+    },
+    {
+      "sequence": 20,
+      "request_sha256": "960b61b065e42051ce6228682c886b4aaf798a9da8b8e5e361065e70b7f313c5",
+      "response_sha256": "74a4cfc3a59eb961156093fd44d5cbbda64ac2c67fbde57344c557d907fbeec3",
+      "receipt_status": 200,
+      "both_raw_hashes_match_proxy_receipt": true
+    }
+  ]
+}

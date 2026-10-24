@@ -314,8 +314,8 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
             | None -> Ok ()
             | Some (command : B.issued) ->
               let result =
-                let* verb, args, _actor = Live.decode command |> Result.map_error (fun detail -> Live.Before_effect detail) in
-                Peer.dispatch peer ~verb args in
+                let* verb, args, actor = Live.decode command |> Result.map_error (fun detail -> Live.Before_effect detail) in
+                Peer.dispatch peer ?actor ~verb args in
               (* A refused delivery loses this one result. The server stopped
                  waiting for it, and its caller was told the outcome is
                  unknown; a connection that is gone fails the next poll. *)

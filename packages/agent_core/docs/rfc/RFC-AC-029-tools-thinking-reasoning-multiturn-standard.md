@@ -137,7 +137,7 @@ not as current files or open backlog items.
 | P2 | Gemini `thoughtSignature` | "soft preserve", summaries/signatures conflated | hard 400 if not echoed; parallel = first part only; signatures ≠ summaries | S3.2, S6.5 |
 | P2 | Gemini `thinkingLevel` matrix | `supports_minimal:bool` only | low/medium/high; medium absent on gemini-3-pro; minimal Flash-only | S1.3 |
 | P2 | Kimi visibility | `Provider_hidden`+`No_streaming_reasoning` | audit artifact says `reasoning_content` side-channel streamed before content; official source capture required before implementation | S3.2 |
-| P2 | OpenAI Responses `phase` | not modeled | `phase:commentary/final_answer` round-trips on stateless replay | S3.2 |
+| Resolved | OpenAI Responses `phase` | native per-item witness preserved by sync, stream and cache paths; see §8 | `phase:commentary/final_answer` round-trips on stateless replay | S3.2 |
 
 Full per-finding verify reasoning and source URLs: audit artifact `wf_ad6e7c0c-aff` (2026-06-29), 51 agents, 6 provider docs scans. Rows marked Low/`확인 필요` below are not implementation authority until an official source or live API probe is recorded.
 
@@ -172,7 +172,7 @@ RFC 컬럼: **RFC** = dialect/capability *type shape* 변경 또는 N-of-M resha
 3. **content_type stream-boundary policy completion (D3-finalize, P1, partial)** — GLM과 독립, streaming blast radius 최대. Current branch ancestry already converts the wire `content_type` to `block_kind`, handles `Unknown_block` explicitly, and routes `SSEUnknownEventType`/parse failures to typed stream errors. Remaining work is narrower: decide and test the final parse/finalize policy for unknown content-block kinds that currently preserve visible text or omit empty blocks, and make that boundary fail closed if S6.1 chooses fail-closed over forward-compatible rendering.
 
 ### 다음 (배포/사용 surface의 정합성 drift)
-4. OpenAI phase/replay matrix residual (P1/P2) — `none`/`minimal`/`xhigh` model-dependent vocabulary/subset, Responses `previous_response_id`, encrypted reasoning-item replay, and `function_call_output` manual replay are implemented in current branch ancestry. Remaining work is narrower: Chat Completions vs Responses replay-mode matrix, strict `json_schema` catalog facts, and `phase:commentary/final_answer` stateless replay modeling.
+4. OpenAI phase/replay matrix residual (P1/P2) — `none`/`minimal`/`xhigh` model-dependent vocabulary/subset, Responses `previous_response_id`, encrypted reasoning-item replay, and `function_call_output` manual replay are implemented in current branch ancestry. The Chat/Responses phase replay matrix and native phase propagation landed in #43522; §8 maps the source fixtures. Strict `json_schema` catalog facts are a separate structured-output concern, not an unfinished phase implementation. MiniMax evidence and conformance remain under #27924.
 5. Anthropic thinking drift + `tool_choice`-400 (P1×2) — forced tool + thinking hard-400 is verified; `thinking.display` visibility drift needs official source refresh before code changes.
 6. MiniMax replay/tool-choice evidence + catalog field fix (P1) — catalog rows already exist; do not add a duplicate provider. First capture official/live evidence, then update the existing capability/replay rows instead of relying on `No_replay` defaults that can silently break interleaved thinking.
 7. ~~중복 stream accumulator 제거 (D4, P2)~~ — resolved: legacy
@@ -207,7 +207,7 @@ telemetry gate나 lenient repair를 추가하지 말고, `Text` → `ToolUse` �
 - **RFC-AC-025** (forced-tool-use enforcement boundary) — S5의 기반.
 - **CLAUDE.md 워크어라운드 거부 기준** — S10.2/§4.4의 enforcement 원천.
 
-## 8. Responses phase replay contract and evidence refresh (2026-10-17)
+## 8. Responses phase replay contract and evidence refresh (2026-10-24)
 
 A canonical assistant message may contain several native Responses output
 items. Its `Response_replay` witness partitions the existing content by item;
@@ -236,13 +236,43 @@ item-level wire fact, independent of wording or model-name heuristics. These
 fixtures establish local codec/history behavior; they do not establish a live
 provider request or account/model access.
 
-MiniMax remains a separate evidence question. The accessible official
-[M3 tool/interleaved-thinking guide](https://platform.minimax.io/docs/guides/text-m3-function-call)
-requires preserving the complete assistant response, including tool calls and,
-when split, reasoning details. The current
-[model-invocation guide](https://platform.minimax.io/docs/guides/text-generation)
-distinguishes M3.1-Flash-Preview: thinking cannot be disabled, and effort uses
-different fields across Chat, Responses and Anthropic protocols. That rule
-must not be generalized to every M3/M2 model. These pages do not establish
-MiniMax `tool_choice` parity or all Responses replay semantics. No MiniMax
-capability change follows from that gap, and it is not a confirmed defect.
+### Source conformance matrix
+
+Inspected at main `c2ed3b6f270`. These are existing fixture definitions and
+production source paths, not a new test execution or live-provider result.
+Paths below are relative to `packages/agent_core/`.
+
+| Replay mode | Existing source evidence |
+| --- | --- |
+| Chat canonical response → Chat request, without invented phase | `test/test_response_phase_replay.ml`: `chat_control` |
+| Responses sync → assistant history → manual request | Same file: `Sync.parts`, `Sync.nullable`, `Sync.tool_order` |
+| Responses SSE → accumulator → assistant history → manual request | Same file: `Streams.native_order`, `Streams.item_done_without_terminal_output`, `Streams.nullable` |
+| Native grouping through response cache and telemetry codecs | Same file: `cache_roundtrip`, `Sync.telemetry_roundtrip` |
+| Unknown phase, conflicting native item identity, incomplete stream | Same file: `Sync.bad_phase`, `Streams.conflicting_identity`, `Streams.unterminated` |
+| Encrypted reasoning and tool-result manual replay | `test/test_backend_openai_codec.ml`: Responses replay fixtures with `encrypted_content` and `function_call_output` |
+| Stateful Responses request | Same file: `test_responses_build_request_includes_previous_response_id` checks the request field; it does not prove server-side conversation retention |
+
+### MiniMax: confirmed contract and remaining work
+
+Official documents reread on 2026-10-24:
+
+- [OpenAI SDK compatibility](https://platform.minimax.io/docs/api-reference/text-openai-api)
+  explicitly requires complete assistant/tool-call history. It names M2, M2.1,
+  M2.5, M2.7, M3 and M3.1-Flash for preservation of inline `<think>` content,
+  and separately requires preserving M3.1-Flash `reasoning_content`.
+- [Tool use and interleaved thinking](https://platform.minimax.io/docs/guides/text-m3-function-call)
+  requires the complete returned assistant message even when it contains no
+  thinking. Its current examples use M3.1-Flash. Anthropic replay preserves the
+  full content block list; Chat replay preserves reasoning and tool-call fields.
+
+This establishes a replay requirement, not proof that the current catalog,
+parser and serializer satisfy it for every named model. #27924 remains open for
+model/protocol-specific conformance fixtures that carry these fields through
+production parse → history → request paths. The OpenAI phase portion is already
+implemented and must not be repeated as unfinished work.
+
+Neither page establishes MiniMax `tool_choice` acceptance parity or all MiniMax
+Responses replay semantics. Record those as unverified, rather than deriving
+restrictions from compatibility branding or changing capabilities without
+provider evidence. No MiniMax capability change or live-provider success is
+claimed by this document refresh.

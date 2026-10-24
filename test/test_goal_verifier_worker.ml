@@ -508,6 +508,51 @@ let test_actual_explicit_retry_and_unknown_fence () =
   exercise false;
   exercise true
 
+let test_reasonless_goal_reply_requires_explicit_retry () =
+  let exercise reason = with_workspace (fun config store _ ->
+    let _, retained = host_prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (actual_review (AR.Approve reason) calls) (fun () ->
+      drain config;
+      let store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+      let config = Workspace.default_config config.base_path in
+      let restored = host_load store original in
+      (match P.phase (W.progress restored) with
+       | Rejected {stage=P.Execution; _} -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+       | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=P.Before_dispatch; _}
+       | Subdividing _ | Subdivided _ -> Alcotest.fail "reasonless Goal reply became a judgment");
+      let receipt = match checked (W.restored_receipt restored) with
+        | Some receipt -> receipt | None -> Alcotest.fail "original reply was not retained" in
+      Alcotest.(check bool) "raw model verdict and actual lookup survive reopening" true
+        (receipt.result.verdict = Some (AR.Approve reason) && receipt.tools <> []);
+      Atomic.set AR.run_llm_reviewer_fn (actual_approve calls);
+      (match Agent.process_pending_work config {Agent.goal_id=subject.goal_id} with
+       | Deferred Verdict_without_reason -> ()
+       | Deferred _ | Committed | Superseded -> Alcotest.fail "ordinary wake lost the original non-judgment");
+      Alcotest.(check int) "ordinary wake does not redispatch" 1 !calls;
+      Alcotest.(check bool) "ordinary wake leaves proof pending" true
+        (phase config subject.goal_id=Goal_phase.Verifying);
+      transition config subject.goal_id "request_complete";
+      transition config subject.goal_id "request_complete";
+      let rows = checked (W.inventory ~store ~installation_id:W.host_installation_id
+        ~package_id:W.host_package_id) in
+      Alcotest.(check int) "repeated explicit request retains one linked successor" 2 (List.length rows);
+      drain config;
+      Alcotest.(check int) "explicit request makes one new model call" 2 !calls;
+      Alcotest.(check bool) "stated evidence advances to human confirmation" true
+        (phase config subject.goal_id=Goal_phase.Awaiting_confirmation);
+      match get (Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id) with
+      | Some {completion=Goal_verification.Proof_proven verdict; _} ->
+        Alcotest.(check string) "proof binds the original pending request" subject.request_id verdict.request_id;
+        Alcotest.(check string) "proof uses the new stated evidence" "actual target measured" verdict.evidence;
+        Alcotest.(check bool) "successor has its own fixed run" true
+          (verdict.verification_run_id <> receipt.run.run_id)
+      | None | Some _ -> Alcotest.fail "explicit retry did not commit the actual Goal proof")) in
+  List.iter exercise [""; " \t\n"]
+
 let test_actual_bound_suspend_and_drop () =
   let exercise dropped = with_workspace (fun config store _ ->
     let authority, retained = host_prepared config store in
@@ -538,5 +583,6 @@ let () = Alcotest.run "retained Goal worker" ["execution", [
   Alcotest.test_case "actual agent restores before lookup and registry" `Quick test_actual_agent_restores_before_lookup_and_registry;
   Alcotest.test_case "actual proof partial write and phase-moved boot" `Quick test_actual_partial_proof_and_nonverifying_boot;
   Alcotest.test_case "actual explicit retry and unknown fence" `Quick test_actual_explicit_retry_and_unknown_fence;
+  Alcotest.test_case "reasonless Goal reply needs an explicit linked retry" `Quick test_reasonless_goal_reply_requires_explicit_retry;
   Alcotest.test_case "actual bound suspend and drop" `Quick test_actual_bound_suspend_and_drop;
   Alcotest.test_case "cloned workspace refuses the original judgment" `Quick test_cloned_workspace_cannot_commit_original]]

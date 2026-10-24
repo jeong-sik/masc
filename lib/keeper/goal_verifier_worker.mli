@@ -59,7 +59,10 @@ val request_retry :
   new_run:(unit -> run_identity) -> (unit, error) result
 (** Actual explicit request_complete boundary only: retain one linked retry
     after a definitely settled non-verdict, including a permanent candidate
-    refusal whose configuration an actor repaired. Store the actor/parent
+    refusal whose configuration an actor repaired or a Goal verdict without
+    its required stated reason. The exact reviewer result stays in its receipt;
+    the Goal admission projection grants no judgment or automatic retry.
+    Store the actor/parent
     authorization in the complete staged child before acknowledging it.
     An ordinary wake, active/unknown dispatch or judgment grants no retry. *)
 

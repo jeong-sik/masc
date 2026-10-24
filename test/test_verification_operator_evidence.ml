@@ -45,6 +45,8 @@ let preview_testable =
     | Operator.Withheld Operator.Not_image_format -> Format.pp_print_string formatter "Not_image_format"
     | Operator.Withheld Operator.Body_not_filed -> Format.pp_print_string formatter "Body_not_filed"
     | Operator.Withheld Operator.Body_unreadable -> Format.pp_print_string formatter "Body_unreadable"
+    | Operator.Withheld (Operator.Body_identity_mismatch _) ->
+      Format.pp_print_string formatter "Body_identity_mismatch"
     | Operator.Withheld (Operator.Over_delivery_ceiling { bytes; ceiling }) ->
       Format.fprintf formatter "Over_delivery_ceiling(%d, %d)" bytes ceiling
     | Operator.Withheld Operator.Over_response_budget ->
@@ -236,6 +238,36 @@ let test_an_unavailable_access_is_the_persisted_json () =
 
 (* The route's JSON must be what the TUI decodes: same bytes, same media type
    read from the bytes, withheld causes with their numbers. *)
+let test_changed_bytes_are_withheld_and_the_tui_retains_the_identity_mismatch () =
+  with_base_path (fun base_path ->
+    let original = png_of_length 100 in
+    let replacement = png_signature ^ String.make (100 - String.length png_signature) 'q' in
+    let item = filed_binary ~base_path ~request_id:"vr-changed" ~index:0 ~format:"png" original in
+    let path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "evidence/vr-changed/0.bin" in
+    Fs_compat.save_file path replacement;
+    let mismatch : Store.binary_body_identity_mismatch =
+      { expected_bytes = 100; actual_bytes = 100
+      ; expected_sha256 = sha256_of original; actual_sha256 = sha256_of replacement } in
+    Alcotest.(check (list preview_testable)) "the server withholds the changed body"
+      [ Operator.Withheld (Operator.Body_identity_mismatch mismatch) ]
+      (previews_of ~base_path [ item ]);
+    let request : Store.request_header =
+      { id = "vr-changed"; task_id = "task-1"; worker = "w"; created_at = 1.0 } in
+    let wire = `Assoc [ "result", `Assoc [ "evidence",
+      Operator.access_to_yojson ~base_path (Store.Evidence_available { request; items = [item] }) ] ] in
+    match Masc.Tui_decode.decode_verification_evidence wire with
+    | Ok (Masc.Tui_decode.Evidence_items
+        [ Masc.Tui_decode.Ev_binary
+            { ev_b_preview = Masc.Tui_decode.Preview_withheld
+                (Masc.Tui_decode.Withheld_body_identity_mismatch
+                  { expected_bytes; actual_bytes; expected_sha256; actual_sha256 }); _ } ]) ->
+      Alcotest.(check (pair int int)) "the decoder retains both sizes" (100, 100)
+        (expected_bytes, actual_bytes);
+      Alcotest.(check (pair string string)) "the decoder retains both digests"
+        (mismatch.expected_sha256, mismatch.actual_sha256) (expected_sha256, actual_sha256)
+    | Ok _ -> Alcotest.fail "the mismatch must remain withheld on the wire"
+    | Error detail -> Alcotest.fail detail)
+
 let test_the_tui_decodes_what_the_server_writes () =
   with_base_path (fun base_path ->
     let data = png_of_length 300 in
@@ -301,5 +333,7 @@ let () =
             test_an_unavailable_access_is_the_persisted_json
         ; Alcotest.test_case "the TUI decodes what the server writes" `Quick
             test_the_tui_decodes_what_the_server_writes
+        ; Alcotest.test_case "changed bytes are withheld through the TUI decoder" `Quick
+            test_changed_bytes_are_withheld_and_the_tui_retains_the_identity_mismatch
         ] )
     ]

@@ -7623,6 +7623,12 @@ type evidence_withheld =
   | Withheld_not_image_format
   | Withheld_body_not_filed
   | Withheld_body_unreadable
+  | Withheld_body_identity_mismatch of {
+      expected_bytes : int;
+      actual_bytes : int;
+      expected_sha256 : string;
+      actual_sha256 : string;
+    }
   | Withheld_over_delivery_ceiling of { bytes : int; ceiling : int }
   | Withheld_over_response_budget
 
@@ -7671,10 +7677,22 @@ let decode_evidence_withheld preview =
     | `Int value when value >= 0 -> Ok value
     | _ -> Error ("withheld preview has no " ^ name)
   in
+  let string_field name =
+    match member name preview with
+    | `String value when value <> "" -> Ok value
+    | _ -> Error ("withheld preview has no " ^ name)
+  in
   match member "reason" preview with
   | `String "not_image_format" -> Ok Withheld_not_image_format
   | `String "body_not_filed" -> Ok Withheld_body_not_filed
   | `String "body_unreadable" -> Ok Withheld_body_unreadable
+  | `String "body_identity_mismatch" ->
+      let* expected_bytes = int_field "expected_bytes" in
+      let* actual_bytes = int_field "actual_bytes" in
+      let* expected_sha256 = string_field "expected_sha256" in
+      let* actual_sha256 = string_field "actual_sha256" in
+      Ok (Withheld_body_identity_mismatch
+        { expected_bytes; actual_bytes; expected_sha256; actual_sha256 })
   | `String "over_delivery_ceiling" ->
       let* bytes = int_field "bytes" in
       let* ceiling = int_field "ceiling" in

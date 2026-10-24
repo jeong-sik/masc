@@ -28,7 +28,7 @@ The repair keeps one generic registry and one typed trigger-policy authority:
 isolated test stanza uses that dependency. The checkpoint binary directly links
 `masc_core`. [Source checks](source-checks.json) record exact relocation hashes
 and the owning dependency declarations. The helper and full policy block were
-compared to the prior source after identifier-only renaming. Twenty-one changed
+compared to the prior source after identifier-only renaming. Twenty-three changed
 or new OCaml files passed parser-only checks with OCaml 5.5.1; `git diff --check`
 passed. These are source/syntax checks, not typing or execution evidence.
 
@@ -47,3 +47,15 @@ the existing root `Connector_trigger_policy` TOML loader. The extracted typed
 handles are therefore named `Connector_trigger_params`; the loader module and
 its `Make`/`load_error` API remain unchanged. Run 40063030116 targeted the
 pre-correction head and is not validation of this corrected source.
+
+Independent source review also found that both actual gateway starts checked
+transport tokens before publishing their configured default. Startup now
+resolves the strict policy and publishes it before those checks. This changes
+observable behavior: a disconnected or disabled connector with configured
+`all` reports `all`, and a live override still wins. Invalid policy does not
+install a fallback; Slack retains the typed loader's startup diagnostic.
+New cases in the existing two policy suites call the real `start` functions
+with transport tokens absent, verify status and descriptor policy, verify
+clear returns to the newly configured value, and cover Slack disabled state
+and invalid-policy diagnostics without opening a transport. These cases are
+prepared source until the new exact-source execution completes.

@@ -385,6 +385,39 @@ let with_clean_override f =
     f
 ;;
 
+let test_start_without_token_publishes_configured_policy () =
+  with_temp_dir @@ fun base_path ->
+  write_file (Filename.concat base_path "runtime.toml")
+    "[discord]\ntrigger_policy = \"all\"\n";
+  with_config_root base_path @@ fun () ->
+  with_env Env_config_core.base_path_env_key base_path @@ fun () ->
+  with_env "DISCORD_BOT_TOKEN" "" @@ fun () ->
+  with_clean_override @@ fun () ->
+  Fun.protect
+    ~finally:(fun () ->
+      Connector_trigger_params.set_discord_configured Gw.Mention_or_thread)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let state = Mcp_server.For_testing.create_state ~base_path in
+      List.iter (fun override ->
+        Connector_trigger_params.set_discord_configured Gw.Mention_or_thread;
+        Runtime_params.clear Connector_trigger_params.discord;
+        Option.iter set_override override;
+        G.start ~sw ~env ~clock:(Eio.Stdenv.clock env) ~state;
+        let expected = Option.value ~default:Gw.All override in
+        List.iter (fun json ->
+          check string "start without a token reports the effective policy"
+            (ps expected)
+            Yojson.Safe.Util.(json |> member "trigger_policy" |> to_string))
+          [State.status_json (); State.connector_json ()];
+        check bool "transport remains disconnected" false (State.connected ());
+        Runtime_params.clear Connector_trigger_params.discord;
+        check string "clearing exposes the configuration published by start"
+          (ps Gw.All) (installed_policy ()))
+        [None; Some Gw.Mention_only])
+;;
+
 let test_configured_answers_without_override () =
   with_clean_override (fun () ->
     Runtime_params.clear Connector_trigger_params.discord;
@@ -505,7 +538,9 @@ let () =
             test_full_directory_pages_keep_channels_and_global_people
         ] )
     ; ( "params_plane"
-      , [ test_case "configured answers without an override" `Quick
+      , [ test_case "start without token publishes configuration and keeps overrides" `Quick
+            test_start_without_token_publishes_configured_policy
+        ; test_case "configured answers without an override" `Quick
             test_configured_answers_without_override
         ; test_case "override wins over configured" `Quick
             test_override_wins_over_configured

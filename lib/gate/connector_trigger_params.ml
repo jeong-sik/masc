@@ -39,9 +39,9 @@ let register_enum ~key ~default ~to_string ~of_string ~choices ~description () =
 
 (* ── connector trigger surface ───────────────────────────────── *)
 
-(* What a connector's gateway resolved from [MASC_*_TRIGGER_POLICY] and
-   runtime.toml at startup.  The param default reads this rather than walking
-   those planes itself, because [Runtime_params.get] calls the default thunk on
+(* What a connector's gateway resolved from runtime.toml at startup. The
+   param default reads this rather than walking the config file itself,
+   because [Runtime_params.get] calls the default thunk on
    every read and a policy check happens per inbound message: resolution is a
    file read, and it belongs to boot.
 

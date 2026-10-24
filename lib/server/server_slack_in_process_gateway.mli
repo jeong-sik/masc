@@ -115,4 +115,6 @@ val start :
   unit
 (** Fork the gateway fiber. Returns immediately. Warnings and the eventual
     gateway crash (if any) are emitted via [Log.Server]. Cancellation
-    propagates through [~sw]. *)
+    propagates through [~sw]. Resolves and publishes the configured trigger
+    policy before disabled/credential admission. Invalid policy is retained
+    as the startup error even when no app token is configured. *)

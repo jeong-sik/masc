@@ -1038,24 +1038,22 @@ let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
 (* ---------------------------------------------------------------- *)
 
 let start ~sw ~env ~clock ~state =
-  match bot_token_opt () with
-  | None ->
-    Log.Server.warn
-      "RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started"
-  | Some token ->
-    (match resolved_trigger_policy () with
-     | Error error ->
-       (* Same fail-closed posture as the Slack sibling (RFC-0317): a
-          malformed policy configuration must stop the gateway, not boot it
-          on a policy the operator did not write. *)
-       Log.Server.error
-         "RFC-0203: Discord trigger-policy configuration rejected; gateway \
-          not started (%s)"
-         (trigger_policy_load_error_to_string error)
-     | Ok configured ->
-    (* What env and runtime.toml said, published so the params surface can
-       offer it as the value a cleared override returns to. *)
+  match resolved_trigger_policy () with
+  | Error error ->
+    (* Reject malformed policy even when transport credentials are absent. *)
+    Log.Server.error
+      "RFC-0203: Discord trigger-policy configuration rejected; gateway \
+       not started (%s)"
+      (trigger_policy_load_error_to_string error)
+  | Ok configured ->
+    (* Publish configuration before token admission so disconnected status
+       reads the same default the ingress policy uses. *)
     Connector_trigger_params.set_discord_configured configured;
+    match bot_token_opt () with
+    | None ->
+      Log.Server.warn
+        "RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started"
+    | Some token ->
     (* An override left on the params surface outlives a restart, so what this
        gateway judges by is the param, not [configured] alone. *)
     let policy = current_trigger_policy () in
@@ -1108,4 +1106,4 @@ let start ~sw ~env ~clock ~state =
       | exn ->
         Log.Server.error
           "RFC-0203: in-process Discord gateway crashed: %s"
-          (Printexc.to_string exn)))
+          (Printexc.to_string exn))

@@ -15,7 +15,7 @@
       "byte_identical": true
     }
   ],
-  "policy_definitions": "The sole enum helper and complete two-policy block match the original after identifier-only renaming. Original persisted keys, metadata, defaults, parsers and validators preserved.",
+  "policy_definitions": "The sole enum helper and configured values/setters/parameter declarations match the original after identifier-only renaming. Persisted keys, metadata, defaults, parsers and validators preserved; stale env-plane prose corrected to runtime.toml.",
   "direction": [
     "masc -> masc_gate -> masc_core",
     "masc_server -> masc_gate -> masc_core"
@@ -45,7 +45,7 @@
   "parser_check": {
     "ocaml_version": "5.5.1",
     "command": "ocamlc -stop-after parsing -c FILE",
-    "changed_existing_or_new_files": 21,
+    "changed_existing_or_new_files": 23,
     "result": "pass",
     "limit": "No local Dune, OCaml typing, linking or behavior execution."
   },
@@ -58,5 +58,6 @@
     "root_policy_loader": "lib/connector_trigger_policy.ml/.mli remains byte-identical to direct base; existing Make/load_error callers preserved",
     "prior_name_collision": "Caught by independent source review; corrected before claiming execution success",
     "prior_unvalidated_dispatch": 40063030116
-  }
+  },
+  "startup_behavior_repair": "Resolve strict policy and install the configured default before Discord bot-token and Slack disabled/app-token admission. New actual-start fixture cases prepared in both existing policy suites; no network tokens supplied."
 }

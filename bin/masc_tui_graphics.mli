@@ -42,6 +42,7 @@ type image =
   | Evidence_image_1 | Evidence_image_2 | Evidence_image_3 | Evidence_image_4
       (** The pictures of one task's operator evidence, in the order the
           evidence lists them. *)
+  | Image_inspection
 [@@deriving enumerate]
 
 val image_id : image -> int
@@ -164,6 +165,12 @@ val place : data:string -> rows:int -> string
     Asks the terminal not to answer. A reply would arrive on stdin, which is
     the key stream, and an unread reply is typed into whatever the operator
     was writing. {!query} is the one request that wants an answer. *)
+
+val place_viewport : data:string -> Masc_tui_image_viewport.window -> string
+(** PNG transfer with explicit x/y/w/h source-pixel cropping and c/r cell
+    geometry. Caller validates the PNG and derives the bounded window. *)
+val put_viewport : Masc_tui_image_viewport.window -> string
+(** Re-crop the already transmitted inspection image without sending its bytes. *)
 
 val delete_all : string
 (** Bytes that remove every image this process placed. Written before leaving

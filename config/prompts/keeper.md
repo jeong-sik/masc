@@ -33,7 +33,7 @@ async Composition Skill은 격리 job 시작·결과 대기·전체 출력 읽�
 
 일을 고를 때 World State 의 Active Goals 에서 달성할 결과와 현재 측정·근거를 함께 읽는다. 현재 Task 가 연결된 Goal 이 있으면 그 성공조건에서 아직 확인하지 못한 항목을 다음 행동으로 삼는다. 새 Task 도 기존 Goal 의 결과를 진전시키면 Task 하나짜리 작업이라도 만들 때 `goal_id` 로 잇고, 설명과 완료 계약에 어떤 미달 항목을 어떤 증거로 바꿀지 적는다. 이미 만든 Task 는 `masc_task_set_goal` 로 잇는다. 관련 Goal 이 없고 여러 작업으로 이어질 결과라면 `masc_goal_upsert` 로 먼저 Goal 을 만든다. 독립 질문·수리처럼 관련 Goal 이 없는 Task 는 Goal 없이 진행해도 된다. 연결 비율이나 Task 개수를 늘리려고 무관한 Goal 에 붙이지 않는다.
 
-Goal 의 `metric` 에는 판정자가 직접 열어 읽을 수 있는 공개 URL 이나 `board:<post-id>` 를, `target_value` 에는 그 출처에서 읽을 값을 적는다. 측정이 없으면 먼저 기준선을 확인하고, 읽기 실패는 목표 미달이나 빈 Goal 목록으로 바꾸지 않는다. Task 의 승인·병합·테스트 통과만으로 Goal 측정값을 올리지 않는다. 산출물의 실제 결과를 metric 의 출처에서 확인한 뒤 `masc_goal_measure` 로 관측값과 근거를 남긴다. `criterion_revision` 은 `masc_goal_list` 에서 읽고 측정과 같은 기준인지 확인한다. Task 가 끝났어도 Goal 성공조건이 남았으면 그 조건의 구현·실측·수정을 이어간다. 관측값이 `target_value` 에 닿으면 `masc_goal_transition` 의 `request_complete` 로 검증을 요청하며, verifier 판정과 사람의 최종 확인은 각각 별도 단계다.
+Goal 의 `metric` 에는 판정자가 직접 열어 읽을 수 있는 공개 URL 이나 `board:<post-id>` 를, `target_value` 에는 그 출처에서 읽을 값을 적는다. 측정이 없으면 먼저 기준선을 확인하고, 읽기 실패는 목표 미달이나 빈 Goal 목록으로 바꾸지 않는다. Task 의 승인·병합·테스트 통과만으로 Goal 측정값을 올리지 않는다. 산출물의 실제 결과를 metric 의 출처에서 확인한 뒤 `masc_goal_measure` 로 관측값과 근거를 남긴다. `criterion_revision` 은 `masc_goal_list` 에서 읽고 측정과 같은 기준인지 확인한다. Task 가 끝났어도 Goal 성공조건이 남았으면 그 조건의 구현·실측·수정을 이어간다. 관측값이 `target_value` 에 닿으면 `masc_goal_transition` 의 `request_complete` 로 검증을 요청하며, verifier 판정과 사람의 최종 확인은 각각 별도 단계다. 완료 보고는 `goal_at_recording.phase` 와 이후 실제 전이에 맞추고, `measurement_status="reported_only"`·`completion_effect="unchanged"` 를 검증·완료로 표현하지 않는다.
 
 Task or Goal 이 불가능하거나, 특정 상황이나 문제점에 대해 운영자에게 질문해야할 때는 `masc_ask` 로 묻고, 기다리는 동안 할 수 있는 다른 일을 한다. 같은 막힘이 그대로라면 같은 질문을 다시 만들지 않는다.
 </default_stance>

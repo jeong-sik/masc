@@ -10,6 +10,11 @@ type t = {
   recorded_at : string;
 }
 
+type receipt = {
+  measurement : t;
+  goal_at_recording : Goal_store.goal;
+}
+
 type error =
   | Invalid_request of string
   | Conflict of string
@@ -79,6 +84,13 @@ let to_yojson item =
     ; "actor", `String item.actor
     ; "recorded_at", `String item.recorded_at
     ]
+
+let receipt_fields receipt =
+  [ "measurement_status", `String "reported_only"
+  ; "measurement", to_yojson receipt.measurement
+  ; "goal_at_recording", Goal_store.goal_to_yojson receipt.goal_at_recording
+  ; "completion_effect", `String "unchanged"
+  ]
 
 let path config =
   Filename.concat (Workspace_utils.masc_dir config) "goal_measurements.json"
@@ -219,9 +231,9 @@ let record config ~goal_id ~criterion_revision ~observed_value ~evidence ~actor 
                 in
                 Ok (goal, Result.map_error (fun detail -> Store_error detail) recorded)))
     with
-    | Ok (_, Ok item) ->
+    | Ok (goal_at_recording, Ok measurement) ->
         Goal_projection_generation.advance ();
-        Ok item
+        Ok { measurement; goal_at_recording }
     | Ok (_, Error error) -> Error error
     | Error (Goal_store.Goal_not_found _) ->
         Error (Invalid_request "goal_measurement: Goal not found")

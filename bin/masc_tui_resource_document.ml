@@ -333,7 +333,7 @@ let anchor_reading (state : state) =
   else match current state with
     | Some ({contents=Some _;error=None;requested=false;
              presentation=Catalog.Document;diagrams=Some _;_} as reading) -> Some reading
-    | Some _ | None -> None
+    | Some {presentation=(Catalog.Document | Catalog.Source);_} | None -> None
 
 let capture_anchor ~cols ~height state =
   Option.bind (anchor_reading state) (fun reading ->

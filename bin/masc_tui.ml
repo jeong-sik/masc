@@ -20751,7 +20751,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         | Error reason -> refuse reason
         | Ok (presentation,scene) -> draw_prepared_image ?scene ~origin state ~refuse ~title:name presentation
       end
-       | Some _ | None -> ())
+       | Some {sir_purpose=(Open_image | Inspect_image _);_} | None -> ())
   | Image_render_ready { title; caption; page_url; image_url; result } ->
       if not state.msx_open then begin
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in

@@ -109,6 +109,20 @@ let make_span source offset text =
   prepared_span source offset (prepare_content text)
 let unattributed reason text =
   { text; spans = [make_span (Unattributed reason) 0 text] }
+let singleton layer text =
+  { text; spans = [make_span (Layer layer) 0 text] }
+let partition_layer layer rendered =
+  let selected, remaining = List.partition (fun span -> match span.source with
+    | Layer candidate -> candidate = layer
+    | Unattributed _ -> false) rendered.spans in
+  let project spans =
+    let buffer = Buffer.create (String.length rendered.text) in
+    let spans = List.map (fun span ->
+      let offset = Buffer.length buffer in
+      Buffer.add_substring buffer rendered.text span.offset span.bytes;
+      {span with offset}) spans in
+    {text = Buffer.contents buffer; spans} in
+  project selected, project remaining
 let append_unattributed rendered reason suffix =
   { text = rendered.text ^ suffix;
     spans = rendered.spans @ [make_span (Unattributed reason) (String.length rendered.text) suffix] }

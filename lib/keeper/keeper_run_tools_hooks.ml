@@ -964,8 +964,9 @@ let assemble_hooks
                    2026-08-24 one keeper — 36 single-call rounds restating one
                    answer). Which blocks still ride a post-tool round is the
                    typed declaration [Prompt_block_id.injected_on_post_tool_round];
-                   the filter sits at assembly below so a new recording site
-                   cannot bypass it.
+                   request assembly below enforces it. The renderer's Goal
+                   layer is issued separately and retained through this turn's
+                   tool loop, without rebroadcasting the other world state.
 
                    The predicate is the position of the conversation's last
                    message, not [last_tool_results]: that hook payload reports
@@ -1136,38 +1137,14 @@ let assemble_hooks
                        record_block Prompt_block_id.Operator_note block;
                        true)
                 in
-                let turn_blocks =
-                  let blocks = List.rev !recorded_blocks in
-                  let blocks =
-                    if post_tool_round
-                    then
-                      List.filter
-                        (fun (block, _) ->
-                           Prompt_block_id.injected_on_post_tool_round block)
-                        blocks
-                    else blocks
-                  in
-                  (* The assembly is a cached prefix, so a block that changes
-                     every turn re-bills every block behind it. Order by how
-                     often each one actually changes rather than by the order
-                     the producers happened to run in: over 386 one measured Keeper turns
-                     the 51,518 B memory block changed 65 times while the 81 B
-                     clock line ahead of it changed 306, and that turn paid
-                     314,080 cache-creation tokens against 50,788 reads.
-                     [stable_sort] keeps producer order inside one rank. *)
-                  List.stable_sort
-                    (fun (left, _) (right, _) ->
-                       Int.compare
-                         (Prompt_block_id.cache_rank left)
-                         (Prompt_block_id.cache_rank right))
-                    blocks
-                in
                 let extra_system_context_assembly =
-                  Keeper_run_prompt.assemble_extra_system_context
+                  Keeper_run_prompt.assemble_request_context
+                    ~post_tool_round
+                    ~previous_assembly:acc.extra_system_context_assembly
                     ~dynamic_context_partition:(Some dynamic_context_partition)
                     ~existing_extra_system_context:
                       current_params.extra_system_context
-                    ~blocks:turn_blocks
+                    ~blocks:(List.rev !recorded_blocks)
                 in
                 let ctx = extra_system_context_assembly.extra_system_context in
                 let recorded_blocks_for_receipt =

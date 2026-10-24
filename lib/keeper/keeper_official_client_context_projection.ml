@@ -243,7 +243,7 @@ let block_body assembly = function
      | Some sections -> World_state_sections (List.map world_state_section sections)
      | None -> Whole_text)
   | Prompt_block_id.(
-      Keeper_instructions | Temporal_summary | Memory_os_recall
+      Keeper_instructions | Active_goals | Temporal_summary | Memory_os_recall
       | Librarian_working_context | Operator_note | Skill_compositions) -> Whole_text
 ;;
 
@@ -680,7 +680,7 @@ let resume_prompt ~goal ~held ?composed_context messages =
     | World_state_sections _,
       ( Session_store.Context_block
           Prompt_block_id.(
-            Keeper_instructions | Temporal_summary | Memory_os_recall
+            Keeper_instructions | Active_goals | Temporal_summary | Memory_os_recall
             | Librarian_working_context | Operator_note | Skill_compositions)
       | Session_store.Librarian_working_state
       | Session_store.Librarian_unread

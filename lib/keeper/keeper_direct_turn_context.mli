@@ -33,3 +33,8 @@ val project :
     guidance; [Some access] never borrows another projection's route. Empty
     fragments are omitted, preserving all remaining bytes and separators.
     Projection neither reloads nor acknowledges the captured observations. *)
+
+val project_partition :
+  t -> workspace_memory_access:Keeper_request_tool_access.t option -> Keeper_context_layers.rendered
+(** The same bytes as [project], with the captured Goal snapshot attributed to
+    [Active_goals] so request assembly can keep it through the tool loop. *)

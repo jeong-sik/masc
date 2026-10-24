@@ -207,7 +207,7 @@ let extract ~sw ~net ~provider_config ~config ~(schema : 'a schema) prompt
     Llm_provider.Provider_config.capability_provider_label provider_cfg
   in
   let* response =
-    Llm_provider.Complete.complete ~sw ~net ~config:provider_cfg ~messages ~tools:[] ()
+    (Llm_provider.Complete.complete ~sw ~net ~config:provider_cfg ~messages ~tools:[] ()).Llm_provider.Completion_outcome.result
     |> Result.map_error (core_error_of_http_error ~provider)
   in
   extract_response ~schema response
@@ -290,7 +290,7 @@ let extract_stream
     Llm_provider.Provider_config.capability_provider_label provider_cfg
   in
   let* response =
-    Llm_provider.Complete.complete_stream
+    (Llm_provider.Complete.complete_stream
       ~sw
       ~net
       ?clock
@@ -298,7 +298,7 @@ let extract_stream
       ~messages
       ~tools:[]
       ~on_event
-      ()
+      ()).Llm_provider.Completion_outcome.result
     |> Result.map_error (core_error_of_http_error ~provider)
   in
   let* value = extract_response ~schema response in

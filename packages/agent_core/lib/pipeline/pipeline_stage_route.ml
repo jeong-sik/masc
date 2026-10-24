@@ -262,7 +262,7 @@ let dispatch_sync
       (match preflight_serving_constraint ~binding ~now_unix_s prepared with
        | Error error -> Error error
        | Ok () when not requires_exact_fit ->
-         Llm_provider.Complete.complete_serialized
+         (Llm_provider.Complete.complete_serialized
            ~sw
            ~net:agent.net
            ?clock
@@ -272,7 +272,7 @@ let dispatch_sync
            ?call_timeout_s:agent.options.call_timeout_s
            ?permit_wait:agent.options.permit_wait
            ?request_wire_observer:agent.pre_dispatch_serialization_observer
-           ()
+           ()).Llm_provider.Completion_outcome.result
          |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
        | Ok () ->
          (match Llm_provider.Complete.resolve_context_limit prepared with
@@ -332,7 +332,7 @@ let dispatch_sync
                                 ~phase:Llm_provider.Http_client.Non_streaming_body
                                 ~next_stage:"completion"))
                       | `Unbounded | `Remaining _ ->
-                        Llm_provider.Complete.complete_admitted
+                        (Llm_provider.Complete.complete_admitted
                           ~sw
                           ~net:agent.net
                           ?clock
@@ -342,7 +342,7 @@ let dispatch_sync
                           ~call_window
                           ?permit_wait:agent.options.permit_wait
                           ?request_wire_observer:agent.pre_dispatch_serialization_observer
-                          ()
+                          ()).Llm_provider.Completion_outcome.result
                         |> Result.map_error
                              (Provider_failure_attribution.of_http_error ~binding ~provider)))))))
   in
@@ -404,7 +404,7 @@ let dispatch_stream
       (match preflight_serving_constraint ~binding ~now_unix_s prepared with
        | Error error -> Error error
        | Ok () when not requires_exact_fit ->
-         Llm_provider.Complete.complete_stream_serialized
+         (Llm_provider.Complete.complete_stream_serialized
            ~sw
            ~net:agent.net
            ?clock
@@ -415,7 +415,7 @@ let dispatch_stream
            ~on_event
            ?on_telemetry
            ?request_wire_observer:agent.pre_dispatch_serialization_observer
-           ()
+           ()).Llm_provider.Completion_outcome.result
          |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
        | Ok () ->
          (match Llm_provider.Complete.resolve_context_limit prepared with
@@ -519,7 +519,7 @@ let dispatch_stream
                               first_event_timeout_s
                               admitted
                         in
-                        Llm_provider.Complete.complete_stream_admitted
+                        (Llm_provider.Complete.complete_stream_admitted
                           ~sw
                           ~net:agent.net
                           ?clock
@@ -530,7 +530,7 @@ let dispatch_stream
                           ~on_event
                           ?on_telemetry
                           ?request_wire_observer:agent.pre_dispatch_serialization_observer
-                          ()
+                          ()).Llm_provider.Completion_outcome.result
                         |> Result.map_error
                              (Provider_failure_attribution.of_http_error ~binding ~provider)))))))
   in

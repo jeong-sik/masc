@@ -109,8 +109,8 @@ let probe_chat_completion_compatible
       in
       let messages : Agent_core_types.message list = [ Agent_core_types.user_msg "hi" ] in
       let run_completion () =
-        Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
-          ~config:provider_config ~messages ()
+        (Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
+          ~config:provider_config ~messages ()).Llm_provider.Completion_outcome.result
       in
       (* A completion that arrived as the window closed is the completion. *)
       let outcome =

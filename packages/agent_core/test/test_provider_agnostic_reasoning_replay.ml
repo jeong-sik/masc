@@ -709,14 +709,14 @@ let admitted_round_one ~stream =
     | Ok serialized ->
       if stream
       then
-        Complete.complete_stream_serialized
+        (Complete.complete_stream_serialized
           ~sw
           ~net
           ~transport
           serialized
           ~on_event:ignore
-          ()
-      else Complete.complete_serialized ~sw ~net ~transport serialized ()
+          ()).Llm_provider.Completion_outcome.result
+      else (Complete.complete_serialized ~sw ~net ~transport serialized ()).Llm_provider.Completion_outcome.result
   in
   match completed with
   | Error _ -> Alcotest.fail "the stubbed admitted completion must succeed"
@@ -1296,8 +1296,8 @@ let admitted_wire_types
     in
     let result =
       if stream
-      then Complete.complete_stream_serialized ~sw ~net serialized ~on_event:ignore ()
-      else Complete.complete_serialized ~sw ~net serialized ()
+      then (Complete.complete_stream_serialized ~sw ~net serialized ~on_event:ignore ()).Llm_provider.Completion_outcome.result
+      else (Complete.complete_serialized ~sw ~net serialized ()).Llm_provider.Completion_outcome.result
     in
     match result with
     | Ok response -> response

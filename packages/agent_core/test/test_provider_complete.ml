@@ -826,16 +826,16 @@ let check_ollama_correlation_rejected ~expected messages =
   in
   check_result
     "sync correlation rejection"
-    (Llm_provider.Complete.complete ~sw ~net ~config ~messages ());
+    ((Llm_provider.Complete.complete ~sw ~net ~config ~messages ())).Llm_provider.Completion_outcome.result;
   check_result
     "stream correlation rejection"
-    (Llm_provider.Complete.complete_stream
+    ((Llm_provider.Complete.complete_stream
        ~sw
        ~net
        ~config
        ~messages
        ~on_event:(fun _ -> ())
-       ())
+       ())).Llm_provider.Completion_outcome.result
 ;;
 
 let test_ollama_missing_tool_correlation_rejected_sync_and_stream () =
@@ -1238,16 +1238,16 @@ let test_complete_rejects_glm_named_forced_tool_choice_before_request () =
   let net = Eio.Stdenv.net env in
   assert_rejected
     "sync completion rejects before request"
-    (Llm_provider.Complete.complete ~sw ~net ~config ~messages:[] ());
+    ((Llm_provider.Complete.complete ~sw ~net ~config ~messages:[] ())).Llm_provider.Completion_outcome.result;
   assert_rejected
     "stream completion rejects before request"
-    (Llm_provider.Complete.complete_stream
+    ((Llm_provider.Complete.complete_stream
        ~sw
        ~net
        ~config
        ~messages:[]
        ~on_event:(fun _ -> ())
-       ())
+       ())).Llm_provider.Completion_outcome.result
 ;;
 
 (* ── Provider_config.make ────────────────────────────── *)
@@ -1309,23 +1309,23 @@ let complete_sync_and_stream ~config ~transport =
   @@ fun sw ->
   let net = Eio.Stdenv.net env in
   let sync =
-    Llm_provider.Complete.complete
+    (Llm_provider.Complete.complete
       ~sw
       ~net
       ~config
       ~messages:[ user_msg "hi" ]
       ~transport
-      ()
+      ()).Llm_provider.Completion_outcome.result
   in
   let stream =
-    Llm_provider.Complete.complete_stream
+    (Llm_provider.Complete.complete_stream
       ~sw
       ~net
       ~config
       ~messages:[ user_msg "hi" ]
       ~on_event:(fun _ -> ())
       ~transport
-      ()
+      ()).Llm_provider.Completion_outcome.result
   in
   sync, stream
 ;;
@@ -1625,13 +1625,13 @@ let complete_with_captured_diag ~config ~response =
     let net = Eio.Stdenv.net env in
     let transport = fake_transport response in
     match
-      Llm_provider.Complete.complete
+      (Llm_provider.Complete.complete
         ~sw
         ~net
         ~config
         ~messages:[ user_msg "hi" ]
         ~transport
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Ok _ -> ()
     | Error _ -> Alcotest.fail "fake completion should succeed"
@@ -1734,7 +1734,7 @@ let test_complete_rejects_output_schema_for_glm () =
       ()
   in
   match
-    Llm_provider.Complete.complete ~sw ~net ~config ~messages:[ user_msg "hi" ] ()
+    (Llm_provider.Complete.complete ~sw ~net ~config ~messages:[ user_msg "hi" ] ()).Llm_provider.Completion_outcome.result
   with
   | Error (Llm_provider.Http_client.AcceptRejected { reason }) ->
     Alcotest.(check bool)
@@ -1763,13 +1763,13 @@ let test_complete_stream_rejects_output_schema_for_glm () =
       ()
   in
   match
-    Llm_provider.Complete.complete_stream
+    (Llm_provider.Complete.complete_stream
       ~sw
       ~net
       ~config
       ~messages:[ user_msg "hi" ]
       ~on_event:(fun _ -> ())
-      ()
+      ()).Llm_provider.Completion_outcome.result
   with
   | Error (Llm_provider.Http_client.AcceptRejected { reason }) ->
     Alcotest.(check bool)
@@ -1886,23 +1886,23 @@ cache_read_multiplier = 1.0
     let transport = fake_transport response in
     check_cost
       "sync exact provider price"
-      (Llm_provider.Complete.complete
+      ((Llm_provider.Complete.complete
          ~sw
          ~net
          ~transport
          ~config
          ~messages:[ user_msg "hi" ]
-         ());
+         ())).Llm_provider.Completion_outcome.result;
     check_cost
       "stream exact provider price"
-      (Llm_provider.Complete.complete_stream
+      ((Llm_provider.Complete.complete_stream
          ~sw
          ~net
          ~transport
          ~config
          ~messages:[ user_msg "hi" ]
          ~on_event:(fun _ -> ())
-         ()))
+         ())).Llm_provider.Completion_outcome.result)
 ;;
 
 (* ── Stream accumulator ──────────────────────────────── *)

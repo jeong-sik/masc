@@ -207,8 +207,13 @@ val make_http_transport
     connections. It has no effect when a custom [transport] is supplied.
     When [metrics] is provided, fires lifecycle callbacks.
 
-    @return [Ok api_response] on success (possibly from cache)
-    @return [Error http_error] on failure. A response with no content blocks
+    Returns the response result together with immutable request provenance.
+    [Cache_reused] describes the current lookup body, without asserting a new
+    dispatch or reconstructing the original cached call. Native provenance
+    survives errors and response annotation; observers are independent.
+
+    @return an outcome with [Ok api_response] on success (possibly from cache)
+    @return an outcome with [Error http_error] on failure. A response with no content blocks
     fails closed as [ProviderFailure { kind = Empty_completion { stop_reason } }]
     for built-in HTTP, cache, and injected transports alike. *)
 val complete
@@ -229,7 +234,7 @@ val complete
   -> ?capture_id:string
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> unit
-  -> (Types.api_response, Http_client.http_error) result
+  -> (Types.api_response, Http_client.http_error) result Completion_outcome.t
 
 (** Dispatch an already measured and admitted request. The transport receives
     the request owned by [admitted_request]; callers cannot substitute config,
@@ -255,7 +260,7 @@ val complete_admitted
   -> ?permit_wait:Provider_admission.permit_wait Atomic.t
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> unit
-  -> (Types.api_response, Http_client.http_error) result
+  -> (Types.api_response, Http_client.http_error) result Completion_outcome.t
 
 (** Dispatch a request whose exact final body already passed byte admission,
     without attaching token-fit evidence. This is the typed body-only path;
@@ -274,7 +279,7 @@ val complete_serialized
   -> ?permit_wait:Provider_admission.permit_wait Atomic.t
   -> ?request_wire_observer:Request_wire_observer.try_observe
   -> unit
-  -> (Types.api_response, Http_client.http_error) result
+  -> (Types.api_response, Http_client.http_error) result Completion_outcome.t
 (** [body_timeout_s] is the caller-owned deadline, in seconds, for the provider
     round-trip of a non-streaming call after a cache miss. It must be finite and
     greater than zero and requires [clock].
@@ -447,7 +452,7 @@ val complete_stream
   -> ?connection_cache:Http_client.cache
   -> ?on_telemetry:(Telemetry_event.t -> unit)
   -> unit
-  -> (Types.api_response, Http_client.http_error) result
+  -> (Types.api_response, Http_client.http_error) result Completion_outcome.t
 
 (** Streaming counterpart of {!complete_admitted}. Capture identity and idle
     deadline are fixed when the request is prepared. Pre-dispatch serialization
@@ -474,7 +479,7 @@ val complete_stream_admitted
   -> ?connection_cache:Http_client.cache
   -> ?on_telemetry:(Telemetry_event.t -> unit)
   -> unit
-  -> (Types.api_response, Http_client.http_error) result
+  -> (Types.api_response, Http_client.http_error) result Completion_outcome.t
 
 (** Streaming counterpart of {!complete_serialized}. *)
 val complete_stream_serialized
@@ -492,4 +497,4 @@ val complete_stream_serialized
   -> ?connection_cache:Http_client.cache
   -> ?on_telemetry:(Telemetry_event.t -> unit)
   -> unit
-  -> (Types.api_response, Http_client.http_error) result
+  -> (Types.api_response, Http_client.http_error) result Completion_outcome.t

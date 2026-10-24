@@ -181,7 +181,7 @@ let () =
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
   let sync ?tools ~config messages =
-    Llm_provider.Complete.complete
+    (Llm_provider.Complete.complete
       ~sw
       ~net
       ~clock
@@ -189,10 +189,10 @@ let () =
       ~config
       ~messages
       ?tools
-      ()
+      ()).Llm_provider.Completion_outcome.result
   in
   let stream ?tools ~config messages =
-    Llm_provider.Complete.complete_stream
+    (Llm_provider.Complete.complete_stream
       ~sw
       ~net
       ~clock
@@ -201,7 +201,7 @@ let () =
       ~messages
       ?tools
       ~on_event:(fun _ -> ())
-      ()
+      ()).Llm_provider.Completion_outcome.result
   in
   let thinking_on = { config with Provider_config.enable_thinking = Some true } in
   (* Thinking on, at the row's default effort and through the sync path. Its

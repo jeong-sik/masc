@@ -2264,8 +2264,8 @@ let test_setup_responses_http_dispatch () =
     let rendered = Runtime_setup_spec.render spec in
     let runtime = Runtime_toml.parse_string rendered.runtime_toml |> Result.get_ok in
     let config = Runtime_adapter.binding_to_provider_config runtime (List.hd runtime.bindings) |> Result.get_ok in
-    let response = Llm_provider.Complete.complete ~sw ~net ~config
-        ~messages:[Llm_provider.Types.make_message ~role:Llm_provider.Types.User [Llm_provider.Types.Text "Reply ok."]] () in
+    let response = (Llm_provider.Complete.complete ~sw ~net ~config
+        ~messages:[Llm_provider.Types.make_message ~role:Llm_provider.Types.User [Llm_provider.Types.Text "Reply ok."]] ()).Llm_provider.Completion_outcome.result in
     (match response with
      | Ok response -> check string "Responses envelope decoded" "setup-response" response.id
      | Error _ -> fail "setup-generated Responses request failed");
@@ -2412,8 +2412,8 @@ is-default = true
         | Error rejection ->
           fail (Provider.reasoning_effort_request_rejection_to_message rejection));
        let response =
-         match Llm_provider.Complete.complete ~sw ~net ~config ~tools:[ tool ]
-                 ~messages:[ Types.make_message ~role:Types.User [ Types.Text "Find fixture." ] ] () with
+         match (Llm_provider.Complete.complete ~sw ~net ~config ~tools:[ tool ]
+                 ~messages:[ Types.make_message ~role:Types.User [ Types.Text "Find fixture." ] ] ()).Llm_provider.Completion_outcome.result with
          | Ok response -> response
          | Error error ->
            fail

@@ -77,7 +77,7 @@ let test_complete_reuses_connection () =
     let config = make_anthropic_config url in
     let cache = Http_client.create_cache ~sw () in
     (match
-       Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()
+       (Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()).Llm_provider.Completion_outcome.result
      with
      | Ok _ -> ()
      | Error _ -> Alcotest.fail "expected Ok first call");
@@ -86,7 +86,7 @@ let test_complete_reuses_connection () =
     Alcotest.(check int) "no reuse yet" 0 stats_after_first.reuse_count_total;
     Alcotest.(check int) "one idle connection" 1 stats_after_first.total_idle;
     (match
-       Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()
+       (Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()).Llm_provider.Completion_outcome.result
      with
      | Ok _ -> ()
      | Error _ -> Alcotest.fail "expected Ok second call");
@@ -109,7 +109,7 @@ let test_eviction_fiber_closes_idle () =
     let config = make_anthropic_config url in
     let cache = Http_client.create_cache ~sw ~clock:env#clock ~idle_ttl_seconds:0.05 () in
     (match
-       Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()
+       (Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()).Llm_provider.Completion_outcome.result
      with
      | Ok _ -> ()
      | Error _ -> Alcotest.fail "expected Ok");
@@ -140,7 +140,7 @@ let test_omits_connection_close_header () =
     let config = make_anthropic_config url in
     let cache = Http_client.create_cache ~sw () in
     (match
-       Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()
+       (Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()).Llm_provider.Completion_outcome.result
      with
      | Ok _ -> ()
      | Error _ -> Alcotest.fail "expected Ok");
@@ -316,7 +316,7 @@ let test_stream_reuses_connection () =
     let cache = Http_client.create_cache ~sw () in
     let got = ref [] in
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~config
@@ -325,7 +325,7 @@ let test_stream_reuses_connection () =
          ~on_event:(function
            | Types.ContentBlockDelta { delta = Types.TextDelta s; _ } -> got := s :: !got
            | _ -> ())
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Ok _ -> ()
      | Error _ -> Alcotest.fail "expected Ok stream");
@@ -335,7 +335,7 @@ let test_stream_reuses_connection () =
     Alcotest.(check int) "one idle after stream" 1 stats_after_first.total_idle;
     got := [];
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~config
@@ -344,7 +344,7 @@ let test_stream_reuses_connection () =
          ~on_event:(function
            | Types.ContentBlockDelta { delta = Types.TextDelta s; _ } -> got := s :: !got
            | _ -> ())
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Ok _ -> ()
      | Error _ -> Alcotest.fail "expected Ok stream second");
@@ -367,7 +367,7 @@ let test_per_host_cap_closes_excess () =
     let cache = Http_client.create_cache ~sw ~max_idle_per_host:1 () in
     let once () =
       match
-        Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()
+        (Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()).Llm_provider.Completion_outcome.result
       with
       | Ok _ -> ()
       | Error _ -> Alcotest.fail "expected Ok concurrent"

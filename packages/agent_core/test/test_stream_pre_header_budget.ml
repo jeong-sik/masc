@@ -351,7 +351,7 @@ let test_the_first_event_budget_is_one_window_across_the_headers () =
         Ended
           (Result.map
              (fun (_ : Llm_provider.Types.api_response) -> ())
-             (Llm_provider.Complete.complete_stream
+             ((Llm_provider.Complete.complete_stream
                 ~sw
                 ~net
                 ~clock
@@ -361,7 +361,7 @@ let test_the_first_event_budget_is_one_window_across_the_headers () =
                 ~on_event:(function
                   | Llm_provider.Types.Connected -> reader_entered := true
                   | _ -> ())
-                ())))
+                ())).Llm_provider.Completion_outcome.result))
     with
     | Eio.Time.Timeout -> Hung
   in

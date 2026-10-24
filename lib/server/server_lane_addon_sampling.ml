@@ -142,8 +142,8 @@ let native_attempt ~sw ~net ~(runtime : Runtime_instance.t) ~provider (params : 
   let body_timeout_s = match runtime.model.turn_timeout_s with
     | None | Some 0. -> None
     | Some seconds -> Some seconds in
-  let* response = Llm_provider.Complete.complete ~sw ~net ~clock ~config
-    ~messages:(native_messages params) ~model_identity:Llm_provider.Complete.Reported_model ?body_timeout_s ()
+  let* response = (Llm_provider.Complete.complete ~sw ~net ~clock ~config
+    ~messages:(native_messages params) ~model_identity:Llm_provider.Complete.Reported_model ?body_timeout_s ()).Llm_provider.Completion_outcome.result
     |> Result.map_error (fun error -> Provider_error error) in
   let* content = response_content response in
   let* () = if String.trim response.model = "" then

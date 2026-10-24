@@ -90,6 +90,17 @@ let open_bound ~operation ~parameter ~clock = function
 
 type model_identity = Reported_model | Configured_model_fallback
 
+(* A prepared body is serialization evidence even if admission or another
+   pre-dispatch contract rejects the call. Injected transports own a different
+   projection, so the native prepared body cannot certify their request. *)
+let before_dispatch ~transport ~admitted_body result =
+  match transport, admitted_body with
+  | None, Some body ->
+    Completion_outcome.after_serialization
+      ~request:(Prepared_completion_request.admitted_body_request body) result
+  | Some _, _ | None, None -> Completion_outcome.before_serialization result
+;;
+
 let complete_prepared_sync
       ~sw
       ~net
@@ -172,7 +183,7 @@ let complete_prepared_sync
           body_deadline, call_window, Some body, Some key) body)
   in
   match preflight with
-  | Error err -> Error err
+  | Error err -> before_dispatch ~transport ~admitted_body (Error err)
   | Ok (body_deadline, call_window, admitted_body, cache_key) ->
     let m =
       match metrics with
@@ -183,8 +194,8 @@ let complete_prepared_sync
     let request_config = config in
     (* Reuse both the admitted body and its key for lookup, dispatch and store. *)
     let cached =
-      match cache, cache_key with
-      | Some c, Some key ->
+      match cache, cache_key, admitted_body with
+      | Some c, Some key, Some body ->
         (match c.get ~key with
          | Some json ->
            (match Cache.response_of_json json with
@@ -205,17 +216,19 @@ let complete_prepared_sync
                      })
                   resp.Types.telemetry
               in
-              Some (Ok { resp with Types.telemetry })
+              Some (Ok { resp with Types.telemetry },
+                Prepared_completion_request.admitted_body_request body)
             | None ->
               m.on_cache_miss ~model_id;
               None)
          | None ->
            m.on_cache_miss ~model_id;
            None)
-      | _, _ -> None
+      | _, _, _ -> None
     in
     (match cached with
-     | Some result -> ensure_nonempty_completion result
+     | Some (result, request) ->
+       Completion_outcome.cache_reused ~request (ensure_nonempty_completion result)
      | None ->
        m.on_request_start ~model_id;
        let dispatch () =
@@ -301,14 +314,14 @@ let complete_prepared_sync
             | Ok transport_result -> transport_result
             | Error Provider_admission.Permit_wait_expired ->
               call_deadline_exceeded
-                ~wrap:Completion_outcome.before_serialization
+                ~wrap:(before_dispatch ~transport ~admitted_body)
                 ~phase:Http_client.Queue
                 ~stage:"before a provider admission permit was granted"
             | Error Provider_admission.Permit_granted_as_deadline_passed ->
               (* Nothing was sent, and the permit went straight back. Still
                  the queue phase, said as what happened. *)
               call_deadline_exceeded
-                ~wrap:Completion_outcome.before_serialization
+                ~wrap:(before_dispatch ~transport ~admitted_body)
                 ~phase:Http_client.Queue
                 ~stage:"with a provider admission permit granted as the deadline passed"
             | Error Provider_admission.Work_expired ->
@@ -339,7 +352,8 @@ let complete_prepared_sync
          | Error (Http_client.AcceptRejected _) | Error (Http_client.ProviderTerminal _)
          | Error (Http_client.ProviderFailure _) -> ());
        let result = ensure_nonempty_completion result in
-       (match result with
+       Completion_outcome.map_result (fun _ ->
+       match result with
         | Ok resp ->
           let resp =
             Pricing.annotate_response_cost ~provider:(Provider_config.provider_reference config) resp
@@ -406,7 +420,7 @@ let complete_prepared_sync
               Http_client.provider_failure_to_string ~kind ~message
           in
           m.on_error ~model_id ~message:err_str ~reason:metric_error_reason;
-          Error err))
+          Error err) transport_outcome)
 ;;
 
 let complete
@@ -549,7 +563,7 @@ let complete_prepared_stream
         admission_bound
   in
   match preflight with
-  | Error err -> Error err
+  | Error err -> before_dispatch ~transport ~admitted_body (Error err)
   | Ok admission_window ->
     let on_event = emit_stream_event on_event in
     let request_config = config in
@@ -677,7 +691,7 @@ let complete_prepared_stream
                  " admission_snapshot=after_wait max_slots=%d active=%d available=%d queue_length=%d"
                  snapshot.max_slots snapshot.active snapshot.available snapshot.queue_length
            in
-           Completion_outcome.before_serialization
+           before_dispatch ~transport ~admitted_body
              (Error
                (Http_client.TimeoutError
                 { message =
@@ -689,6 +703,7 @@ let complete_prepared_stream
                 ; phase = Http_client.Queue
                 })))
     in
+    Completion_outcome.map_result (fun result ->
     Result.map
       (fun resp ->
          let latency_ms = latency_ms_int latency_counter in
@@ -713,7 +728,7 @@ let complete_prepared_stream
            ~model_id:config.model_id
            resp;
          resp)
-      (ensure_nonempty_completion transport_outcome.Completion_outcome.result)
+      (ensure_nonempty_completion result)) transport_outcome
 ;;
 
 let complete_stream

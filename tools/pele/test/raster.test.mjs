@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { inflateSync } from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
+import { Resvg } from '@resvg/resvg-js';
 import { renderDocument } from '../engine.mjs';
 
 const markup = (width, height, body, viewBox) =>
@@ -78,7 +79,7 @@ test('raster windows retain authored viewport aspect mapping and nonzero viewBox
     assert.deepEqual([full.width, full.height], [400, 200]);
     assert.deepEqual(firstPixel(full.png), expected);
     assert.equal(rootOf(full).firstChild.getAttribute('viewBox'), '-50 20 100 100');
-    assert.equal(rootOf(full).firstChild.getAttribute('preserveAspectRatio'), mode ?? '');
+    assert.equal(rootOf(full).firstChild.getAttribute('preserveAspectRatio'), mode ?? null);
     const cropped = renderDocument({ ...request, raster: { width: 200, height: 200,
       crop: { left: 0, top: 0, right: 0.5, bottom: 0.25 } } });
     assert.deepEqual(geometry(cropped), [200, 50]);
@@ -96,9 +97,22 @@ test('cropping preserves percentage lengths in the original SVG viewport', () =>
   assert.deepEqual(geometry(result), [100, 100]);
   assert.deepEqual(firstPixel(result.png), [0, 0, 255, 255]);
   const original = rootOf(result).firstChild;
-  assert.equal(original.hasAttribute('viewBox'), false);
+  assert.equal(original.getAttribute('viewBox'), '0 0 400 200');
   assert.equal(original.getAttribute('width'), '400');
-  assert.equal(original.firstChild.getAttribute('width'), '100%');
+});
+
+test('materializing supported CSS before nesting retains original selector matches and pixels', () => {
+  const source = markup(400, 200, '<style>svg svg rect {fill:red;}</style>'
+    + '<rect width="400" height="200"/>'
+    + '<svg x="200" width="200" height="200"><rect width="200" height="200"/></svg>');
+  const request = { format: 'svg', source, maxWidth: 800 };
+  const normal = renderDocument(request);
+  const full = renderDocument({ ...request, raster: { width: 400, height: 200 } });
+  assert.deepEqual(full.png, normal.png);
+  assert.deepEqual(firstPixel(full.png), [0, 0, 0, 255]);
+  const crop = renderDocument({ ...request, raster: { width: 80, height: 40,
+    crop: { left: 0.5, top: 0, right: 1, bottom: 1 } } });
+  assert.deepEqual(firstPixel(crop.png), [255, 0, 0, 255]);
 });
 
 test('Mermaid font size is a frozen layout input independent of raster dimensions and crop', () => {
@@ -111,7 +125,8 @@ test('Mermaid font size is a frozen layout input independent of raster dimension
   assert.deepEqual([enlarged.width, enlarged.height], [normal.width, normal.height]);
   const children = root => Array.from(root.childNodes)
     .map(node => new XMLSerializer().serializeToString(node)).join('');
-  assert.equal(children(rootOf(enlarged).firstChild), children(rootOf(normal)));
+  const canonical = rootOf({ svg: new Resvg(normal.svg).toString() });
+  assert.equal(children(rootOf(enlarged).firstChild), children(canonical));
   assert.ok(enlarged.png.readUInt32BE(16) <= 1920);
   assert.ok(enlarged.png.readUInt32BE(20) <= 1080);
   const smaller = renderDocument({ ...request, fontSize: 16,

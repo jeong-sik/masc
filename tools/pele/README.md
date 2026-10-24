@@ -42,7 +42,8 @@ a full zoomed bitmap before cropping. The original intrinsic SVG dimensions
 define the viewport coordinate system. `renderDocument` retains natural
 layout width/height metadata while its returned SVG and PNG describe the
 requested window. The original SVG viewport remains nested inside that window,
-so percentage lengths retain their original layout. Without `raster`, static
+after resvg resolves its supported CSS, percentage geometry and glyphs in the
+original document context. Without `raster`, static
 SVG retains its exact source bytes and existing no-upscale behavior.
 
 Observed terminal colours seed separate node and group surfaces, muted labels
@@ -63,7 +64,8 @@ aspect ratio, scales down to the available width, and is not enlarged.
 It requires a well-formed SVG document, without a
 DOCTYPE, processing instruction, foreign namespace, script, embedded image,
 HTML content or external href. Fragment references within the SVG are allowed.
-It renders static SVG using resvg, not a browser or the surrounding HTML/CSS.
+It renders static SVG using resvg's supported CSS, not a browser or the
+surrounding HTML/CSS. External stylesheets are not fetched.
 HTML reports still expose embedded base64 images; extracting inline SVG roots
 from their HTML document is separate from this SVG resource path.
 
@@ -92,7 +94,10 @@ can use the existing standalone preview. Rendering failures remain visible;
 
 On Kitty graphics terminals with measured cell geometry, the standalone
 preview accepts `+`/`-` to zoom, arrow keys or `h`/`j`/`k`/`l` to pan, and `0`
-to fit the full image. Wheel input pans vertically. The original PNG stays in
-the terminal; pan/zoom sends source-pixel crop coordinates. `v` returns to the
+to fit the full image. Wheel input pans vertically. Vector diagrams retain their
+original scene and full-image coordinates while an asynchronous worker renders
+the visible window at display density. Pending work reuses the base image;
+failures stay visible and `r` retries. Ordinary raster images reuse their
+original PNG with source-pixel crop coordinates. `v` returns to the
 resource's original source, while `Esc` or `q` returns to its document.
 These preview keys are consumed by the image and never reach the composer.

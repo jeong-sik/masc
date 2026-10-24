@@ -231,12 +231,12 @@ export function renderDocument(request) {
         responsive: false, fontFamily: 'sans-serif', fontSize,
       });
       svg = concreteSvg(result.svg, colors);
-      if (raster === undefined) {
-        renderer = new Resvg(svg, {
-          background: background ?? '#ffffff',
-          fitTo: { mode: 'width', value: Math.min(Math.ceil(result.width), request.maxWidth) },
-        });
-      }
+      renderer = new Resvg(svg, {
+        background: background ?? '#ffffff',
+        fitTo: raster === undefined
+          ? { mode: 'width', value: Math.min(Math.ceil(result.width), request.maxWidth) }
+          : { mode: 'original' },
+      });
       break;
     case 'svg': {
       svg = retainedSvg(request.source);
@@ -251,8 +251,14 @@ export function renderDocument(request) {
       throw new TypeError('format must be mermaid or svg');
   }
   if (raster !== undefined) {
-    svg = rasterWindow(svg, raster, result);
-    renderer = new Resvg(svg, { background: background ?? (request.format === 'mermaid' ? '#ffffff' : undefined) });
+    if (renderer.imagesToResolve().length) throw new Error('Diagram contains unresolved images');
+    // Resolve supported CSS selectors, percentage geometry and glyphs in the
+    // original document before adding the display-window ancestor.
+    svg = rasterWindow(renderer.toString(), raster, result);
+    renderer = new Resvg(svg, {
+      background: background ?? (request.format === 'mermaid' ? '#ffffff' : undefined),
+      font: { loadSystemFonts: false },
+    });
   }
   if (renderer.imagesToResolve().length) throw new Error('Diagram contains unresolved images');
   return { ...result, svg, png: renderer.render().asPng() };

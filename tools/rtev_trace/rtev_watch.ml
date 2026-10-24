@@ -174,21 +174,46 @@ let () =
   (* For each stop-the-world the leader waited for (its stw_api_barrier
      span [t0, t1]), the domain whose stw_handler began last inside the span
      is the one every other domain waited on. *)
+  let handler_starts =
+    match !barriers with
+    | [] -> []
+    | _ :: _ ->
+      let domains = ref [] in
+      Hashtbl.iter
+        (fun d begins ->
+          let starts = Array.of_list begins in
+          Array.sort Int64.compare starts;
+          domains := (d, starts) :: !domains)
+        handler_begins;
+      (* Equal timestamps retain the first domain visited by [Hashtbl.iter]. *)
+      List.rev !domains
+  in
+  let latest_begin starts upper =
+    let rec after_upper left right =
+      if left >= right then left
+      else
+        let middle = left + (right - left) / 2 in
+        if Int64.compare starts.(middle) upper <= 0 then
+          after_upper (middle + 1) right
+        else after_upper left middle
+    in
+    let next = after_upper 0 (Array.length starts) in
+    if next = 0 then None else Some starts.(next - 1)
+  in
   let late : (int, acc) Hashtbl.t = Hashtbl.create 16 in
   List.iter
     (fun (leader, t0, t1) ->
       let worst = ref None in
-      Hashtbl.iter
-        (fun d begins ->
+      List.iter
+        (fun (d, starts) ->
           if d <> leader then
-            List.iter
-              (fun b ->
-                if Int64.compare b t0 >= 0 && Int64.compare b (Int64.add t1 2_000_000L) <= 0 then
-                  match !worst with
-                  | Some (_, wb) when Int64.compare wb b >= 0 -> ()
-                  | _ -> worst := Some (d, b))
-              begins)
-        handler_begins;
+            match latest_begin starts (Int64.add t1 2_000_000L) with
+            | Some b when Int64.compare b t0 >= 0 ->
+                (match !worst with
+                 | Some (_, wb) when Int64.compare wb b >= 0 -> ()
+                 | _ -> worst := Some (d, b))
+            | Some _ | None -> ())
+        handler_starts;
       match !worst with
       | None -> ()
       | Some (d, b) -> push (find_or_add late d new_acc) (Int64.sub b t0))

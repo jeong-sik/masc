@@ -38,9 +38,9 @@ observations, not a gate. The new transient table uses O(N) extra memory.
 
 Validation: source parsing (`ocamlc -stop-after parsing`), `git diff --check`,
 and independent adversarial source review found no P0/P1/P2 issue in the lookup
-change. No local Dune build, whole-transcript behavioral suite or native TUI
-measurement was run. Existing transcript tests cover late results and
-superseded attempts; those still need execution on the candidate artifact.
+change. No local Dune build or native TUI measurement was run in this initial
+experiment. The later native CI receipt below records the existing transcript
+suite, including late results and superseded attempts.
 
 ## Initial live server baseline
 
@@ -126,8 +126,8 @@ At uptime 11m54s, the same runtime instance reported 31 Keeper fibers, RSS
 1.090/6.690/73.621 ms (600 samples). The source changes above were **not
 installed**. The difference from startup is not attributed to these changes.
 
-Remaining evidence: native focused suites for both changes; matched installed
-server/TUI measurements; file-read contention and memory profiling under the
+Remaining evidence at this initial observation: native focused suites for both
+changes; matched installed server/TUI measurements; file-read contention and memory profiling under the
 active fleet; controlled 35/350-agent runs with continuity checks. Existing
 Curator decisions, persistence validation and Keeper autonomy remain in scope
 as invariants, not knobs to weaken for a lower latency number.
@@ -147,8 +147,8 @@ Publication/source/workspace validity is checked again after observation I/O.
 A changed source or invalidation falls back to the current publication. The
 native tests now assert actual purchase/corrupt-ledger behavior through this
 path and include mutation/replacement during observation. Source parsing and
-independent adversarial review passed; native/wire execution remains pending.
-No latency improvement from this change has yet been measured on a server.
+independent adversarial review passed. Native/wire execution had not yet run
+at this source-only stage; the later checks and comparison below extend it.
 
 A separate reproduction found that structural equality included the internal
 Candle balance replay clocks. With decay Off, observations one second apart
@@ -179,8 +179,8 @@ The runner records source hashes, PPX output and full test/probe output. The
 pure configuration/observation prefix and the observation-sequence functions
 are extracted explicitly; ledger filesystem I/O, Eio, native HTTP handlers,
 response compression and installed runtime performance are **not** exercised.
-The broader HTTP suite includes a clock-only complete-response equality case,
-but that suite has not yet executed on this candidate.
+The broader HTTP suite includes a clock-only complete-response equality case;
+its later native execution is recorded below.
 
 The current server uses the public inserted-field identity introduced by
 [#45594](https://github.com/jeong-sik/masc/pull/45594). The proposed whole-Candle
@@ -189,3 +189,105 @@ already avoids clock-only invalidation. `run_candle_probe.py` now reads its
 explicit historical `--before` and `--after` sources from Git, including the
 Candle dependencies and tests, so the original evidence remains reproducible
 without leaving duplicate production helpers or mixing current code into it.
+
+## Completed native CI checks
+
+Two explicit focused runs completed; neither is a full regression or release gate.
+No local Dune build was used.
+
+| Run | Source head | Selected suite | Passed |
+|---|---|---|---:|
+| [39936085154](https://github.com/jeong-sik/masc/actions/runs/39936085154) | `eb8542c375a9ad327a74b2662c65d671b933843a` | JSONL incremental projection | 9 |
+| same | same | Audit projection | 7 |
+| same | same | TUI Keeper chat transcript | 106 |
+| [39939550826](https://github.com/jeong-sik/masc/actions/runs/39939550826) | `196f1f7134dc0bb3835c5e1d74e19d4cd4c6871c` | Dashboard cache | 60 |
+| same | same | Dashboard HTTP core | 156 |
+| same | same | Candle balance | 11 |
+
+The full logs were read for actual suite execution and individual counts, rather
+than treating workflow success as evidence that a selected suite ran.
+
+## Native HTTP observation fixture
+
+`scripts/harness/perf/execution_observation_probe.py` creates its own temporary
+workspace and config, seeds paused Keeper metadata and synthetic Candle grants,
+and launches one exact-source native server on an ephemeral loopback port.
+It uses the bundled real Candle appraiser package in Docker, with its image
+pinned by the inspected digest. Exact model outputs are disabled for this
+installation; no appraisal obligations are seeded. This measures wallet and
+address observations, not appraisal or provider throughput.
+
+The experiment verifies real Candle readiness, every wallet, portrait/revision
+and Board address, unchanged metadata and ledger bytes, zero active Keeper
+fibers in the opening/closing health observations, and no attempted model POST.
+An atomic owned TOML edit must appear in the next measured address response.
+Requests use one HTTP/1.1 connection and cross whole-second Candle clock ticks.
+The unchanged and address-changed phases are reported separately, including
+raw elapsed time, encoding, bytes, ETag and Server-Timing. Normal snapshot TTL
+and refresh remain active. The server exits before its workspace is removed;
+Docker cleanup verifies labels and exact resource names before deletion.
+
+Prerequisites: Python 3.11+, local Docker, source-verified native binary and its
+bundled dylibs. Build only the optional Python worker image if absent:
+
+```sh
+docker build -f addons/candle-appraiser/Dockerfile \
+  -t masc-lane-candle-appraiser:0.1.4 addons
+python3 scripts/harness/perf/execution_observation_probe.py \
+  --binary /path/to/verified-runtime/masc --source-sha FULL_SOURCE_SHA \
+  --keepers 350 --samples 10 --output /tmp/new-observation-directory
+```
+
+A small installed-binary smoke additionally exercised a non-ASCII temporary
+root and verified actual UTF-8 Docker ownership and cleanup. Existing output
+directories were proven unchanged on failure. Independent adversarial source
+review found three P2 issues in the measurement driver; all were repaired and
+reviewed again before the comparison runs.
+
+The source-verified macOS arm64 artifacts came from runs
+[39939554841](https://github.com/jeong-sik/masc/actions/runs/39939554841)
+(base `68ec8fb2c52545c68600928524dcc12945e55ee7`) and
+[39939559032](https://github.com/jeong-sik/masc/actions/runs/39939559032)
+(candidate `196f1f7134dc0bb3835c5e1d74e19d4cd4c6871c`).
+Both workflow heads are `376e0f1abdd03163f7af4b4791c24ad46dd043f0`; that is
+not the built source. Artifact metadata, `probe.json`, all published SHA256SUMS,
+packaged runtime provenance and actual server/TUI embedded source identities
+were checked. The dependency lists differ only in CI host name. The candidate
+contains exactly the four performance changes above and their evidence.
+
+Six sequential experiments completed 120 measured requests, all with exact
+wallet/address assertions, unchanged paused metadata/ledger, no model POST,
+clean server exit and verified Docker cleanup. Each table cell is p50 / p95
+in milliseconds, from ten samples; p95 is therefore the maximum observed.
+
+| Metadata rows | Order | Phase | Baseline ms | Candidate ms |
+|---:|---|---|---:|---:|
+| 35 | baseline, candidate | unchanged | 34.166 / 287.510 | 28.190 / 105.648 |
+| 35 | baseline, candidate | address changed | 142.835 / 215.469 | 66.157 / 289.355 |
+| 350 | candidate, baseline | unchanged | 179.649 / 464.302 | 841.562 / 1,262.383 |
+| 350 | candidate, baseline | address changed | 209.667 / 510.495 | 1,259.215 / 10,142.396 |
+| 350 | baseline, candidate | unchanged | 206.463 / 579.809 | 78.098 / 135.063 |
+| 350 | baseline, candidate | address changed | 169.790 / 349.409 | 96.546 / 145.998 |
+
+**No stable latency improvement is established by these shared-host samples.**
+The first 350-row candidate run was much slower; reversing order reversed the
+result. Host load averages varied substantially and are retained in the raw
+packet, but they do not establish the cause of any outlier. The slow run and its
+10.14-second request remain evidence requiring follow-up, not excluded samples.
+
+The response-path behavior did reproduce consistently: all 30 unchanged
+candidate samples reused gzip bytes and one body hash per experiment, while all
+30 baseline samples returned identity encoding and changed body hashes. At 350
+rows, unchanged wire bodies were 62,560–62,563 bytes versus
+1,391,442–1,391,443 bytes. All changed
+addresses were current; most candidate changed responses used fresh JSON. Their
+Server-Timing showed one observation lookup; one slow sample also entered the
+fallback cache_compute stage and retained both timings. This does not prove a
+new cache snapshot was published. The baseline retained both stages throughout.
+
+`native_http_observations.json` retains source/artifact identities, input hashes,
+all 120 timing/header receipts, descriptive summaries and cleanup receipts. Raw
+synthetic response bodies and complete private health/log packets remain in
+`/tmp/masc-native-execution-*-20261023` on the measurement host, with their
+request-log hashes in the committed packet. These are not installed candidate,
+active 350-agent continuity, full TUI rendering, or 0.1 ms acceptance results.

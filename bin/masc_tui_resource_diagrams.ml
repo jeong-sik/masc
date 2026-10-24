@@ -15,7 +15,8 @@ let create ~mime_type ~contents ~width ~cell_pixels ~colors =
   let sources = Masc_tui_resource_images.images ~mime_type contents
     |> List.filter_map (function
       | _, Masc_tui_image_preview.Output_image {source=Inline_mermaid source;_} -> Some source
-      | _, (Named_path _ | Staged _ | Stored_attachment _ | Output_image _
+      | _, (Named_path _ | Staged _ | Stored_attachment _
+        | Output_image {source=(Inline_data _ | Inline_svg _ | Server_path _ | Remote_uri _);_}
         | Unavailable_image _ | No_image) -> None)
     |> List.fold_left (fun (seen,ordered) source ->
       if Sources.mem source seen then seen,ordered

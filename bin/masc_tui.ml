@@ -11049,11 +11049,18 @@ let prepare_resource_diagrams state ~mailbox =
          Eio.Fiber.fork_daemon ~sw (fun () ->
            Eio.Fiber.yield ();
            List.iter (fun source ->
+             let current = match state.resource_diagrams, state.resource_content with
+               | Some current, Some (_,contents) ->
+                   Masc_tui_resource_diagrams.request current == request
+                   && Masc_tui_resource_diagrams.owns contents current
+               | (Some _ | None), (Some _ | None) -> false in
+             if current then begin
              let result = Eio_guard.run_in_systhread ~label:"tui-artifact-diagram" (fun () ->
                Masc_tui_pele.render ~format:Mermaid ~cache_dir:(ensure_img_cache_dir ())
                  ~max_width:(Masc_tui_resource_diagrams.width request)
                  ~colors:(Masc_tui_resource_diagrams.colors request) source) in
-             deliver mailbox (Resource_diagram_ready (request,source,result)))
+             deliver mailbox (Resource_diagram_ready (request,source,result))
+             end)
              (Masc_tui_resource_diagrams.sources request);
            `Stop_daemon)
        end

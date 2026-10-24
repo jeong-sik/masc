@@ -147,7 +147,8 @@ let test_markdown_diagrams () =
     (List.map fst candidates);
   let diagrams = List.filter_map (function
     | _, Preview.Output_image {name;source=Inline_mermaid source} -> Some (name,source)
-    | _, (Named_path _ | Staged _ | Stored_attachment _ | Output_image _
+    | _, (Named_path _ | Staged _ | Stored_attachment _
+      | Output_image {source=(Inline_data _ | Inline_svg _ | Server_path _ | Remote_uri _);_}
       | Unavailable_image _ | No_image) -> None) candidates in
   check (list (pair string string)) "exact closed sources keep part and occurrence identity"
     ["Mermaid · part 2 · diagram 1", first;

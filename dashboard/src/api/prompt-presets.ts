@@ -12,6 +12,7 @@ const preservedSettings = Schema.Array(Schema.Struct({
   lane: Schema.String, setting: Schema.Literal('max_output_tokens', 'thinking'),
 }))
 const skippedLanes = Schema.Array(Schema.Struct({ lane: Schema.String, reason: Schema.String }))
+const skippedAssignments = Schema.Array(Schema.Struct({ keeper: Schema.String, reason: Schema.String }))
 const defaults = Schema.Struct({
   status: Schema.Literal('unknown', 'matches', 'differs'),
   changes: Schema.Array(Schema.Struct({
@@ -53,6 +54,7 @@ const report = Schema.Struct({
   restored: Schema.String, autosave: Schema.String, prompt_overrides: part, instructions: part,
   runtime, default_prompts: defaults, preserved_lane_settings: Schema.optional(preservedSettings),
   skipped_lanes: Schema.optional(skippedLanes),
+  skipped_assignments: Schema.optional(skippedAssignments),
 })
 const detail = Schema.Struct({
   ok: Schema.Literal(true), directory: Schema.String,
@@ -142,7 +144,7 @@ export function restorePromptPreset(name: string, options: PromptPresetRequestOp
 }
 
 export function promptPresetReportNeedsAttention(value: PromptPresetReport): boolean {
-  if (value.prompt_overrides.skipped.length || value.instructions.skipped.length || value.skipped_lanes?.length) return true
+  if (value.prompt_overrides.skipped.length || value.instructions.skipped.length || value.skipped_lanes?.length || value.skipped_assignments?.length) return true
   switch (value.runtime.status) {
     case 'failed': return true
     case 'unchanged': return false

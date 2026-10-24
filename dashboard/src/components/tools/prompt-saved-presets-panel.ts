@@ -26,6 +26,7 @@ function RestoreReport({ report }: { report: PromptPresetReport }) {
   return html`<div class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] p-3"
     role="status" data-preset-report data-needs-attention=${String(promptPresetReportNeedsAttention(report))}>
     <p>${report.restored} 복원 결과 · 직전 설정 백업: <code>${report.autosave}</code></p>
+    ${promptPresetReportNeedsAttention(report) ? html`<p role="alert">일부 설정이 제외됐거나 적용 확인이 필요합니다. 아래 결과를 확인하세요.</p>` : null}
     ${[
       { label: '프롬프트 override', part: report.prompt_overrides }, { label: 'Keeper 지시문', part: report.instructions },
     ].map(({ label, part }) => {
@@ -35,7 +36,7 @@ function RestoreReport({ report }: { report: PromptPresetReport }) {
     ${report.runtime.status === 'failed'
       ? html`<p>Runtime 적용 실패: ${report.runtime.error}</p>`
       : report.runtime.status === 'unchanged'
-        ? html`<p>Runtime: 저장된 설정과 이미 일치합니다.</p>`
+        ? html`<p>Runtime: 파일 변경 없음.</p>`
         : html`<div>
           <p>Runtime: 파일 적용됨 · 디스크 저장 ${report.runtime.commit.durability === 'durable' ? '확인' : '내구성 미확인'}</p>
           ${report.runtime.commit.durability_detail ? html`<p>${report.runtime.commit.durability_detail}</p>` : null}
@@ -45,7 +46,13 @@ function RestoreReport({ report }: { report: PromptPresetReport }) {
               : `기존 레인 유지 · ${report.runtime.exact_output_registry.reason}`}</p>
         </div>`}
     <p class="mt-2 text-xs">Keeper 지시문은 각 Keeper의 다음 up/턴부터 반영됩니다. 적용 제외와 Runtime 경고가 있으면 함께 확인하세요.</p>
-    ${report.skipped_lanes?.map(row => html`<p role="alert" key=${row.lane}>레인 복원 제외 · ${row.lane}: ${row.reason}</p>`)}
+    ${(report.skipped_lanes?.length || report.skipped_assignments?.length) ? html`<div class="my-2" data-preset-runtime-exclusions>
+      <p>기존 설정 유지 · Runtime 배정 ${report.skipped_assignments?.length ?? 0}개 · 레인 ${report.skipped_lanes?.length ?? 0}개 복원 제외</p>
+      <details class="mt-1 text-xs"><summary>제외한 설정과 사유 보기</summary>
+        ${report.skipped_lanes?.map(row => html`<p class="mt-2 break-words" key=${row.lane}>레인 · <code>${row.lane}</code>: ${row.reason}</p>`)}
+        ${report.skipped_assignments?.map(row => html`<p class="mt-2 break-words" key=${row.keeper}>Runtime 배정 · <code>${row.keeper}</code>: ${row.reason}</p>`)}
+      </details>
+    </div>` : null}
     <${PreservedSettings} settings=${report.preserved_lane_settings ?? []} />
   </div>`
 }
@@ -207,6 +214,7 @@ function PromptSavedPresetsContent({
       ${armed === selected ? html`<div class="my-2 rounded-[var(--r-1)] border border-[var(--warn-border)] p-3" data-preset-confirmation>
         <p>${selected}의 저장된 설정으로 복원합니다. 현재 설정은 _autosave에 먼저 백업됩니다. 다음 복원은 이 백업을 덮어씁니다.</p>
         <p class="mt-1 text-xs">Keeper 지시문은 각 Keeper의 다음 up/턴부터 반영됩니다.</p>
+        <p class="mt-1 text-xs">현재 Runtime이 거절한 배정·레인은 기존 값을 유지하고 적용 제외로 보고합니다.</p>
         <${ActionButton} variant="primary" size="sm" disabled=${blocked || !viewed || detailLoading} testId="prompt-presets-confirm" onClick=${() => { void mutate('restore') }}>확인 · 복원<//>
         <${ActionButton} variant="ghost" size="sm" disabled=${busy} onClick=${() => setArmed(null)}>취소<//>
       </div>` : html`<${ActionButton} size="sm" variant="ghost" disabled=${blocked || !viewed || detailLoading || detailError !== null} testId="prompt-presets-restore" onClick=${() => setArmed(selected)}>이 저장본 복원…<//>`}

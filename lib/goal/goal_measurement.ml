@@ -131,12 +131,15 @@ let latest rows (goal : Goal_store.goal) =
        && String.equal row.criterion_revision goal.criterion_revision)
     rows
 
+let latest_for_goal records (goal : Goal_store.goal) =
+  Result.map (fun rows -> latest rows goal) records
+
 let projection records (goal : Goal_store.goal) =
-  match records with
+  match latest_for_goal records goal with
   | Error reason ->
       `Assoc [ "state", `String "unavailable"; "reason", `String reason ]
-  | Ok rows ->
-      (match latest rows goal with
+  | Ok measurement ->
+      (match measurement with
        | None -> `Assoc [ "state", `String "not_recorded" ]
        | Some row ->
            `Assoc [ "state", `String "reported"

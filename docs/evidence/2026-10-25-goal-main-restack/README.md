@@ -1,16 +1,15 @@
 # Goal stack composition with the current main
 
-This is a local source candidate over main
-`98a1508e6ecbda1d38d33aa7d0eb7f366b420ddf`, preserving the original 14-layer
-Goal head `895df663fb303ee2fa95c38bbd28b571db9abb62` and the fifteenth Draft
-measurement-receipt layer. The latter moved from `3014cfce` to `ec664e53` and
-then `cc510480` while the candidate was prepared. The first delta corrects the
-authoritative-empty provider-wire fixture expectation; the second publishes 67
-evidence/document/fragment paths. Both are preserved, with only the new fragment's
-missing own-PR citation repaired. Adopting the raw runtime reports is not an
-independent validation or a claim to have executed their native/model runs.
-No author checkout,
-runtime store, installed candidate, PR readiness, or public ref was changed.
+This is a local 16-layer source candidate over main
+`98a1508e6ecbda1d38d33aa7d0eb7f366b420ddf`. It preserves the public Goal14
+head `895df663fb303ee2fa95c38bbd28b571db9abb62`, the complete latest Draft
+measurement-receipt head `177219da10c1b27b606c10af70b4bf6ea39211da`, and new
+Draft observation-retention head `2be9d21697fb4c9da9aafd769f5fa691bae2e757`.
+All latest author production and raw evidence files are preserved, apart from
+explicitly documented conflict/consumer repairs and own-fragment citations.
+Preserving raw runtime reports is not an independent audit or a claim to have
+executed their native/model runs. No author checkout, runtime store, installed
+candidate, PR readiness or public ref was changed.
 
 The whole stack was rebased with `gh stack rebase`. Conflict choices preserve
 main's immutable review original and worker/publication flow, completion-result
@@ -49,10 +48,17 @@ The source failure paths were read through their actual callers:
 - `Verifier_review_owner.load` maps Original decoding errors to
   `Corrupt_original`; its read path does not retain, replace, or delete a body.
   `load_for_destination` and `load_retained` propagate that error.
-- `next_attempt` and `retained_commits` decode inventory records before
-  selecting the verification. An incompatible Original can therefore block the
-  whole verifier-review scope, including unrelated new reviews. It is not
-  silently dropped or treated as an empty inventory.
+- Before the scope-isolation repair, `next_attempt` and `retained_commits`
+  decoded the whole inventory before selecting a verification. An independently
+  bound old Original A therefore blocked unrelated fresh/current B. The actual
+  differential component reproduced this separate availability defect.
+- The introducing #45775 layer now requires a closed selection for commit
+  inventories. Targeted reads first validate immutable routing identity, key,
+  summary/body agreement and the already verified digest, then strictly decode
+  only that verification. Routing never constructs an executable Original.
+  Unverifiable identity remains an error; no unknown is treated as absence.
+  `All_verifications` recovery still strictly rejects unsupported records.
+  Unsupported target A remains retained and cannot allocate or redispatch.
 - `Verifier_review_worker.run_attempt_with` loads first. Already judged,
   committing, finished, conflicted, and refused phases restore their result
   before any dispatch intention. An old result returns `Original_corrupt`;
@@ -112,3 +118,28 @@ the actual codec-v3 User JSON, the previous digest is retired, System span/hash
 and the Resume write slot bind, and the same empty observation is not resent.
 These are fresh exact-source pure-component results with the recorded effect
 ports, not full Host, native provider/SDK, remote retention or live behavior.
+
+## Current sixteen-layer component binding
+
+The independent scope-isolation execution compiles the actual Owner/Original
+modules against named temporary-file/store cleanup ports. The integrated seven
+source files match that executed repair byte for byte. It keeps main-v2 A
+strictly rejected and its original five files/frontier unchanged, permits only
+independently bound fresh/current B's own next attempt, and leaves the global
+inventory in error. The actual Owner test source also covers malformed routing,
+missing/duplicate metadata, key/digest disagreement and vanished bodies. This
+is not full Host, production filesystem, provider or runtime recovery proof.
+
+New #45853 replaces the Goal-only System field with closed Goal/Task-verdict
+observations. The existing official-removal probe is minimally ported to those
+three API changes and executed against the current typed-Origin sources.
+Its before and unsafe-formatter controls still fail, and the repaired current
+source passes 25 checks. Earlier projection executions are not substituted for
+this new input set. `codec-after.json` records a fresh 19-check codec run.
+
+The new Task-verdict block also exposed a real Dashboard consumer failure:
+`memCompositionFromInputComponents` dereferenced a missing metadata entry.
+The actual source constants/functions, transpiled by TypeScript and executed
+in Node, fail for a positive-byte `prompt.completion_authority` before the
+one-line introducing-layer mapping and preserve its label and byte total
+afterward. No layout assertion, browser render or visible UI success is claimed.

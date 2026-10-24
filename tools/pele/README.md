@@ -30,6 +30,10 @@ scale together; fixed logical chart spacing stays readable at terminal density.
 Generated SVG declares its default font family and size explicitly for resvg;
 authored child font overrides and diagram label proportions remain intact.
 `maxWidth`, `fontSize` and `colors` stay fixed while inspecting one diagram.
+Optional `now` captures current-time expressions and decorations as epoch
+milliseconds: a safe integer within JavaScript's valid Date range. Retain the
+same value while inspecting a scene to freeze Gantt dates and its clock marker.
+Omitting it uses Pele's current-time behavior on each render.
 Optional `raster` requests a display surface independently of that layout:
 
 ```json

@@ -84,9 +84,10 @@ test('all seven example fences retain their complete logical geometry at equival
   const rootOf = result => new DOMParser().parseFromString(result.svg, 'image/svg+xml').documentElement;
   const children = root => Array.from(root.childNodes)
     .map(node => new XMLSerializer().serializeToString(node)).join('');
+  const now = Date.UTC(2026, 9, 25, 12);
   for (const source of sources) {
-    const normal = renderDocument({ format: 'mermaid', source, maxWidth: 640, fontSize: 16 });
-    const dense = renderDocument({ format: 'mermaid', source, maxWidth: 1360, fontSize: 34 });
+    const normal = renderDocument({ format: 'mermaid', source, maxWidth: 640, fontSize: 16, now });
+    const dense = renderDocument({ format: 'mermaid', source, maxWidth: 1360, fontSize: 34, now });
     assert.equal(rootOf(dense).getAttribute('viewBox'), rootOf(normal).getAttribute('viewBox'));
     assert.equal(children(rootOf(dense)), children(rootOf(normal)));
     assert.equal(dense.width, normal.width * density);

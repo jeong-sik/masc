@@ -224,6 +224,10 @@ export function renderDocument(request) {
   if (typeof request?.source !== 'string') throw new TypeError('source must be a string');
   positiveInteger(request.maxWidth, 'maxWidth');
   const fontSize = request.fontSize === undefined ? logicalFontSize : positiveInteger(request.fontSize, 'fontSize');
+  const now = request.now;
+  if (now !== undefined && (!Number.isSafeInteger(now) || !Number.isFinite(new Date(now).getTime()))) {
+    throw new TypeError('now must be a safe integer JavaScript date in epoch milliseconds');
+  }
   const raster = rasterRequest(request.raster);
   let colors = new Map();
   let background;
@@ -241,7 +245,7 @@ export function renderDocument(request) {
       const density = fontSize / logicalFontSize;
       result = render(request.source, {
         maxWidth: request.maxWidth / density, images: false, links: false,
-        responsive: false, fontFamily: 'sans-serif', fontSize: logicalFontSize,
+        responsive: false, fontFamily: 'sans-serif', fontSize: logicalFontSize, now,
       });
       result = { ...result, width: result.width * density, height: result.height * density };
       svg = concreteSvg(result.svg, colors, result);

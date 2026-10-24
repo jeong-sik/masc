@@ -155,7 +155,7 @@ let run_direct_attempt ~system_prompt ~base_path ~cli_path ~on_transmitted_model
                     config
                   | Some _ | None -> fail "Codex runtime fixture did not resolve"
                 in
-                Keeper_codex_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = "codex-blank-prompt" })
+                Keeper_codex_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "codex-blank-prompt" })
                   ~context_window:(Some (Runtime_instance.max_context_of_runtime
                     (Runtime.get_runtime_by_id "codex.codex" |> Option.get)))
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input

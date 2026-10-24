@@ -927,7 +927,7 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
     }
   in
   let outcome =
-    Keeper_muse_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = keeper_name })
+    Keeper_muse_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
       ?argument_source ?librarian_front
       ?composed_context
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
@@ -1342,7 +1342,7 @@ default = "reloaded.reloaded"
             system_prompt_override = Some "MUSE_ROUTED_EFFECTIVE_SYSTEM_PROMPT" }
       | _ -> fail "expected before_turn_params hook event") } in
   let run () = Eio.Switch.run (fun sw ->
-    match Keeper_turn_driver.run_named ~input_source:(Keeper_request_source.Keeper_history { trace_id = keeper_name }) ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
+    match Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name }) ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
       ~runtime_id ~keeper_name ~base_path ~goal:"Call masc_probe once"
       ~system_prompt:"" ~hooks
       ~tools:[tool] ~agent_core_tools:[tool]

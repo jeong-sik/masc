@@ -9657,7 +9657,7 @@ let test_workspace_memory_read_dispatch () =
 
 (* Model responses are a real app-server process fixture. Gate authority and
    replay below use the existing Keeper dispatcher and durable stores. *)
-let native_gate_fixture ~config ~meta ~deferred () =
+let native_gate_fixture ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~deferred () =
   let write path text = Out_channel.with_open_bin path (fun out -> output_string out text) in
   let capture = Filename.concat config.Workspace.base_path "native-gate-requests.jsonl" in
   let command = Filename.concat config.base_path "native-gate-codex" in
@@ -9724,7 +9724,7 @@ default = "official.primary"
       let native_config = match Runtime.get_runtime_by_id "official.gate" with
         | Some {Runtime_instance.execution=Runtime_execution.Codex_app_server config; _} -> config
         | _ -> fail "native Gate fixture runtime missing" in
-      Masc.Keeper_codex_runtime.run ~input_source:(Keeper_request_source.Keeper_history { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id })
+      Masc.Keeper_codex_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id })
         ~context_window:(Some (Runtime_instance.max_context_of_runtime
           (Runtime.get_runtime_by_id "official.gate" |> Option.get)))
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input

@@ -380,6 +380,18 @@ let parse_config content =
     | Some root -> absolute_path "scratch_root" root in
   Ok { remote_root; env_allowlist; payload_path; env_file; scratch_root }
 
+let render_config (config : config) =
+  String.concat "\n"
+    ([ "remote_root=" ^ config.remote_root
+     ; "env_allowlist=" ^ String.concat "," config.env_allowlist
+     ; "path=" ^ String.concat ":" config.payload_path
+     ; "scratch_root=" ^ config.scratch_root
+     ]
+     @ (match config.env_file with
+        | None -> []
+        | Some path -> [ "env_file=" ^ path ])
+     @ [ "" ])
+
 (* Read here rather than through Env_config_core: the shim is a standalone
    binary deployed to the remote host, where masc's config layer does not
    exist. Its dune stanza names exec_ssh_protocol and unix and nothing else,

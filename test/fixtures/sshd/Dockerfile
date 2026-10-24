@@ -5,6 +5,7 @@ RUN apk add --no-cache \
       git \
       openssh-server \
       procps \
+      python3 \
       ripgrep \
       sudo \
  && adduser -D -s /bin/sh masc \

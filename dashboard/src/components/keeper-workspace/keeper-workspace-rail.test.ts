@@ -769,8 +769,8 @@ describe('KeeperWorkspaceRail', () => {
       context_metrics_unavailable: { kind: 'not_observed', reason: 'turn_record_without_usage' },
     })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
-    expect(container.textContent).toContain('턴 레코드 기준 측정 불가')
-    expect(container.textContent).toContain('turn_record_without_usage')
+    expect(container.querySelector('.meter')).toBeNull()
+    expect(container.textContent).toContain('완료 요청의 사용량 보고 없음')
   })
 
   it('renders measurement provenance for a turn_record-sourced context', () => {

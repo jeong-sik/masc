@@ -5,6 +5,7 @@
 // is not an identity contract. The roster therefore needs no disclaimer copy.
 
 import { html } from 'htm/preact'
+import { contextObservationMessage } from '../lib/context-observation'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { Agent, Keeper } from '../types'
 import {
@@ -1573,10 +1574,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               </div>
             ` : null}
 
-            ${selectedCtxPct == null && selectedContextUnavailable?.kind === 'not_observed' ? html`
+            ${selectedCtxPct == null && selectedContextUnavailable ? html`
               <div class="fl-as-sec" data-testid="fleet-context-not-observed">
                 <h4>컨텍스트</h4>
                 <div class="fl-notobs">현재 점유율 <b>미관측</b> · usage와 분리</div>
+                <p class="text-xs" data-severity=${contextObservationMessage(selectedContextUnavailable).severity}>${contextObservationMessage(selectedContextUnavailable).label}</p>
+                <p class="text-xs text-[var(--color-fg-muted)]">${contextObservationMessage(selectedContextUnavailable).detail}</p>
               </div>
             ` : null}
 

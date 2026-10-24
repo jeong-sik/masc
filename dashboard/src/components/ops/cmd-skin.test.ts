@@ -111,7 +111,7 @@ describe('Ops command-surface skin (keeper-v2 command.jsx parity)', () => {
     expect(rows[0]?.querySelectorAll('.cmd-log-h .mono.dim').length).toBe(3)
   })
 
-  it('wraps the context-metrics diagnostic in cmd-banner with the design note', async () => {
+  it('keeps expected missing measurements in an informational disclosure', async () => {
     const stores = await loadOps()
     seedStores(stores)
     stores.operatorActionLog.value = []
@@ -130,11 +130,11 @@ describe('Ops command-surface skin (keeper-v2 command.jsx parity)', () => {
     render(html`<${stores.Ops} />`, container)
     await flushUi()
 
-    const banner = container.querySelector('[data-testid="ops-context-metrics-unavailable"]')
-    expect(banner?.classList.contains('cmd-banner')).toBe(true)
-    expect(banner?.querySelector('b')?.textContent).toBe('Context metrics unavailable')
-    expect(banner?.textContent).toContain('Keeper sangsu')
-    expect(banner?.textContent).toContain('스냅샷은 occupancy 를 관측하지 않습니다')
+    const note = container.querySelector('[data-testid="ops-context-observation-note"]')
+    expect(note?.tagName).toBe('DETAILS')
+    expect(note?.hasAttribute('role')).toBe(false)
+    expect(note?.textContent).toContain('Keeper sangsu')
+    expect(container.querySelector('[data-testid="ops-context-metrics-unavailable"]')).toBeNull()
   })
 
   it('lays the operations controls out in cmd-cols and mounts the intervene form', async () => {

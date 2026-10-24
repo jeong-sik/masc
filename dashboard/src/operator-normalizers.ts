@@ -148,8 +148,9 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
   // Context fields are accepted only from the TurnRecord projection (the
   // measurement SSOT); a retired or unknown source drops entirely — absence
   // is explained by the typed context_metrics_unavailable channel.
+  const contextUnavailable = normalizeKeeperContextMetricsUnavailable(raw.context_metrics_unavailable)
   const contextSource = asString(raw.context_source) ?? null
-  const contextMeasured = contextSource === 'turn_record'
+  const contextMeasured = contextSource === 'turn_record' && contextUnavailable === null
   return {
     name,
     runtime_class: 'keeper' as const,
@@ -162,7 +163,7 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     context_tokens: contextMeasured ? asNumber(raw.context_tokens) ?? null : null,
     context_max: contextMeasured ? asNumber(raw.context_max) ?? null : null,
     context_source: contextMeasured ? contextSource : null,
-    context_metrics_unavailable: normalizeKeeperContextMetricsUnavailable(raw.context_metrics_unavailable),
+    context_metrics_unavailable: contextUnavailable,
     last_turn_usage: normalizeKeeperLastTurnUsage(raw.last_turn_usage),
     last_turn_ago_s: asNumber(raw.last_turn_ago_s),
     model: hasModelLabel ? 'runtime' : undefined,

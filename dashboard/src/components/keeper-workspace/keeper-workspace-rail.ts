@@ -14,6 +14,7 @@
 // segments, memory inspector, live ctx occupancy) are MARKED, never faked.
 
 import { html } from 'htm/preact'
+import { contextObservationMessage } from '../../lib/context-observation'
 import { lazy, Suspense } from 'preact/compat'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
@@ -490,10 +491,8 @@ function ContextSection({
   const ctxAbsoluteTurn = keeper.context?.absolute_turn ?? null
   const ctxObservedAt = keeper.context?.observed_at ?? null
   const ctxTurnRef = keeper.context?.turn_ref ?? null
-  const ctxUnavailableReason =
-    keeper.context_metrics_unavailable?.kind === 'not_observed'
-      ? keeper.context_metrics_unavailable.reason
-      : null
+  const ctxUnavailable = keeper.context_metrics_unavailable
+    ? contextObservationMessage(keeper.context_metrics_unavailable) : null
   // The "윈도우 사용량" label was redundant under the section's "컨텍스트"
   // heading — the percentage and the 사용/전체 line below are self-explanatory.
   const usageHeader = html`
@@ -516,8 +515,8 @@ function ContextSection({
                 />
               </div>
             `
-          : html`<div class="ctx-empty" data-missing="context-window"><strong>윈도우 사용률 미측정</strong><span>${ctxUnavailableReason
-                ? html`턴 레코드 기준 측정 불가: <span class="mono">${ctxUnavailableReason}</span>`
+          : html`<div class="ctx-empty" data-missing="context-window"><strong>윈도우 사용률 미측정</strong><span>${ctxUnavailable
+                ? html`<span data-severity=${ctxUnavailable.severity}>${ctxUnavailable.label}</span><span>${ctxUnavailable.detail}</span>`
                 : '측정된 턴 레코드가 아직 없음'}</span></div>`}
         <div class="ctx-usage">
           <span class="ctx-usage-k">마지막 턴 input</span>

@@ -9,7 +9,6 @@ import type {
   CtxCompositionTelemetry,
   Keeper,
   KeeperContextMetricsUnavailable,
-  KeeperContextNotObservedReason,
   KeeperLifecycleState,
   KeeperLastTurnUsage,
   KeeperMetricPoint,
@@ -22,7 +21,7 @@ import type {
   ProviderHealth,
   SandboxProfile,
 } from './types'
-import { KEEPER_CONTEXT_NOT_OBSERVED_REASONS, toSandboxProfile } from './types'
+import { toSandboxProfile } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { isKeeperOffline } from './lib/keeper-predicates'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
@@ -55,15 +54,47 @@ export function normalizeKeeperContextMetricsUnavailable(
 
   const kind = asString(raw.kind) ?? null
   const reason = asString(raw.reason) ?? null
-  if (
-    kind === 'not_observed'
-    && reason !== null
-    && (KEEPER_CONTEXT_NOT_OBSERVED_REASONS as readonly string[]).includes(reason)
-  ) {
-    return { kind, reason: reason as KeeperContextNotObservedReason }
+  const invalid: KeeperContextMetricsUnavailable = {
+    kind: 'invalid_payload', reported_kind: kind, reported_reason: reason,
+  }
+  if (kind !== 'not_observed') return invalid
+
+  switch (reason) {
+    case 'context_measurement_missing':
+    case 'turn_record_undecodable':
+    case 'turn_record_read_failed':
+    case 'turn_record_without_usage':
+    case 'turn_record_trace_mismatch':
+      return { kind, reason }
   }
 
-  return { kind: 'invalid_payload', reported_kind: kind, reported_reason: reason }
+  const count = (value: unknown): number | null | undefined => {
+    if (value === null || value === undefined) return null
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+      ? value : undefined
+  }
+  const raw_input_tokens = count(raw.raw_input_tokens)
+  const context_window = count(raw.context_window)
+  if (raw_input_tokens === undefined || context_window === undefined) return invalid
+
+  switch (reason) {
+    case 'conversation_cumulative_usage':
+      return raw.usage_scope === 'conversation_cumulative'
+        ? { kind, reason, usage_scope: raw.usage_scope, raw_input_tokens, context_window } : invalid
+    case 'turn_total_usage':
+      return raw.usage_scope === 'turn_total'
+        ? { kind, reason, usage_scope: raw.usage_scope, raw_input_tokens, context_window } : invalid
+    case 'usage_scope_unavailable':
+      return raw.usage_scope === 'unavailable'
+        ? { kind, reason, usage_scope: raw.usage_scope, raw_input_tokens, context_window } : invalid
+    case 'context_tokens_exceed_window':
+      return raw.usage_scope === 'per_request'
+        && raw_input_tokens !== null && context_window !== null
+        && context_window > 0 && raw_input_tokens > context_window
+        ? { kind, reason, usage_scope: raw.usage_scope, raw_input_tokens, context_window } : invalid
+    default:
+      return invalid
+  }
 }
 
 export function normalizeKeeperLastTurnUsage(raw: unknown): KeeperLastTurnUsage | null {
@@ -624,15 +655,16 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       // A retired or unknown source drops entirely (numbers and string):
       // absence is explained by the typed context_metrics_unavailable
       // channel, never by echoing a retired producer name.
+      const contextUnavailable = normalizeKeeperContextMetricsUnavailable(row.context_metrics_unavailable)
       const topContextSource = asString(row.context_source) ?? null
-      const topContextMeasured = topContextSource === 'turn_record'
+      const topContextMeasured = topContextSource === 'turn_record' && contextUnavailable === null
       const contextRatio = topContextMeasured ? asNumber(row.context_ratio) ?? null : null
       const statusRaw = asString(row.status) ?? 'offline'
       const model = undefined
       const metricsSeries = normalizeMetricsSeries(row.metrics_series)
 
       const nestedContextSource = contextRaw ? asString(contextRaw.source) ?? null : null
-      const nestedContextMeasured = nestedContextSource === 'turn_record'
+      const nestedContextMeasured = nestedContextSource === 'turn_record' && contextUnavailable === null
       const normalizedContext =
         contextRaw
           ? {
@@ -759,7 +791,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         context_tokens: topContextMeasured ? asNumber(row.context_tokens) ?? null : null,
         context_max: topContextMeasured ? asNumber(row.context_max) ?? null : null,
         context_source: topContextMeasured ? topContextSource : null,
-        context_metrics_unavailable: normalizeKeeperContextMetricsUnavailable(row.context_metrics_unavailable),
+        context_metrics_unavailable: contextUnavailable,
         last_turn_usage: normalizeKeeperLastTurnUsage(row.last_turn_usage),
         context: normalizedContext,
         recent_input_preview: asString(row.recent_input_preview) ?? null,

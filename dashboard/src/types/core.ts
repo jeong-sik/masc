@@ -1242,15 +1242,47 @@ export const KEEPER_CONTEXT_NOT_OBSERVED_REASONS = [
   'turn_record_read_failed',
   'turn_record_without_usage',
   'turn_record_trace_mismatch',
+  'conversation_cumulative_usage',
+  'turn_total_usage',
+  'usage_scope_unavailable',
+  'context_tokens_exceed_window',
 ] as const
 
 export type KeeperContextNotObservedReason =
   (typeof KEEPER_CONTEXT_NOT_OBSERVED_REASONS)[number]
 
+interface KeeperContextUsageEvidence {
+  raw_input_tokens: number | null
+  context_window: number | null
+}
+
 export type KeeperContextMetricsUnavailable =
   | {
       kind: 'not_observed'
-      reason: KeeperContextNotObservedReason
+      reason: Exclude<KeeperContextNotObservedReason,
+        'conversation_cumulative_usage' | 'turn_total_usage' | 'usage_scope_unavailable' | 'context_tokens_exceed_window'>
+    }
+  | ({
+      kind: 'not_observed'
+      reason: 'conversation_cumulative_usage'
+      usage_scope: 'conversation_cumulative'
+    } & KeeperContextUsageEvidence)
+  | ({
+      kind: 'not_observed'
+      reason: 'turn_total_usage'
+      usage_scope: 'turn_total'
+    } & KeeperContextUsageEvidence)
+  | ({
+      kind: 'not_observed'
+      reason: 'usage_scope_unavailable'
+      usage_scope: 'unavailable'
+    } & KeeperContextUsageEvidence)
+  | {
+      kind: 'not_observed'
+      reason: 'context_tokens_exceed_window'
+      usage_scope: 'per_request'
+      raw_input_tokens: number
+      context_window: number
     }
   | {
       kind: 'invalid_payload'

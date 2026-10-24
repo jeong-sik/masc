@@ -10,7 +10,7 @@ the dashboard to native setup (#45836). These are source changes; the issue
 Source: `f01373f25ffa2c10a5da4ffd3dbc5072b01ceee5`. The six existing focused suites passed **140 tests**:
 `connector-status`, `connector-overview-strip`, `connector-readiness-rail`,
 `connector-paths-strip`, `connector-constants`, `connector-setup-guides`.
-See [the actual result log](dashboard-focused.log); only the local working
+See [the actual result log](dashboard-focused.txt); only the local working
 path is normalized to `<worktree>`. This is DOM/fixture behavior, not a browser,
 installed bundle, screenshot or live server measurement.
 
@@ -23,7 +23,7 @@ pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorker
 `pnpm exec tsc --noEmit` is **not passing**: two errors remain in unchanged
 `src/keeper-stream.test.ts`. An archive of baseline
 `b33506e601f5ee9ea843369a9fc6039c39a0820c`, including dashboard and test fixtures,
-with the same frozen dependencies reproduced [identical output](dashboard-typecheck.log).
+with the same frozen dependencies reproduced [identical output](dashboard-typecheck.txt).
 This isolates the existing failures; it does not convert them into a typecheck PASS.
 Connector CSS was parsed with PostCSS while removing the deleted widget selectors.
 

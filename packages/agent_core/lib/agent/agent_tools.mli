@@ -268,7 +268,6 @@ val execute_tools
   -> hooks:Hooks.hooks
   -> ?tool_approval:Hooks.tool_approval_callback
   -> event_bus:Event_bus.t option
-  -> ?journal:Durable_event.journal
   -> tracer:Tracing.t
   -> agent_name:string
   -> turn_count:int

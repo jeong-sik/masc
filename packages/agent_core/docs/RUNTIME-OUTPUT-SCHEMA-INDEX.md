@@ -36,9 +36,9 @@ Machine-readable catalog: `docs/schema-surfaces/runtime-output-surfaces.v1.json`
   in the same change.
 - This index lists production output surfaces only. Internal execution-topology
   types are not a seventh runtime schema and do not authorize external writes.
-- The single-writer hard cut has landed (`#2683`): the `agent_core` execution
-  path (`Agent_execution_runner` / `Execution_agent_scope`), surfaced through
-  `Agent.execution_store`, owns occurrence creation while `Durable_event`
-  provides the journal type and idempotency-key foundation. Event_bus,
-  Raw_trace, durable persistence, and dashboard data are read projections of
-  that single writer.
+- Durable occurrence creation belongs to `Agent_execution_runner` and
+  `Execution_agent_scope`, composed through `Agent.execution_store`. External
+  history readers use `Agent.open_execution_projection` with canonical event identity
+  and scoped cursors. Event_bus and Raw_trace observations are not external-effect
+  receipts. Their complete post-commit projection integration and finite-scope
+  retention acceptance remain tracked in masc#27890.

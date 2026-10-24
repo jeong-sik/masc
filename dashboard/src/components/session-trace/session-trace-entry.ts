@@ -132,7 +132,7 @@ function toolStyle(name: string): { icon: string; color: string } {
   return toolCategory(name)
 }
 
-// Durable_event projections carry durable_kind in detail; give each
+// Execution trace rows carry durable_kind in detail; give each
 // a distinct icon/tone so LLM, error, and agent lifecycle events
 // are visually separable in the trace timeline.
 function durableStyle(kind: unknown): { icon: string; color: string } | null {

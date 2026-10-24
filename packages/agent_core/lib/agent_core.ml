@@ -129,8 +129,6 @@ module Eval_stats = Eval_stats
 module Runtime_store = Runtime_store
 module Plan = Plan
 module Tool_input_validation = Tool_input_validation
-module Durable_event = Durable_event
-module Journal_bridge = Journal_bridge
 
 (* runtime_query/query removed — CLI Runtime purge *)
 

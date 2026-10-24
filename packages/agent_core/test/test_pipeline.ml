@@ -1573,34 +1573,7 @@ let test_error_domain_provider_errors () =
     errs
 ;;
 
-(* Pipeline.error_domain_of stamps the durable [Error_occurred] event's
-   [error_domain] from the actual error's typed category, not a hardcoded
-   "Api". A durable journal/store-write failure surfaces as [Error.Internal]
-   (see Pipeline_execution_scope.core_error), so it must be labeled "Internal",
-   not misattributed to the provider "Api" domain. The Internal->Internal
-   assertion fails if the hardcoded [error_domain = "Api"] is restored. *)
-let test_error_domain_of_persistence_not_api () =
-  Alcotest.(check string)
-    "persistence/store failure -> Internal"
-    "Internal"
-    (Internal_pipeline.error_domain_of (Error.Internal "journal write failed: disk full"));
-  Alcotest.(check bool)
-    "persistence failure is not misattributed to Api"
-    true
-    (Internal_pipeline.error_domain_of (Error.Internal "x") <> "Api");
-  (* Genuine provider errors stay "Api" so existing provider logs are stable. *)
-  Alcotest.(check string)
-    "genuine provider error -> Api"
-    "Api"
-    (Internal_pipeline.error_domain_of
-       (Error.Api (Error.Retry.AuthError { message = "bad key" })));
-  (* A third variant confirms the label is derived, not constant. *)
-  Alcotest.(check string)
-    "config error -> Config"
-    "Config"
-    (Internal_pipeline.error_domain_of
-       (Error.Config (Error.MissingEnvVar { var_name = "API_KEY" })))
-;;
+
 
 (* ── Provider_mock: multi-tool response ───────────────────── *)
 
@@ -2058,7 +2031,6 @@ let test_agent_run_uses_durable_tool_authority () =
              (fun ?on_telemetry:_ ~on_event:_ _request -> next_response ())
          })
        in
-       let journal = Durable_event.create () in
        let event_bus = Event_bus.create () in
        let event_config =
          Event_bus.subscription_config ~capacity:32 ~overflow:Event_bus.Drop_newest
@@ -2079,7 +2051,6 @@ let test_agent_run_uses_durable_tool_authority () =
          { Agent.default_options with
            transport = Some transport
          ; provider_config = Some (Provider_mock.to_provider_config ())
-         ; journal = Some journal
          ; event_bus = Some event_bus
          ; on_run_complete =
              Some
@@ -2139,16 +2110,6 @@ let test_agent_run_uses_durable_tool_authority () =
          "completion observes the final durable cursor"
          (Some (committed_cursor ()))
          !completion_cursor;
-       let legacy_tool_events =
-         Durable_event.events journal
-         |> List.filter (function
-           | Durable_event.Tool_called _ | Durable_event.Tool_completed _ -> true
-           | _ -> false)
-       in
-       Alcotest.(check int)
-         "legacy journal does not duplicate tool authority"
-         0
-         (List.length legacy_tool_events);
        let public_tool_events =
          Event_bus.drain event_subscription
          |> List.filter (fun (event : Event_bus.event) ->
@@ -4337,10 +4298,7 @@ let () =
         ; Alcotest.test_case "with_stage" `Quick test_error_domain_with_stage
         ; Alcotest.test_case "is_retryable" `Quick test_error_domain_is_retryable
         ; Alcotest.test_case "provider errors" `Quick test_error_domain_provider_errors
-        ; Alcotest.test_case
-            "durable event: persistence not Api"
-            `Quick
-            test_error_domain_of_persistence_not_api
+
         ] )
     ; ( "provider_mock_extra"
       , [ Alcotest.test_case "multi tool response" `Quick test_mock_multi_tool_response

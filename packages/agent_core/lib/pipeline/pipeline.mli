@@ -22,14 +22,6 @@ type turn_outcome =
   | ToolsExecuted of Agent_types.checkpoint_stage
   | TerminalToolCompleted of Terminal_tool_receipt.t
 
-(** Observation-only domain label stamped on a durable [Error_occurred] event,
-    derived from the actual error's typed [Error.category] (not hardcoded).
-    A journal/store-write failure surfaces as [Error.Internal] and is labeled
-    "Internal", not "Api"; genuine provider ([Error.Api]) errors stay "Api".
-    This projection is for observation only; it does not affect control flow,
-    retry, or provider-failure attribution. *)
-val error_domain_of : Error.t -> string
-
 (** Persist [state] using the same pre-commit checkpoint transaction as turn
     collection. The live agent state is not changed by this function. *)
 val persist_turn_checkpoint_for_state

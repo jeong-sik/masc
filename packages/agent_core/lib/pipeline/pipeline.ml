@@ -433,17 +433,6 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
                               t.predicted_per_second)
                         }
                   })));
-       (match agent.options.journal with
-        | Some j ->
-          Agent_execution_event_writer.append
-            j
-            (State_transition
-               { from_state = "turn_running"
-               ; to_state = "turn_complete"
-               ; reason = response.stop_reason |> Types.show_stop_reason
-               ; timestamp = Pipeline_common.timestamp_now ?clock ()
-               })
-        | None -> ());
        (* The admitted response, not the wire one, is what the output stage must
           route: dispatch reads [response.content] on its own, so handing back
           the original here would run a call the transcript no longer records. *)
@@ -692,19 +681,6 @@ let tag_error stage result =
     Error e
 ;;
 
-(* Observation-only domain label for a durable [Error_occurred] event.
-
-   Derived from the actual error via [Error.category] — the exhaustive typed
-   SSOT (a new [Error.t] variant forces a compile error there, so no
-   error can silently fall back to a wrong domain). [String.capitalize_ascii]
-   only presents the canonical lowercase [category_label] in the durable
-   event's historic capitalized style, keeping "Api" for genuine provider
-   ([Error.Api]) errors so those logs stay consistent. It is not a classifier:
-   classification lives entirely in the typed [Error.category] match. *)
-let error_domain_of (err : Error.t) : string =
-  Error.category err |> Error.category_label |> String.capitalize_ascii
-;;
-
 let run_new_turn
       ~sw
       ?clock
@@ -759,17 +735,6 @@ let run_new_turn
     in
     (* Stage 3: Route exactly once. Provider [ContextOverflow] remains a typed
        error; AGENT_CORE does not mutate the transcript or retry implicitly. *)
-    (match agent.options.journal with
-     | Some j ->
-       Agent_execution_event_writer.append
-         j
-         (Llm_request
-            { turn
-            ; model = turn_config.model
-            ; timestamp = Pipeline_common.timestamp_now ?clock ()
-            })
-     | None -> ());
-    let t0 = Pipeline_common.timestamp_now ?clock () in
     let api_outcome =
       stage_route
         ~sw
@@ -785,37 +750,9 @@ let run_new_turn
         prep
       |> Llm_provider.Completion_outcome.map_result (tag_error "route")
     in
-    let duration_ms = (Pipeline_common.timestamp_now ?clock () -. t0) *. 1000.0 in
     let* () = Pipeline_execution_scope.record_provider_request_provenance
       execution api_outcome.Llm_provider.Completion_outcome.request_provenance in
     let api_result = api_outcome.Llm_provider.Completion_outcome.result in
-    (match agent.options.journal, api_result with
-     | Some j, Ok (_, response) ->
-       let input_tokens, output_tokens =
-         match response.usage with
-         | Some u -> Some u.input_tokens, Some u.output_tokens
-         | None -> None, None
-       in
-       Agent_execution_event_writer.append
-         j
-         (Llm_response
-            { turn
-            ; input_tokens
-            ; output_tokens
-            ; stop_reason = Types.show_stop_reason response.stop_reason
-            ; duration_ms
-            ; timestamp = Pipeline_common.timestamp_now ?clock ()
-            })
-     | Some j, Error err ->
-       Agent_execution_event_writer.append
-         j
-         (Error_occurred
-            { turn
-            ; error_domain = error_domain_of err
-            ; detail = Error.to_string err
-            ; timestamp = Pipeline_common.timestamp_now ?clock ()
-            })
-     | None, _ -> ());
     (* Stage 4+5+6: Collect, Execute/Output *)
     let outcome =
       match api_result with

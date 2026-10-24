@@ -120,7 +120,6 @@ let make_agent ~net ~transport () =
 
 let make_checkpoint_agent
       ?event_bus
-      ?journal
       ?(hooks = Hooks.empty)
       ?context_injector
       ~net
@@ -133,7 +132,6 @@ let make_checkpoint_agent
     { Agent.default_options with
       transport = Some transport
     ; event_bus
-    ; journal
     ; hooks
     ; context_injector
     ; provider_config =
@@ -440,13 +438,11 @@ let test_checkpoint_sink_failure_fails_turn () =
     |> Result.get_ok
   in
   let event_sub = Event_bus.subscribe ~config event_bus in
-  let journal = Durable_event.create () in
   let checkpoint_sink _snapshot = Error "disk full" in
   let transport = make_sequence_transport [ text_response "ok" ] in
   let agent =
     make_checkpoint_agent
       ~event_bus
-      ~journal
       ~net:env#net
       ~transport
       ~checkpoint_sink
@@ -470,16 +466,7 @@ let test_checkpoint_sink_failure_fails_turn () =
          (function
            | Event_bus.TurnCompleted _ -> true
            | _ -> false)
-         event_payloads);
-    let journal_events = Durable_event.events journal in
-    Alcotest.(check bool)
-      "no turn_complete journal transition after checkpoint failure"
-      false
-      (List.exists
-         (function
-           | Durable_event.State_transition { to_state = "turn_complete"; _ } -> true
-           | _ -> false)
-         journal_events)
+         event_payloads)
 ;;
 
 let test_checkpoint_sink_does_not_clobber_intervening_state () =
@@ -698,83 +685,6 @@ let test_context_injection_failure_keeps_base_tool_result () =
        !snapshots)
 ;;
 
-let test_journal_observer_failure_rethrows_after_tool_result_checkpoint () =
-  Eio_main.run
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
-  let snapshots = ref [] in
-  let checkpoint_sink snapshot =
-    snapshots := snapshot :: !snapshots;
-    Ok ()
-  in
-  let journal =
-    Durable_event.create
-      ~on_append:(function
-        | Durable_event.Tool_completed _ -> failwith "journal projection failed"
-        | _ -> ())
-      ()
-  in
-  let transport = make_sequence_transport [ tool_use_response () ] in
-  let time_tool =
-    Tool.create
-      ~name:"get_time"
-      ~description:"Get current time"
-      ~parameters:
-        [ { Types.name = "timezone"
-          ; param_type = Types.String
-          ; description = "tz"
-          ; required = true
-          }
-        ]
-      (fun _input -> Ok { Types.content = "12:00 UTC"; content_blocks = None; _meta = None })
-  in
-  let agent =
-    make_checkpoint_agent
-      ~journal
-      ~net:env#net
-      ~transport
-      ~checkpoint_sink
-      ~tools:[ time_tool ]
-      ()
-  in
-  (match Agent.run ~sw agent "what time is it?" with
-   | Ok _ | Error _ -> Alcotest.fail "expected journal observer exception"
-   | exception Failure detail ->
-     Alcotest.(check string)
-       "original observer exception"
-       "journal projection failed"
-       detail
-   | exception exception_ ->
-     Alcotest.fail ("unexpected observer exception: " ^ Printexc.to_string exception_));
-  Alcotest.(check bool)
-    "in-memory ToolResult precedes observer rethrow"
-    true
-    (messages_contain_tool_result
-       ~tool_use_id:"call_1"
-       ~content:"12:00 UTC"
-       (Agent.state agent).messages);
-  Alcotest.(check bool)
-    "checkpoint ToolResult precedes observer rethrow"
-    true
-    (List.exists
-       (fun (snapshot : Agent.checkpoint_snapshot) ->
-          snapshot.stage = Agent.After_tool_results_appended
-          && messages_contain_tool_result
-               ~tool_use_id:"call_1"
-               ~content:"12:00 UTC"
-               snapshot.checkpoint.messages)
-       !snapshots);
-  Alcotest.(check int)
-    "journal kept Tool_completed before reporting callback failure"
-    1
-    (Durable_event.events journal
-     |> List.filter (function
-       | Durable_event.Tool_completed _ -> true
-       | _ -> false)
-     |> List.length)
-;;
-
 let () =
   Alcotest.run
     "Telemetry pipeline integration"
@@ -815,10 +725,6 @@ let () =
             "context injection failure keeps base tool result"
             `Quick
             test_context_injection_failure_keeps_base_tool_result
-        ; Alcotest.test_case
-            "journal observer rethrows after tool result checkpoint"
-            `Quick
-            test_journal_observer_failure_rethrows_after_tool_result_checkpoint
         ] )
     ]
 ;;

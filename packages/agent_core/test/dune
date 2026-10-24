@@ -71,7 +71,6 @@
   test_inline_reasoning_split
   test_capabilities
   test_agent_card
-  test_agent_auto_dump
   test_agent_lifecycle
   test_agent_pipeline
   test_agent_periodic_cleanup
@@ -108,7 +107,6 @@
   test_contract
   test_discovery
   test_discovery_http
-  test_durable_event
   test_e2e_v024
   test_eio_cancellability
   test_elicitation
@@ -131,7 +129,6 @@
   test_initial_messages
   test_injection
   test_integration
-  test_journal_bridge
   test_llm_cache
   test_llm_provider_error
   test_log
@@ -212,7 +209,6 @@
   test_inline_reasoning_split
   test_capabilities
   test_agent_card
-  test_agent_auto_dump
   test_agent_lifecycle
   test_agent_pipeline
   test_agent_periodic_cleanup
@@ -249,7 +245,6 @@
   test_contract
   test_discovery
   test_discovery_http
-  test_durable_event
   test_e2e_v024
   test_eio_cancellability
   test_elicitation
@@ -272,7 +267,6 @@
   test_initial_messages
   test_injection
   test_integration
-  test_journal_bridge
   test_llm_cache
   test_llm_provider_error
   test_log

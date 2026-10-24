@@ -23,170 +23,435 @@ let runtime_lane_notice_style = function
     if Masc_tui_runtime_config_receipt.lane_needs_attention receipt then Theme.warn ()
     else Theme.info ()
 
-let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
-  let ordered values =
-    match values with
-    | [] -> "(none)"
-    | values ->
-      values
-      |> List.mapi (fun index value ->
-        Printf.sprintf "%d %s" (index + 1) (Terminal_text.single_line value))
-      |> String.concat "  →  "
-  in
-  let wrap style text =
-    Message_layout.wrap_words ~max_cells:(max 1 (width - 4)) text
+let ordered_slot_list values =
+  match values with
+  | [] -> "(없음)"
+  | values ->
+    values
+    |> List.mapi (fun index value ->
+      Printf.sprintf "%d %s" (index + 1) (Terminal_text.single_line value))
+    |> String.concat "  →  "
+
+let standalone_lane_purpose (lane : Tui_decode.standalone_lane) =
+  Option.value ~default:"No consumer purpose reported by this server."
+    lane.sl_purpose
+
+let standalone_lane_obligation (lane : Tui_decode.standalone_lane) =
+  if lane.sl_required then "필수(Required)" else "선택(Optional)"
+
+let standalone_lane_outcome_ko = function
+  | "succeeded" | "ok" | "approved" | "reviewed" | "committed" -> "성공"
+  | "failed" | "error" | "raised" -> "실패"
+  | "cancelled" | "review_cancelled" -> "취소"
+  | "rejected" -> "반려"
+  | other -> Terminal_text.single_line other
+
+let standalone_lane_last_run ~now (lane : Tui_decode.standalone_lane) =
+  match lane.sl_last_outcome, lane.sl_last_terminal_at with
+  | None, _ -> "실행 기록 없음"
+  | Some outcome, None ->
+    "마지막 실행 " ^ standalone_lane_outcome_ko outcome
+  | Some outcome, Some at ->
+    Printf.sprintf "마지막 실행 %s (%s 전)"
+      (standalone_lane_outcome_ko outcome)
+      (Masc_tui_answering.elapsed_text ~now at)
+
+let standalone_lane_state_style (lane : Tui_decode.standalone_lane) =
+  match lane.sl_configuration_state, lane.sl_status with
+  | Tui_decode.Lane_registry_unavailable, _
+  | _, Tui_decode.Standalone_degraded -> Theme.bad ()
+  | (Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured), _
+  | _, Tui_decode.Standalone_unavailable -> Theme.warn ()
+  | Tui_decode.Lane_off, _ | _, Tui_decode.Standalone_off -> Theme.recede ()
+  | Tui_decode.Lane_ready, Tui_decode.Standalone_running -> Theme.info ()
+  | Tui_decode.Lane_ready,
+    Tui_decode.(Standalone_idle | Standalone_no_retained_observation) ->
+    Ansi.reset
+
+let standalone_lane_headline_state ~now (lane : Tui_decode.standalone_lane) =
+  let last_run = standalone_lane_last_run ~now lane in
+  match lane.sl_configuration_state, lane.sl_status with
+  | Tui_decode.Lane_registry_unavailable, _ ->
+    "오류 — 런타임 레지스트리를 읽을 수 없음"
+  | Tui_decode.Lane_unconfigured, _ ->
+    "미설정 — 지정된 모델 후보가 없음"
+  | Tui_decode.Lane_slotless, _ ->
+    "실행 불가 — 설정된 후보 중 사용 가능한 모델이 없음"
+  | Tui_decode.Lane_off, _ | _, Tui_decode.Standalone_off ->
+    if lane.sl_running_count > 0 then
+      Printf.sprintf "꺼짐 (진행 중 %d건 마무리 중) · %s"
+        lane.sl_running_count last_run
+    else
+      Printf.sprintf "꺼짐 (신규 실행 중지) · %s" last_run
+  | Tui_decode.Lane_ready, Tui_decode.Standalone_degraded ->
+    Printf.sprintf "주의 필요 — %s" last_run
+  | Tui_decode.Lane_ready, Tui_decode.Standalone_running ->
+    let started_note =
+      match lane.sl_last_started_at with
+      | Some started ->
+        Printf.sprintf "%d건 진행 중 (최근 %s 전 시작)"
+          lane.sl_running_count
+          (Masc_tui_answering.elapsed_text ~now started)
+      | None -> Printf.sprintf "%d건 진행 중" lane.sl_running_count
+    in
+    Printf.sprintf "실행 중 — %s · %s" started_note last_run
+  | Tui_decode.Lane_ready, Tui_decode.Standalone_idle ->
+    Printf.sprintf "정상 대기 · %s" last_run
+  | Tui_decode.Lane_ready, Tui_decode.Standalone_no_retained_observation ->
+    "정상 준비됨 · 아직 실행 기록 없음"
+  | Tui_decode.Lane_ready, Tui_decode.Standalone_unavailable ->
+    Printf.sprintf "사용 불가 · %s" last_run
+
+let standalone_lane_run_score_summary (lane : Tui_decode.standalone_lane) =
+  let total = lane.sl_retained_run_count in
+  if total > 0 then
+    let rate =
+      float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
+    in
+    Printf.sprintf "%.1f%% 성공 (%d성공 / %d실패 / %d취소 · 총 %d건)"
+      rate lane.sl_succeeded_count lane.sl_failed_count
+      lane.sl_cancelled_count total
+  else "집계된 실행 기록 없음"
+
+let standalone_lane_latency_summary (lane : Tui_decode.standalone_lane) =
+  match lane.sl_p50_elapsed_s with
+  | Some s -> (
+      match Message_layout.elapsed_text s with
+      | Some text -> Some (Printf.sprintf "평균(p50) %s 소요" text)
+      | None -> None)
+  | None -> None
+
+let standalone_lane_jev_summary (lane : Tui_decode.standalone_lane) =
+  match lane.sl_jev with
+  | None -> None
+  | Some Tui_decode.Jev_off -> Some (Theme.recede (), "꺼짐 (OFF)")
+  | Some Tui_decode.Jev_cli_only ->
+    Some (Theme.recede (), "사용 불가 (Board 레인이 CLI 전용)")
+  | Some Tui_decode.Jev_lane_unavailable ->
+    Some (Theme.warn (), "사용 불가 (Board 레인이 준비되지 않음)")
+  | Some (Tui_decode.Jev_configured { destinations }) ->
+    let named (destination : Tui_decode.standalone_lane_jev_destination) =
+      Printf.sprintf "%s (%s)" destination.sljd_destination_uri destination.sljd_model
+    in
+    Some
+      ( Ansi.reset
+      , "활성 · "
+        ^ Terminal_text.single_line
+            (String.concat ", " (List.map named destinations)) )
+
+let wrap_indented_line ~max_cells style text =
+  let single = Terminal_text.single_line text in
+  if String.equal (String.trim single) "" then [ style, "" ]
+  else
+    Message_layout.wrap_words ~max_cells:(max 1 max_cells) single
     |> List.map (fun line -> style, "  " ^ line)
+
+let wrap_indented_lines ~max_cells style lines =
+  List.concat_map (wrap_indented_line ~max_cells style) lines
+
+let lane_overview_summary_block ~cols ~label ~purpose ~left_title ~left_rows
+    ~right_title ~right_rows ~actions =
+  let max_cells = max 1 (framed_inner_width cols - 2) in
+  wrap_indented_line ~max_cells Ansi.bold
+    (Printf.sprintf "%s · %s"
+       (Terminal_text.single_line label)
+       (Terminal_text.single_line purpose))
+  @ split_summary_columns ~cols
+      ~left_title ~left_rows ~right_title ~right_rows
+  @ wrap_indented_line ~max_cells (Theme.info ()) actions
+
+let failover_candidate_rows ?(no_slot_count = 0) ~admitted_slots ~cli_slots
+    ~dropped_slots () =
+  let slot_style = function [] -> Theme.recede () | _ :: _ -> Ansi.reset in
+  [ slot_style admitted_slots, "1차 HTTP: " ^ ordered_slot_list admitted_slots
+  ; slot_style cli_slots, "2차 CLI:  " ^ ordered_slot_list cli_slots
+  ]
+  @ (if no_slot_count > 0 then
+       [ ( Theme.warn ()
+         , Printf.sprintf "전체 후보 실패(무응답): %d건" no_slot_count ) ]
+     else [])
+  @ (match dropped_slots with
+     | [] -> []
+     | dropped ->
+       [ Theme.warn (), "탈락 후보: " ^ ordered_slot_list dropped ])
+
+let exact_lane_overview_actions =
+  "Enter: 실행 기록 · s: 모델 순서 변경 · a: 후보 추가 · Space: 켜기/끄기 · d: 상세(슬롯통계·설정·계약)"
+
+(* Concise two-column summary for the bottom pane of MASC Features.
+   Focuses on the 3 operator questions:
+   1. Why is it in this state right now? (상태)
+   2. How well is it performing? (성적 · 속도)
+   3. Which models run in what order? (1차 HTTP · 2차 CLI 후보 순서) *)
+let standalone_lane_summary_lines ~now ~cols (lane : Tui_decode.standalone_lane) =
+  let state_style = standalone_lane_state_style lane in
+  let runs_style =
+    if lane.sl_failed_count > 0 then Theme.warn ()
+    else if lane.sl_retained_run_count = 0 then Theme.recede ()
+    else Ansi.reset
   in
-  let purpose =
-    Option.value ~default:"No consumer purpose reported by this server."
-      lane.sl_purpose
+  let left_rows =
+    [ state_style, "상태: " ^ standalone_lane_headline_state ~now lane
+    ; runs_style, "성적: " ^ standalone_lane_run_score_summary lane
+    ]
+    @ Option.to_list
+        (Option.map
+           (fun latency -> Ansi.reset, "속도: " ^ latency)
+           (standalone_lane_latency_summary lane))
+    @ Option.to_list
+        (Option.map
+           (fun (jstyle, jtext) -> jstyle, "JEV:  " ^ jtext)
+           (standalone_lane_jev_summary lane))
+    @ Option.to_list
+        (Option.map
+           (fun error -> Theme.bad (), "오류: " ^ Terminal_text.single_line error)
+           lane.sl_admission_error)
   in
+  let right_rows =
+    failover_candidate_rows
+      ~no_slot_count:lane.sl_runs_without_slot.slws_no_slot
+      ~admitted_slots:lane.sl_admitted_slots
+      ~cli_slots:lane.sl_cli_slots
+      ~dropped_slots:lane.sl_dropped_slots ()
+  in
+  lane_overview_summary_block ~cols ~label:lane.sl_label
+    ~purpose:(standalone_lane_purpose lane)
+    ~left_title:"현재 상태 · 실행 성적" ~left_rows
+    ~right_title:"모델 호출 순서 (Failover)" ~right_rows
+    ~actions:exact_lane_overview_actions
+
+let standing_word_ko = function
+  | Masc_tui_lane_standing.Ready -> "정상(ready)"
+  | Masc_tui_lane_standing.Waiting -> "대기(waiting)"
+  | Masc_tui_lane_standing.Changing -> "전환 중(changing)"
+  | Masc_tui_lane_standing.Failing -> "주의 필요(failing)"
+  | Masc_tui_lane_standing.Off -> "꺼짐(off)"
+  | Masc_tui_lane_standing.Not_set_up -> "미설정(not set up)"
+  | Masc_tui_lane_standing.Unobserved -> "미관측(unobserved)"
+
+let toggleable_lane_summary_columns ~state_line ~off_note ~right_title
+    ~kind_label ~row_id ~open_hint =
+  ( "현재 상태 · 동작"
+  , [ state_line; Theme.recede (), "꺼짐 시: " ^ off_note ]
+  , right_title
+  , [ Ansi.reset, "구분:   " ^ kind_label
+    ; Theme.recede (), "식별자: " ^ row_id
+    ]
+  , open_hint ^ " · Space: 켜기/끄기 · d: 전체 상세" )
+
+let inventory_row_summary_lines ~cols ~standing ~selected_output
+    (row : Masc.Tui_decode_lane_inventory.row) =
+  let open Masc.Tui_decode_lane_inventory in
+  let standing_style =
+    match standing with
+    | Masc_tui_lane_standing.Failing -> Theme.bad ()
+    | Masc_tui_lane_standing.(Waiting | Changing | Not_set_up) -> Theme.warn ()
+    | Masc_tui_lane_standing.(Off | Unobserved) -> Theme.recede ()
+    | Masc_tui_lane_standing.Ready -> Ansi.reset
+  in
+  let state_line =
+    ( standing_style
+    , Printf.sprintf "상태: %s · %s" (standing_word_ko standing)
+        (Masc_tui_lane_inventory.row_summary row) )
+  in
+  let left_title, left_rows, right_title, right_rows, actions =
+    match row.state with
+    | Exact_state config ->
+      let left_extra, right_rows =
+        match config with
+        | Configured c ->
+          let err =
+            Option.to_list
+              (Option.map (fun detail -> Theme.bad (), "오류: " ^ detail) c.admission_error)
+          in
+          ( err
+          , failover_candidate_rows ~admitted_slots:c.admitted_slots
+              ~cli_slots:c.cli_slots ~dropped_slots:c.dropped_slots () )
+        | Disabled c ->
+          ( [ Theme.recede (), "동작: 새 작업 중지 (진행 중 작업은 완료까지 유지)" ]
+          , [ Theme.recede (), "1차 HTTP(보존): " ^ ordered_slot_list c.declared_slots
+            ; Theme.recede (), "2차 CLI(보존):  " ^ ordered_slot_list c.declared_cli_slots
+            ] )
+        | Unconfigured detail | Registry_unavailable detail ->
+          ( [ Theme.warn (), "원인: " ^ detail ]
+          , [ Theme.recede (), "식별자: " ^ row.id ] )
+      in
+      ( "현재 상태 · 승인"
+      , state_line :: left_extra
+      , "모델 호출 순서 (Failover)"
+      , right_rows
+      , exact_lane_overview_actions )
+    | Browser_clients _ | Browser_executor _ ->
+      toggleable_lane_summary_columns ~state_line
+        ~off_note:"새 요청만 거절하고 열린 세션은 유지"
+        ~right_title:"백엔드 · 식별자" ~kind_label:"Browser 레인"
+        ~row_id:row.id ~open_hint:"Enter: 브라우저 열기"
+    | Machine_state _ ->
+      toggleable_lane_summary_columns ~state_line
+        ~off_note:"머신 상태와 체크포인트 보존"
+        ~right_title:"화면 송출 · 식별자" ~kind_label:"Machines 레인"
+        ~row_id:row.id ~open_hint:"Enter: 화면 보기"
+    | Package_state { declaration; instances } ->
+      let decl_rows =
+        match declaration with
+        | Some (Valid value) ->
+          [ ( Ansi.reset
+            , Printf.sprintf "패키지: %s · %s (rev %s)"
+                value.package_id value.title value.desired_revision ) ]
+        | Some (Invalid messages) ->
+          List.map (fun msg -> Theme.bad (), "오류: " ^ msg) messages
+        | Some Absent ->
+          [ Theme.warn (), "선언: 디렉터리에서 선언 파일을 찾을 수 없음" ]
+        | Some Unobserved ->
+          [ Theme.warn (), "선언: 디렉터리 읽기가 아직 완료되지 않음" ]
+        | None ->
+          [ Theme.recede (), "선언: 수동 연결 인스턴스 (TOML 파일 없음)" ]
+      in
+      let worker_rows =
+        match instances with
+        | [] -> [ Theme.recede (), "워커: 관측된 실행 워커 없음" ]
+        | items ->
+          List.map
+            (fun (item : instance) ->
+               let style, phase_str =
+                 match item.phase with
+                 | Failed detail -> Theme.bad (), "실패: " ^ detail
+                 | Attached -> Ansi.reset, "연결됨(attached)"
+                 | Observing -> Ansi.reset, "관측 중(observing)"
+                 | Detaching -> Theme.warn (), "정리 중(detaching)"
+                 | Detached -> Theme.recede (), "분리됨(detached)"
+               in
+               let presence_str =
+                 match item.presence with
+                 | Live -> "실행 중"
+                 | Retained -> "보관됨"
+               in
+               ( style
+               , Printf.sprintf "워커: %s (%s · %s)"
+                   item.instance_id presence_str phase_str ))
+            items
+      in
+      let output_or_source_rows =
+        match Masc_tui_lane_inventory.exact_output_lines ~selected:selected_output row with
+        | _ :: _ as outputs -> List.map (fun line -> Ansi.reset, line) outputs
+        | [] ->
+          (match row.selection with
+           | Declaration path -> [ Theme.recede (), "설정: " ^ path ]
+           | Exact _ | Browser _ | Machine _ | Manual_instance _ ->
+             [ Theme.recede (), "식별자: " ^ row.id ])
+      in
+      let has_outputs =
+        Option.is_some
+          (Masc_tui_lane_inventory.selected_exact_output ~selected:selected_output row)
+      in
+      ( "현재 상태 · 선언 정보"
+      , state_line :: decl_rows
+      , "실행 워커 · 출력 바인딩"
+      , worker_rows @ output_or_source_rows
+      , if has_outputs then
+          "Enter: 열기 · [ / ]: 출력 선택 · e: 설정 편집 · d: 전체 상세"
+        else "Enter: 열기 · d: 전체 상세" )
+  in
+  lane_overview_summary_block ~cols ~label:row.label ~purpose:row.purpose
+    ~left_title ~left_rows ~right_title ~right_rows ~actions
+
+let standalone_lane_without_slot_rows_ko (lane : Tui_decode.standalone_lane) =
+  let without = lane.sl_runs_without_slot in
+  let counted label count =
+    if count <= 0 then [] else [ Printf.sprintf "• %s: %d건" label count ]
+  in
+  let gap =
+    match standalone_lane_slot_history_gap lane with
+    | 0 -> []
+    | gap when gap > 0 -> [ Printf.sprintf "• 슬롯 집계 누락: %d건" gap ]
+    | gap -> [ Printf.sprintf "• 슬롯 집계 초과: %d건" (-gap) ]
+  in
+  counted "Vendor System One (외부 직접 응답)" without.slws_vendor_system_one
+  @ counted "서버 재시작으로 중단" without.slws_server_restarted
+  @ counted "전체 후보 실패로 슬롯 미배정(무응답)" without.slws_no_slot
+  @ gap
+
+let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
+  let max_cells = max 1 (width - 4) in
+  let wrap style text = wrap_indented_line ~max_cells style text in
+  let purpose = standalone_lane_purpose lane in
   let answer = Tui_decode.standalone_lane_answer lane in
-  (* Three facts the server has always sent and nothing drew.
-
-     [required] is the one that changes what an operator does about a lane
-     that cannot run: an optional lane nobody configured is a choice, and a
-     required one is a hole.
-
-     [configuration_state] separates "nobody configured this" from "the
-     registry could not be read", which the status word beside the lane
-     collapses into one "unavailable". The block draws the admission error
-     below, and those two states each carry one, so this is the typed half
-     of a distinction that was only ever legible as prose.
-
-     The last terminal run is what the totals cannot say. [ok/fail/cancel
-     962/133/0] reads the same whether the failures were this morning or
-     last quarter, and an idle lane says nothing at all about when it last
-     did work. *)
-  let obligation = if lane.sl_required then "Required" else "Optional" in
+  let obligation = standalone_lane_obligation lane in
   let configuration =
     Tui_decode.standalone_lane_configuration_phrase
       lane.sl_configuration_state
   in
-  let last_run =
-    match lane.sl_last_outcome, lane.sl_last_terminal_at with
-    | None, _ -> "no retained terminal observation"
-    | Some outcome, None -> "last run " ^ Terminal_text.single_line outcome
-    | Some outcome, Some at ->
-      Printf.sprintf "last run %s %s ago"
-        (Terminal_text.single_line outcome)
-        (Masc_tui_answering.elapsed_text ~now at)
-  in
-  (* By the state alone. This block draws no glyph, so a colour that also
-     answered "is it required" would make a split nothing else in the block
-     recovers -- the row two lines up gives every colour class its own mark
-     for exactly that reason. The obligation is in the words. *)
-  let state_style =
-    match lane.sl_configuration_state with
-    | Tui_decode.Lane_off -> Theme.recede ()
-    | Tui_decode.Lane_ready -> Ansi.reset
-    | Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured -> Theme.warn ()
-    | Tui_decode.Lane_registry_unavailable -> Theme.bad ()
-  in
-  let jev_lines =
-    match lane.sl_jev with
-    | None -> []
-    | Some Tui_decode.Jev_off -> wrap (Theme.recede ()) "JEV OFF"
-    | Some Tui_decode.Jev_cli_only ->
-      wrap (Theme.recede ()) "JEV unavailable: Board lane is CLI-only"
-    | Some Tui_decode.Jev_lane_unavailable ->
-      wrap (Theme.warn ()) "JEV unavailable: Board lane is not ready"
-    | Some (Tui_decode.Jev_configured { destinations }) ->
-      let named (destination : Tui_decode.standalone_lane_jev_destination) =
-        Printf.sprintf "%s (%s)" destination.sljd_destination_uri destination.sljd_model
-      in
-      wrap Ansi.reset
-        (Printf.sprintf
-           "JEV CONFIGURED \xc2\xb7 %s"
-           (Terminal_text.single_line (String.concat ", " (List.map named destinations))))
-  in
-  let activity =
-    let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
-    match lane.sl_status, lane.sl_last_started_at with
-    | Tui_decode.Standalone_off, _ ->
-        Printf.sprintf "Activity: off · %d accepted runs finishing" lane.sl_running_count
-    | Tui_decode.Standalone_running, Some started ->
-        Printf.sprintf "Activity: %d running · latest started %s ago"
-          lane.sl_running_count (Masc_tui_answering.elapsed_text ~now started)
-    | (Standalone_running, None)
-    | ((Standalone_idle | (Standalone_degraded | (Standalone_no_retained_observation | Standalone_unavailable))), _) -> "Activity: " ^ status in
-  let run_stats =
-    let total = lane.sl_retained_run_count in
-    if total > 0 then
-      let rate =
-        float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
-      in
-      let p50_str =
-        (* Use the shared elapsed-time formatting for this observation. *)
-        match lane.sl_p50_elapsed_s with
-        | Some s -> (
-            match Message_layout.elapsed_text s with
-            | Some text -> Printf.sprintf " · p50 latency %s" text
-            | None -> "")
-        | None -> ""
-      in
-      Printf.sprintf "Runs: %d retained (%d ok / %d fail / %d cancel) · %.1f%% success%s"
-        total lane.sl_succeeded_count lane.sl_failed_count
-        lane.sl_cancelled_count rate p50_str
-    else "Runs: no runs retained yet"
-  in
-  let slot_distribution =
-    (* Every finished run, by who answered it. The slot counts cover only
-       runs that named a slot; the rest come from the server by why they
-       named none. On Board Attention most of those are Vendor System One,
-       which answers before any slot is bound (#37296), so a reader who saw
-       only the slots would take its answers for missing records. *)
-    let dist =
-      match lane.sl_selected_slots with
-      | [] -> []
-      | scs ->
-        [ String.concat ", "
-            (List.map
-               (fun (sc : Tui_decode.standalone_lane_slot_count) ->
-                  Printf.sprintf "%s: %d"
-                    (Terminal_text.single_line sc.slsc_slot_id) sc.slsc_count)
-               scs) ]
+  let state_style = standalone_lane_state_style lane in
+  let slot_history_lines =
+    let slot_rows =
+      List.map
+        (fun (sc : Tui_decode.standalone_lane_slot_count) ->
+           Printf.sprintf "• %s: %d회"
+             (Terminal_text.single_line sc.slsc_slot_id) sc.slsc_count)
+        lane.sl_selected_slots
     in
-    match dist @ standalone_lane_runs_without_slot_parts lane with
-    | [] -> []
-    | parts ->
-      wrap Ansi.reset
-        ("Slot selection history: " ^ String.concat " \xc2\xb7 " parts)
+    match slot_rows @ standalone_lane_without_slot_rows_ko lane with
+    | [] -> wrap (Theme.recede ()) "(기록된 슬롯 응답 이력이 없습니다)"
+    | rows -> wrap_indented_lines ~max_cells Ansi.reset rows
   in
   wrap Ansi.bold
     (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
        (Terminal_text.single_line purpose))
+  @ detail_section_heading "1. 현재 상태 · 실행 성적"
   @ wrap state_style
-      (Printf.sprintf "%s lane · %s · %s" obligation
-         configuration last_run)
-  @ wrap Ansi.dim
-      (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
-         (Standalone_lane.to_id lane.sl_lane))
-  @ jev_lines
-  @ wrap Ansi.reset activity
+      ("현재 상태: " ^ standalone_lane_headline_state ~now lane)
+  @ wrap state_style
+      (Printf.sprintf "구분/설정: %s · %s" obligation configuration)
   @ wrap (if lane.sl_failed_count > 0 then Theme.warn () else Ansi.reset)
-      run_stats
-  @ slot_distribution
-  @ wrap Ansi.reset
-      ("Catalog attempts (admitted order): " ^ ordered lane.sl_admitted_slots)
-  @ wrap Ansi.reset
-      ("Then CLI (after catalog exhaustion): " ^ ordered lane.sl_cli_slots)
-  @ wrap
-      (if lane.sl_dropped_slots = [] then Ansi.dim else Theme.warn ())
-      ("Dropped before execution: " ^ ordered lane.sl_dropped_slots)
+      ("실행 성적: " ^ standalone_lane_run_score_summary lane)
+  @ (match standalone_lane_latency_summary lane with
+     | None -> []
+     | Some latency -> wrap Ansi.reset ("소요 시간: " ^ latency))
+  @ (match standalone_lane_jev_summary lane with
+     | None -> []
+     | Some (style, text) -> wrap style ("JEV: " ^ text))
   @ (match lane.sl_admission_error with
      | None -> []
      | Some error ->
        wrap (Theme.bad ())
-         ("Admission error: " ^ Terminal_text.single_line error))
-  (* The file's shape and the editor [e] opens are the same two sentences on
-     every lane, so they cost four of this pane's rows to say what no lane
-     answers. They are under [?] with the key that acts on them, the move the
-     Keeper columns and the Memory ST words already made. What stays here is
-     what this lane answers: the section it configures is on the Config row
-     above, and the evidence line below says what its runs retain. *)
+         ("등록 오류: " ^ Terminal_text.single_line error))
+  @ detail_section_heading "2. 모델 호출 순서 (Failover) · 설정 위치"
+  @ wrap Ansi.dim
+      (Printf.sprintf "TOML 섹션: [runtime.exact_output_lanes.%s]"
+         (Standalone_lane.to_id lane.sl_lane))
+  @ wrap Ansi.reset
+      ("1차 HTTP 후보 (순서대로 시도): " ^ ordered_slot_list lane.sl_admitted_slots)
+  @ wrap Ansi.reset
+      ("2차 CLI 후보 (HTTP 모두 실패 시): " ^ ordered_slot_list lane.sl_cli_slots)
+  @ wrap
+      (if lane.sl_dropped_slots = [] then Ansi.dim else Theme.warn ())
+      ("실행 전 탈락한 후보: " ^ ordered_slot_list lane.sl_dropped_slots)
+  @ detail_section_heading "3. 모델별 누적 응답 횟수 (Slot Selection History)"
+  @ slot_history_lines
+  @ detail_section_heading "4. 레인 출력 의미 · 실행 증거 (Contract)"
   @ wrap Ansi.reset answer.sla_output_meaning
   @ wrap Ansi.dim answer.sla_evidence
+
+let inventory_row_detail_lines ~width ~selected_output
+    (row : Masc.Tui_decode_lane_inventory.row) =
+  let max_cells = max 1 (width - 2) in
+  let wrap style text = wrap_indented_line ~max_cells style text in
+  let base_lines =
+    match Masc_tui_lane_inventory.detail_lines row with
+    | label :: purpose :: rest ->
+      wrap Ansi.bold (label ^ " · " ^ purpose)
+      @ detail_section_heading "1. 설정 · 관측 상세 (Configuration · Observation)"
+      @ wrap_indented_lines ~max_cells Ansi.reset rest
+    | lines -> wrap_indented_lines ~max_cells Ansi.reset lines
+  in
+  let output_lines =
+    match Masc_tui_lane_inventory.exact_output_lines ~selected:selected_output row with
+    | [] -> []
+    | outputs ->
+      detail_section_heading "2. 출력 스키마 바인딩 (Exact Output)"
+      @ wrap_indented_lines ~max_cells Ansi.reset outputs
+  in
+  base_lines @ output_lines
 
 let rec take_rows remaining acc = function
   | _ when remaining <= 0 -> List.rev acc
@@ -454,49 +719,19 @@ let render_lanes_overview (state : state) =
       now.Unix.tm_sec
   in
   let header =
-    (* Both readings come from [runtime_surface], which the Runtime screen
-       loads and this one does not, so on a first visit here they were zeros
-       nobody measured. *)
-    let lane_reading =
-      Option.map
-        (fun snapshot ->
-          string_of_int (List.length snapshot.rss_resolved.rrs_lanes))
-        state.runtime_surface
-    in
-    let all_reading =
-      Option.map
-        (fun snapshot ->
-          string_of_int (List.length snapshot.rss_resolved.rrs_runtimes))
-        state.runtime_surface
-    in
-    let lane_count = lanes_inventory_count state in
+    let title = screen_title " MASC Features" in
     match state.lane_inventory with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Features") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
+          title (title_missing_reading ~error:state.standalone_lanes_error) timestamp
           (connection_badge state)
     | Some _ ->
-        Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Features")
-          (tab_strip
-             ~width:
-               (tab_strip_width ~cols
-                  ~before:(screen_title " MASC Features" ^ tab_strip_gap)
-                  ~after:("  " ^ timestamp ^ "  " ^ connection_badge state))
-             ~press:pressable
-             [ ( tab_entry_label "Candidate orders" lane_reading
-               , false
-               , Press_runtime_mode Masc_tui_types.Runtime_lanes )
-             ; ( tab_entry_label "All runtimes" all_reading
-               , false
-               , Press_runtime_mode Masc_tui_types.Runtime_all )
-             ; ( tab_entry_label "Features"
-                   (Some
-                      (Masc_tui_message_layout.count_noun lane_count "feature"))
-               , true
-               , Press_standalone_lanes )
-             ])
-          timestamp (connection_badge state)
+        let after = "  " ^ timestamp ^ "  " ^ connection_badge state in
+        Printf.sprintf "%s  %s%s"
+          title
+          (runtime_substrate_tab_strip state ~cols
+             ~before:(title ^ tab_strip_gap) ~after ~current:`Features)
+          after
   in
   box_top buf cols;
   box_line buf cols header;
@@ -609,20 +844,12 @@ let render_lanes_overview (state : state) =
          box_divider buf cols;
          let detail = match selected_standalone_lane state with
            | Some lane ->
-               (Theme.info (), "  Space: activity · s: models · a: candidate")
-               :: standalone_lane_detail_lines ~now:(Unix.gettimeofday ()) ~width:inner lane
+               standalone_lane_summary_lines ~now:(Unix.gettimeofday ()) ~cols lane
            | None ->
-               ((match inventory_row.Masc.Tui_decode_lane_inventory.selection with
-                 | Browser _ -> ["Space: activity · Enter: browser"]
-                 | Machine _ -> ["Space: activity · Enter: spectate"]
-                 | Exact _ | Declaration _ | Manual_instance _ -> [])
-                @ Masc_tui_lane_inventory.detail_lines inventory_row
-                @ Masc_tui_lane_inventory.exact_output_lines
-                    ~selected:(Masc_tui_types.lanes_exact_output_name state inventory_row) inventory_row)
-               |> List.concat_map (fun line ->
-                    Terminal_text.single_line line
-                    |> Message_layout.wrap_words ~max_cells:(max 1 (inner - 2))
-                    |> List.map (fun line -> Theme.recede (), "  " ^ line))
+               inventory_row_summary_lines ~cols
+                 ~standing:(standing inventory_row)
+                 ~selected_output:(Masc_tui_types.lanes_exact_output_name state inventory_row)
+                 inventory_row
          in
          let shown = take_rows available [] detail in
          let shown =
@@ -1151,7 +1378,7 @@ let lane_run_gate_judgment_summary = function
           "%sJUDGMENT%s  %sADVISORY %s%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN"
           Ansi.bold Ansi.reset style label Ansi.reset )
 
-let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
+let lane_run_summary_lines ~cols (detail : Tui_decode.lane_run_detail) =
   let subject =
     match detail.lrd_run_kind, detail.lrd_subject_id with
     | Tui_decode.Lane_run_task_verification, Some subject ->
@@ -1171,63 +1398,109 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
         | Some text -> Printf.sprintf "  ·  %s" text
         | None -> "")
   in
-  let slot =
+  let answer_row =
     match detail.lrd_answer_source, detail.lrd_selected_slot with
-    | Some _, _ | None, None -> ""
-    | None, Some slot -> "  ·  SLOT " ^ Terminal_text.single_line slot
+    | Some (Tui_decode.Lane_run_answer_exact_attempt slot), _ ->
+      Ansi.reset, "응답: EXACT · " ^ Terminal_text.single_line slot
+    | Some (Tui_decode.Lane_run_answer_cli_slot slot), _ ->
+      Ansi.reset, "응답: CLI · " ^ Terminal_text.single_line slot
+    | Some (Tui_decode.Lane_run_answer_vendor_system_one { model; endpoint = _ }), _ ->
+      ( Theme.warn ()
+      , "응답: VENDOR SYSTEM ONE · "
+        ^ Terminal_text.single_line model
+        ^ " · NO EXACT-FLOW RECEIPT" )
+    | None, Some slot ->
+      Ansi.reset, "슬롯: " ^ Terminal_text.single_line slot
+    | None, None ->
+      Theme.recede (), "응답: 슬롯 미배정"
   in
-  let answer_source =
-    match detail.lrd_answer_source with
-    | None -> []
-    | Some (Tui_decode.Lane_run_answer_exact_attempt slot) ->
-      [ Ansi.reset, "  ANSWER  EXACT · " ^ Terminal_text.single_line slot ]
-    | Some (Tui_decode.Lane_run_answer_cli_slot slot) ->
-      [ Ansi.reset, "  ANSWER  CLI · " ^ Terminal_text.single_line slot ]
-    | Some (Tui_decode.Lane_run_answer_vendor_system_one { model; endpoint = _ }) ->
-      [ ( Ansi.reset
-        , "  ANSWER  VENDOR SYSTEM ONE · "
-          ^ Terminal_text.single_line model
-          ^ " · NO EXACT-FLOW RECEIPT" ) ]
-  in
-  let failure =
+  let failure_rows =
     match detail.lrd_failure with
     | None -> []
     | Some failure ->
       [ ( Theme.bad ()
-        , Printf.sprintf
-            "  CODE  %s  ·  %s"
+        , Printf.sprintf "오류: %s · %s"
             (Terminal_text.single_line failure.lrf_code)
             (Terminal_text.single_line failure.lrf_detail) ) ]
   in
   let decision_style, decision = lane_run_decision_badge detail in
+  let verdict_and_status_style =
+    match detail.lrd_status with
+    | Tui_decode.Lane_run_failed
+    | Tui_decode.Lane_run_completion_persistence_failed
+    | Tui_decode.Lane_run_completion_durability_unknown
+    | Tui_decode.Lane_run_infrastructure_unavailable
+    | Tui_decode.Lane_run_not_reviewed
+    | Tui_decode.Lane_run_commit_failed
+    | Tui_decode.Lane_run_raised -> Theme.bad ()
+    | Tui_decode.Lane_run_cancelled
+    | Tui_decode.Lane_run_rejected
+    | Tui_decode.Lane_run_superseded
+    | Tui_decode.Lane_run_deferred
+    | Tui_decode.Lane_run_review_cancelled -> Theme.warn ()
+    | Tui_decode.Lane_run_succeeded
+    | Tui_decode.Lane_run_approved
+    | Tui_decode.Lane_run_reviewed
+    | Tui_decode.Lane_run_committed
+    | Tui_decode.Lane_run_running
+    | Tui_decode.Lane_run_other _ ->
+      (match detail.lrd_decision with
+       | Tui_decode.Lane_run_not_a_decision ->
+         lane_run_status_style detail.lrd_status
+       | Tui_decode.Lane_run_decision_approved
+       | Tui_decode.Lane_run_decision_rejected
+       | Tui_decode.Lane_run_decision_reviewed
+       | Tui_decode.Lane_run_decision_committed
+       | Tui_decode.Lane_run_decision_superseded
+       | Tui_decode.Lane_run_decision_pending
+       | Tui_decode.Lane_run_decision_not_reached
+       | Tui_decode.Lane_run_decision_unknown -> decision_style)
+  in
   let tool_style, tools = lane_run_tool_summary detail.lrd_tool_evidence in
   let skill_style, skills = lane_run_skill_summary detail.lrd_skill_evidence in
+  let contract_rows, full_width_tools =
+    match detail.lrd_tool_evidence, detail.lrd_skill_evidence with
+    | Tui_decode.Lane_run_no_tools_by_contract, Tui_decode.Lane_run_no_skills_by_contract ->
+      [ Theme.muted (), "도구/스킬: 미사용 (Exact-output 계약)" ], []
+    | Tui_decode.Lane_run_tools_observed _, _ ->
+      [ skill_style, skills ], [ tool_style, "  " ^ tools ]
+    | (Tui_decode.Lane_run_tools_pending | Tui_decode.Lane_run_no_tools_by_contract
+      | Tui_decode.Lane_run_tools_contract_unknown), _ ->
+      [ tool_style, tools; skill_style, skills ], []
+  in
   let gate_judgment =
     match lane_run_gate_judgment_summary detail.lrd_gate_judgment with
     | None -> []
     | Some (style, line) -> [ style, "  " ^ line ]
   in
-  [ ( Ansi.reset
-    , Printf.sprintf "  LANE  %s  ·  %s%s"
-        (Lane_run_identity.to_id detail.lrd_lane)
-        (Terminal_text.single_line
-           (Tui_decode.lane_run_kind_label detail.lrd_run_kind))
-        subject )
-  ; ( Ansi.dim
-    , Printf.sprintf "  ACTOR  %s  ·  STARTED %s%s%s"
-        (Terminal_text.single_line detail.lrd_actor)
-        (lane_run_clock detail.lrd_started_at) elapsed slot )
-  ; ( Ansi.reset
-    , Printf.sprintf "  DECISION  %s%s%s  ·  RUN  %s%s%s" decision_style
-        decision Ansi.reset (lane_run_status_style detail.lrd_status)
-        (Terminal_text.single_line
-           (Tui_decode.lane_run_status_label detail.lrd_status))
-        Ansi.reset )
-  ]
-  @ failure
-  @ answer_source
+  let left_rows =
+    [ ( verdict_and_status_style
+      , Printf.sprintf "판정: %s  ·  실행: %s" decision
+          (Terminal_text.single_line
+             (Tui_decode.lane_run_status_label detail.lrd_status)) )
+    ; ( Ansi.reset
+      , Printf.sprintf "레인: %s  ·  %s%s"
+          (Lane_run_identity.to_id detail.lrd_lane)
+          (Terminal_text.single_line
+             (Tui_decode.lane_run_kind_label detail.lrd_run_kind))
+          subject )
+    ]
+    @ failure_rows
+  in
+  let right_rows =
+    [ answer_row
+    ; ( Ansi.dim
+      , Printf.sprintf "호출: %s  ·  시작 %s%s"
+          (Terminal_text.single_line detail.lrd_actor)
+          (lane_run_clock detail.lrd_started_at) elapsed )
+    ]
+    @ contract_rows
+  in
+  split_summary_columns ~cols
+    ~left_title:"판정 · 실행 상태" ~left_rows
+    ~right_title:"응답 모델 · 호출 주체" ~right_rows
   @ gate_judgment
-  @ [ tool_style, "  " ^ tools; skill_style, "  " ^ skills ]
+  @ full_width_tools
 
 let lane_run_panel_titles (detail : Tui_decode.lane_run_detail) =
   match detail.lrd_run_kind, detail.lrd_tool_evidence with
@@ -1475,8 +1748,8 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
   in
   measurement_output_preview ~width ~output_path:report.output_path (probabilities @ samples)
 
-let inspection_summary_lines = function
-  | Inspection_lane detail -> lane_run_summary_lines detail
+let inspection_summary_lines ~cols = function
+  | Inspection_lane detail -> lane_run_summary_lines ~cols detail
   | Inspection_measurement (_, measurement) -> measurement_summary_lines measurement.report
 
 let inspection_panel_titles = function
@@ -1576,7 +1849,7 @@ let render_lane_run_detail (state : state) ~run_id =
       done;
       0, None, 0
     | Some detail, (Some _ | None) ->
-      let summary = inspection_summary_lines detail in
+      let summary = inspection_summary_lines ~cols detail in
       let compact_preflight = match detail with
         | Inspection_lane {Tui_decode.lrd_librarian_preflight=Some _;_} -> not state.lane_run_preflight_details
         | Inspection_lane { lrd_librarian_preflight = None;_} | Inspection_measurement (_, _) -> false in
@@ -1695,19 +1968,38 @@ type client_table_column =
 let render_client_detail state (client : Masc.Tui_decode.client_row) =
   let terminal_rows, cols = get_terminal_size () in
   let width = max 1 (framed_inner_width cols - 2) in
-  let field label value =
-    ("  " ^ Ansi.bold ^ label ^ Ansi.reset)
-    :: (Message_layout.wrap_words ~max_cells:width (Terminal_text.single_line value)
-        |> List.map (fun line -> "  " ^ line))
+  let field ?(style = Ansi.reset) label value =
+    let prefix = "  " ^ label ^ ": " in
+    let prefix_width = Message_layout.display_width prefix in
+    let continuation = String.make prefix_width ' ' in
+    match
+      Message_layout.wrap_words ~max_cells:(max 1 (width - prefix_width))
+        (Terminal_text.single_line value)
+    with
+    | [] -> [ prefix ^ style ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset ]
+    | first :: rest ->
+      (Ansi.bold ^ prefix ^ Ansi.reset ^ style ^ first ^ Ansi.reset)
+      :: List.map (fun line -> continuation ^ style ^ line ^ Ansi.reset) rest
   in
   let optional = function Some value -> value | None -> Masc_tui_theme.Glyph.no_value in
-  let lines = field "Name:" client.cr_name
-    @ field "Status:" (Masc.Tui_decode.client_status_to_string client.cr_status)
-    @ field "Type:" client.cr_agent_type
-    @ field "Acting for:" (optional client.cr_keeper_name)
-    @ field "Task:" (optional client.cr_current_task)
-    @ field "Last seen (as read):" client.cr_last_seen
-    @ field "Observation age:" (Masc_tui_wire_age.text ~now:(Unix.gettimeofday ()) client.cr_last_seen)
+  let status_style =
+    match client.cr_status with
+    | Masc.Tui_decode.Client_active | Masc.Tui_decode.Client_busy -> Theme.ok ()
+    | Masc.Tui_decode.Client_listening -> Theme.info ()
+    | Masc.Tui_decode.Client_inactive -> Theme.recede ()
+  in
+  let lines =
+    detail_section_lines ~first:true "1. 연결 상태 · 현재 작업 (Status & Activity)"
+    @ field ~style:status_style "Status"
+        (Masc.Tui_decode.client_status_to_string client.cr_status)
+    @ field "Acting for" (optional client.cr_keeper_name)
+    @ field "Task" (optional client.cr_current_task)
+    @ field "Observation age"
+        (Masc_tui_wire_age.text ~now:(Unix.gettimeofday ()) client.cr_last_seen)
+    @ field ~style:Ansi.dim "Last seen (as read)" client.cr_last_seen
+    @ detail_section_lines "2. 클라이언트 식별 정보 (Identity)"
+    @ field "Name" client.cr_name
+    @ field "Type" client.cr_agent_type
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"client-detail"
     ~frame:Chrome_overlay ~title:(screen_title " MASC Client Detail")
@@ -1736,15 +2028,19 @@ let render_clients (state : state) =
       now.Unix.tm_sec
   in
   let header =
+    let title = screen_title " MASC System / Runtime / Clients" in
     match state.clients_surface with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC System / Runtime / Clients") (title_missing_reading ~error:state.clients_surface_error) timestamp
+          title (title_missing_reading ~error:state.clients_surface_error) timestamp
           (connection_badge state)
     | Some _ ->
-        Printf.sprintf "%s (%d attached)  %s  %s"
-          (screen_title " MASC System / Runtime / Clients") shown timestamp
-          (connection_badge state)
+        let after = "  " ^ timestamp ^ "  " ^ connection_badge state in
+        Printf.sprintf "%s  %s%s"
+          title
+          (runtime_substrate_tab_strip state ~cols
+             ~before:(title ^ tab_strip_gap) ~after ~current:`Clients)
+          after
   in
   box_top buf cols;
   box_line buf cols header;
@@ -1902,22 +2198,15 @@ let render_clients (state : state) =
   finish_surface state ~surface_key:"clients" ~rows:terminal_rows ~cols buf
 ;;
 
-let render_lane_scrollable_reading (state : state) ~terminal_rows ~cols
-    ~surface_key ~title ~hints raw_lines =
+let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
+    ~surface_key ~title ~hints styled_lines =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let width = max 1 (framed_inner_width cols - 2) in
-  let lines =
-    raw_lines
-    |> List.concat_map (fun text ->
-         Terminal_text.single_line text
-         |> Message_layout.wrap_words ~max_cells:width)
-  in
   let height = max 1 (rows - Masc_tui_frame.chrome_rows) in
   let scroll =
-    Masc_tui_scroll.normalize ~count:(List.length lines) ~height
+    Masc_tui_scroll.normalize ~count:(List.length styled_lines) ~height
       state.lane_run_detail_scroll
   in
-  let window = Rows.of_list ~first:scroll ~height lines in
+  let window = Rows.of_list ~first:scroll ~height styled_lines in
   let buf = Buffer.create 4096 in
   box_top buf cols;
   box_line buf cols (screen_title title ^ "  " ^ connection_badge state);
@@ -1925,16 +2214,23 @@ let render_lane_scrollable_reading (state : state) ~terminal_rows ~cols
   for offset = 0 to height - 1 do
     match Rows.at window (scroll + offset) with
     | None -> box_empty buf cols
-    | Some line -> box_line buf cols ("  " ^ line)
+    | Some (style, line) -> box_line_styled buf cols ~style line
   done;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~position:(Masc_tui_scroll.window_text ~scroll ~height (List.length lines))
+       ~position:(Masc_tui_scroll.window_text ~scroll ~height (List.length styled_lines))
        ~hints);
   finish_surface state
     ~clamped:(Lane_run_detail_scroll { scroll; content_height = height })
     ~surface_key ~rows:terminal_rows ~cols buf
+
+let render_lane_scrollable_reading (state : state) ~terminal_rows ~cols
+    ~surface_key ~title ~hints raw_lines =
+  let max_cells = max 1 (framed_inner_width cols - 2) in
+  render_lane_scrollable_styled_reading state ~terminal_rows ~cols
+    ~surface_key ~title ~hints
+    (wrap_indented_lines ~max_cells Ansi.reset raw_lines)
 
 let lane_activity_hints =
   "Space:draft  s:save  r:read  u:reapply  x:discard  ?:help  Esc:back"
@@ -1942,29 +2238,45 @@ let lane_activity_hints =
 let render_lane_inventory_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
   let width = max 1 (framed_inner_width cols - 2) in
+  let max_cells = max 1 (width - 2) in
+  let wrap style text = wrap_indented_line ~max_cells style text in
   let content = match state.lane_inventory with
-    | None -> ["Lane inventory has not been read. r: refresh"]
+    | None -> wrap (Theme.recede ()) "Lane inventory has not been read. r: refresh"
     | Some snapshot ->
         (match target with
-         | None -> "Inventory diagnostics" :: (match Masc_tui_lane_inventory.snapshot_notices snapshot with
-             | [] -> ["No inventory read issues observed."]
-             | notices -> notices)
+         | None ->
+             wrap Ansi.bold "Inventory diagnostics"
+             @ (match Masc_tui_lane_inventory.snapshot_notices snapshot with
+                | [] -> wrap (Theme.recede ()) "No inventory read issues observed."
+                | notices -> wrap_indented_lines ~max_cells (Theme.warn ()) notices)
          | Some id ->
              (match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) -> String.equal row.id id) snapshot.rows with
-              | None -> ["This Lane is absent from the current reading. Esc returns to the inventory."]
+              | None ->
+                  wrap (Theme.warn ())
+                    "This Lane is absent from the current reading. Esc returns to the inventory."
               | Some row ->
+                  let detail_for_row row =
+                    inventory_row_detail_lines ~width
+                      ~selected_output:(Masc_tui_types.lanes_exact_output_name state row)
+                      row
+                  in
                   (match row.Masc.Tui_decode_lane_inventory.selection with
                    | Exact lane ->
                        (match List.find_opt (fun (item : Tui_decode.standalone_lane) ->
                             Standalone_lane.equal item.sl_lane lane) snapshot.exact_snapshot.sls_lanes with
-                        | Some item -> standalone_lane_detail_lines ~now:(Unix.gettimeofday ()) ~width item
-                            |> List.map (fun (_,line) -> Masc_tui_theme.strip_sgr line)
-                        | None -> Masc_tui_lane_inventory.detail_lines row)
+                        | Some item ->
+                            standalone_lane_detail_lines ~now:(Unix.gettimeofday ()) ~width item
+                        | None -> detail_for_row row)
                    | Browser _ | Machine _ | Declaration _ | Manual_instance _ ->
-                       Masc_tui_lane_inventory.detail_lines row))) in
-  let content = (match state.standalone_lanes_error with
-    | None -> [] | Some detail -> ["STALE · " ^ detail]) @ content in
-  render_lane_scrollable_reading state ~terminal_rows ~cols
+                       detail_for_row row))) in
+  let content =
+    Option.to_list
+      (Option.map (fun detail -> wrap (Theme.warn ()) ("STALE · " ^ detail))
+         state.standalone_lanes_error)
+    |> List.concat
+    |> fun stale -> stale @ content
+  in
+  render_lane_scrollable_styled_reading state ~terminal_rows ~cols
     ~surface_key:"lane-inventory-detail" ~title:" MASC Lane reading"
     ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End:top/bottom  r:refresh  Esc/Left:inventory"
     content

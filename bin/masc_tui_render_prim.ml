@@ -5503,3 +5503,129 @@ let lane_run_clock started_at =
   let tm = Unix.localtime started_at in
   Printf.sprintf "%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let detail_section_heading ?(first = false) title =
+  let heading = [ Theme.info () ^ Ansi.bold, "  [ " ^ title ^ " ]" ] in
+  if first then heading else (Ansi.dim, "") :: heading
+
+let detail_section_lines ?(first = false) title =
+  let heading = [ "  " ^ Theme.info () ^ Ansi.bold ^ "[ " ^ title ^ " ]" ^ Ansi.reset ] in
+  if first then heading else "" :: heading
+
+let wrap_summary_column_items ~width items =
+  let width = max 1 width in
+  List.concat_map
+    (fun (style, text) ->
+       let clean = Terminal_text.single_line text in
+       if Message_layout.display_width clean <= width then
+         [ style, clean ]
+       else
+         match Message_layout.wrap_words ~max_cells:(max 1 (width - 2)) clean with
+         | [] -> []
+         | first :: rest ->
+           (style, first)
+           :: List.map (fun line -> style, "  " ^ line) rest)
+    items
+
+let split_summary_columns ~cols ~left_title ~left_rows ~right_title ~right_rows =
+  let inner = max 1 (framed_inner_width cols) in
+  let heading_style = Theme.recede () ^ Ansi.bold in
+  if cols >= keeper_split_threshold_cols then begin
+    let indent = "  " in
+    let indent_width = 2 in
+    let divider = " │ " in
+    let divider_width = 3 in
+    let body_width = max 2 (inner - indent_width) in
+    let left_width = max 1 ((body_width - divider_width) / 2) in
+    let right_width = max 1 (body_width - left_width - divider_width) in
+    let left_lines =
+      (heading_style, left_title)
+      :: wrap_summary_column_items ~width:left_width left_rows
+    in
+    let right_lines =
+      (heading_style, right_title)
+      :: wrap_summary_column_items ~width:right_width right_rows
+    in
+    let total = max (List.length left_lines) (List.length right_lines) in
+    let cell width (style, text) =
+      fit_width (style ^ text ^ Ansi.reset) width
+    in
+    List.init total (fun index ->
+      let left =
+        Option.value (List.nth_opt left_lines index) ~default:(Ansi.reset, "")
+      in
+      let right =
+        Option.value (List.nth_opt right_lines index) ~default:(Ansi.reset, "")
+      in
+      ( ""
+      , indent
+        ^ cell left_width left
+        ^ Theme.recede () ^ divider ^ Ansi.reset
+        ^ cell right_width right ))
+  end
+  else begin
+    let width = max 1 (inner - 4) in
+    let indent_rows rows =
+      wrap_summary_column_items ~width rows
+      |> List.map (fun (style, line) -> style, "    " ^ line)
+    in
+    [ heading_style, "  " ^ left_title ]
+    @ indent_rows left_rows
+    @ [ heading_style, "  " ^ right_title ]
+    @ indent_rows right_rows
+  end
+
+let runtime_substrate_tab_strip (state : state) ~cols ~before ~after
+    ~(current : [ `Runtime_lanes | `Runtime_all | `Features | `Clients ]) =
+  let lane_reading =
+    Option.map
+      (fun (snapshot : Masc.Tui_decode.runtime_surface_snapshot) ->
+        let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
+        match current with
+        | `Runtime_lanes | `Runtime_all ->
+          Printf.sprintf "%s, %s"
+            (Message_layout.count_noun lane_count "lane")
+            (Message_layout.count_noun (List.length snapshot.rss_candidates) "slot")
+        | `Features | `Clients -> string_of_int lane_count)
+      state.runtime_surface
+  in
+  let all_reading =
+    Option.map
+      (fun (snapshot : Masc.Tui_decode.runtime_surface_snapshot) ->
+        string_of_int (List.length snapshot.rss_resolved.rrs_runtimes))
+      state.runtime_surface
+  in
+  let feature_reading =
+    Option.map
+      (fun (snapshot : Masc.Tui_decode_lane_inventory.snapshot) ->
+        let count = List.length snapshot.rows in
+        match current with
+        | `Features -> Message_layout.count_noun count "feature"
+        | `Runtime_lanes | `Runtime_all | `Clients -> string_of_int count)
+      state.lane_inventory
+  in
+  let client_reading =
+    Option.map
+      (fun (snapshot : Masc.Tui_decode.clients_snapshot) ->
+        let count = List.length snapshot.cls_clients in
+        match current with
+        | `Clients -> Printf.sprintf "%d attached" count
+        | `Runtime_lanes | `Runtime_all | `Features -> string_of_int count)
+      state.clients_surface
+  in
+  tab_strip
+    ~width:(tab_strip_width ~cols ~before ~after)
+    ~press:pressable
+    [ ( tab_entry_label "Candidate orders" lane_reading
+      , current = `Runtime_lanes
+      , Press_runtime_mode Runtime_lanes )
+    ; ( tab_entry_label "All runtimes" all_reading
+      , current = `Runtime_all
+      , Press_runtime_mode Runtime_all )
+    ; ( tab_entry_label "Features" feature_reading
+      , current = `Features
+      , Press_standalone_lanes )
+    ; ( tab_entry_label "Clients" client_reading
+      , current = `Clients
+      , Press_surface Clients )
+    ]

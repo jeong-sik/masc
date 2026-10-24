@@ -6,7 +6,7 @@ Current and historical typed context encode identically as `role: system`, `clea
 
 The native serializer and creation-prefix fold share one header encoder, including both role and clear_at. Removed empty assistants contribute no phantom header to the digest. Prefix stamps use `agent_core.reasoning_prefix.v2`; old stamps are absent certification, with no conversion or migration. This does not establish resumed artifact compatibility (#27894). Sync, streaming and exact-output transports already use the shared body-sensitive beta resolver; Count_tokens now uses it too.
 
-Ordinary User, Recovery_instruction and Agent_instruction retain their existing continuation placement in this layer. An instruction after an assistant cannot become a text System there under the native rules. No human query, tool ID or server-tool-result support is fabricated. #27904 remains open for these other origin/episode paths and integration evidence.
+Ordinary User, Recovery_instruction and Agent_instruction retain their existing continuation placement in this layer. An instruction after an assistant cannot become a text System there under the native rules. No human query, tool ID or server-tool-result support is fabricated. #27904 was closed remotely after the preceding layers merged. This PR still tracks the native context repair; other origin/episode paths and integration evidence remain outside its verified scope. Issue closure does not establish those execution results.
 
 ## Executed isolated source evidence
 

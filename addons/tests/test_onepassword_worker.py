@@ -54,6 +54,17 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(set(status), set(tools["onepassword_status"]["outputSchema"]["required"]))
         self.assertTrue((PACKAGE / "skills" / "onepassword" / "SKILL.md").is_file())
 
+    def test_private_companion_negotiation_does_not_enable_status_or_login(self):
+        responses = self.call([self.rpc("lane_companion", {}),
+                               self.rpc("lane_companion", {"token": "MUST_NOT_LEAK"}, 2),
+                               self.rpc("lane_call", {"tool": "lane_companion", "arguments": {},
+                                                       "caller": {"kind": "operator"}}, 3)])
+        self.assertEqual(responses[0]["result"], {"content": [], "structuredContent": {"version": 1, "tools": []},
+                                                "isError": False})
+        self.assertTrue(responses[1]["result"]["isError"])
+        self.assertTrue(responses[2]["result"]["isError"])
+        self.assertNotIn("MUST_NOT_LEAK", json.dumps(responses))
+
     def test_status_requires_host_context_and_cannot_select_oauth_controls(self):
         requests = [self.rpc("onepassword_status", {}, 1)]
         for identity, (tool, caller, arguments) in enumerate([

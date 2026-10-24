@@ -56,8 +56,9 @@ rechecks the exact Chrome tab before filling. A fill failure after entry fences
 the original session. Their results stay on the private backend path; these
 programs are not model tools. The independent host socket broker and two-phase
 Python client are [source implementation](../../docs/design/lane-addon-companion-broker.md).
-Runtime/private-context authority wiring, the login lifecycle, installed-host
-execution and real account verification remain unfinished.
+Runtime/private-context authority wiring is also source implementation. The
+package negotiates no companion exports until its login lifecycle is ready.
+That lifecycle, installed-host execution and real account verification remain unfinished.
 
 1. Extend the private connection controls with approval links, confirmed remote
    revocation and explicit interrupted-exchange recovery. A new account must not

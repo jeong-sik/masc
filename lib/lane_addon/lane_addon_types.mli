@@ -111,6 +111,9 @@ val host_requests_tool : string
 (** [lane_host_requests]: the worker lists every request it waits for
     (RFC operator-quiz §4.4). *)
 val operator_tool : string
+val companion_tool : string
+(** Optional private handshake, never an action or exported tool. Its closed
+    version/tool list opts specific host-context exports into companion grants. *)
 (** Reserved private operator port. Cannot be an export or an action tool. *)
 
 val host_result_tool : string

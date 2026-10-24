@@ -46,6 +46,37 @@ signals cancellation and removes new admission immediately. `await_stopped`
 separately joins the broker's listener and connections; it does not prove external
 Browser/process cleanup. The caller removes its private directory after that join.
 
+## Host connection and call context
+
+An optional reserved MCP `lane_companion` handshake declares version 1 and the
+exact exported tools that need this channel. It requires host-context invocation;
+the reserved handshake cannot be exported or used as an action. Negotiation,
+schemas and exports become visible together at Ready. Companion exports require
+input validation and closed public output schemas even when other hooks are disabled.
+
+The native MCP connection lazily owns one private allocation. Only a negotiated
+export receives a fresh capability in its private `lane_call` envelope. The
+model's original arguments stay separate. Admission is checked again under the
+original worker RPC mutex. Raw worker text, metadata and error detail never reach
+the companion export's public callbacks; validated structured output is projected
+to its public reply. Container workers and Browser-service providers do not
+receive this host companion transport.
+
+At bind and before each new extension effect, the runtime checks the original
+provider and Browser entries, generative connection identities and caller
+visibility. One fresh declaration snapshot checks both configured owners,
+including enabled state, revision and execution package. Both identities are
+checked again after that read. The original Browser client repeats admission
+after socket connect and before writing.
+
+Retirement withdraws new admission and revokes the broker immediately. Worker
+cleanup joins both its original process and private allocation. Allocation cleanup
+joins the broker and registered Browser settlements, then removes only its
+original empty temporary directory. Only the broker owns socket removal, guarded
+by captured directory/socket inode identities. Replacement paths are retained as
+unconfirmed. Abandoned bindings release only the original Browser operation and
+accept only the exact successful release receipt.
+
 ## Python client
 
 `addons/onepassword/companion.py` validates the private endpoint's directory and
@@ -74,10 +105,9 @@ explicit invocation cancellation and the separate revocation/join boundary. This
 coding session parsed those sources; it did not execute, typecheck or build them.
 No installed-host, real Browser or real 1Password result is established.
 
-The runtime must still construct this broker under the original provider owner,
-inject grants only into negotiated private host call context, and implement the
-fresh provider/caller/Browser authority factory. It must withdraw unused grants,
-cancel failed invocations and join broker cleanup during provider retirement.
-The Python login lifecycle must then use this transport, private approval controls
+The host connection, private call context and authority factory are source
+implementation. Their OCaml fixtures have not been executed or typechecked in
+this coding session. The 1Password package negotiates an empty tool list until
+its login lifecycle can use this transport, private approval controls
 and durable safe operation/continuation records. Existing exports continue to
 report `browser_login_available = false` until that path is usable.

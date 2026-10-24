@@ -23,9 +23,9 @@ let expected command reply = match command,reply with
   | W.Extension _,W.Extension_reply _ -> true
   | (W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Deliver _|Disconnect _|Issue _),
     (W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _) -> false
-let exchange t ~settlement ~on_cancel_after_dispatch command =
+let exchange t ~settlement ~admit ~on_cancel_after_dispatch command =
   let available () = settlement || (not t.revoked && t.available ()) in
-  if not (available ()) then Error (Unavailable "browser worker is unavailable")
+  if not (available () && admit ()) then Error (Unavailable "browser worker is unavailable")
   else match Eio_context.get_net_opt (),Eio_context.get_clock_opt () with
   | None,_ | _,None -> Error (Unavailable "browser worker network context is unavailable")
   | Some net,Some clock ->
@@ -38,7 +38,7 @@ let exchange t ~settlement ~on_cancel_after_dispatch command =
         | W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Extension _|Deliver _|Disconnect _ -> 0.) in
       let exchange () = Eio.Switch.run (fun sw ->
         let flow = Eio.Net.connect ~sw net (`Unix t.socket_path) in
-        if not (available ()) then Error (Unavailable "browser worker was retired before dispatch")
+        if not (admit () && available ()) then Error (Unavailable "browser worker was retired before dispatch")
         else (
           writing := true;
           Eio.Flow.copy_string (text ^ "\n") flow;
@@ -72,11 +72,15 @@ let exchange t ~settlement ~on_cancel_after_dispatch command =
         Error (if !writing then Outcome_unknown detail else Unavailable detail)
 
 let call t ~on_cancel_after_dispatch command =
-  exchange t ~settlement:false ~on_cancel_after_dispatch command
+  exchange t ~settlement:false ~admit:(fun () -> true) ~on_cancel_after_dispatch command
+let call_companion t ~admit ~on_cancel_after_dispatch command =
+  try exchange t ~settlement:false ~admit ~on_cancel_after_dispatch (W.Extension command) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> Error (Outcome_unknown "private browser call outcome unknown")
 
 let transfer_download t ~id ~actor ~route ~verb ~publish =
   let call ~settlement command =
-    exchange t ~settlement ~on_cancel_after_dispatch:(fun () -> ()) command
+    exchange t ~settlement ~admit:(fun () -> true) ~on_cancel_after_dispatch:(fun () -> ()) command
     |> Result.map_error (function Unavailable detail|Outcome_unknown detail -> detail) in
   let receipt = function
     | W.Receipt -> Ok ()

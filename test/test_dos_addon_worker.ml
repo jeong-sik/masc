@@ -69,7 +69,7 @@ let test_stdio_controller () =
               let raw name arguments = unwrap (Client.call_tool client ~name ~arguments ()) in
               let call ?controller ?(principal=Lane_addon_call_context.Keeper "fixture") name arguments =
                 raw Lane_addon_call_context.tool_name
-                  (Lane_addon_call_context.to_json_with_controller ~controller ~principal ~tool:name ~arguments) in
+                  (Lane_addon_call_context.to_json_with_controller ~companion:None ~controller ~principal ~tool:name ~arguments) in
               let snapshot () = member "holder" (raw C.snapshot_tool (`Assoc [])) in
               let admission ?release ?handoff_target observed_holder =
                 {C.observed_holder;release;handoff_target} in
@@ -157,7 +157,7 @@ let test_stdio_controller () =
                   (Tool_result.Workflow_rejection, Tool_result.Proven_post_effect));
               ignore (call ~controller:(admission None) "masc_dos_step" step_args);
               let release holder = raw C.release_tool
-                (Lane_addon_call_context.to_json_with_controller
+                (Lane_addon_call_context.to_json_with_controller ~companion:None
                   ~controller:(Some (admission ~release:C.No_credential (Some holder)))
                   ~principal:(Lane_addon_call_context.Host_actor "operator")
                   ~tool:C.release_tool ~arguments:(`Assoc [])) in
@@ -397,7 +397,7 @@ let test_a_core_exception_while_booting_is_a_completed_load () =
     let raw name arguments = unwrap (Client.call_tool client ~name ~arguments ()) in
     let admission = {C.observed_holder=None; release=None; handoff_target=None} in
     let loaded = raw Lane_addon_call_context.tool_name
-      (Lane_addon_call_context.to_json_with_controller ~controller:(Some admission)
+      (Lane_addon_call_context.to_json_with_controller ~companion:None ~controller:(Some admission)
          ~principal:(Lane_addon_call_context.Keeper "fixture") ~tool:"masc_dos_load"
          ~arguments:(`Assoc ["program", `String "bad-boot"; "boot", `String "GAME.COM"])) in
     check bool "the load completes" false (loaded.S.is_error = Some true);
@@ -426,7 +426,7 @@ let test_a_handler_exception_does_not_end_the_worker () =
     let raw name arguments = unwrap (Client.call_tool client ~name ~arguments ()) in
     let call ?controller name arguments =
       raw Lane_addon_call_context.tool_name
-        (Lane_addon_call_context.to_json_with_controller ~controller
+        (Lane_addon_call_context.to_json_with_controller ~companion:None ~controller
            ~principal:(Lane_addon_call_context.Keeper "fixture") ~tool:name ~arguments) in
     let admission observed_holder = {C.observed_holder; release=None; handoff_target=None} in
     let snapshot () = member "holder" (raw C.snapshot_tool (`Assoc [])) in

@@ -67,7 +67,7 @@ let tool =
     (fun _ -> Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None })
 ;;
 
-let write config absolute_turn =
+let write_for config keeper absolute_turn =
   Snapshot.write_best_effort
     ~config
     ~keeper
@@ -80,16 +80,20 @@ let write config absolute_turn =
     ~tools:[ tool ]
 ;;
 
+let write config absolute_turn = write_for config keeper absolute_turn
+
 let turn_ref absolute_turn =
   Ids.Turn_ref.make ~trace_id:"trace-provider-input" ~absolute_turn
 ;;
 
-let read config absolute_turn =
+let read_for config keeper absolute_turn =
   match Snapshot.read_manifest ~config ~keeper ~turn_ref:(turn_ref absolute_turn) with
   | Ok manifest -> manifest
   | Error error ->
     failf "provider input read failed: %s" (Snapshot.read_error_to_string error)
 ;;
+
+let read config absolute_turn = read_for config keeper absolute_turn
 
 let read_part config absolute_turn index =
   Snapshot.read_part ~config ~keeper ~turn_ref:(turn_ref absolute_turn) ~index
@@ -289,6 +293,87 @@ let test_malformed_latest_snapshot_is_not_used_for_reuse () =
     ignore (read config 8))
 ;;
 
+let test_new_owner_and_malformed_history_reuse_verified_blobs () =
+  with_workspace_env (fun _env sw config ->
+    write config 7;
+    let first = read config 7 in
+    let store = Tool_blob_store.create ~base_path:config.base_path in
+    let originals =
+      List.map
+        (fun (part : Snapshot.part) ->
+          let path = blob_path store part.part_sha256 in
+          let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
+          Eio.Switch.on_release sw (fun () -> Unix.close fd);
+          path, Unix.fstat fd)
+        first.mf_parts
+    in
+    let check_originals () =
+      List.iter
+        (fun (path, before) ->
+          let after = Unix.stat path in
+          check bool "verified physical blob is retained" true
+            (before.Unix.st_dev = after.Unix.st_dev
+             && before.Unix.st_ino = after.Unix.st_ino))
+        originals
+    in
+    let other = "provider-input-other-owner" in
+    (* This owner has no previous snapshot from which to borrow a reuse map. *)
+    write_for config other 7;
+    check bool "another owner retains the exact ordered parts" true
+      (first.mf_parts = (read_for config other 7).mf_parts);
+    check_originals ();
+    (* Invalid owner history supplies no authority. The unchanged physical
+       blobs still have their separate strict-publication evidence. *)
+    Dated_jsonl.append
+      (Keeper_types_support.keeper_provider_input_store config keeper)
+      (`Assoc [ "schema", `String "broken" ]);
+    write config 8;
+    check bool "malformed history does not alter the new exact parts" true
+      (first.mf_parts = (read config 8).mf_parts);
+    check_originals ())
+;;
+
+let test_new_owner_repairs_missing_corrupt_and_nonstrict_blobs () =
+  with_workspace_env (fun _env sw config ->
+    write config 7;
+    let first = read config 7 in
+    let store = Tool_blob_store.create ~base_path:config.base_path in
+    let parts = Array.of_list first.mf_parts in
+    let path index = blob_path store parts.(index).part_sha256 in
+    let exact_contents =
+      Array.init 3 (fun index ->
+        match read_part config 7 index with
+        | Ok content -> content.pc_text
+        | Error error -> failf "%s" (Snapshot.read_error_to_string error))
+    in
+    Unix.unlink (path 0);
+    Fs_compat.save_file (path 1) "corrupt provider message";
+    ignore
+      (Tool_blob_store.put store ~bytes:exact_contents.(2) ~mime:"application/json"
+        : Tool_output.t);
+    let ordinary_fd = Unix.openfile (path 2) [ Unix.O_RDONLY ] 0 in
+    Eio.Switch.on_release sw (fun () -> Unix.close ordinary_fd);
+    let ordinary_identity = Unix.fstat ordinary_fd in
+    let other = "provider-input-repair-owner" in
+    write_for config other 7;
+    let repaired = read_for config other 7 in
+    check bool "fresh owner retains all exact original parts" true
+      (first.mf_parts = repaired.mf_parts);
+    List.iter
+      (fun (part : Snapshot.part) ->
+        match Snapshot.read_part ~config ~keeper:other ~turn_ref:(turn_ref 7)
+          ~index:part.part_index with
+        | Error error -> failf "%s" (Snapshot.read_error_to_string error)
+        | Ok content ->
+          check string "damaged or missing bytes are restored exactly"
+            exact_contents.(part.part_index) content.pc_text)
+      repaired.mf_parts;
+    let strict_identity = Unix.stat (path 2) in
+    check bool "ordinary replacement cannot inherit strict publication" true
+      (ordinary_identity.Unix.st_dev <> strict_identity.Unix.st_dev
+       || ordinary_identity.Unix.st_ino <> strict_identity.Unix.st_ino))
+;;
+
 let test_wrong_turn_is_not_substituted () =
   with_workspace (fun config ->
     write config 7;
@@ -392,6 +477,14 @@ let () =
             "malformed latest snapshot is not reused"
             `Quick
             test_malformed_latest_snapshot_is_not_used_for_reuse
+        ; test_case
+            "new owners and malformed history reuse verified physical blobs"
+            `Quick
+            test_new_owner_and_malformed_history_reuse_verified_blobs
+        ; test_case
+            "new owners repair missing, corrupt and non-strict blobs"
+            `Quick
+            test_new_owner_repairs_missing_corrupt_and_nonstrict_blobs
         ; test_case
             "a message payload is the serialised message and its digest"
             `Quick

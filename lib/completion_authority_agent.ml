@@ -219,6 +219,8 @@ let review_notes
          | Some runtime -> `String runtime
          | None -> `Null)
       ; "gate", `String (Task.Anti_rationalization.gate_to_string result.gate)
+      ; "evaluator_execution", (match result.evaluator_execution with
+          | None -> `Null | Some identity -> Runtime_response_identity.to_yojson identity)
       ; "verdict", verdict
       ; "authority_kind", `String (Masc_domain.completion_authority_kind authority)
       ; "authority_actor", `String (Masc_domain.completion_authority_actor authority)
@@ -401,7 +403,7 @@ let completion_notes_of_evidence
     | `Assoc fields ->
       `Assoc
         (List.filter
-           (fun (name, _) -> not (String.equal name "submitted_evidence"))
+           (fun (name, _) -> not (String.equal name "submitted_evidence" || String.equal name "producer_execution"))
            fields)
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
       as output -> output
@@ -419,6 +421,7 @@ let completion_notes_of_evidence
 
 type prepared_review =
   { request : Verification.verification_request
+  ; producer_execution : Runtime_response_identity.t option
   ; evidence_access : Workspace_verification_store.submitted_evidence_access
   ; review_request : Task.Anti_rationalization.review_request
   ; unread_images : (string * Workspace_verification_store.read_binary_error) list
@@ -511,6 +514,11 @@ let prepare_review
              assignee
              header.worker)
       else
+        let producer_execution = match Verification.producer_execution request with
+          | Ok identity -> identity
+          | Error detail ->
+            Log.Task.warn "[verification-submit-provenance] request=%s unknown: %s" request.id detail;
+            None in
         let* evidence_refs = evidence_refs_of_output request.output in
         let* question = verdict_question_of_request request in
         (* An artifact reference the store could not read is carried here,
@@ -550,6 +558,7 @@ let prepare_review
         in
         Ok
           { request
+          ; producer_execution
           ; evidence_access
           ; review_request =
               { task_title = task.title
@@ -1160,6 +1169,8 @@ let process_task_once ?(registry=Verification_run_registry.global ())
               | Error Verifier_review_owner.Not_found ->
               let* original =
                 Verifier_review_original.prepare
+                  ~generator_runtime:(Option.map
+                    (fun identity -> identity.Runtime_response_identity.runtime_id) prepared.producer_execution)
                   ~verification_id
                   ~attempt
                   ~question
@@ -1234,7 +1245,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                (last record 2026-07-27; the surface read as a museum). A
                non-verdict is a no-op inside; the stalled path below already
                reaches the Board. *)
-            Eval_calibration.record_verdict ~task_id:task.id
+            Eval_calibration.record_verdict ?producer_execution:prepared.producer_execution ~task_id:task.id
               ~req:prepared.review_request ~result ();
             let evaluator_runtime = result.evaluator_runtime in
             match result.verdict with

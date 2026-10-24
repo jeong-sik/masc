@@ -32,6 +32,12 @@ type verification_request = {
   created_at: float;
 }
 
+val producer_execution : verification_request -> (Runtime_response_identity.t option, string) result
+(** The host-captured submitting response retained in immutable request output.
+    Missing/null evidence is unknown; malformed or worker-mismatched evidence
+    returns a diagnostic error. This accessor does not reject the Task or its
+    request. No runtime metadata is consulted. *)
+
 (** What one pass over the request directory found, each readable request as
     the reader keeps it. Callers report both fields: [readable] alone is a
     silent drop, and failing the scan over one entry in [unreadable] loses

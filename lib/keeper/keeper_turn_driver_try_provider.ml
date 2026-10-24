@@ -2280,6 +2280,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; runtime_id = Some ctx.runtime_id
+          ; execution_actor = (if String.trim ctx.keeper_name = "" then None else Some ctx.keeper_name)
           ; transport = ctx.transport_resolved
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
           ; session_id = (input_trace_id ctx.request_input)

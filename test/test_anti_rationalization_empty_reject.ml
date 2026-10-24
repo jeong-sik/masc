@@ -67,7 +67,7 @@ let test_explicit_base_path_reaches_reviewer () =
   with_reviewer
     (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
        received := Some base_path;
-       Ok {AR.selected_runtime_id="task-reviewer";verdict=None})
+       Ok {AR.selected_runtime_id="task-reviewer"; evaluator_execution = None;verdict=None})
     (fun () ->
        ignore
          (AR.review ~evaluator_runtime:"task-reviewer"
@@ -101,7 +101,7 @@ let configure_prompt_registry () =
 let test_structured_tool_is_the_only_semantic_verdict () =
   with_reviewer
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-       Ok {AR.selected_runtime_id="task-reviewer";verdict=Some (AR.Approve "")})
+       Ok {AR.selected_runtime_id="task-reviewer";evaluator_execution=None;verdict=Some (AR.Approve "")})
     (fun () ->
        let result = review () in
        Alcotest.(check string)
@@ -114,10 +114,29 @@ let test_structured_tool_is_the_only_semantic_verdict () =
        | None -> Alcotest.fail "structured verdict was lost")
 ;;
 
+let test_exact_verdict_response_identity_survives_projection () =
+  let identity = match Runtime_response_identity.make ~execution_id:"judge-execution"
+    ~actor:"completion-review" ~runtime_id:"actual-winner" ~response_id:"verdict-response"
+    ~provider_id:"actual-provider" ~model_id:"reported-model" ~tool_use_id:"accepted-verdict"
+    ~provider_turn:2 with
+    | Ok identity -> identity | Error detail -> Alcotest.fail detail in
+  with_reviewer
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_
+      ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      Ok { AR.selected_runtime_id = "actual-winner"; verdict = Some (AR.Approve "checked")
+        ; evaluator_execution = Some identity })
+    (fun () ->
+      let result = review () in
+      Alcotest.(check string) "the winning runtime survives a requested-slot difference"
+        "actual-winner" result.evaluator_runtime;
+      Alcotest.(check bool) "the accepted verdict invocation is retained exactly" true
+        (result.evaluator_execution = Some identity))
+;;
+
 let test_response_text_is_never_parsed_as_verdict () =
   with_reviewer
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-       Ok {AR.selected_runtime_id="task-reviewer";verdict=None})
+       Ok {AR.selected_runtime_id="task-reviewer";evaluator_execution=None;verdict=None})
     (fun () ->
        let result = review () in
        Alcotest.(check string)
@@ -278,7 +297,7 @@ let test_verdict_enum_mirrors_valid_verdict_strings () =
       ~attempt_continuation:_ ~on_runtime_attempt_error:_
       () ->
        received := Some report_tool_schema;
-       Ok {AR.selected_runtime_id="task-reviewer";verdict=None})
+       Ok {AR.selected_runtime_id="task-reviewer"; evaluator_execution = None;verdict=None})
     (fun () ->
        ignore (review ());
        match !received with
@@ -321,7 +340,7 @@ let test_verdict_enum_mirrors_valid_verdict_strings () =
 let test_note_only_verdict_is_owned_by_the_reviewer () =
   with_reviewer
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-       Ok {AR.selected_runtime_id="task-reviewer";verdict=Some (AR.Approve "everything looks fine")})
+       Ok {AR.selected_runtime_id="task-reviewer";evaluator_execution=None;verdict=Some (AR.Approve "everything looks fine")})
     (fun () ->
        let result = review () in
        Alcotest.(check string)
@@ -371,7 +390,7 @@ let test_successful_lookup_is_exposed_to_the_reviewer () =
           saw_success := data_exposes_success && blocks_expose_success);
        Ok
          { AR.selected_runtime_id = "task-reviewer"
-         ; verdict = Some (AR.Approve "checked the lookup result")
+         ; evaluator_execution = None; verdict = Some (AR.Approve "checked the lookup result")
          })
     (fun () ->
        let result =
@@ -575,7 +594,7 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
                    { message = "fixture provider body-size refusal"
                    ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 } }
                  else Agent_core.Retry.ContextOverflow { message = "fixture context overflow"; limit = None }))
-            end else Ok { AR.selected_runtime_id = evaluator_runtime; verdict = Some (AR.Approve "checked") })
+            end else Ok { AR.selected_runtime_id = evaluator_runtime; evaluator_execution = None; verdict = Some (AR.Approve "checked") })
           (fun () ->
             let result = AR.run ~log_info:ignore ~log_warn:ignore
                 ~render_prompt:(fun () -> Ok prompt) ~goal_blocks:[attachment]
@@ -663,7 +682,7 @@ let test_oversized_lookup_handoff_preserves_the_inline_refusal () =
               (List.exists (function T.Text text -> String_util.contains_substring text body
                 | T.Thinking _ | T.RedactedThinking _ | T.ReasoningDetails _
                 | T.ToolUse _ | T.ToolResult _ | T.Image _ | T.Document _ | T.Audio _ -> false) blocks);
-            Ok { AR.selected_runtime_id = evaluator_runtime; verdict = Some (AR.Approve "checked refusal") }
+            Ok { AR.selected_runtime_id = evaluator_runtime; evaluator_execution = None; verdict = Some (AR.Approve "checked refusal") }
           end)
         (fun () ->
           let result = AR.run ~log_info:ignore ~log_warn:ignore
@@ -759,7 +778,7 @@ let test_failed_lookup_handoff_uses_the_full_bridge_envelope () =
                 (List.exists (function T.Text text -> String_util.contains_substring text payload
                   | T.Thinking _ | T.RedactedThinking _ | T.ReasoningDetails _
                   | T.ToolUse _ | T.ToolResult _ | T.Image _ | T.Document _ | T.Audio _ -> false) blocks);
-              Ok { AR.selected_runtime_id = evaluator_runtime; verdict = Some (AR.Approve "checked failure view") }
+              Ok { AR.selected_runtime_id = evaluator_runtime; evaluator_execution = None; verdict = Some (AR.Approve "checked failure view") }
             end)
           (fun () ->
             let result = AR.run ~log_info:ignore ~log_warn:ignore ~render_prompt:(fun () -> Ok prompt)
@@ -778,7 +797,9 @@ let () =
   Alcotest.run
     "anti_rationalization_structured_only"
     [ ( "review boundary"
-      , [ Alcotest.test_case "failed lookup handoff uses the full bridge envelope" `Quick
+      , [ Alcotest.test_case "the accepted verdict response identity survives projection" `Quick
+            test_exact_verdict_response_identity_survives_projection
+        ; Alcotest.test_case "failed lookup handoff uses the full bridge envelope" `Quick
             test_failed_lookup_handoff_uses_the_full_bridge_envelope
         ; Alcotest.test_case "oversized lookup handoff retains the inline refusal" `Quick
             test_oversized_lookup_handoff_preserves_the_inline_refusal

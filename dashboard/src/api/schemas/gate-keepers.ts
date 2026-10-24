@@ -1,5 +1,7 @@
 import { CandleAccountRevisionSchema } from './candle-observation'
 import { KeeperPortraitSchema } from './keeper-portrait'
+import { readKeeperBoardAddress } from '../../lib/board-address'
+import { RuntimeLaneObservationSchema } from '../../lib/keeper-runtime-walk'
 import { KEEPER_ACTIVATION_MODES } from '../../lib/keeper-activation-mode'
 import { Data, Effect, ParseResult, Schema } from 'effect'
 
@@ -11,12 +13,30 @@ const KeeperMetaWireSchema = Schema.Struct({
   updated_at: Schema.NonEmptyString,
 })
 
+// Admin projections attach this observation to both readable and error rows.
+// Reuse the Board boundary's exact key and canonical identity validation.
+const KeeperBoardAddressWireSchema = Schema.Unknown.pipe(Schema.filter(raw => {
+  const address = readKeeperBoardAddress(raw)
+  return address.state === 'ready'
+    || address.reason === 'metadata_absent'
+    || address.reason === 'effective_metadata_unread'
+}))
+
+const KeeperLastFailureWireSchema = Schema.Struct({
+  cause: Schema.Literal(
+    'heartbeat', 'turn', 'provider', 'configuration', 'client_recovery',
+    'fiber', 'exception', 'operator_interrupt',
+  ),
+  at_unix: Schema.NullOr(Schema.Number.pipe(Schema.filter(Number.isFinite))),
+})
+
 // Mirror of the healthy row built by keeper_list_row_json in
 // lib/keeper/keeper_tool_surface_ops.ml. RFC-0393 removed the agent_name
 // echo key; phase/health/paused/next_action ride the same row.
 const GateKeeperWireSchema = Schema.Struct({
   runtime_class: Schema.Literal('keeper'),
   portrait: KeeperPortraitSchema,
+  board_address: Schema.optional(KeeperBoardAddressWireSchema),
   // Shared connector discovery omits currency. Operator observations may
   // accompany the same lifecycle rows; this consumer does not interpret them.
   candle_balance_milli: Schema.optional(Schema.Unknown),
@@ -28,6 +48,8 @@ const GateKeeperWireSchema = Schema.Struct({
   health: Schema.NonEmptyString,
   paused: Schema.Boolean,
   next_action: Schema.NullOr(Schema.String),
+  last_failure: Schema.NullOr(KeeperLastFailureWireSchema),
+  runtime_lane_observation: Schema.NullOr(RuntimeLaneObservationSchema),
   runtime_blocker_summary: Schema.NullOr(Schema.String),
   runtime_blocker_signature: Schema.NullOr(Schema.String),
   keepalive_running: Schema.Boolean,
@@ -50,6 +72,7 @@ const GateKeeperIssueBaseWireSchema = Schema.Struct({
   status: Schema.Literal('error'),
   runtime_class: Schema.Literal('keeper'),
   portrait: KeeperPortraitSchema,
+  board_address: Schema.optional(KeeperBoardAddressWireSchema),
   candle_balance_milli: Schema.optional(Schema.Unknown),
   candle_account_revision: Schema.optional(CandleAccountRevisionSchema),
   name: Schema.NonEmptyString,

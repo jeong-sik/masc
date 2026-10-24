@@ -19,13 +19,13 @@ endpoint authority; no local/Docker fallback on SSH failure.
 | Preserve endpoint tool environment on upgrade | Config roundtrip and real endpoint probe using retained path/env_file/scratch root | Implementing |
 | Discover registered endpoints and diagnose readiness | Current runtime registry projection; named probe results and UI selection | Missing |
 | Change profiles with endpoint/network fields together | Actual TUI/Dashboard request, persisted TOML reread, rejected/uncertain save recovery | Missing |
-| Keeper can Execute, Read, Grep, Glob/List, Write and Edit | Keeper tool records and endpoint-side reread/hash; no host shadow files | Unverified |
+| Keeper can Execute, Read, Grep, Write, Edit and enumerate files | Keeper tool records and endpoint-side reread/hash; enumeration uses the exposed Execute tool | Baseline actual Keeper file workflow measured; matching candidate remains unverified |
 | Path/root/cwd semantics agree across tools, scripts and receipts | Same nested file accessed through each surface, declared roots and sibling refusal scenarios | Audit required; #37324, #38593, #38895 |
 | Typed stdin/stdout/stderr redirects work remotely | Actual typed redirect workflow including append and split streams; host path never opened | Gap; #31442 |
 | Long commands do not block Keeper interaction | Remote process handle, output/wait/cancel and actual remote child cleanup | Gap; #36941 |
 | Explicit repository materialization has exact identity | Declared URL/revision/destination, actual clone/readback, repeat without loss of dirty work | Gap; #31460 |
 | Optional GitHub workflow works and cancellation cleans up | Keeper-scoped actual auth and repository operation, no token leakage, cancelled remote login cleanup | Unverified; #32910 |
-| Reconnect/restart and transport failures remain truthful | Persisted output reread after server restart; named error on disconnect; explicit cancellation and no orphan | Unverified |
+| Reconnect/restart and transport failures remain truthful | Persisted output reread after server restart; named error on disconnect; explicit cancellation and no orphan | Baseline manual Keeper restarted and reread files; long-base ControlPath defect found; disconnect/cancel still open |
 | Endpoint replacement and trust rotation do not borrow old authority | Same-name host/root/key-path changes invalidate readiness and observations; same-path key/pin rotation and ControlMaster reauthentication are separately exercised | Source review found stale cache keys; repair in progress |
 | Runtime installation includes the required SSH operator tools | Exact-source packaged bootstrap/shim availability and install/readback on the exercised platforms | Audit required; normal runtime package currently lists four operator executables |
 | Operator and Keeper can observe the lane | Current endpoint/shim/last dispatch and errors visible through relevant API, native TUI and browser proof | Unverified |
@@ -53,3 +53,11 @@ an unrun or skipped integration case a pass.
 Keep this objective active until every requirement is supported by current
 evidence. Any unavailable infrastructure/identity must remain an explicit
 outstanding requirement, not a reduction of scope.
+
+Baseline file workflow and evidence scope:
+[actual Keeper over pinned SSH](../../evidence/2026-10-24-remote-ssh-keeper/README.md).
+Bootstrap targeted CI passed at `2172d6e6cc53da69d4ab0264479b767fa8cb0dde`
+(run 40078533807). Selection targeted CI passed at
+`d8ac0d66fffe3fc89af6becdc0145d7b910c3955` (run 40098708721), after repairing
+two module visibility errors from run 40096481342. These results are source and
+focused CI evidence; the baseline runtime above is a different commit.

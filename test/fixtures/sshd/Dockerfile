@@ -12,6 +12,7 @@ RUN apk add --no-cache \
  && passwd -d masc \
  && install -d -m 0700 -o masc -g masc /home/masc/.ssh \
  && install -d -m 0755 /run/sshd /srv/masc/playground \
+ && install -d -m 0700 -o masc -g masc /srv/masc/playground/keeper-a \
  && install -d -m 0700 -o masc -g masc \
       /srv/masc/playground/keeper-a/.config/gh \
  && printf '%s\n' 'masc ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/masc \

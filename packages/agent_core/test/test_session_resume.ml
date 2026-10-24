@@ -683,7 +683,7 @@ let test_binding_hook_cannot_reenable_incompatible_replay () = with_net (fun net
       let cp=binding_checkpoint original [binding_message(binding_source original)] in
       let before=Checkpoint.to_json cp in
       let calls=ref 0 in
-      let response=Provider_mock.text_response "continued without replay" in
+      let response=Provider_mock.text_response "continued without replay" [] in
       let transport=Llm_provider.Llm_transport.custom ({
         complete_sync=(fun _ -> incr calls; {response=Ok response;latency_ms=Some 0});
         complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> incr calls;Ok response)}) in

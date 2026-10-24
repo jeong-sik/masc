@@ -904,7 +904,7 @@ let test_provider_binding_persistence () =
       ~canonical_model_id:"shared-model"
       ~replay_contract:Llm_provider.Reasoning_replay_contract.{
         replay_policy=All_assistant_messages; streaming=No_streaming_reasoning;
-        output_wire=No_output_control}
+        output_wire=No_output_control;content_carrier=Canonical_blocks}
     |> Result.get_ok in
   let cp = make_checkpoint ~model:"shared-model" ~provider_binding:(Some source)
     ~messages:[Types.assistant_msg "no reasoning artifact"] () in

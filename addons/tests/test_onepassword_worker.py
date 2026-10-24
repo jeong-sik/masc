@@ -54,12 +54,12 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(set(status), set(tools["onepassword_status"]["outputSchema"]["required"]))
         self.assertTrue((PACKAGE / "skills" / "onepassword" / "SKILL.md").is_file())
 
-    def test_private_companion_negotiation_does_not_enable_status_or_login(self):
+    def test_private_companion_negotiation_grants_only_login_start(self):
         responses = self.call([self.rpc("lane_companion", {"version": 2}),
                                self.rpc("lane_companion", {"token": "MUST_NOT_LEAK"}, 2),
                                self.rpc("lane_call", {"tool": "lane_companion", "arguments": {},
                                                        "caller": {"kind": "operator"}}, 3)])
-        self.assertEqual(responses[0]["result"], {"content": [], "structuredContent": {"version": 2, "tools": []},
+        self.assertEqual(responses[0]["result"], {"content": [], "structuredContent": {"version": 2, "tools": ["onepassword_login"]},
                                                 "isError": False})
         self.assertTrue(responses[1]["result"]["isError"])
         self.assertTrue(responses[2]["result"]["isError"])

@@ -90,7 +90,7 @@ def _app_link(value):
     try:
         url = urlsplit(value)
         return (url.scheme == "onepassword" and url.netloc == "grant-brokered-access"
-                and not url.username and not url.password)
+                and not url.username and not url.password and not url.path and not url.fragment)
     except ValueError:
         return False
 

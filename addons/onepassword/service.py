@@ -257,16 +257,34 @@ class Service:
                     self._phase = _Phase.FAILED
                     self._condition.notify_all()
 
-    def close(self):
+    def retire(self):
+        """End admission and original IO; the owned thread settles disposal."""
         with self._condition:
-            if self._phase is _Phase.OPEN:
-                self._phase = _Phase.CLOSING
+            if self._phase is not _Phase.OPEN:
+                return
+            self._phase = _Phase.CLOSING
+            try:
+                operations = self.engine.operations(OPERATOR)
+            except LoginError:
+                # The engine may already have closed its original lease.
+                operations = []
+            for operation in operations:
+                try:
+                    self.engine.interrupt(operation["operation_id"], OPERATOR)
+                except LoginError:
+                    pass
+                except BaseException:
+                    # Still interrupt the remaining original handles. Only a
+                    # fixed uncertain cleanup result may leave this boundary.
+                    self._cleanup_failed = True
             self._condition.notify_all()
-        try:
-            self.engine.close()
-        except BaseException:
-            with self._condition:
-                self._cleanup_failed = True
+
+    def close(self):
+        self.retire()
+        if threading.current_thread() is self._thread:
+            # Retirement is accepted, but this thread cannot claim its own
+            # cleanup has joined. Its finally block retains that ownership.
+            raise LoginError("outcome_unknown")
         self._thread.join()
         with self._condition:
             self._jobs.clear()

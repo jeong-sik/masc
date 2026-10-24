@@ -90,19 +90,23 @@ let run_case source () =
    | Goal_unavailable -> Fs_compat.save_file (Goal_store.goals_path config) "invalid JSON"
    | Current | Revised | Empty -> ());
   let prepared = prepare config in
-  let dynamic = Direct.project prepared ~workspace_memory_access:None in
   (* An interleaved preparation cannot replace an already captured turn. *)
   (match measurement with
    | Some observation -> check bool "original preparation retains its own observed value" true
        (contains ~needle:observation.id (Direct.project original ~workspace_memory_access:None))
    | None -> ());
-  let partition = Keeper_context_layers.unattributed Direct_turn dynamic in
-  let assembled = Keeper_run_prompt.assemble_extra_system_context
+  let partition = Direct.project_partition prepared ~workspace_memory_access:None in
+  let dynamic = Keeper_context_layers.text partition in
+  let base_system_prompt = "Respond to the owner using current workspace observations." in
+  let assembled = Keeper_run_prompt.assemble_request_context ~base_system_prompt
+      ~post_tool_round:false ~previous_assembly:None
       ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, dynamic] in
   let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params; _} ->
-      AdjustParams {current_params with extra_system_context = assembled.extra_system_context}
+      AdjustParams {current_params with extra_system_context = assembled.extra_system_context;
+        system_prompt_override = Keeper_context_assembly.system_prompt_override
+          ~previous:current_params.system_prompt_override assembled}
     | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _
     | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> Continue) } in
   let received = ref [] in
@@ -117,7 +121,7 @@ let run_case source () =
       ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions"
       ~tool_stream:false () in
   let runtime = Runtime_agent.default_config ~name:"direct-goal-wire"
-      ~provider_cfg ~system_prompt:"Respond to the owner using current workspace observations."
+      ~provider_cfg ~system_prompt:base_system_prompt
       ~tools:[] in
   let runtime = {runtime with hooks = Some hooks} in
   let result = match Runtime_agent.run ~sw ~net:env#net ~config:runtime owner_request with
@@ -132,8 +136,12 @@ let run_case source () =
   check bool "owner request supplies no Goal ID hint" false
     (match goal with Some goal -> contains ~needle:goal.id owner_request | None -> false);
   check bool "actual wire retains the owner request" true (List.mem owner_request content);
-  let contexts = List.filter (contains ~needle:"[system context]") content in
-  let context = match contexts with [context] -> context | _ -> fail "one fresh context carrier required" in
+  let context = match List.filter (fun message -> Json.member "role" message = `String "system") messages with
+    | [message] -> Json.member "content" message |> Json.to_string
+    | _ -> fail "one effective leading system prompt required" in
+  check bool "Goal data never appears in the extra User carrier" false
+    (List.exists (fun text -> contains ~needle:"[system context]" text &&
+       contains ~needle:"Active Goals" text) content);
   (match source, goal, measurement with
    | Current, Some goal, Some observation ->
      List.iter (fun needle -> check bool "receiver sees current Goal provenance" true
@@ -160,6 +168,8 @@ let run_case source () =
   (* OpenAI-compatible requests use an ephemeral carrier; the agent's returned
      durable-checkpoint candidate must contain the owner and answer only. *)
   let checkpoint = match result.checkpoint with Some value -> value | None -> fail "checkpoint missing" in
+  check (option string) "Goal suffix leaves the durable base instructions unchanged"
+    (Some base_system_prompt) checkpoint.system_prompt;
   List.iter (fun (message : Agent_core.Types.message) ->
     List.iter (function
       | Agent_core.Types.Text text ->
@@ -195,18 +205,27 @@ let test_goal_survives_read_then_task_creation () =
       ~turn_instructions_text:"INITIAL_TURN_INSTRUCTIONS" () in
   let partition = Direct.project_partition prepared ~workspace_memory_access:None in
   let dynamic = Keeper_context_layers.text partition in
+  let existing_override = "EXISTING_BASE_OVERRIDE" in
   let previous = ref None in
   let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params; messages; _} ->
       let post_tool_round = Keeper_run_prompt.is_later_round_of_this_turn
           ~injected_this_turn:(Option.is_some !previous) messages in
-      let issued = Keeper_run_prompt.assemble_request_context ~post_tool_round
+      let current_params = {current_params with system_prompt_override=Some existing_override} in
+      let issued = Keeper_run_prompt.assemble_request_context
+          ~base_system_prompt:(Option.get current_params.system_prompt_override) ~post_tool_round
           ~previous_assembly:!previous ~dynamic_context_partition:(Some partition)
           ~existing_extra_system_context:current_params.extra_system_context
           ~blocks:[Prompt_block_id.Dynamic_context, dynamic;
                    Prompt_block_id.Temporal_summary, "INITIAL_CLOCK"] in
       previous := Some issued;
-      AdjustParams {current_params with extra_system_context = issued.extra_system_context}
+      Keeper_prompt_capture.write ~config ~keeper:"goal-loop-wire" ~trace_id:"trace-goal-loop-wire"
+        ~absolute_turn:1 ~blocks:((Prompt_block_id.Keeper_instructions, existing_override)
+          :: Keeper_context_assembly.logical_blocks issued)
+        ~assembled:issued.extra_system_context ~system_prompt:issued.system_prompt;
+      AdjustParams {current_params with extra_system_context = issued.extra_system_context;
+        system_prompt_override = Keeper_context_assembly.system_prompt_override
+          ~previous:current_params.system_prompt_override issued}
     | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _
     | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> Continue) } in
   let meta = match Masc_test_deps.meta_of_json_fixture
@@ -262,12 +281,29 @@ let test_goal_survives_read_then_task_creation () =
     let contexts = List.filter_map (fun message -> match Json.member "content" message with
       | `String text when contains ~needle:"[system context]" text -> Some text
       | `String _ | `Null | `List _ | `Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> None) messages in
-    let context = match contexts with [context] -> context | _ -> fail "one current context carrier required" in
+    let context = match List.filter (fun message -> Json.member "role" message = `String "system") messages with
+      | [message] -> Json.member "content" message |> Json.to_string
+      | _ -> fail "one effective leading system prompt required" in
+    check bool "the prior system override survives the Goal suffix" true
+      (String.starts_with ~prefix:existing_override context);
+    let issued = match !previous with Some issued -> issued | None -> fail "issued assembly missing" in
+    let physical = match issued.system_prompt with Some value -> value | None -> fail "system receipt missing" in
+    check string "physical system receipt matches receiver bytes" physical.text context;
+    check int "physical system receipt covers the exact UTF8 bytes" (String.length context) physical.partition.bytes;
+    List.iter (fun (span : Keeper_context_assembly.span) ->
+      let bytes = String.sub context span.offset span.bytes in
+      check string "every issued physical span matches received bytes" span.sha256
+        Digestif.SHA256.(digest_string bytes |> to_hex)) physical.partition.spans;
     List.iter (fun needle -> check bool "every receiver request retains the exact Goal snapshot" true
       (contains ~needle context)) [goal.id;goal.criterion_revision;measurement.id;reported_value];
+    check bool "Goal is not duplicated in the extra User carrier" false
+      (List.exists (contains ~needle:goal.criterion_revision) contexts);
+    let extra = String.concat "" contexts in
     List.iter (fun needle -> check bool "other world context stays first-request only" (index=0)
-      (contains ~needle context)) ["INITIAL_GATE_SNAPSHOT";"INITIAL_OWNER_CONVERSATION";
-        "INITIAL_WORKTREE_SNAPSHOT";"INITIAL_TURN_INSTRUCTIONS";"INITIAL_CLOCK"]) bodies;
+      (contains ~needle extra)) ["INITIAL_GATE_SNAPSHOT";"INITIAL_OWNER_CONVERSATION";
+        "INITIAL_WORKTREE_SNAPSHOT";"INITIAL_TURN_INSTRUCTIONS";"INITIAL_CLOCK"];
+    if index > 0 then check bool "tool feedback remains the newest message" true
+      (Json.member "role" (List.hd (List.rev messages)) = `String "tool")) bodies;
   let checkpoint = match result.checkpoint with Some checkpoint -> checkpoint | None -> fail "checkpoint missing" in
   let task_results = List.concat_map (fun (message : Agent_core.Types.message) ->
       List.filter_map (function
@@ -293,6 +329,17 @@ let test_goal_survives_read_then_task_creation () =
     | Ok links -> links | Error detail -> fail detail in
   check bool "real Task creation persisted its explicit Goal association" true
     (match List.assoc_opt goal.id links with Some [_] -> true | None | Some [] | Some (_::_::_) -> false);
+  check (option string) "the per-request override is not written into the checkpoint"
+    (Some "Read the metric, then record the remaining work as a Task.") checkpoint.system_prompt;
+  let capture = match Keeper_prompt_capture.read ~config ~keeper:"goal-loop-wire" with
+    | Ok capture -> capture | Error error -> fail (Keeper_prompt_capture.read_error_to_string error) in
+  check (list string) "capture attributes base instructions and Goal once each"
+    ["keeper_instructions";"active_goals"]
+    (List.map (fun (block : Keeper_prompt_capture.block) -> Prompt_block_id.to_string block.id) capture.blocks);
+  check (option string) "post-tool capture has no fabricated extra carrier" None capture.assembled;
+  check (option string) "capture records the physical stable system value"
+    (Option.map (fun (issued : Keeper_context_assembly.system_prompt) -> issued.text)
+      (Option.bind !previous (fun issued -> issued.Keeper_context_assembly.system_prompt))) capture.system_prompt;
   check bool "Goal snapshot carrier stays out of returned durable conversation" false
     (List.exists (fun (message : Agent_core.Types.message) ->
       List.exists (function Agent_core.Types.Text text -> contains ~needle:measurement.id text

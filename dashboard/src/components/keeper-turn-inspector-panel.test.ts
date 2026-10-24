@@ -101,6 +101,9 @@ describe('KeeperTurnInspectorPanel', () => {
         { id: 'operator_note', bytes: 32, text: 'check the cancel record first' },
       ],
       assembled: null,
+      assembledBytes: 0,
+      systemPrompt: null,
+      systemPromptPartition: null,
     })
 
     render(html`<${KeeperTurnInspectorPanel} keepers=${KEEPERS} />`)

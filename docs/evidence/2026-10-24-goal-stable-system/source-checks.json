@@ -1,0 +1,65 @@
+{
+  "checks": [
+    {
+      "path": "lib/keeper/keeper_agent_run.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_context_assembly.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_context_assembly.mli",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_next_request_forecast.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_prompt_capture.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_prompt_capture.mli",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_run_prompt.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_run_prompt.mli",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_run_tools_hooks.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_direct_goal_provider_wire.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_next_request_forecast.ml",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_prompt_capture.ml",
+      "exit": 0,
+      "stderr": ""
+    }
+  ],
+  "scope": "OCaml parsing only; no native full typecheck/link or Dune build"
+}

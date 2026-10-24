@@ -67,10 +67,12 @@ proof remains scoped to extra context and does not assert a Goal System span.
   errors. `typescript-current.txt` contains only those same two unchanged
   `keeper-stream.test.ts` diagnostics at lines 1862 and 1873. Full TypeScript
   validation therefore remains failing on that existing baseline.
-- `git diff --check` passes.
+- Product-source `git diff --check BASE HEAD -- lib bin test dashboard config` passes. The original frontend stdout retains its trailing blank line, so an evidence-inclusive diff check reports that whitespace; no blanket clean-diff claim is made.
 
 The authored real HTTP receiver regression checks three provider requests,
 leading System Goal bytes, unchanged prior override, first-request-only other
 world state, genuine bundled Task creation/linkage, captures and an ephemeral
 checkpoint. Its native execution, a new exact-build Keeper experiment and a
 visible browser check are pending. No live G2/G3 success is claimed here.
+
+Independent source review of661becba found a P2 in official-client Resume: changed Goal observation is absent from the carried prompt while vendor sessions retain their first System until compaction. This is a source blocker, not merely missing test evidence. Repair of that typed carried path is in progress. Regular HTTP and official Resume scopes must remain separate. See independent-source-review.json.

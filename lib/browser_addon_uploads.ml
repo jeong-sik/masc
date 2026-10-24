@@ -74,8 +74,10 @@ let release t ~id snapshot =
 
 let stage t ~id ~actor ~route ~verb = protect (fun () ->
   let* _=B.client_id_of_string id in
-  let* ()=match route with B.Automation_route -> Ok ()
-    | Live_route _|Stagehand_route -> Error "this upload broker requires the owned Gecko backend" in
+  (* The browsers this worker runs read the copies: the owned Gecko, and the
+     ego connection. A grant keeps the exact route it was staged for. *)
+  let* ()=match route with B.Automation_route|Live_route (Some _) -> Ok ()
+    | Live_route None|Stagehand_route -> Error "this upload broker requires the owned Gecko or a selected live connection of this worker" in
   let* paths=upload_paths verb in
   let* ()=locked t (fun () ->
     if not t.serving then Error "upload broker is retired"

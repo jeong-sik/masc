@@ -215,10 +215,10 @@ let test_ego_table () =
   let backend = Cap.Connected Lane.Ego_task_space in
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
-  check (list string) "reads, capture, the tab list, its own tabs, their history, input and dialogs on them, and the space handed to the operator and back"
+  check (list string) "reads, capture, the tab list, its own tabs, their history, input, dialogs, uploads and downloads on them, and the space handed to the operator and back"
     ["list_tabs";"open_tab";"close_tab";"navigate";"follow_link";"back";"forward";"reload";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"click_snapshot_target";"fill_snapshot_target";
      "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
-     "fill";"type_text";"press_key";"key_chord";"select_option";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"list_downloads"]
+     "fill";"type_text";"press_key";"key_chord";"select_option";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"upload_file";"list_downloads"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with
     | Cap.Conditional {constraints;_} ->

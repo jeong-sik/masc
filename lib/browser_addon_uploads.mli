@@ -7,7 +7,8 @@ val create : directory:string -> (t, string) result
 val stage : t -> id:string -> actor:string -> route:Browser_lane.route ->
   verb:Browser_lane.verb -> (unit, string) result
 (** The trusted host supplies a bound upload command whose paths are its own
-    authorized snapshots. Copy regular, same-UID, single-link 0600 sources into
+    authorized snapshots, for the owned automation route or a selected live
+    connection of this worker. Copy regular, same-UID, single-link 0600 sources into
     the worker allocation before publishing the one-use grant. The original
     command, actor and route remain immutable. This performs no browser input. *)
 val with_claim : t -> id:string -> actor:string -> route:Browser_lane.route ->

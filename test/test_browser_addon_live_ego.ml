@@ -277,6 +277,13 @@ def run(script,answer):
         saved.write_text('report');(root/'downloaded').write_text(str(saved))
         answer({'since':'2026-10-23T09:00:00.000Z','rows':[{'id':ident,'label':'p1','url':'https://fixture.test/report.txt',
             'suggestedFilename':'report.txt','state':'completed','path':str(saved),'reason':None}]})
+    elif step=='page.upload':
+        # The worker's copies, as ego would set them on the page's input.
+        paths=[pathlib.Path(path) for path in args['paths']]
+        (root/'uploaded').write_text(json.dumps([str(path) for path in paths]))
+        files=[{'name':path.name,'size':path.stat().st_size} for path in paths]
+        answer({'error':None,'dialog':None,'tab':{'url':'https://fixture.test/','title':'Fixture'},
+            'after':{'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','files':files})}})
     elif step=='space.finish':answer(None)
     else:answer(error='unexpected step '+step)
 for raw in stream:
@@ -310,6 +317,7 @@ let scenario mode =
       Time_compat.set_clock (Eio.Stdenv.clock env);
       let owner = ok (Owner.create ~incarnation:"0b000000-0000-4000-8000-000000000071") in
       ok (Owner.attach_downloads owner (ok (Broker.create ~directory:root)));
+      ok (Owner.attach_uploads owner (ok (Masc.Browser_addon_uploads.create ~directory:root)));
       let dispatch command = Owner.dispatch owner {W.incarnation=Owner.incarnation owner;command} in
       let work () =
         entered := true;
@@ -372,6 +380,25 @@ let scenario mode =
            check bool "and the grant released" true (dispatch (W.Download_release {id;actor;route;verb}) = W.Receipt)
          | W.Download_reply (Broker.Published _) | W.Issue_result _ | Snapshot_result _ | Model_reply _
          | Poll_result _ | Receipt | Service_refusal _ -> fail "the grant was not claimed for this connection");
+        (* An upload staged for this connection's route reaches ego as the
+           worker's own copies, and they stay until the space has ended. *)
+        let source = Filename.concat root "note.txt" in
+        write source "hello"; Unix.chmod source 0o600;
+        let upload = B.Page_act (B.Action.On_tab {tab_id=1;frame_path=[];interaction=B.Action.Upload {selector="#file";paths=[source]}}) in
+        let grant = "0b000000-0000-4000-8000-000000000072" in
+        check bool "the upload is staged for this connection" true
+          (dispatch (W.Upload_stage {id=grant;actor;route;verb=upload}) = W.Receipt);
+        (match Owner.dispatch_upload owner ~id:grant ~actor ~route ~verb:upload with
+         | W.Issue_result (Ok (B.Answered json)) ->
+           check string "the files the input holds" {|[{"name":"note.txt","size":5}]|}
+             (Yojson.Safe.to_string Yojson.Safe.Util.(json |> member "data" |> member "files"))
+         | W.Issue_result (Ok (B.Lane_absent | Timed_out | Refused _ | Rejected_before_effect _)) | W.Issue_result (Error _)
+         | Snapshot_result _ | Model_reply _ | Download_reply _ | Poll_result _ | Receipt | Service_refusal _ ->
+           fail "the staged upload did not reach ego");
+        let copies = List.map Yojson.Safe.Util.to_string
+            (Yojson.Safe.Util.to_list (Yojson.Safe.from_string (read (Filename.concat root "uploaded")))) in
+        check bool "ego was given the worker's copies" true
+          (copies <> [source] && List.for_all Sys.file_exists copies);
         check bool "an input the table refuses never reaches ego" true
           (match issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Activate_tab}) with
            | W.Issue_result (Error (B.Transport_unsupported _)) -> true
@@ -398,10 +425,13 @@ let scenario mode =
     | "normal" ->
       check bool "caller work ran" true !entered;
       check (list string) "steps"
-        ["space.open"; "tabs.list"; "page.capture"; "page.open"; "page.goto"; "page.target"; "page.pointer"; "page.downloads"; "space.finish"] steps;
+        ["space.open"; "tabs.list"; "page.capture"; "page.open"; "page.goto"; "page.target"; "page.pointer"; "page.downloads"; "page.upload"; "space.finish"] steps;
       check int "one ego process ran them all" 1 processes;
       check bool "retirement removed the published download" false
         (Sys.file_exists (read (Filename.concat root "downloaded")));
+      check bool "and, once the space had ended, the upload copies" false
+        (List.exists (fun copy -> Sys.file_exists (Yojson.Safe.Util.to_string copy))
+           (Yojson.Safe.Util.to_list (Yojson.Safe.from_string (read (Filename.concat root "uploaded")))));
       check bool "the screenshot directory is removed, with what a stopped capture left" false
         (Sys.file_exists (read (Filename.concat root "captures")))
     | "late" ->

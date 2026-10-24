@@ -30,6 +30,7 @@ val issue : ?upload_paths:string list -> ?required_actions:Browser_capabilities.
     and effect metadata. Malformed post-dispatch replies have unknown effect. *)
 
 (** [upload_paths] must be an exact pending host snapshot batch, not caller
-    paths. The host prepares worker-owned copies over the original private
+    paths, and the selection the owned automation route or an explicit live
+    browser. The host prepares worker-owned copies over the original private
     connection, then uses the ordinary exported tool/hooks once. A failed or
     cancelled call is never replayed. *)

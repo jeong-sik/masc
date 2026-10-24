@@ -69,6 +69,9 @@ val space_id : t -> int
     [close_tab] act only on pages an agent opened in the space, and so does
     [page.interact]. [back] and [forward] move one entry in the tab's own
     history and are refused before acting when there is none.
+    [upload] sets the worker's copies of a Keeper's files on one CSS-matched
+    file input of such a page; this connection holds those copies until its
+    space has ended, since the page reads them later.
     [accept_dialog] and [dismiss_dialog] answer the JavaScript dialog such a
     page is blocked on; a listed row of a managed page carries the dialog
     blocking it, and while one is open, reads, moves and input on that page
@@ -103,5 +106,6 @@ val dispatch
   -> (Yojson.Safe.t, Browser_live_peer.failure) result
 
 (** Ends the task space. ego closes the pages it manages and keeps the tabs
-    the operator opened there. *)
+    the operator opened there. Once it has, the upload copies this
+    connection held are let go. *)
 val finish : t -> (unit, string) result

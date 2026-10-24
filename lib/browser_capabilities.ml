@@ -312,8 +312,13 @@ let support backend operation = match backend with
            "Refused before any effect when the agent already holds the space. The receipt carries the tab that was active, unless it is a tab the operator opened; list the tabs before the next step."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
           Unsupported "Only an ego connection takes its task space back from the operator.")
-    | Upload_file -> gecko_only backend (invoke ~action:"upload" Act)
-        [observed;"Requires an owning Keeper, an observed file input and sandbox-authorized file paths; 16 MiB per file."]
+    | Upload_file -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"upload" Act
+          [observed;"Requires an owning Keeper, an explicit ego browser, one CSS-matched file input (multiple for more than one file) and sandbox-authorized file paths; 16 MiB per file.";
+           "The receipt lists the files the input now holds; the page reads them later, so this connection keeps the copies until its space ends.";ego_agent_pages]
+      | Owned_gecko | Owned_chromium | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable ->
+          gecko_only backend (invoke ~action:"upload" Act)
+            [observed;"Requires an owning Keeper, an observed file input and sandbox-authorized file paths; 16 MiB per file."])
     | List_downloads -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~mode:"downloads" Read
           [observed;"Explicit tabId and an explicit ego browser. Lists the downloads the page started from the first step this connection took on it, opening it included, as pending, completed or interrupted. watchingSince says from when: a stopped command restarts ego's process, and with it the list.";

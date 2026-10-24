@@ -185,3 +185,9 @@ space = "masc"
   different behavior from wheel-under-pointer and clicking a link. Dialogs and
   downloads already call native SDK methods; their remaining adapters maintain
   MASC receipts, artifact publication and process/file lifetime.
+
+The persistent SDK-process adapter was rechecked on installed Ego .20:
+[session-gap evidence](../evidence/ego-native-session-gap/) shows a second
+process blocked on page.info while the opener owned a confirm. It progressed
+only after the original process dismissed it. Keep this process-state repair;
+do not infer that current .20 round exit always deletes download temp files.

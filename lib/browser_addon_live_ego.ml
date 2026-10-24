@@ -52,9 +52,10 @@ let run_command ~env ~timeout_s ~stdin ~command arguments =
 
 (* One ego-browser nodejs process serves every command of a connection.
    ego's SDK keeps a page's dialog and event state in the process, and a
-   page blocked on a dialog that outlived the process that opened it answers
-   no later process: on ego lite 0.6.0.16 every command to it timed out, as
-   ego-lite's docs/native-javascript-dialog-requirement.md says. ego hands
+   page blocked on a dialog is not readable from a different SDK process.
+   Installed .20 reproduces that asymmetry even while the opener stays alive;
+   see docs/evidence/ego-native-session-gap/. The SDK's own dialog requirement
+   documents the process-local state. ego hands
    back a process's own output only once it exits, and its console.log is
    read-only, so the process connects back to a Unix socket in the
    connection's private directory, runs each script it receives as an async

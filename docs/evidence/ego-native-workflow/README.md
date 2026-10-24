@@ -54,3 +54,17 @@ regression run is claimed.
 Continue the overall native-first work in issue #45726. The initial space 4
 was found missing before runtime verification; the operator explicitly approved
 continuing in space 9. Reuse 9 and finish only when the whole goal ends.
+
+## Tool loader repair
+
+Selected CI run 40073172999 compiled all seven selected suites. The workflow
+codec (5 tests) and browser-lane routing (14 tests) passed; other suites failed
+at tool initialization because the production TOML loader requires table
+arrays for nested params. General TOML syntax validation had not proved that
+contract. The workflow declaration now uses [[params.items.params]].
+[schema-load-before.txt](schema-load-before.txt) reproduces the failure with
+the real loader; [schema-load-after.txt](schema-load-after.txt) loads both
+Interact/Act declarations. [schema-load.json](schema-load.json) binds the
+loader/interfaces and declarations to SHA-256. This is component loading,
+not full server startup or a passing re-execution of those suites.
+

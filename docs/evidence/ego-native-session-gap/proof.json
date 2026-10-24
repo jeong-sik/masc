@@ -1,0 +1,68 @@
+{
+  "root": "/tmp/masc-ego-session-dialog-20261024-HytWME",
+  "url": "http://localhost:54983/",
+  "spaceId": 4,
+  "page": "p1",
+  "guardianPid": 76312,
+  "observerPid": 76321,
+  "newProcessDismissedBeforeGuardian": false,
+  "beforeRecovery": {
+    "name": "before_info",
+    "ownership": "agent",
+    "at": "2026-10-24T07:17:47.791Z"
+  },
+  "guardian": {
+    "signal": "dismiss",
+    "recovery": {
+      "dismissed": true,
+      "info": {
+        "url": "http://localhost:54983/",
+        "title": "Owned cross-process dialog fixture",
+        "w": 1020,
+        "h": 946,
+        "sx": 0,
+        "sy": 0,
+        "pw": 1020,
+        "ph": 946
+      },
+      "result": "false"
+    }
+  },
+  "observer": {
+    "name": "completed",
+    "info": {
+      "url": "http://localhost:54983/",
+      "title": "Owned cross-process dialog fixture",
+      "w": 1020,
+      "h": 946,
+      "sx": 0,
+      "sy": 0,
+      "pw": 1020,
+      "ph": 946
+    },
+    "dismissed": false,
+    "result": "false",
+    "final": {
+      "url": "http://localhost:54983/",
+      "title": "Owned cross-process dialog fixture",
+      "w": 1020,
+      "h": 946,
+      "sx": 0,
+      "sy": 0,
+      "pw": 1020,
+      "ph": 946
+    },
+    "at": "2026-10-24T07:17:59.741Z"
+  },
+  "guardianResult": {
+    "code": 0,
+    "signal": null,
+    "pid": 76312
+  },
+  "observerResult": {
+    "code": 0,
+    "signal": null,
+    "pid": 76321
+  },
+  "scope": "concurrent new-process visibility with original opener kept alive; no opener-exit case and no new space/finish/handoff"
+}

@@ -612,6 +612,7 @@ type owner_initialization_error =
   | Runtime_config_read_failed of string
   | Native_execution_runtime_failed of Runtime_agent_execution_runtime.initialization_error
   | Keeper_config_recovery_failed of Keeper_config_journal.report
+  | Admin_credential_bootstrap_failed of Masc_domain.masc_error
   | Run_registry_already_installed of
       [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
   | Keeper_persistence_preparation_failed of
@@ -655,6 +656,8 @@ let owner_initialization_error_to_string = function
       | No_journal | Recovered_rolled_back _ -> "recovery completion was not accepted"
     in
     "keeper configuration recovery failed: " ^ detail
+  | Admin_credential_bootstrap_failed error ->
+    "Admin credential bootstrap failed: " ^ Masc_domain.masc_error_to_string error
   | Run_registry_already_installed `Fusion ->
     "Fusion run registry already has a process owner"
   | Run_registry_already_installed `Verification ->
@@ -982,7 +985,10 @@ let initialize_owner_state_blocking
   let t1 = Eio.Time.now clock in
   Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
   bootstrap_server_state_blocking state;
-  sync_admin_token_env state;
+  (match sync_admin_token_env state with
+    | Ok () -> ()
+    | Error error ->
+      raise (Owner_initialization_failed (Admin_credential_bootstrap_failed error)));
   sync_internal_keeper_token_env state;
   sync_bootable_keeper_credentials state;
   (* Shutdown admission restore below is mailbox-linearized by the Keeper

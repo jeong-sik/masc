@@ -5,52 +5,18 @@
 
 let sync_admin_token_env (state : Mcp_server.server_state) =
   let base_path = (Mcp_server.workspace_config state).base_path in
-  let admin_agent_name =
-    match Auth.read_initial_admin base_path with
-    | Some name ->
-        let trimmed = String.trim name in
-        if trimmed <> "" then trimmed else "admin"
-    | None -> "admin"
-  in
-  match Env_config_core.admin_token_opt () with
-  | Some raw_token ->
-      let already_synced =
-        match Auth.verify_token base_path ~agent_name:admin_agent_name ~token:raw_token with
-        | Ok cred -> cred.role = Masc_domain.Admin
-        | Error _ -> false
-      in
-      (match
-         Auth.save_file_backed_raw_token_credential base_path
-           ~agent_name:admin_agent_name ~role:Masc_domain.Admin ~raw_token
-       with
-       | Ok _ ->
-           if already_synced then
-             Log.Server.info
-               "startup admin token verified for %s via %s"
-               admin_agent_name Env_config_core.admin_token_env_key
-           else
-             Log.Server.warn
-               "startup admin token drift repaired for %s via %s"
-               admin_agent_name Env_config_core.admin_token_env_key
-       | Error err ->
-           Log.Server.error
-             "startup admin token sync failed for %s: %s"
-             admin_agent_name
-             (Masc_domain.masc_error_to_string err))
-  | None ->
-      (match
-         Auth.create_token base_path ~agent_name:admin_agent_name ~role:Masc_domain.Admin
-       with
-       | Ok (raw_token, _cred) ->
-           Unix.putenv Env_config_core.admin_token_env_key raw_token;
-           Log.Server.warn
-             "startup minted %s for %s because env was unset"
-             Env_config_core.admin_token_env_key admin_agent_name
-       | Error err ->
-          Log.Server.error
-             "startup admin token mint failed for %s: %s"
-             admin_agent_name
-             (Masc_domain.masc_error_to_string err))
+  let ( let* ) = Result.bind in
+  let* raw_token, credential, source =
+    Auth.prepare_startup_admin_token base_path
+      ~raw_token:(Env_config_core.admin_token_opt ()) in
+  Unix.putenv Env_config_core.admin_token_env_key raw_token;
+  let source = match source with
+    | Auth.Stored_admin_token -> "stored"
+    | Auth.Minted_admin_token -> "minted"
+    | Auth.Supplied_admin_token -> "supplied" in
+  Log.Server.info "startup Admin credential ready for %s (source=%s)"
+    credential.agent_name source;
+  Ok ()
 
 let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
   let base_path = (Mcp_server.workspace_config state).base_path in

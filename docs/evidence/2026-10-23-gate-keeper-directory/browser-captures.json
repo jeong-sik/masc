@@ -1,0 +1,12 @@
+[
+  {
+    "file": "masc-gate-schema-installed-before-20261023.png",
+    "sha256": "ecd4f9db0ba2df986c22f9be06e744a2550bab9af8d8bd8d4feeb7d06039c4ee",
+    "scope": "private local screenshot containing live workspace data"
+  },
+  {
+    "file": "masc-gate-schema-candidate-after-20261023.png",
+    "sha256": "e3fec15e9f6975cad28b9793c3c31217bfc70a35ae04d443bd256fdcf1af5614",
+    "scope": "private local screenshot containing live workspace data"
+  }
+]

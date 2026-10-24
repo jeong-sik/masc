@@ -1,0 +1,13 @@
+{
+  "provenance": "Recorded result of the completed read-only page.evaluate call in Ego TaskSpace 78, page p2",
+  "candidate_code_head": "0f73b0b1086cbab9190d6d4f8222579d04d11740",
+  "server_binary_commit": "107c58401723313611f7c599bbe15225de5910da",
+  "capture": "masc-gate-schema-candidate-after-20261023.png",
+  "observation": {
+    "url": "http://127.0.0.1:5188/dashboard/#connectors?section=connector-status&connector=slack",
+    "directoryError": false,
+    "keeperFilter": true,
+    "keeperRows": 37,
+    "disabledSlackStillVisible": true
+  }
+}

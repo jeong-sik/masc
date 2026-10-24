@@ -24,9 +24,10 @@ explicit instead of adding a wrapper with the same inputs and full result.
 
 ## 2. Instruction or composition
 
-Write a **composition** when every node input is known before the plan runs: a
-declared parameter, a literal, or a field of an earlier node's output. Write an
-**instruction** when a step depends on reading what an earlier step returned.
+Write a **composition** when its inputs and dependencies can be declared as
+parameters, literals or fields of earlier nodes' outputs. Write an
+**instruction** when choosing the next step needs model judgement about an earlier
+result. Passing a declared output field to the next node is still a composition.
 
 The body alone decides the kind. No `toml composition` fence makes an instruction
 Skill, served through `keeper_skill`. Exactly one fence makes a composition Skill,
@@ -38,7 +39,9 @@ diagnostic first.
 ## 3. What the Keeper sees
 
 - **Instruction Skill:** the frontmatter `description`, one line in the `keeper_skill`
-  Available list. The body is read only when the Keeper opens it.
+  Available list or capability search result. The body is read only when the Keeper
+  opens it. Use the returned exact `reference.identity` and `content_revision`;
+  a remembered name does not pin a source or revision.
 - **Composition Skill:** only the fence's `description` and each param's `description`.
   The prose around the fence never reaches the Keeper. Put when to use it, when not
   to, and how to read the result in that TOML `description`. Keep the frontmatter
@@ -69,7 +72,10 @@ YAML description that contains `:`, `#`, or a leading backtick.
 - Params are scalar (`string`, `integer`, `number`, `boolean`) and all required. Every
   declared param is referenced by some node and every reference is declared; either
   mismatch rejects the composition.
-- `execution = "async"` needs every node to be statically read-only.
+- `execution = "async"` admits statically read-only ordinary leaves and the runtime's
+  durable owned-job/Ask contracts. A general state-changing tool is not admitted
+  merely because it is in the catalog. Read the current tool schema and admission
+  diagnostic; inline file mutation does not imply durable async replay.
 - Ready independent nodes marked `Concurrent` can run together. A `Serial` node is
   exclusive and preserves the serial schedule's order. `branch_failure_policy`
   defaults to `"fail_fast"`: a failure stops work that has not committed to run;
@@ -98,6 +104,14 @@ equivalent explicitly on every node that has one.
 
 ## 6. Instruction body
 
+- State the procedure's applicability and evidence, including the source revision
+  and conditions that mattered. Before reusing a rule, check the current task,
+  authoritative contract and tool schema. A past success does not override a later
+  explicit instruction, a changed contract or a correction to its evidence.
+- Describe repeatable decisions rather than preserving incidental lane setup,
+  account names or a one-off stack size as universal prerequisites. For repository
+  operations, point to the repository's current review and merge guide; do not
+  freeze its API routes or approval policy from one historical run.
 - Keep `SKILL.md` under 500 lines. Put long material in `references/<file>.md`, one
   level below the Skill root, and say in the body when to read it. The Keeper reads
   it with `keeper_skill` and `file = "references/<file>.md"`.
@@ -123,12 +137,18 @@ equivalent explicitly on every node that has one.
   `artifact` object and proposed directory name `package_id` to `keeper_skill_validate`.
   This checks document and composition-plan rules; it does not execute or publish.
   Writing the draft does not update the catalog.
-- **Task-specific composition:** use `keeper_composition_prepare` with a concrete
-  structured plan, inspect the returned preview, then call `keeper_composition_run`
-  with that exact draft reference. This freezes the caller, plan and authorized
-  tool contracts without publishing a Skill. It currently admits fixed-input,
-  statically read-only ordinary tools. Preparation is useful for a new combination;
-  it is not required before calling an existing composition or direct tool.
+- **Task-specific composition:** pass the structured prepare input as
+  `keeper_composition_run.recipe` to validate, save and execute in one call. Use
+  `keeper_composition_prepare` separately when the plan needs inspection before
+  execution, then run its exact draft reference. Both paths freeze the caller,
+  plan and authorized tool/Skill contracts without publishing a Skill. Ordinary
+  nodes take fixed `args` or an `input` template for upstream values, never both.
+  Exact admitted child Skills take `skill_reference` and expose their declared
+  exports. Inline Read/Edit plans can overlap independent supported files after
+  inputs resolve; Write keeps its original Serial handler and publication recovery.
+  Durable async plans use the admitted read-only and owned-job/Ask contracts above.
+  Preparation does not execute or activate a Skill, and is not a prerequisite for
+  an existing composition or a direct tool.
 - **Same draft to Skill:** for a reusable parameter-free plan, include `skill`
   metadata (`package_id`, `description`) during prepare. This freezes the validated
   `SKILL.md` bytes too. Use the same `draft_sha256` and `package_id` for

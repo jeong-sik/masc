@@ -85,14 +85,14 @@ let initial json =
   let* workspace_request_id = request_id payload in
   Ok {payload;workspace_request_id;workspace=Uncommitted;
       recipients=List.map (fun name -> name,Pending None) recipients}
-let transition record json =
+let transition_state ~find_recipient ~set_recipient workspace recipients json =
   match json with
   | `Assoc f -> (match List.assoc_opt "event" f with
       | Some (`String "committed") ->
           let* f = exact ["event";"seq"] json in
-          (match List.assoc "seq" f,record.workspace with
-           | `Int seq,Uncommitted when seq>0 -> Ok {record with workspace=Committed seq}
-           | `Int seq,Committed previous when seq=previous -> Ok record
+          (match List.assoc "seq" f,workspace with
+           | `Int seq,Uncommitted when seq>0 -> Ok (Committed seq,recipients)
+           | `Int seq,Committed previous when seq=previous -> Ok (workspace,recipients)
            | _,(Uncommitted | Committed _) -> Error (Corrupt "contradictory workspace commit"))
       | Some (`String "recipient") ->
           let* f = exact ["event";"recipient";"state";"error"] json in
@@ -102,16 +102,43 @@ let transition record json =
             | "pending",`Null -> Ok (Pending None)
             | "pending",`String detail -> Ok (Pending (Some detail))
             | _ -> Error (Corrupt "invalid recipient state") in
-          (match record.workspace,List.assoc_opt recipient record.recipients,next with
+          (match workspace,find_recipient recipient recipients,next with
            | Committed _,Some (Pending (Some _)),Pending None ->
                Error (Corrupt "pending update cannot erase failed-attempt evidence")
            | Committed _,Some (Pending _),_ | Committed _,Some Accepted,Accepted ->
-               Ok {record with recipients=List.map (fun (name,old) ->
-                 name,(if name=recipient then next else old)) record.recipients}
+               Ok (workspace,set_recipient recipient next recipients)
            | (Committed _, Some (Accepted), Pending _) | (Committed _, None, _)
            | (Uncommitted, _, _) -> Error (Corrupt "recipient not admitted, commit absent or accepted state regressed"))
       | Some _ | None -> Error (Corrupt "unknown delivery event"))
   | _ -> Error (Corrupt "delivery event must be an object")
+let transition record json =
+  let* workspace,recipients = transition_state
+    ~find_recipient:List.assoc_opt
+    ~set_recipient:(fun recipient next -> List.map (fun (name,old) ->
+      name,(if name=recipient then next else old)))
+    record.workspace record.recipients json in
+  if workspace == record.workspace && recipients == record.recipients then Ok record
+  else Ok {record with workspace;recipients}
+module Recipient_table = Hashtbl.Make (struct
+  type t = string
+  let equal = String.equal
+  let hash = Hashtbl.hash
+end)
+type replay_recipients =
+  | Admitted_list of (string * recipient_state) list
+  | Replay_index of recipient_state Recipient_table.t
+let find_replay_recipient name = function
+  | Admitted_list recipients -> List.assoc_opt name recipients
+  | Replay_index index -> Recipient_table.find_opt index name
+let set_replay_recipient name state recipients =
+  let index = match recipients with
+    | Admitted_list recipients ->
+        let index = Recipient_table.create (List.length recipients) in
+        List.iter (fun (name,state) -> Recipient_table.add index name state) recipients;
+        index
+    | Replay_index index -> index in
+  Recipient_table.replace index name state;
+  Replay_index index
 let decode bytes =
   try
   if bytes="" then Ok None else
@@ -121,8 +148,23 @@ let decode bytes =
   | [] -> Error (Corrupt "empty delivery journal")
   | first::rest ->
       let* record=initial (Yojson.Safe.from_string first) in
-      List.fold_left (fun acc line -> let* record=acc in transition record (Yojson.Safe.from_string line))
-        (Ok record) rest |> Result.map Option.some)
+      (* A recipient acknowledgement rereads the growing authoritative journal.
+         Replay into one local index rather than rebuilding the entire
+         audience list for every historical acknowledgement. The admitted list
+         still owns output ordering. This builder belongs exclusively to this
+         decode; only the final immutable list leaves it. *)
+      let* workspace,recipients = List.fold_left (fun acc line ->
+        let* workspace,recipients=acc in
+        transition_state ~find_recipient:find_replay_recipient
+          ~set_recipient:set_replay_recipient workspace recipients (Yojson.Safe.from_string line))
+        (Ok (record.workspace,Admitted_list record.recipients)) rest in
+      let recipients = match recipients with
+        | Admitted_list recipients -> recipients
+        | Replay_index index -> List.map (fun (name,_) ->
+            (* Every admitted name was indexed on the first recipient update;
+               transitions cannot add or remove a name. *)
+            name,Recipient_table.find index name) record.recipients in
+      Ok (Some {record with workspace;recipients}))
   | _ -> Error (Corrupt "incomplete delivery journal")
   with Yojson.Json_error detail -> Error (Corrupt detail)
 let protect f = try f () with

@@ -22,9 +22,19 @@ let roundtrips () =
     Page_context {tab_id=7;frame_path=["#frame"];mode=`Text 1000};
     Page_instruct {tab_id=7;instruction="Open the menu"};Page_locate {tab_id=7;instruction=None};
     Page_extract {tab_id=7;instruction="Read totals";schema=Some (`Assoc ["type",`String "object"])}] in
+  let hooks = ok (Masc.Lane_addon_tool_hooks.prepare
+    ~hooks:[Validate_input] Masc.Browser_addon_tool.definition) in
+  let public command = `Assoc ["lane",`String "live";
+    "clientId",`String (B.client_id_to_string id);"command",command] in
   List.iter (fun verb ->
     let request = {W.incarnation;command=W.Issue {route;verb;actor=Some "keeper";timeout_sec=3.;only_if_idle=false}} in
-    check bool (B.verb_to_string verb) true (ok (W.of_json (W.to_json request))=request)) verbs
+    check bool (B.verb_to_string verb) true (ok (W.of_json (W.to_json request))=request);
+    match Masc.Lane_addon_tool_hooks.before_call hooks (public (B.verb_json verb)) with
+    | Ok () -> ()
+    | Error detail -> failf "%s must pass the advertised input contract: %s" (B.verb_to_string verb) detail) verbs;
+  check bool "the same input hook rejects an unsupported wire verb" true
+    (Result.is_error (Masc.Lane_addon_tool_hooks.before_call hooks
+      (public (`Assoc ["verb",`String "page.unsupported";"args",`Assoc []]))))
 (* A native host may poll as the extension or a BiDi host; the ego
    connection polls only from inside the worker. *)
 let a_native_host_cannot_poll_as_ego () =

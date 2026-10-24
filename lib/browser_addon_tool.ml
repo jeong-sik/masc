@@ -12,7 +12,7 @@ let input_schema = object_schema ~required:["lane";"command"] [
   "lane",enum ["live";"automation";"stagehand"];"clientId",text_schema;"uploadId",text_schema;
   "command",object_schema ~required:["verb";"args"] [
     "verb",enum ["tabs.list";"page.read";"page.downloads";"page.console";"page.network";"page.cookies";"page.capture";
-      "page.scene";"page.interact";"session.open";"session.close";"session.status";
+      "page.scene";"page.snapshot";"page.interact";"session.open";"session.close";"session.status";
       "page.goto";"page.elements";"page.act";"page.context";"page.instruct";"page.locate";"page.extract"];
     "args",object_schema ~open_fields:true ~required:[] []]]
 let output_schema = object_schema ~required:["reply";"answer"] [

@@ -385,7 +385,7 @@ let scenario mode =
            worker's own copies, and they stay until the space has ended. *)
         let source = Filename.concat root "note.txt" in
         write source "hello"; Unix.chmod source 0o600;
-        let upload = B.Page_act (B.Action.On_tab {tab_id=1;frame_path=[];interaction=B.Action.Upload {selector="#file";paths=[source]}}) in
+        let upload = B.Page_act (B.Action.On_tab {tab_id=1;frame_path=[];interaction=B.Action.Upload {target=B.Action.File_input "#file";paths=[source]}}) in
         let grant = "0b000000-0000-4000-8000-000000000072" in
         check bool "the upload is staged for this connection" true
           (dispatch (W.Upload_stage {id=grant;actor;route;verb=upload}) = W.Receipt);

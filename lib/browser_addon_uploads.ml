@@ -117,8 +117,8 @@ let with_claim t ~id ~actor ~route ~verb f =
   Fun.protect ~finally:finish (fun () ->
     let* ()=protect (fun () -> check t) in
     match verb with
-    | B.Page_act (B.Action.On_tab ({interaction=Upload {selector;_};_} as target)) ->
-        Ok (f (B.Page_act (B.Action.On_tab {target with interaction=Upload {selector;paths=Lease.paths grant.snapshot}})))
+    | B.Page_act (B.Action.On_tab ({interaction=Upload {target=upload;_};_} as target)) ->
+        Ok (f (B.Page_act (B.Action.On_tab {target with interaction=Upload {target=upload;paths=Lease.paths grant.snapshot}})))
     | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _
     | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
     | Page_act (Open_tab _|Open_window _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})

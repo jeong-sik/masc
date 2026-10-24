@@ -130,8 +130,8 @@ let prepare ~keeper_name ~upload_paths tool json =
   | Act ->
       let* action=B.Action.parse json in
       let* action=match action,upload_paths with
-        | B.Action.On_tab ({interaction=Upload {selector;_};_} as target),Some paths ->
-            Ok (B.Action.On_tab {target with interaction=Upload {selector;paths}})
+        | B.Action.On_tab ({interaction=Upload {target=upload;_};_} as target),Some paths ->
+            Ok (B.Action.On_tab {target with interaction=Upload {target=upload;paths}})
         | On_tab {interaction=Upload _;_},None -> Error "upload requires an authoritative Keeper file context"
         | (Open_tab _|Open_window _|Control _|On_tab {interaction=(Back|Forward|Reload
             |Close_tab|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests);_}),(None|Some _) -> Ok action in

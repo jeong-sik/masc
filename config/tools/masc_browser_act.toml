@@ -35,6 +35,11 @@ type = "string"
 description = "upload: one observed file input; preserve decoded CSS including > and escapes, not JSON escape notation."
 
 [[params]]
+name = "opener"
+type = "string"
+description = "upload on an ego browser instead of selector: one observed control whose click opens the page's file chooser. The click is the effect; the receipt's chosen lists the files handed to the chooser."
+
+[[params]]
 name = "text"
 type = "string"
 description = "accept_dialog prompt text."

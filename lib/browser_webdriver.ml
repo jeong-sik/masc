@@ -337,7 +337,9 @@ let interact t session ~perform_effect ~started = function
   | Browser_lane.Action.Clear_emulation -> emulate t session ~started None
   | Browser_lane.Action.Block_requests hosts -> block_requests t session ~started (Some hosts)
   | Browser_lane.Action.Unblock_requests -> block_requests t session ~started None
-  | Browser_lane.Action.Upload {selector;paths} ->
+  | Browser_lane.Action.Upload {target = Browser_lane.Action.Chooser_opener _; _} ->
+    Error (Protocol "the automation Firefox sets files on a file input only; name it with selector")
+  | Browser_lane.Action.Upload {target = Browser_lane.Action.File_input selector; paths} ->
     let* id = element_id t session selector in
     let element = `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id] in
     let* is_file = script t session "return arguments[0].localName==='input' && arguments[0].type==='file';" [element] in

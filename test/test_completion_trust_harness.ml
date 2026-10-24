@@ -725,6 +725,66 @@ let test_legitimate_claim_succeeds () =
     | Some assignee -> check string "claimed task is owned by the caller" meta.name assignee
     | None -> fail "task-001 must be Claimed/InProgress after a legitimate claim")
 
+let test_late_verdict_respects_actual_terminal_authority () =
+  let exercise terminal = with_ws "completion_terminal_race"
+    (fun ~sw:_ ~net:_ ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->
+      ignore (Workspace.add_task config ~title:"terminal commit race" ~priority:1
+        ~description:"An operator acts while the system reviewer is answering.");
+      ignore (claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work ~task_id:"task-001");
+      let old_hook = Atomic.get Workspace_hooks.verification_submitted_fn in
+      Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.verification_submitted_fn old_hook)
+        (fun () ->
+          (* The active daemon owns the real runtime, but this test enters its
+             complete review+settlement synchronously so a registry write
+             cannot be mistaken for completion of the later notification. *)
+          Atomic.set Workspace_hooks.verification_submitted_fn (fun _ ~task:_ ~assignee:_ ~verification_id:_ -> ());
+          let submitted = attempt_done ~config ~meta ~publication_recovery ~ctx_work
+            ~task_id:"task-001" ~result:"ready for the controlled authority race" () in
+          check string "submission is accepted" "success" (outcome_label submitted.KTE.disposition);
+          let task, verification_id = match find_task config "task-001" with
+            | Some ({task_status=Masc_domain.AwaitingVerification {verification_id;_}; _} as task) -> task,verification_id
+            | Some _ | None -> fail "race fixture never reached AwaitingVerification" in
+          let previous = Atomic.get AR.run_llm_reviewer_fn in
+          let racing_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
+              ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () =
+            let commit verdict = Workspace.commit_verdict_r config
+              ~authority:(Masc_domain.Human_operator {operator_id="race-operator"})
+              ~task_id:task.id ~verification_id ~verdict () in
+            let acted = match terminal with
+              | `Cancelled -> Workspace.cancel_task_as_operator_r config ~operator_id:"race-operator"
+                  ~task_id:task.id ~reason:"cancelled while review is in flight" ()
+              | `Done -> commit Masc_domain.Verdict_approved
+              | `Rejected -> commit (Masc_domain.Verdict_rejected {reason="operator requests repair"}) in
+            (match acted with Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error));
+            Ok {AR.selected_runtime_id=evaluator_runtime; verdict=Some (AR.Approve "late model approval")} in
+          Fun.protect ~finally:(fun () -> Atomic.set AR.run_llm_reviewer_fn previous) (fun () ->
+            Atomic.set AR.run_llm_reviewer_fn racing_reviewer;
+            check bool "actual review and outcome consumer returned" true
+              (Masc.Completion_authority_agent.For_testing.process_active_task
+                ~task ~assignee:meta.name ~verification_id));
+          let is_terminal = terminal <> `Rejected in
+          let row = match Masc.Verification_run_registry.get (Masc.Verification_run_registry.global ()) ~verification_id with
+            | Some row -> row | None -> fail "actual system review did not publish its run" in
+          (match row.status with
+           | Completed {outcome=Superseded_by _; _} when is_terminal -> ()
+           | Completed {outcome=Commit_failed _; _} when not is_terminal -> ()
+           | Running | Completed _ -> fail "run did not distinguish terminal supersession from a nonterminal refusal");
+          check bool "no shared retry batch was armed" false
+            (Masc.Completion_authority_agent.For_testing.retry_pending ~task_id:task.id ~verification_id);
+          let stalls = Masc.Board_dispatch.list_posts ~hearth:"verification" ~limit:200 ()
+            |> List.filter (fun (post:Masc.Board.post) -> match post.meta_json with
+              | Some (`Assoc fields) -> List.assoc_opt "type" fields = Some (`String "verification_stalled")
+                  && List.assoc_opt "verification_id" fields = Some (`String verification_id)
+              | Some _ | None -> false) in
+          check int "only an actual nonterminal refusal publishes a stall" (if is_terminal then 0 else 1) (List.length stalls);
+          match Workspace.read_task_status_r config ~task_id:task.id with
+          | Ok (Some {status;_}) -> check bool "late verdict preserves the operator decision" true
+              (match terminal,status with
+               | `Done,Masc_domain.Done _ | `Cancelled,Cancelled _ | `Rejected,InProgress _ -> true
+               | _ -> false)
+          | Ok None | Error _ -> fail "authoritative final Task state is unavailable")) in
+  List.iter exercise [`Done; `Cancelled; `Rejected]
+
 let () =
   let prompt_dir = Masc_test_deps.source_path "config/prompts" in
   Prompt_registry.set_markdown_dir prompt_dir;
@@ -756,5 +816,7 @@ let () =
             `Quick test_unavailable_evaluator_keeps_task_active
         ; test_case "legitimate self-claim is accepted (selectivity control)" `Quick
             test_legitimate_claim_succeeds
+        ; test_case "late verdict respects the actual terminal authority" `Quick
+            test_late_verdict_respects_actual_terminal_authority
         ] )
     ]

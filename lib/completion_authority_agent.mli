@@ -106,13 +106,26 @@ module For_testing : sig
         }
     | Raised of { detail : string }
 
-  (** How one review attempt ended. [Stalled] names why no verdict was
+  (** How one review attempt ended. [Superseded_by] records the observed
+      terminal authority without scheduling a retry or publishing a stall.
+      [Stalled] names why no verdict was
       committed: the run row is recorded, the caller schedules the retry the
       cause asks for, and then writes the WARN and projects the stall to the
       Board from the scheduler's answer. *)
   type process_outcome =
     | Committed
+    | Superseded_by of { authority : string }
     | Stalled of stop_cause
+
+  val process_active_task :
+    task:Masc_domain.task -> assignee:string -> verification_id:string -> bool
+  (** Synchronously exercise the actual active runtime's review and outcome
+      consumer. [false] means no runtime is active. Tests suppress the submit
+      wake before using this entrypoint, so the same review cannot race it. *)
+
+  val retry_pending : task_id:string -> verification_id:string -> bool
+  (** Observe whether the active runtime's shared retry batch names this
+      review. Does not schedule, wait or dispatch. *)
 
   val not_reviewed_of_result : Task.Anti_rationalization.review_result -> stop_cause
   (** The stop a verdict-less review records: [Not_reviewed] with the

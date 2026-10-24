@@ -1,0 +1,31 @@
+{
+  "source_commit": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+  "dashboard_build_identity": {
+    "schema": "masc.dashboard-build.v1",
+    "source_commit": "a3173b973ab93a6b64fd301bca105a67a7529d00"
+  },
+  "server_binary_sha256": "d27fb1565ca8eb220cd751edb83ab193cb43932d8b9ec50fa9ae25067b38a669",
+  "browser": "ego-browser task space27, closed with finish keep[]",
+  "before": {
+    "sandbox_profile": "remote_ssh",
+    "remote_endpoint": "proof",
+    "network_mode": "inherit"
+  },
+  "persisted_after": {
+    "sandbox_profile": "remote_ssh",
+    "remote_endpoint": "proof_alt",
+    "network_mode": "inherit"
+  },
+  "claims": [
+    "registered endpoints displayed",
+    "actual browser endpoint selection and save",
+    "independent persisted TOML readback"
+  ],
+  "not_measured": [
+    "native TUI",
+    "real model judgement",
+    "full profile transition",
+    "production installation",
+    "current rebased PR runtime"
+  ]
+}

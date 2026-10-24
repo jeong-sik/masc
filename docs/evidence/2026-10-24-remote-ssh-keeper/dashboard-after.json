@@ -1,0 +1,5 @@
+{
+  "sandbox_profile": "remote_ssh",
+  "remote_endpoint": "proof_alt",
+  "network_mode": "inherit"
+}

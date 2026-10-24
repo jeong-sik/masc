@@ -107,3 +107,34 @@ The shim is still the preexisting ARM64 artifact described above. Real model
 judgement, extended continuity, production installation and the remaining
 readiness requirements remain unverified. Add `--exercise-pin-rotation` to
 include this optional failure/recovery scenario.
+
+## Browser endpoint selection and durable save
+
+The candidate server and a clean detached Dashboard build both identified
+`a3173b973ab93a6b64fd301bca105a67a7529d00`. In an Ego task space, the operator
+opened this actual Keeper's settings, chose the sandbox tab, selected the
+registered `proof_alt` endpoint and clicked **Keeper 설정 저장**. `proof_alt`
+was explicitly declared in this isolated runtime and pointed at the same
+dedicated test host. The original `proof` declaration was retained.
+
+The dropdown displayed registered endpoint names, host/user/port, remote root
+and prior observations. Before save the new endpoint correctly showed no probe
+or dispatch observation. After save its real preflight observations appeared;
+the UI removed the unsaved marker. Independent TOML readback changed exactly
+the observed sandbox tuple from `remote_ssh/proof/inherit` to
+`remote_ssh/proof_alt/inherit`. The save also started the previously stopped
+manual Keeper; the screenshots show that state change, not merely a draft.
+
+`dashboard-endpoint-picker.png` and `dashboard-endpoint-saved.png` were captured
+and visually inspected. `dashboard-before.json`, `dashboard-after.json` and
+`dashboard-receipt.json` preserve the readbacks and scope. The Ego task space
+was closed with `finish({keep:[]})`, and its owned candidate server was stopped.
+Production installation and workspace configuration were not changed.
+
+This does not prove a full Docker-to-SSH profile transition or native TUI
+interaction. The saved chat snapshot also preserves an unresolved observation:
+the assistant reply's `execution_id` tool tile and its turn's `tool_call_id`
+timeline can show different tools in this candidate. Canonical tool results and
+the detailed timeline were the execution evidence here; the reply tile's mapping
+requires separate investigation. These observations belong to the tested a317
+candidate and are not a verdict on an unexecuted rebased head.

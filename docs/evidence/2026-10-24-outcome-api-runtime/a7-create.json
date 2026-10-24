@@ -1,0 +1,47 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.64.0"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"ok\":true,\"task_id\":\"task-001\",\"creation_request_id\":null,\"summary\":\"Added task-001: 독립 산술 결과와 Task 승인 지표 확인\",\"title\":\"독립 산술 결과와 Task 승인 지표 확인\",\"priority\":3,\"description\":\"alpha/beta/gamma Goal과 독립적인 산술 결과 2+2를 실제 Docker에서 실행하고, Task 승인 지표와 외부 수용 미관측을 구분한다.\",\"goal_id\":null,\"predecessor_task_id\":null,\"skills\":[]}",
+          "status": "ok",
+          "tool": "masc_add_task"
+        },
+        "trace_id": "2",
+        "agent_id": "goal-canary-operator",
+        "tool": "masc_add_task",
+        "duration_ms": 5,
+        "attempts": 1,
+        "timestamp": "2026-10-24T09:40:49Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"ok\":true,\"task_id\":\"task-001\",\"creation_request_id\":null,\"summary\":\"Added task-001: 독립 산술 결과와 Task 승인 지표 확인\",\"title\":\"독립 산술 결과와 Task 승인 지표 확인\",\"priority\":3,\"description\":\"alpha/beta/gamma Goal과 독립적인 산술 결과 2+2를 실제 Docker에서 실행하고, Task 승인 지표와 외부 수용 미관측을 구분한다.\",\"goal_id\":null,\"predecessor_task_id\":null,\"skills\":[]}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "ok": true,
+      "task_id": "task-001",
+      "creation_request_id": null,
+      "summary": "Added task-001: 독립 산술 결과와 Task 승인 지표 확인",
+      "title": "독립 산술 결과와 Task 승인 지표 확인",
+      "priority": 3,
+      "description": "alpha/beta/gamma Goal과 독립적인 산술 결과 2+2를 실제 Docker에서 실행하고, Task 승인 지표와 외부 수용 미관측을 구분한다.",
+      "goal_id": null,
+      "predecessor_task_id": null,
+      "skills": []
+    }
+  }
+}

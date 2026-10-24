@@ -44,7 +44,8 @@ val drop_block_env_var : string
 
 val request_headers : body:string -> (string * string) list -> (string * string) list
 (** Add the binding-controls beta only when this exact serialized request
-    contains [thinking.block_binding]. Preserve other caller beta values. *)
+    contains [thinking.block_binding]. Add the turn-scoped-context beta when
+    messages carry [clear_at]. Preserve other caller beta values. *)
 
 val observe_input_transformations : Yojson.Safe.t -> unit
 (** Record provider-reported thinking transformations without recording block

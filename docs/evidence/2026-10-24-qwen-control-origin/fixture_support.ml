@@ -20,6 +20,10 @@ end
 module Capabilities = struct
   type reasoning_replay_override = Default_reasoning_replay
     | Force_initial_system_latest_user_turn_tool_calls
+    | Force_turn_scoped_system_context_preserve_always
+    | Force_no_replay | Force_drop_without_tool_preserve_with_tool
+    | Force_latest_user_turn_tool_calls | Force_preserve_always
+    | Force_preserve_with_request_tools
   type capabilities = {reasoning_replay_override:reasoning_replay_override}
 end
 

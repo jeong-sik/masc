@@ -59,6 +59,7 @@ type reasoning_replay_override = Capability_vocab.reasoning_replay_override =
   | Force_initial_system_latest_user_turn_tool_calls
   (** Replay tool-call reasoning only inside the structurally latest user turn. *)
   | Force_preserve_always
+  | Force_turn_scoped_system_context_preserve_always
   | Force_preserve_with_request_tools
 
 type assistant_tool_content_format = Capability_vocab.assistant_tool_content_format =

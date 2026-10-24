@@ -676,6 +676,7 @@ let with_client_history_replay
              | Llm_provider.Capabilities.Force_latest_user_turn_tool_calls
              | Llm_provider.Capabilities.Force_initial_system_latest_user_turn_tool_calls
              | Llm_provider.Capabilities.Force_preserve_always
+             | Llm_provider.Capabilities.Force_turn_scoped_system_context_preserve_always
              | Llm_provider.Capabilities.Force_preserve_with_request_tools )
          ; _
          }

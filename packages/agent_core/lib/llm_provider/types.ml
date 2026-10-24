@@ -478,7 +478,7 @@ module Reasoning_prefix = struct
     | Duplicate
   [@@deriving show]
 
-  let key = "agent_core.reasoning_prefix.v1"
+  let key = "agent_core.reasoning_prefix.v2"
   let sha256_hex_length = 64
 
   let digest_is_canonical value =

@@ -1,5 +1,5 @@
 {
-  "production_lowerer_source_sha256": "09e8cdd15f142298749b18356a0a102423764a04e0a3e2985c451056e4c916ba",
+  "production_lowerer_source_sha256": "92b59eea3e2e541e3dda9d75dd5bf0e69a236981041e2acaf400bd19a7d0179b",
   "template_sha256": "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259",
   "scope": "production lowerer with fixture dependencies plus official template",
   "production_serializer_executed": false,

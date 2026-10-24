@@ -1,0 +1,46 @@
+{
+  "scope": "production lowerer and extracted production prefix verifier, decoder and beta header code with fixture dependencies",
+  "production_source_sha256": {
+    "message_origin_lowering.ml": "92b59eea3e2e541e3dda9d75dd5bf0e69a236981041e2acaf400bd19a7d0179b",
+    "message_origin_lowering.mli": "140b131a089ade26ad896667410bb4895ccbeb080648666b1e2b91e0ee865073",
+    "reasoning_history_projection.ml": "1ae34a8f3da4c971aaa5d52cc30bab649c230739b2ba2a771823bdc8e782af14",
+    "types.ml": "5849f60e035a9084c40788cda8061f3b131486d1b33aae3e1550df41596bc11f",
+    "backend_anthropic.ml": "01b5f50f7b3a0ada5df7ca402130b5102e452f2d660ff9f73a570b5a20111fdd"
+  },
+  "extracted_source_sha256": {
+    "prefix_slice": "1f6103bd385fd0694ecdd767360bcace5e4a077e5af64bdea3135b27e20cc8a7",
+    "prefix_decoder": "75d1ae2cbc6de4342a0835ef3a205d0afbce5081cc475432130cbc81549d0e08",
+    "header_slice": "c074cc22e64c7f7ad2eff0d89ea60a5498e79e86f484ad0aa7bbd43ef51747de"
+  },
+  "project_linked": false,
+  "production_serializer_executed": false,
+  "source_compatibility_classifier_executed": false,
+  "provider_signature_authenticated": false,
+  "provider_called": false,
+  "checks": {
+    "fresh_historical_wire_identical": true,
+    "source_coordinates_preserved": true,
+    "canonical_origin_and_role_unchanged": true,
+    "context_header_scopes_next_user": true,
+    "tool_continuation_retains_thinking": true,
+    "text_edit_invalidates_creation_prefix": true,
+    "header_edit_invalidates_creation_prefix": true,
+    "old_stamp_is_not_v2_certification": true,
+    "removed_assistant_has_no_phantom_header": true,
+    "post_prefix_placement_requires_revalidation": true,
+    "leading_context_rejected": true,
+    "context_after_assistant_rejected": true,
+    "context_before_user_rejected": true,
+    "context_between_tool_use_and_result_rejected": true,
+    "consecutive_context_group_accepted": true,
+    "nontext_context_rejected": true,
+    "default_positions_unchanged": true,
+    "native_policy_is_declared": true,
+    "wrong_codec_rejected": true,
+    "count_body_without_thinking_adds_beta": true,
+    "caller_beta_preserved": true,
+    "binding_and_context_betas_coexist": true,
+    "beta_merge_idempotent": true,
+    "ordinary_body_has_no_extra_beta": true
+  }
+}

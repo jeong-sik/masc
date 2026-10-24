@@ -44,6 +44,7 @@ type reasoning_replay_override =
   | Force_latest_user_turn_tool_calls
   | Force_initial_system_latest_user_turn_tool_calls
   | Force_preserve_always
+  | Force_turn_scoped_system_context_preserve_always
   | Force_preserve_with_request_tools
 
 type assistant_tool_content_format =
@@ -542,6 +543,7 @@ let reasoning_replay_table =
   ; "latest_user_turn_tool_calls", Force_latest_user_turn_tool_calls
   ; "initial_system_latest_user_turn_tool_calls", Force_initial_system_latest_user_turn_tool_calls
   ; "preserve_always", Force_preserve_always
+  ; "turn_scoped_system_context_preserve_always", Force_turn_scoped_system_context_preserve_always
   ; "preserve_with_request_tools", Force_preserve_with_request_tools
   ]
 ;;

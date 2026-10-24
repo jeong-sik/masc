@@ -218,7 +218,8 @@ let apply_replay_override caps dialect =
     { dialect with replay_policy = Tool_call_assistant_messages_all_history }
   | Force_latest_user_turn_tool_calls | Force_initial_system_latest_user_turn_tool_calls ->
     { dialect with replay_policy = Tool_call_assistant_messages_latest_user_turn }
-  | Force_preserve_always | Force_preserve_with_request_tools ->
+  | Force_preserve_always | Force_preserve_with_request_tools
+  | Force_turn_scoped_system_context_preserve_always ->
     { dialect with replay_policy = All_assistant_messages }
 ;;
 
@@ -596,6 +597,7 @@ let base_for_provider_config (config : Provider_config.t) =
      | Force_latest_user_turn_tool_calls
      | Force_initial_system_latest_user_turn_tool_calls
      | Force_preserve_always
+     | Force_turn_scoped_system_context_preserve_always
      | Force_preserve_with_request_tools -> dialect)
   | Kimi | OpenAI_compat | Glm ->
     (match Provider_config.capabilities_for_config_model config with

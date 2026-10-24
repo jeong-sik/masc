@@ -1,0 +1,26 @@
+Run40113587452 at939db8d04e8bbbd205b16cf9b2da3429db47d35b
+No selected suite executed. Retained diagnostic excerpts:
+
+test suite	UNKNOWN STEP	2026-10-24T16:56:01.5566166Z File "lib/keeper/keeper_tool_in_process_runtime.ml", lines 1557-1564, characters 9-23:
+test suite	UNKNOWN STEP	2026-10-24T16:56:01.5566603Z 1557 | .........match surface, continuation_channel with
+test suite	UNKNOWN STEP	2026-10-24T16:56:01.5566973Z 1558 |          | "telegram", Some (Keeper_continuation_channel.Telegram _ as channel) ->
+test suite	UNKNOWN STEP	2026-10-24T16:56:01.5567488Z 1559 |            Result.map Option.some (Keeper_native_origin_reply.of_continuation channel)
+test suite	UNKNOWN STEP	2026-10-24T16:56:01.5567991Z 1560 |          | "imessage", Some (Keeper_continuation_channel.Imessage {chat_guid;_} as channel) ->
+test suite	UNKNOWN STEP	2026-10-24T16:56:01.5568508Z 1561 |            Result.bind (Channel_gate_imessage_state.reply_target ~chat_guid) (fun destination ->
+test suite	UNKNOWN STEP	2026-10-24T16:56:01.5568987Z 1562 |              Result.map Option.some (Keeper_native_origin_reply.of_continuation
+test suite	UNKNOWN STEP	2026-10-24T16:56:01.5569372Z 1563 |                ~imessage_destination:destination channel))
+test suite	UNKNOWN STEP	2026-10-24T16:56:01.5569649Z 1564 |          | _ -> Ok None...
+test suite	UNKNOWN STEP	2026-10-24T16:56:01.5569949Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	UNKNOWN STEP	2026-10-24T16:56:01.5570509Z   It will remain exhaustive when constructors are added to type Keeper_continuation_channel.t.
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3824459Z 807 | ....(match connector_post_replay_target connector_post with
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3824819Z 808 |      | Masc.Keeper_surface_post.To_discord { channel_id } ->
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3825115Z 809 |        Alcotest.check
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3825324Z 810 |          Alcotest.string
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3825585Z 811 |          "terminal target remains the approved channel"
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3825855Z 812 |          "D-exact"
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3826051Z 813 |          channel_id
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3826278Z 814 |      | ( Masc.Keeper_surface_post.To_dashboard
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3826562Z 815 |        | Masc.Keeper_surface_post.To_slack _ ) ->
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3826929Z 816 |        Alcotest.fail "Discord replay produced the wrong terminal target")
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3827360Z Error (warning 8 [partial-match]): this pattern-matching is not exhaustive.
+test suite	UNKNOWN STEP	2026-10-24T16:56:27.3827747Z   Here is an example of a case that is not matched: To_native _

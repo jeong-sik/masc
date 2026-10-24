@@ -194,3 +194,15 @@ The existing keeper-message and chat-primitives suites passed **211 tests**
 including native receipt normalization. See [the output](wake-dashboard.txt).
 This is fixture/DOM execution, without a new browser observation of this layer.
 The earlier two unrelated baseline typecheck failures still apply.
+
+### Autonomous follow-up compilation result
+
+[Run 40113587452](https://github.com/jeong-sik/masc/actions/runs/40113587452)
+at `939db8d04e8bbbd205b16cf9b2da3429db47d35b` completed **FAILURE**, before
+any of its three selected suites executed. The runtime's native route lookup
+had a fragile catch-all over the continuation variant (warning 4); an existing
+Gate replay fixture omitted the added `To_native` constructor (warning 8).
+The repair enumerates every continuation case and adds the missing test arm.
+This source repair does not establish execution of the new wake scenario.
+The same three suites are requested again; earlier lower-layer 24/92 results
+remain separate. No local Dune build or CI watch loop was used.

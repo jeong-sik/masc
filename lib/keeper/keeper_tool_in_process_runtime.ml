@@ -1561,7 +1561,11 @@ let handle_surface_post_with_outcome
            Result.bind (Channel_gate_imessage_state.reply_target ~chat_guid) (fun destination ->
              Result.map Option.some (Keeper_native_origin_reply.of_continuation
                ~imessage_destination:destination channel))
-         | _ -> Ok None in
+         | _, Some (Keeper_continuation_channel.Dashboard _
+             | Keeper_continuation_channel.Discord _ | Keeper_continuation_channel.Slack _
+             | Keeper_continuation_channel.Telegram _ | Keeper_continuation_channel.Imessage _
+             | Keeper_continuation_channel.Keeper _ | Keeper_continuation_channel.Unrouted _)
+         | _, None -> Ok None in
        match native_reply with
        | Error detail -> fail ~class_:Tool_result.Workflow_rejection
            ~effect_disposition:Tool_result.Proven_pre_effect (Keeper_surface_post.error_json detail)

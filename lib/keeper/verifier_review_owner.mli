@@ -40,6 +40,13 @@ type load_error =
   | Corrupt_original of string
       (** The stored bytes exist but do not decode to a review original. *)
 
+type verification_scope = All_verifications | Verification of string
+(** [Verification id] isolates only records whose summary, body identity,
+    original key and verified digest independently agree. Routing metadata is
+    not an executable Original; selected records still decode strictly.
+    An unverifiable identity rejects the observation, never proves absence.
+    [All_verifications] retains strict full-inventory validation. *)
+
 val attempt_request_id : verification_id:string -> attempt:int -> (string, string) result
 (** The owner-record key for one attempt: ["<verification_id>:attempt-<n>"].
     Attempts are non-negative integers; a negative attempt is an error. *)
@@ -79,7 +86,10 @@ val load_for_destination :
 val next_attempt :
   store:store -> verification_id:string -> installation_id:string -> package_id:string ->
   (int, load_error) result
-(** Select the exact retained frontier from the strictly validated durable inventory.
+(** Select the exact retained frontier from the strictly validated durable
+    inventory for this verification. Independently bound foreign identities
+    are excluded before semantic Original decoding; target failures remain
+    errors and never authorize a fresh attempt.
     New identities require a definite typed terminal retry and a durably linked
     successor preserving the complete frozen input. A wake alone never allocates.
     The host holds its workspace process lease and serializes this verification
@@ -110,14 +120,15 @@ end
 val result_to_json : Task.Anti_rationalization.review_result -> Yojson.Safe.t
 val result_of_json : Yojson.Safe.t -> (Task.Anti_rationalization.review_result, string) result
 
-val retained_commits : store:store -> installation_id:string -> package_id:string ->
+val retained_commits : store:store -> selection:verification_scope ->
+  installation_id:string -> package_id:string ->
   (retained list, load_error) result
-(** Strict original commit inventory including acknowledged terminal facts, so
+(** Strict selected original commit inventory including acknowledged terminal facts, so
     a queued stale Task snapshot cannot start another registry lifecycle. *)
 
 val pending_commits :
   terminal_pending:(retained -> (bool, string) result) ->
-  store:store -> installation_id:string -> package_id:string ->
+  store:store -> selection:verification_scope -> installation_id:string -> package_id:string ->
   (retained list, load_error) result
 (** Strict recovery discovery. Retained judgments/intents are returned, together
     with terminal facts whose canonical host publication is not acknowledged.

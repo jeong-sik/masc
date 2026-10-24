@@ -102,11 +102,77 @@ let check_no_stale_request_after_prepare_failure env binding =
     fail "failed prepare reattributed a previous same-runtime request"
 ;;
 
+let check_unbound_request_journals ~base_path ~keeper_name ~bodies observations =
+  let call_ids, digests = List.fold_left
+    (fun (call_ids, digests) (observation : Request_observation.t) ->
+      match observation.evidence with
+      | Request_observation.Recorded {call_id; requests} ->
+        let reopened = Keeper_request_execution.reopen ~base_path ~keeper_name ~call_id
+          |> require "reopen unbound request journal" in
+        check bool "request evidence survives loss of the original observation handle" true
+          (Request_observation.to_json observation =
+           Request_observation.to_json
+             {observation with evidence=Keeper_request_execution.request_evidence reopened});
+        let digests = List.fold_left
+          (fun digests (request : Request_observation.provider_request) ->
+            match request.provenance with
+            | Some (Llm_provider.Completion_outcome.Serialized body) ->
+              body.body_sha256 :: digests
+            | None | Some (Llm_provider.Completion_outcome.Not_serialized
+                | Cache_reused _ | External_unobserved | Interrupted_unobserved) ->
+              fail "actual native HTTP request lost its serialized artifact") digests requests in
+        call_id :: call_ids, digests
+      | Request_observation.Not_dispatched -> call_ids, digests
+      | Request_observation.No_durable_scope | No_matching_call | Read_failed _ ->
+        fail "unbound native invocation has no readable durable request evidence")
+    ([], []) observations in
+  check int "each actual Agent API invocation owns one request journal" 2
+    (List.length (List.sort_uniq String.compare call_ids));
+  let expected = List.map (fun body -> Digestif.SHA256.(digest_string body |> to_hex)) bodies in
+  check (list string) "success and HTTP failure facts match exact received wire bodies"
+    (List.sort String.compare expected) (List.sort String.compare digests)
+;;
+
+let test_unbound_journal_unavailable_evidence () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  let base_path = Filename.temp_file "keeper-request-journal-" "" in
+  Unix.unlink base_path; Unix.mkdir base_path 0o700;
+  Eio.Switch.on_release sw (fun () -> remove base_path);
+  let keeper_name = "request-journal-fixture" in
+  let config = Runtime_agent.default_config ~name:keeper_name
+    ~provider_cfg:(Llm_provider.Provider_config.make ~kind:Anthropic ~model_id:"fixture"
+      ~base_url:"http://not-used.invalid" ()) ~system_prompt:"fixture" ~tools:[] in
+  check bool "fixture starts without an application execution runtime" true
+    (Option.is_none (Runtime_agent_execution_runtime.get ()));
+  (match Keeper_request_execution.prepare ~base_path ~keeper_name ~config () with
+   | Error _ -> () | Ok _ -> fail "unavailable runtime silently created a request scope");
+  check bool "failed preparation creates no storage" false
+    (Sys.file_exists (Common.masc_dir_from_base_path ~base_path));
+  initialize_native_execution ~sw env;
+  let journal, bound = Keeper_request_execution.prepare ~base_path ~keeper_name ~config ()
+    |> require "prepare unbound journal" in
+  (match Keeper_request_execution.prepare ~base_path ~keeper_name ~config:bound () with
+   | Error _ -> () | Ok _ -> fail "existing execution store was replaced");
+  let check_unavailable () = match Keeper_request_execution.request_evidence journal with
+    | Request_observation.Read_failed _ -> ()
+    | Not_dispatched | No_durable_scope | No_matching_call | Recorded _ ->
+      fail "unreadable locator was converted into request facts" in
+  check_unavailable ();
+  let directory = Filename.concat
+    (Filename.concat (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path)
+      keeper_name) "request-executions") (Keeper_request_execution.call_id journal) in
+  write (Filename.concat directory "locator.json") "{malformed";
+  check_unavailable ()
+;;
+
 let test_http_effect_checkpoint_owner_restart_alternate ?(durable_native = false) ?(interleave = false) ?(lose_retained = false) ?(projection_failure = false) () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
-  if durable_native then initialize_native_execution ~sw env;
+  initialize_native_execution ~sw env;
   Fs_compat.set_fs env#fs;
   ignore (Server_startup_state.mark_state_ready ());
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -440,7 +506,7 @@ let test_http_same_path_resume_after_tool_result ?(durable_native = false) ~resu
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
-  if durable_native then initialize_native_execution ~sw env;
+  initialize_native_execution ~sw env;
   Fs_compat.set_fs env#fs;
   ignore (Server_startup_state.mark_state_ready ());
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -657,6 +723,9 @@ is-default = true
     (Store.has_claimable_queued store ~now:(Time_compat.now ()) |> require "has_claimable_queued");
   Store.close store |> require "close store";
   run_phase ~resume:true;
+  if not durable_native then
+    check_unbound_request_journals ~base_path ~keeper_name
+      ~bodies:!request_bodies !request_observations;
   if durable_native then (
     let recorded = List.filter_map (fun (observation:Request_observation.t) ->
       match observation.evidence with
@@ -784,7 +853,10 @@ let test_committed_tool_events_match_the_append_ownership ~native () =
   check bool "no calls, no events" true
     (Server_keeper_operation_transcript.committed_tool_events ~operation_id ~resumed_from [] = Ok [])
 
-let () = run "direct runtime continuation" ["http", [test_case
+let () = run "direct runtime continuation" [
+  "request journal", [test_case "unavailable journal never fabricates request facts" `Quick
+    test_unbound_journal_unavailable_evidence];
+  "http", [test_case
   "rate limit after tool result resumes same operation across owner restart" `Quick
   (test_http_effect_checkpoint_owner_restart_alternate ~interleave:false ~lose_retained:false ~projection_failure:false);
   test_case "autonomous history advances while original exact continuation survives" `Quick

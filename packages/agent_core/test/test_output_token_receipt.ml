@@ -498,14 +498,14 @@ let test_anthropic_zero_is_explicit () =
    receipt. Exercise its final sync/stream boundary, not a second resolver. *)
 let test_completion_serialization_preserves_receipt () =
   let cases : (PC.provider_kind * string * output_token_envelope * string list) list =
-    [ OpenAI_compat, "/v1/chat/completions", Openai_chat_max_tokens, ["max_tokens"]
-    ; OpenAI_compat, "/v1/responses", Openai_responses_max_output_tokens, ["max_output_tokens"]
-    ; Anthropic, "/v1/messages", Anthropic_messages_max_tokens, ["max_tokens"]
-    ; Kimi, "/v1/messages", Anthropic_messages_max_tokens, ["max_tokens"]
-    ; Gemini, "/v1beta/models/m:generateContent", Gemini_generation_config_max_output_tokens,
+    [ PC.OpenAI_compat, "/v1/chat/completions", Openai_chat_max_tokens, ["max_tokens"]
+    ; PC.OpenAI_compat, "/v1/responses", Openai_responses_max_output_tokens, ["max_output_tokens"]
+    ; PC.Anthropic, "/v1/messages", Anthropic_messages_max_tokens, ["max_tokens"]
+    ; PC.Kimi, "/v1/messages", Anthropic_messages_max_tokens, ["max_tokens"]
+    ; PC.Gemini, "/v1beta/models/m:generateContent", Gemini_generation_config_max_output_tokens,
         ["generationConfig"; "maxOutputTokens"]
-    ; Ollama, "/api/chat", Ollama_options_num_predict, ["options"; "num_predict"]
-    ; Glm, "/v1/chat/completions", Openai_chat_max_tokens, ["max_tokens"]
+    ; PC.Ollama, "/api/chat", Ollama_options_num_predict, ["options"; "num_predict"]
+    ; PC.Glm, "/v1/chat/completions", Openai_chat_max_tokens, ["max_tokens"]
     ]
   in
   List.iter (fun (kind, request_path, envelope, path) ->

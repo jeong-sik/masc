@@ -7,10 +7,11 @@
 # then run the case's verify script. The verify exit code is the entire pass
 # verdict (RFC-0396 D2); this script records evidence and never re-judges.
 #
-# Evidence: one JSON file per run plus an appended runs.jsonl, then
+# Evidence: one JSON file per run plus runs.jsonl rebuilt before reporting, then
 # test/coding_eval_report_cli.exe turns rows into pass@k / buckets. A run
-# whose evidence file already exists is skipped, so re-invoking with the same
-# --out directory resumes a sharded collection (RFC-0396 D4).
+# is resumed only when its receipt matches the frozen experiment inputs.
+# This driver supports Docker Keepers and Docker grading; it does not select
+# microVM or SSH backends.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,6 +35,8 @@ LIVE_RUN_DIR=""
 TARGET_DIR=""
 CONFIG_DIR=""
 SERVER_LOG=""
+GRADER_IMAGE_ID=""
+EXPERIMENT_DIGEST=""
 
 usage() {
   cat >&2 <<'EOF'
@@ -47,7 +50,9 @@ Usage:
 
 Runs each selected coding case against each model, records one evidence row
 per run into <out>/runs.jsonl, and summarizes with coding_eval_report_cli.
-Re-running with the same --out skips runs whose evidence already exists.
+Docker is the supported execution and grading backend. Re-running the same
+--out resumes only the same frozen corpus, prompts, runtime config, binaries
+and image. Changed inputs require a new --out directory.
 EOF
 }
 
@@ -94,6 +99,7 @@ fi
 
 require_cmd jq
 require_cmd curl
+require_cmd python3
 
 if [[ -z "${MODELS}" ]]; then
   echo "--models is required (example: --models ollama:qwen3-coder)" >&2
@@ -184,6 +190,7 @@ declare_requested_runtimes() {
 }
 
 prepare_live_environment() {
+  require_cmd docker
   local run_suffix
   run_suffix="$(date +%Y%m%d_%H%M%S)-$$"
   LIVE_RUN_DIR="${OUT_DIR}/live-${run_suffix}"
@@ -196,16 +203,47 @@ prepare_live_environment() {
   # Promote the fixture image CI builds into Docker. The host file holds
   # builds only: the binary ships the names, `ocaml` included.
   local base_image="masc-sandbox-test:ci"
-  if ! docker image inspect "${base_image}" > /dev/null; then
+  if ! GRADER_IMAGE_ID="$(docker image inspect "${base_image}" --format '{{.Id}}')"; then
     echo "coding eval failed: ${base_image} is not in Docker's image store; build it with \`masc sandbox-image --tag ${base_image}\`" >&2
     exit 1
   fi
   printf '[images.base.docker]\nreference = "%s"\n' \
-    "${base_image}" > "${CONFIG_DIR}/sandbox-image-builds.toml"
+    "${GRADER_IMAGE_ID}" > "${CONFIG_DIR}/sandbox-image-builds.toml"
   declare_requested_runtimes
   if [[ -z "${PORT}" ]]; then
     PORT="$(harness_pick_free_port)"
   fi
+}
+
+# The experiment owns input identity. A runtime limit or model name alone is
+# not enough to reuse a receipt produced by another corpus/configuration.
+experiment_inputs() {
+  local -a arguments=(capture --root "${ROOT_DIR}" --cases "${CASES_DIR}"
+    --runtime-config "${CONFIG_DIR}/runtime.toml"
+    --binary "${ROOT_DIR}/_build/default/bin/main_eio.exe"
+    --report-binary "${CLI_EXE}" --models "${MODELS}"
+    --memory-mode "${MEMORY_MODE}" --execution-mode "${EXECUTION_MODE}"
+    --image "${GRADER_IMAGE_ID}" --out "${OUT_DIR}/experiment.json")
+  if [[ -n "${MANIFEST}" ]]; then
+    arguments+=(--acceptance-manifest "${MANIFEST}")
+  fi
+  python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_inputs.py" "${arguments[@]}" "$@"
+}
+
+assert_experiment_inputs() {
+  local observed
+  observed="$(experiment_inputs --check)" || return 1
+  [[ "${observed}" == "${EXPERIMENT_DIGEST}" ]]
+}
+
+# All stages use one captured candidate and fresh isolated Docker graders.
+# Host code handles bytes only; no candidate verifier/import/build runs here.
+grade_case_stages() {
+  local case_dir="$1" workspace="$2" run_dir="$3"
+  assert_experiment_inputs >/dev/null || return 125
+  python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_sandbox.py" \
+    --case "${case_dir}" --workspace "${workspace}" \
+    --image "${GRADER_IMAGE_ID}" --stage all --output "${run_dir}"
 }
 
 start_live_server() {
@@ -623,19 +661,14 @@ run_one() {
   local case_dir="$3"
   local repeat_index="$4"
 
-  local case_id timeout_sec verify_rel prompt test_files regression_rel build_rel
+  local case_id timeout_sec prompt test_files
   case_id="$(jq -r '.id' "${case_dir}/case.json")"
   timeout_sec="$(jq -r '.timeout_sec' "${case_dir}/case.json")"
-  verify_rel="$(jq -r '.verify' "${case_dir}/case.json")"
   prompt="$(jq -r '.prompt' "${case_dir}/case.json")"
   # Protected test oracle files (one per line), restored pristine before
   # grading. Defaults to check.sh when the key is absent — the corpus
   # convention Coding_eval_case also defaults to.
   test_files="$(jq -r '(.test_files // ["check.sh"])[]' "${case_dir}/case.json")"
-  # Optional PASS_TO_PASS regression script (case-relative). Empty when absent.
-  regression_rel="$(jq -r '.regression // empty' "${case_dir}/case.json")"
-  # Optional build probe (case-relative). Empty when absent.
-  build_rel="$(jq -r '.build // empty' "${case_dir}/case.json")"
 
   local run_id run_dir workspace evidence_path mode_suffix=""
   if [[ -f "${case_dir}/memory.json" || -f "${case_dir}/source-memory.json" ]]; then
@@ -645,8 +678,14 @@ run_one() {
     | tr -c 'A-Za-z0-9._-' '-')"
   run_dir="${OUT_DIR}/runs/${run_id}"
   evidence_path="${run_dir}/evidence.json"
+  assert_experiment_inputs >/dev/null || return 1
   if [[ -f "${evidence_path}" ]]; then
-    echo "[coding-eval] skip ${run_id} (evidence exists)" >&2
+    if ! jq -e --arg digest "${EXPERIMENT_DIGEST}" --arg mode "${MEMORY_MODE}" \
+      '.experiment_digest == $digest and .memory_mode == $mode' "${evidence_path}" >/dev/null; then
+      echo "[coding-eval] refusing stale receipt ${run_id}" >&2
+      return 1
+    fi
+    echo "[coding-eval] skip ${run_id} (same experiment receipt)" >&2
     return 0
   fi
   mkdir -p "${run_dir}"
@@ -845,48 +884,22 @@ run_one() {
     edited_source_json="$(count_edited_source_files "${case_dir}" "${workspace}" "${test_files}")"
     edited_target_json="$(count_edited_target_files "${case_dir}" "${workspace}")"
 
-    # SWE-bench-style honest oracle: restore each protected test file from the
-    # case's canonical workspace before grading, so a run cannot pass by
-    # editing the very test it is judged on (the prompt's "do not modify
-    # check.sh" is guidance, not an enforced boundary).
-    while IFS= read -r test_file; do
-      [[ -z "${test_file}" ]] && continue
-      if [[ -f "${case_dir}/workspace/${test_file}" ]]; then
-        mkdir -p "${workspace}/$(dirname "${test_file}")"
-        cp -f "${case_dir}/workspace/${test_file}" "${workspace}/${test_file}"
-      fi
-    done <<< "${test_files}"
+    # Restore the complete declared oracle only inside the grader's private
+    # snapshot. Candidate links cannot redirect a host-side restoration. Every
+    # stage measures the same captured bytes in its own fresh container.
     set +e
-    bash "${case_dir}/${verify_rel}" "${workspace}" \
-      >"${run_dir}/verify.log" 2>&1
-    local verify_code=$?
+    grade_case_stages "${case_dir}" "${workspace}" "${run_dir}" \
+      >"${run_dir}/grading.log" 2>&1
+    local grading_code=$?
     set -e
-    verify_exit_json="${verify_code}"
-
-    # PASS_TO_PASS: a declared regression guard runs against the same graded
-    # workspace and must stay green. A run that turns verify green while
-    # breaking it does not pass. The script is case-level (hidden from the
-    # candidate) like verify itself.
-    if [[ -n "${regression_rel}" ]]; then
-      set +e
-      bash "${case_dir}/${regression_rel}" "${workspace}" \
-        >"${run_dir}/regression.log" 2>&1
-      local regression_code=$?
-      set -e
-      regression_exit_json="${regression_code}"
-    fi
-
-    # Optional build probe: separates a candidate edit that does not compile
-    # (Build_failed) from one that compiles but is wrong (Wrong_solution). It is
-    # diagnostic only -- the pass verdict stays verify + regression -- and runs
-    # against the same graded workspace.
-    if [[ -n "${build_rel}" ]]; then
-      set +e
-      bash "${case_dir}/${build_rel}" "${workspace}" \
-        >"${run_dir}/build.log" 2>&1
-      local build_code=$?
-      set -e
-      build_exit_json="${build_code}"
+    if [[ "${grading_code}" == "0" ]]; then
+      verify_exit_json="$(jq -r '.verify' "${run_dir}/grading.json")"
+      regression_exit_json="$(jq -r '.regression' "${run_dir}/grading.json")"
+      build_exit_json="$(jq -r '.build' "${run_dir}/grading.json")"
+    else
+      # A refused snapshot or grader launch is a failed verification, never an
+      # absent/green stage. The reason remains in grading.log.
+      verify_exit_json="${grading_code}"
     fi
   fi
 
@@ -932,7 +945,7 @@ run_one() {
     "${tool_calls_json}" "${input_tokens_json}" "${output_tokens_json}" \
     "${cost_usd_json}" "$(json_string_or_null "${error_text}")" \
     "${regression_exit_json}" "${edited_source_json}" "${edited_target_json}" \
-    "${build_exit_json}" "${operation_id_json}")"
+    "${build_exit_json}" "${operation_id_json}" "${EXPERIMENT_DIGEST}" "${MEMORY_MODE}")"
   append_row "${row}" "${evidence_path}"
   echo "[coding-eval] ${run_id}: status=${finish_status} verify_exit=${verify_exit_json} regression_exit=${regression_exit_json} edited_target=${edited_target_json} build=${build_exit_json}" >&2
 }
@@ -940,7 +953,9 @@ run_one() {
 main() {
   ensure_cli_built
   prepare_live_environment
+  EXPERIMENT_DIGEST="$(experiment_inputs)" || exit 1
   start_live_server
+  assert_experiment_inputs >/dev/null || exit 1
 
   local case_dirs
   case_dirs="$(selected_case_dirs)"
@@ -965,6 +980,9 @@ main() {
     done <<< "${case_dirs}"
   done
 
+  assert_experiment_inputs >/dev/null || exit 1
+  python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_inputs.py" collect \
+    --experiment "${OUT_DIR}/experiment.json" --runs "${OUT_DIR}/runs" --out "${RUNS_JSONL}"
   "${CLI_EXE}" --cases "${CASES_DIR}" --runs "${RUNS_JSONL}" --out "${OUT_DIR}" \
     --k "${PASS_AT_K}"
   echo "[coding-eval] report: ${OUT_DIR}/REPORT.md" >&2

@@ -71,6 +71,44 @@ shared-client transport cache is outside this binary proof. Its focused run
 [40112787489](https://github.com/jeong-sik/masc/actions/runs/40112787489) completed
 successfully on source12c: actual client4, reply-policy1 and lane14 tests
 (19 total; [receipt](current-client-policy-ci.json)). This compiles and exercises
-the new socket boundary, but does not execute its current-policy Keeper path. These observations establish the scoped
-owner-loss repair, not current-head full regression, release, installation or
-all browser behavior.
+the new socket boundary. These observations establish the scoped owner-loss
+repair, not full regression, release, installation or all browser behavior.
+
+
+## Current shared-client policy: actual Keeper on12c
+
+[keeper-12c001e5](keeper-12c001e5/) binds the new metadata/routing integration to
+source `12c001e55e27c7a9340ae27f956e112fd5360c76` and successful macOS build
+[40113070920](https://github.com/jeong-sik/masc/actions/runs/40113070920).
+All three downloaded binary hashes were checked; embedded full health, effective
+private root and live server/worker hashes match its receipt. Later source
+commits add documentation/evidence only.
+
+A real `glm-coding.glm-5.3-flash` Keeper executed the original operation
+`ego-native-proof-12c-policy-1` and reached `Succeeded`. The nine retained tool
+completions include ordinary BrowserGoto, ordinary BrowserAct reload, native
+snapshot, ordinary BrowserInteract `target.ref=1` click and a final native
+snapshot. They retain one observed client and tab1 in actual space30/p1; no
+workflow substitutes for these ordinary calls. One BrowserRead omitted its
+browser binding and was refused before dispatch; the same operation recovered
+with the observed binding. That failure is preserved.
+
+The fresh local application recorded exactly one confirmation click. The final
+native snapshot, title and independently captured/visually inspected screenshot
+all show `네이티브 연결 검증 완료`. This was a new single-click test application,
+not another delivery form submission. The provider record contains run identity
+and model metadata only; raw reasoning, credentials and private event streams
+are excluded. Browser inputs/results and their source file/line/hash provenance
+are retained. The screenshot is the reviewer's SDK capture, not a Keeper image.
+
+This short run proves the actual current client metadata/caller path, not a new
+long-duration result. The current-source Unix-socket tests separately prove
+SDK-owned calls outlive the transport window and other routes stay bounded.
+The earlier130.14-second original-caller result remains bound to14c9, and
+navigation evidence remains bound to a96.
+
+Normal Keeper/server shutdown ended the matched server/worker/SDK without an
+extra SDK signal. The owned fixture was then stopped. All four captured PIDs
+are absent; the final actual TaskSpace list shows the owned space30 absent,
+without a second finish request. Production binaries/state were not changed.
+No full regression, merge, installation or release claim is made.

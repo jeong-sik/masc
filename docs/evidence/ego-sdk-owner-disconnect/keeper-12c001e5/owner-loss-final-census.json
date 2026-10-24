@@ -1,0 +1,14 @@
+{
+  "server": {
+    "pid": 43339,
+    "state": "absent"
+  },
+  "worker": {
+    "pid": 43401,
+    "state": "absent"
+  },
+  "sdk": {
+    "pid": 43543,
+    "state": "absent"
+  }
+}

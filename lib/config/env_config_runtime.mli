@@ -199,12 +199,10 @@ module InternalTimers : sig
   val rate_limit_bucket_ttl_sec : int
 end
 
-(** {1 Sidecar reconcile loop} *)
+(** {1 Lane add-on process control} *)
 
 module Sidecar : sig
-  val reconcile_backoff_sec : float
   val control_command_timeout_sec : float
-  val schema_generation_timeout_sec : float
 end
 
 (** {1 Workspace file endpoint limits} *)

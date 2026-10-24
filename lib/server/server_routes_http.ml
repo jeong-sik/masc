@@ -45,7 +45,6 @@ let make_routes ~port ~host:_ ~sw ~clock =
   |> Server_routes_http_routes_play_screen.add_routes
   |> Server_routes_http_routes_autonomous.add_routes
   |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock
-  |> Server_routes_http_routes_sidecar.add_routes ~sw ~clock
   |> Server_routes_http_routes_repositories.add_routes
   |> Server_routes_http_routes_workspace.add_routes
   |> Server_ide_http.add_routes

@@ -146,7 +146,6 @@ module String_opt_knob = struct
     | Imessage_self_chat_guid
     | Imessage_poll_interval_sec
     | Imessage_cursor_path
-    | Sidecar_root
     | Voice_realtime_ws_url
   [@@deriving enumerate]
 
@@ -176,11 +175,6 @@ module String_opt_knob = struct
       , "(derived)"
       , "channel"
       , "Where the last delivered message ROWID is kept" )
-    | Sidecar_root ->
-      ( "MASC_SIDECAR_ROOT"
-      , "(derived)"
-      , "runtime"
-      , "Repository root the sidecar routes resolve paths against" )
     | Voice_realtime_ws_url ->
       ( "MASC_VOICE_REALTIME_WS_URL"
       , "(none)"
@@ -202,9 +196,7 @@ module Float_knob = struct
   type t =
     | Sse_reconnect_min_interval_s
     | Sse_connect_window_s
-    | Sidecar_reconcile_backoff_sec
     | Sidecar_control_timeout_sec
-    | Sidecar_schema_timeout_sec
     | Full_health_refresh_timeout_sec
     | Repo_sync_interval_sec
     | Snapshot_interval_sec
@@ -224,21 +216,11 @@ module Float_knob = struct
       , "runtime"
       , "Sliding window over which SSE reconnects are counted; <= 0 disables \
          the window limit" )
-    | Sidecar_reconcile_backoff_sec ->
-      ( "MASC_SIDECAR_RECONCILE_BACKOFF_SEC"
-      , 30.0
-      , "runtime"
-      , "Backoff between repeated same-generation sidecar start dispatches" )
     | Sidecar_control_timeout_sec ->
       ( "MASC_SIDECAR_CONTROL_TIMEOUT_SEC"
       , 5.0
       , "runtime"
       , "Subprocess timeout for sidecar control commands; floored at 1s" )
-    | Sidecar_schema_timeout_sec ->
-      ( "MASC_SIDECAR_SCHEMA_TIMEOUT_SEC"
-      , 10.0
-      , "runtime"
-      , "Subprocess timeout for sidecar schema generation; floored at 1s" )
     | Full_health_refresh_timeout_sec ->
       ( "MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC"
       , 20.0

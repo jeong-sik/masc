@@ -653,44 +653,12 @@ module InternalTimers = struct
   let rate_limit_bucket_ttl_sec = Env_setting.Int_knob.get Rate_limit_bucket_ttl_sec
 end
 
-(** {1 Sidecar reconcile loop}
-
-    Retry/backoff knobs for the connector sidecar lifecycle (#8919). Operator
-    override lets us tune backoff without recompilation when a sidecar is
-    flapping vs. genuinely offline. See #8930 for the SSOT consolidation. *)
+(** {1 Lane add-on process control} *)
 
 module Sidecar = struct
-  (** Backoff window (seconds) between repeated same-generation
-      [running + unavailable] start dispatches. Default: 30 (matches the
-      inline literal that landed in #8919). *)
-  let reconcile_backoff_sec =
-    Env_setting.Float_knob.get Sidecar_reconcile_backoff_sec
-
-  (** Subprocess timeout (seconds) for sidecar control commands —
-      [stop], [tail], and similar quick housekeeping operations.
-
-      Wraps two [Process_eio.run_argv_with_status] sites at
-      [server_routes_http_routes_sidecar.ml:780,835]. Default 5s
-      preserves the inline literals; floor 1s prevents an operator
-      typo from making every control command return "timeout" before
-      the sidecar even handles the signal. *)
+  (** Existing shared subprocess deadline for lane add-on stop/control calls. *)
   let control_command_timeout_sec =
     Float.max 1.0 (Env_setting.Float_knob.get Sidecar_control_timeout_sec)
-
-  (** Subprocess timeout (seconds) for sidecar Python schema
-      generation. Wraps [Process_eio.run_argv_with_status] at
-      [server_routes_http_routes_sidecar.ml:882]. Default 10s
-      preserves the inline literal; this path runs Python interp +
-      schema introspection so it needs more headroom than the
-      lightweight control commands. Floor 1s.
-
-      Must satisfy [schema_generation > control_command] — schema
-      gen is strictly heavier than control commands, so an operator
-      lowering schema budget below the control budget would silently
-      reorder the implicit precedence and surprise downstream
-      diagnostics. *)
-  let schema_generation_timeout_sec =
-    Float.max 1.0 (Env_setting.Float_knob.get Sidecar_schema_timeout_sec)
 end
 
 module Workspace_file = struct

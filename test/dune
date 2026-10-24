@@ -452,7 +452,6 @@
   test_progress
   test_validation
   test_channel_gate_binding_store
-  test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state
   test_dashboard
   test_dashboard_librarian_metric
@@ -809,7 +808,6 @@
   test_progress
   test_validation
   test_channel_gate_binding_store
-  test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state
   test_dashboard
   test_dashboard_librarian_metric
@@ -2774,7 +2772,6 @@
 
 (include stanzas/test_env_config_sandbox.inc)
 
-(include stanzas/test_env_config_sidecar_timeouts.inc)
 
 (include stanzas/test_env_config_voice_bridge_timeouts.inc)
 

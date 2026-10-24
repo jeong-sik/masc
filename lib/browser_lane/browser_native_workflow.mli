@@ -19,18 +19,9 @@ type t = private { tab_id : int; expected_url : string; steps : step list;
 
 (** Strict decoder, with no fallback for unknown methods/fields. [maxChars]
     must be supplied after the caller applies its existing snapshot size policy.
-    [steps] may contain at most {!max_steps} calls and at most {!max_budget_ms}
-    of total execution budget (including {!snapshot_timeout_ms} for initial URL
-    and final snapshot reads). [timeoutMs] is an explicit SDK timeout up to
-    {!max_step_timeout_ms}; absence budgets {!default_step_timeout_ms}. *)
-val max_steps : int
-val default_step_timeout_ms : int
-val max_step_timeout_ms : int
-val snapshot_timeout_ms : int
-val max_budget_ms : int
-val max_window_s : float
-val budget_ms : t -> int
-val window_s : t -> float
+    Optional nonnegative JavaScript-safe [timeoutMs] values are forwarded to
+    the native SDK method unchanged; omission preserves the SDK default.
+    There is no MASC step-count or cumulative execution-time limit. *)
 val of_json : Yojson.Safe.t -> (t, string) result
 val to_json : t -> Yojson.Safe.t
 val is_effect : action -> bool

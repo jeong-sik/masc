@@ -13,18 +13,6 @@ type step = { action : action; timeout_ms : int option }
 type snapshot_scope = Viewport | Full_page
 type t = { tab_id : int; expected_url : string; steps : step list;
   snapshot_scope : snapshot_scope; max_chars : int }
-let max_steps = 16
-let default_step_timeout_ms = 5_000
-let max_step_timeout_ms = 30_000
-let snapshot_timeout_ms = 5_000
-let max_budget_ms = 60_000
-let stop_grace_s = 2.
-let max_window_s = (Float.of_int max_budget_ms /. 1000.) +. stop_grace_s
-let step_budget_ms {timeout_ms; _} = Option.value timeout_ms ~default:default_step_timeout_ms
-let steps_budget_ms steps =
-  List.fold_left (fun total step -> total + step_budget_ms step) snapshot_timeout_ms steps
-let budget_ms {steps; _} = steps_budget_ms steps
-let window_s t = (Float.of_int (budget_ms t) /. 1000.) +. stop_grace_s
 let ( let* ) = Result.bind
 let object_fields allowed = function
   | `Assoc fields when List.for_all (fun (name, _) -> List.mem name allowed) fields
@@ -57,10 +45,7 @@ let step_of_json value =
   let selector () = text "selector" fields in
   let* timeout_ms = match List.assoc_opt "timeoutMs" fields with
     | None -> Ok None
-    | Some _ ->
-      let* ms = integer "timeoutMs" fields in
-      if ms <= max_step_timeout_ms then Ok (Some ms)
-      else Error "timeoutMs exceeds maximum step timeout" in
+    | Some _ -> Result.map Option.some (integer "timeoutMs" fields) in
   let* action = match method_ with
     | "click" | "dblclick" | "hover" ->
       let* _ = arguments ["selector"] in let* selector = selector () in
@@ -110,10 +95,6 @@ let of_json value =
       let rec decode acc = function [] -> Ok (List.rev acc)
         | value :: rest -> let* step = step_of_json value in decode (step :: acc) rest in decode [] values
     | _ -> Error "steps must be a native Page call array" in
-  let* () = if List.length steps <= max_steps then Ok ()
-    else Error "workflow steps exceed maximum step count" in
-  let* () = if steps_budget_ms steps <= max_budget_ms then Ok ()
-    else Error "workflow execution budget exceeds maximum total timeout" in
   Ok {tab_id;expected_url;steps;snapshot_scope;max_chars}
 let is_effect = function
   | Click _ | Double_click _ | Hover _ | Fill _ | Press _ | Select_option _ | Goto _ -> true

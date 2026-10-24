@@ -69,7 +69,7 @@ type pointer_state = Released | Release_uncertain
 
 type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
 
-type t = { run : runner; run_native : runner; now : unit -> float; space_id : int; version : string; capture_directory : string;
+type t = { run : runner; run_native : string -> (string, run_failure) result; now : unit -> float; space_id : int; version : string; capture_directory : string;
   downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t; uploads : Browser_lane.Upload_lease.owner;
   mutable pointer_state : pointer_state; mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
@@ -157,8 +157,8 @@ let with_download_root t = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as args -> args
 let run_step t ~window_s ~step ~args body =
   asked t.run ~window_s ~step ~space:(`Int t.space_id) ~holder:Agent_holds ~args:(with_download_root t args) body
-let run_native_step t ?(window_s = Browser_lane.Native_workflow.max_window_s) ~step ~args body =
-  match t.run_native ~window_s (script ~step ~space:(`Int t.space_id) ~holder:Agent_holds ~args:(with_download_root t args) body) with
+let run_native_step t ~step ~args body =
+  match t.run_native (script ~step ~space:(`Int t.space_id) ~holder:Agent_holds ~args:(with_download_root t args) body) with
   | Error failure -> Error (Unanswered failure)
   | Ok output -> answer output
 (* A read has no effect, so however it failed, nothing happened. *)
@@ -1351,9 +1351,9 @@ let workflow ?actor t args =
   let* () = match t.pointer_state with Released -> Ok ()
     | Release_uncertain -> Error (Live.Before_effect "ego pointer release is unconfirmed; inspect and end this task space before more input") in
   let arguments = match Browser_lane.Native_workflow.to_json request with
-    | `Assoc fields -> obj (("label",str label)::("cursor",str (cursor_label ~actor ~verb:"workflow"))::("budgetMs",`Int (Browser_lane.Native_workflow.budget_ms request))::("defaultTimeoutMs",`Int Browser_lane.Native_workflow.default_step_timeout_ms)::("snapshotTimeoutMs",`Int Browser_lane.Native_workflow.snapshot_timeout_ms)::fields)
+    | `Assoc fields -> obj (("label",str label)::("cursor",str (cursor_label ~actor ~verb:"workflow"))::fields)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
-  let result = run_native_step t ~window_s:(Browser_lane.Native_workflow.window_s request) ~step:"page.native_workflow" ~args:arguments
+  let result = run_native_step t ~step:"page.native_workflow" ~args:arguments
       (String.concat "\n" [Browser_ego_workflow.script;unblocked_agent_page;
         "    const outcome = await nativeWorkflow(task.page(args.label), args);";
         "    emit({ok: true, value: outcome});";"  }"]) in

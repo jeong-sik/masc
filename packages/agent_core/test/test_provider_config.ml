@@ -2631,6 +2631,35 @@ let test_patch_telemetry_reports_the_request_window () =
     (Option.bind patched.telemetry (fun t -> t.Types.effective_context_window))
 ;;
 
+let test_reported_model_survives_normalization_without_inventing_missing_evidence () =
+  let config = context_window_config ~max_context:8192 ~window:None () in
+  let raw model =
+    let fields = [ "id", `String "raw-response"; "status", `String "completed"
+      ; "output", `List [ `Assoc [ "id", `String "fc-1"; "type", `String "function_call"
+        ; "call_id", `String "call-1"; "name", `String "lookup"; "arguments", `String "{}" ] ] ] in
+    let fields = fields @ Option.to_list (Option.map (fun model -> "model", `String model) model) in
+    match Backend_openai_responses.parse_response_result (Yojson.Safe.to_string (`Assoc fields)) with
+    | Ok response -> response | Error detail -> Alcotest.fail detail in
+  List.iter (fun model ->
+    let parsed = raw model in
+    let expected = match model with
+      | Some model when String.trim model <> "" -> Some (Types.Provider_reported_model model)
+      | None | Some _ -> Some Types.Provider_model_not_reported in
+    let twice = Complete_common.patch_telemetry parsed ~config (Some 10)
+      |> fun response -> Complete_common.patch_telemetry response ~config (Some 20) in
+    Alcotest.(check bool) "raw model evidence survives both normalization passes" true
+      (Option.bind twice.telemetry (fun telemetry -> telemetry.Types.reported_model) = expected);
+    if expected = Some Types.Provider_model_not_reported then
+      Alcotest.(check string) "presentation fallback still serves its existing contract"
+        config.model_id twice.model)
+    [ None; Some ""; Some "  "; Some config.model_id; Some "different-reported-model" ];
+  let uncaptured = { (raw None) with model = config.model_id
+    ; telemetry = Some { Types.default_inference_telemetry with canonical_model_id = Some config.model_id } } in
+  let patched = Complete_common.patch_telemetry uncaptured ~config (Some 10) in
+  Alcotest.(check bool) "old or injected fallback without raw capture remains unknown" true
+    (Option.is_none (Option.bind patched.telemetry (fun telemetry -> telemetry.Types.reported_model)))
+;;
+
 (* Declared provider identity and an anonymous wire label may have the same
    spelling, but only the former carries catalog provider authority. *)
 let resolved_capabilities config =
@@ -3363,6 +3392,10 @@ let () =
             "response telemetry reports the request window"
             `Quick
             test_patch_telemetry_reports_the_request_window
+        ; Alcotest.test_case
+            "reported model remains distinct from configured fallback"
+            `Quick
+            test_reported_model_survives_normalization_without_inventing_missing_evidence
         ] )
     ]
 ;;

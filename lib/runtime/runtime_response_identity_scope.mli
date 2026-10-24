@@ -7,8 +7,9 @@ val with_scope :
     call. Its hooks clear the prior response at BeforeTurn and capture the
     authoritative AfterTurn response before tool dispatch. [wrap_tool] freezes
     that response with the exact invocation for each handler (including its
-    resource-scoped handler). Missing provider, model or invocation evidence
-    keeps the response unobserved. *)
+    resource-scoped handler). Capture requires the raw parser's reported-model
+    fact and one globally unique tool-use ID in that response; configured model
+    fallback, missing evidence and ambiguous occurrences stay unobserved. *)
 
 val current : unit -> Runtime_response_identity.t option
 (** Copy of the current native response's immutable identity. Absent outside

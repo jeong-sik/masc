@@ -5,12 +5,13 @@ updated: 2026-10-24
 
 # Verification model identity observation
 
-Runtime configuration keys do not establish which models produced and judged
-an output. Calibration therefore keeps runtime diversity separate from
+Runtime configuration keys do not establish which models emitted the
+submitting tool call and accepted verdict call. Calibration therefore keeps runtime diversity separate from
 captured provider/model identity diversity. Missing observations are excluded
 from the model-pair denominator and remain visible in coverage and cause
-counts. A provider/model identity does not prove different model weights or
-statistical independence.
+counts. A submitting-response identity does not identify all models or
+collaborators that authored an artifact across earlier turns. A provider/model
+identity does not prove different model weights or statistical independence.
 
 ## Native capture and immutable binding
 
@@ -25,9 +26,10 @@ actor remain unobserved.
 
 `Runtime_response_identity_scope` installs an execution-local scope for each
 native runtime call. Its `AfterTurn` hook receives the live provider response
-before tools execute. Capture requires the materialized provider ID and live
-inference telemetry with a canonical request model; the measured model ID is
-the model reported by that response. No current catalog lookup or
+before tools execute. Capture requires the materialized provider ID and the
+typed reported-model fact stamped by the raw JSON parser or stream accumulator,
+before presentation fallback. Request/canonical model metadata is insufficient.
+The measured model ID is that retained reported value. No current catalog lookup or
 `last_model_used` read substitutes for either fact.
 
 Each tool handler freezes that response with its own exact invocation through
@@ -35,7 +37,8 @@ Each tool handler freezes that response with its own exact invocation through
 handlers and terminal contracts. The frozen fiber binding survives nested
 work without being overwritten by another provider response. A new native
 scope and the named-runtime dispatch boundary mask the invoking tool's
-identity. An uncaptured official-client execution cannot borrow its caller's
+identity. Globally duplicated tool-use IDs stay unknown even when registered
+tool names differ. An uncaptured official-client execution cannot borrow its caller's
 model.
 
 `Verification_protocol.create_submit_request` writes the current submitting
@@ -65,7 +68,7 @@ comparisons of recorded runtime keys. They make no model-independence claim.
 
 - `observed_verdict_count` and `unobserved_verdict_count`;
 - `same_model_identity_count` and `distinct_model_identity_count`, comparing
-  the captured provider/reported-model pair;
+  the captured submitting-response/verdict-response provider/model pair;
 - `distinct_model_identity_rate`, `null` when no complete pair was observed;
 - `unobserved_causes`, separating absent producer, evaluator, and both.
 
@@ -84,11 +87,32 @@ implementation must extend each official-client's own pre-tool response
 boundary with actual provider/model and invocation evidence before increasing
 its observed coverage.
 
+Raw parsers retain explicit missing/blank model evidence separately from
+uncaptured evidence. `patch_telemetry` preserves this fact even when it fills
+`api_response.model` from the configured request model. Repatching and cache
+readback cannot promote that fallback into a reported model.
+
 Provider model names can alias the same underlying weights across providers.
 The present metric measures the reported identities, not weight independence,
 model-family independence, or reviewer correctness. No new approval gate is
 introduced: note-only Task judgment and Goal proof/person confirmation remain
 as configured.
+
+## Build source consumption
+
+The changed parser sources are tracked in this repository.
+`packages/agent_core/lib/llm_provider/dune` declares the local public library
+`masc.agent_core.llm_provider`, and `packages/agent_core/lib/dune` declares
+`masc.agent_core` with a dependency on that local `llm_provider` library.
+`lib/runtime/dune` and `lib/dune` depend on those exact public names.
+The root Dune directory selection includes `packages`; `dune-project` states
+that Agent execution is built from `packages/agent_core`, and `masc.opam`
+declares no external Agent Core dependency or pin.
+
+The candidate build paths use this workspace: `linux-x64-probe.yml` builds
+`bin/main_eio.exe`, and `merge-compile.yml` invokes Dune with `--root .`.
+These source declarations establish which implementation the build selects;
+they are not a claim that the changed candidate has built or run.
 
 ## Validation scope
 
@@ -101,7 +125,8 @@ pure behavior evidence; it does not link the MASC runtime.
 
 Authored native tests exercise the real provider/tool loop on fresh,
 cooperative, and checkpoint entries; exact submitting response and invocation;
-synthetic agent name versus host actor; missing actor; nested identity masking;
+synthetic agent name versus host actor; missing actor; blank reported model
+through presentation fallback; nested identity masking;
 immutable submit/reload; duplicate metadata without a review gate; actual
 winning reviewer reply; and calibration observed/unknown coverage. OCaml
 syntax and whitespace checks are local source evidence. Native linked tests,

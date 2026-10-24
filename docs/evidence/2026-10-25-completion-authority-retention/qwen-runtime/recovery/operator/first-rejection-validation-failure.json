@@ -1,0 +1,6 @@
+{
+  "status": 400,
+  "effect": "Request lacked required reject reason. Actual source parser refuses before commit; authoritative Task remained AwaitingVerification at same verification ID.",
+  "corrected_at": "2026-10-24T17:26:58.979473+00:00",
+  "no_duplicate_verdict_effect": true
+}

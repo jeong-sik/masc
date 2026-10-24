@@ -1,0 +1,67 @@
+{
+  "observed_at": "2026-10-24T17:50:25.019590+00:00",
+  "scope": "Development Vite preview from integration3280 plus Root-authored one-line metadata repair; no installed frontend or new native backend claim",
+  "frontend_git_head_at_observation": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "frontend_base_head": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "frontend_root": "/private/tmp/masc-authority-round-integration-20261025",
+  "frontend_pid": 18474,
+  "frontend_command": "node node_modules/vite/bin/vite.js --config /tmp/masc-authority-ui-preview-20261025/vite.config.mts",
+  "frontend_url": "http://127.0.0.1:53887/dashboard/#keepers?keeper=goal-canary",
+  "backend_fixed_target": "http://127.0.0.1:65337",
+  "backend_source": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+  "frontend_delta": "diff --git a/dashboard/src/components/memory-inspector.ts b/dashboard/src/components/memory-inspector.ts\nindex 870f0a6fc95..54ee5715a04 100644\n--- a/dashboard/src/components/memory-inspector.ts\n+++ b/dashboard/src/components/memory-inspector.ts\n@@ -120,6 +120,7 @@ const INPUT_COMPONENT_META: Readonly<Record<TurnInputComponentId, BlockMeta>> =\n   'prompt.keeper_instructions': PROMPT_BLOCK_META.keeper_instructions,\n   'prompt.dynamic_context': PROMPT_BLOCK_META.dynamic_context,\n   'prompt.active_goals': PROMPT_BLOCK_META.active_goals,\n+  'prompt.completion_authority': PROMPT_BLOCK_META.completion_authority,\n   'prompt.temporal_summary': PROMPT_BLOCK_META.temporal_summary,\n   'prompt.memory_os_recall': PROMPT_BLOCK_META.memory_os_recall,\n   'prompt.librarian_working_context': PROMPT_BLOCK_META.librarian_working_context,\n",
+  "files": [
+    {
+      "file": "dashboard/src/api/dashboard-turn-records.ts",
+      "served_sha256": "1557e34cd56e07615a4ec2919b0b26d1fe4bdb270f310344aed339fe8b82a106",
+      "baseline_2be9_sha256": "1557e34cd56e07615a4ec2919b0b26d1fe4bdb270f310344aed339fe8b82a106",
+      "integration_3280_sha256": "1557e34cd56e07615a4ec2919b0b26d1fe4bdb270f310344aed339fe8b82a106",
+      "baseline_equals_3280": true,
+      "served_equals_3280": true
+    },
+    {
+      "file": "dashboard/src/api/dashboard-keeper-prompt.ts",
+      "served_sha256": "19e1d10a9decb1dfd9d3a391b570eb04f7048f259cc44e3bcccfea3890a7e5f9",
+      "baseline_2be9_sha256": "19e1d10a9decb1dfd9d3a391b570eb04f7048f259cc44e3bcccfea3890a7e5f9",
+      "integration_3280_sha256": "19e1d10a9decb1dfd9d3a391b570eb04f7048f259cc44e3bcccfea3890a7e5f9",
+      "baseline_equals_3280": true,
+      "served_equals_3280": true
+    },
+    {
+      "file": "dashboard/src/components/keeper-turn-inspector-panel.ts",
+      "served_sha256": "74c3d6f6071b6771c2978edf9b437b04cfa715be32cfe52f49fca8bbdf242f8f",
+      "baseline_2be9_sha256": "74c3d6f6071b6771c2978edf9b437b04cfa715be32cfe52f49fca8bbdf242f8f",
+      "integration_3280_sha256": "74c3d6f6071b6771c2978edf9b437b04cfa715be32cfe52f49fca8bbdf242f8f",
+      "baseline_equals_3280": true,
+      "served_equals_3280": true
+    },
+    {
+      "file": "dashboard/src/components/memory-inspector.ts",
+      "served_sha256": "1c545c596a309fcff283ecbb610ee3c028cdffbd9716441f7420b06de8c58b51",
+      "baseline_2be9_sha256": "89e31768dbcbe1bd05d4ca1383006deb30bd21c48e7ac9f7b8e312ebada75588",
+      "integration_3280_sha256": "89e31768dbcbe1bd05d4ca1383006deb30bd21c48e7ac9f7b8e312ebada75588",
+      "baseline_equals_3280": true,
+      "served_equals_3280": false
+    }
+  ],
+  "dependency_lock_sha256": "5d3c9f77d5f1bb316ee7a78b0798fe727c0513d885b21c525198e0fbeff49cd8",
+  "installed_dependency_lock_sha256": "5d3c9f77d5f1bb316ee7a78b0798fe727c0513d885b21c525198e0fbeff49cd8",
+  "node_modules_symlink": "/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules",
+  "private_vite_override_sha256": "b11036218c5279f12ffd13ca67a617511455fefc4a75b4404028018b1749ed62",
+  "mcp_proxy_contract": {
+    "incoming_origin_host_equals_incoming_host_before_translation": true,
+    "protocols": [
+      "http:",
+      "https:"
+    ],
+    "translated_origin": "http://127.0.0.1:65337",
+    "translated_host": "127.0.0.1:65337",
+    "rejected_other_origin": "destroy proxy request",
+    "scope": "configured source contract; not a cross-origin transport experiment"
+  },
+  "task_space_id": 31,
+  "existing_space_21_touched": false,
+  "app_or_model_mutation_by_ui_observer": false,
+  "auth_display": "Verified @dashboard \u00b7 admin",
+  "manual_credentials_entry_required": false
+}

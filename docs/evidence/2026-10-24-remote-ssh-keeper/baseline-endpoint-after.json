@@ -1,0 +1,12 @@
+{
+  "cwd": "/srv/masc/playground/ssh-proof-20261024-d",
+  "hostname": "6758e8d27ec8",
+  "notes": "after\n",
+  "sha256": "7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919",
+  "initial": {
+    "marker": "f84bb0caa082406bb9fb50cb846834ca",
+    "cwd": "/srv/masc/playground/ssh-proof-20261024-d",
+    "hostname": "6758e8d27ec8",
+    "uid": 1000
+  }
+}

@@ -156,6 +156,14 @@ reconciliation, not another login dispatch. This is source implementation of
 not a delivered wake or resumed Keeper turn. Private progress publication and the
 original Keeper's actual continuation remain to be connected.
 
+The private login journal now retains typed attention, submitted-fill and terminal
+publication intents in the same atomic write as their operation state. A private
+ACK records exact-envelope host admission; it is not Keeper consumption. Storage
+uncertainty fences the old engine so it cannot overwrite already committed
+publication IDs. These private file scenarios are tested with fabricated
+credential/Browser edges. Actual publication transport and Keeper wake remain
+unconnected; public login replies and observations contain no outbox or secrets.
+
 ## Verification
 
 Run `python3 -m unittest discover -s addons/tests -p 'test_onepassword_*.py'`.

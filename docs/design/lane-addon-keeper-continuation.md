@@ -59,14 +59,33 @@ provider connection. Provider retirement closes publication admission; the host
 records loss of that original owner rather than accepting a successor's claim.
 No elapsed-time expiry or replacement operation is introduced.
 
-## Commit, deliver and acknowledge (remaining implementation)
+## Commit, deliver and acknowledge
 
-The package commits its changed public state and immutable publication intent
-together before attempting publication. Emit attention, submitted-fill and
-terminal changes from typed transitions; intermediate polling/checking activity
-does not need to wake the Keeper. Publication identity is durable and is reused
-after an uncertain publication acknowledgement. This retry concerns delivery
-only and never replays a request, credential fill or Browser command.
+The private Python login journal now commits changed operation state and its
+immutable public publication intent in one atomic file write. It emits typed
+attention, submitted-fill and terminal transitions; intermediate polling/checking
+activity emits no notice. Separate successful fills retain separate publication
+IDs even when their public snapshots match. Public envelopes contain only that
+ID, kind, operation ID, phase, submitted-fill fact and false website verification.
+
+`Logins.pending_publications` rereads the same unacknowledged envelopes without
+binding or executing anything. The private `acknowledge_publication` requires
+the exact original caller and complete, type-correct envelope. A duplicate ACK
+does not rewrite its record. Its `host_accepted` marker means durable host
+admission only; it does not claim queue consumption or Keeper resumption. Neither
+method is a public MCP tool, and actual host publication/ACK transport is still
+unconnected. The private journal uses version 2 with strict closed decoding.
+
+After an uncertain journal write the original engine fences admission, further
+writes and private sockets. It cannot overwrite a possibly committed publication
+from its older memory snapshot. Recovery reads the actual journal, preserves
+original IDs/host acceptance and records lost nonterminal ownership as a new
+unknown terminal notice without rebinding or replay. Private file tests cover
+failures before a fill-state write, after that write and after an ACK write.
+
+Remaining: deliver these intents on the private transport and reuse their IDs
+after an uncertain host acknowledgement. This retry concerns delivery only and
+never replays a request, credential fill or Browser command.
 
 The host commits the exact validated publication before acknowledging it. A
 repeated ID with the same binding and payload reconciles the original delivery;

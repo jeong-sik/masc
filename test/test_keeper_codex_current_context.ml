@@ -205,7 +205,8 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
   let base_path = Filename.dirname capture in
   let load_state () =
     match Keeper_official_client_session_store.load
-            ~base_path ~keeper_name:"context-fixture" with
+            ~base_path ~keeper_name:"context-fixture"
+          |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
     | Ok (Some state) -> state
     | Ok None -> fail "Codex native session state disappeared"
     | Error detail -> fail detail
@@ -662,7 +663,8 @@ let test_continuation_resume_overflow_ends_on_a_full_thread () =
        (resume |> member "params" |> member "threadId" |> text)
    | rows -> fail (Printf.sprintf "expected one resume and no retry, saw %d" (List.length rows)));
   match Keeper_official_client_session_store.load ~base_path:(Filename.dirname capture)
-          ~keeper_name:"context-fixture" with
+          ~keeper_name:"context-fixture"
+        |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
   | Ok (Some { phase = Recovery_required { failure; _ }; _ }) ->
     check bool "the thread is recorded full, with no activity observed" true
       (failure = Keeper_official_client_session_store.(Vendor_session_full No_activity_observed))
@@ -745,7 +747,7 @@ let test_frozen_unread_changes_and_clears_across_native_requests () =
         check bool "a changed observation never replays the earlier unread carrier" false
           (String_util.contains_substring sent (encoded prior))) !previous;
     previous := Some unread;
-    match Store.load ~base_path:(Filename.dirname capture) ~keeper_name:"context-fixture" with
+    match Store.load ~base_path:(Filename.dirname capture) ~keeper_name:"context-fixture" |> Result.map_error Store.read_error_to_string with
     | Ok (Some {context_frontier=Some frontier;_}) ->
       let held = List.filter
         (fun (item : Store.held_context) -> item.context=Store.Librarian_unread)

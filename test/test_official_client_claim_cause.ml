@@ -84,7 +84,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
     outcome.result, outcome.settled_session, outcome.effect_disposition
 
 let read_recovery ~base_path ~keeper_name =
-  match S.load ~base_path ~keeper_name with
+  match S.load ~base_path ~keeper_name |> Result.map_error S.read_error_to_string with
   | Ok (Some { phase = S.Recovery_required recovery; _ }) -> recovery
   | Ok _ -> Alcotest.fail "durable recovery missing"
   | Error detail -> Alcotest.fail detail

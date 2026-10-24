@@ -2039,7 +2039,7 @@ let test_tools_support_false_omits_mcp_bridge () =
    reads an empty store for the other runner's tests and reports it as state
    that disappeared. *)
 let load_state ?(keeper_name = "claude-fixture") base_path =
-  match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+  match Keeper_official_client_session_store.load ~base_path ~keeper_name |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
   | Error detail -> fail detail
   | Ok None -> fail "Claude Code current-owner state disappeared"
   | Ok (Some state) -> state

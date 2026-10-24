@@ -951,17 +951,45 @@ let equal left right =
   && Float.equal left.updated_at right.updated_at
 ;;
 
+type read_failure = { path : string; detail : string }
+
+type read_error =
+  | Invalid_path of string
+  | Unreadable of read_failure
+  | Invalid_json of read_failure
+  | Not_current of read_failure
+
+let read_error_to_string = function
+  | Invalid_path detail -> detail
+  | Unreadable { path; detail } ->
+    Printf.sprintf "failed to read official-client session %s: %s" path detail
+  | Invalid_json { path; detail } ->
+    Printf.sprintf "official-client session JSON rejected path=%s: %s" path detail
+  | Not_current { path; detail } ->
+    Printf.sprintf "official-client session rejected path=%s: %s" path detail
+;;
+
 let load_path state_path =
-  if not (Fs_compat.file_exists state_path)
-  then Ok None
-  else
-    let* json = Safe_ops.read_json_file_safe state_path in
-    let* binding = of_yojson json in
+  match Fs_compat.load_file_opt state_path with
+  | exception Sys_error detail -> Error (Unreadable { path = state_path; detail })
+  | None -> Ok None
+  | Some contents ->
+    let* json =
+      Safe_ops.parse_json_off_fiber ~context:state_path contents
+      |> Result.map_error (fun detail -> Invalid_json { path = state_path; detail })
+    in
+    let* binding =
+      of_yojson json
+      |> Result.map_error (fun detail -> Not_current { path = state_path; detail })
+    in
     Ok (Some binding)
 ;;
 
 let load ~base_path ~keeper_name =
-  let* state_path = path ~base_path ~keeper_name in
+  let* state_path =
+    path ~base_path ~keeper_name
+    |> Result.map_error (fun detail -> Invalid_path detail)
+  in
   load_path state_path
 ;;
 
@@ -979,7 +1007,7 @@ let save_path ~state_dir binding =
     | Ok () -> Ok ()
     | Error error -> Error (Keeper_fs.durable_write_error_to_string error)
   in
-  let* persisted = load_path state_path in
+  let* persisted = load_path state_path |> Result.map_error read_error_to_string in
   match persisted with
   | Some persisted when equal persisted binding -> Ok ()
   | Some _ -> Error "official-client session changed after durable write"
@@ -1027,12 +1055,13 @@ let inspect_store_directory directory =
 type stored_binding =
   { keeper_name : string
   ; path : string
-  ; decoded : (t, string) result
+  ; decoded : (t, read_error) result
   }
 
 (* [state_dir] writes under [Common.keepers_runtime_dir_of_base], so that is
-   the directory listed here. Every entry [path] accepts is read with [load_path], the reader every claim
-   uses, so this reads exactly the files a claim would read, a linked keeper
+   the directory listed here. Every entry [path] accepts is read with
+   [load_path], the reader every claim uses, so this reads exactly the files
+   a claim would read, a linked keeper
    directory included. Ordinary metadata files are not Keeper directories.
    A name [path] refuses is left out: [state_dir] refuses it too, so this
    store never wrote there. Directory inspection failures refuse discovery
@@ -1089,7 +1118,7 @@ let stored_bindings ~base_path =
       | _ ->
         (match load_path state_path with
          | Ok None ->
-           Error ("official-client session disappeared or became unreadable during discovery: " ^ state_path)
+           Error ("official-client session disappeared during discovery: " ^ state_path)
          | Ok (Some binding) ->
            Ok (Some { keeper_name; path = state_path; decoded = Ok binding })
          | Error rejection ->
@@ -1123,24 +1152,44 @@ let stored_bindings ~base_path =
    one that decodes now, or is gone, is not moved. The observed form keeps a
    completed rename when only the release fails, as [clear_then_with_lock]
    does. *)
+type move_error =
+  | Move_read_failed of read_error
+  | Binding_readable of string
+  | Binding_missing of string
+  | Lock_failed of File_lock_eio.durable_lock_error
+  | Rename_failed of string
+
+let move_error_to_string = function
+  | Move_read_failed error -> read_error_to_string error
+  | Binding_readable path -> "the binding decodes now; it was left in place: " ^ path
+  | Binding_missing path -> "the binding is gone; nothing was moved: " ^ path
+  | Lock_failed error -> File_lock_eio.durable_lock_error_to_string error
+  | Rename_failed detail -> detail
+;;
+
 let move_aside ~base_path ~keeper_name ~rejected_path =
-  let* directory = state_dir ~base_path ~keeper_name in
+  let* directory =
+    state_dir ~base_path ~keeper_name
+    |> Result.map_error (fun detail -> Move_read_failed (Invalid_path detail))
+  in
   let state_path = Filename.concat directory filename in
   match
     File_lock_eio.with_durable_lock_observed
       ~lock_path:(store_lock_path directory)
       (fun () ->
          match load_path state_path with
-         | Ok (Some (_ : t)) -> Error "the binding decodes now; it was left in place"
-         | Ok None -> Error "the binding is gone; nothing was moved"
-         | Error (_ : string) ->
+         | Ok (Some (_ : t)) -> Error (Binding_readable state_path)
+         | Ok None -> Error (Binding_missing state_path)
+         | Error ((Invalid_path _ | Unreadable _) as error) ->
+           Error (Move_read_failed error)
+         | Error (Invalid_json _ | Not_current _) ->
            (match Fs_compat.rename state_path rejected_path with
             | () -> Ok ()
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-            | exception exn -> Error (Printexc.to_string exn)))
+            | exception exn -> Error (Rename_failed (Printexc.to_string exn))))
   with
   | File_lock_eio.Lock_not_acquired error ->
-    Error (File_lock_eio.durable_lock_error_to_string error)
+    Error (Lock_failed error)
   | File_lock_eio.Body_completed { value; release_error } ->
     Option.iter
       (fun error ->
@@ -1149,7 +1198,7 @@ let move_aside ~base_path ~keeper_name ~rejected_path =
            "official-client session move-aside %s; releasing the claim lock failed: %s"
            (match value with
             | Ok () -> "completed"
-            | Error detail -> "did not move the file (" ^ detail ^ ")")
+            | Error error -> "did not move the file (" ^ move_error_to_string error ^ ")")
            (File_lock_eio.durable_lock_error_to_string error))
       release_error;
     value
@@ -1177,7 +1226,7 @@ let clear_then_with_lock ~with_lock ~base_path ~keeper_name after_clear =
            Log.Keeper.warn
              ~keeper_name
              "official-client session binding could not be read before clear; removing it under the claim lock: %s"
-             detail);
+             (read_error_to_string detail));
         (match Keeper_fs.remove_file_durable ~ownership_root:directory state_path with
          | Ok () -> Ok (after_clear ())
          | Error error -> Error (Keeper_fs.durable_remove_error_to_string error))
@@ -1228,7 +1277,10 @@ let commit_if_input_recovery_current
       ~commit
   =
   with_store_lock ~base_path ~keeper_name (fun directory ->
-    let* current = load_path (Filename.concat directory filename) in
+    let* current =
+      load_path (Filename.concat directory filename)
+      |> Result.map_error read_error_to_string
+    in
     match current with
     | Some
         { runtime_id
@@ -1260,7 +1312,10 @@ let commit_if_input_recovery_current
 let transition ~base_path ~keeper_name ~expected next =
   let* () = validate next in
   with_store_lock ~base_path ~keeper_name (fun directory ->
-    let* current = load_path (Filename.concat directory filename) in
+    let* current =
+      load_path (Filename.concat directory filename)
+      |> Result.map_error read_error_to_string
+    in
     if Option.equal equal current expected
     then save_path ~state_dir:directory next |> Result.map (fun () -> next)
     else Error "official-client session changed before durable transition")
@@ -1959,7 +2014,7 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
       let* current =
         match load_path (Filename.concat directory filename) with
         | Ok current -> Ok current
-        | Error detail -> Error (Store_unavailable detail)
+        | Error detail -> Error (Store_unavailable (read_error_to_string detail))
       in
       match current with
       | None -> Error Session_missing

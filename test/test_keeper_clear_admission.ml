@@ -154,6 +154,7 @@ max-context = 4096
     Keeper_official_client_session_store.load
       ~base_path
       ~keeper_name:meta.name
+    |> Result.map_error Keeper_official_client_session_store.read_error_to_string
     |> require_ok
   in
   Fun.protect ~finally:(fun () -> match !owner_stop with

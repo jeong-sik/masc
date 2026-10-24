@@ -97,7 +97,7 @@ let resolution_of_observation obligation = function
     {Semantic.obligation; decision=Semantic.Gate_denied detail}
 
 let validate_native ~base_path ~keeper_name checkpoint =
-  let* expected = Native.load ~base_path ~keeper_name in
+  let* expected = Native.load ~base_path ~keeper_name |> Result.map_error Native.read_error_to_string in
   Native.validate_continuation ~checkpoint ~expected ~client_kind:checkpoint.Semantic.client_kind
     ~runtime_id:checkpoint.runtime_id ~tool_surface_sha256:checkpoint.tool_surface_sha256
 
@@ -369,7 +369,7 @@ let complete_native ~config ~keeper_name ~operation_id admission =
     let* () = match admission.transmitted_input with
       | Some _ -> Ok ()
       | None -> Error "native Gate continuation has no transmitted-input receipt" in
-    let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name in
+    let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name |> Result.map_error Native.read_error_to_string in
     let* () = Native.validate_completed_continuation ~checkpoint ~expected in
     Owner.discharge_direct_gate ~base_path:config.Workspace.base_path ~keeper_name ~operation_id
       ~obligation:admission.selected.obligation |> owner
@@ -427,7 +427,7 @@ let pending ~base_path ~keeper_name ~operation_id =
 let record_completed ~config ~keeper_name admission =
   match admission.authority, admission.transmitted_input with
   | Official_client checkpoint, Some _ ->
-    let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name in
+    let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name |> Result.map_error Native.read_error_to_string in
     let* () = Native.validate_completed_continuation ~checkpoint ~expected in
     Keeper_approval_queue.record_native_continuation_delivery
       ~base_path:config.Workspace.base_path ~keeper_name ~resolution:admission.resolution
@@ -496,7 +496,7 @@ let session_full ~config ~keeper_name admission =
   match admission.authority with
   | Agent_core _ -> Ok None
   | Official_client checkpoint ->
-    let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name in
+    let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name |> Result.map_error Native.read_error_to_string in
     Ok (session_full_cause ~checkpoint
       ~approval_id:admission.selected.obligation.approval_id expected)
 

@@ -471,7 +471,9 @@ let official_client_session_store =
                       report
                       (match stored.decoded with
                        | Ok (_ : Keeper_official_client_session_store.t) -> Ok ()
-                       | Error detail -> Error (stored.keeper_name ^ ": " ^ detail)))
+                       | Error error ->
+                         Error (stored.keeper_name ^ ": "
+                           ^ Keeper_official_client_session_store.read_error_to_string error)))
 
                  empty_report))
   }

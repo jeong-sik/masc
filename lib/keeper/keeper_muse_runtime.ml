@@ -875,7 +875,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     let* stored_session =
       Session_store.load ~base_path ~keeper_name
       |> Result.map_error (fun detail ->
-        internal_error ("Muse Code session binding load failed: " ^ detail))
+        internal_error ("Muse Code session binding load failed: " ^ Session_store.read_error_to_string detail))
     in
     let* stored_session =
       match stored_session with

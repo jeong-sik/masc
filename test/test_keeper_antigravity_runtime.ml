@@ -1775,7 +1775,7 @@ let test_native_policy_failure_releases_claim () =
          | Ok _ -> fail "invalid policy destination unexpectedly launched a turn");
         check bool "policy refusal precedes CLI launch" false (Sys.file_exists marker);
         let module Store = Keeper_official_client_session_store in
-        (match Store.load ~base_path ~keeper_name with
+        (match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
          | Ok (Some {phase=Ready; last_transient_release=Some {failure=Pre_dispatch_failed; _}; _}) -> ()
          | Ok _ -> fail "pre-dispatch failure retained a recovery fence"
          | Error detail -> fail detail)))))

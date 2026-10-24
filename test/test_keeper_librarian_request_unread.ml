@@ -196,7 +196,7 @@ let test_summary_fallback_and_resume () =
     ~turn_count:1 ~updated_at:3. |> require in
   let settled=Store.settle_holding ~held_context:next.held_context ~base_path ~keeper_name
     ~expected:inflight ~session_id ~turn_id ~updated_at:4. |> require in
-  let loaded=Store.load ~base_path ~keeper_name |> require in
+  let loaded=Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string |> require in
   check bool "native unread identity survives actual store write and reload" true (loaded=Some settled);
   let plan : Store.claim_plan={previous_settlement=Some {session_id;turn_id};turn_count=2;
     required_tool_surface_sha256=None} in

@@ -4801,7 +4801,7 @@ for line in sys.stdin:
          (observed.window = expected_empty)
      | None -> fail "successful empty retry must have response evidence");
     let settled_thread () =
-      match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+      match Keeper_official_client_session_store.load ~base_path ~keeper_name |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
       | Ok (Some { phase = Settled settlement; _ }) -> settlement.session_id
       | Ok (Some _) | Ok None -> fail "the successful turn must settle its vendor thread"
       | Error detail -> fail detail
@@ -5048,7 +5048,7 @@ let test_blank_completion_rejected_without_losing_session () =
             | _ -> fail ("commentary after a native command was not a fenced no-progress \
                           rejection: " ^ Agent_core.Error.to_string error))
        | Ok _ -> fail "commentary after a native command was accepted as the reply");
-      match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" with
+      match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
       | Ok (Some { phase = Settled { session_id = "thread-1"; turn_id = "turn-1" }; _ }) -> ()
       | Ok _ -> fail "commentary after a native command lost its settled session"
       | Error detail -> fail detail));
@@ -5546,7 +5546,7 @@ let test_keeper_partial_write_retains_transport_evidence () =
                 (Keeper_provider_attempt_effect.allows_same_turn_retry effect_disposition)
             | _ -> fail (Agent_core.Error.to_string error))
          | Ok _ -> fail "partial input dispatch completed a Keeper turn");
-        match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" with
+        match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
         | Ok (Some { phase = Recovery_required
             { failure = Transport_interrupted; _ }; _ }) -> ()
         | Ok _ -> fail "partial write lost durable transport recovery evidence"
@@ -6454,7 +6454,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
         ~cli_path ~model:"gpt-fixture" () with
       | Error error -> fail (Agent_core.Error.to_string error)
       | Ok result -> check int "actual session advances through settled turns" ordinal result.turns);
-    let stored = match Store.load ~base_path ~keeper_name with
+    let stored = match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
       | Ok (Some stored) -> stored | Ok None -> fail "settled session missing"
       | Error detail -> fail detail in
     let expected_turn = Printf.sprintf "turn-%d" ordinal in
@@ -6886,6 +6886,7 @@ let test_keeper_protocol_failure_enters_recovery () =
                 Keeper_official_client_session_store.load
                   ~base_path
                   ~keeper_name:"codex-fixture"
+              |> Result.map_error Keeper_official_client_session_store.read_error_to_string
               with
               | Error detail -> fail detail
               | Ok None -> fail "failed Codex turn left no durable recovery state"
@@ -6991,7 +6992,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
         | Ok () -> ()
         | Error detail -> fail detail);
        let recovery =
-         match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+         match Keeper_official_client_session_store.load ~base_path ~keeper_name |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
          | Error detail -> fail detail
          | Ok None -> fail "real Keeper failure left no recovery state"
          | Ok (Some recovery) -> recovery
@@ -7196,7 +7197,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
          0
          (Keeper_event_queue.length queue_after_success);
        let settled =
-         match Keeper_official_client_session_store.load ~base_path ~keeper_name with
+         match Keeper_official_client_session_store.load ~base_path ~keeper_name |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
          | Error detail -> fail detail
          | Ok None -> fail "post-resolution Keeper turn lost its durable state"
          | Ok (Some settled) -> settled
@@ -7297,6 +7298,7 @@ let test_keeper_resumes_persisted_codex_thread () =
          Keeper_official_client_session_store.load
            ~base_path
            ~keeper_name:"codex-fixture"
+       |> Result.map_error Keeper_official_client_session_store.read_error_to_string
        with
        | Error detail -> fail detail
        | Ok None -> fail "resumed Codex binding disappeared"
@@ -7556,7 +7558,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        check string "resume sends the current instructions and no conversation"
          ("UPDATED_SYSTEM_PROMPT\n\n" ^ posture_note)
          resume_instructions;
-       (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" with
+       (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
         | Ok (Some {context_frontier=Some frontier; _}) ->
           check int "frontier records all canonical messages" 4 frontier.message_count;
           check bool "frontier records that the thread holds the conversation" true
@@ -7668,6 +7670,7 @@ let test_keeper_starts_fresh_on_changed_tool_surface () =
               Keeper_official_client_session_store.load
                 ~base_path
                 ~keeper_name:"codex-fixture"
+            |> Result.map_error Keeper_official_client_session_store.read_error_to_string
             with
             | Error detail -> fail detail
             | Ok None -> fail "binding disappeared after a changed tool surface"
@@ -8303,6 +8306,7 @@ let test_production_keeper_resumes_across_trace_rotation () =
          Keeper_official_client_session_store.load
            ~base_path
            ~keeper_name:"codex-production-fixture"
+       |> Result.map_error Keeper_official_client_session_store.read_error_to_string
        with
        | Error detail -> fail detail
        | Ok None -> fail "production Codex current-owner state disappeared"

@@ -10,6 +10,7 @@ open Masc
 module R = Keeper_store_boot_reconcile
 module D = Keeper_durable_store
 module B = Server_bootstrap_loops
+module Session = Keeper_official_client_session_store
 
 let rec remove_tree path =
   match (Unix.lstat path).Unix.st_kind with
@@ -792,6 +793,81 @@ let test_every_boot_store_has_exactly_one_id () =
    refuses the same file; the accepted quarantine moves it aside under the
    store lock, so the keeper's next claim finds no binding and starts a new
    vendor session. *)
+let test_session_io_refuses_boot_and_direct_quarantine () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let keeper_name = "session-io" in
+  let path = Session.path ~base_path ~keeper_name |> Result.get_ok in
+  Fs_compat.mkdir_p path;
+  let original = Unix.stat path in
+  let read_error =
+    match Session.load ~base_path ~keeper_name with
+    | Error ((Session.Unreadable _) as error) -> error
+    | Error (Session.Invalid_path _ | Session.Invalid_json _ | Session.Not_current _)
+    | Ok _ -> fail "the directory did not produce a typed I/O failure"
+  in
+  let failure =
+    { R.store = D.Refusing.Official_client_session
+    ; keeper = keeper_name
+    ; path
+    ; error = Session.read_error_to_string read_error
+    }
+  in
+  let examination = R.examine config in
+  check bool "boot retains the original file failure" true
+    (examination.R.unreadable = [ failure ]);
+  check bool "I/O is not a quarantine candidate" true (examination.R.undecodable = []);
+  Fun.protect ~finally:B.For_testing.reset_keeper_persistence_lifecycle (fun () ->
+    List.iter (fun accept_quarantine ->
+      (match R.admit ~accept_quarantine examination with
+       | Error refusals -> check bool "I/O admission is mandatory" true
+           (refusals = [ R.Unreadable failure ])
+       | Ok _ -> fail "an I/O failure bypassed admission");
+      B.For_testing.reset_keeper_persistence_lifecycle ();
+      match B.prepare_keeper_persistence ~accept_store_quarantine:accept_quarantine ~config () with
+      | Error error -> check bool "boot refuses the I/O failure" true
+          (error = B.Store_quarantine_refused [ R.Unreadable failure ])
+      | Ok _ -> fail "boot admitted an unreadable session") [ false; true ]);
+  let report = R.quarantine ~now:0. config examination in
+  check bool "quarantine carries the mandatory I/O refusal" true
+    (report.R.failed = [ failure ] && report.R.quarantined = []);
+  let rejected_path = path ^ ".quarantine-test" in
+  (match Session.move_aside ~base_path ~keeper_name ~rejected_path with
+   | Error error -> check bool "the locked reread retains its I/O cause" true
+       (error = Session.Move_read_failed read_error)
+   | Ok () -> fail "an I/O failure authorized a direct rename");
+  check int "the source directory remains the same entry" original.Unix.st_ino
+    (Unix.stat path).Unix.st_ino;
+  check bool "no quarantine destination was created" false (Sys.file_exists rejected_path)
+;;
+
+let test_session_quarantine_reread_refuses_a_new_io_failure () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let keeper_name = "changed-session" in
+  let path = Session.path ~base_path ~keeper_name |> Result.get_ok in
+  write_bytes path "{rejected-session";
+  let examination = R.examine config in
+  let admitted =
+    match R.admit ~accept_quarantine:true examination with
+    | Ok admitted -> admitted
+    | Error _ -> fail "readable rejected content was not admitted for explicit quarantine"
+  in
+  Unix.unlink path;
+  Unix.mkdir path 0o700;
+  let original = Unix.stat path in
+  let report = R.quarantine ~now:0. config admitted in
+  (match report.R.failed, report.R.quarantined with
+   | [ failure ], [] ->
+     check string "the failed move names the original owner" keeper_name failure.R.keeper;
+     check string "the failed move names the original path" path failure.R.path;
+     check bool "the failure belongs to the session store" true
+       (failure.R.store = D.Refusing.Official_client_session)
+   | [], _ | _ :: _, _ -> fail "the new I/O failure did not refuse the stale quarantine");
+  check int "the replacement entry was not moved" original.Unix.st_ino
+    (Unix.stat path).Unix.st_ino
+;;
+
 let test_an_unreadable_session_binding_refuses_boot () =
   with_workspace
   @@ fun config ->
@@ -832,7 +908,7 @@ let test_an_unreadable_session_binding_refuses_boot () =
      check bool "the binding is gone" false (Sys.file_exists path);
      check string "the rejected copy keeps the bytes" digest (file_digest rejected_path)
    | _ -> fail "exactly one binding is moved aside");
-  (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"sound" with
+  (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"sound" |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
    | Ok None -> ()
    | Ok (Some _) -> fail "a binding survived the quarantine"
    | Error detail -> failf "the store still refuses after the quarantine: %s" detail);
@@ -851,7 +927,7 @@ let test_an_unreadable_session_binding_refuses_boot () =
   with
   | Error detail -> failf "the claim after the quarantine failed: %s" detail
   | Ok (_ : Keeper_official_client_session_store.t) ->
-    (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"sound" with
+    (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"sound" |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
      | Ok (Some _) -> ()
      | Ok None -> fail "the claim wrote no binding"
      | Error detail -> failf "the fresh binding does not read back: %s" detail)
@@ -1690,7 +1766,9 @@ let () =
             test_examination_does_not_create_an_absent_runtime_root
         ] )
     ; ( "admit"
-      , [ test_case "metadata I/O failure never accepts quarantine" `Quick
+      , [ test_case "session I/O refuses boot and direct quarantine" `Quick
+            test_session_io_refuses_boot_and_direct_quarantine
+        ; test_case "metadata I/O failure never accepts quarantine" `Quick
             test_metadata_io_failure_never_accepts_quarantine
         ; test_case "invalid JSON metadata requires explicit quarantine" `Quick
             test_invalid_json_metadata_remains_an_explicit_quarantine
@@ -1706,7 +1784,9 @@ let () =
             test_refusal_names_each_store_and_both_ways_forward
         ] )
     ; ( "quarantine"
-      , [ test_case "undecodable stores are moved aside once" `Quick
+      , [ test_case "session quarantine rereads a changed I/O failure" `Quick
+            test_session_quarantine_reread_refuses_a_new_io_failure
+        ; test_case "undecodable stores are moved aside once" `Quick
             test_undecodable_stores_are_moved_aside_once
         ; test_case "pending publication refuses the memory quarantine" `Quick
             test_memory_quarantine_refuses_pending_publication

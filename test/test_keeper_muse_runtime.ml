@@ -1011,7 +1011,7 @@ let check_stream label events =
 ;;
 
 let settled_turn ~base_path =
-  match Store.load ~base_path ~keeper_name with
+  match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
   | Ok (Some { client_kind = Store.Muse; phase = Store.Settled { session_id; turn_id }; turn_count; _ }) ->
     session_id, turn_id, turn_count
   | Ok (Some { client_kind = Store.Codex | Store.Claude_code | Store.Antigravity; _ }) ->
@@ -1529,7 +1529,7 @@ let scenario name = [ "scenario", `String name ]
 (* The recovery row a failed turn left: its failure and the host turn it
    names. *)
 let recovery_row ~base_path =
-  match Store.load ~base_path ~keeper_name with
+  match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
   | Ok (Some { phase = Store.Recovery_required { failure; observed_turn_id; _ }; _ }) ->
     failure, observed_turn_id
   | Ok
@@ -1610,7 +1610,7 @@ let test_failed_muse_turn_reads_typed_usage_without_replay () =
           (Result.is_error run.outcome.result);
         check_effect "original uncertainty stays fenced"
           Keeper_provider_attempt_effect.Observation_unavailable run.outcome;
-        (match Store.load ~base_path ~keeper_name with
+        (match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
          | Ok (Some { phase = Store.Settled settled
                     ; last_transient_release = Some release; _ }) ->
            check_failure "original recovery stays retryable"
@@ -1656,7 +1656,7 @@ let test_a_failed_turn_after_a_built_in_tool_is_not_effect_free () =
     check_effect "effects unknown" Keeper_provider_attempt_effect.Observation_unavailable
       run.outcome;
     let failed_turn = started_turn_id ~base_path in
-    (match Store.load ~base_path ~keeper_name with
+    (match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
      | Ok (Some {phase=Store.Settled settled; last_transient_release=Some release; _}) ->
        check_failure "failed terminal remains explicit" Store.Retryable_turn_failed release.failure;
        check string "first failed turn retains acknowledged session" session_id settled.session_id;
@@ -1864,7 +1864,7 @@ let test_resumed_model_is_reselected_before_dispatch () =
 
 (* The phase the store holds once the previous turn settled. *)
 let settled_phase ~base_path =
-  match Store.load ~base_path ~keeper_name with
+  match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
   | Ok (Some { Store.phase = Store.Settled _ as phase; _ }) -> phase
   | Ok (Some _) -> fail "the first turn did not settle"
   | Ok None -> fail "no session was recorded"
@@ -1875,7 +1875,7 @@ let settled_phase ~base_path =
    settlement from before the turn, so the next turn resumes that session
    instead of waiting on an operator. *)
 let check_owner_stop ~base_path ~settled =
-  match Store.load ~base_path ~keeper_name with
+  match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
   | Ok (Some restored) ->
     check bool "the earlier settlement is restored" true (restored.Store.phase = settled);
     (match restored.Store.last_transient_release with
@@ -2535,7 +2535,7 @@ let test_a_host_count_beyond_a_reported_failed_turn_is_refused () =
      | Ok _ -> fail "a failed turn cannot succeed");
     check string "the host did not count the failed turn" "1"
       (read_text (Filename.concat base_path "host-turn-count.txt"));
-    (match Store.load ~base_path ~keeper_name with
+    (match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
      | Ok (Some failed) ->
        check bool "the failed turn leaves the reported count" true
          (failed.Store.host_turns = Store.Reported 1)
@@ -2766,7 +2766,7 @@ let test_an_owner_stop_after_turn_start_resumes_whatever_the_host_counted () =
      | () -> fail "the interrupted turn returned"
      | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ());
     check_owner_stop ~base_path ~settled;
-    (match Store.load ~base_path ~keeper_name with
+    (match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
      | Ok (Some stopped) ->
        check bool "the stopped turn's ending is unobserved" true
          (stopped.Store.host_turns = Store.Unobserved_after 1)

@@ -120,7 +120,21 @@ let examine_official_client_session (config : Workspace.config) examination =
          match binding.decoded with
          | Ok (_ : Keeper_official_client_session_store.t) ->
            { examination with readable = examination.readable + 1 }
-         | Error rejection ->
+         | Error
+             ((Keeper_official_client_session_store.Invalid_path _
+              | Keeper_official_client_session_store.Unreadable _) as error) ->
+           { examination with
+             unreadable =
+               { store = D.Refusing.Official_client_session
+               ; keeper = binding.keeper_name
+               ; path = binding.path
+               ; error = Keeper_official_client_session_store.read_error_to_string error
+               } :: examination.unreadable
+           }
+         | Error
+             ((Keeper_official_client_session_store.Invalid_json _
+              | Keeper_official_client_session_store.Not_current _) as error) ->
+           let rejection = Keeper_official_client_session_store.read_error_to_string error in
            { examination with
              undecodable =
                { store = D.Refusing.Official_client_session
@@ -342,7 +356,9 @@ let move_aside ~now ~base_path ~keepers_dir (u : undecodable) =
       ~keeper_name:u.keeper
       ~rejected_path
     |> Result.map (fun () -> u.path, rejected_path, None)
-    |> Result.map_error (fun error -> error ^ " (rejected: " ^ u.rejection ^ ")")
+    |> Result.map_error (fun error ->
+      Keeper_official_client_session_store.move_error_to_string error
+      ^ " (rejected: " ^ u.rejection ^ ")")
   | D.Refusing.Event_queue ->
     Keeper_event_queue_persistence.move_aside_undecodable_result
       ~base_path

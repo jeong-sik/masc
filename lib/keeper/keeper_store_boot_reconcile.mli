@@ -81,9 +81,10 @@ val examine : Workspace.config -> examination
 (** Decode every file of each [Refuse_boot] store with this build, and read
     the [Degrade_typed] store once. [Preflight_only] stores are not read.
     No file is created, renamed or written, so calling it twice gives the
-    same answer. Keeper metadata I/O failures are [unreadable], while invalid
-    JSON or a rejected current schema is [undecodable]. The other stores
-    retain their existing rejection classification. These lists count
+    same answer. Keeper metadata and official-client session I/O failures
+    are [unreadable], while invalid JSON or a rejected current schema is
+    [undecodable]. The other stores retain their existing rejection
+    classification. These lists count
     per-keeper files only.
 
     The goal store is read through [Goal_store.load_source]. When it is

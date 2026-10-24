@@ -28,18 +28,18 @@ let roundtrip () =
   let parsed=request calls in
   check bool "native fields roundtrip unchanged" true (ok (W.of_json (W.to_json parsed))=parsed);
   check int "all methods preserved" (List.length calls) (List.length parsed.steps);
-  check int "execution budget sums step and snapshot reserves" 50_000 (W.budget_ms parsed);
-  check (float 0.001) "runner window adds stop grace" 52. (W.window_s parsed)
+  let explicit = step "hover" ["selector",str "@1";"timeoutMs",`Int 120_000] in
+  let longer = request (List.init 20 (fun _ -> explicit)) in
+  check int "known sequence has no invented step cap" 20 (List.length longer.steps);
+  check bool "SDK timeout survives unchanged" true
+    (List.for_all (fun (step : W.step) -> step.timeout_ms = Some 120_000) longer.steps)
 let strict_inputs () =
-  let zero_timeout = step "click" ["selector",str "#x";"timeoutMs",`Int 0] in
   List.iter (fun value -> check bool "invalid caller input is rejected" true (Result.is_error (W.of_json value)))
     [obj (("steps",`List [])::base []);
      obj (base [step "evaluate" ["text",str "process.exit()"]]);
      obj (base [step "fill" ["selector",str "#x";"text",str "hi";"url",str "irrelevant"]]);
      obj (base [step "click" ["selector",str "#x";"timeoutMs",`Int (-1)]]);
-     obj (base [step "click" ["selector",str "#x";"timeoutMs",`Int (W.max_step_timeout_ms + 1)]]);
-     obj (base (List.init (W.max_steps + 1) (fun _ -> zero_timeout)));
-     obj (base (List.init 12 (fun _ -> click)));
+     obj (base [step "click" ["selector",str "#x";"timeoutMs",`Int 9007199254740992]]);
      obj (base [step "goto" ["url",str "javascript:alert(1)"]]);
      obj (base [step "selectOption" ["selector",str "#x";"values",`List [str "a";str "a"]]])]
 let complete () =

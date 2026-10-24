@@ -208,6 +208,7 @@ type operation_runner =
   ; on_execution_settled :
       keeper_name:string ->
       claimed_operation_id:Chat_operation.Operation_id.t option ->
+      operations:Chat_operation.t list ->
       execution:operation_execution ->
       unit
   }
@@ -217,13 +218,16 @@ type operation_runner =
     ready must call {!wake_operation_drain}. Cooling runtime continuations alone
     recheck their live dependency witness at the Keeper observation interval.
 
-    [on_execution_settled] runs on the Owner fiber after the child switch has
-    fully unwound — every executor fiber has finished or been cancelled — and
-    before the durable settle is applied. A cancelled child cannot publish its
-    own terminal event, so this is the only point that both survives the
-    cancellation and still knows the execution verdict. Implementations
-    project the verdict to live consumers (wire-terminal synthesis); they must
-    not mutate durable state. Exceptions are contained by the Owner. *)
+    [on_execution_settled] runs after the child's effects have ended and the
+    Owner has committed its accepted settlement. [operations] is the complete,
+    ordered batch read directly from this Owner's store, including immutable
+    terminal facts and each member's original input digest (the execution
+    owner's aggregate digest remains on the claimed operation). The callback
+    must not re-enter this Owner or look up a new
+    admission capability. It projects retained facts idempotently; its failure
+    cannot undo them. Failed operations are available through
+    {!failed_operations_at_start} for restart projection recovery. Deferred
+    executions may have no terminal and must not be projected as completed. *)
 
 type t
 
@@ -386,10 +390,10 @@ val await_queued_handoff_recipient
     stops running, the store cannot be read or the owner closes. Cancellation
     unregisters the condition waiter; no timer or polling loop is installed. *)
 
-(** Durable [Failed Interrupted_by_restart] records, including batch members
+(** Durable [Failed] records, including batch members
     and earlier starts. The registry retries their idempotent journal and
     transcript projections; the owner has no transcript of its own. *)
-val restart_interrupted_operations : t -> Chat_operation.t list
+val failed_operations_at_start : t -> Chat_operation.t list
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result

@@ -259,7 +259,7 @@ let user_matches_turn ~messages ~turn_ref =
          | ( (Role.Assistant | Role.Request_failure)
            , Some
                { Keeper_chat_delivery_identity.delivery_key
-               ; transcript_slot = Keeper_chat_delivery_identity.Terminal_result
+               ; transcript_slot = (Keeper_chat_delivery_identity.Terminal_result | Keeper_chat_delivery_identity.Settled_failure)
                } )
            when matches_turn_ref m ->
            Some delivery_key
@@ -271,6 +271,7 @@ let user_matches_turn ~messages ~turn_ref =
             | Keeper_chat_delivery_identity.Tool_call _
             | Keeper_chat_delivery_identity.Tool_delivery _
             | Keeper_chat_delivery_identity.Terminal_result
+            | Keeper_chat_delivery_identity.Settled_failure
             | Keeper_chat_delivery_identity.Approval_request
             | Keeper_chat_delivery_identity.Approval_resolution
             | Keeper_chat_delivery_identity.Approval_replay
@@ -298,6 +299,7 @@ let user_matches_turn ~messages ~turn_ref =
             | Keeper_chat_delivery_identity.Tool_call _
             | Keeper_chat_delivery_identity.Tool_delivery _
             | Keeper_chat_delivery_identity.Terminal_result
+            | Keeper_chat_delivery_identity.Settled_failure
             | Keeper_chat_delivery_identity.Approval_request
             | Keeper_chat_delivery_identity.Approval_resolution
             | Keeper_chat_delivery_identity.Approval_replay

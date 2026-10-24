@@ -167,136 +167,24 @@ let prepare_operation_store_path pool keeper_name =
             (Printexc.to_string exn)))
 ;;
 
-(* What the operator reads in the transcript for a request the restart cut
-   off. The cause is a value ([Server_restarted]) and its summary is the
-   sentence; the prefix is the stream's [persisted_error_reply] shape, so the
-   row renders as the failure it is and does not read as the keeper's own
-   words (RFC-0454 D2). *)
-let restart_interrupted_summary =
-  Keeper_request_failure.summary
-    { Keeper_request_failure.cause = Keeper_request_failure.Server_restarted }
-;;
-
-let restart_interrupted_reply = "Keeper request failed: " ^ restart_interrupted_summary
-;;
-
-(* The run the restart cut off journaled whatever it had produced and stopped,
-   and its stream died with the process. A client that reopens the operation
-   replays that journal and then finds the operation settled, so the journal
-   needs the terminal the stream would have carried. Recorded through the same
-   helper the Owner's settlement uses. Durable failed operations are retried
-   on every start; their exact journal settlement marker prevents duplicates.
-   An earlier segment's error cannot stand in for this restart. A journal that
-   cannot be written is logged and does not stop the owner from starting. *)
-let record_restart_terminal ~base_dir ~keeper_name ~settlement =
-  let operation_id = Keeper_chat_operation.Operation_id.to_string settlement.Keeper_chat_event_log.operation_id in
-  let journal =
-    Keeper_chat_event_log.open_journal ~base_dir ~keeper_name ~operation_id ()
-  in
-  match
-    Keeper_chat_event_log.record_terminal_error
-      ~segment:(Keeper_chat_event_log.Restart_settlement settlement) journal
-      ~ts:settlement.completed_at
-      ~message:restart_interrupted_summary
-  with
-  | Ok (Recorded_terminal_error _ | Existing_terminal_error _) -> ()
-  | Error detail ->
-    Log.Keeper.warn
-      ~keeper_name
-      "restart-interrupted operation %s left no journal terminal: %s"
-      operation_id
-      detail
-;;
-
-(* A request the restart cut off is settled [Failed Interrupted_by_restart] in
-   the operation store, but the stream that would have persisted its failure
-   row died with the process, so the transcript showed the user's line with
-   no answer at all (msx-retro-mania, three requests on 2026-09-14). Leave the
-   same [Transport_failure] row the stream leaves, once per operation: the
-   delivery key makes a second start on the same store a no-op. The row is
-   evidence for the operator, not the keeper's utterance, so it does not
-   advance the lane watermark. A row that cannot be written is logged and
-   does not stop the owner from starting. The stored source is decoded only
-   when the row is written, so a source that no longer decodes is reported
-   once, by the start that writes its row without a surface. *)
-let record_restart_interruptions pool ~keeper_name owner =
-  let base_dir = pool.config.Workspace.base_path in
-  List.iter
-    (fun (operation : Keeper_owner.Chat_operation.t) ->
-       let operation_id =
-         Keeper_owner.Chat_operation.Operation_id.to_string operation.operation_id
-       in
-       (match operation.state with
-        | Failed {completed_at;failure={kind=Interrupted_by_restart;_}} ->
-            record_restart_terminal ~base_dir ~keeper_name
-              ~settlement:{Keeper_chat_event_log.operation_id=operation.operation_id;completed_at}
-        | Queued | Running _ | Succeeded _ | Cancelled _
-        | Failed
-            { failure =
-                { kind =
-                    ( Turn_cancelled | Turn_exception | Store_unavailable
-                    | No_queued_operation | Invalid_input | Turn_invariant
-                    | Delivery_failed )
-                ; _
-                }
-            ; _
-            } -> ());
-       let source =
-         lazy (Keeper_chat_operation_payload.source_of_json operation.source)
-       in
-       match
-         Keeper_chat_delivery_identity.Request_id.of_string operation_id
-       with
-       | Error detail ->
-         Log.Keeper.warn
-           ~keeper_name
-           "restart-interrupted operation %s left no failure row: %s"
-           operation_id
-           detail
-       | Ok request_id ->
-         let route =
-           lazy
-             (match Lazy.force source with
-              | Ok source ->
-                { Keeper_chat_store.Row_route.surface = Some source.surface
-                ; conversation_id = source.conversation_id
-                }
-              | Error _ -> Keeper_chat_store.Row_route.none)
-         in
-         (match
-            Keeper_chat_store.append_request_failure_once
-              ~base_dir
-              ~keeper_name
-              ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
-              ~content:restart_interrupted_reply
-              ~route
-              ()
-          with
-          | Ok (Keeper_chat_store.Appended _) ->
-            let broadcast_source =
-              match Lazy.force source with
-              | Ok source -> Surface_ref.lane_label source.surface
-              | Error detail ->
-                Log.Keeper.warn
-                  ~keeper_name
-                  "restart-interrupted operation %s has an undecodable source; its failure row carries no surface: %s"
-                  operation_id
-                  detail;
-                "restart"
-            in
-            Keeper_chat_broadcast.chat_appended
-              ~keeper_name
-              ~source:broadcast_source
-              ~content:restart_interrupted_reply
-              ()
-          | Ok (Keeper_chat_store.Already_present _) -> ()
-          | Error detail ->
-            Log.Keeper.warn
-              ~keeper_name
-              "restart-interrupted operation %s left no failure row: %s"
-              operation_id
-              detail))
-    (Keeper_owner.restart_interrupted_operations owner)
+(* Immutable Failed rows are the retained intent for both projections. A
+   process may stop after either append, so every start retries the same facts,
+   not just failures whose cause happens to be Interrupted_by_restart. *)
+let record_failed_operations pool ~keeper_name owner =
+  List.iter (fun (operation : Keeper_chat_operation.t) ->
+    let log_pending error =
+      Log.Keeper.warn ~keeper_name
+        "failed operation projection pending operation=%s: %s"
+        (Keeper_chat_operation.Operation_id.to_string operation.operation_id)
+        (Keeper_chat_failure_projection.error_to_string error) in
+    match Keeper_chat_failure_projection.persist
+      ~base_path:pool.config.Workspace.base_path ~keeper_name operation with
+    | Ok Not_failed -> ()
+    | Ok (Projected {transcript; journal}) ->
+      (match transcript with Ok () -> () | Error error -> log_pending error);
+      (match journal with Ok _ -> () | Error error -> log_pending error)
+    | Error error -> log_pending error)
+    (Keeper_owner.failed_operations_at_start owner)
 ;;
 
 let start_owner pool ~keeper_name ~initial_meta =
@@ -319,7 +207,7 @@ let start_owner pool ~keeper_name ~initial_meta =
      with
      | Error _ as error -> error
      | Ok owner ->
-       record_restart_interruptions pool ~keeper_name owner;
+       record_failed_operations pool ~keeper_name owner;
        Ok owner)
 ;;
 

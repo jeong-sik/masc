@@ -34,6 +34,7 @@ type transcript_slot =
       }
   | Tool_delivery of { ordinal : int }
   | Terminal_result
+  | Settled_failure
   | Approval_request
   | Approval_resolution
   | Approval_replay

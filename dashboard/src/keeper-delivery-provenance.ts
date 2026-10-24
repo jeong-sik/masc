@@ -26,6 +26,7 @@ export type KeeperChatDeliveryKey =
 export type KeeperChatTranscriptSlot =
   | { readonly kind: 'accepted_user' }
   | { readonly kind: 'terminal_result' }
+  | { readonly kind: 'settled_failure' }
   | { readonly kind: 'approval_request' }
   | { readonly kind: 'approval_resolution' }
   | { readonly kind: 'approval_replay' }
@@ -53,7 +54,7 @@ export type KeeperChatDeliveryProvenanceDecode =
 
 export function operationDeliveryProvenance(
   operationId: string,
-  slot: 'accepted_user' | 'terminal_result',
+  slot: 'accepted_user' | 'terminal_result' | 'settled_failure',
 ): KeeperChatDeliveryProvenance {
   return {
     delivery_key: { kind: 'operation', operation_id: operationId },
@@ -103,6 +104,7 @@ function sameTranscriptSlot(
   if (left.kind !== right.kind) return false
   switch (left.kind) {
     case 'accepted_user':
+    case 'settled_failure':
     case 'terminal_result':
     case 'approval_request':
     case 'approval_resolution':
@@ -215,6 +217,7 @@ function decodeTranscriptSlot(raw: unknown): KeeperChatTranscriptSlot | null {
   if (!plainObject(raw)) return null
   switch (raw.kind) {
     case 'accepted_user':
+    case 'settled_failure':
     case 'terminal_result':
     case 'approval_request':
     case 'approval_resolution':

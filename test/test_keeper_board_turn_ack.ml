@@ -159,7 +159,7 @@ data: [DONE]
           Eio.Promise.resolve signal_chat_started operation.operation_id;
           Keeper_owner.Operation_succeeded { outcome_ref = "chat-after-board" })
     ; on_execution_settled =
-        (fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ -> ())
+        (fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ -> ())
     } in
   ignore (Keeper_owner_registry.install_from_store ~sw
     ~operation_runner:(Some operation_runner)

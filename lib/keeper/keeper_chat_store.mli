@@ -441,6 +441,14 @@ val append_request_failure_once :
   ?stream_lifecycle:stream_lifecycle_event list -> unit ->
   (append_once_result, string) result
 
+val append_settled_failure_once :
+  base_dir:string -> keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key -> content:string ->
+  route:Row_route.t Lazy.t -> unit -> (append_once_result, string) result
+(** Append the Owner's immutable failure under [Settled_failure]. This does
+    not replace an earlier assistant result: a host rejection after output
+    was delivered is a distinct fact, and cannot reuse that result's slot. *)
+
 (** Idempotently append the ordered tool-call rows for a durable request that
     has no assistant message. This is the only valid representation of a
     tool-only continuation; callers must not write an empty assistant row.

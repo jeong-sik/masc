@@ -47,6 +47,7 @@ type transcript_slot =
       }
   | Tool_delivery of { ordinal : int }
   | Terminal_result
+  | Settled_failure
   | Approval_request
   | Approval_resolution
   | Approval_replay
@@ -220,6 +221,7 @@ let delivery_key_equal left right =
 let transcript_slot_to_yojson = function
   | Accepted_user -> `Assoc [ "kind", `String "accepted_user" ]
   | Terminal_result -> `Assoc [ "kind", `String "terminal_result" ]
+  | Settled_failure -> `Assoc [ "kind", `String "settled_failure" ]
   | Approval_request -> `Assoc [ "kind", `String "approval_request" ]
   | Approval_resolution -> `Assoc [ "kind", `String "approval_resolution" ]
   | Approval_replay -> `Assoc [ "kind", `String "approval_replay" ]
@@ -263,6 +265,10 @@ let transcript_slot_of_yojson = function
            fields
        in
        Ok Terminal_result
+     | "settled_failure" ->
+       let* () = validate_fields ~context:"settled failure transcript slot"
+         ~expected:[ "kind" ] fields in
+       Ok Settled_failure
      | "approval_request" ->
        let* () =
          validate_fields
@@ -335,6 +341,7 @@ let transcript_slot_equal left right =
   match left, right with
   | Accepted_user, Accepted_user
   | Terminal_result, Terminal_result
+  | Settled_failure, Settled_failure
   | Approval_request, Approval_request
   | Approval_resolution, Approval_resolution
   | Approval_replay, Approval_replay
@@ -344,15 +351,16 @@ let transcript_slot_equal left right =
     Ids.Execution_id.equal left.execution_id right.execution_id
     && Int.equal left.ordinal right.ordinal
   | Tool_delivery left, Tool_delivery right -> Int.equal left.ordinal right.ordinal
-  | Accepted_user, (Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Terminal_result, (Accepted_user | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Tool_call _, (Accepted_user | Terminal_result | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Tool_delivery _, (Accepted_user | Terminal_result | Tool_call _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Approval_request, (Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Approval_resolution, (Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_replay | Approval_replay_correction | Approval_continuation)
-  | Approval_replay, (Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay_correction | Approval_continuation)
-  | Approval_replay_correction, (Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_continuation)
-  | Approval_continuation, (Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction) -> false
+  | Accepted_user, (Settled_failure | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Settled_failure, (Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Terminal_result, (Settled_failure | Accepted_user | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Tool_call _, (Settled_failure | Accepted_user | Terminal_result | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Tool_delivery _, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Approval_request, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_resolution | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Approval_resolution, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_replay | Approval_replay_correction | Approval_continuation)
+  | Approval_replay, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay_correction | Approval_continuation)
+  | Approval_replay_correction, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_continuation)
+  | Approval_continuation, (Settled_failure | Accepted_user | Terminal_result | Tool_call _ | Tool_delivery _ | Approval_request | Approval_resolution | Approval_replay | Approval_replay_correction) -> false
 ;;
 
 let delivery_provenance_fields { delivery_key; transcript_slot } =

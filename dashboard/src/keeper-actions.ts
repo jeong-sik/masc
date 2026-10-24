@@ -562,15 +562,18 @@ function hasCanonicalOperationTurn(
 ): boolean {
   const expectedUser = operationDeliveryProvenance(operationId, 'accepted_user')
   const expectedAssistant = operationDeliveryProvenance(operationId, 'terminal_result')
+  const expectedFailure = operationDeliveryProvenance(operationId, 'settled_failure')
   const hasUser = entries.some(entry => (
     entry.deliveryProvenance != null
     && sameDeliveryProvenance(entry.deliveryProvenance, expectedUser)
   ))
-  const hasAssistant = entries.some(entry => (
+  const hasTerminal = entries.some(entry => (
     entry.deliveryProvenance != null
-    && sameDeliveryProvenance(entry.deliveryProvenance, expectedAssistant)
+    && (sameDeliveryProvenance(entry.deliveryProvenance, expectedAssistant)
+      || (entry.delivery === 'request_failure'
+        && sameDeliveryProvenance(entry.deliveryProvenance, expectedFailure)))
   ))
-  return hasUser && hasAssistant
+  return hasUser && hasTerminal
 }
 
 async function reconcileOperationFromServerHistory(

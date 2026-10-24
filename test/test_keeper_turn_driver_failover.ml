@@ -4324,7 +4324,7 @@ let test_direct_retry_owner_revalidates_recovery_and_reassignment () =
             Owner.resume_direct_runtime_retry owner ~operation_id ~observed |> ok;
             Eio.Promise.resolve resolve_resumed operation.operation_id;
             Owner.Operation_succeeded {outcome_ref="same-operation-finished"})
-        ; on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ -> ()) }
+        ; on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ -> ()) }
       in
       let path = Filename.temp_file "direct-retry-owner" ".sqlite3" in
       Sys.remove path;

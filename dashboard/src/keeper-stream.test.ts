@@ -1847,37 +1847,53 @@ describe('Keeper operation stream projection', () => {
       && entry.delivery === 'request_failure')).toBe(true)
   })
 
-  it('a persisted request failure terminal keeps a late operation event from reopening the operation', () => {
-    // keeper-state normalizes a persisted request_failure row to a
-    // system-role entry with terminal_result provenance. The operation it
-    // terminated is finished: a delayed broadcast for the same operation
-    // must be ignored, not appended as a fresh assistant bubble.
-    const operationId = 'late-event-after-failure'
-    appendThreadEntry('sangsu', {
-      id: 'persisted-failure',
-      role: 'system',
-      source: 'direct_assistant',
-      label: 'sangsu',
-      text: 'REQUEST_FAILURE_DIAGNOSTIC',
-      rawText: 'REQUEST_FAILURE_DIAGNOSTIC',
-      timestamp: new Date().toISOString(),
-      delivery: 'request_failure',
-      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_result'),
-      details: null,
-    })
-    const before = [...(keeperThreads.value.sangsu ?? [])]
-    const applied = applyKeeperOperationTurnEvent('sangsu', {
-      operationId,
-      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'late fragment' },
-    })
-    const after = keeperThreads.value.sangsu ?? []
-    expect(applied).toBe(null)
-    expect(after.length).toBe(before.length)
-    expect(after.every(entry => entry.role !== 'assistant' || entry.delivery !== 'sending'))
-      .toBe(true)
-    expect(after.some(entry => entry.id === 'persisted-failure'
-      && entry.delivery === 'request_failure')).toBe(true)
+describe('settled operation history', () => {
+  beforeEach(() => {
+    _resetKeeperStreamBuffersForTests()
+    _resetLiveSendRequestOwnersForTests()
+    _resetActiveKeeperStreamsForTests()
+    _clearTrackedKeeperChatOperationsForTests()
+    keeperThreads.value = {}
   })
+
+  it.each([false, true])('does not reopen a settled failure after loading history (earlier reply: %s)', (earlierReply) => {
+    const operationId = 'settled-failure-from-history'
+    const history = chatHistoryEntriesFromRest('sangsu', [
+      ...(earlierReply ? [{
+        id: 'earlier-assistant', role: 'assistant', content: 'Reply delivered before host rejection', ts: 1,
+        delivery_provenance: operationDeliveryProvenance(operationId, 'terminal_result'),
+        delivery_provenance_status: 'valid',
+      }] : []),
+      {
+        id: 'settled-failure', role: 'request_failure', content: 'Keeper request failed: host rejection', ts: 2,
+        delivery_provenance: {
+          delivery_key: { kind: 'operation', operation_id: operationId },
+          transcript_slot: { kind: 'settled_failure' },
+        },
+        delivery_provenance_status: 'valid',
+      },
+    ])
+    mergeServerHistoryEntries('sangsu', history)
+    const before = [...(keeperThreads.value.sangsu ?? [])]
+    expect(before).toHaveLength(earlierReply ? 2 : 1)
+    expect(before.find(entry => entry.id === 'settled-failure')?.delivery).toBe('request_failure')
+
+    for (const event of [
+      { type: 'RUN_STARTED' as const },
+      { type: 'TEXT_MESSAGE_CONTENT' as const, delta: 'late fragment' },
+    ]) {
+      expect(applyKeeperOperationTurnEvent('sangsu', { operationId, event })).toBeNull()
+    }
+    _flushPendingKeeperStreamDeltasForTests()
+    expect(keeperThreads.value.sangsu).toEqual(before)
+    expect((keeperThreads.value.sangsu ?? []).filter(entry => entry.role === 'assistant'))
+      .toHaveLength(earlierReply ? 1 : 0)
+    if (earlierReply) {
+      expect(keeperThreads.value.sangsu?.find(entry => entry.id === 'earlier-assistant'))
+        .toMatchObject({ text: 'Reply delivered before host rejection', delivery: 'history' })
+    }
+  })
+})
 
 describe('applyKeeperStreamEvent tool calls', () => {
   beforeEach(() => {

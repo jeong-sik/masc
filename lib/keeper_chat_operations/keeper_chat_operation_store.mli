@@ -237,8 +237,8 @@ val submit
   -> (admission, error) result
 
 val get : t -> Operation.Operation_id.t -> (Operation.t option, error) result
-val list_restart_interrupted : t -> (Operation.t list, error) result
-(** Every durable [Failed Interrupted_by_restart] record, including settled
+val list_failed : t -> (Operation.t list, error) result
+(** Every durable [Failed] record, including settled
     batch members. Re-reading after startup permits interrupted projection
     writes to retry; it is independent of newly running operations. *)
 val inventory : t -> (inventory, error) result

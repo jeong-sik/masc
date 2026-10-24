@@ -166,6 +166,7 @@ type operation_runner =
   ; on_execution_settled :
       keeper_name:string ->
       claimed_operation_id:Chat_operation.Operation_id.t option ->
+      operations:Chat_operation.t list ->
       execution:operation_execution ->
       unit
   }
@@ -451,8 +452,8 @@ type t =
            turn duration. Only a lane that actually lost the slot needs telling
            that it is free. Owner-fiber-local; every reader and writer below
            runs in the command loop. *)
-  ; restart_interrupted : Chat_operation.t list
-        (* All durable [Interrupted_by_restart] failures, including batch
+  ; failed_at_start : Chat_operation.t list
+        (* All durable [Failed] operations, including batch
            members and prior starts, so the transcript and event journal can
            retry incomplete recovery. Fixed at start; settlement identity
            makes repeated recovery idempotent. *)
@@ -1263,7 +1264,7 @@ let start
          |> Result.map_error owner_error_of_operation_error)
         (fun projection ->
         run_operation_store ~label:"read restart recovery operations" (fun () ->
-          Chat_operation_store.list_restart_interrupted operation_store)
+          Chat_operation_store.list_failed operation_store)
         |> Result.map_error owner_error_of_operation_error
         |> Result.map (fun recovery -> projection, recovery))
   in
@@ -1272,7 +1273,7 @@ let start
      (* See startup failure path: preserve the original error; close is best-effort. *)
      ignore (Chat_operation_store.close operation_store : (unit, _) result);
      error
-   | Ok (initial_operation_projection, restart_interrupted) ->
+   | Ok (initial_operation_projection, failed_at_start) ->
   let closed_p, resolve_closed = Eio.Promise.create () in
   let t =
     { keeper_name
@@ -1297,7 +1298,7 @@ let start
     ; stopping_waiters = ref []
     ; shutdown_idle_waiters = ref []
     ; on_turn_slot_released
-    ; restart_interrupted
+    ; failed_at_start
     }
   in
   (* [closed_p] is what a caller of {!request} waits on to learn that no
@@ -1723,24 +1724,6 @@ let start
               else runner_ended
             in
             Atomic.set t.child_cancel None;
-            (* Hook-before-durable-settle gives observers a happens-before: a
-               durably Failed/Succeeded operation implies its wire synthesis
-               already ran (the stopping test relies on this ordering).
-               Cancellation of the owner switch inside the hook skips the
-               Child_finished handover below, as it always could here;
-               [settle_running_after_restart] clears that window on the next
-               boot. The handover itself is protected, so an interrupted child
-               still reports what it settled. *)
-            (try
-               runner.on_execution_settled
-                 ~keeper_name:t.keeper_name
-                 ~claimed_operation_id:!claimed_operation_id
-                 ~execution
-             with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn ->
-               Log.Keeper.error "operation settle hook raised for %s: %s"
-                 t.keeper_name (Printexc.to_string exn));
             notify
               t
               (Child_finished
@@ -2730,8 +2713,8 @@ let start
               (* The child ignores this result and the row stays Running, so
                  a refused settlement is otherwise invisible until the next
                  boot settles it. *)
-              (match finish_operation_child claimed_operation_id execution ~ended with
-               | Ok () as ok -> ok
+              let settled = finish_operation_child claimed_operation_id execution ~ended in
+              (match settled with
                | Error error as failed ->
                  Log.Keeper.error ~keeper_name:t.keeper_name
                    "chat operation settlement refused operation=%s: %s"
@@ -2739,7 +2722,37 @@ let start
                     | Some operation_id -> Chat_operation.Operation_id.to_string operation_id
                     | None -> "unclaimed")
                    (error_to_string error);
-                 failed)
+                 failed
+               | Ok () ->
+                 let operations = match claimed_operation_id with
+                   | None -> Ok []
+                   | Some operation_id -> run_operation_read t
+                       ~label:"read accepted batch settlement" (fun () ->
+                         Chat_operation_store.batch_operations t.operation_store ~operation_id) in
+                 (match operations with
+                  | Error error ->
+                    Log.Keeper.error ~keeper_name:t.keeper_name
+                      "chat operation projection pending: %s" (error_to_string error)
+                  | Ok operations ->
+                    let accepted = match operations with
+                      | [] -> Some execution
+                      | first :: _ ->
+                        match first.Chat_operation.state with
+                        | Failed { failure; _ } -> Some (Operation_failed
+                            {kind=failure.kind; detail=failure.detail; outcome_ref=failure.outcome_ref})
+                        | Succeeded {outcome_ref;_} -> Some (Operation_succeeded {outcome_ref})
+                        | Queued | Cancelled _ -> Some Operation_deferred
+                        | Running _ -> None in
+                    (match operation_runner, accepted with
+                     | None, _ | Some _, None -> ()
+                     | Some runner, Some execution ->
+                       (try runner.on_execution_settled ~keeper_name:t.keeper_name
+                          ~claimed_operation_id ~operations ~execution
+                        with
+                        | Eio.Cancel.Cancelled _ as exn -> raise exn
+                        | exn -> Log.Keeper.error ~keeper_name:t.keeper_name
+                            "operation projection raised: %s" (Printexc.to_string exn))));
+                 Ok ())
             | Autonomous_child_finished { outcome; resolve = autonomous_resolve } ->
               let response =
                 match outcome with
@@ -2882,7 +2895,7 @@ let await_queued_handoff_recipient t ~operation_id =
       | Error _ -> Some false)
 ;;
 
-let restart_interrupted_operations t = t.restart_interrupted
+let failed_operations_at_start t = t.failed_at_start
 let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
 let interrupt_turn = pause_and_interrupt
 let run_next_operation ?priority_predecessors t ~operation_id ~observed =

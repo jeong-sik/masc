@@ -124,7 +124,7 @@ let run_case ~how root =
   in
   let runner : Keeper_owner.operation_runner =
     {ready=(fun ~keeper_name:_ -> true); execute;
-     on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ -> ())} in
+     on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ -> ())} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner)
     ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
   let input = Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]

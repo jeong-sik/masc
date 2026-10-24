@@ -11,13 +11,14 @@ on:
         options:
           - linux-x64
           - macos-arm64
+          - ego-runtime-macos-arm64
           - stagehand-model-macos-arm64
           - preparation-driver-macos-arm64
           - rc-pptx-trace
           - lane-fusion-container
 
       candidate_sha:
-        description: Candidate source SHA (required for preparation driver; optional for macOS runtime)
+        description: Candidate source SHA (required for Ego runtime and preparation driver; optional for macOS runtime)
         type: string
         default: ""
 
@@ -641,4 +642,104 @@ jobs:
           name: lane-fusion-container-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/lane-fusion-container/
           if-no-files-found: error
+          retention-days: 7
+
+  ego-runtime-probe:
+    if: inputs.target == 'ego-runtime-macos-arm64'
+    name: Build exact-source Ego runtime path
+    runs-on: macos-15
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Validate explicit source identity
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          if re.fullmatch(r'[0-9a-f]{40}', os.environ['CANDIDATE_SHA']) is None:
+              raise SystemExit('candidate_sha must be a full lowercase commit SHA')
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Install native build dependencies
+        run: |
+          brew install flock gmp libpq openssl@3 zstd
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+      - name: Pin and install candidate dependencies
+        run: |
+          set -euo pipefail
+          scripts/opam-pin-external-deps.sh --with-compact-protocol --with-bisect
+          opam install ./masc.opam --deps-only --locked --with-test --yes
+      - name: Build the actual Ego runtime path
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ego-runtime-probe"
+          test "$(uname -m)" = arm64
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code HEAD --
+          targets=(bin/main_eio.exe bin/masc_browser_addon_worker.exe bin/masc_native_addon_launcher.exe)
+          printf '%s\n' "${targets[@]}" > "$RUNNER_TEMP/ego-runtime-probe/build-targets.txt"
+          opam exec -- dune build --release "${targets[@]}" 2>&1 | tee "$RUNNER_TEMP/ego-runtime-probe/build.log"
+          git diff --exit-code HEAD --
+      - name: Record exact candidate bytes and dependencies
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PROBE_OUT: ${{ runner.temp }}/ego-runtime-probe
+          WORKFLOW_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cp _build/default/bin/main_eio.exe "$PROBE_OUT/masc"
+          cp _build/default/bin/masc_browser_addon_worker.exe "$PROBE_OUT/masc-browser-addon-worker"
+          cp _build/default/bin/masc_native_addon_launcher.exe "$PROBE_OUT/masc-native-addon-launcher"
+          test "$("$PROBE_OUT/masc" build-commit)" = "$CANDIDATE_SHA"
+          {
+            uname -a
+            opam exec -- ocamlc -version
+            opam list --installed --columns=name,version
+            brew list --versions
+            otool -L "$PROBE_OUT/masc" "$PROBE_OUT/masc-browser-addon-worker" "$PROBE_OUT/masc-native-addon-launcher"
+          } > "$PROBE_OUT/dependencies.txt"
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          root = Path(os.environ['PROBE_OUT'])
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if source != os.environ['CANDIDATE_SHA']:
+              raise SystemExit('candidate source identity changed')
+          names = ('masc', 'masc-browser-addon-worker', 'masc-native-addon-launcher')
+          binaries = {name: {'bytes': (root / name).stat().st_size,
+                            'sha256': hashlib.sha256((root / name).read_bytes()).hexdigest()}
+                      for name in names}
+          receipt = dict(source_commit=source,
+              source_tree=subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+              workflow_head=os.environ['WORKFLOW_HEAD'], run_id=os.environ['GITHUB_RUN_ID'],
+              run_attempt=os.environ['GITHUB_RUN_ATTEMPT'], platform='macos-arm64', binaries=binaries,
+              build_targets=(root / 'build-targets.txt').read_text().splitlines(),
+              behavior_executed=False, installed=False, release_verified=False,
+              relocatable_runtime_verified=False)
+          (root / 'build-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+      - name: Preserve candidate or failed-build evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ego-runtime-macos-arm64-${{ inputs.candidate_sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ego-runtime-probe/
+          if-no-files-found: ignore
           retention-days: 7

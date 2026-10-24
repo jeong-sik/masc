@@ -895,6 +895,17 @@ status: reference
   [Agent_input_request](../../packages/agent_core/lib/base/agent_input_request.mli) ·
   [agent-input-wait-ownership 설계](../../docs/design/agent-input-wait-ownership.md)
 
+**Keeper Input Wait Observation (retained-input 대기 관측)**
+: 현재 Keeper Owner가 소유한 정확한 retained 입력을 읽는 관측 계약
+  (`Keeper_input_wait_observation.read : ... -> (t, error) result`). 한 번의 Owner
+  mailbox 조회로 trace, 원래 session root와 정확한 journal reference를 얻은 뒤 해당
+  artifact를 검증한다. 성공은 `Unobserved`·`Pending`·`Consumed`이며, 실패는
+  `Owner_unavailable`·`Trace_changed`·`Prior_input_unavailable`·`Retained_unavailable`이다.
+  마지막 오류는 retained checkpoint의 읽기·bytes·identity·session·turn 검증 실패를
+  보존한다. canonical/history로 대체하지 않으며, 이 읽기 결과는 응답 수락이나
+  continuation dispatch 권한을 주지 않는다(#44963).
+  → [Keeper_input_wait_observation](../../lib/keeper/keeper_input_wait_observation.mli)
+
 **Ask (질문)**
 : Keeper가 운영자에게 묻는 durable 질문 묶음. `masc_ask`가 만들고,
   `masc_ask_status`·`masc_ask_withdraw`가 조회·철회하며, 답변은 별도 wake로
@@ -1722,9 +1733,15 @@ status: reference
   `defer_loading`(#38567). composition의 선언은 Skill 블록에만 두고, 같은 이름의
   `config/tools/` 파일은 composition에 읽히지 않는다. 선언이 없으면 `Always_loaded`이고,
   TOML 파일 없이 OCaml로 만든 도구는 지연을 선언할 수 없다. 목록은 description 첫 줄
-  (80바이트까지)로 도구를 소개한다. Agent Core lane에만 적용된다 — codex·antigravity·
-  claude_code runtime은 도구 배열 전체를 받는다. Execution Disposition의 `Deferred`(도구
-  호출의 결과)와 이름이 겹치지만 다른 개념이다. 이쪽은 스키마를 언제 싣느냐다.
+  (80바이트까지)로 도구를 소개한다. 정적 descriptor는 내부 도구 이름의 선언을 읽고,
+  Add-on export는 턴의 retained export authority를 통해 지연될 수 있다
+  (#45449, [Keeper_tool_descriptor](../../lib/keeper/keeper_tool_descriptor.mli)).
+  공식 클라이언트의 동적 도구는 `Upfront`·`On_demand`를 각 transport의 정책으로
+  전달한다 — Claude Code의 `anthropic/alwaysLoad`, Codex의 `deferLoading`
+  ([Runtime_official_client_tool](../../lib/runtime/runtime_official_client_tool.mli)).
+  도구 집합이 고정된 runtime은 전체 스키마를 받는다. Execution Disposition의
+  `Deferred`(도구 호출의 결과)와 이름이 겹치지만 다른 개념이다. 이쪽은 스키마를
+  언제 싣느냐다.
   → [Tool_loading_declarations](../../lib/tool_surface/tool_loading_declarations.mli)
 
 **Tool-host failure report**
@@ -2404,6 +2421,14 @@ status: reference
   성립한다. **Keeper hook**(매 turn 턴별 문맥을 조립해 얹는 관행)과는 다른 층의
   용어다.
   → [Hooks_agent_core](../../packages/agent_core/lib/base/hooks.mli)
+
+**Lane Add-on release 분류 (Native_released·Native_retained)**
+: native worker의 정확한 installation·incarnation에 대한 release 결과를 가리키는
+  닫힌 어휘(`Lane_addon_lifecycle.release`). `Native_released`와 `Native_retained`
+  모두 native retirement와 실제 admission settlement가 확인된 상태다.
+  `Native_retained`는 자원 해제를 확인하지 못해 운영자가 자원을 인수한 경우이며,
+  자원은 그 자리에 남고 host가 제거하지 않는다(#45216).
+  → [Lane_addon_lifecycle](../../lib/lane_addon/lane_addon_lifecycle.mli)
 
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계·머신 호스팅 레이어. `msx-machine`·`dos-machine` Add-on worker가 호스팅하는 MSX·DOS 머신,
@@ -4361,6 +4386,13 @@ status: reference
   역사적 발췌일 뿐이며, 완료 상태를 증명하거나 새로운 할 일 목록·열린 의무를 규정하지 않는다.
   → [Keeper_recent_work](../../lib/keeper/keeper_recent_work.mli) ·
   [Keeper Unified Prompt](../../lib/keeper/keeper_unified_prompt.mli)
+
+**Own_recent_actions (자기 직후 행동 기억)**
+: 이 Keeper 자신의 최근 도구 호출과 결과를 턴별로 싣는 현재 컨텍스트 층
+  (`Keeper_context_layers.Own_recent_actions`). 호출의 provenance와 성공·실패·지연·
+  미기록 결과, 실패 요약을 렌더링한다. 최근 작업을 싣는 `Recent_work`와는 입력과
+  렌더링이 별도인 층이다(#36935 도입, #41351·#45145 경유 확장).
+  → [Keeper_context_layers](../../lib/keeper/keeper_context_layers.mli)
 
 **Extra System Context (턴별 문맥)**
 : Keeper hook이 매 turn 새로 조립해 provider 지시 표면에 얹는 `System` 메시지.

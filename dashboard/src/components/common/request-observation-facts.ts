@@ -13,7 +13,7 @@ export function RequestObservationFacts({ observations }: { observations: Reques
       case 'read_failed': content = `요청 증거 읽기 실패: ${evidence.detail}`; break
       case 'recorded': content = html`<div title=${evidence.call_id}>${evidence.requests.length === 0 ? 'provider attempt 없음' : evidence.requests.map(request => {
         const fact = request.provenance
-        if (fact === null) return html`<p title=${request.node_id}>T${request.turn} · 호출 결과 미기록</p>`
+        if (fact === null) return html`<p title=${request.node_id}>T${request.turn} · 요청 결정 미기록</p>`
         switch (fact.state) {
           case 'not_serialized': return html`<p>T${request.turn} · 직렬화 증거 없음</p>`
           case 'external_unobserved': return html`<p>T${request.turn} · 외부 transport wire 미관측</p>`

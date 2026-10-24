@@ -285,9 +285,7 @@ let test_effects_answer_what_happened () =
        (Yojson.Safe.to_string receipt)
    | Error _ -> fail "open_tab failed");
   check string "the url reaches the script" "https://slack.com/" (text (field "url" (last ()).args));
-  let action_window = Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.Open_tab "https://slack.com/")) in
-  check bool "open_tab runs within the server's action window" true
-    ((last ()).window_s < action_window && (last ()).window_s > Lane.default_timeout_sec);
+  check (float 0.) "open_tab uses the SDK-owned runner" 0. (last ()).window_s;
   reply := (fun _ -> refused "the page budget is reached");
   check string "a page ego would not create" "before effect"
     (failure_kind (dispatch peer Live.Page_act (act_args (Lane.Action.Open_tab "https://slack.com/"))));
@@ -322,8 +320,10 @@ let test_effects_answer_what_happened () =
    | Ok receipt -> check string "the move" {|{"tabId":1,"action":"goto","url":"https://slack.com/c","title":"Channel"}|}
        (Yojson.Safe.to_string receipt)
    | Error _ -> fail "goto failed");
-  check bool "goto runs within the server's goto window" true
-    ((last ()).window_s < Lane.reply_timeout_sec (Lane.Page_goto {url="https://slack.com/c";tab_id=Some 1}));
+  check (float 0.) "goto uses the SDK-owned runner" 0. (last ()).window_s;
+  (match dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload})) with
+   | Ok _ -> () | Error _ -> fail "reload failed");
+  check (float 0.) "reload uses the SDK-owned runner" 0. (last ()).window_s;
   reply := (fun _ -> answered (obj ["error",str "page.goto failed: net::ERR_UNSAFE_PORT";
     "tab",obj ["url",str "http://127.0.0.1:9/";"title",str "127.0.0.1"]]));
   (match dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "http://127.0.0.1:9/"]) with

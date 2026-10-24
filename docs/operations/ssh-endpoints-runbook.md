@@ -212,6 +212,17 @@ Use both fields in the same update:
 the SSH lane, select the new profile and pass `"remote_endpoint": null` in the
 same call. Leaving a remote endpoint attached to another profile is rejected.
 
+The Dashboard's Keeper sandbox settings select from the current runtime
+endpoint registry and display the server's last shim/dispatch observations.
+An empty registry and an unreadable registry are different states. Reading
+settings does not connect to the endpoint or establish current readiness.
+
+In the native TUI, `e` edits `remote_endpoint` along with the other Keeper
+settings. The Sandbox `s` shortcut retains an explicitly selected registered
+endpoint or chooses the only registered endpoint, and selects inherited
+networking in the same revision-checked save. With multiple endpoints, choose
+one explicitly through `e`; `d` and `m` clear the SSH endpoint in their save.
+
 Repo checkout materialization is not inferred from the host filesystem. Until
 the typed inventory in masc#31460 lands, provision required checkouts through
 an explicit operator-approved repository workflow.

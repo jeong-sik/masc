@@ -36,15 +36,13 @@ val keeper_history_summary_json :
   all_keeper_names:string list ->
   keeper_name:string ->
   history_path:string ->
-  filter_fragments:bool ->
-  Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int * int * int
+  Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int
 (** [keeper_history_summary_json ~all_keeper_names ~keeper_name
-      ~history_path ~filter_fragments] reads the keeper's history
+      ~history_path] reads the keeper's history
     file and returns
-    [(turns_json, models_json, tools_json, raw_count,
-       fragment_count, filtered_count)]. The 6-tuple shape is
-    operator-visible in the dashboard and pinned at the contract
-    seam. *)
+    [(conversation, recent_mentions, mention_counts, raw_count)].
+    Internal sources are excluded by their recorded provenance. Message length,
+    punctuation and language do not decide whether a conversation is visible. *)
 
 (** {1 Test-visible helpers}
     Pinned for behaviour-tests under {!test/test_dashboard_keeper_metrics_10286}. *)

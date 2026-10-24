@@ -219,22 +219,27 @@ let test_history_summary_decodes_content_blocks () =
     String.concat
       "\n"
       [ {|{"role":"assistant","content_blocks":[{"type":"text","text":"hello from albini"}],"ts_unix":1.0}|}
+      ; {|{"role":"assistant","content_blocks":[{"type":"text","text":"42"}],"ts_unix":1.1}|}
+      ; {|{"role":"assistant","content_blocks":[{"type":"text","text":"완료"}],"ts_unix":1.2}|}
+      ; {|{"role":"assistant","content_blocks":[{"type":"text","text":"https://example.com/or"}],"ts_unix":1.3}|}
       ; {|{"role":"user","content_blocks":[{"type":"text","text":"ping @fixture-keeper please"}],"ts_unix":2.0}|}
       ]
     ^ "\n"
   in
   with_temp_history rows (fun path ->
-      let conversation, _k2k_recent, _k2k_mentions, raw_count, _frag, _filtered =
+      let conversation, _k2k_recent, _k2k_mentions, raw_count =
         Metrics.keeper_history_summary_json
           ~all_keeper_names:[ "albini"; "fixture-keeper" ]
           ~keeper_name:"albini"
           ~history_path:path
-          ~filter_fragments:false
       in
-      check int "raw_count counts content_blocks rows" 2 raw_count;
+      check int "raw_count counts content_blocks rows" 5 raw_count;
       match conversation with
       | `List (first :: _ as items) ->
-          check int "conversation length" 2 (List.length items);
+          check (list string) "persisted answers remain visible regardless of prose"
+            [ "hello from albini"; "42"; "완료"; "https://example.com/or";
+              "ping @fixture-keeper please" ]
+            (List.map Yojson.Safe.Util.(fun item -> item |> member "content" |> to_string) items);
           let content =
             first
             |> Yojson.Safe.Util.member "content"
@@ -278,12 +283,11 @@ let test_history_summary_routes_by_source_not_content () =
     ^ "\n"
   in
   with_temp_history rows (fun path ->
-      let conversation, _k2k_recent, _k2k_mentions, raw_count, _frag, _filtered =
+      let conversation, _k2k_recent, _k2k_mentions, raw_count =
         Metrics.keeper_history_summary_json
           ~all_keeper_names:[ "albini" ]
           ~keeper_name:"albini"
           ~history_path:path
-          ~filter_fragments:false
       in
       check int "only the explicit internal source is excluded" 1 raw_count;
       match conversation with

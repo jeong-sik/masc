@@ -979,6 +979,35 @@ let test_status_tracks_toml_overlay_changes () =
     "second cache instructions after toml edit"
     (status_instructions config name)
 
+let test_status_keeps_short_answers_and_excludes_internal_sources () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-history" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
+    ~instructions:"read persisted conversation history";
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  let history_path = Masc.Keeper_types_support.keeper_history_path config
+      (Keeper_id.Trace_id.to_string meta.runtime.trace_id) in
+  mkdir_p (Filename.dirname history_path);
+  let answers = [ "OK"; "42"; "완료"; "https://example.com/or" ] in
+  let row source text =
+    Yojson.Safe.to_string (`Assoc
+      [ "role", `String "assistant"; "source", `String source
+      ; "ts_unix", `Float 1.0
+      ; "content_blocks", `List [ `Assoc [ "type", `String "text"; "text", `String text ] ] ]) in
+  write_file history_path
+    (String.concat "\n"
+       (List.map (row "direct_assistant") answers
+        @ [ row "internal_assistant" "Internal context." ]) ^ "\n");
+  let status = status_json_with_args config (`Assoc
+      [ "name", `String name; "fast", `Bool true
+      ; "include_context", `Bool false; "include_history_tail", `Bool true
+      ; "tail_messages", `Int 10 ]) in
+  let visible = Yojson.Safe.Util.(status |> member "history_tail" |> to_list
+      |> List.map (fun item -> item |> member "content" |> to_string)) in
+  Alcotest.(check (list string)) "persisted answers survive source-based history selection"
+    answers visible
+
 let test_status_reports_normalized_options () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "status-options-cache" in
@@ -1915,6 +1944,8 @@ let () =
             test_status_tracks_toml_overlay_changes;
           Alcotest.test_case "status reports normalized options"
             `Quick test_status_reports_normalized_options;
+          Alcotest.test_case "status keeps short answers and excludes internal sources"
+            `Quick test_status_keeps_short_answers_and_excludes_internal_sources;
           Alcotest.test_case "fast status selects repository inspection explicitly"
             `Quick test_status_repository_inspection_selection;
           Alcotest.test_case "status rejects tail order outside schema" `Quick

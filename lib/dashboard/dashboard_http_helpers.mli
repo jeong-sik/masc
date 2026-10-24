@@ -7,10 +7,6 @@
 
 (** {1 Environment-variable parsing} *)
 
-val bool_default_true_of_env : string -> bool
-(** [false] only when the env var is set to ["0" | "false" | "no" | "n"]
-    (case/whitespace insensitive); [true] otherwise, including when unset. *)
-
 val int_of_env_default :
   string -> default:int -> min_v:int -> max_v:int -> int
 (** Parse env var as int and clamp to [\[min_v, max_v\]]. *)

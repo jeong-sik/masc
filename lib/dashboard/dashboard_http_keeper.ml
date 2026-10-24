@@ -401,9 +401,6 @@ let supervisor_diagnostics_json ~restart_count ~crash_log ~last_failure_reason =
 
 let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojson.Safe.t =
   let include_goals = true in
-  let history_fragment_filter_enabled =
-    bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
-  in
   let series_points = 120 in
   let names =
     (match Keeper_meta_store.keeper_names_result config with
@@ -544,14 +541,11 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           let ( conversation_tail,
                 k2k_recent,
                 k2k_mentions,
-                conversation_raw_count,
-                conversation_fragment_count,
-                conversation_fragment_filtered_count ) =
+                conversation_raw_count ) =
             keeper_history_summary_json
               ~all_keeper_names:names
               ~keeper_name:m.name
               ~history_path
-              ~filter_fragments:history_fragment_filter_enabled
           in
           let conversation_tail_count =
             match conversation_tail with
@@ -920,8 +914,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("recent_tool_names", `List (List.map (fun item -> `String item) recent_tool_names));
               ("conversation_tail_count", `Int conversation_tail_count);
               ("conversation_raw_count", `Int conversation_raw_count);
-              ("conversation_fragment_count", `Int conversation_fragment_count);
-              ("conversation_fragment_filtered_count", `Int conversation_fragment_filtered_count);
               ("k2k_count", `Int k2k_count);
               ("k2k_mentions", k2k_mentions);
               ("provider_health", provider_health_json);

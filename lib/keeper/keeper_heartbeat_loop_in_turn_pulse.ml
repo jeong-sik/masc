@@ -8,7 +8,6 @@
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-open Keeper_execution
 
 let in_turn_liveness_pulse_interval_sec () =
   max 5.0 (min 30.0 (float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())))

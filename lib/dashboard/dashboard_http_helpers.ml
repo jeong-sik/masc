@@ -5,8 +5,6 @@
 
 (* Delegations to the canonical Env_config_core readers (RFC-0371 B7):
    this module used to carry raw getenv + parse + clamp copies of them. *)
-let bool_default_true_of_env name = Env_config_core.get_bool ~default:true name
-
 let int_of_env_default name ~default ~min_v ~max_v =
   Env_config_core.get_int_clamped ~default ~min_v ~max_v name
 

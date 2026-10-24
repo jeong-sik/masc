@@ -1,4 +1,4 @@
-(** Keeper_prompt — System prompts, Keeper instructions, and text processing
+(** Keeper_prompt — System prompts and Keeper instructions
     for keeper agents. AGENT_CORE-aligned: these functions define agent identity and
     text output. *)
 
@@ -105,5 +105,3 @@ let build_keeper_system_prompt
     ; render_instruction Prompt_names.keeper_tags_instructions_close []
     ]
 ;;
-
-include Keeper_text_processing

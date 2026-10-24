@@ -8,7 +8,6 @@ open Keeper_types_profile
 open Keeper_memory
 open Keeper_alerting
 open Keeper_tool_dispatch_runtime
-open Keeper_execution
 open Keeper_status_runtime
 open Keeper_status_metrics
 open Keeper_status_bridge
@@ -353,7 +352,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let ctx_opt =
            if include_context then
              let (_session, ctx_opt) =
-               load_context_from_checkpoint
+               Keeper_context_core.load_context_from_checkpoint
                  ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
                  ~base_dir
              in
@@ -444,20 +443,17 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            else
              empty_metrics_summary
          in
-         let history_filter_fragments =
-           bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
-         in
-         let (history_tail, history_raw_count, history_fragment_count, history_fragment_filtered_count) =
+         let (history_tail, history_raw_count) =
            if not include_history_tail then
-             (`List [], 0, 0, 0)
+             (`List [], 0)
            else
              let lines =
                read_tail_lines_or_empty ~site:"keeper_status_detail_history"
                  history_path ~max_bytes:tail_bytes ~max_lines:tail_messages
              in
-             let (items_rev, raw_count, fragment_count, filtered_count) =
+             let (items_rev, raw_count) =
                List.fold_left
-                 (fun (acc, raw_count, fragment_count, filtered_count) line ->
+                 (fun (acc, raw_count) line ->
                    try
                      let j = Yojson.Safe.from_string line in
                      let role = Safe_ops.json_string ~default:"unknown" "role" j in
@@ -493,13 +489,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                        | "system" -> "system"
                        | _ -> "other")
                      in
-                     let is_fragment =
-                       role_lc = "assistant"
-                       && looks_fragmentary_history_text content
-                     in
-                     let should_filter =
-                       is_internal || (history_filter_fragments && is_fragment)
-                     in
                      let preview =
                        if String.length content > 200 then
                          String_util.utf8_prefix ~max_bytes:200 content ^ "..."
@@ -510,27 +499,18 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                          ("role", `String role);
                          ("source", `String source);
                          ("kind", `String entry_kind);
-                         ("is_fragment", `Bool is_fragment);
                          ("ts_unix", `Float ts_unix);
                          ("age_s", Json_util.float_opt_to_json age_s);
                          ("content", `String preview);
                        ]
                      in
-                     let acc = if should_filter then acc else item :: acc in
-                     let filtered_count =
-                       filtered_count + if should_filter then 1 else 0
-                     in
-                     ( acc,
-                       raw_count + 1,
-                       fragment_count + (if is_fragment then 1 else 0),
-                       filtered_count )
-                   with Yojson.Json_error _ -> (acc, raw_count, fragment_count, filtered_count))
-                 ([], 0, 0, 0) lines
+                     let acc = if is_internal then acc else item :: acc in
+                     (acc, raw_count + 1)
+                   with Yojson.Json_error _ -> (acc, raw_count))
+                 ([], 0) lines
              in
             ( `List (apply_tail_order tail_order (List.rev items_rev)),
-              raw_count,
-              fragment_count,
-              filtered_count )
+              raw_count )
          in
         (* No tool call log for this keeper means no reading, not a reading of
            zero. The branch removed here answered "0 calls" whenever lifetime
@@ -707,9 +687,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              | `List xs -> `Int (List.length xs)
              | _ -> `Int 0);
            ("history_raw_count", `Int history_raw_count);
-           ("history_fragment_count", `Int history_fragment_count);
-           ("history_fragment_filtered_count", `Int history_fragment_filtered_count);
-           ("history_fragment_filter_enabled", `Bool history_filter_fragments);
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path config m.name));
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));

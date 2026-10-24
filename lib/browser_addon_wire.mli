@@ -21,6 +21,9 @@ type command =
   | Model_wait of { after : string option }
 (** Private host broker ports. The long wait ends on a request-set change or
     retirement, independently of a browser command waiting on its model. *)
+  | Extension of Browser_extension_protocol.command
+(** Private trusted companion execution. Programs, credentials and replies never
+    enter model request queues or ordinary browser tools. *)
   | Poll of { client : Browser_lane.client_info; window_sec : float }
   | Deliver of { client_id : Browser_lane.client_id; id : string; payload : Yojson.Safe.t }
   | Disconnect of Browser_lane.client_id
@@ -55,6 +58,7 @@ type disposition = Not_started | Outcome_unknown
 type reply =
   | Snapshot_result of Yojson.Safe.t
   | Model_reply of Yojson.Safe.t
+  | Extension_reply of Yojson.Safe.t
   | Download_reply of Browser_addon_downloads.claim
   | Poll_result of { command : Browser_lane.issued option; state_id : string }
   | Receipt

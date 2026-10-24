@@ -130,13 +130,13 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false)
         verb=B.Session_status;actor=Some "fixture";timeout_sec=2.;only_if_idle=false}} in
       check bool "command reaches owned driver client" true (match reply with
         | W.Issue_result (Ok (B.Answered (`Assoc fields))) -> List.assoc_opt "ok" fields=Some (`Bool true)
-        | Issue_result _|Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Service_refusal _ -> false);
+        | Issue_result _|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Service_refusal _ -> false);
       if open_session then (
         let opened=Owner.dispatch owner {W.incarnation=instance_id;command=W.Issue {route=B.Automation_route;
           verb=B.Session_open {headless=Some true};actor=Some "fixture";timeout_sec=2.;only_if_idle=false}} in
         let answered_ok=match opened with
           | W.Issue_result (Ok (B.Answered (`Assoc fields))) -> List.assoc_opt "ok" fields=Some (`Bool true)
-          | W.Issue_result _|Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Service_refusal _ -> false in
+          | W.Issue_result _|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Service_refusal _ -> false in
         if wrong_profile then
           check bool "a browser that reports another profile is refused" false answered_ok
         else (
@@ -151,7 +151,7 @@ let scenario ?(open_session=false) ?(refuse_delete=false) ?(wrong_profile=false)
         check bool "rejected DELETE settles retirement as unknown" true
           (match retired with W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
            | Service_refusal {disposition=Not_started;_}|Issue_result _|Snapshot_result _
-           |Model_reply _|Download_reply _|Poll_result _|Receipt -> false)
+           |Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt -> false)
       else check bool "private retirement joins backend cleanup" true (retired=W.Receipt) in
     Masc.Browser_addon_automation.run ~env ~owner ~directory work);
   if not refuse_delete then
@@ -234,7 +234,7 @@ let retire_during_creation () = with_instance ~marker:"slow-session"
       (match !retired with
        | Some (W.Service_refusal {disposition=W.Outcome_unknown;_}) -> true
        | Some (W.Service_refusal {disposition=W.Not_started;_}|W.Issue_result _|W.Snapshot_result _
-              |W.Model_reply _|W.Download_reply _|W.Poll_result _|W.Receipt) | None -> false);
+              |W.Model_reply _|W.Extension_reply _|W.Download_reply _|W.Poll_result _|W.Receipt) | None -> false);
     left_by_the_browser driver_root)
 (* A driver that exits while the worker serves leaves no session it can address. *)
 let driver_exit () = with_instance ~marker:"exit-after-ready"

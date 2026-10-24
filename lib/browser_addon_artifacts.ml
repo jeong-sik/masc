@@ -29,7 +29,7 @@ let finalize ~socket ~client ~store ~name ~arguments ~principal ~result =
     let* payload=match reply with
       | W.Issue_result (Ok (B.Answered (`Assoc payload))) -> Ok payload
       | Issue_result (Ok (Answered _|Lane_absent|Timed_out|Refused _|Rejected_before_effect _)|Error _)
-      | Service_refusal _|Receipt|Snapshot_result _|Model_reply _|Download_reply _|Poll_result _ ->
+      | Service_refusal _|Receipt|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _ ->
           Error "download finalization requires an original answered receipt" in
     let* ()=if List.assoc_opt "ok" payload=Some (`Bool true) then Ok ()
       else Error "download receipt was not successful" in

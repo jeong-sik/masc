@@ -14,6 +14,8 @@ type 'session opened =
   { session : 'session
   ; release : unit Eio.Promise.u
   ; stopped : (unit, string) result Eio.Promise.t
+  ; private_fenced : unit Eio.Promise.t
+  ; resolve_private_fenced : unit Eio.Promise.u
   ; ended : string option ref  (* the first reason the session stopped working *)
   ; abandoned_answers : int ref  (* settled replies whose callers left, including cancellation races *)
   ; abandoned_answered : Eio.Condition.t  (* broadcast on each such reply *)
@@ -59,6 +61,9 @@ let backend_name = "chromium-stagehand"
 let session_observation t = Atomic.get t.observed_session
 let set_state t state =
   t.state <- state;
+  (match state with
+   | Private_unsettled opened -> ignore (Eio.Promise.try_resolve opened.resolve_private_fenced ())
+   | Closed | Opening | Closing _ | Quarantined _ | Open _ -> ());
   Atomic.set t.observed_session (match state with
     | Closed -> (match t.last_settlement with
       | Ok () -> Browser_lane.Browser_closed | Error _ -> Browser_lane.Browser_unknown)
@@ -90,6 +95,8 @@ let keyboard_quarantined = Browser_lane.Rejected_before_effect
   "native keyboard release is unconfirmed; this browser is quarantined without closing its pages; explicitly close and reopen the stagehand session before new work"
 let private_unsettled = Browser_lane.Rejected_before_effect
   "private browser operation outcome is unknown; explicitly close the original session before new page work"
+let private_interrupted = Browser_lane.Refused
+  "the original browser was fenced during page work; its result was discarded; explicitly close the original session before new work"
 
 (* See [run_session]: an ended session may already be let go; a later release then does nothing. *)
 let release_session release = ignore (Eio.Promise.try_resolve release ())
@@ -142,6 +149,7 @@ let run_session t ~headless ~opened ~resolve_opened =
     t.log event
   in
   let stopped, resolve_stopped = Eio.Promise.create () in
+  let private_fenced, resolve_private_fenced = Eio.Promise.create () in
   let terminal = ref (Ok ()) in
   let not_opened detail =
     if not (Eio.Promise.is_resolved opened) then Eio.Promise.resolve resolve_opened (Error detail)
@@ -174,7 +182,8 @@ let run_session t ~headless ~opened ~resolve_opened =
           | Some (Ok (session, _init)) ->
             Executor.Tabs.forget_pages t.tabs;
             t.last_end <- None;
-            set_state t (Open { session; release; stopped; ended; abandoned_answers; abandoned_answered });
+            set_state t (Open { session; release; stopped; private_fenced; resolve_private_fenced;
+                               ended; abandoned_answers; abandoned_answered });
             release_on_end := (fun () -> release_session release);
             (match !ended with Some _ -> !release_on_end () | None -> ());
             Eio.Promise.resolve resolve_opened (Ok ());
@@ -287,13 +296,24 @@ let page t ~began ~actor verb =
     match t.state with
     | Open opened ->
       began opened;
-      Eio.Switch.run (fun sw ->
+      let admitted () = match t.state with
+        | Open current when current == opened && Option.is_none !(opened.ended) -> true
+        | Closed | Opening | Closing _ | Quarantined _ | Private_unsettled _ | Open _ -> false in
+      let publishable () =
+        not (Eio.Promise.is_resolved opened.private_fenced) &&
+        match t.state with
+        | Open current | Quarantined current when current == opened && Option.is_none !(opened.ended) -> true
+        | Closed | Opening | Closing _ | Quarantined _ | Private_unsettled _ | Open _ -> false in
+      let perform () = Eio.Switch.run (fun sw ->
         let keyboard_pending = ref false in
         Eio.Switch.on_release sw (fun () ->
           if !keyboard_pending then match t.state with
             | Open current when current == opened -> set_state t (Quarantined current)
             | Closed | Opening | Closing _ | Quarantined _ | Private_unsettled _ | Open _ -> ());
         let call request =
+          Eio.Fiber.check ();
+          if not (admitted ()) then Error (Session.Not_delivered "the original page operation was fenced")
+          else (
           let keyboard = match request with
             | Wire.Page_key_press _ | Wire.Page_type _ -> true
             | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages
@@ -309,8 +329,17 @@ let page t ~began ~actor verb =
                | Session.Abandoned_call_pending | Session.Delivery_unsettled | Session.Not_delivered _) ->
              if keyboard then keyboard_pending := false
            | Error (Session.Rejected _ | Session.Lost _) -> ());
-          result in
-        Executor.execute ~tabs:t.tabs ~call ?actor verb)
+          if admitted () then result
+          else Error (Session.Lost "the original browser was fenced during page work")) in
+        Executor.execute ~tabs:t.tabs ~call ?actor verb) in
+      (match Watched_work.run
+        ~watcher:(fun () -> Eio.Promise.await opened.private_fenced; None)
+        (fun () -> Some (perform ()))
+      with
+      | Some answer when publishable () -> answer
+      | Some _ | None -> private_interrupted
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception exn -> if publishable () then raise exn else private_interrupted)
     | Quarantined _ -> keyboard_quarantined
     | Private_unsettled _ -> private_unsettled
     | Closed | Opening | Closing _ -> no_session)
@@ -490,6 +519,11 @@ let capture_private_session t =
     | Quarantined _ | Private_unsettled _ -> Error Private_session_fenced
     | Closed | Opening | Closing _ | Open _ -> Error Private_not_started))
 
+let fence_private_session t ~session = match t.state with
+  | Open opened when session.owner == t.private_owner && session.opened == opened ->
+      set_state t (Private_unsettled opened)
+  | Closed | Opening | Closing _ | Quarantined _ | Private_unsettled _ | Open _ -> ()
+
 let execute_private t ~session ~tab_id ~run =
   private_request t (fun () -> with_verb_slot t (fun () ->
     let ( let* ) = Result.bind in
@@ -513,7 +547,11 @@ let execute_private t ~session ~tab_id ~run =
        join it once this exact browser has terminated, rather than retaining
        the backend-wide page slot through a later session's entire lifetime. *)
     match Watched_work.run
-      ~watcher:(fun () -> ignore (Eio.Promise.await opened.stopped); None)
+      ~watcher:(fun () ->
+        Eio.Fiber.first
+          (fun () -> ignore (Eio.Promise.await opened.stopped))
+          (fun () -> Eio.Promise.await opened.private_fenced);
+        None)
       (fun () ->
         Eio.Fiber.check ();
         match t.state with
@@ -523,7 +561,11 @@ let execute_private t ~session ~tab_id ~run =
           Some (run opened.session ~page_id)
         | Closed | Opening | Closing _ | Quarantined _ | Private_unsettled _ | Open _ -> None)
     with
-    | Some (Ok value) -> Ok value
+    | Some (Ok value) ->
+        (match t.state with
+         | Open current when current == opened && Option.is_none !(opened.ended)
+             && not (Eio.Promise.is_resolved opened.private_fenced) -> Ok value
+         | Closed | Opening | Closing _ | Quarantined _ | Private_unsettled _ | Open _ -> unknown ())
     | Some (Error ()) | None -> unknown ()
     | exception (Eio.Cancel.Cancelled _ as exn) ->
       if !began then fence ();

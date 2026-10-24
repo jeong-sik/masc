@@ -133,3 +133,8 @@ val quiescent : t -> bool
     check this under the backend's page serializer immediately before using the
     original transport; releasing a cancelled public verb's slot alone does not
     establish that its extension input has settled. *)
+val with_private_transport : t ->
+  (Browser_cdp.t -> worker:Browser_cdp.session_id -> ('a, unit) result) -> ('a, unit) result
+(** Trusted callback on the original verified transport and Stagehand worker.
+    Requires quiescence; caller holds the backend's page-operation slot.
+    No CDP URL, reconnect or alternate session is exposed. *)

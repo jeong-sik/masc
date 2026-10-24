@@ -75,7 +75,8 @@ let results () =
     (ok (W.reply_of_json (W.reply_to_json reply))=reply))
     [W.Poll_result {command=None;state_id="snapshot-1"};
      W.Poll_result {command=Some {B.id="command";verb_json=B.verb_json B.Tabs_list};state_id="snapshot-2"};
-     W.Receipt;W.Snapshot_result (`Assoc []);W.Model_reply (`Assoc ["requests",`List []]);W.Issue_result (Ok (B.Answered payload));
+     W.Receipt;W.Snapshot_result (`Assoc []);W.Model_reply (`Assoc ["requests",`List []]);
+     W.Extension_reply (`Assoc ["private_reference",`String "opaque"]);W.Issue_result (Ok (B.Answered payload));
      W.Service_refusal {message="retired";disposition=W.Outcome_unknown}]
 let retirement () =
   let request={W.incarnation;command=W.Retire} in
@@ -101,7 +102,23 @@ let commands_that_change_nothing () =
      "download commit",W.Download_commit {id="dl";actor="keeper";route;verb=B.Tabs_list;receipt=`Null},false;
      "download release",W.Download_release {id="dl";actor="keeper";route;verb=B.Tabs_list},false;
      "model result",W.Model_result `Null,false;
+     "private extension",W.Extension (Masc.Browser_extension_protocol.Release incarnation),false;
      "native delivery",W.Deliver {client_id=id;id="cmd";payload=`Null},false]
+let extension_ports () =
+  let module P=Masc.Browser_extension_protocol in
+  List.iter (fun command -> let request={W.incarnation;command=W.Extension command} in
+    check bool "private extension preserves exact program and arguments" true
+      (W.of_json (W.to_json request)=Ok request))
+    [P.Prepare {operation_id=incarnation;tab_id=7;extension_id=String.make 32 'a';directory="/private/extension";
+       program="async()=>({ready:true})";arguments=`Assoc []};
+     P.Invoke {operation_id=incarnation;program="async context=>context.arguments";
+       arguments=`Assoc ["private",`String "PRIVATE_MARKER"]}; P.Release incarnation];
+  let valid=P.to_json (P.Invoke {operation_id=incarnation;program="async()=>({})";arguments=`Assoc []}) in
+  let fields=match valid with `Assoc fields -> fields | _ -> fail "expected object" in
+  List.iter (fun fields -> check bool "unknown duplicate and invalid arguments refuse" true
+    (Result.is_error (P.of_json (`Assoc fields))))
+    [("program",`String "async()=>({})")::fields;("extra",`Bool true)::fields;
+     List.map (fun (key,value) -> key,if key="arguments" then `String "not-object" else value) fields]
 let () = run "browser addon wire" ["boundary",[
   test_case "closed verbs roundtrip" `Quick roundtrips;
   test_case "guards and competing identities" `Quick rejections;
@@ -109,4 +126,5 @@ let () = run "browser addon wire" ["boundary",[
   test_case "partial effects and receipts" `Quick results;
   test_case "private retirement retains incarnation" `Quick retirement;
   test_case "private model ports preserve incarnation" `Quick model_ports;
+  test_case "private extension ports preserve authority" `Quick extension_ports;
   test_case "commands that change nothing" `Quick commands_that_change_nothing]]

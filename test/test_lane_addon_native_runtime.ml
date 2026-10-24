@@ -773,7 +773,7 @@ max_reply_bytes = 65536
     (match Option.map (fun service -> R.call_browser_service ~config ~access ~service
         ~command:Browser_addon_wire.Snapshot) (service browser) with
      | Some (Ok (Browser_addon_wire.Snapshot_result _)) -> true
-     | Some (Ok (Browser_addon_wire.(Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)))
+     | Some (Ok (Browser_addon_wire.(Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)))
      | Some (Error (Browser_addon_client.(Unavailable _|Outcome_unknown _))) | None -> false);
   Unix.unlink (Filename.concat root "hold-idle");
   ignore (dispatch config R.Detach ["instance_id",`String browser]);

@@ -1379,7 +1379,7 @@ let msg role text : Agent_core.Types.message =
 ;;
 
 let prepare messages =
-  Host.prepare_turn
+  Host.prepare_turn ~composed_context:None
     ~runtime_label:"Fixture"
     ~keeper_name:"seed-fixture"
     ~turn_count:1
@@ -1391,7 +1391,7 @@ let prepare messages =
     ~configured_reasoning_effort:None
 ;;
 
-let prepare_prompt ?(hooks = None) system_prompt =
+let prepare_prompt ?(hooks = None) ?(composed_context = None) system_prompt =
   Host.prepare_turn
     ~runtime_label:"Fixture"
     ~keeper_name:"prompt-fixture"
@@ -1401,6 +1401,7 @@ let prepare_prompt ?(hooks = None) system_prompt =
     ~initial_messages:[ msg Agent_core.Types.User "history" ]
     ~model_input_projection:None
     ~hooks
+    ~composed_context
     ~configured_reasoning_effort:None
 ;;
 
@@ -1439,6 +1440,47 @@ let test_hook_override_to_blank_system_prompt_is_refused () =
     (prepare_prompt ~hooks:(Some hooks) "SYS")
 ;;
 
+(* A Goal is an observation, so its nonblank bytes cannot supply the Keeper
+   instructions the official lane already requires. The assembly is published
+   by the actual hook; reading it before that hook would miss this refusal. *)
+let test_goal_observation_cannot_mask_blank_keeper_instructions () =
+  let prepare_composed ~initial ~override =
+    let issued = ref None in
+    let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+      | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+        let current_params = {current_params with system_prompt_override=override} in
+        let base_system_prompt = Option.value ~default:initial current_params.system_prompt_override in
+        let partition = Keeper_context_layers.singleton Active_goals
+            "Goal observation: current revision and reported measurement 1/3" in
+        let assembly = Keeper_run_prompt.assemble_request_context ~base_system_prompt
+            ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
+            ~existing_extra_system_context:None
+            ~blocks:[Prompt_block_id.Dynamic_context, Keeper_context_layers.text partition] in
+        issued := Some assembly;
+        Agent_core.Hooks.AdjustParams {current_params with
+          extra_system_context=assembly.extra_system_context;
+          system_prompt_override=Keeper_context_assembly.system_prompt_override
+            ~previous:current_params.system_prompt_override assembly}
+      | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+      | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
+    let result = prepare_prompt ~hooks:(Some hooks)
+        ~composed_context:(Some (fun () -> !issued)) initial in
+    check bool "the actual hook issued a Goal carrier" true
+      (match !issued with
+       | Some {system_prompt=Some {goal_text=Some _;_};_} -> true
+       | Some _ | None -> false);
+    result in
+  List.iter (fun (initial, override) -> check_refused_system_prompt
+      "Goal context over blank selected Keeper instructions"
+      (prepare_composed ~initial ~override))
+    ["",None; " \n\t ",None; "valid configured instructions",Some "";
+     "valid configured instructions",Some " \n\t "];
+  match prepare_composed ~initial:"" ~override:(Some "valid selected instructions") with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok prepared -> check bool "a valid selected override and its Goal remain admitted" true
+      (String.starts_with ~prefix:"valid selected instructions\n\n" prepared.Host.system_prompt)
+;;
+
 let test_non_blank_system_prompt_reaches_the_lane_unchanged () =
   match prepare_prompt "  SYS with edges  " with
   | Error error -> fail (Agent_core.Error.to_string error)
@@ -1468,7 +1510,7 @@ let test_extra_system_context_keeps_typed_provenance () =
     }
   in
   let result =
-    Host.prepare_turn
+    Host.prepare_turn ~composed_context:None
       ~runtime_label:"Fixture"
       ~keeper_name:"provenance-fixture"
       ~turn_count:1
@@ -2688,6 +2730,7 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
       | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
       | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
     let prepared = match Host.prepare_turn ~runtime_label:"held-goal-fixture"
+        ~composed_context:(Some (fun () -> Some assembly))
         ~keeper_name:"held-goal" ~turn_count:1 ~system_prompt:"BASE_INSTRUCTIONS"
         ~tools:[] ~initial_messages:[Agent_core.Types.user_msg owner]
         ~model_input_projection:None ~hooks:(Some hooks) ~configured_reasoning_effort:None with
@@ -3110,7 +3153,7 @@ let test_unsupported_choice_refuses_before_projection () =
     | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
       Agent_core.Hooks.AdjustParams {current_params with tool_choice=Some Agent_core.Types.Any}
     | _ -> Agent_core.Hooks.Continue)} in
-  let result = Host.prepare_turn ~runtime_label:"Fixture" ~keeper_name:"choice-fixture"
+  let result = Host.prepare_turn ~composed_context:None ~runtime_label:"Fixture" ~keeper_name:"choice-fixture"
     ~turn_count:1 ~system_prompt:"SYS" ~tools:[] ~initial_messages:[]
     ~model_input_projection:(Some (fun ~tools:_ messages -> projected:=true;Ok messages))
     ~hooks:(Some hooks) ~configured_reasoning_effort:None in
@@ -3368,6 +3411,8 @@ let () =
         ] )
     ; ( "system prompt refusal (masc#33165)"
       , [ test_case "a blank prompt is refused" `Quick test_blank_system_prompt_is_refused
+        ; test_case "Goal observations cannot mask blank Keeper instructions" `Quick
+            test_goal_observation_cannot_mask_blank_keeper_instructions
         ; test_case
             "a hook override to blank is refused"
             `Quick

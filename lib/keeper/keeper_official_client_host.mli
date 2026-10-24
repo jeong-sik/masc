@@ -661,6 +661,7 @@ val prepare_turn :
   model_input_projection:
     (tools:Agent_core.Tool.t list -> Agent_core.Agent.model_input_projection) option ->
   hooks:Agent_core.Hooks.hooks option ->
+  composed_context:(unit -> composed_context option) option ->
   configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
   (prepared_turn, Agent_core.Error.t) result
 (** [configured_reasoning_effort] seeds the turn params the
@@ -675,7 +676,11 @@ val prepare_turn :
     [InvalidConfig { field = "system_prompt" }]. Every official client runs
     its own built-in instructions when masc names none, with masc's tool
     surface still attached, so a blank composition is a configuration defect
-    named here once rather than in each lane (#33165).
+    named here once rather than in each lane (#33165). [composed_context] is
+    read after the hook publishes its assembly. When the selected System
+    bytes are that exact issued carrier, its underlying [base_text] must also
+    be nonblank: a Goal observation does not supply Keeper instructions. A
+    stale assembly cannot substitute for a different selected override.
 
     The hook's [extra_system_context] is appended as a raw [System] message
     carrying [origin = System_context]. Official

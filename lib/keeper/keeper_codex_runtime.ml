@@ -977,6 +977,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let initial_messages = Option.to_list historical_task_message @ initial_messages in
     let* prepared =
       Host.prepare_turn
+        ~composed_context
         ~configured_reasoning_effort:
           (Runtime_inference.resolve_reasoning_effort ~runtime_id)
         ~runtime_label

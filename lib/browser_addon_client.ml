@@ -21,8 +21,9 @@ let expected command reply = match command,reply with
   | W.Issue _,W.Issue_result _ -> true
   | (W.Model_requests|Model_result _|Model_wait _),W.Model_reply _ -> true
   | W.Download_claim _,W.Download_reply _ -> true
-  | (W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _|Issue _),
-    (W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _) -> false
+  | W.Extension _,W.Extension_reply _ -> true
+  | (W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Deliver _|Disconnect _|Issue _),
+    (W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _) -> false
 let issue_policy t route verb =
   let open Browser_lane in
   match route with
@@ -52,11 +53,11 @@ let raw_exchange t ~settlement ~on_cancel_after_dispatch command =
       let writing = ref false in
       let allowance=t.control_timeout_sec +. (match command with
         | W.Issue {timeout_sec;_} -> timeout_sec | W.Poll {window_sec;_} -> window_sec
-        | W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Deliver _|Disconnect _ -> 0.) in
+        | W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Extension _|Deliver _|Disconnect _ -> 0.) in
       let policy=match command with
         | W.Issue {route;verb;_} -> issue_policy t route verb
         | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _
-        | Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> Ok Browser_lane.Reply_window in
+        | Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Deliver _|Disconnect _ -> Ok Browser_lane.Reply_window in
       match policy with
       | Error error -> Error error
       | Ok policy ->
@@ -73,9 +74,9 @@ let raw_exchange t ~settlement ~on_cancel_after_dispatch command =
           else match W.reply_of_json (Yojson.Safe.from_string raw) with
           | Ok reply when expected command reply -> Ok reply
           | Ok _ -> Error (Outcome_unknown "unexpected browser service reply")
-          | Error detail -> Error (Outcome_unknown ("invalid browser service reply: " ^ detail)))) in
+          | Error _ -> Error (Outcome_unknown "invalid browser service reply"))) in
       try (match command with
-        | W.Retire | W.Model_wait _ -> exchange ()
+        | W.Retire | W.Model_wait _ | W.Extension _ -> exchange ()
         | W.Issue {route;verb;timeout_sec;_} ->
           let owned_startup=match route with
             | Browser_lane.Stagehand_route -> Option.is_none (Browser_lane.stagehand_server_deadline verb ~timeout_sec)
@@ -92,7 +93,9 @@ let raw_exchange t ~settlement ~on_cancel_after_dispatch command =
         if !writing then Eio.Cancel.protect on_cancel_after_dispatch;
         raise cancelled
       | (Eio.Io _|Eio.Time.Timeout|End_of_file|Eio.Buf_read.Buffer_limit_exceeded|Yojson.Json_error _) as exn ->
-        let detail=Printexc.to_string exn in
+        let detail=match exn with Yojson.Json_error _ -> "malformed browser service reply"
+          | Eio.Io _|Eio.Time.Timeout|End_of_file|Eio.Buf_read.Buffer_limit_exceeded -> "browser service transport interrupted"
+          | _ -> "browser service transport failed" in
         Error (if !writing then Outcome_unknown detail else Unavailable detail)
 
 let exchange t ~settlement ~on_cancel_after_dispatch command =
@@ -101,7 +104,7 @@ let exchange t ~settlement ~on_cancel_after_dispatch command =
      let token=ref () in
      t.snapshot_token <- Some token; t.live_transports <- None; Some token
    | Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _
-   | Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _|Issue _ -> None in
+   | Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Deliver _|Disconnect _|Issue _ -> None in
   let result=raw_exchange t ~settlement ~on_cancel_after_dispatch command in
   match command with
   | W.Snapshot ->
@@ -116,10 +119,10 @@ let exchange t ~settlement ~on_cancel_after_dispatch command =
             t.live_transports <- Some (List.map (fun (client:Browser_lane.client_info) -> client.client_id,client.transport) published.clients);
           result
         | Error detail -> Error (Outcome_unknown ("invalid browser transport snapshot: " ^ detail)))
-     | Ok (Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)
+     | Ok (Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)
      | Error _ -> result)
   | Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _
-  | Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _|Issue _ -> result
+  | Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Deliver _|Disconnect _|Issue _ -> result
 
 let call t ~on_cancel_after_dispatch command =
   exchange t ~settlement:false ~on_cancel_after_dispatch command
@@ -131,7 +134,7 @@ let transfer_download t ~id ~actor ~route ~verb ~publish =
   let receipt = function
     | W.Receipt -> Ok ()
     | W.Service_refusal {message;_} -> Error message
-    | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ ->
+    | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Issue_result _ ->
         Error "unexpected download settlement receipt" in
   let ( let* )=Result.bind in
   let released=ref None in
@@ -143,7 +146,7 @@ let transfer_download t ~id ~actor ~route ~verb ~publish =
       | W.Download_reply (Browser_addon_downloads.Published value) -> Ok value
       | Download_reply (Snapshot descriptor) -> publish descriptor
       | Service_refusal {message;_} -> Error message
-      | Snapshot_result _|Model_reply _|Poll_result _|Receipt|Issue_result _ ->
+      | Snapshot_result _|Model_reply _|Extension_reply _|Poll_result _|Receipt|Issue_result _ ->
           Error "unexpected download claim receipt" in
     let* reply=call ~settlement:true (W.Download_commit {id;actor;route;verb;receipt=artifact}) in
     let* ()=receipt reply in Ok artifact) in

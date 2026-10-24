@@ -42,6 +42,14 @@ joined before the page slot is returned. A late cleanup never fences a newly
 opened successor. An adapter must be cancellable and its cleanup must not wait
 for a reply from the already terminated browser.
 
+An extension worker's loss resolves an original-session fence signal. Already
+running public and private work is cancelled and its cleanup joined before the
+serializer returns. Public calls check admission before and after every runtime
+call and again before publishing a result. A synchronous callback or one that
+returns while handling cancellation cannot publish a capture or successful private
+result after that fence. The signal belongs to the original opened resource;
+late cleanup and stale worker events cannot fence a successor.
+
 Private values do not pass through a `Browser_lane.answer`, public tool result,
 action receipt or observation. CDP JSON parsing, command send and WebSocket
 errors use fixed messages at their first boundary, since connection-ended
@@ -49,29 +57,50 @@ reasons also reach public lifecycle status and operator logs. The private Unix
 service likewise discards parser fragments and unexpected exception text.
 Adapters must also erase raw CDP command-rejection and provider error text.
 
+## Private extension transport
+
+`Browser_extension_protocol` describes prepare/invoke/release with a one-use
+operation UUID. The dedicated `Extension`/`Extension_reply` Unix wire operation
+is attached once to the same owned Chrome backend. Admission is released before
+waiting; retirement removes that callback before resource teardown. Ordinary
+browser service ingress refuses this operation. It has no model tool schema,
+model-request queue, durable payload or public result hook.
+
+The adapter loads a trusted installed extension directory through the original
+CDP transport, checks its exact extension ID and attaches only that extension's
+single service worker. Target discovery is event-driven. Worker detach/loss fences
+the original session instead of selecting another worker. Prepare retains the
+page slot until trusted package setup returns exactly `{ready:true}`. The
+1Password setup program waits for initialization and enables agentic mode for
+the whole browser before observations can resume.
+
+Every invocation resolves the original CDP page target through
+`chrome.debugger.getTargets()` in the original Stagehand extension worker. That
+extension's verified manifest already grants debugger permission. The exact target
+must have one numeric Chrome tab ID and the same HTTPS URL observed through CDP.
+There is no cast from MASC tab ID, active-tab lookup or URL-match fallback.
+
+The private 1Password package programs implement request/status/fill with a
+closed argument set and safe error projections. Grants match their requested
+entry ID. Before request/fill they recheck the exact numeric tab's URL and the
+requested HTTPS origin. Fill returns only `fill_submitted`; any failure after
+provider entry throws a fixed error so the backend fences the original session.
+Website authentication is a separate observation after confirmed fill settlement.
+
 ## Next integration boundaries
 
-This API is a source foundation; it does not yet load 1Password or export login.
-The remaining implementation must:
+This is source implementation; no host built from this layer is installed and no
+1Password extension/account was exercised. The remaining implementation must:
 
-1. Route a dedicated private Browser owner/wire operation to this exact pin.
-   Ordinary browser ingress and exported tools must not accept that private
-   transport command.
-2. Use an independent private broker for the Python connector. Existing model
+1. Use an independent private broker for the Python connector. Existing model
    request/result ports retain their payloads and cannot carry tokens or
    approval links. Nested calls on the connector's same MCP connection would
    deadlock behind the exported call's mutex and the Python request loop.
-3. Bind connector connection UUID, provider owner, Browser owner, original
+2. Bind connector connection UUID, provider owner, Browser owner, original
    session/target and host principal to each login operation. Public continuation
    records carry only safe operation identity and status.
-4. Resolve the extension's numeric Chrome tab id separately from MASC's tab id
-   and the CDP target id. The original Stagehand extension has debugger
-   permission; Chrome's [getTargets contract](https://developer.chrome.com/docs/extensions/reference/api/debugger#method-getTargets)
-   exposes a target id and an optional numeric tab id. That exact mapping is a
-   candidate for the adapter, still requiring implementation and live proof.
-   No first-match, active-tab or ambiguous URL fallback is permitted.
-5. Run initialization/agentic mode, request/approval/status and fill through the
-   original verified CDP transport. Keep approval URLs in private operator
+3. Connect the package's programs and request/approval/status/fill lifecycle to
+   the private transport. Keep approval URLs in private operator
    controls. Verify website authentication after fill, then resume the original
    Keeper task. Fill completion alone does not prove website sign-in.
 
@@ -81,6 +110,14 @@ Focused source fixtures cover original session/tab binding, observation
 exclusion, unknown/cancel fencing, queued cancellation, active close/reopen with
 cleanup join, and abandoned public-call readiness. CDP/private Unix fixtures
 exercise secret-bearing error inputs at the first decoder/transport boundary.
+Additional source fixtures cover exact extension-worker attachment, one-use
+operation binding, in-flight worker loss, cancellation-ignoring callbacks, owner
+retirement, indefinite private wait and distinct reply kinds. Eight Node tests
+execute the actual package programs with fake extension APIs and passed.
 This external coding session ran parse-only checks and independent source
 review, not Dune, an OCaml typecheck or these OCaml fixtures. It did not replace
 the installed worker or perform a real 1Password login.
+
+Primary contracts: Chrome [debugger target mapping](https://developer.chrome.com/docs/extensions/reference/api/debugger#method-getTargets),
+CDP [extension loading](https://chromedevtools.github.io/devtools-protocol/tot/Extensions/)
+and [Browserbase's 1Password integration](https://docs.browserbase.com/integrations/1password/agentic-autofill).

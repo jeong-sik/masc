@@ -37,6 +37,11 @@ val attach_stagehand : t -> models:bool ->
     cleanups and waits for both before answering. Each attached cleanup runs once;
     concurrent or repeated Retire requests observe the same result. An error or
     exception from either cleanup prevents a successful retirement receipt. *)
+val attach_extensions : t ->
+  (Browser_extension_protocol.command ->
+    (Yojson.Safe.t, Browser_extension_protocol.error) result) -> (unit, string) result
+(** One private executor attached to the already owned Chrome backend. Admission
+    is revoked before cleanup. The admission lock is never held during execution. *)
 val attach_live : t -> client_id:Browser_lane.client_id ->
   cleanup:(unit -> (unit, string) result) -> (unit, string) result
 (** Bind cleanup of an already registered exact live client this worker runs,

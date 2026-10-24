@@ -2425,8 +2425,8 @@ let test_rejected_verdict_audit_preserves_reason () =
          "required deployment evidence is missing"
          handoff.summary;
        Alcotest.(check (list string))
-         "task keeps the rejected verification identity"
-         [ "vrf-audit-rejected" ]
+         "verification correlation is not producer evidence"
+         []
          handoff.evidence_refs;
        Alcotest.(check (option string))
          "task keeps the rejecting authority"
@@ -2434,6 +2434,11 @@ let test_rejected_verdict_audit_preserves_reason () =
          handoff.updated_by
      | [ _ ] -> Alcotest.fail "rejected task lost its durable continuation"
      | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks));
+    Alcotest.(check (list string))
+      "typed rejection outbox keeps its verification identity"
+      [ "vrf-audit-rejected" ]
+      (List.map (fun (rejection : Masc_domain.pending_completion_rejection) ->
+         rejection.verification_id) (W.read_backlog config).pending_completion_rejections);
     let open Unix in
     let tm = gmtime (gettimeofday ()) in
     let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
@@ -2756,6 +2761,139 @@ let test_resubmission_notifies_after_late_projection_error () =
        Alcotest.(check string) "stale verdict sees the committed replacement" new_id current
    | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
    | Ok _ -> Alcotest.fail "superseded evidence must not approve the replacement")
+
+let test_rejected_submission_captures_current_handoff_on_first_retry () =
+  with_eio_temp_dir @@ fun base_path ->
+  let producer = "snapshot-retry-worker" in
+  let prepared = ref [] in
+  let notifications = ref [] in
+  with_scoped_hook Workspace_hooks.verification_submit_request_fn
+    (fun config ~task ~assignee ~verification_id ~claim ->
+      prepared := (verification_id, task) :: !prepared;
+      real_submit_request config ~task ~assignee ~verification_id ~claim) @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_delete_request_fn real_delete_request @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_submitted_fn
+    (fun _ ~task:_ ~assignee:_ ~verification_id:_ -> ()) @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_notify_submit_fn
+    (fun config ~task ~assignee ~verification_id ~claim:_ ->
+      let captured = List.assoc verification_id !prepared in
+      Alcotest.(check bool) "capture and notification share one immutable Task"
+        true (captured == task);
+      Alcotest.(check bool) "committed Task includes that exact submission handoff"
+        true (task = receipt_task config);
+      Alcotest.(check string) "notification retains the submitting actor" producer assignee;
+      notifications := verification_id :: !notifications) @@ fun () ->
+  let config = W.default_config base_path in
+  ignore (W.init config ~agent_name:(Some producer));
+  ensure_keeper_meta config producer;
+  ensure_producer_playground config producer;
+  let producer_root = Keeper_sandbox_config.host_root_abs_of_agent
+    ~base_path:(VS.project_root_of_base_path base_path) ~agent_name:producer in
+  let artifact = Filename.concat producer_root "workspace/acceptance.json" in
+  Fs_compat.mkdir_p (Filename.dirname artifact);
+  let original_body = "{\"alpha\":true,\"beta\":true,\"gamma\":true}\n" in
+  let corrected_body = "{\"alpha\":true,\"beta\":false,\"gamma\":false}\n" in
+  let reference = "artifact:workspace/acceptance.json" in
+  let summary = "alpha-only artifact ready for inspection" in
+  let handoff_context : Masc_domain.task_handoff_context =
+    { summary; reason = None; next_step = None; failure_mode = None
+    ; reclaim_policy = None; evidence_refs = [reference]
+    ; updated_at = Some "2026-10-25T00:00:00Z"; updated_by = Some producer } in
+  ignore (W.add_task config ~title:"Independent artifact retry" ~priority:1
+    ~description:"No Goal association is required for a Task submission");
+  let accepted = function
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error) in
+  accepted (W.claim_task_r config ~agent_name:producer ~task_id:"task-001" ());
+  accepted (W.transition_task_r config ~agent_name:producer ~task_id:"task-001"
+    ~action:Masc_domain.Start ());
+  let submit tool_use_id =
+    Runtime_response_identity_scope.with_scope ~actor:(Some producer)
+      ~runtime_id:"retry-fixture-slot" ~provider_id:(Some "fixture-provider")
+      (fun ~hooks ~wrap_tool ->
+        let response : Agent_core.Types.api_response =
+          { id = "response-" ^ tool_use_id; model = "reported-fixture-model"
+          ; stop_reason = StopToolUse
+          ; content = [ToolUse {id=tool_use_id; name="submit-fixture"; input=`Assoc []}]
+          ; usage = None
+          ; telemetry = Some { Llm_provider.Types.default_inference_telemetry with
+              canonical_model_id = Some "requested-fixture-model"
+            ; reported_model = Some (Provider_reported_model "reported-fixture-model") } } in
+        ignore (Agent_core.Hooks.invoke_validated hooks.after_turn
+          (Agent_core.Hooks.AfterTurn {turn=1; response; tool_source_map=Some
+            {admitted_tool_sources=[{planned_index=0; source_tool_use_ordinal=0;
+              name_resolution=Registered_name}]; source_tool_use_count=1}}));
+        let tool = Agent_core.Tool.create ~name:"submit-fixture" ~description:"submit"
+          ~parameters:[] (fun _ ->
+            accepted (W.transition_task_r config ~agent_name:producer ~task_id:"task-001"
+              ~action:Masc_domain.Submit_for_verification ~notes:summary ~handoff_context ());
+            Ok {Agent_core.Types.content="submitted"; content_blocks=None; _meta=None})
+          |> wrap_tool in
+        let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn:1
+          ~schedule:{planned_index=0; batch_index=0; batch_size=1; execution_mode=Serial}
+          ~completion:Continue_after_success in
+        (match Agent_core.Tool.execute ~invocation tool (`Assoc []) with
+         | Ok _ -> () | Error error -> Alcotest.fail error.message));
+    let _, _, id = receipt_submission (receipt_task config) in id in
+  Fs_compat.save_file artifact original_body;
+  let first_id = submit "first-submit" in
+  let authority = Masc_domain.Human_operator {operator_id="retry-operator"} in
+  accepted (W.commit_verdict_r config ~task_id:"task-001" ~verification_id:first_id
+    ~authority ~verdict:(Masc_domain.Verdict_rejected {reason="keep beta and gamma false"}) ());
+  (match (receipt_task config).handoff_context with
+   | Some handoff -> Alcotest.(check (list string))
+       "rejection correlation does not become an evidence reference" [] handoff.evidence_refs
+   | None -> Alcotest.fail "rejection must retain its correction handoff");
+  Fs_compat.save_file artifact corrected_body;
+  let retry_id = submit "first-retry" in
+  Alcotest.(check bool) "the first retry has a fresh request" true (first_id <> retry_id);
+  Alcotest.(check int) "no duplicate retry was needed" 2 (List.length !prepared);
+  Alcotest.(check (list string)) "each committed snapshot notifies once"
+    [first_id; retry_id] (List.rev !notifications);
+  let receipt = match VS.submission_receipt ~base_path ~request_id:retry_id
+    ~task_id:"task-001" ~worker:producer with
+    | Ok receipt -> receipt
+    | Error reason -> Alcotest.fail (VS.evidence_access_failure_to_string ~request_id:retry_id reason) in
+  Alcotest.(check (list string)) "first retry has no capture diagnostic" []
+    Yojson.Safe.Util.(receipt |> member "diagnostics" |> to_list |> List.map Yojson.Safe.to_string);
+  let request id = match V.load_request base_path id with
+    | Ok request -> request | Error detail -> Alcotest.fail detail in
+  let retry = request retry_id in
+  Alcotest.(check string) "stored request retains its producer" producer retry.worker;
+  let open Yojson.Safe.Util in
+  Alcotest.(check int) "current claim has only artifact and current narrative" 2
+    (retry.output |> member "submitted_evidence" |> to_list |> List.length);
+  let artifact_snapshot request_id =
+    match VS.inspect_submitted_evidence_for_authority ~base_path ~request_id
+    ~task_id:"task-001" ~task_worker:producer ~authority with
+   | VS.Evidence_available {items; _} ->
+     (match List.filter_map (function
+        | VS.Evidence_artifact item -> Some item.content
+        | VS.Evidence_collaboration _ | VS.Evidence_note _
+        | VS.Evidence_invalid_reference | VS.Evidence_artifact_unreadable _
+        | VS.Evidence_artifact_binary _ -> None) items with
+      | [body] -> body
+      | _ -> Alcotest.fail "one current artifact must be available")
+   | VS.Evidence_unavailable {reason; _} ->
+     Alcotest.fail (VS.evidence_access_failure_to_string ~request_id reason) in
+  Alcotest.(check string) "first capture reads the new artifact" corrected_body
+    (artifact_snapshot retry_id);
+  (match V.producer_execution retry with
+   | Ok (Some identity) ->
+     Alcotest.(check string) "host-owned actor survives retry" producer identity.actor;
+     Alcotest.(check string) "exact retry Tool source survives" "first-retry" identity.tool_use_id;
+     Alcotest.(check string) "reported model survives" "reported-fixture-model" identity.model_id
+   | Ok None -> Alcotest.fail "native submitting response must remain observed"
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check string) "old rejected evidence remains immutable" original_body
+    (artifact_snapshot first_id);
+  (match W.commit_verdict_r config ~task_id:"task-001" ~verification_id:first_id
+    ~authority ~verdict:Masc_domain.Verdict_approved () with
+   | Error (Masc_domain.Task (Masc_domain.Task_error.VerificationSuperseded {requested; current; _})) ->
+     Alcotest.(check string) "stale verdict names the old request" first_id requested;
+     Alcotest.(check string) "stale verdict cannot approve the retry" retry_id current
+   | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+   | Ok _ -> Alcotest.fail "old evidence must not approve the replacement")
 
 let test_precommit_failure_compensates_only_new_request () =
   with_pending_receipt_task @@ fun config original ->
@@ -5199,6 +5337,8 @@ let () =
         test_raw_workspace_submission_notifies_once;
       Alcotest.test_case "committed resubmission notifies after a late projection error" `Quick
         test_resubmission_notifies_after_late_projection_error;
+      Alcotest.test_case "rejected submission captures current handoff on first retry" `Quick
+        test_rejected_submission_captures_current_handoff_on_first_retry;
       Alcotest.test_case "precommit failure compensates only the new request" `Quick
         test_precommit_failure_compensates_only_new_request;
       Alcotest.test_case "late raised cancellation skips submission finalization" `Quick

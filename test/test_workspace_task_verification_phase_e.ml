@@ -29,7 +29,7 @@ let test_analysis_only_with_plain_notes_keeps_notes () =
   (* Non-empty notes reach the configured LLM as an explicit narrative item. *)
   let task = dummy_task () in
   let refs =
-    V.verification_submission_evidence_refs task ~notes:"investigated 24h log audit" None
+    V.verification_submission_evidence_refs task ~notes:"investigated 24h log audit"
   in
   Alcotest.(check (list string))
     "plain prose notes become typed narrative evidence"
@@ -38,14 +38,14 @@ let test_analysis_only_with_plain_notes_keeps_notes () =
 
 let test_analysis_only_with_empty_notes_returns_empty () =
   let task = dummy_task () in
-  let refs = V.verification_submission_evidence_refs task ~notes:"" None in
+  let refs = V.verification_submission_evidence_refs task ~notes:"" in
   Alcotest.(check (list string)) "empty notes -> empty refs" [] refs
 
 let test_placeholder_like_notes_reach_llm_evidence () =
   let task = dummy_task () in
-  let refs = V.verification_submission_evidence_refs task ~notes:"tbd" None in
+  let refs = V.verification_submission_evidence_refs task ~notes:"tbd" in
   Alcotest.(check (list string)) "tbd is preserved for LLM judgment" [ "note:tbd" ] refs;
-  let refs2 = V.verification_submission_evidence_refs task ~notes:"  DRAFT  " None in
+  let refs2 = V.verification_submission_evidence_refs task ~notes:"  DRAFT  " in
   Alcotest.(check (list string)) "source whitespace is normalized only" [ "note:DRAFT" ] refs2
 
 let test_contracted_task_keeps_requirements_out_of_submitted_refs () =
@@ -58,7 +58,7 @@ let test_contracted_task_keeps_requirements_out_of_submitted_refs () =
     }
   in
   let task = dummy_task ~contract () in
-  let refs = V.verification_submission_evidence_refs task ~notes:"" None in
+  let refs = V.verification_submission_evidence_refs task ~notes:"" in
   Alcotest.(check (list string))
     "contract requirements are not submitted evidence"
     []
@@ -79,7 +79,7 @@ let test_handoff_context_evidence_refs_survive_typed () =
     }
   in
   let task = dummy_task ~handoff_context () in
-  let refs = V.verification_submission_evidence_refs task ~notes:"" None in
+  let refs = V.verification_submission_evidence_refs task ~notes:"" in
   Alcotest.(check bool)
     "typed handoff evidence_ref survives" true
     (List.mem "note:see retro" refs);

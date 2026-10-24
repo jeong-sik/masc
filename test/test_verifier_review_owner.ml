@@ -45,7 +45,7 @@ let sample_schemas = [ "lookup_read" ]
 
 let prepare_original ~request ~verification_id ~attempt =
   match
-    V.prepare
+    V.prepare ~generator_runtime:None
       ~verification_id
       ~attempt
       ~question:sample_question

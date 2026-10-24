@@ -185,13 +185,18 @@ let create_submit_request ~(config : Workspace.config)
   let output =
     match spec.output with
     | `Assoc fields ->
+      let producer_execution =
+        match Runtime_response_identity_scope.current () with
+        | Some identity when String.equal identity.actor assignee ->
+          Runtime_response_identity.to_yojson identity
+        | None | Some _ -> `Null in
       `Assoc
-        (List.map
+        (("producer_execution", producer_execution) :: List.map
            (fun (key, value) ->
              if String.equal key "submitted_evidence"
              then key, evidence_snapshot
              else key, value)
-           fields)
+           (List.filter (fun (name, _) -> not (String.equal name "producer_execution")) fields))
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
       as impossible ->
       impossible

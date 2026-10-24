@@ -4,7 +4,7 @@ module AR = Task.Anti_rationalization
 
 let ( let* ) = Result.bind
 
-let schema = "verifier_review_original/v2"
+let schema = "verifier_review_original/v3"
 
 (* Strict JSON decoding helpers. A decoder that reads a required key with a
    bare [List.assoc] leaks [Not_found] out of the [result] on a missing key,
@@ -80,6 +80,7 @@ type t =
   { verification_id : string
   ; attempt : int
   ; review_request : AR.review_request
+  ; generator_runtime : string option
   ; question : AR.verdict_question
   ; lookup_root : AR.lookup_root
   ; lookup_schemas : string list
@@ -89,8 +90,10 @@ type t =
   ; output_contract : string
   }
 
-let prepare ~verification_id ~attempt ~question ~lookup_root ~lookup_schemas ~lookup_binding req =
-  if String.trim verification_id = ""
+let prepare ~generator_runtime ~verification_id ~attempt ~question ~lookup_root ~lookup_schemas ~lookup_binding req =
+  if Option.fold ~none:false ~some:(fun runtime -> String.trim runtime = "") generator_runtime
+  then Error "verifier review original generator_runtime must be non-blank when present"
+  else if String.trim verification_id = ""
   then Error "verifier review original requires a non-blank verification_id"
   else if attempt < 0
   then Error "verifier review original attempt must be a non-negative integer"
@@ -108,6 +111,7 @@ let prepare ~verification_id ~attempt ~question ~lookup_root ~lookup_schemas ~lo
       { verification_id
       ; attempt
       ; review_request = req
+      ; generator_runtime
       ; question
       ; lookup_root
       ; lookup_schemas
@@ -121,6 +125,7 @@ let prepare ~verification_id ~attempt ~question ~lookup_root ~lookup_schemas ~lo
 let verification_id t = t.verification_id
 let attempt t = t.attempt
 let review_request t = t.review_request
+let generator_runtime t = t.generator_runtime
 let question t = t.question
 let lookup_root t = t.lookup_root
 let lookup_schemas t = t.lookup_schemas
@@ -373,6 +378,7 @@ let lookup_schemas_of_json (json : Yojson.Safe.t) : (string list, string) result
 
 let field_names =
   [ "attempt"
+  ; "generator_runtime"
   ; "lookup_binding"
   ; "lookup_root"
   ; "lookup_schemas"
@@ -391,6 +397,7 @@ let to_json t =
     [ "schema", `String schema
     ; "verification_id", `String t.verification_id
     ; "attempt", `Int t.attempt
+    ; "generator_runtime", Json_util.string_opt_to_json t.generator_runtime
     ; "review_request", review_request_to_json t.review_request
     ; "question", verdict_question_to_json t.question
     ; "lookup_root", lookup_root_to_json t.lookup_root
@@ -439,6 +446,13 @@ let of_json json =
         | `Int value when value >= 0 -> Ok value
         | _ -> Error "verifier review original attempt must be a non-negative integer"
       in
+      let* generator_runtime =
+        let* value = field "generator_runtime" fields in
+        match value with
+        | `Null -> Ok None
+        | `String runtime when String.trim runtime <> "" -> Ok (Some runtime)
+        | _ -> Error "verifier review original generator_runtime must be null or non-blank text"
+      in
       let* review_request_json = field "review_request" fields in
       let* question_json = field "question" fields in
       let* lookup_root_json = field "lookup_root" fields in
@@ -454,6 +468,7 @@ let of_json json =
           { verification_id
           ; attempt
           ; review_request
+          ; generator_runtime
           ; question
           ; lookup_root
           ; lookup_schemas

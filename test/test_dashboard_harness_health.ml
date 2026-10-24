@@ -187,10 +187,10 @@ let test_model_identity_gaps_reach_the_dashboard_without_a_zero_rate () =
     let overview = Yojson.Safe.Util.member "overview" json in
     let calibration = Yojson.Safe.Util.member "calibration" json in
     let observation = Yojson.Safe.Util.member "model_identity_observation" overview in
-    check string "model identities remain unobserved" "unobserved"
-      Yojson.Safe.Util.(observation |> member "kind" |> to_string);
+    check int "no complete model pair was observed" 0
+      Yojson.Safe.Util.(observation |> member "observed_verdict_count" |> to_int);
     check int "the missing coverage reaches the overview" verdict_count
-      Yojson.Safe.Util.(observation |> member "verdict_count" |> to_int);
+      Yojson.Safe.Util.(observation |> member "unobserved_verdict_count" |> to_int);
     check bool "the overview preserves the ledger's nullable runtime rate" true
       (Yojson.Safe.Util.member "distinct_runtime_rate" overview = runtime_rate);
     check bool "the ledger and overview retain the same identity observation" true
@@ -205,6 +205,7 @@ let test_model_identity_gaps_reach_the_dashboard_without_a_zero_rate () =
   let result : Review.review_result =
     { verdict = Some (Review.Approve "")
     ; evaluator_runtime = "judge-alias"; generator_runtime = Some "producer-alias"
+    ; evaluator_execution = None
     ; gate = Review.Structured_tool; fallback_reason = None
     ; retryable_runtimes = []; model_absent_runtimes = [] } in
   Calibration.record_verdict ~task_id:"task-model-gap" ~req ~result ();

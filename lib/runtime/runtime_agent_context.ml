@@ -105,6 +105,8 @@ type config =
   ; runtime_id : string option
     (** The executing runtime's id, typed. [None] for callers that are
         not dispatching on behalf of a configured runtime. *)
+  ; execution_actor : string option
+    (** Host-owned tool actor, independent of the synthetic agent name. *)
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
     (** Caller-owned projection applied only to provider-bound messages.
@@ -181,6 +183,7 @@ let default_config
   ; session_id = None
   ; description = None
   ; runtime_id = None
+  ; execution_actor = None
   ; initial_messages = []
   ; model_input_projection = None
   ; pre_dispatch_serialization_observer = None

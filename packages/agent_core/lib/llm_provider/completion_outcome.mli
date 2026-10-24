@@ -1,7 +1,7 @@
-(** Native completion result and the serialization fact it actually owns.
+(** Completion result and the request provenance actually available.
 
     This is separate from the provider response: errors after serialization
-    retain the same fact as successes. Neither constructor invokes an observer.
+    retain the same fact as successes. The constructors do not invoke an observer.
     Serialization is not evidence of dispatch or provider acceptance. *)
 type serialized_request = private
   { output_token_receipt : Types.output_token_receipt
@@ -12,6 +12,7 @@ type serialized_request = private
 type request_provenance =
   | Not_serialized
   | Serialized of serialized_request
+  | Cache_reused of serialized_request
   | External_unobserved
   | Interrupted_unobserved
 
@@ -20,7 +21,8 @@ type 'a t = private
   ; request_provenance : request_provenance
   }
 
-(** No generation body was serialized by this native call. *)
+(** No native generation serialization evidence was produced or supplied for
+    this call. *)
 val before_serialization : 'a -> 'a t
 
 (** Seal the final body digest and the exact backend-owned receipt from the
@@ -39,3 +41,11 @@ val external_unobserved : 'a -> 'a t
 (** The caller interrupted work before receiving its native outcome. No
     serialization or non-serialization fact is inferred from cancellation. *)
 val interrupted_unobserved : 'a -> 'a t
+
+(** A response cache supplied this result. The sealed body and receipt belong
+    to this lookup request, not to a new dispatch or the cached response's
+    original provider call. *)
+val cache_reused
+  :  request:Complete_common.serialized_http_request
+  -> 'a
+  -> 'a t

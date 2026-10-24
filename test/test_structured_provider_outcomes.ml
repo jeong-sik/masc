@@ -200,12 +200,12 @@ let through_complete ~stream response =
       ~base_url:"http://127.0.0.1:1" () in
   let result =
     if stream then
-      Llm_provider.Complete.complete_stream ~sw ~net:env#net ~transport ~config
+      (Llm_provider.Complete.complete_stream ~sw ~net:env#net ~transport ~config
         ~messages:[ Types.user_msg "controlled terminal response" ]
-        ~on_event:(fun _ -> ()) ()
+        ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
     else
-      Llm_provider.Complete.complete ~sw ~net:env#net ~transport ~config
-        ~messages:[ Types.user_msg "controlled terminal response" ] ()
+      (Llm_provider.Complete.complete ~sw ~net:env#net ~transport ~config
+        ~messages:[ Types.user_msg "controlled terminal response" ] ()).Llm_provider.Completion_outcome.result
   in
   match result with
   | Ok response -> response

@@ -702,9 +702,9 @@ let test_policy_is_frozen_before_measurement ~stream () =
     check int "count reserves the generation's original output ceiling" 64
       (Complete.admitted_fit admitted).reserved_output_tokens;
     let result = if stream then
-        Complete.complete_stream_admitted ~sw ~net admitted ~admission_window:unbounded_window
-          ~on_event:(fun _ -> ()) ()
-      else Complete.complete_admitted ~sw ~net admitted ~call_window:unbounded_window () in
+        (Complete.complete_stream_admitted ~sw ~net admitted ~admission_window:unbounded_window
+          ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+      else (Complete.complete_admitted ~sw ~net admitted ~call_window:unbounded_window ()).Llm_provider.Completion_outcome.result in
     result, expected_source
   in
   let response = match result with Ok response -> response | Error _ -> fail "frozen request failed" in
@@ -808,9 +808,9 @@ reasoning_replay = "%s"
           Llm_provider.Llm_transport.custom ({ complete_sync = (fun request -> { response = invoke request; latency_ms = None })
           ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ request -> invoke request) }) in
         let result = if stream then
-            Complete.complete_stream ~sw ~net ~transport ~config:cfg
-              ~messages:[msg User [Text "hello"]] ~on_event:(fun _ -> ()) ()
-          else Complete.complete ~sw ~net ~transport ~config:cfg ~messages:[msg User [Text "hello"]] () in
+            (Complete.complete_stream ~sw ~net ~transport ~config:cfg
+              ~messages:[msg User [Text "hello"]] ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+          else (Complete.complete ~sw ~net ~transport ~config:cfg ~messages:[msg User [Text "hello"]] ()).Llm_provider.Completion_outcome.result in
         let result = match result with Ok result -> result | Error _ -> fail "injected completion failed" in
         let telemetry = match result.telemetry with Some telemetry -> telemetry | None -> fail "response has no telemetry" in
         check (option int) "response retains the prepared context declaration"
@@ -868,7 +868,7 @@ let test_admitted_body_is_frozen_across_catalog_mutation () =
            Complete.inspect_serialized_request ~stream:false ~config:cfg ~messages ()
          in
          let result =
-           Complete.complete_admitted
+           (Complete.complete_admitted
              ~sw
              ~net
              ~request_wire_observer:(fun observation ->
@@ -876,7 +876,7 @@ let test_admitted_body_is_frozen_across_catalog_mutation () =
                Ok ())
              admitted
              ~call_window:unbounded_window
-             ()
+             ()).Llm_provider.Completion_outcome.result
          in
          result, admitted_evidence, fresh_serialization
        in
@@ -1034,7 +1034,7 @@ let test_prepared_measure_admit_dispatch () =
       })
     in
     let result =
-      Complete.complete_admitted ~sw ~net ~transport admitted ~call_window:unbounded_window ()
+      (Complete.complete_admitted ~sw ~net ~transport admitted ~call_window:unbounded_window ()).Llm_provider.Completion_outcome.result
     in
     result, fit, !dispatched
   in

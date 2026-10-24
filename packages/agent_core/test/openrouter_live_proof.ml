@@ -104,7 +104,7 @@ let () =
   @@ fun sw ->
   let deltas = ref 0 in
   match
-    Llm_provider.Complete.complete_stream
+    (Llm_provider.Complete.complete_stream
       ~sw
       ~net:(Eio.Stdenv.net env)
       ~clock:(Eio.Stdenv.clock env)
@@ -115,7 +115,7 @@ let () =
             "Work out 4177 * 3391 step by step, then state the product."
         ]
       ~on_event:(fun _ -> incr deltas)
-      ()
+      ()).Llm_provider.Completion_outcome.result
   with
   | Error e ->
     let described =

@@ -461,13 +461,13 @@ let test_zero_declaration_rejected_before_dispatch () =
     make_config ~base_url:"http://invalid.test:1" ~max_concurrent_requests:0 ()
   in
   match
-    Complete.complete
+    (Complete.complete
       ~sw
       ~net:(Eio.Stdenv.net env)
       ~transport:reject_dispatch_transport
       ~config
       ~messages:[]
-      ()
+      ()).Llm_provider.Completion_outcome.result
   with
   | Error (Http_client.AcceptRejected { reason }) ->
     check
@@ -492,13 +492,13 @@ let test_zero_priority_run_limit_rejected_before_dispatch () =
       ()
   in
   match
-    Complete.complete
+    (Complete.complete
       ~sw
       ~net:(Eio.Stdenv.net env)
       ~transport:reject_dispatch_transport
       ~config
       ~messages:[]
-      ()
+      ()).Llm_provider.Completion_outcome.result
   with
   | Error (Http_client.AcceptRejected { reason }) ->
     check
@@ -524,13 +524,13 @@ let test_run_limit_without_max_rejected_before_dispatch () =
       ()
   in
   match
-    Complete.complete
+    (Complete.complete
       ~sw
       ~net:(Eio.Stdenv.net env)
       ~transport:reject_dispatch_transport
       ~config
       ~messages:[]
-      ()
+      ()).Llm_provider.Completion_outcome.result
   with
   | Error (Http_client.AcceptRejected { reason }) ->
     check
@@ -576,13 +576,13 @@ let test_complete_dispatch_is_admitted () =
   in
   let job () =
     ignore
-      (Complete.complete
+      ((Complete.complete
          ~sw
          ~net:(Eio.Stdenv.net env)
          ~transport:counting_transport
          ~config
          ~messages:[]
-         ())
+         ())).Llm_provider.Completion_outcome.result
   in
   Eio.Fiber.all (List.init 6 (fun _ -> job));
   check int "every dispatch completed" 0 (Atomic.get in_flight);
@@ -638,7 +638,7 @@ let test_call_deadline_ends_the_wait_for_a_permit () =
   let dispatched = ref false in
   let started = Eio.Time.now clock in
   (match
-     Complete.complete
+     (Complete.complete
        ~sw
        ~net:(Eio.Stdenv.net env)
        ~clock
@@ -650,7 +650,7 @@ let test_call_deadline_ends_the_wait_for_a_permit () =
        ~config
        ~messages:[]
        ~call_timeout_s:call_deadline_s
-       ()
+       ()).Llm_provider.Completion_outcome.result
    with
    | Error (Http_client.TimeoutError { phase = Http_client.Queue; message }) ->
      check
@@ -700,7 +700,7 @@ let test_admission_deadline_ends_the_wait_for_a_stream_permit () =
   in
   let started = Eio.Time.now clock in
   (match
-     Complete.complete_stream
+     (Complete.complete_stream
        ~sw
        ~net:(Eio.Stdenv.net env)
        ~clock
@@ -709,7 +709,7 @@ let test_admission_deadline_ends_the_wait_for_a_stream_permit () =
        ~config
        ~messages:[]
        ~on_event:(fun _ -> ())
-       ()
+       ()).Llm_provider.Completion_outcome.result
    with
    | Error (Http_client.TimeoutError { phase = Http_client.Queue; message }) ->
      check
@@ -756,7 +756,7 @@ let test_call_deadline_bounds_the_round_trip_with_what_the_wait_left () =
   let dispatched = ref false in
   let started = Eio.Time.now clock in
   (match
-     Complete.complete
+     (Complete.complete
        ~sw
        ~net:(Eio.Stdenv.net env)
        ~clock
@@ -768,7 +768,7 @@ let test_call_deadline_bounds_the_round_trip_with_what_the_wait_left () =
        ~config
        ~messages:[]
        ~call_timeout_s:call_deadline_s
-       ()
+       ()).Llm_provider.Completion_outcome.result
    with
    | Error (Http_client.TimeoutError { phase = Http_client.Non_streaming_body; message }) ->
      check
@@ -797,7 +797,7 @@ let test_a_narrower_body_deadline_fires_inside_the_call_deadline () =
   let body_deadline_s = 0.2 in
   let started = Eio.Time.now clock in
   (match
-     Complete.complete
+     (Complete.complete
        ~sw
        ~net:(Eio.Stdenv.net env)
        ~clock
@@ -807,7 +807,7 @@ let test_a_narrower_body_deadline_fires_inside_the_call_deadline () =
        ~messages:[]
        ~body_timeout_s:body_deadline_s
        ~call_timeout_s:call_deadline_s
-       ()
+       ()).Llm_provider.Completion_outcome.result
    with
    | Error (Http_client.TimeoutError { phase = Http_client.Non_streaming_body; message }) ->
      check

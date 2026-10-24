@@ -76,13 +76,13 @@ let config_for ~port ~connect_timeout_s =
 let complete ~sw ~net ?clock ~config () =
   Result.map
     (fun (_ : Llm_provider.Types.api_response) -> ())
-    (Llm_provider.Complete.complete
+    ((Llm_provider.Complete.complete
        ~sw
        ~net
        ?clock
        ~config
        ~messages:[ Llm_provider.Types.user_msg "hello" ]
-       ())
+       ())).Llm_provider.Completion_outcome.result
 ;;
 
 let with_env f =

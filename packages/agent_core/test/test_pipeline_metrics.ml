@@ -151,7 +151,7 @@ let test_sync_dispatches_via_complete_triggers_metrics () =
       ()
   in
   let result =
-    Llm_provider.Complete.complete
+    (Llm_provider.Complete.complete
       ~sw
       ~net
       ~transport
@@ -165,7 +165,7 @@ let test_sync_dispatches_via_complete_triggers_metrics () =
           }
         ]
       ~metrics
-      ()
+      ()).Llm_provider.Completion_outcome.result
   in
   match result with
   | Ok _ ->

@@ -404,7 +404,13 @@ let complete_stream_http
                   }))
   in
   match request with
-  | Error err -> Completion_outcome.before_serialization (Error err)
+  | Error err ->
+    (match admitted_body with
+     | Some body ->
+       Completion_outcome.after_serialization
+         ~request:(Prepared_completion_request.admitted_body_request body)
+         (Error err)
+     | None -> Completion_outcome.before_serialization (Error err))
   | Ok serialized ->
     let result =
     let http_codec = serialized.Complete_common.http_codec in

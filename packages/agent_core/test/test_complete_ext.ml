@@ -208,7 +208,7 @@ let test_cache_hit_clears_latency_telemetry () =
      hit must never reach the network. *)
   let config = make_config ~model_id:"cache-hit-test" () in
   let messages = [ Types.user_msg "hello" ] in
-  match Complete.complete ~sw ~net:(Eio.Stdenv.net env) ~config ~messages ~cache () with
+  match (Complete.complete ~sw ~net:(Eio.Stdenv.net env) ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result with
   | Error err -> failf "unexpected complete error: %s" (string_of_http_error err)
   | Ok resp ->
     (match resp.telemetry with
@@ -268,7 +268,7 @@ let test_complete_transport_bypasses_cache_with_metrics_and_trace_headers () =
   in
   let messages = [ Types.user_msg "hello" ] in
   let first =
-    Complete.complete
+    (Complete.complete
       ~sw
       ~net:(Eio.Stdenv.net env)
       ~transport
@@ -277,7 +277,7 @@ let test_complete_transport_bypasses_cache_with_metrics_and_trace_headers () =
       ~trace_context:[ "traceparent", "new"; "tracestate", "state" ]
       ~cache
       ~metrics
-      ()
+      ()).Llm_provider.Completion_outcome.result
   in
   (match first with
    | Ok resp ->
@@ -289,7 +289,7 @@ let test_complete_transport_bypasses_cache_with_metrics_and_trace_headers () =
       | None -> fail "expected telemetry")
    | Error err -> failf "unexpected complete error: %s" (string_of_http_error err));
   let second =
-    Complete.complete
+    (Complete.complete
       ~sw
       ~net:(Eio.Stdenv.net env)
       ~transport
@@ -298,7 +298,7 @@ let test_complete_transport_bypasses_cache_with_metrics_and_trace_headers () =
       ~trace_context:[ "traceparent", "new"; "tracestate", "state" ]
       ~cache
       ~metrics
-      ()
+      ()).Llm_provider.Completion_outcome.result
   in
   (match second with
    | Ok resp -> check string "fresh transport text" "done" (Types.text_of_response resp)
@@ -333,7 +333,7 @@ let test_opaque_transport_cache_bypass_does_not_require_http_serialization () =
     incr calls;
     { Llm_transport.response = Ok (make_response ()); latency_ms = None }) in
   for _ = 1 to 2 do
-    match Complete.complete ~sw ~net:(Eio.Stdenv.net env) ~transport ~config ~messages ~cache () with
+    match (Complete.complete ~sw ~net:(Eio.Stdenv.net env) ~transport ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result with
     | Ok _ -> ()
     | Error err -> failf "opaque request was rejected: %s" (string_of_http_error err)
   done;
@@ -353,13 +353,13 @@ let test_complete_injected_transport_rejects_typed_empty () =
          transport_of_sync (fun () ->
            { Llm_transport.response = Ok response; latency_ms = Some 1 })
        in
-       Complete.complete
+       (Complete.complete
          ~sw
          ~net:(Eio.Stdenv.net env)
          ~transport
          ~config
          ~messages:[ Types.user_msg "hello" ]
-         ()
+         ()).Llm_provider.Completion_outcome.result
        |> check_typed_empty_completion stop_reason)
     empty_failure_stops
 ;;
@@ -377,14 +377,14 @@ let test_complete_stream_injected_transport_rejects_typed_empty () =
          transport_of_sync (fun () ->
            { Llm_transport.response = Ok response; latency_ms = Some 1 })
        in
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:(Eio.Stdenv.net env)
          ~transport
          ~config
          ~messages:[ Types.user_msg "hello" ]
          ~on_event:(fun _ -> ())
-         ()
+         ()).Llm_provider.Completion_outcome.result
        |> check_typed_empty_completion stop_reason)
     empty_failure_stops
 ;;
@@ -397,8 +397,8 @@ let test_complete_injected_terminal_outcomes () =
        let response = make_response ~stop_reason ~content:[] () in
        let transport = transport_of_sync (fun () ->
          { Llm_transport.response = Ok response; latency_ms = Some 1 }) in
-       Complete.complete ~sw ~net:(Eio.Stdenv.net env) ~transport
-         ~config:(make_config ()) ~messages:[ Types.user_msg "hello" ] ()
+       (Complete.complete ~sw ~net:(Eio.Stdenv.net env) ~transport
+         ~config:(make_config ()) ~messages:[ Types.user_msg "hello" ] ()).Llm_provider.Completion_outcome.result
        |> check_content_free_terminal stop_reason)
     content_free_terminal_stops
 ;;
@@ -411,9 +411,9 @@ let test_complete_stream_injected_terminal_outcomes () =
        let response = make_response ~stop_reason ~content:[] () in
        let transport = transport_of_sync (fun () ->
          { Llm_transport.response = Ok response; latency_ms = Some 1 }) in
-       Complete.complete_stream ~sw ~net:(Eio.Stdenv.net env) ~transport
+       (Complete.complete_stream ~sw ~net:(Eio.Stdenv.net env) ~transport
          ~config:(make_config ()) ~messages:[ Types.user_msg "hello" ]
-         ~on_event:(fun _ -> ()) ()
+         ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
        |> check_content_free_terminal stop_reason)
     content_free_terminal_stops
 ;;
@@ -430,14 +430,14 @@ let test_complete_cached_empty_fails_before_transport () =
   in
   let observations = ref 0 in
   let result =
-    Complete.complete
+    (Complete.complete
       ~sw
       ~net:(Eio.Stdenv.net env)
       ~config:(make_config ~model_id:"cached-empty" ())
       ~messages:[ Types.user_msg "hello" ]
       ~cache
       ~request_wire_observer:(fun _ -> incr observations; Ok ())
-      ()
+      ()).Llm_provider.Completion_outcome.result
   in
   check int "cache hit does not emit dispatch observation" 0 !observations;
   check_typed_empty_completion Types.EndTurn result
@@ -455,9 +455,9 @@ let test_complete_cached_terminal_outcomes () =
          ; set = (fun ~key:_ ~ttl_sec:_ _ -> fail "cache hit must not be stored again") }
        in
        let observations = ref 0 in
-       Complete.complete ~sw ~net:(Eio.Stdenv.net env)
+       (Complete.complete ~sw ~net:(Eio.Stdenv.net env)
          ~config:(make_config ()) ~messages:[ Types.user_msg "hello" ] ~cache
-         ~request_wire_observer:(fun _ -> incr observations; Ok ()) ()
+         ~request_wire_observer:(fun _ -> incr observations; Ok ()) ()).Llm_provider.Completion_outcome.result
        |> check_content_free_terminal stop_reason;
        check int "cached terminal has no dispatch observation" 0 !observations)
     content_free_terminal_stops
@@ -483,14 +483,14 @@ let test_complete_transport_failure_is_one_shot () =
       })
   in
   (match
-     Complete.complete
+     (Complete.complete
        ~sw
        ~net:(Eio.Stdenv.net env)
        ~transport
        ~config
        ~messages:[ Types.user_msg "hello" ]
        ~metrics
-       ()
+       ()).Llm_provider.Completion_outcome.result
    with
    | Error (Http_client.HttpError { code = 500; body = Http_client.Received "temporary"; _ }) -> ()
    | Error err -> failf "unexpected typed error: %s" (string_of_http_error err)
@@ -553,7 +553,7 @@ let test_complete_stream_transport_success_metrics_and_telemetry () =
     })
   in
   (match
-     Complete.complete_stream
+     (Complete.complete_stream
        ~sw
        ~net:(Eio.Stdenv.net env)
        ~transport
@@ -567,7 +567,7 @@ let test_complete_stream_transport_success_metrics_and_telemetry () =
        ~on_event:(fun _event -> ())
        ~on_telemetry:(fun event -> seen_telemetry := event :: !seen_telemetry)
        ~metrics
-       ()
+       ()).Llm_provider.Completion_outcome.result
    with
    | Ok resp ->
      check string "stream model patched" "openai-stream" resp.model;
@@ -628,7 +628,7 @@ let test_custom_stream_wire_rejection_is_typed_nonfatal () =
     })
   in
   let result =
-    Complete.complete_stream
+    (Complete.complete_stream
       ~sw
       ~net:(Eio.Stdenv.net env)
       ~transport
@@ -640,7 +640,7 @@ let test_custom_stream_wire_rejection_is_typed_nonfatal () =
       ~messages:[ Types.user_msg "hello" ]
       ~on_event:(fun _ -> ())
       ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
-      ()
+      ()).Llm_provider.Completion_outcome.result
   in
   (match result with
    | Ok response ->
@@ -692,7 +692,7 @@ let test_custom_stream_wire_observer_and_telemetry_exceptions_are_nonfatal () =
          })
        in
        let result =
-         Complete.complete_stream
+         (Complete.complete_stream
            ~sw
            ~net:(Eio.Stdenv.net env)
            ~transport
@@ -703,7 +703,7 @@ let test_custom_stream_wire_observer_and_telemetry_exceptions_are_nonfatal () =
            ~on_telemetry:(function
              | Telemetry_event.Wire_observer_failure _ -> failwith "telemetry unavailable"
              | _ -> ())
-           ()
+           ()).Llm_provider.Completion_outcome.result
        in
        (match result with
         | Ok response ->

@@ -22,7 +22,7 @@ let complete ?override ~sw ~net ~clock ~config ~messages ?tools () =
   match override with
   | Some complete -> complete ~sw ~net ~clock ~config ~messages ?tools ()
   | None ->
-    Llm_provider.Complete.complete
+    (Llm_provider.Complete.complete
       ~sw
       ~net
       ~clock
@@ -31,5 +31,5 @@ let complete ?override ~sw ~net ~clock ~config ~messages ?tools () =
       ~config
       ~messages
       ?tools
-      ()
+      ()).Llm_provider.Completion_outcome.result
 ;;

@@ -458,8 +458,8 @@ let test_rendered_image_reaches_verifier_http_request () =
                 { Llm_provider.Capabilities.openai_compat_chat_capabilities with
                   supports_image_input = true }
               () in
-          (match Llm_provider.Complete.complete ~sw ~net ~config:provider
-                   ~messages:[Agent_core.Types.user_msg_blocks blocks] () with
+          (match (Llm_provider.Complete.complete ~sw ~net ~config:provider
+                   ~messages:[Agent_core.Types.user_msg_blocks blocks] ()).Llm_provider.Completion_outcome.result with
            | Ok _ -> Ok {AR.selected_runtime_id=evaluator_runtime;verdict=Some (AR.Approve "synthetic image delivery receipt only")}
            | Error _ -> Error (Agent_core.Error.Internal "fixture HTTP request failed"))
       in

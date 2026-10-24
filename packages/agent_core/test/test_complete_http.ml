@@ -262,7 +262,7 @@ let test_complete_anthropic_ok () =
     @@ fun sw ->
     let url = start_mock_server ~sw ~net:env#net (anthropic_response "mock response") in
     let config = make_config url in
-    match Complete.complete ~sw ~net:env#net ~config ~messages () with
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
     | Ok resp ->
       check string "model" "mock" resp.model;
       let text =
@@ -290,7 +290,7 @@ let test_complete_http_rejects_typed_empty_completion () =
       let url =
         start_mock_server ~sw ~net:env#net (anthropic_empty_response wire_stop_reason)
       in
-      Complete.complete ~sw ~net:env#net ~config:(make_config url) ~messages ()
+      (Complete.complete ~sw ~net:env#net ~config:(make_config url) ~messages ()).Llm_provider.Completion_outcome.result
       |> check_typed_empty_completion expected;
       Eio.Switch.fail sw Exit
     with
@@ -314,13 +314,13 @@ let test_complete_stream_http_rejects_typed_empty_completion () =
       let url =
         start_mock_server ~sw ~net:env#net (anthropic_empty_sse wire_stop_reason)
       in
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~config:(make_config url)
         ~messages
         ~on_event:(fun _ -> ())
-        ()
+        ()).Llm_provider.Completion_outcome.result
       |> check_typed_empty_completion expected;
       Eio.Switch.fail sw Exit
     with
@@ -340,7 +340,7 @@ let test_complete_http_preserves_content_free_terminal () =
     try Eio.Switch.run @@ fun sw ->
       let url = start_mock_server ~sw ~net:env#net
           (anthropic_empty_response wire_stop_reason) in
-      Complete.complete ~sw ~net:env#net ~config:(make_config url) ~messages ()
+      (Complete.complete ~sw ~net:env#net ~config:(make_config url) ~messages ()).Llm_provider.Completion_outcome.result
       |> check_content_free_terminal expected;
       Eio.Switch.fail sw Exit
     with Exit -> ())
@@ -355,8 +355,8 @@ let test_complete_stream_http_preserves_content_free_terminal () =
     try Eio.Switch.run @@ fun sw ->
       let url = start_mock_server ~sw ~net:env#net
           (anthropic_empty_sse wire_stop_reason) in
-      Complete.complete_stream ~sw ~net:env#net ~config:(make_config url)
-        ~messages ~on_event:(fun _ -> ()) ()
+      (Complete.complete_stream ~sw ~net:env#net ~config:(make_config url)
+        ~messages ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
       |> check_content_free_terminal expected;
       Eio.Switch.fail sw Exit
     with Exit -> ())
@@ -387,7 +387,7 @@ let test_complete_stream_openai_captures_llama_server_timings () =
     let prefill = ref None in
     let events = ref [] in
     let result =
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~config:(make_openai_config url)
@@ -398,7 +398,7 @@ let test_complete_stream_openai_captures_llama_server_timings () =
             prefill := Some (prompt_eval_tokens, cache_hit)
           | _ -> ())
         ~on_event:(fun event -> events := event :: !events)
-        ()
+        ()).Llm_provider.Completion_outcome.result
     in
     (match result with
      | Ok resp ->
@@ -450,7 +450,7 @@ let test_complete_http_error () =
       start_mock_server ~sw ~net:env#net ~status:`Bad_request "bad request body"
     in
     let config = make_config url in
-    match Complete.complete ~sw ~net:env#net ~config ~messages () with
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
     | Ok _ -> fail "expected Error"
     | Error (Http_client.HttpError { code; _ }) ->
       check int "status 400" 400 code;
@@ -482,14 +482,14 @@ let test_complete_request_wire_observer_sees_exact_sync_body () =
       Ok ()
     in
     (match
-       Http_request_observer.with_observer http_observer (fun () -> Complete.complete
+       Http_request_observer.with_observer http_observer (fun () -> (Complete.complete
          ~sw
          ~net:env#net
          ~capture_id:"sync-request-1"
          ~request_wire_observer
          ~config:(make_openai_config base_url)
          ~messages
-         ())
+         ()).Llm_provider.Completion_outcome.result)
      with
      | Error _ -> fail "request observation changed the provider result"
      | Ok _ -> ());
@@ -529,13 +529,13 @@ let test_complete_invalid_uri_rejects_before_wire_observation () =
     Ok ()
   in
   match
-    Complete.complete
+    (Complete.complete
       ~sw
       ~net:env#net
       ~request_wire_observer
       ~config:(make_config "http://")
       ~messages
-      ()
+      ()).Llm_provider.Completion_outcome.result
   with
   | Error (Http_client.NetworkError { kind = Http_client.Unknown; _ }) ->
     check int "invalid URI produces no wire observation" 0 !observed_request_count
@@ -604,7 +604,7 @@ let test_complete_http_empty_error_body_has_context () =
         ~max_tokens:100
         ()
     in
-    match Complete.complete ~sw ~net:env#net ~config ~messages () with
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
     | Ok _ -> fail "expected Error"
     | Error (Http_client.HttpError { code; body = Http_client.Received body; _ }) ->
       check int "status 404" 404 code;
@@ -633,7 +633,7 @@ let test_complete_openai_ok () =
     @@ fun sw ->
     let url = start_mock_server ~sw ~net:env#net (openai_response "openai reply") in
     let config = make_openai_config url in
-    match Complete.complete ~sw ~net:env#net ~config ~messages () with
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
     | Ok resp ->
       let text =
         List.filter_map
@@ -669,7 +669,7 @@ let test_complete_openai_responses_sync_ok () =
         ~max_tokens:100
         ()
     in
-    match Complete.complete ~sw ~net:env#net ~config ~messages () with
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
     | Ok resp ->
       check bool "stop tool use" true (resp.stop_reason = Types.StopToolUse);
       (match resp.content with
@@ -718,7 +718,7 @@ let test_complete_openai_responses_json_mode_body () =
         ~max_tokens:100
         ()
     in
-    (match Complete.complete ~sw ~net:env#net ~config ~messages () with
+    (match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
      | Ok _ -> ()
      | Error _ -> fail "expected Ok for OpenAI Responses JSON mode");
     match !captured with
@@ -803,13 +803,13 @@ let test_complete_stream_openai_responses_ok () =
     in
     let events = ref [] in
     match
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~config
         ~messages
         ~on_event:(fun evt -> events := evt :: !events)
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Ok resp ->
       check string "stream id" "resp-stream-1" resp.id;
@@ -885,7 +885,7 @@ let test_complete_trace_context_headers () =
       ; "tracestate", "vendor=value"
       ]
     in
-    (match Complete.complete ~sw ~net:env#net ~config ~messages ~trace_context () with
+    (match (Complete.complete ~sw ~net:env#net ~config ~messages ~trace_context ()).Llm_provider.Completion_outcome.result with
      | Ok _ -> ()
      | Error _ -> fail "expected Ok");
     match !seen with
@@ -919,7 +919,7 @@ let test_complete_openai_mlx_vlm_telemetry () =
         (openai_mlx_vlm_response "mlx reply")
     in
     let config = make_openai_config url in
-    match Complete.complete ~sw ~net:env#net ~config ~messages () with
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
     | Ok resp ->
       let text =
         List.filter_map
@@ -980,7 +980,7 @@ let test_complete_sync_latency_uses_injected_clock () =
         (anthropic_response "clocked")
     in
     let config = make_config url in
-    match Complete.complete ~sw ~net:env#net ~clock ~config ~messages () with
+    match (Complete.complete ~sw ~net:env#net ~clock ~config ~messages ()).Llm_provider.Completion_outcome.result with
     | Ok resp ->
       (match resp.telemetry with
        | Some telemetry ->
@@ -1012,7 +1012,9 @@ let test_complete_cache_store_and_hit () =
   try
     Eio.Switch.run
     @@ fun sw ->
-    let url = start_mock_server ~sw ~net:env#net (anthropic_response "cached") in
+    let received = ref None and requests = ref 0 in
+    let url = start_mock_server ~sw ~net:env#net ~capture_body:received
+        ~on_request:(fun () -> incr requests) (anthropic_response "cached") in
     let config = make_config url in
     let store : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 4 in
     let cache : Cache.t =
@@ -1020,12 +1022,28 @@ let test_complete_cache_store_and_hit () =
       ; set = (fun ~key ~ttl_sec:_ value -> Hashtbl.replace store key value)
       }
     in
-    (* First call — cache miss, HTTP hit *)
-    (match Complete.complete ~sw ~net:env#net ~config ~messages ~cache () with
+    let first = Complete.complete ~sw ~net:env#net ~config ~messages ~cache () in
+    (match first.result with
      | Ok _ -> check bool "stored in cache" true (Hashtbl.length store > 0)
      | Error _ -> fail "expected Ok first call");
-    (* Second call — cache hit, no HTTP *)
-    match Complete.complete ~sw ~net:env#net ~config ~messages ~cache () with
+    let second = Complete.complete ~sw ~net:env#net ~config ~messages ~cache () in
+    (match first.request_provenance, second.request_provenance with
+     | Completion_outcome.Serialized sent, Completion_outcome.Cache_reused lookup ->
+       check string "cache lookup uses same body digest" sent.body_sha256 lookup.body_sha256;
+       check bool "cache lookup preserves exact output decision" true
+         (sent.output_token_receipt = lookup.output_token_receipt);
+       let body = match !received with Some body -> body
+         | None -> fail "cache miss never reached peer" in
+       check string "public miss describes actual peer body"
+         Digestif.SHA256.(digest_string body |> to_hex) sent.body_sha256
+     | (Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
+       | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved), _
+     | Completion_outcome.Serialized _, (Completion_outcome.Not_serialized
+       | Completion_outcome.Serialized _ | Completion_outcome.External_unobserved
+       | Completion_outcome.Interrupted_unobserved) ->
+       fail "cache reuse must be distinct from a dispatched request");
+    check int "cache hit made no second HTTP request" 1 !requests;
+    match second.result with
     | Ok resp ->
       let text =
         List.filter_map
@@ -1094,7 +1112,7 @@ let test_response_cache_tracks_catalog_defaults () =
   with_response_cache_server @@ fun ~sw ~net ~url ~cache ~bodies ->
   let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
       ~base_url:url ~request_path:"/v1/messages" () in
-  let run () = Complete.complete ~sw ~net ~config ~messages ~cache () |> require_cached_response in
+  let run () = (Complete.complete ~sw ~net ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result |> require_cached_response in
   ignore (run ());
   Model_catalog.set_global (response_cache_catalog ~ceiling:16 ~replay:"preserve_always");
   ignore (run ());
@@ -1135,7 +1153,7 @@ let test_response_cache_tracks_reasoning_source_projection () =
   let mismatching = history (Types.Reasoning_source.metadata foreign @ prefix_metadata) in
   check bool "canonical content alone cannot distinguish source" true
     (List.map Api_common.message_to_json matching = List.map Api_common.message_to_json mismatching);
-  let run messages = Complete.complete ~sw ~net ~config ~messages ~cache () |> require_cached_response in
+  let run messages = (Complete.complete ~sw ~net ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result |> require_cached_response in
   ignore (run matching);
   ignore (run mismatching);
   ignore (run (history []));
@@ -1157,7 +1175,7 @@ let test_response_cache_does_not_restamp_cached_reasoning () =
   with_response_cache_server ~response_body @@ fun ~sw ~net ~url ~cache ~bodies ->
   let config = Provider_config.make ~kind:Anthropic ~model_id:"response-cache-model"
       ~base_url:url ~request_path:"/v1/messages" ~max_tokens:64 () in
-  let run () = Complete.complete ~sw ~net ~config ~messages ~cache () |> require_cached_response in
+  let run () = (Complete.complete ~sw ~net ~config ~messages ~cache ()).Llm_provider.Completion_outcome.result |> require_cached_response in
   let original = run () in
   Model_catalog.set_global (response_cache_catalog ~ceiling:64 ~replay:"no_replay");
   let current_source = Reasoning_dialect.reasoning_source_for_provider_config config |> Result.get_ok in
@@ -1203,8 +1221,8 @@ let test_response_cache_reuses_admitted_body_without_dispatch_on_hit () =
   Model_catalog.set_global (response_cache_catalog ~ceiling:16 ~replay:"no_replay");
   let observations = ref [] in
   let observer observation = observations := observation :: !observations; Ok () in
-  let run () = Complete.complete_serialized ~sw ~net serialized ~cache
-      ~request_wire_observer:observer () |> require_cached_response in
+  let run () = (Complete.complete_serialized ~sw ~net serialized ~cache
+      ~request_wire_observer:observer ()).Llm_provider.Completion_outcome.result |> require_cached_response in
   ignore (run ());
   ignore (run ());
   check int "admitted body cache hit does not dispatch" 1 (List.length !bodies);
@@ -1246,7 +1264,7 @@ let test_complete_metrics () =
       }
     in
     (* No cache provided → on_cache_miss not called *)
-    match Complete.complete ~sw ~net:env#net ~config ~messages ~metrics () with
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
     | Ok _ ->
       check int "no cache = no miss" 0 !miss_count;
       check int "start" 1 !start_count;
@@ -1288,7 +1306,7 @@ let test_complete_tool_call_metrics () =
             tool_calls := (provider, model_id, count) :: !tool_calls)
       }
     in
-    match Complete.complete ~sw ~net:env#net ~config ~messages ~metrics () with
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
     | Ok resp ->
       check bool "stop tool use" true (resp.stop_reason = Types.StopToolUse);
       (match !tool_calls with
@@ -1313,7 +1331,7 @@ let test_complete_non_retryable () =
     @@ fun sw ->
     let url = start_mock_server ~sw ~net:env#net ~status:`Unauthorized "unauthorized" in
     let config = make_config url in
-    match Complete.complete ~sw ~net:env#net ~config ~messages () with
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
     | Ok _ -> fail "expected Error"
     | Error (Http_client.HttpError { code; _ }) ->
       check int "401" 401 code;
@@ -1347,7 +1365,7 @@ let test_complete_error_metrics () =
             status_calls := (provider, model_id, status) :: !status_calls)
       }
     in
-    match Complete.complete ~sw ~net:env#net ~config ~messages ~metrics () with
+    match (Complete.complete ~sw ~net:env#net ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
     | Ok _ -> fail "expected Error"
     | Error _ ->
       check int "error callback" 1 !error_count;
@@ -1418,7 +1436,7 @@ let test_complete_transport_http_metrics_ok () =
       }
     in
     let transport = make_transport (Ok (mock_transport_response "transport ok")) in
-    match Complete.complete ~sw ~net:env#net ~transport ~config ~messages ~metrics () with
+    match (Complete.complete ~sw ~net:env#net ~transport ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
     | Ok _ ->
       (match !status_calls with
        | [ ("openai_compat", "gpt-4", 200) ] -> Eio.Switch.fail sw Exit
@@ -1450,7 +1468,7 @@ let test_complete_transport_http_metrics_error () =
            (Http_client.HttpError
               { code = 429; body = Http_client.Received "rate limited"; retry_after_header = None }))
     in
-    match Complete.complete ~sw ~net:env#net ~transport ~config ~messages ~metrics () with
+    match (Complete.complete ~sw ~net:env#net ~transport ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
     | Ok _ -> fail "expected Error"
     | Error (Http_client.HttpError { code; _ }) ->
       check int "status 429" 429 code;
@@ -1483,7 +1501,7 @@ let test_complete_transport_mock_emits_status () =
       }
     in
     let transport = make_transport (Ok (mock_transport_response "cli ok")) in
-    match Complete.complete ~sw ~net:env#net ~transport ~config ~messages ~metrics () with
+    match (Complete.complete ~sw ~net:env#net ~transport ~config ~messages ~metrics ()).Llm_provider.Completion_outcome.result with
     | Ok _ ->
       check int "mock transport emits status" 1 !hits;
       Eio.Switch.fail sw Exit
@@ -1550,7 +1568,7 @@ let test_metrics_global_used_when_no_per_call_metrics () =
       ~finally:(fun () -> Metrics.set_global previous)
       (fun () ->
          (* Deliberately do NOT pass ~metrics — global should take effect. *)
-         match Complete.complete ~sw ~net:env#net ~config ~messages () with
+         match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
          | Ok _ ->
            check int "global on_http_status fired once" 1 (List.length !status_calls);
            Eio.Switch.fail sw Exit
@@ -1907,8 +1925,8 @@ let test_complete_stream_refused_frame_diagnostics () =
                   summaries := (terminal, read_dump ()) :: !summaries
               | _ -> () in
             let message = match
-              Complete.complete_stream ~sw ~net:env#net ~config:(config url)
-                ~messages ~on_event ~on_telemetry ()
+              (Complete.complete_stream ~sw ~net:env#net ~config:(config url)
+                ~messages ~on_event ~on_telemetry ()).Llm_provider.Completion_outcome.result
             with
               | Error (Http_client.ProviderFailure
                   { kind = Http_client.Provider_wire_error
@@ -1983,7 +2001,7 @@ let test_complete_injected_http_transport_preserves_stream_status_metrics () =
       }
     in
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~transport
@@ -1991,7 +2009,7 @@ let test_complete_injected_http_transport_preserves_stream_status_metrics () =
          ~messages
          ~metrics
          ~on_event:(fun _ -> ())
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Ok _ -> ()
      | Error _ -> fail "expected injected HTTP transport stream to succeed");
@@ -2053,12 +2071,12 @@ let test_complete_kimi_path_override_stays_anthropic_codec () =
     in
     let request_path = "/v1/chat/completions" in
     (match
-       Complete.complete
+       (Complete.complete
          ~sw
          ~net:env#net
          ~config:(make_kimi_config ~request_path url)
          ~messages
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Ok resp -> check string "Kimi sync text" "kimi sync" (text_of_response resp)
      | Error _ -> fail "expected Kimi sync Anthropic Messages response to parse");
@@ -2089,13 +2107,13 @@ let test_complete_kimi_anthropic_stream_codec () =
         (anthropic_sse_response "kimi stream")
     in
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~config:(make_kimi_config url)
          ~messages
          ~on_event:(fun _ -> ())
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Ok resp -> check string "Kimi stream text" "kimi stream" (text_of_response resp)
      | Error _ -> fail "expected Kimi Anthropic Messages SSE response to parse");
@@ -2131,7 +2149,7 @@ let test_complete_request_wire_observer_sees_exact_stream_body () =
       Ok ()
     in
     (match
-       Http_request_observer.with_observer http_observer (fun () -> Complete.complete_stream
+       Http_request_observer.with_observer http_observer (fun () -> (Complete.complete_stream
          ~sw
          ~net:env#net
          ~capture_id:"stream-request-1"
@@ -2139,7 +2157,7 @@ let test_complete_request_wire_observer_sees_exact_stream_body () =
          ~config:(make_kimi_config url)
          ~messages
          ~on_event:(fun _ -> ())
-         ())
+         ()).Llm_provider.Completion_outcome.result)
      with
      | Ok resp -> check string "stream response" "observed stream" (text_of_response resp)
      | Error _ -> fail "request observation changed the streaming provider result");
@@ -2194,7 +2212,7 @@ let test_complete_openai_compatible_kimi_uses_openai_codec () =
         ~max_tokens:100
         ()
     in
-    (match Complete.complete ~sw ~net:env#net ~config ~messages () with
+    (match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
      | Ok resp -> check string "Kimi OpenAI text" "kimi openai" (text_of_response resp)
      | Error _ -> fail "expected OpenAI-compatible Kimi response to parse");
     (match !captured_path with
@@ -2231,7 +2249,7 @@ let test_complete_stream_ok () =
     let config = make_config url in
     let events = ref [] in
     let on_event evt = events := evt :: !events in
-    match Complete.complete_stream ~sw ~net:env#net ~config ~messages ~on_event () with
+    match (Complete.complete_stream ~sw ~net:env#net ~config ~messages ~on_event ()).Llm_provider.Completion_outcome.result with
     | Ok resp ->
       let text =
         List.filter_map
@@ -2260,13 +2278,13 @@ let test_complete_stream_preserves_thinking_signature () =
     in
     let config = make_config url in
     match
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~config
         ~messages
         ~on_event:(fun _ -> ())
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Ok resp ->
       check bool "stop tool use" true (resp.stop_reason = Types.StopToolUse);
@@ -2304,14 +2322,14 @@ let test_complete_stream_malformed_payload_is_wire_error () =
       }
     in
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~config:(make_config url)
          ~messages
          ~metrics
          ~on_event:(fun _ -> ())
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Error
          (Http_client.ProviderFailure
@@ -2348,14 +2366,14 @@ let test_complete_provider_error_envelope_is_not_a_wire_error () =
     in
     let telemetry = ref [] in
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~config:(make_openai_config url)
          ~messages
          ~on_event:(fun _ -> ())
          ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Error
          (Http_client.ProviderFailure
@@ -2399,14 +2417,14 @@ let test_complete_declared_provider_condition_is_that_http_error () =
     in
     let telemetry = ref [] in
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~config:(make_openai_config url)
          ~messages
          ~on_event:(fun _ -> ())
          ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Error
          (Http_client.HttpError
@@ -2446,14 +2464,14 @@ let test_complete_ollama_malformed_ndjson_is_wire_error () =
     in
     let telemetry = ref [] in
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~config:(make_config ~kind:Provider_config.Ollama ~request_path:"/api/chat" url)
          ~messages
          ~on_event:(fun _ -> ())
          ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Error
          (Http_client.ProviderFailure
@@ -2498,14 +2516,14 @@ let test_complete_ollama_provider_error_is_not_wire_error () =
     let telemetry = ref [] in
     let events = ref [] in
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~config:(make_config ~kind:Provider_config.Ollama ~request_path:"/api/chat" url)
          ~messages
          ~on_event:(fun event -> events := event :: !events)
          ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Error
          (Http_client.ProviderFailure
@@ -2569,14 +2587,14 @@ let test_complete_ollama_missing_required_ndjson_field_is_wire_error () =
 |}
     in
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~config:(make_config ~kind:Provider_config.Ollama ~request_path:"/api/chat" url)
          ~messages
          ~on_event:(fun _ -> ())
          ~on_telemetry:(fun _ -> ())
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Error
          (Http_client.ProviderFailure
@@ -2608,14 +2626,14 @@ let test_complete_ollama_incomplete_ndjson_preserves_wire_format () =
     in
     let telemetry = ref [] in
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~config:(make_config ~kind:Provider_config.Ollama ~request_path:"/api/chat" url)
          ~messages
          ~on_event:(fun _ -> ())
          ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Error
          (Http_client.ProviderFailure
@@ -2658,7 +2676,7 @@ let test_complete_stream_on_event_exception_is_nonfatal () =
       incr calls;
       failwith "stream observer failed"
     in
-    match Complete.complete_stream ~sw ~net:env#net ~config ~messages ~on_event () with
+    match (Complete.complete_stream ~sw ~net:env#net ~config ~messages ~on_event ()).Llm_provider.Completion_outcome.result with
     | Ok resp ->
       check string "text" "streamed text" (text_of_response resp);
       check bool "callback invoked" true (!calls > 0);
@@ -2684,7 +2702,7 @@ let test_complete_stream_wire_observer_rejection_is_typed_nonfatal () =
       Error Wire_observer.{ reason = "caller queue unavailable" }
     in
     match
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~capture_id:"request-wire-1"
@@ -2693,7 +2711,7 @@ let test_complete_stream_wire_observer_rejection_is_typed_nonfatal () =
         ~messages
         ~on_event:(fun _ -> ())
         ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Error _ -> fail "wire observer rejection changed the provider result"
     | Ok response ->
@@ -2771,7 +2789,7 @@ let test_complete_stream_wire_failure_telemetry_exception_is_nonfatal () =
            | _ -> ()
          in
          (match
-            Complete.complete_stream
+            (Complete.complete_stream
               ~sw
               ~net:env#net
               ~wire_observer
@@ -2779,7 +2797,7 @@ let test_complete_stream_wire_failure_telemetry_exception_is_nonfatal () =
               ~messages
               ~on_event:(fun _ -> ())
               ~on_telemetry
-              ()
+              ()).Llm_provider.Completion_outcome.result
           with
           | Error _ ->
             fail "wire failure telemetry callback exception changed the provider result"
@@ -2827,7 +2845,7 @@ let test_complete_stream_transport_on_event_exception_is_nonfatal () =
   in
   let config = make_config "http://unused.test" in
   match
-    Complete.complete_stream ~sw ~net:env#net ~transport ~config ~messages ~on_event ()
+    (Complete.complete_stream ~sw ~net:env#net ~transport ~config ~messages ~on_event ()).Llm_provider.Completion_outcome.result
   with
   | Ok resp ->
     check string "text" "transport streamed" (text_of_response resp);
@@ -2856,13 +2874,13 @@ let test_complete_stream_preserves_repeated_incremental_text () =
     let events = ref [] in
     let on_event event = events := event :: !events in
     match
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~config:(make_config url)
         ~messages
         ~on_event
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Ok response ->
       check string "canonical response" "haha" (text_of_response response);
@@ -2908,8 +2926,8 @@ let complete_stream_preserves_repeated_content ~reasoning () =
       | Types.ContentBlockDelta {delta=Types.TextDelta text | Types.ThinkingDelta text;_} ->
         delivered := text :: !delivered
       | _ -> () in
-    (match Complete.complete_stream ~sw ~net:env#net ~config:(make_config url)
-             ~messages ~on_event () with
+    (match (Complete.complete_stream ~sw ~net:env#net ~config:(make_config url)
+              ~messages ~on_event ()).Llm_provider.Completion_outcome.result with
      | Error _ -> fail "valid repeating content must reach the provider terminal"
      | Ok response ->
        check bool "explicit provider terminal survives" true (response.stop_reason=Types.EndTurn);
@@ -2956,13 +2974,13 @@ let test_complete_stream_replaces_invalid_content_with_typed_failure () =
     let events = ref [] in
     let on_event event = events := event :: !events in
     (match
-       Complete.complete_stream
+       (Complete.complete_stream
          ~sw
          ~net:env#net
          ~config:(make_config url)
          ~messages
          ~on_event
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Error _ -> ()
      | Ok _ -> fail "cross-kind content stream completed successfully");
@@ -3013,7 +3031,7 @@ let test_complete_stream_active_chunks_can_exceed_idle_timeout_total () =
     let events = ref [] in
     let on_event evt = events := evt :: !events in
     match
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~clock:env#clock
@@ -3021,7 +3039,7 @@ let test_complete_stream_active_chunks_can_exceed_idle_timeout_total () =
         ~config
         ~messages
         ~on_event
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Ok resp ->
       check string "text" "active long stream" (text_of_response resp);
@@ -3080,7 +3098,7 @@ let test_complete_stream_idle_after_output_keeps_the_production_state () =
     let config = make_config url in
     let telemetry = ref [] in
     match
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~clock:env#clock
@@ -3089,7 +3107,7 @@ let test_complete_stream_idle_after_output_keeps_the_production_state () =
         ~messages
         ~on_event:(fun _ -> ())
         ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Error
         (Http_client.TimeoutError
@@ -3136,7 +3154,7 @@ let test_complete_stream_first_event_timeout_telemetry_is_ttft () =
     let config = make_config url in
     let telemetry = ref [] in
     match
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~clock:env#clock
@@ -3145,7 +3163,7 @@ let test_complete_stream_first_event_timeout_telemetry_is_ttft () =
         ~messages
         ~on_event:(fun _ -> ())
         ~on_telemetry:(fun event -> telemetry := event :: !telemetry)
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Error (Http_client.TimeoutError { phase = Http_client.First_token; _ }) ->
       check
@@ -3185,7 +3203,7 @@ let test_complete_stream_idle_timeout_still_fires () =
     let config = make_config url in
     let on_event _evt = () in
     match
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~clock:env#clock
@@ -3193,7 +3211,7 @@ let test_complete_stream_idle_timeout_still_fires () =
         ~config
         ~messages
         ~on_event
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Error (Http_client.TimeoutError { phase = Http_client.First_token; message }) ->
       let prefix = "stream_idle_timeout_s deadline exceeded" in
@@ -3271,7 +3289,7 @@ let test_complete_stream_responses_prelude_keeps_first_event_budget () =
         ()
     in
     match
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~clock:env#clock
@@ -3280,7 +3298,7 @@ let test_complete_stream_responses_prelude_keeps_first_event_budget () =
         ~config
         ~messages
         ~on_event:(fun _ -> ())
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Ok resp ->
       check string "text" "late" (text_of_response resp);
@@ -3328,7 +3346,7 @@ let test_complete_stream_long_thinking_is_not_cut_off () =
       | _ -> ()
     in
     match
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~clock:mock_clock
@@ -3336,7 +3354,7 @@ let test_complete_stream_long_thinking_is_not_cut_off () =
         ~config
         ~messages
         ~on_event
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Ok resp ->
       check string "text" "answer" (text_of_response resp);
@@ -3391,7 +3409,7 @@ let omitted_idle_test_case ~transport_arm ~kind ~request_path ~content_type ~bod
       Eio.Promise.resolve resolve_release_body ());
     match
       Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
-        Complete.complete_stream
+        (Complete.complete_stream
           ~sw
           ~net:env#net
           ~clock:mock_clock
@@ -3401,7 +3419,7 @@ let omitted_idle_test_case ~transport_arm ~kind ~request_path ~content_type ~bod
           ~on_event:(function
             | Types.Connected -> Eio.Promise.resolve resolve_connected ()
             | _ -> ())
-          ())
+          ()).Llm_provider.Completion_outcome.result)
     with
     | Ok resp ->
       check string "text" "default-disabled" (text_of_response resp);
@@ -3466,7 +3484,7 @@ let test_clock_jump_fixture_fires_explicit_idle_timeout () =
       Eio.Promise.resolve resolve_release_body ());
     match
       Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
-        Complete.complete_stream
+        (Complete.complete_stream
           ~sw
           ~net:env#net
           ~clock:mock_clock
@@ -3476,7 +3494,7 @@ let test_clock_jump_fixture_fires_explicit_idle_timeout () =
           ~on_event:(function
             | Types.Connected -> Eio.Promise.resolve resolve_connected ()
             | _ -> ())
-          ())
+          ()).Llm_provider.Completion_outcome.result)
     with
     | Error (Http_client.TimeoutError { phase = Http_client.First_token; _ }) ->
       Eio.Switch.fail sw Exit
@@ -3512,7 +3530,7 @@ let test_complete_stream_metrics () =
     in
     let on_event _evt = () in
     match
-      Complete.complete_stream ~sw ~net:env#net ~config ~messages ~on_event ~metrics ()
+      (Complete.complete_stream ~sw ~net:env#net ~config ~messages ~on_event ~metrics ()).Llm_provider.Completion_outcome.result
     with
     | Ok _ ->
       check int "first chunk count" 1 (List.length !first_chunks);
@@ -3651,7 +3669,7 @@ let test_complete_stream_transport_arm_idle_timeout () =
     (* The request-borne deadline is the sole idle-timeout source. *)
     let transport = Complete.make_http_transport ~clock:env#clock ~sw ~net:env#net () in
     match
-      Complete.complete_stream
+      (Complete.complete_stream
         ~sw
         ~net:env#net
         ~clock:env#clock
@@ -3660,7 +3678,7 @@ let test_complete_stream_transport_arm_idle_timeout () =
         ~config
         ~messages
         ~on_event:(fun _ -> ())
-        ()
+        ()).Llm_provider.Completion_outcome.result
     with
     | Error (Http_client.TimeoutError { phase = Http_client.First_token; _ }) ->
       Eio.Switch.fail sw Exit
@@ -3691,14 +3709,14 @@ let test_complete_body_timeout_fires () =
     let config = make_config url in
     let t0 = Unix.gettimeofday () in
     (match
-       Complete.complete
+       (Complete.complete
          ~sw
          ~net:env#net
          ~clock:env#clock
          ~config
          ~messages
          ~body_timeout_s:0.3
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Ok _ -> fail "expected Error (body_timeout_s should have fired)"
      | Error
@@ -3729,14 +3747,14 @@ let test_complete_body_timeout_does_not_fire_on_fast_response () =
     let url = start_mock_server ~sw ~net:env#net (anthropic_response "fast response") in
     let config = make_config url in
     (match
-       Complete.complete
+       (Complete.complete
          ~sw
          ~net:env#net
          ~clock:env#clock
          ~config
          ~messages
          ~body_timeout_s:60.0
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Ok resp ->
        let text =
@@ -3770,14 +3788,14 @@ let test_complete_sync_uses_only_outer_body_timeout () =
     in
     let config = { (make_config url) with connect_timeout_s = Some 0.02 } in
     (match
-       Complete.complete
+       (Complete.complete
          ~sw
          ~net:env#net
          ~clock:env#clock
          ~config
          ~messages
          ~body_timeout_s:0.5
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Ok response -> check string "body" "slow body" (text_of_response response)
      | Error _ -> fail "nested connect timeout incorrectly capped sync body");
@@ -3802,7 +3820,7 @@ let test_complete_body_timeout_without_clock_rejected_before_request () =
     in
     let config = make_config url in
     (match
-       Complete.complete ~sw ~net:env#net ~config ~messages ~body_timeout_s:60.0 ()
+       (Complete.complete ~sw ~net:env#net ~config ~messages ~body_timeout_s:60.0 ()).Llm_provider.Completion_outcome.result
      with
      | Error (Http_client.AcceptRejected _) ->
        check int "request rejected before HTTP I/O" 0 !request_count
@@ -3839,14 +3857,14 @@ let test_complete_body_timeout_requires_finite_positive_value_before_request () 
     List.iter
       (fun (label, body_timeout_s) ->
          match
-           Complete.complete
+           (Complete.complete
              ~sw
              ~net:env#net
              ~clock:env#clock
              ~config
              ~messages
              ~body_timeout_s
-             ()
+             ()).Llm_provider.Completion_outcome.result
          with
          | Error (Http_client.AcceptRejected _) ->
            check int (label ^ " rejected before HTTP I/O") 0 !request_count
@@ -3854,14 +3872,14 @@ let test_complete_body_timeout_requires_finite_positive_value_before_request () 
          | Error _ -> failf "%s timeout returned the wrong typed error" label)
       invalid_cases;
     (match
-       Complete.complete
+       (Complete.complete
          ~sw
          ~net:env#net
          ~clock:env#clock
          ~config
          ~messages
          ~body_timeout_s:60.0
-         ()
+         ()).Llm_provider.Completion_outcome.result
      with
      | Ok resp ->
        let text =
@@ -3888,7 +3906,7 @@ let test_complete_without_body_timeout_or_clock_succeeds () =
     @@ fun sw ->
     let url = start_mock_server ~sw ~net:env#net (anthropic_response "unbounded") in
     let config = make_config url in
-    (match Complete.complete ~sw ~net:env#net ~config ~messages () with
+    (match (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result with
      | Ok resp ->
        let text =
          List.filter_map
@@ -3922,7 +3940,7 @@ let test_complete_injected_transport_without_timeout_is_unbounded () =
     }
   in
   match
-    Complete.complete ~sw ~net:env#net ~transport ~config:(make_config "") ~messages ()
+    (Complete.complete ~sw ~net:env#net ~transport ~config:(make_config "") ~messages ()).Llm_provider.Completion_outcome.result
   with
   | Ok resp ->
     check
@@ -3952,14 +3970,14 @@ let test_complete_injected_transport_rejects_invalid_deadlines_before_call () =
   in
   let config = make_config "" in
   (match
-     Complete.complete
+     (Complete.complete
        ~sw
        ~net:env#net
        ~transport
        ~config
        ~messages
        ~body_timeout_s:1.0
-       ()
+       ()).Llm_provider.Completion_outcome.result
    with
    | Error (Http_client.AcceptRejected _) -> ()
    | Ok _ -> fail "injected timeout without clock was accepted"
@@ -3975,7 +3993,7 @@ let test_complete_injected_transport_rejects_invalid_deadlines_before_call () =
   List.iter
     (fun (label, body_timeout_s) ->
        match
-         Complete.complete
+         (Complete.complete
            ~sw
            ~net:env#net
            ~clock:env#clock
@@ -3983,7 +4001,7 @@ let test_complete_injected_transport_rejects_invalid_deadlines_before_call () =
            ~config
            ~messages
            ~body_timeout_s
-           ()
+           ()).Llm_provider.Completion_outcome.result
        with
        | Error (Http_client.AcceptRejected _) -> ()
        | Ok _ -> failf "%s injected timeout was accepted" label
@@ -4009,7 +4027,7 @@ let test_complete_injected_transport_positive_timeout_succeeds () =
     }
   in
   match
-    Complete.complete
+    (Complete.complete
       ~sw
       ~net:env#net
       ~clock:env#clock
@@ -4017,7 +4035,7 @@ let test_complete_injected_transport_positive_timeout_succeeds () =
       ~config:(make_config "")
       ~messages
       ~body_timeout_s:1.0
-      ()
+      ()).Llm_provider.Completion_outcome.result
   with
   | Ok resp ->
     check string "bounded injected response" "injected bounded" (text_of_response resp);
@@ -4043,7 +4061,7 @@ let test_complete_injected_transport_timeout_is_typed () =
     }
   in
   match
-    Complete.complete
+    (Complete.complete
       ~sw
       ~net:env#net
       ~clock:env#clock
@@ -4051,7 +4069,7 @@ let test_complete_injected_transport_timeout_is_typed () =
       ~config:(make_config "")
       ~messages
       ~body_timeout_s:0.01
-      ()
+      ()).Llm_provider.Completion_outcome.result
   with
   | Error (Http_client.TimeoutError { phase = Http_client.Non_streaming_body; message })
     ->
@@ -4084,7 +4102,7 @@ let test_complete_injected_transport_inner_timeout_is_not_relabelled () =
   let propagated =
     try
       ignore
-        (Complete.complete
+        ((Complete.complete
            ~sw
            ~net:env#net
            ~clock:env#clock
@@ -4092,7 +4110,7 @@ let test_complete_injected_transport_inner_timeout_is_not_relabelled () =
            ~config:(make_config "")
            ~messages
            ~body_timeout_s:1.0
-           ());
+           ())).Llm_provider.Completion_outcome.result;
       false
     with
     | Eio.Time.Timeout -> true
@@ -4118,7 +4136,7 @@ let test_complete_deadline_preflight_precedes_cache_hit () =
     }
   in
   match
-    Complete.complete
+    (Complete.complete
       ~sw
       ~net:env#net
       ~config:(make_config "")
@@ -4126,7 +4144,7 @@ let test_complete_deadline_preflight_precedes_cache_hit () =
       ~cache
       ~body_timeout_s:1.0
       ~request_wire_observer:(fun _ -> incr observations; Ok ())
-      ()
+      ()).Llm_provider.Completion_outcome.result
   with
   | Error (Http_client.AcceptRejected _) ->
     check int "deadline preflight precedes cache lookup" 0 !cache_reads;
@@ -4173,17 +4191,17 @@ let test_complete_rejects_unsupported_reasoning_before_io () =
     check_accept_rejected
       ~label:"sync unsupported reasoning effort"
       ~needle:"does not accept reasoning effort"
-      (Complete.complete ~sw ~net:env#net ~config ~messages ());
+      ((Complete.complete ~sw ~net:env#net ~config ~messages ())).Llm_provider.Completion_outcome.result;
     check_accept_rejected
       ~label:"stream unsupported reasoning effort"
       ~needle:"does not accept reasoning effort"
-      (Complete.complete_stream
+      ((Complete.complete_stream
          ~sw
          ~net:env#net
          ~config
          ~messages
          ~on_event:(fun _ -> ())
-         ());
+         ())).Llm_provider.Completion_outcome.result;
     check int "unsupported effort performs no HTTP request" 0 !request_count;
     Eio.Switch.fail sw Exit
   with
@@ -4214,17 +4232,17 @@ let test_complete_rejects_missing_anthropic_output_ceiling_before_io () =
     check_accept_rejected
       ~label:"sync missing Anthropic output ceiling"
       ~needle:"requires max_tokens"
-      (Complete.complete ~sw ~net:env#net ~config ~messages ());
+      ((Complete.complete ~sw ~net:env#net ~config ~messages ())).Llm_provider.Completion_outcome.result;
     check_accept_rejected
       ~label:"stream missing Anthropic output ceiling"
       ~needle:"requires max_tokens"
-      (Complete.complete_stream
+      ((Complete.complete_stream
          ~sw
          ~net:env#net
          ~config
          ~messages
          ~on_event:(fun _ -> ())
-         ());
+         ())).Llm_provider.Completion_outcome.result;
     check int "missing output ceiling performs no HTTP request" 0 !request_count;
     Eio.Switch.fail sw Exit
   with
@@ -4355,9 +4373,9 @@ let test_responses_tool_images_on_http ~stream () =
     in
     let result =
       if stream then
-        Complete.complete_stream ~sw ~net:env#net ~config ~messages:history
-          ~on_event:(fun _ -> ()) ()
-      else Complete.complete ~sw ~net:env#net ~config ~messages:history ()
+        (Complete.complete_stream ~sw ~net:env#net ~config ~messages:history
+          ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+      else (Complete.complete ~sw ~net:env#net ~config ~messages:history ()).Llm_provider.Completion_outcome.result
     in
     (match result with Ok _ -> () | Error _ -> fail "Responses fixture completion failed");
     let body = match !captured with
@@ -4438,9 +4456,9 @@ let test_anthropic_image_sources_on_http ~stream () =
     let config = make_config url in
     let result =
       if stream then
-        Complete.complete_stream ~sw ~net:env#net ~config ~messages:history
-          ~on_event:(fun _ -> ()) ()
-      else Complete.complete ~sw ~net:env#net ~config ~messages:history ()
+        (Complete.complete_stream ~sw ~net:env#net ~config ~messages:history
+          ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+      else (Complete.complete ~sw ~net:env#net ~config ~messages:history ()).Llm_provider.Completion_outcome.result
     in
     (match result with Ok _ -> () | Error _ -> fail "fixture completion failed");
     let body = match !captured with
@@ -4484,8 +4502,8 @@ let test_refresh_failure_prevents_http () =
         ~credential_source:(Refreshable_credential (fun () -> Error Credential_unavailable))
         ~model_capabilities_override:Capabilities.gemini_capabilities () in
       List.iter (fun stream ->
-        let result = if stream then Complete.complete_stream ~sw ~net:env#net ~config ~messages
-          ~on_event:(fun _ -> ()) () else Complete.complete ~sw ~net:env#net ~config ~messages () in
+        let result = if stream then (Complete.complete_stream ~sw ~net:env#net ~config ~messages
+          ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result else (Complete.complete ~sw ~net:env#net ~config ~messages ()).Llm_provider.Completion_outcome.result in
         match result with
         | Error (Http_client.AcceptRejected { reason }) ->
           check string "safe refusal" "Provider credential refresh is unavailable" reason
@@ -4521,9 +4539,9 @@ let test_vertex_native_transport () =
         let http_events = ref [] in
         let http_observer = Http_request_observer.create (fun event -> http_events := event :: !http_events; Ok ()) in
         let result = Http_request_observer.with_observer http_observer (fun () ->
-          if stream then Complete.complete_stream ~sw ~net:env#net ~config
-            ~messages ~tools ~on_event:(fun _ -> ()) ()
-          else Complete.complete ~sw ~net:env#net ~config ~messages ~tools ~cache ()) in
+          if stream then (Complete.complete_stream ~sw ~net:env#net ~config
+            ~messages ~tools ~on_event:(fun _ -> ()) ()).Llm_provider.Completion_outcome.result
+          else (Complete.complete ~sw ~net:env#net ~config ~messages ~tools ~cache ()).Llm_provider.Completion_outcome.result) in
         (match result with
          | Error _ -> fail "native Vertex-shaped transport failed"
          | Ok response -> check bool "native function call survives transport" true
@@ -4554,7 +4572,7 @@ let transport_request config observer : Llm_transport.completion_request =
   ; stream_idle_timeout_s=None; first_event_timeout_s=None; body_timeout_s=None }
 ;;
 
-let test_native_completion_outcome ~via_transport () =
+let test_native_completion_outcome ?(public = false) ~via_transport () =
   Eio_main.run @@ fun env ->
   try Eio.Switch.run @@ fun sw ->
     List.iter (fun stream ->
@@ -4575,7 +4593,18 @@ let test_native_completion_outcome ~via_transport () =
               ~request_path:"/v1/messages" ~base_url:url ~max_tokens:200
               ~model_capabilities_override:capabilities () in
           let response, provenance =
-            if via_transport then
+            if public then
+              let transport = if via_transport then
+                Some (Complete.make_http_transport ~sw ~net:env#net ()) else None in
+              let outcome = if stream then
+                Complete.complete_stream ~sw ~net:env#net ?transport
+                  ?request_wire_observer:observer ~config ~messages
+                  ~on_event:(fun _ -> ()) ()
+              else
+                Complete.complete ~sw ~net:env#net ?transport
+                  ?request_wire_observer:observer ~config ~messages () in
+              outcome.result, outcome.request_provenance
+            else if via_transport then
               let transport = Complete.make_http_transport ~sw ~net:env#net () in
               let request = transport_request config observer in
               if stream then
@@ -4601,6 +4630,7 @@ let test_native_completion_outcome ~via_transport () =
           let body = match !captured with Some body -> body
             | None -> fail "peer did not receive the generation body" in
           match provenance with
+          | Completion_outcome.Cache_reused _
           | Completion_outcome.Not_serialized
           | Completion_outcome.External_unobserved
           | Completion_outcome.Interrupted_unobserved -> fail "serialized evidence was lost"
@@ -4630,6 +4660,7 @@ let test_custom_transport_outcome () =
   let stream = transport.invoke_stream ~on_event:(fun _ -> ()) request in
   let check_unobserved = function
     | Completion_outcome.External_unobserved -> ()
+    | Completion_outcome.Cache_reused _
     | Completion_outcome.Not_serialized | Completion_outcome.Serialized _
     | Completion_outcome.Interrupted_unobserved ->
       fail "custom callback invented a native serialization fact"
@@ -4646,6 +4677,7 @@ let test_native_completion_before_serialization () =
       ~model_id:"receipt-required-missing" ~base_url:"http://127.0.0.1:1" () in
   let check_provenance = function
     | Completion_outcome.Not_serialized -> ()
+    | Completion_outcome.Cache_reused _
     | Completion_outcome.Serialized _
     | Completion_outcome.External_unobserved
     | Completion_outcome.Interrupted_unobserved -> fail "failed serializer invented a receipt"
@@ -4664,6 +4696,118 @@ let test_native_completion_before_serialization () =
   | Error _ | Ok _ -> fail "missing required stream limit must fail before dispatch"
 ;;
 
+let test_public_unobserved_and_preflight () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let config = make_config "http://not-observed.invalid" in
+  let transport = make_transport (Ok (mock_transport_response "custom")) in
+  List.iter (fun stream ->
+    let outcome = if stream then
+      Complete.complete_stream ~sw ~net:env#net ~config ~messages ~transport
+        ~on_event:(fun _ -> ()) ()
+    else Complete.complete ~sw ~net:env#net ~config ~messages ~transport () in
+    (match outcome.request_provenance with
+     | Completion_outcome.External_unobserved -> ()
+     | Completion_outcome.Not_serialized | Completion_outcome.Serialized _
+     | Completion_outcome.Cache_reused _ | Completion_outcome.Interrupted_unobserved ->
+       fail "public custom path invented a native receipt");
+    match outcome.result with Ok _ -> () | Error _ -> fail "custom success lost")
+    [false; true];
+  let missing = Provider_config.make ~kind:Anthropic
+    ~model_id:"receipt-required-missing" ~base_url:"http://127.0.0.1:1" () in
+  List.iter (fun stream ->
+    let outcome = if stream then
+      Complete.complete_stream ~sw ~net:env#net ~config:missing ~messages
+        ~on_event:(fun _ -> ()) ()
+    else Complete.complete ~sw ~net:env#net ~config:missing ~messages () in
+    (match outcome.request_provenance with
+     | Completion_outcome.Not_serialized -> ()
+     | Completion_outcome.Serialized _ | Completion_outcome.Cache_reused _
+     | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved ->
+       fail "public rejection invented a receipt");
+    match outcome.result with
+    | Error (Http_client.AcceptRejected _) -> ()
+    | Error _ | Ok _ -> fail "missing required output must reject") [false; true]
+;;
+
+let test_prepared_rejection_retains_serialization () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let config = make_config "http://127.0.0.1:1" in
+  let prepared = Complete.prepare_request ~config ~messages () in
+  List.iter (fun stream ->
+    let serialized = match Complete.admit_request_body ~stream prepared with
+      | Ok request -> request
+      | Error _ -> fail "fixture must admit a serialized body" in
+    let outcome = if stream then
+      Complete.complete_stream_serialized ~sw ~net:env#net serialized
+        ~admission_timeout_s:(-1.) ~on_event:(fun _ -> ()) ()
+    else
+      Complete.complete_serialized ~sw ~net:env#net serialized
+        ~call_timeout_s:(-1.) () in
+    (match outcome.result with
+     | Error (Http_client.AcceptRejected _) -> ()
+     | Error _ | Ok _ -> fail "invalid declared deadline must reject before dispatch");
+    match outcome.request_provenance with
+    | Completion_outcome.Serialized request ->
+      check bool "prepared serialization survives a pre-dispatch rejection" true
+        (request.body_bytes > 0)
+    | Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
+    | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved ->
+      fail "pre-dispatch rejection discarded an existing serialized artifact")
+    [false; true]
+;;
+
+let test_prepared_wrong_mode_retains_serialization () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let config = make_config "http://127.0.0.1:1" in
+  let prepared = Complete.prepare_request ~config ~messages () in
+  List.iter (fun stream ->
+    let serialized = match Complete.admit_request_body ~stream prepared with
+      | Ok request -> request | Error _ -> fail "fixture serialization failed" in
+    let outcome = if stream then
+      Complete.complete_serialized ~sw ~net:env#net serialized ()
+    else Complete.complete_stream_serialized ~sw ~net:env#net serialized
+      ~on_event:(fun _ -> ()) () in
+    (match outcome.result with
+     | Error (Http_client.AcceptRejected _) -> ()
+     | Error _ | Ok _ -> fail "wrong streaming shape must reject before dispatch");
+    match outcome.request_provenance with
+    | Completion_outcome.Serialized _ -> ()
+    | Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
+    | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved ->
+      fail "wrong mode rejection discarded the supplied serialization") [false; true]
+;;
+
+let test_prepared_work_timeout_retains_serialization () =
+  Eio_main.run @@ fun env ->
+  try Eio.Switch.run @@ fun sw ->
+    let clock = Eio_mock.Clock.make () in
+    let captured = ref None in
+    let url = start_mock_server ~sw ~net:env#net ~capture_body:captured
+      ~on_request:(fun () ->
+        Eio_mock.Clock.set_time clock 1.;
+        Eio.Fiber.await_cancel ()) (anthropic_response "must time out") in
+    let config = make_config url in
+    let prepared = Complete.prepare_request ~config ~messages () in
+    let serialized = match Complete.admit_request_body ~stream:false prepared with
+      | Ok request -> request | Error _ -> fail "fixture serialization failed" in
+    let outcome = Complete.complete_serialized ~sw ~net:env#net ~clock
+      ~call_timeout_s:1. serialized () in
+    (match outcome.result with
+     | Error (Http_client.TimeoutError {phase=Http_client.Non_streaming_body;_}) -> ()
+     | Error _ | Ok _ -> fail "peer-triggered clock must expire the provider round trip");
+    (match outcome.request_provenance with
+     | Completion_outcome.Serialized request ->
+       let body = match !captured with Some body -> body
+         | None -> fail "deadline moved before peer received the request" in
+       check string "interruption preserves known peer body"
+         Digestif.SHA256.(digest_string body |> to_hex) request.body_sha256
+     | Completion_outcome.Not_serialized | Completion_outcome.Cache_reused _
+     | Completion_outcome.External_unobserved | Completion_outcome.Interrupted_unobserved ->
+       fail "work timeout discarded known prepared serialization");
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
 let () =
   run
     "complete_http"
@@ -4672,8 +4816,20 @@ let () =
             `Quick (test_native_completion_outcome ~via_transport:false)
         ; test_case "native transport factory preserves the received wire evidence"
             `Quick (test_native_completion_outcome ~via_transport:true)
+        ; test_case "public sync/stream outcomes preserve native success/error evidence"
+            `Quick (test_native_completion_outcome ~public:true ~via_transport:false)
+        ; test_case "public outcomes preserve factory success/error evidence"
+            `Quick (test_native_completion_outcome ~public:true ~via_transport:true)
         ; test_case "custom callbacks explicitly leave native wire unobserved"
             `Quick test_custom_transport_outcome
+        ; test_case "public custom and preflight states remain explicit"
+            `Quick test_public_unobserved_and_preflight
+        ; test_case "prepared evidence survives pre-dispatch rejection"
+            `Quick test_prepared_rejection_retains_serialization
+        ; test_case "wrong mode rejection preserves prepared evidence"
+            `Quick test_prepared_wrong_mode_retains_serialization
+        ; test_case "work timeout preserves prepared evidence"
+            `Quick test_prepared_work_timeout_retains_serialization
         ; test_case "failed serialization invents no receipt"
             `Quick test_native_completion_before_serialization ] )
     ; ( "Vertex native", [test_case "OAuth native sync and streaming tool response" `Quick test_vertex_native_transport; test_case "refresh failure blocks HTTP" `Quick test_refresh_failure_prevents_http] )

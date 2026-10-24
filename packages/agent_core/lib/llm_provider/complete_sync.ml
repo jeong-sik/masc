@@ -536,7 +536,13 @@ let complete_http
            (fun serialized -> Ok (body_deadline, serialized)))
   in
   match preflight with
-  | Error err -> Completion_outcome.before_serialization (Error err, None)
+  | Error err ->
+    (match admitted_body with
+     | Some body ->
+       Completion_outcome.after_serialization
+         ~request:(Prepared_completion_request.admitted_body_request body)
+         (Error err, None)
+     | None -> Completion_outcome.before_serialization (Error err, None))
   | Ok (body_deadline, serialized) ->
     let result =
     let http_codec = serialized.Complete_common.http_codec in

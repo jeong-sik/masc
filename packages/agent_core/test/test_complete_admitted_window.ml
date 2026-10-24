@@ -146,22 +146,22 @@ let complete_admitted_under_a_spent_window ~stream =
     let result =
       if stream
       then
-        Complete.complete_stream_admitted
+        (Complete.complete_stream_admitted
           ~sw
           ~net
           ~admission_window:(spent_window ())
           ~transport
           admitted
           ~on_event:ignore
-          ()
+          ()).Llm_provider.Completion_outcome.result
       else
-        Complete.complete_admitted
+        (Complete.complete_admitted
           ~sw
           ~net
           ~transport
           admitted
           ~call_window:(spent_window ())
-          ()
+          ()).Llm_provider.Completion_outcome.result
     in
     result, !reached
   in

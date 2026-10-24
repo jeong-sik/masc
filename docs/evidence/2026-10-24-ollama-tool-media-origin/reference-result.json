@@ -1,0 +1,14 @@
+{
+  "scope": "official reference template on declared fixtures",
+  "serializer_executed": false,
+  "provider_called": false,
+  "template_commit": "995ad96eacd98c81ed38be0c5b274b04031597b0",
+  "template_sha256": "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259",
+  "checks": {
+    "old_synthetic_user_loses_current_reasoning": true,
+    "tool_role_preserves_current_reasoning": true,
+    "default_discards_prior_question_reasoning": true,
+    "real_new_human_closes_current_trajectory": true,
+    "explicit_preserve_thinking_keeps_full_history": true
+  }
+}

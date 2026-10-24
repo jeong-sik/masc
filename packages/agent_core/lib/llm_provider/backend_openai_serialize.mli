@@ -65,7 +65,9 @@ val dialect_messages_of_history
     occurrence-scoped ToolUse-to-ToolResult projection. Ollama tool results
     carry [tool_name], not the OpenAI-compatible [tool_call_id]. Missing or
     ambiguous correlation is returned explicitly so the HTTP serialization
-    boundary can reject it. *)
+    boundary can reject it. Tool-result images stay in that correlated tool
+    message's native [images] field; they never introduce a user-query boundary.
+    Image source and capability admission match ordinary native image input. *)
 val ollama_messages_of_history
   :  modality_priority:Modality.priority
   -> supports_image_input:bool

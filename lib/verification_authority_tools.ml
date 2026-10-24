@@ -805,3 +805,46 @@ let task_review_lookup t : Task.Anti_rationalization.lookup_surface =
       | Error detail -> Tool_result.error ~failure_class:Tool_result.Policy_rejection
           ~tool_name:name ~start_time:(Tool_timing.start ()) detail)
   }
+
+type goal_subject = {
+  goal_id : string;
+  request_id : string;
+  criterion : Goal_store.criterion;
+}
+
+type goal_review = {
+  goal_tools : t;
+  goal_subject : goal_subject;
+  goal_layout : string list;
+  goal_binding : string;
+}
+
+let create_goal_review ~config ~goal_id =
+  let open Result.Syntax in
+    let* _goal, (request_id, criterion, submitted_evidence) =
+      Goal_verification.bind_review config ~goal_id in
+    let subject = {goal_id; request_id; criterion} in
+    let* goal_tools = create_goal_proof ~config ~submitted_evidence in
+    let* goal_layout = goal_proof_root_layout goal_tools in
+    let tool_json (tool : Types_core.tool_schema) =
+      `Assoc ["name", `String tool.name; "description", `String tool.description;
+        "input_schema", tool.input_schema] in
+    let projection = `Assoc ["purpose", `String "goal_proof_review";
+      "goal_id", `String subject.goal_id; "request_id", `String subject.request_id;
+      "criterion", Goal_store.criterion_to_yojson subject.criterion;
+      "base_path", `String config.Workspace.base_path;
+      "ownership_root", `String goal_tools.ownership_root;
+      "schemas", `List (List.map tool_json (schemas goal_tools));
+      "submitted_evidence", `List (List.map
+        Workspace_verification_store.submitted_evidence_item_to_yojson submitted_evidence)] in
+    let* canonical = Lane_addon_action.canonical projection in
+    let goal_binding = Lane_addon_store.digest (Yojson.Safe.to_string canonical) in
+    Ok {goal_tools; goal_subject=subject; goal_layout; goal_binding}
+
+let goal_review_subject t = t.goal_subject
+let goal_review_evidence t = t.goal_tools.submitted_evidence
+let goal_review_binding t = t.goal_binding
+let goal_review_root_layout t = t.goal_layout
+let goal_review_base_path t = t.goal_tools.config.base_path
+let goal_review_lookup t : Task.Anti_rationalization.lookup_surface =
+  {schemas=schemas t.goal_tools; dispatch=dispatch t.goal_tools}

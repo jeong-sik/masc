@@ -44,6 +44,36 @@ val task_review_lookup : task_review -> Task.Anti_rationalization.lookup_surface
     using the same captured endpoint for path translation, Read, Grep, media
     and layout. Configuration changes cannot redirect an admitted lookup. *)
 
+(** {1 Goal proof authority}
+
+    A Goal is shared and has no Task producer. This host-built capability binds
+    its exact pending request and criterion to the shared-playground tools and
+    the complete submitted snapshot. It never supplies a Task identity. *)
+type goal_subject = {
+  goal_id : string;
+  request_id : string;
+  criterion : Goal_store.criterion;
+}
+
+type goal_review
+
+val create_goal_review :
+  config:Workspace.config -> goal_id:string -> (goal_review, string) result
+(** Bind the actual current pending proof under the Goal lock, then capture
+    its submitted snapshot, complete lookup schemas and shared-root layout.
+    Callers cannot supply another request, criterion or evidence payload.
+    Unavailable layout is an error, not an empty-root assertion. No model call,
+    request write, proof transition or human confirmation occurs here. *)
+
+val goal_review_subject : goal_review -> goal_subject
+val goal_review_evidence : goal_review -> Workspace_verification_store.submitted_evidence_item list
+val goal_review_binding : goal_review -> string
+val goal_review_root_layout : goal_review -> string list
+val goal_review_base_path : goal_review -> string
+val goal_review_lookup : goal_review -> Task.Anti_rationalization.lookup_surface
+(** Execute only through the captured host-built tools. A serialized original
+    names this capability by its digest; it does not reconstruct a dispatcher. *)
+
 val create :
   config:Workspace.config -> producer:string ->
   submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> (t, string) result

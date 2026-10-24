@@ -1,0 +1,172 @@
+{
+  "scope": "official Codex app-server probe, production environment whitelist and Native_read argv overrides, 14 captured real schemas, stub handlers; not installed Keeper",
+  "tools": [
+    "keeper_artifact_publish",
+    "keeper_skill_publish",
+    "keeper_memory_select",
+    "keeper_memory_write",
+    "keeper_surface_read",
+    "keeper_surface_post",
+    "keeper_image_read",
+    "keeper_analyze_image",
+    "masc_task_history",
+    "masc_plan_get_task",
+    "masc_run_get",
+    "masc_run_plan",
+    "masc_schedule_list",
+    "masc_schedule_get"
+  ],
+  "arms": [
+    {
+      "label": "upfront_idle",
+      "deferLoading": false,
+      "usage": [
+        {
+          "total": {
+            "totalTokens": 30030,
+            "inputTokens": 30023,
+            "cachedInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 7,
+            "reasoningOutputTokens": 0
+          },
+          "last": {
+            "totalTokens": 30030,
+            "inputTokens": 30023,
+            "cachedInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 7,
+            "reasoningOutputTokens": 0
+          },
+          "modelContextWindow": 380000
+        }
+      ],
+      "calls": [],
+      "responses": [
+        "PROBE_OK"
+      ],
+      "auth_type": "chatgpt",
+      "model": "gpt-6.1-sol",
+      "status": "completed"
+    },
+    {
+      "label": "deferred_idle",
+      "deferLoading": true,
+      "usage": [
+        {
+          "total": {
+            "totalTokens": 26059,
+            "inputTokens": 26052,
+            "cachedInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 7,
+            "reasoningOutputTokens": 0
+          },
+          "last": {
+            "totalTokens": 26059,
+            "inputTokens": 26052,
+            "cachedInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 7,
+            "reasoningOutputTokens": 0
+          },
+          "modelContextWindow": 380000
+        }
+      ],
+      "calls": [],
+      "responses": [
+        "PROBE_OK"
+      ],
+      "auth_type": "chatgpt",
+      "model": "gpt-6.1-sol",
+      "status": "completed"
+    },
+    {
+      "label": "deferred_call",
+      "deferLoading": true,
+      "usage": [
+        {
+          "total": {
+            "totalTokens": 26547,
+            "inputTokens": 26493,
+            "cachedInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 54,
+            "reasoningOutputTokens": 0
+          },
+          "last": {
+            "totalTokens": 26547,
+            "inputTokens": 26493,
+            "cachedInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 54,
+            "reasoningOutputTokens": 0
+          },
+          "modelContextWindow": 380000
+        },
+        {
+          "total": {
+            "totalTokens": 53608,
+            "inputTokens": 53522,
+            "cachedInputTokens": 26368,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 86,
+            "reasoningOutputTokens": 0
+          },
+          "last": {
+            "totalTokens": 27061,
+            "inputTokens": 27029,
+            "cachedInputTokens": 26368,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 32,
+            "reasoningOutputTokens": 0
+          },
+          "modelContextWindow": 380000
+        },
+        {
+          "total": {
+            "totalTokens": 80704,
+            "inputTokens": 80610,
+            "cachedInputTokens": 53248,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 94,
+            "reasoningOutputTokens": 0
+          },
+          "last": {
+            "totalTokens": 27096,
+            "inputTokens": 27088,
+            "cachedInputTokens": 26880,
+            "cacheWriteInputTokens": 0,
+            "outputTokens": 8,
+            "reasoningOutputTokens": 0
+          },
+          "modelContextWindow": 380000
+        }
+      ],
+      "calls": [
+        {
+          "name": "keeper_surface_read",
+          "arguments": {
+            "surface": "fixture",
+            "mode": "local",
+            "limit": 1
+          }
+        }
+      ],
+      "responses": [
+        "PROBE_READ_OK"
+      ],
+      "auth_type": "chatgpt",
+      "model": "gpt-6.1-sol",
+      "status": "completed"
+    }
+  ],
+  "source_base": "f326c4cfe9e2b4547f3b76f6e8d8f164971dc0a0",
+  "candidate_config_commit": "cdc44bef00c",
+  "interpretation": {
+    "paired_idle_input_tokens_before": 30023,
+    "paired_idle_input_tokens_after": 26052,
+    "difference": 3971,
+    "scope": "single paired Codex probe; total input includes cached tokens; not production savings or Claude/Argon measurement"
+  }
+}

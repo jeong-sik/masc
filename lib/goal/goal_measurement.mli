@@ -17,6 +17,14 @@ type t = private {
   recorded_at : string;
 }
 
+type receipt = private {
+  measurement : t;
+  goal_at_recording : Goal_store.goal;
+}
+(** The observation and immutable Goal returned by the same locked
+    transaction. The Goal is the lifecycle state at recording, not a later
+    read or a completion judgment. Only the measurement is persisted. *)
+
 type error =
   | Invalid_request of string
   | Conflict of string
@@ -25,6 +33,12 @@ type error =
 val error_to_string : error -> string
 
 val to_yojson : t -> Yojson.Safe.t
+
+val receipt_fields : receipt -> (string * Yojson.Safe.t) list
+(** Shared MCP/HTTP success fields: [measurement_status = reported_only],
+    [measurement], [goal_at_recording], and [completion_effect = unchanged].
+    Transport success envelopes are supplied by their existing callers.
+    Recording certifies no target, verifier proof, or human confirmation. *)
 
 val path : Workspace_utils.config -> string
 (** The measurement snapshot; its recovery mirror is this path with
@@ -52,19 +66,20 @@ val record :
   observed_value:string ->
   evidence:string ->
   actor:string ->
-  (t, error) result
+  (receipt, error) result
 (** Bind an explicit value and evidence to the exact current criterion under
     the Goal lock. The value is displayed verbatim; no numeric comparison or
     completion inference is performed. Evidence that is not a resolvable
     Evidence Reference is [Invalid_request]. The Goal phase is not consulted:
     a Completed or Dropped Goal still takes an observation, since recording
-    one never moves the phase. *)
+    one never moves the phase. The receipt names that unchanged Goal from
+    the transaction that recorded the observation. *)
 
 val remove_goal : Workspace_utils.config -> goal_id:string -> (unit, string) result
 (** Drop the observation of a deleted Goal, so the snapshot stays bounded by
     the Goals that exist. [Ok ()] without a write when the Goal has none. *)
 
 val record_json :
-  Workspace_utils.config -> actor:string -> Yojson.Safe.t -> (t, error) result
+  Workspace_utils.config -> actor:string -> Yojson.Safe.t -> (receipt, error) result
 (** Strict four-field request decoder shared by the operator and Keeper HTTP
     routes. The authenticated actor is supplied by the route. *)

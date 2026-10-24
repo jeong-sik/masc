@@ -2880,6 +2880,10 @@ status: reference
   - 완료가 아니다: 관측은 Goal phase를 바꾸지 않고 목표 달성을 증명하지도 않는다.
     완료는 **Goal**의 verifier 증명과 사람 확인으로만 정해진다. 그래서 `Completed`·
     `Dropped` Goal도 관측을 받는다.
+  - 기록 영수증: MCP와 HTTP가 같은 `measurement_status: reported_only`,
+    `measurement`, `goal_at_recording`, `completion_effect: unchanged`를 반환한다.
+    `goal_at_recording`은 측정을 기록한 같은 잠금 트랜잭션의 실제 Goal이며,
+    나중에 다시 읽은 값이나 완료 판정이 아니다. 이 Goal 사본은 측정 파일에 저장하지 않는다.
   - Goal 하나에 한 건: 새 관측이 같은 Goal의 이전 관측을 대신한다. 기준이 바뀌면
     (`criterion_revision`이 달라지면) 옛 관측은 새 기준의 값으로 보이지 않고
     `not_recorded`가 된다. Goal을 지우면 그 관측도 지운다.

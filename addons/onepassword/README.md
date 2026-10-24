@@ -12,7 +12,7 @@ Browser Add-on session, through verified website sign-in and continuation.
 `oauth.py` owns the production OAuth code/PKCE exchange and rotating tokens in a
 separate operator-owned private store. Its only model-safe projection is
 `Connector.status()`. `begin()` is an operator-only control: its authorization
-URL must never enter a tool result, Ask text, observation, log or model context.
+URL must never enter a public tool result, Ask text, observation, log or model context.
 The HTTPS callback must authenticate the operator, capture `integration_key`
 from the fragment, clear that fragment, and call `complete()` with the matching
 state. Tokens use the fixed production API origin and redirects are refused.
@@ -32,13 +32,27 @@ it outside retained Lane data and Keeper work disks. Records and lock files are
 and hard-linked files are refused. Host processes share the operator's OS UID;
 this is not a claim of sandbox isolation or protection against that UID.
 
+## Private connection controls
+
+The package now advertises the non-exportable `lane_operator` port for `view`,
+`connect`, `complete` and transaction-pinned `cancel`. The host's existing Add-on
+panel provides its connection form through the [private operator control
+contract](../../docs/design/lane-addon-operator-controls.md). Register the exact
+HTTPS URL `<your MASC origin>/addons/oauth/callback` with 1Password. The callback
+fragment is cleared in the return page and sent through authenticated private
+POST; no tokens or PKCE verifier are returned to that page.
+
+These changes are source implementation, not an installed-host or real-account
+connection result. The previously installed development package still provides
+status only.
+
 ## Docking contract still to implement
 
-1. An authenticated operator surface for connect, callback, approval links,
+1. Extend the private connection controls with approval links, confirmed remote
    revocation and explicit interrupted-exchange recovery. A new account must not
    borrow an earlier account's integration key.
-2. Complete the status-only package's login tools and operator UI integration
-   through existing Lane Add-on discovery and host-context caller identity.
+2. Complete the package's login tools through existing Lane Add-on discovery
+   and host-context caller identity.
 3. Supported 1Password extension loading in the original owned Chromium session.
    `createAccessRequest`, status and `fillCredential` run under that Browser
    Add-on's existing page-operation ownership. No separate CDP fill bypass.
@@ -54,8 +68,10 @@ this is not a claim of sandbox isolation or protection against that UID.
 
 ## Verification
 
-Run `python3 -m unittest discover -s addons/tests -p test_onepassword_oauth.py`.
-The checks use a transport fixture, never a personal account or real tokens.
+Run `python3 -m unittest discover -s addons/tests -p 'test_onepassword_*.py'`.
+The checks use transport fixtures and actual MCP subprocesses, never a personal
+account or real tokens. The private callback checks also verify that public
+status/observations contain none of the fixture OAuth material.
 
 ## Install the development status connector
 

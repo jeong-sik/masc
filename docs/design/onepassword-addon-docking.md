@@ -17,8 +17,13 @@ retained observations or logs. A status-only tool does not satisfy that outcome.
   another Browser service.
 - `onepassword_status`: safe account projection, with
   `browser_login_available = false` while browser docking remains unfinished.
-- Focused Python checks: 22 OAuth scenarios and 6 native-style MCP subprocess
-  scenarios. These use fabricated credentials and transport fixtures.
+- Private operator connection source: discovered `lane_operator`, admin-only
+  host ingress, original-incarnation/connection authority, the generic Dashboard
+  connection panel, callback fragment capture and transaction-pinned cancel.
+  See [operator control contract](lane-addon-operator-controls.md).
+- Focused Python checks: 29 OAuth, 10 operator-boundary and 6 native-style MCP
+  subprocess scenarios. Dashboard transport and popup/workspace/credential
+  admission have 10 focused checks. These use fabricated credentials and fixtures.
 
 On 2026-10-24, candidate `dc3e8ed35ff065c4cff859a8473531b4561373db`
 was copied as an explicit development package and installed through the served
@@ -41,10 +46,9 @@ published account-authentication evidence.
 
 ## Remaining work
 
-1. Provide authenticated operator connect/callback/approval/disconnect controls.
-   Capture the first-consent integration key from the callback fragment, clear
-   the fragment and keep URLs out of the model/public MCP wire. Add explicit
-   remote reconciliation for an interrupted exchange or rotation.
+1. Install and exercise the implemented private connect/callback/cancel path on
+   a host built from this stack. Extend it with approval/disconnect controls and
+   explicit remote reconciliation for an interrupted exchange or rotation.
 2. Attach the supported extension and connector to the existing owned Chromium
    backend. Use the original Browser owner and its existing page-operation
    serialization. The companion does not acquire an independent browser or a

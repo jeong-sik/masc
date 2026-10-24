@@ -26,7 +26,7 @@ class ConnectionTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name) / "private"
-        self.store = oauth.PrivateStore(self.directory)
+        self.store = oauth.PrivateStore(self.directory, provision=True)
         self.configuration = oauth.Configuration("client", "CLIENT_SECRET", "https://masc.example/callback")
         self.clock = 1000.0
         self.calls = []
@@ -78,6 +78,152 @@ class ConnectionTests(unittest.TestCase):
             self.connector.complete(state="wrong", code="AUTH_CODE", integration_key="KEY")
         self.assertEqual(self.calls, [])
         self.assertEqual(self.retained()["state"], parameters["state"][0])
+
+    def test_cancel_authorization_erases_only_its_exact_pending_attempt(self):
+        authorization = self.connector.begin()
+        state = parse_qs(urlsplit(authorization["authorization_url"]).query)["state"][0]
+        self.assertEqual(authorization["connection_id"], self.retained()["connection_id"])
+        self.assertEqual(self.connector.cancel_authorization(expected_state=state,
+                                                             expected_connection_id=authorization["connection_id"]),
+                         {"phase": "disconnected", "connected": False})
+        self.assertEqual(self.retained(), {"phase": "disconnected",
+                                           "configuration_id": self.configuration.identity})
+        self.assertEqual(self.calls, [])
+        self.assertNotIn("connection_id", self.connector.status())
+        with self.assertRaisesRegex(oauth.ConnectionError, "authorization_cancel_refused"):
+            self.connector.cancel_authorization(expected_state=state,
+                                                 expected_connection_id=authorization["connection_id"])
+        with self.assertRaisesRegex(oauth.ConnectionError, "oauth_state_mismatch"):
+            self.connector.complete(state=state, code="code", integration_key="key")
+        self.assertEqual(self.calls, [])
+
+    def test_authorization_cancel_requires_both_identities_without_consuming_the_attempt(self):
+        authorization = self.connector.begin()
+        original = self.retained()
+        for state, connection_id in [
+            ("wrong", authorization["connection_id"]),
+            (original["state"], "wrong"),
+            (None, authorization["connection_id"]),
+            (original["state"], None),
+            ("다른 요청", authorization["connection_id"]),
+            ("\ud800", authorization["connection_id"]),
+        ]:
+            with self.subTest(state=state, connection_id=connection_id):
+                with self.assertRaisesRegex(oauth.ConnectionError, "authorization_cancel_refused"):
+                    self.connector.cancel_authorization(expected_state=state,
+                                                         expected_connection_id=connection_id)
+                self.assertEqual(self.retained(), original)
+        self.assertEqual(self.calls, [])
+
+    def test_stale_cancel_rereads_a_new_attempt_from_the_shared_store(self):
+        first = self.connector.begin()
+        first_state = self.retained()["state"]
+        second_connector = oauth.Connector(self.configuration, oauth.PrivateStore(self.directory),
+                                           transport=self.transport, now=lambda: self.clock)
+        self.assertEqual(second_connector.status()["phase"], "authorizing")
+        self.connector.cancel_authorization(expected_state=first_state,
+                                             expected_connection_id=first["connection_id"])
+        second = second_connector.begin()
+        second_record = self.retained()
+        with self.assertRaisesRegex(oauth.ConnectionError, "authorization_cancel_refused"):
+            self.connector.cancel_authorization(expected_state=first_state,
+                                                 expected_connection_id=first["connection_id"])
+        self.assertEqual(self.retained(), second_record)
+        self.assertNotEqual(first["connection_id"], second["connection_id"])
+        self.assertEqual(self.calls, [])
+
+    def test_late_cancel_waits_for_callback_and_cannot_revoke_its_completed_connection(self):
+        authorization = self.connector.begin()
+        state = self.retained()["state"]
+        entered, release, cancel_started = threading.Event(), threading.Event(), threading.Event()
+        second_connector = oauth.Connector(self.configuration, oauth.PrivateStore(self.directory),
+                                           transport=self.transport, now=lambda: self.clock)
+
+        def exchange(path, fields, configuration):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return self.transport(path, fields, configuration)
+
+        def cancel():
+            cancel_started.set()
+            return second_connector.cancel_authorization(expected_state=state,
+                                                          expected_connection_id=authorization["connection_id"])
+
+        self.connector.transport = exchange
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            completed = pool.submit(self.connector.complete, state=state, code="code", integration_key="key")
+            self.assertTrue(entered.wait(5))
+            cancelled = pool.submit(cancel)
+            self.assertTrue(cancel_started.wait(5))
+            self.assertFalse(cancelled.done())
+            release.set()
+            self.assertEqual(completed.result(), {"phase": "connected", "connected": True})
+            with self.assertRaisesRegex(oauth.ConnectionError, "authorization_cancel_refused"):
+                cancelled.result()
+        self.assertEqual(self.retained()["phase"], "connected")
+        self.assertEqual(self.retained()["connection_id"], authorization["connection_id"])
+        self.assertEqual(len(self.calls), 1)
+
+    def test_parallel_authorization_cancels_have_one_winner(self):
+        authorization = self.connector.begin()
+        state = self.retained()["state"]
+        second = oauth.Connector(self.configuration, oauth.PrivateStore(self.directory),
+                                 transport=self.transport, now=lambda: self.clock)
+
+        def cancel(connector):
+            try:
+                return connector.cancel_authorization(expected_state=state,
+                                                       expected_connection_id=authorization["connection_id"])
+            except oauth.ConnectionError as failure:
+                return str(failure)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(cancel, [self.connector, second]))
+        self.assertCountEqual(results, [{"phase": "disconnected", "connected": False},
+                                        "authorization_cancel_refused"])
+        self.assertEqual(self.retained()["phase"], "disconnected")
+        self.assertEqual(self.calls, [])
+
+    def test_authorization_cancel_does_not_clear_interrupted_operations(self):
+        for operation in ["exchange", "refresh", "revoke"]:
+            with self.subTest(operation=operation):
+                directory = Path(self.temporary.name) / operation
+                connector = oauth.Connector(self.configuration, oauth.PrivateStore(directory, provision=True),
+                                             transport=self.transport, now=lambda: self.clock)
+                authorization = connector.begin()
+                state = parse_qs(urlsplit(authorization["authorization_url"]).query)["state"][0]
+
+                def lose(*args):
+                    raise oauth.ConnectionError("outcome_unknown")
+
+                with self.assertRaises(oauth.ConnectionError):
+                    if operation == "exchange":
+                        connector.transport = lose
+                        connector.complete(state=state, code="code", integration_key="key")
+                    else:
+                        connector.complete(state=state, code="code", integration_key="key")
+                        if operation == "refresh":
+                            self.clock += 901
+                            connector.transport = lose
+                            connector.credentials(lambda *args: self.fail("unknown refresh must not use credentials"),
+                                                  expected_connection_id=authorization["connection_id"])
+                        else:
+                            connector.disconnect(lose)
+                before = (directory / "connection.json").read_bytes()
+                calls_before = len(self.calls)
+                with self.assertRaisesRegex(oauth.ConnectionError, "authorization_cancel_refused"):
+                    connector.cancel_authorization(expected_state=state,
+                                                     expected_connection_id=authorization["connection_id"])
+                self.assertEqual((directory / "connection.json").read_bytes(), before)
+                self.assertEqual(len(self.calls), calls_before)
+
+    def test_disconnect_requires_the_pinned_cancel_api_for_pending_authorization(self):
+        self.connector.begin()
+        original = self.retained()
+        with self.assertRaisesRegex(oauth.ConnectionError, "authorization_cancel_required"):
+            self.connector.disconnect(lambda *args: self.fail("pending authorization has nothing to revoke"))
+        self.assertEqual(self.retained(), original)
+        self.assertEqual(self.calls, [])
 
     def test_connection_cannot_borrow_an_old_accounts_key(self):
         self.connect()
@@ -365,7 +511,7 @@ class ConnectionTests(unittest.TestCase):
         ]:
             with self.subTest(invalid=invalid):
                 other_path = Path(self.temporary.name) / ("case-" + str(len(os.listdir(self.temporary.name))))
-                connector = oauth.Connector(self.configuration, oauth.PrivateStore(other_path),
+                connector = oauth.Connector(self.configuration, oauth.PrivateStore(other_path, provision=True),
                                              transport=lambda *args: invalid)
                 params = parse_qs(urlsplit(connector.begin()["authorization_url"]).query)
                 with self.assertRaises(oauth.ConnectionError):

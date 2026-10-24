@@ -46,7 +46,28 @@ think tags and text-only payloads.
   expectations and the matching Keeper settlement fixture, without changing
   production Timeout semantics.
 
-Selected follow-up CI is recorded on the PR at its exact candidate head. No local
+- Repaired candidate [run 40102152061](https://github.com/jeong-sik/masc/actions/runs/40102152061),
+  exact head `9951b2a6b637327c45f0fd985fe9315cddd99286`, SUCCESS. Direct logs
+  confirm session resume 41, checkpoint 113 and provider-agnostic replay 57 tests
+  passed. The preceding [run 40099679923](https://github.com/jeong-sik/masc/actions/runs/40099679923)
+  at `087daa3bc5109ba72a238bc5d620911c4bf87785` passed pipeline 69, clone 12,
+  raw trace 17, elicitation 23, Root mid-turn resume 5 and Keeper input-wait 8.
+  It failed compilation of the new hook fixture (mock response still needed its
+  message-list argument) and an existing checkpoint fixture missing the newly
+  added content_carrier field; both are corrected. It also found two stale
+  native-prefix assertions expecting true caller messages to merge with tool
+  results. Current typed origin rules preserve those six messages separately,
+  placing the second Assistant at index 4. The tests now check that contract.
+- Exact-main [baseline run 40102075427](https://github.com/jeong-sik/masc/actions/runs/40102075427)
+  at `1962cf55ef430ee4d7247d7c6487b61f29fcb860` independently reproduced the
+  missing carrier fixture field and the same two native-prefix failures. No
+  relevant Core product/test source changed between the prior base and this
+  baseline. Those baseline failures are separate from the new mock-call error.
+
+The repaired candidate's three selected suites ran at its exact code head. The
+six successful suites from the prior run are carried evidence for their recorded
+head, not a claim that all nine ran again at the new head. This documentation-only
+follow-up does not change the tested product or fixtures. No local
 Dune build or full regression was run. Parser/whitespace checks prove syntax and
 patch hygiene only. Source review and selected CI do not establish installed
 runtime, live provider conformance or deployment. Low-level lossy projection APIs

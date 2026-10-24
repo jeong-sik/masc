@@ -117,6 +117,9 @@ let transport_policy () = Eio_main.run (fun env ->
           let click=Browser_lane.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";
             frame_path=[];action=Browser_lane.Click "#send"} in
           let goto=Browser_lane.Page_goto {url="https://fixture.test/";tab_id=Some 1} in
+          let reload=Browser_lane.Page_act (Browser_lane.Action.On_tab {tab_id=1;frame_path=[];
+            interaction=Browser_lane.Action.Reload}) in
+          let open_tab=Browser_lane.Page_act (Browser_lane.Action.Open_tab "https://fixture.test/") in
           let issue route verb=W.Issue {route;verb;actor=None;timeout_sec=0.001;only_if_idle=false} in
           let refused label command =
             let before= !issues in
@@ -152,13 +155,15 @@ let transport_policy () = Eio_main.run (fun env ->
               refused "unobserved exact live transport refused" (issue (Live_route (Some ego.client_id)) click);
               refused "unselected live transport refused" (issue (Live_route None) click);
               read [ego;extension;bidi];
-              List.iter (fun route -> List.iter (bounded route) [click;goto])
+              List.iter (fun route -> List.iter (bounded route) [click;goto;reload;open_tab])
                 [Browser_lane.Automation_route;Stagehand_route;Live_route (Some extension.client_id);Live_route (Some bidi.client_id)];
-              issue_entered := Eio.Promise.create ();
-              (match Eio.Fiber.first
-                (fun () -> `Returned (call (issue (Live_route (Some ego.client_id)) click)))
+              List.iter (fun verb ->
+                issue_entered := Eio.Promise.create ();
+                match Eio.Fiber.first
+                (fun () -> `Returned (call (issue (Live_route (Some ego.client_id)) verb)))
                 (fun () -> Eio.Promise.await (fst !issue_entered);Eio.Time.sleep clock 0.3;`Waiting) with
-               | `Waiting -> () | `Returned _ -> fail "observed Ego SDK input lost its owner wait");
+               | `Waiting -> () | `Returned _ -> fail "observed Ego SDK operation lost its owner wait")
+                [click;goto;reload;open_tab];
               read [extension;bidi];
               refused "replacement snapshot removes old client" (issue (Live_route (Some ego.client_id)) click);
               List.iter (fun reply ->

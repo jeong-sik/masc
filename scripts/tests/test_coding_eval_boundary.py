@@ -34,6 +34,43 @@ DOCKER_IMAGE = None
 
 
 class CodingBoundary(unittest.TestCase):
+    def test_collect_refuses_duplicate_json_before_replacing_the_index(self):
+        for duplicate in ("provider", "model", "memory_mode", "experiment_digest", "run_id", "nested", "manifest"):
+            with self.subTest(duplicate=duplicate), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "runs/run").mkdir(parents=True)
+                declared = {"memory_mode": "off"}
+                digest = hashlib.sha256(inputs.encode(declared)).hexdigest()
+                manifest = {"experiment_digest": digest, "inputs": declared}
+                row = {"run_id": "run", "experiment_digest": digest, "memory_mode": "off",
+                       "provider": "declared-provider", "model": "declared-model"}
+                for order in ("prefix", "suffix"):
+                    manifest_bytes = json.dumps(manifest)
+                    row_bytes = json.dumps(row)
+                    if duplicate == "manifest":
+                        manifest_bytes = (
+                            '{"experiment_digest":"foreign",' + manifest_bytes[1:]
+                            if order == "prefix"
+                            else manifest_bytes[:-1] + ',"experiment_digest":"foreign"}'
+                        )
+                    elif duplicate == "nested":
+                        row_bytes = '{"details":{"model":"first","model":"second"},' + row_bytes[1:]
+                    elif order == "prefix":
+                        row_bytes = json.dumps({duplicate: "conflicting-value"})[:-1] + "," + row_bytes[1:]
+                    else:
+                        row_bytes = row_bytes[:-1] + "," + json.dumps({duplicate: "conflicting-value"})[1:]
+                    (root / "experiment.json").write_text(manifest_bytes)
+                    (root / "runs/run/evidence.json").write_text(row_bytes)
+                    index = root / "runs.jsonl"
+                    index.write_text("previous accepted index\n")
+                    result = subprocess.run([sys.executable, str(ROOT / "scripts/harness/lib/coding_eval_inputs.py"),
+                        "collect", "--experiment", str(root / "experiment.json"), "--runs", str(root / "runs"),
+                        "--out", str(index)], capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("duplicate JSON object key", result.stderr)
+                    self.assertEqual(index.read_text(), "previous accepted index\n")
+                    self.assertEqual(list(root.glob(".coding-eval-rows-*")), [])
+
     def test_node_oracle_edit_does_not_fix_the_candidate(self):
         if not shutil.which("node"):
             self.skipTest("Node is unavailable for the fixed corpus control")
@@ -102,6 +139,11 @@ class CodingBoundary(unittest.TestCase):
                         inputs.capture(args)
                     path.write_bytes(original)
             manifest = json.loads(args.out.read_text())
+            original_manifest = args.out.read_text()
+            args.out.write_text('{"experiment_digest":"foreign",' + original_manifest[1:])
+            with self.assertRaisesRegex(ValueError, "duplicate JSON object key"):
+                inputs.capture(args)
+            args.out.write_text(original_manifest)
             run = output / "runs/run/evidence.json"
             run.parent.mkdir(parents=True)
             row = {"run_id": "run", "experiment_digest": manifest["experiment_digest"], "memory_mode": "off"}

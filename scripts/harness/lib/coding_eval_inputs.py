@@ -52,6 +52,21 @@ def encode(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
+def read_json(path):
+    # Canonical re-encoding must not erase ambiguous source identities before
+    # the report's strict decoder can inspect them. The hook sees every object,
+    # including objects nested inside the experiment inputs or a receipt.
+    def unique_object(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate JSON object key " + repr(key) + " in " + str(path))
+            value[key] = item
+        return value
+
+    return json.loads(path.read_text(), object_pairs_hook=unique_object)
+
+
 def experiment(args):
     scripts = [
         "scripts/harness_coding_eval.sh", "scripts/run-local.sh",
@@ -101,7 +116,7 @@ def capture(args):
     if args.out.exists() or args.out.is_symlink():
         if args.out.is_symlink():
             raise ValueError("experiment manifest must not be a symlink")
-        existing = json.loads(args.out.read_text())
+        existing = read_json(args.out)
         if existing != current:
             raise ValueError("experiment inputs differ from --out; use a new output directory")
     elif args.check:
@@ -116,14 +131,14 @@ def capture(args):
 
 
 def collect(args):
-    manifest = json.loads(args.experiment.read_text())
+    manifest = read_json(args.experiment)
     expected = manifest["experiment_digest"]
     if expected != digest_bytes(encode(manifest["inputs"])):
         raise ValueError("experiment manifest digest mismatch")
     rows = []
     seen = set()
     for path in sorted(args.runs.glob("*/evidence.json")):
-        row = json.loads(path.read_text())
+        row = read_json(path)
         if row.get("experiment_digest") != expected:
             raise ValueError("run evidence belongs to another experiment: " + str(path))
         if row.get("memory_mode") != manifest["inputs"]["memory_mode"]:

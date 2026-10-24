@@ -8,9 +8,9 @@ these extra clocks. This is an identified contract inconsistency, not a claim
 of a reproduced production navigation outage.
 
 These three peer paths now use the existing native runner and the authenticated
-Ego transport selects `Executor_owned`. The outer Add-on client uses that same
-closed policy and delegates to the worker, which still selects other-browser
-policies from its actual transport. Existing running-request ownership,
+Ego transport selects `Executor_owned`. The private Add-on client retains the
+shared reply policy; a live client ID cannot prove an Ego transport. The worker
+independently selects the policy from its admitted actual transport. Existing running-request ownership,
 settlement, cancellation and explicit disconnect apply without a new lifetime
 mechanism. Generated Page scripts and partial-effect/created-tab receipts are
 unchanged. An uncertain new-page result still requires tab observation before

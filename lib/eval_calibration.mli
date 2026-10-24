@@ -115,4 +115,8 @@ val format_few_shot_block : calibration_example list -> string
 val calibration_stats :
   ?since:string -> ?until:string -> unit -> Yojson.Safe.t
 (** Compute summary statistics: verdict counts, gate distribution,
-    false positive/negative rates, agreement rate. *)
+    false positive/negative rates, agreement rate. [distinct_runtime_rate]
+    compares recorded runtime identifiers and is [null] when no pair was
+    recorded. It does not establish distinct models: current verdict rows
+    carry no submission-bound producer and judge model identities, so
+    [model_identity_observation] reports unobserved verdict coverage. *)

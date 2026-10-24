@@ -1012,7 +1012,7 @@ let start_range_projection ~input_source ?argument_projection
 ;;
 
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
-    ~initial_messages ~model_input_projection ~hooks ~configured_reasoning_effort
+    ~initial_messages ~model_input_projection ~hooks ~composed_context ~configured_reasoning_effort
     =
   let hooks = match hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty in
   let before_turn =
@@ -1110,6 +1110,12 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
   let system_prompt =
     Option.value turn_params.system_prompt_override ~default:system_prompt
   in
+  let keeper_instructions =
+    match Option.bind composed_context (fun read ->
+        Option.bind (read ()) (fun assembly -> assembly.Keeper_context_assembly.system_prompt)) with
+    | Some issued when String.equal issued.text system_prompt -> issued.base_text
+    | Some _ | None -> system_prompt
+  in
   (* Every official client runs its own built-in instructions when masc names
      none: Codex omits developerInstructions, Claude Code has taken its
      coding-agent prompt since #33072, Antigravity renders the goal alone. A
@@ -1120,9 +1126,9 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
      its own notes, cannot see a blank keeper prompt behind them: Codex's
      default posture note is never blank (#33165). *)
   let* () =
-    match String_util.trim_nonempty system_prompt with
-    | Some _ -> Ok ()
-    | None ->
+    match String_util.trim_nonempty keeper_instructions, String_util.trim_nonempty system_prompt with
+    | Some _, Some _ -> Ok ()
+    | None, _ | _, None ->
       Error
         (config_error
            ~field:"system_prompt"

@@ -224,6 +224,7 @@ let test_failed_scope_stops_official_provider_preparation () =
            (fun _ -> inner_called := true; Agent_core.Hooks.Continue)) }
   in
   let result = Masc.Keeper_official_client_host.prepare_turn
+      ~composed_context:None
       ~runtime_label:"scope-test" ~keeper_name:"scope-owner" ~turn_count:1
       ~system_prompt:"system" ~tools:[] ~initial_messages:[]
       ~model_input_projection:(Some (fun ~tools:_ messages -> projected := true; Ok messages))

@@ -15,7 +15,9 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_siz
     Masc_tui_image_cache.prepare_payload ~run:Unix.system ~cache_dir:(cache_dir ()) bytes in
   let vector format bytes =
     let scene = Masc_tui_pele.scene ~format ~max_width:diagram_width
-      ~font_size:diagram_font_size ~colors:diagram_colors bytes in
+      ~font_size:diagram_font_size
+      ~now_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.))
+      ~colors:diagram_colors bytes in
     let raster = {Masc_tui_pele.width=diagram_width;height=diagram_height;crop=None} in
     present ~scene (Masc_tui_pele.render ~cache_dir:(cache_dir ()) ~raster scene) in
   let prepare_declared format bytes = match format with

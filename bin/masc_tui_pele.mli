@@ -5,14 +5,16 @@ type scene = private {
   source : string;
   max_width : int;
   font_size : int;
+  now_ms : int64;
   colors : (string * string) option;
 }
 type crop = { left : float; top : float; right : float; bottom : float }
 type raster = { width : int; height : int; crop : crop option }
 (** Original source and frozen layout metrics. Raster requests never relayout a
-    scene. Crop corners are normalized to its original rendered viewport,
+    scene. The acquisition edge captures [now_ms] once so time-derived diagram
+    coordinates stay fixed during inspection. Crop corners are normalized to its original rendered viewport,
     including authored viewBox letterboxing or clipping. *)
-val scene : format:format -> max_width:int -> font_size:int ->
+val scene : format:format -> max_width:int -> font_size:int -> now_ms:int64 ->
   colors:(string * string) option -> string -> scene
 
 val render :

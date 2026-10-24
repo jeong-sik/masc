@@ -1,12 +1,12 @@
 type format = Mermaid | Svg
 type scene = { format : format; source : string; max_width : int;
-  font_size : int; colors : (string * string) option }
+  font_size : int; now_ms : int64; colors : (string * string) option }
 type crop = { left : float; top : float; right : float; bottom : float }
 type raster = { width : int; height : int; crop : crop option }
-let scene ~format ~max_width ~font_size ~colors source =
-  {format;source;max_width;font_size;colors}
+let scene ~format ~max_width ~font_size ~now_ms ~colors source =
+  {format;source;max_width;font_size;now_ms;colors}
 
-let render ~cache_dir ?raster {format;source;max_width;font_size;colors} =
+let render ~cache_dir ?raster {format;source;max_width;font_size;now_ms;colors} =
   let paths = ref [] in
   let temporary suffix =
     let path = Filename.temp_file ~temp_dir:cache_dir "pele-" suffix in
@@ -22,7 +22,7 @@ let render ~cache_dir ?raster {format;source;max_width;font_size;colors} =
       let errors = temporary ".err" in
       let fields = ["format", `String (match format with Mermaid -> "mermaid" | Svg -> "svg");
                     "source", `String source; "maxWidth", `Int max_width;
-                    "fontSize", `Int font_size] in
+                    "fontSize", `Int font_size; "now", `Intlit (Int64.to_string now_ms)] in
       let fields = match raster with
         | None -> fields
         | Some {width;height;crop} ->

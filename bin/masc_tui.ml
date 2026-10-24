@@ -11177,6 +11177,7 @@ let prepare_resource_diagrams state ~mailbox =
                let scene = Masc_tui_pele.scene ~format:Mermaid
                  ~max_width:(Masc_tui_resource_diagrams.width request)
                  ~font_size:(max 1 (cell_width*2))
+                 ~now_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.))
                  ~colors:(Masc_tui_resource_diagrams.colors request) source in
                Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) scene) in
              deliver mailbox (Resource_diagram_ready (request,source,result))

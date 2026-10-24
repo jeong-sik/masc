@@ -69,7 +69,7 @@ type pointer_state = Released | Release_uncertain
 
 type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
 
-type t = { run : runner; run_native : string -> (string, run_failure) result; now : unit -> float; space_id : int; version : string; capture_directory : string;
+type t = { run : runner; run_native : runner; now : unit -> float; space_id : int; version : string; capture_directory : string;
   downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t; uploads : Browser_lane.Upload_lease.owner;
   mutable pointer_state : pointer_state; mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
@@ -1350,14 +1350,14 @@ let workflow ?actor t args =
   let* () = match t.pointer_state with Released -> Ok ()
     | Release_uncertain -> Error (Live.Before_effect "ego pointer release is unconfirmed; inspect and end this task space before more input") in
   let arguments = match Browser_lane.Native_workflow.to_json request with
-    | `Assoc fields -> obj (("label",str label)::("cursor",str (cursor_label ~actor ~verb:"workflow"))::fields)
+    | `Assoc fields -> obj (("label",str label)::("cursor",str (cursor_label ~actor ~verb:"workflow"))::("budgetMs",`Int (Browser_lane.Native_workflow.budget_ms request))::("defaultTimeoutMs",`Int Browser_lane.Native_workflow.default_step_timeout_ms)::("snapshotTimeoutMs",`Int Browser_lane.Native_workflow.snapshot_timeout_ms)::fields)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
   let source = script ~step:"page.native_workflow" ~space:(`Int t.space_id) ~holder:Agent_holds
       ~args:(with_download_root t arguments)
       (String.concat "\n" [Browser_ego_workflow.script;unblocked_agent_page;
         "    const outcome = await nativeWorkflow(task.page(args.label), args);";
         "    emit({ok: true, value: outcome});";"  }"]) in
-  let result = match t.run_native source with
+  let result = match t.run_native ~window_s:(Browser_lane.Native_workflow.window_s request) source with
     | Error error -> Error (Unanswered error)
     | Ok output -> answer output in
   match result with

@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const test=require('node:test');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../lib/browser_ego_workflow.ml'),'utf8').split('let script = {js|')[1].split('|js}')[0];
-const run=vm.runInNewContext('('+source+')');
+const run=vm.runInNewContext('('+source+')',{setTimeout,clearTimeout});
 const initial='https://fixture.test/start',destination='https://fixture.test/done';
 function fixture({fail,dialog,snapshot='native result'}={}) {
  const calls=[];let url=initial,value='';
@@ -40,7 +40,21 @@ test('known native sequence navigates, waits and returns one final snapshot',asy
  assert.equal(f.calls.find(c=>Array.isArray(c)&&c[0]==='snapshot')[1],undefined,'viewport uses the SDK default, not a MASC scope name');
  assert.equal(f.calls[2][0],'waitForURL');
  assert.equal(f.calls[4][2].timeout,90);assert.equal(f.calls[4][2].state,'visible');
- assert.equal(Object.hasOwn(f.calls[1][2],'timeout'),false,'SDK defaults are not replaced');
+ assert.equal(f.calls[1][2].timeout,5000,'omitted timeoutMs receives bounded step timeout');
+});
+test('stuck SDK call omitting timeoutMs and exhausted workflow budget are bounded',async()=>{
+ const stuck=fixture();
+ stuck.page.click=()=>new Promise(()=>{});
+ const timedOut=await run(stuck.page,{...request([{method:'click',selector:'@12'}]),defaultTimeoutMs:15,budgetMs:60});
+ assert.equal(timedOut.effectStarted,true);assert.equal(timedOut.completedEffect,false);
+ assert.equal(timedOut.failure.index,0);assert.equal(timedOut.failure.method,'click');
+ assert.match(timedOut.failure.message,/timed out after 15ms/);
+ const overBudget=fixture();
+ overBudget.page.hover=async()=>{await new Promise(resolve=>setTimeout(resolve,15));return {};};
+ overBudget.page.click=async()=>{await new Promise(resolve=>setTimeout(resolve,40));return {};};
+ const stopped=await run(overBudget.page,{...request([{method:'hover',selector:'@1'},{method:'click',selector:'@2'}]),defaultTimeoutMs:50,budgetMs:30});
+ assert.equal(stopped.completed.length,1);assert.equal(stopped.failure.index,1);assert.equal(stopped.failure.method,'click');
+ assert.match(stopped.failure.message,/budget exceeded|timed out/);
 });
 test('full-page workflow snapshot uses the native full_page scope',async()=>{
  const f=fixture();const result=await run(f.page,{...request([]),snapshotScope:'full_page'});

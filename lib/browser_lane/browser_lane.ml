@@ -127,8 +127,9 @@ let reply_timeout_sec = function
   | Session_status -> 10.
   | Page_goto _ -> 45.
   | Page_act action -> Action.reply_timeout_sec action
+  | Page_native_workflow workflow -> Native_workflow.window_s workflow
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
-  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Page_elements _ | Page_context _
+  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_elements _ | Page_context _
   | Page_instruct _ | Page_locate _ | Page_extract _ -> default_timeout_sec
 
 type reply_policy = Reply_window | Executor_owned

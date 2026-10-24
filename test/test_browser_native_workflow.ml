@@ -27,13 +27,19 @@ let roundtrip () =
     step "waitForLoadState" ["state",str "networkidle"]] in
   let parsed=request calls in
   check bool "native fields roundtrip unchanged" true (ok (W.of_json (W.to_json parsed))=parsed);
-  check int "all methods preserved" (List.length calls) (List.length parsed.steps)
+  check int "all methods preserved" (List.length calls) (List.length parsed.steps);
+  check int "execution budget sums step and snapshot reserves" 50_000 (W.budget_ms parsed);
+  check (float 0.001) "runner window adds stop grace" 52. (W.window_s parsed)
 let strict_inputs () =
+  let zero_timeout = step "click" ["selector",str "#x";"timeoutMs",`Int 0] in
   List.iter (fun value -> check bool "invalid caller input is rejected" true (Result.is_error (W.of_json value)))
     [obj (("steps",`List [])::base []);
      obj (base [step "evaluate" ["text",str "process.exit()"]]);
      obj (base [step "fill" ["selector",str "#x";"text",str "hi";"url",str "irrelevant"]]);
      obj (base [step "click" ["selector",str "#x";"timeoutMs",`Int (-1)]]);
+     obj (base [step "click" ["selector",str "#x";"timeoutMs",`Int (W.max_step_timeout_ms + 1)]]);
+     obj (base (List.init (W.max_steps + 1) (fun _ -> zero_timeout)));
+     obj (base (List.init 12 (fun _ -> click)));
      obj (base [step "goto" ["url",str "javascript:alert(1)"]]);
      obj (base [step "selectOption" ["selector",str "#x";"values",`List [str "a";str "a"]]])]
 let complete () =

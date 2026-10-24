@@ -55,7 +55,7 @@ let now () = !clock
 let opened ?(capture_directory=capture_directory ()) ?(downloads=no_downloads) run =
   let run ~window_s script = let sent = sent_of ~window_s script in
     if sent.step = "space.open" then answered (obj ["spaceId",`Int 51;"ownership",str "agent"]) else run sent in
-  match Peer.open_space ~downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory with
+  match Peer.open_space ~downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory with
   | Ok peer -> peer
   | Error detail -> failf "the space did not open: %s" detail
 
@@ -92,7 +92,7 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
     | "tabs.list" -> answered (`List [])
     | "space.finish" -> answered `Null
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   check int "space number" 51 (Peer.space_id peer);
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -100,10 +100,10 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
   check (list string) "opened by name, then held by number"
     [ "space.open \"masc\""; "tabs.list 51"; "space.finish 51" ]
     (List.rev_map (fun (step, space) -> step ^ " " ^ Yojson.Safe.to_string space) !spaces);
-  let user = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
+  let user = Peer.open_space ~run_native:(fun ~window_s:_ _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
       ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 7;"ownership",str "user"])) in
   check bool "a space the operator owns is refused" true (Result.is_error user);
-  let in_use = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
+  let in_use = Peer.open_space ~run_native:(fun ~window_s:_ _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
       ~run:(fun ~window_s:_ _ -> failed "EGO_TASK_SPACE_NAME_IN_USE: masc") in
   check (result reject string) "ego's own refusal is kept" (Error "EGO_TASK_SPACE_NAME_IN_USE: masc") (Result.map ignore in_use)
 
@@ -592,7 +592,7 @@ let test_the_scripts_parse_as_modules () =
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null;"after",in_page (obj ["files",`List []])])
     | "page.choose_files" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   List.iter (fun (verb, args) -> ignore (dispatch peer verb args))
@@ -829,7 +829,7 @@ let test_a_snapshot_reads_egos_own_tree () =
       output := in_node (snapshot_stand_in !text ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let snapshot ?(tab_id=1) ?(max_chars=1000) scope =
@@ -915,7 +915,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
       output := in_node (target_stand_in ~url:!url ~blocked:!blocked ~act:!act ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let printed prefix = match List.find_opt (String.starts_with ~prefix) (String.split_on_char '\n' !output) with
@@ -1014,7 +1014,7 @@ let test_the_space_goes_to_the_operator_and_back () =
     match sent.step with
     | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str !ownership])
     | _ -> output := in_node (control_stand_in ~ownership:!ownership ~user_page:!user_page ^ script); Ok !output in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
     | Some line -> after ~prefix:"seen " line
@@ -1041,7 +1041,7 @@ let test_the_space_goes_to_the_operator_and_back () =
   check bool "with the agent holding the space, a take-over is refused before any effect" true
     (contains (before_effect "a needless take-over" (act Lane.Action.Take_over)) "already holds");
   check string "and ego is not asked to take it" "[]" (seen ());
-  let open_owned_by owner = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 52;"ownership",str owner]))
+  let open_owned_by owner = Peer.open_space ~run_native:(fun ~window_s:_ _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 52;"ownership",str owner]))
       ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) in
   check bool "a space handed to the operator still opens, so take_over can bring it back" true
     (Result.is_ok (open_owned_by "agentDelegatedToUser"));
@@ -1063,7 +1063,7 @@ let test_history_moves_one_entry () =
         ~same_url:!same_url ~load:!load ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let on_tab ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
@@ -1272,7 +1272,7 @@ let test_dialog_scripts_in_node () =
       let open_, opening, opens_on = !scenario in
       output := in_node (dialog_stand_in ~open_ ~opening ~opens_on ~canned:(canned step) ^ script);
       Ok !output in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
@@ -1446,7 +1446,7 @@ let test_the_download_wait_runs_in_node () =
       output := in_node (String.concat "\n" (List.rev (("{\n" ^ script ^ "\n}") :: !program)));
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let goto () = match dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://example.test/"]) with
@@ -1635,7 +1635,7 @@ let test_the_upload_script_runs_in_node () =
     | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Form" ~url:"https://example.test/" ~active:true ()])
     | "page.upload" -> output := in_node (upload_stand_in ~opens:!opens ^ script); Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
@@ -1740,7 +1740,7 @@ let test_the_chooser_script_runs_in_node () =
       output := in_node (chooser_stand_in ~opens:!opens ~multiple:!multiple ~set:!set ~fails:!fails ~click_fails:!click_fails
         ^ "\n{\n" ^ script ^ "\n}\n" ^ recovery); Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:run ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with

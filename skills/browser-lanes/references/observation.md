@@ -49,8 +49,9 @@ documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔
 
 `selector`는 관측한 native locator를 그대로 쓴다. workflow 메서드 이름은
 단일 조작의 `double_click`·`select_option` 대신 SDK의 `dblclick`·`selectOption`이다.
-각 step의 선택적 `timeoutMs`는 SDK에 그대로 전달하며 생략하면 SDK 기본값을 쓴다.
-누적 단계·시간 상한은 없고 대기는 SDK가 소유한다. 실행은 기존 호스트 권한·취소 경계를 따른다.
+`steps`는 최대 16개, 전체 실행 예산은 최대 60,000ms(시작 URL·최종 snapshot 예비 5,000ms 포함)이다.
+각 step의 선택적 `timeoutMs`(최대 30,000ms)는 남은 실행 예산 안에서 SDK에 전달하며 생략하면 5,000ms를 예산으로 잡는다.
+실행은 기존 호스트 권한·취소·시간 경계를 따른다.
 
 `expectedUrl`은 실행을 시작할 때만 검사한다. 이후 이동이 일어나면 native wait로
 목적지·요소·로드 상태를 기다린다. 마지막에는 native snapshot이 돌아온다.

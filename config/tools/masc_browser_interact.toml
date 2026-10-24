@@ -320,7 +320,8 @@ description = "set_zoom only: actual browser zoom factor (0.3–5), requires exa
 [[params]]
 name = "steps"
 type = "array"
-description = "workflow only: native Page calls in order. click/dblclick/hover take selector; fill takes selector,text; press takes selector,key; selectOption takes selector and value or distinct values ([] clears); goto takes an absolute HTTP(S) url; waitForURL takes a native string/glob url; waitForSelector takes selector,state (attached/detached/visible/hidden); waitForLoadState takes state (domcontentloaded/load/networkidle). Optional timeoutMs is forwarded to that SDK method; omission uses its default. No cumulative step/time limit or injected script. Locators come from observations; no new intermediate judgment inside this call."
+max_items = 16
+description = "workflow only: up to 16 native Page calls in order within a 60000 ms total execution budget (5000 ms reserved for initial URL and final snapshot). click/dblclick/hover take selector; fill takes selector,text; press takes selector,key; selectOption takes selector and value or distinct values ([] clears); goto takes an absolute HTTP(S) url; waitForURL takes a native string/glob url; waitForSelector takes selector,state (attached/detached/visible/hidden); waitForLoadState takes state (domcontentloaded/load/networkidle). Optional timeoutMs (0–30000 ms) is forwarded to that SDK method and capped by the remaining workflow budget; omission budgets 5000 ms. Locators come from observations; no injected script or new intermediate judgment inside this call."
 
 [params.items]
 type = "object"
@@ -366,6 +367,7 @@ enum = ["attached", "detached", "visible", "hidden", "domcontentloaded", "load",
 name = "timeoutMs"
 type = "integer"
 minimum = 0
+maximum = 30000
 
 [[params]]
 name = "snapshotScope"

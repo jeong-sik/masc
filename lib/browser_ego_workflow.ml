@@ -5,31 +5,51 @@ let script = {js|async function nativeWorkflow(page, args) {
     completed, effectStarted, completedEffect,
     failure: {index, method, message: String(error?.message ?? error), ...extra}
   });
+  const defaultTimeoutMs = args.defaultTimeoutMs ?? 5000;
+  const snapshotTimeoutMs = args.snapshotTimeoutMs ?? 5000;
+  const budgetMs = args.budgetMs ?? Math.min(60000, snapshotTimeoutMs + args.steps.reduce(
+    (sum, step) => sum + (step.timeoutMs ?? defaultTimeoutMs), 0));
+  const deadline = Date.now() + budgetMs;
+  const withBudget = (stepMs, method, work) => {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0)
+      return Promise.reject(new Error('workflow execution budget exceeded before ' + method));
+    const limitMs = Math.min(stepMs, remainingMs);
+    if (typeof setTimeout !== 'function')
+      return Promise.resolve().then(() => work(limitMs));
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(method + ' timed out after ' + limitMs + 'ms')), limitMs);
+    });
+    return Promise.race([Promise.resolve().then(() => work(limitMs)), timeout]).finally(() => {
+      if (timer !== null && typeof clearTimeout === 'function') clearTimeout(timer);
+    });
+  };
   let initialUrl;
-  try { initialUrl = await page.url(); }
+  try { initialUrl = await withBudget(snapshotTimeoutMs, 'initialUrl', () => page.url()); }
   catch (error) { return failure(0, 'initialUrl', error); }
   if (initialUrl !== args.expectedUrl)
     return failure(0, 'initialUrl', 'the tab is at ' + initialUrl + ', not at expectedUrl; read it again');
   for (let index = 0; index < args.steps.length; index++) {
     const step = args.steps[index];
-    const options = step.timeoutMs === undefined ? {} : {timeout: step.timeoutMs};
+    const requestedMs = step.timeoutMs ?? defaultTimeoutMs;
     let receipt = null, effect = false;
     try {
       switch (step.method) {
-        case 'click': effect = effectStarted = true; receipt = await page.click(step.selector, {...options, label: args.cursor}); break;
-        case 'dblclick': effect = effectStarted = true; receipt = await page.dblclick(step.selector, {...options, label: args.cursor}); break;
-        case 'hover': effect = effectStarted = true; receipt = await page.hover(step.selector, {...options, label: args.cursor}); break;
-        case 'fill': effect = effectStarted = true; receipt = await page.fill(step.selector, step.text, options); break;
-        case 'press': effect = effectStarted = true; receipt = await page.press(step.selector, step.key, options); break;
+        case 'click': effect = effectStarted = true; receipt = await withBudget(requestedMs, step.method, timeout => page.click(step.selector, {timeout, label: args.cursor})); break;
+        case 'dblclick': effect = effectStarted = true; receipt = await withBudget(requestedMs, step.method, timeout => page.dblclick(step.selector, {timeout, label: args.cursor})); break;
+        case 'hover': effect = effectStarted = true; receipt = await withBudget(requestedMs, step.method, timeout => page.hover(step.selector, {timeout, label: args.cursor})); break;
+        case 'fill': effect = effectStarted = true; receipt = await withBudget(requestedMs, step.method, timeout => page.fill(step.selector, step.text, {timeout})); break;
+        case 'press': effect = effectStarted = true; receipt = await withBudget(requestedMs, step.method, timeout => page.press(step.selector, step.key, {timeout})); break;
         case 'selectOption': {
           const selection = step.values === undefined ? {value: step.value} : step.values.map(value => ({value}));
           effect = effectStarted = true;
-          receipt = await page.selectOption(step.selector, selection, options); break;
+          receipt = await withBudget(requestedMs, step.method, timeout => page.selectOption(step.selector, selection, {timeout})); break;
         }
-        case 'goto': effect = effectStarted = true; receipt = await page.goto(step.url, options); break;
-        case 'waitForURL': await page.waitForURL(step.url, options); break;
-        case 'waitForSelector': await page.waitForSelector(step.selector, {...options, state: step.state}); break;
-        case 'waitForLoadState': await page.waitForLoadState(step.state, options); break;
+        case 'goto': effect = effectStarted = true; receipt = await withBudget(requestedMs, step.method, timeout => page.goto(step.url, {timeout})); break;
+        case 'waitForURL': await withBudget(requestedMs, step.method, timeout => page.waitForURL(step.url, {timeout})); break;
+        case 'waitForSelector': await withBudget(requestedMs, step.method, timeout => page.waitForSelector(step.selector, {timeout, state: step.state})); break;
+        case 'waitForLoadState': await withBudget(requestedMs, step.method, timeout => page.waitForLoadState(step.state, {timeout})); break;
         default: return failure(index, step.method, 'unsupported native Page method');
       }
     } catch (error) { return failure(index, step.method, error); }
@@ -39,16 +59,18 @@ let script = {js|async function nativeWorkflow(page, args) {
     if (receipt?.dialog) return failure(index, step.method, 'answer the JavaScript dialog before continuing', {dialog: receipt.dialog});
   }
   try {
-    const snapshot = await (args.snapshotScope === 'viewport'
-      ? page.snapshot() : page.snapshot({scope: args.snapshotScope}));
-    if (typeof snapshot !== 'string') throw new Error('ego answered a snapshot that is not text');
-    let end = Math.min(args.maxChars, snapshot.length);
-    if (end > 0 && end < snapshot.length && snapshot.charCodeAt(end - 1) >= 0xD800
-        && snapshot.charCodeAt(end - 1) <= 0xDBFF && snapshot.charCodeAt(end) >= 0xDC00
-        && snapshot.charCodeAt(end) <= 0xDFFF) end--;
-    const url = await page.url(), title = await page.title();
-    return {completed, effectStarted, completedEffect, failure: null, urlBefore: initialUrl, url, title,
-      snapshot: snapshot.slice(0, end), truncated: end < snapshot.length, chars: snapshot.length};
+    return await withBudget(snapshotTimeoutMs, 'snapshot', async () => {
+      const snapshot = await (args.snapshotScope === 'viewport'
+        ? page.snapshot() : page.snapshot({scope: args.snapshotScope}));
+      if (typeof snapshot !== 'string') throw new Error('ego answered a snapshot that is not text');
+      let end = Math.min(args.maxChars, snapshot.length);
+      if (end > 0 && end < snapshot.length && snapshot.charCodeAt(end - 1) >= 0xD800
+          && snapshot.charCodeAt(end - 1) <= 0xDBFF && snapshot.charCodeAt(end) >= 0xDC00
+          && snapshot.charCodeAt(end) <= 0xDFFF) end--;
+      const url = await page.url(), title = await page.title();
+      return {completed, effectStarted, completedEffect, failure: null, urlBefore: initialUrl, url, title,
+        snapshot: snapshot.slice(0, end), truncated: end < snapshot.length, chars: snapshot.length};
+    });
   } catch (error) { return failure(args.steps.length, 'snapshot', error); }
 }|js}
 

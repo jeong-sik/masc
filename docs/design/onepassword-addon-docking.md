@@ -25,7 +25,15 @@ retained observations or logs. A status-only tool does not satisfy that outcome.
   serializer, public-extension settlement checks and unknown/cancel fences.
   CDP/private Unix errors discard raw payload/exception text at their first
   boundary. The [companion session contract](browser-private-companion-session.md)
-  records the still-unconnected provider broker and Browser owner/wire ports.
+  records the private Browser owner/wire port and original-CDP extension loader.
+  Exact CDP target to numeric Chrome tab mapping uses the existing Stagehand
+  extension's debugger table. Companion loss cancels and joins active public or
+  private work; results returned during cancellation cannot escape the fence.
+- Package-owned `prepare.js`/`autofill.js`: real extension initialization,
+  whole-browser agentic mode, request/status and credential fill with exact tab
+  checks, entry-ID grant selection and private error projections. Eight Node
+  fixtures execute these actual programs with a fake extension API and passed.
+  The Python-to-host private broker still needs to invoke this source path.
 - Focused Python checks: 29 OAuth, 10 operator-boundary and 6 native-style MCP
   subprocess scenarios. Dashboard transport and popup/workspace/credential
   admission have 10 focused checks. These use fabricated credentials and fixtures.
@@ -54,10 +62,10 @@ published account-authentication evidence.
 1. Install and exercise the implemented private connect/callback/cancel path on
    a host built from this stack. Extend it with approval/disconnect controls and
    explicit remote reconciliation for an interrupted exchange or rotation.
-2. Attach the supported extension and connector to the existing owned Chromium
-   backend. Use the original Browser owner and its existing page-operation
-   serialization. The companion does not acquire an independent browser or a
-   separate CDP fill path.
+2. Install and exercise the supported extension through the implemented loader
+   on the existing owned Chromium backend, then connect its private transport to
+   the Python connector. The companion uses the original Browser owner, CDP
+   connection and page-operation serializer.
 3. Run request/status/fill through a private typed exchange. Pin connector
    connection generation, Browser worker incarnation, original session/tab and
    host principal to each login operation. Never follow a replacement owner.

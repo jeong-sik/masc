@@ -103,6 +103,10 @@ val lost : t -> string -> unit
 
 (** [None] while the connection is open. *)
 val lost_reason : t -> string option
+val subscribe_events : t -> (event -> unit) -> (unit -> unit)
+(** Owner-domain observers on this exact transport. Callbacks must not yield,
+    raise or perform I/O. Unsubscribe before releasing the listener's owner.
+    No event is replayed and no connection is created. *)
 
 (** [command t ?session method_ params] writes one command and waits for its
     reply. *)

@@ -304,7 +304,7 @@ for raw in stream:
 let answered = function
   | W.Issue_result (Ok (B.Answered json)) -> json
   | W.Issue_result (Ok (B.Lane_absent | Timed_out | Refused _ | Rejected_before_effect _)) | W.Issue_result (Error _)
-  | Snapshot_result _ | Model_reply _ | Download_reply _ | Poll_result _ | Receipt | Service_refusal _ ->
+  | Snapshot_result _ | Model_reply _|Extension_reply _ | Download_reply _ | Poll_result _ | Receipt | Service_refusal _ ->
     fail "the ego connection did not answer"
 
 let scenario mode =
@@ -344,7 +344,7 @@ let scenario mode =
             (match issue ~timeout_sec:1. (B.Page_read {tab_id=Some 1;max_chars=None}) with
              | W.Issue_result (Ok B.Timed_out) -> true
              | W.Issue_result (Ok (B.Answered _ | Lane_absent | Refused _ | Rejected_before_effect _) | Error _)
-             | Snapshot_result _ | Model_reply _ | Download_reply _ | Poll_result _ | Receipt | Service_refusal _ -> false);
+             | Snapshot_result _ | Model_reply _|Extension_reply _ | Download_reply _ | Poll_result _ | Receipt | Service_refusal _ -> false);
           check string "its late result does not end the connection" (Yojson.Safe.to_string tab_list)
             (Yojson.Safe.to_string (answered (issue B.Tabs_list)));
           check bool "retirement" true (dispatch W.Retire = W.Receipt);
@@ -394,7 +394,7 @@ let scenario mode =
            let receipt = ok (Masc.Browser_download_artifact.publish ~base_path:root snapshot) in
            check bool "the publication is committed" true (dispatch (W.Download_commit {id;actor;route;verb;receipt}) = W.Receipt);
            check bool "and the grant released" true (dispatch (W.Download_release {id;actor;route;verb}) = W.Receipt)
-         | W.Download_reply (Broker.Published _) | W.Issue_result _ | Snapshot_result _ | Model_reply _
+         | W.Download_reply (Broker.Published _) | W.Issue_result _ | Snapshot_result _ | Model_reply _|Extension_reply _
          | Poll_result _ | Receipt | Service_refusal _ -> fail "the grant was not claimed for this connection");
         (* An upload staged for this connection's route reaches ego as the
            worker's own copies, and they stay until the space has ended. *)
@@ -409,7 +409,7 @@ let scenario mode =
            check string "the staged files handed to the SDK" {|[{"name":"note.txt","size":5}]|}
              (Yojson.Safe.to_string Yojson.Safe.Util.(json |> member "data" |> member "chosen"))
          | W.Issue_result (Ok (B.Lane_absent | Timed_out | Refused _ | Rejected_before_effect _)) | W.Issue_result (Error _)
-         | Snapshot_result _ | Model_reply _ | Download_reply _ | Poll_result _ | Receipt | Service_refusal _ ->
+         | Snapshot_result _ | Model_reply _|Extension_reply _ | Download_reply _ | Poll_result _ | Receipt | Service_refusal _ ->
            fail "the staged upload did not reach ego");
         let copies = List.map Yojson.Safe.Util.to_string
             (Yojson.Safe.Util.to_list (Yojson.Safe.from_string (read (Filename.concat root "uploaded")))) in
@@ -418,7 +418,7 @@ let scenario mode =
         check bool "an input the table refuses never reaches ego" true
           (match issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Activate_tab}) with
            | W.Issue_result (Error (B.Transport_unsupported _)) -> true
-           | W.Issue_result (Ok _ | Error _) | Snapshot_result _ | Model_reply _ | Download_reply _
+           | W.Issue_result (Ok _ | Error _) | Snapshot_result _ | Model_reply _|Extension_reply _ | Download_reply _
            | Poll_result _ | Receipt | Service_refusal _ -> false);
         check bool "retirement ends the task space" true (dispatch W.Retire = W.Receipt);
         check bool "retirement answers after the space ended" true (finished ());

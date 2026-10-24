@@ -76,6 +76,15 @@ status only.
 
 ## Docking contract still to implement
 
+The Browser private wire and original-CDP extension loader are now source
+implementation. Package-owned `prepare.js` waits for extension readiness and
+enables whole-browser agentic mode while the page slot remains held.
+`autofill.js` runs request/status/fill, matches grants by entry identity and
+rechecks the exact Chrome tab before filling. A fill failure after entry fences
+the original session. Their results stay on the private backend path; these
+programs are not model tools. Python-to-host brokering, installed-host execution
+and real account verification remain unfinished.
+
 1. Extend the private connection controls with approval links, confirmed remote
    revocation and explicit interrupted-exchange recovery. A new account must not
    borrow an earlier account's integration key.
@@ -97,6 +106,8 @@ status only.
 ## Verification
 
 Run `python3 -m unittest discover -s addons/tests -p 'test_onepassword_*.py'`.
+Run `node --test addons/tests/test_onepassword_programs.mjs` for the actual
+extension programs against fake APIs (eight scenarios passed).
 The checks use transport fixtures and actual MCP subprocesses, never a personal
 account or real tokens. The private callback checks also verify that public
 status/observations contain none of the fixture OAuth material.

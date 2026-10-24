@@ -272,7 +272,7 @@ let queued_workspace_messages ~base_path ~keeper_name =
       | Keeper_event_queue.Task_outcome _
       | Keeper_event_queue.Task_cancelled _
       | Keeper_event_queue.Delegate_completed _
-      | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+      | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
       | Keeper_event_queue.Composition_completed _ -> None)
 ;;
 

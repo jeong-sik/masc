@@ -199,10 +199,9 @@ let reserve ~fs ~config ~source ~destination ~arguments = protect (fun () ->
           else Error Binding_conflict in
         (match result with Ok _ -> Fs_compat.Confirm_existing result | Error _ -> Fs_compat.Refuse_update result))
   |> outcome)
-let lookup ~config ~source = protect (fun () ->
-  let* ()=if valid_source source then Ok () else Error Invalid_source in
+let find ~config ~id = protect (fun () ->
+  let* _=read_hash (`String id) |> Result.map_error (fun _ -> Invalid_source) in
   let* base_path=canonical config in
-  let* id=identity source in
   let path=location base_path id in
   let* parent=blocking (fun () -> Fs_compat.inspect_owned_directory_chain
       ~ownership_root:(Common.masc_dir_from_base_path ~base_path) (Filename.dirname path)
@@ -215,6 +214,14 @@ let lookup ~config ~source = protect (fun () ->
        let* ()=blocking (fun () -> validate_path ~base_path ~path ~create:false) in
        Fs_compat.update_private_file_durable_locked_result ~create:false path (fun bytes ->
          let result=let* ()=validate_path ~base_path ~path ~create:false in
-           let* prior=decode bytes in scoped ~base_path ~source ~id prior |> Result.map Option.some in
+           let* prior=decode bytes in
+           if prior.base_path=base_path && prior.id=id then Ok (Some prior) else Error Binding_conflict in
          None,result) |> outcome
      | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None))
+let lookup ~config ~source =
+  let* ()=if valid_source source then Ok () else Error Invalid_source in
+  let* id=identity source in
+  let* record=find ~config ~id in
+  match record with
+  | None -> Ok None
+  | Some record -> scoped ~base_path:record.base_path ~source ~id record |> Result.map Option.some

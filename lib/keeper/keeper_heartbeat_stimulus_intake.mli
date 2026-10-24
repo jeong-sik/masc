@@ -40,6 +40,7 @@ type stimulus_intake_result =
   | Stimulus_ask_missing of string (** Missing Ask ID. *)
   | Stimulus_ask_not_answered of string (** Open or withdrawn Ask ID. *)
   | Stimulus_job_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
+  | Stimulus_addon_unavailable of string * Lane_addon_companion_publication.error
   | Stimulus_completion_rejection_obsolete
   | Stimulus_completion_rejection_retry_later of string
 
@@ -53,7 +54,9 @@ val classify_pending_board_event_result
     [stim] into zero-or-one pending board events. On [Error unavailable] it
     logs and counts the read and returns [Stimulus_consumed []]. Original job
     completions instead require the canonical owner and return
-    [Stimulus_job_unavailable] for retention on any source read failure. *)
+    [Stimulus_job_unavailable] for retention on any source read failure.
+    Add-on notices likewise return [Stimulus_addon_unavailable] rather than
+    consuming an unreadable, unsafe or differently sourced publication. *)
 val pending_board_events_of_stimulus_result
   :  base_path:string
   -> meta_after_triage:keeper_meta
@@ -66,6 +69,7 @@ type event_queue_intake_error =
   | Connector_item_missing of string (** Missing event ID, not a whole-store failure. *)
   | Ask_read_failed of Keeper_ask_store.read_error
   | Job_result_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
+  | Addon_result_unavailable of string * Lane_addon_companion_publication.error
   | Completion_rejection_read_failed of string
 
 (** Map one durable event-queue payload to its typed turn trigger. A payload

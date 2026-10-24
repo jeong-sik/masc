@@ -3,8 +3,11 @@
 Implementation and design for the remaining continuation work in
 [#45736](https://github.com/jeong-sik/masc/issues/45736). The current version-2
 companion and public login tools do not implement private progress delivery.
-Original source capture and first-writer retention are now source implementation
-in `Lane_addon_companion_origin`, before companion grant issuance. A preparing
+Original source capture and first-writer retention are source implementation
+in `Lane_addon_companion_origin`, before companion grant issuance. Canonical
+publication retention, a durable Keeper queue producer and source-checked
+observation intake are now implemented on the host. The current worker
+transport does not call that producer yet. A preparing
 receipt or a private worker's completed fill does not prove the Keeper resumed.
 
 ## Ownership before dispatch (source implementation)
@@ -87,12 +90,32 @@ Remaining: deliver these intents on the private transport and reuse their IDs
 after an uncertain host acknowledgement. This retry concerns delivery only and
 never replays a request, credential fill or Browser command.
 
-The host commits the exact validated publication before acknowledging it. A
-repeated ID with the same binding and payload reconciles the original delivery;
-a different payload is a conflict. Use a typed `Addon_operation_changed` Keeper
-stimulus carrying the immutable binding/publication identity and original route.
-The public result stays in its canonical host record. Follow the existing owned
-job completion ordering: durable stimulus before wake hint and producer ACK.
+The host implementation now retains each notice under the original invocation
+and publication ID in a private immutable file. It captures the export's closed
+output schema, revalidates the public output and rejects changed same-ID payloads
+or damaged/unsafe files without repair. The exported reply and publication paths
+share the same closed-schema validator. No raw worker text or private descriptor
+is copied into this record.
+
+`Keeper_addon_publication.deliver` commits that record and durably enqueues a
+`Addon_operation_changed` stimulus before its optional wake hint or successful
+return. The queue carries original source/channel and immutable pointers; output
+stays in the canonical host record. Retries consult the existing queue and its
+strict reaction-ledger consumption evidence. Source capture and this internal
+producer are not publisher authentication; the remaining private broker caller
+must retain its exact original provider/caller scope throughout delivery.
+
+Keeper intake strictly rereads both the origin and publication before rendering
+public output into the prompt. A different Task, Keeper or route cannot borrow
+the record. Unavailable/corrupt source reads retain the queued stimulus and do
+not advance cycle failure state or manufacture an empty consumed result. The new
+type is explicit through queue persistence, reaction/disposition kinds, routing,
+paused-source handling, lifecycle selection and waiting inventory projections.
+There is still no executed original Keeper turn or private worker delivery proof.
+The existing ready-batch policy can mix notices from different conversations;
+its wake channel then becomes `None`. Connecting the private publisher must also
+preserve the original source/conversation boundary through actual turn admission.
+Canonical queue metadata alone does not prove that routing or task continuation.
 
 Delivery records must distinguish publication accepted, queue entry committed,
 original source consumed and resumed turn observed. Queue admission alone does
@@ -125,3 +148,9 @@ The new origin fixtures cover real private files, immutable-source conflicts,
 corrupt/unsafe records and cross-process first-writer behavior. They have only
 been parsed in this external coding session; no local Dune build or execution
 has verified them. They do not exercise progress publication or Keeper resumption.
+
+The new host publication fixtures use private files, the durable queue and actual
+canonical observation reads, including retry after simulated source consumption.
+They are source fixtures only: this coding session has parsed them without a local
+Dune build or execution. They do not simulate a resumed Keeper turn as proof of
+real continuation.

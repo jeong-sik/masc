@@ -18,6 +18,7 @@ type stimulus_kind =
   | Composition_completed  (* An async composition this Keeper submitted has settled *)
   | Owned_job_completed
   | Tool_result_ready
+  | Addon_operation_changed
 
 type reaction_kind =
   | Turn_started

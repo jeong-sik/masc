@@ -334,7 +334,7 @@ let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Workspace_message _
   | Keeper_event_queue.Delegate_completed _
   | Keeper_event_queue.Composition_completed _
-  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
   | Keeper_event_queue.Task_outcome _ ->
     None
 ;;
@@ -881,7 +881,7 @@ let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~rea
     | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
     | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-    | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+    | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
     | Keeper_event_queue.Task_outcome _ -> false
   in
   match

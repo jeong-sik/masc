@@ -302,7 +302,7 @@ let schedule_queue_match
     | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
     | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
     | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
-    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
     | Keeper_event_queue.Task_outcome _ -> false)
 ;;
 
@@ -316,7 +316,7 @@ let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimu
     | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
     | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
     | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
-    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
     | Keeper_event_queue.Task_outcome _ -> None
   in
   [ "matched_bucket", `String bucket

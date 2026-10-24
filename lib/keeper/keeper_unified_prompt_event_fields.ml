@@ -17,6 +17,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Composition_completed ->
     "keeper_composition_completed"
   | Keeper_world_observation.Owned_job_completed _ -> "owned_job_completed"
+  | Keeper_world_observation.Addon_operation_changed _ -> "addon_operation_changed"
   | Keeper_world_observation.Ask_answered_row _ -> "ask_answered"
 ;;
 
@@ -163,6 +164,11 @@ let board_event_note_fields = function
     [ "job_id", Keeper_owned_job_identity.Job_id.to_string completion.oj_job_id
     ; "source", Yojson.Safe.to_string (Keeper_owned_job_identity.source_to_json completion.oj_source)
     ; "channel", Yojson.Safe.to_string (Keeper_continuation_channel.to_yojson completion.oj_channel) ]
+  | Keeper_world_observation.Addon_operation_changed change ->
+    [ "origin_id", change.ao_origin_id
+    ; "publication_id", change.ao_publication_id
+    ; "source", Yojson.Safe.to_string (Keeper_owned_job_identity.source_to_json change.ao_source)
+    ; "channel", Yojson.Safe.to_string (Keeper_continuation_channel.to_yojson change.ao_channel) ]
 ;;
 
 let board_event_fields
@@ -340,7 +346,7 @@ let group_scheduled_wake_events events =
     | Keeper_world_observation.Delegate_completed _
     | Keeper_world_observation.Ask_answered_row _
     | Keeper_world_observation.Composition_completed
-    | Keeper_world_observation.Owned_job_completed _ -> groups
+    | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ -> groups
   in
   List.fold_left add_event [] events
 ;;

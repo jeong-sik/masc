@@ -31,6 +31,7 @@ type stimulus_intake_result =
   | Stimulus_ask_missing of string
   | Stimulus_ask_not_answered of string
   | Stimulus_job_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
+  | Stimulus_addon_unavailable of string * Lane_addon_companion_publication.error
   | Stimulus_completion_rejection_obsolete
   | Stimulus_completion_rejection_retry_later of string
 
@@ -40,6 +41,7 @@ type event_queue_intake_error =
   | Connector_item_missing of string
   | Ask_read_failed of Keeper_ask_store.read_error
   | Job_result_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
+  | Addon_result_unavailable of string * Lane_addon_companion_publication.error
   | Completion_rejection_read_failed of string
 
 let event_queue_intake_error_to_string = function
@@ -53,6 +55,8 @@ let event_queue_intake_error_to_string = function
     "ask answer intake retry: " ^ Keeper_ask_store.read_error_to_string error
   | Completion_rejection_read_failed detail ->
     "completion rejection authority intake retry: " ^ detail
+  | Addon_result_unavailable (id,error) ->
+    "addon publication unavailable " ^ id ^ ": " ^ Lane_addon_companion_publication.error_to_string error
   | Job_result_unavailable (job_id,error) ->
     "job result unavailable " ^ Keeper_owned_job_identity.Job_id.to_string job_id ^ ": "
     ^ Keeper_owned_job_store.error_to_string error
@@ -65,6 +69,7 @@ let event_queue_intake_error_reason_label = function
   | Ask_read_failed _ -> "event_queue_ask_read_failed"
   | Completion_rejection_read_failed _ -> "event_queue_completion_rejection_read_failed"
   | Job_result_unavailable _ -> "event_queue_job_result_unavailable"
+  | Addon_result_unavailable _ -> "event_queue_addon_result_unavailable"
 ;;
 
 let event_queue_intake_error_counts_as_cycle_failure = function
@@ -72,7 +77,7 @@ let event_queue_intake_error_counts_as_cycle_failure = function
   | Connector_read_failed _ | Connector_item_missing _
   | Ask_read_failed _
   | Completion_rejection_read_failed _
-  | Job_result_unavailable _ -> false
+  | Job_result_unavailable _ | Addon_result_unavailable _ -> false
 ;;
 
 let classify_pending_board_event_result = function
@@ -105,6 +110,11 @@ let pending_board_events_of_stimulus_result ~base_path ~meta_after_triage stim =
   | Keeper_event_queue.Completion_authority_rejected rejection ->
     completion_rejection_intake ~config:(Workspace.default_config base_path)
       ~meta_after_triage stim rejection
+  | Keeper_event_queue.Addon_operation_changed change ->
+    (match Keeper_world_observation.pending_board_event_of_addon_operation_change
+       ~base_path ~keeper_name:meta_after_triage.name ~arrived_at:stim.arrived_at change with
+     | Ok event -> Stimulus_consumed [event]
+     | Error error -> Stimulus_addon_unavailable (change.ao_publication_id,error))
   | Keeper_event_queue.Owned_job_completed completion ->
     (match Keeper_world_observation.pending_board_event_of_owned_job_completion
        ~base_path ~keeper_name:meta_after_triage.name ~arrived_at:stim.arrived_at completion with
@@ -221,7 +231,7 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Delegate_completed _
   | Keeper_event_queue.Composition_completed _
-  | Keeper_event_queue.Owned_job_completed _ ->
+  | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
        stimulus itself forces the keeper to re-run its cycle and proceed on its
        own state. The answer travels in the Board Activity row, so the turn
@@ -379,7 +389,7 @@ let consume_single_heartbeat_stimulus
          | Keeper_event_queue.Delegate_failed _ -> "failed")
         meta_after_triage.name;
       pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
-    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ ->
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ ->
       pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
     | Keeper_event_queue.Composition_completed cc ->
       (* Same shape as [Delegate_completed]: work this Keeper started and did
@@ -428,7 +438,7 @@ let consume_single_heartbeat_stimulus
   | Stimulus_connector_retry_later _ | Stimulus_connector_missing _
   | Stimulus_ask_retry_later _ | Stimulus_ask_missing _
   | Stimulus_completion_rejection_obsolete | Stimulus_completion_rejection_retry_later _
-  | Stimulus_ask_not_answered _ | Stimulus_job_unavailable _ -> intake_result
+  | Stimulus_ask_not_answered _ | Stimulus_job_unavailable _ | Stimulus_addon_unavailable _ -> intake_result
   | Stimulus_consumed _ ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string StimulusConsumed)
@@ -477,7 +487,7 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Workspace_message _
   | Keeper_event_queue.Delegate_completed _
   | Keeper_event_queue.Composition_completed _
-  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
   | Keeper_event_queue.Task_outcome _ ->
     true
 ;;
@@ -558,7 +568,7 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
          | Keeper_event_queue.Workspace_message _
          | Keeper_event_queue.Delegate_completed _
          | Keeper_event_queue.Composition_completed _
-         | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+         | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
          | Keeper_event_queue.Task_outcome _ -> None)
       (Keeper_event_queue.to_list pending)
 ;;
@@ -796,7 +806,7 @@ let reconcile_spent_selection
   | Delegate_completed _
   (* A settled composition cannot un-settle, so the selection stays worth a
      turn. *)
-  | Composition_completed _ | Owned_job_completed _ ->
+  | Composition_completed _ | Owned_job_completed _ | Addon_operation_changed _ ->
     Ok Selection_actionable
 ;;
 
@@ -831,7 +841,7 @@ let heartbeat_event_intake
     | Keeper_event_queue.Workspace_message _
     | Keeper_event_queue.Delegate_completed _
     | Keeper_event_queue.Composition_completed _
-    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
     | Keeper_event_queue.Task_outcome _ ->
       None
   in
@@ -869,7 +879,7 @@ let heartbeat_event_intake
            | Keeper_event_queue.Workspace_message _
            | Keeper_event_queue.Delegate_completed _
            | Keeper_event_queue.Composition_completed _
-           | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+           | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
            | Keeper_event_queue.Task_outcome _ ->
              true)
         selections
@@ -891,7 +901,7 @@ let heartbeat_event_intake
     | Keeper_event_queue.Workspace_message _
     | Keeper_event_queue.Delegate_completed _
     | Keeper_event_queue.Composition_completed _
-    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
     | Keeper_event_queue.Task_outcome _ -> false
   in
   let consume_batch selections =
@@ -1057,7 +1067,7 @@ let heartbeat_event_intake
              | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
              | Keeper_event_queue.Hitl_resolved _ | Keeper_event_queue.Completion_authority_rejected _
              | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-             | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+             | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
              | Keeper_event_queue.Task_outcome _ -> None
            in
            (match
@@ -1114,6 +1124,13 @@ let heartbeat_event_intake
                  , first_withdrawn
                  , Some (selection, Pending_selection_failed
                      ("failed to acknowledge obsolete completion rejection: " ^ message)) ))
+            | Stimulus_addon_unavailable (id,error) ->
+              let error=Addon_result_unavailable (id,error) in
+              Log.Keeper.warn "turn entry: retaining unavailable addon result keeper=%s: %s"
+                keeper_name (event_queue_intake_error_to_string error);
+              let first_withdrawn=match first_withdrawn with
+                | None -> Some (selection,error) | Some _ as kept -> kept in
+              loop remaining observations_rev selections_rev first_withdrawn rest
             | Stimulus_job_unavailable (job_id,error) ->
               let error = Job_result_unavailable (job_id,error) in
               Log.Keeper.warn "turn entry: retaining unavailable job result keeper=%s: %s"
@@ -1233,7 +1250,7 @@ let heartbeat_event_intake
             | Keeper_world_observation.Delegate_completed _
             | Keeper_world_observation.Ask_answered_row _
             | Keeper_world_observation.Composition_completed
-            | Keeper_world_observation.Owned_job_completed _ ->
+            | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ ->
               Log.Keeper.info
                 "turn entry: promoted queued observation post_id=%s keeper=%s"
                 event.Keeper_world_observation.post_id

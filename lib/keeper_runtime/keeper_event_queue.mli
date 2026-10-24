@@ -159,6 +159,9 @@ type stimulus_payload =
   | Owned_job_completed of owned_job_completion
       (** The original job has a complete canonical result. Only identity and
           original source/channel are carried; full output stays in its journal. *)
+  | Addon_operation_changed of addon_operation_change
+      (** Schema-validated public progress from an original Add-on invocation.
+          Only immutable publication/source pointers travel in this queue. *)
   | Task_outcome of task_outcome
       (** A completion authority approved this Keeper's submitted evidence —
           the approval twin of [Completion_authority_rejected]. Pointer-only:
@@ -228,6 +231,13 @@ and owned_job_completion =
   { oj_job_id : Keeper_owned_job_identity.Job_id.t
   ; oj_source : Keeper_owned_job_identity.source
   ; oj_channel : Keeper_continuation_channel.t
+  }
+
+and addon_operation_change =
+  { ao_origin_id : string
+  ; ao_publication_id : string
+  ; ao_source : Keeper_owned_job_identity.source
+  ; ao_channel : Keeper_continuation_channel.t
   }
 
 and composition_terminal =
@@ -350,10 +360,13 @@ val delegate_completion_post_id : delegate_completion -> post_id
     operation id alone is a complete key. *)
 
 val composition_completion_post_id : composition_completion -> post_id
-val owned_job_completion_post_id : owned_job_completion -> post_id
 (** Dedup/correlation id for [Composition_completed]:
     ["keeper-composition:<request_id>"]. One async request settles once, so
     the request id alone is a complete key. *)
+val owned_job_completion_post_id : owned_job_completion -> post_id
+val addon_operation_change_post_id : addon_operation_change -> post_id
+(** Original invocation plus immutable publication ID. The output remains in
+    its canonical host record and is revalidated before prompt admission. *)
 
 val ask_answered_post_id : ask_answered -> post_id
 (** Dedup/correlation id for [Ask_answered]: ["keeper-ask:<ask_id>"]. One

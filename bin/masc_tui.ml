@@ -12570,7 +12570,7 @@ let record_applied_asks (snapshot : Masc.Tui_decode_asks.asks_snapshot) =
         | Masc.Tui_decode_asks.Ask_open -> true
         | Masc.Tui_decode_asks.Ask_answered _ | Masc.Tui_decode_asks.Ask_withdrawn _ -> false in
       Masc_tui_frame_timing.{owner;ask_id=row.ar_id;
-        source_turn_ref=Option.map Masc.Ids.Turn_ref.to_string row.ar_source_turn_ref;is_open})
+        source_turn_ref=Option.map Ids.Turn_ref.to_string row.ar_source_turn_ref;is_open})
       snapshot.asn_rows in
     Masc_tui_frame_timing.note_asks_application
       (Masc_tui_frame_timing.Applied {open_count=snapshot.asn_open_count;rows})

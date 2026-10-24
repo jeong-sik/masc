@@ -1,0 +1,9 @@
+File "coding_eval_case.ml", lines 138-143, characters 8-26:
+138 | ........(match collect [] items with
+139 |          | Ok [] ->
+140 |            Error
+141 |              "test_files must not be empty (omit the key for the default \
+142 |               [\"check.sh\"])"
+143 |          | other -> other)
+Warning 4 [fragile-match]: this pattern-matching is fragile.
+  It will remain exhaustive when constructors are added to type Stdlib.result.

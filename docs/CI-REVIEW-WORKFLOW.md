@@ -230,11 +230,16 @@ gh workflow run browser-stagehand-proof.yml --ref WORKFLOW_REF \
 Set `-f companion_checks=true` for a candidate containing the original-session
 companion implementation. This additionally builds the server and executes the
 Stagehand backend, extension companion, Unix broker, allocation cleanup,
-worker protocol and original Keeper invocation retention suites. The candidate
-must contain all six fixtures; the worker protocol suite initializes the actual
+worker protocol, original Keeper invocation retention and canonical publication
+queue suites. The candidate must contain all seven fixtures; the worker protocol suite initializes the actual
 package, while origin retention covers immutable source ownership and refuses
 duplicate dispatch. The artifact records the selected build targets and
 test names, retains individual test logs and packages the matching server.
+After the complete selected build succeeds, binaries and their source/checksums
+are retained before runtime checks. A later fixture failure therefore preserves
+the build artifact without implying runtime success. Independent fixture commands
+all run and record pipeline exit codes in `companion-results.tsv`; the step fails
+if any command or log pipeline fails.
 These fixtures use fabricated CDP/provider edges; the separate browser probe
 still exercises its selected real browser. Neither proves real 1Password
 approval, website authentication or Keeper continuation. Source and workflow

@@ -120,7 +120,8 @@ jobs:
           if [[ "$COMPANION_CHECKS" == true ]]; then
             tests=(test_browser_stagehand_backend test_browser_extension_companion
               test_lane_addon_companion_broker test_lane_addon_companion_allocation
-              test_lane_addon_worker_protocol test_lane_addon_companion_origin)
+              test_lane_addon_worker_protocol test_lane_addon_companion_origin
+              test_lane_addon_companion_publication)
             printf '%s\n' "${tests[@]}" > proof/native-browser/companion-tests.txt
             targets+=(bin/main_eio.exe)
             for name in "${tests[@]}"; do targets+=("test/$name.exe"); done
@@ -128,13 +129,33 @@ jobs:
           printf '%s\n' "${targets[@]}" > proof/native-browser/build-targets.txt
           opam exec -- dune build --release "${targets[@]}"
 
+      - name: Retain compiled companion inputs before runtime checks
+        if: inputs.companion_checks
+        run: |
+          set -euo pipefail
+          mkdir -p proof/native-browser/binaries
+          while IFS= read -r target; do
+            cp "_build/default/$target" "proof/native-browser/binaries/$(basename "$target")"
+          done < proof/native-browser/build-targets.txt
+          cp proof/native-browser/SOURCE_COMMIT proof/native-browser/NATIVE_BUILD_COMMIT
+          (cd proof/native-browser && shasum -a 256 binaries/*.exe > NATIVE_BUILD_SHA256SUMS)
+
       - name: Exercise the selected original-session companion fixtures
         if: inputs.companion_checks
         run: |
           set -euo pipefail
+          companion_failed=0
+          printf 'test_name\tpipeline_exit_code\n' > proof/native-browser/companion-results.tsv
           while IFS= read -r name; do
-            opam exec -- "_build/default/test/$name.exe" 2>&1 | tee "proof/native-browser/$name.log"
+            if opam exec -- "_build/default/test/$name.exe" 2>&1 | tee "proof/native-browser/$name.log"; then
+              companion_exit_code=0
+            else
+              companion_exit_code=$?
+              companion_failed=1
+            fi
+            printf '%s\t%s\n' "$name" "$companion_exit_code" >> proof/native-browser/companion-results.tsv
           done < proof/native-browser/companion-tests.txt
+          exit "$companion_failed"
 
       # Chrome for Testing, not branded Chrome: branded builds refuse
       # --load-extension from 137, and 154 is the build the CDP extension load

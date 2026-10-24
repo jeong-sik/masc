@@ -647,7 +647,7 @@ jobs:
   ego-runtime-probe:
     if: inputs.target == 'ego-runtime-macos-arm64'
     name: Build exact-source Ego runtime path
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 90
     defaults:
       run:

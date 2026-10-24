@@ -1,0 +1,24 @@
+2026-10-24T14:15:28.1059448Z ##[group]Run set -euo pipefail
+2026-10-24T14:15:28.1059727Z [36;1mset -euo pipefail[0m
+2026-10-24T14:15:28.1059965Z [36;1mopam exec -- dune build --root . \[0m
+2026-10-24T14:15:28.1060285Z [36;1m  bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \[0m
+2026-10-24T14:15:28.1060608Z [36;1m  bin/deployment_preflight_helper.exe[0m
+2026-10-24T14:15:28.1060917Z [36;1m# Record the SHA that was actually built: GITHUB_SHA is main's[0m
+2026-10-24T14:15:28.1061242Z [36;1m# (the dispatch ref), not the checked-out head.[0m
+2026-10-24T14:15:28.1061701Z [36;1mprintf '%s\n' "2c3a9f701afd57cd0f62deb853325cb0197e0432" > "/home/runner/work/_temp/.ci-main-build-receipt"[0m
+2026-10-24T14:15:28.1117771Z shell: /usr/bin/bash -e {0}
+2026-10-24T14:15:28.1118003Z env:
+2026-10-24T14:15:28.1118171Z   DUNE_JOBS: 4
+2026-10-24T14:15:28.1118364Z   DUNE_CACHE: enabled-except-user-rules
+2026-10-24T14:15:28.1118664Z   DUNE_CACHE_ROOT: /home/runner/work/_temp/masc-dune-cache
+2026-10-24T14:15:28.1118966Z   OPAMCOLOR: always
+2026-10-24T14:15:28.1119164Z   OPAMCONFIRMLEVEL: unsafe-yes
+2026-10-24T14:15:28.1119378Z   OPAMERRLOGLEN: 0
+2026-10-24T14:15:28.1119574Z   OPAMEXTERNALSOLVER: builtin-0install
+2026-10-24T14:15:28.1119799Z   OPAMRETRIES: 10
+2026-10-24T14:15:28.1119989Z   OPAMSOLVERTIMEOUT: 600
+2026-10-24T14:15:28.1120179Z   OPAMYES: 1
+2026-10-24T14:15:28.1120349Z   OPAMSWITCH: ci-5-5-1
+2026-10-24T14:15:28.1120545Z ##[endgroup]
+2026-10-24T14:15:32.8031781Z (cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-1/bin/atdgen -j -j-std ./sse_event.atd)
+2026-10-24T14:15:32.8032642Z Warning: option "-j-std" is deprecated.

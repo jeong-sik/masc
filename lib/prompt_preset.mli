@@ -110,6 +110,19 @@ val capture :
 val save : base_path:string -> snapshot -> (unit, string) result
 (** Writes the preset directory, replacing a preset of the same name. *)
 
+type create_error =
+  | Invalid_name of string
+  | Already_exists of string
+  | Failed of { name : string; reason : string }
+
+val create : base_path:string -> snapshot -> (unit, create_error) result
+(** Publishes a new complete preset atomically only when its name is absent.
+    An existing path, including an empty directory or dangling symlink, is
+    preserved and reported as [Already_exists]. Does not replace a preset
+    that appeared after a caller listed names or captured its snapshot. *)
+
+val create_error_to_string : create_error -> string
+
 val load : base_path:string -> string -> (snapshot, string) result
 val list : base_path:string -> listing
 

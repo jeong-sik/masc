@@ -434,6 +434,117 @@ let test_a_failed_save_keeps_the_preset_it_was_replacing () =
     check (array string) "no holder is left behind" [||] (Sys.readdir staging))
 ;;
 
+let preset_tree_bytes dir =
+  let rec read relative =
+    let path = Filename.concat dir relative in
+    if Sys.is_directory path then
+      Sys.readdir path |> Array.to_list |> List.sort String.compare
+      |> List.concat_map (fun name -> read (Filename.concat relative name))
+    else [relative, Fs_compat.load_file path]
+  in
+  read ""
+;;
+
+let create_or_fail ~base_path snapshot =
+  match Preset.create ~base_path snapshot with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (Preset.create_error_to_string error)
+;;
+
+let test_create_preserves_a_name_taken_after_listing () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let proposed = or_fail (Preset.capture ~base_path ~name:"new-preset" ~description:"stale client") in
+    Alcotest.(check int) "the client initially sees no saved names" 0
+      (List.length (Preset.list ~base_path).presets);
+    set_override ~base_path "Another caller's saved prompt.";
+    let winner = or_fail (Preset.capture ~base_path ~name:proposed.name ~description:"other caller") in
+    create_or_fail ~base_path winner;
+    let dir = Preset.source_directory ~base_path winner in
+    let before = preset_tree_bytes dir in
+    (match Preset.create ~base_path proposed with
+     | Error (Preset.Already_exists name) ->
+       Alcotest.(check string) "the competing name is reported" proposed.name name
+     | Error error -> Alcotest.fail (Preset.create_error_to_string error)
+     | Ok () -> Alcotest.fail "a stale name listing allowed replacement");
+    Alcotest.(check (list (pair string string))) "all original saved bytes remain" before
+      (preset_tree_bytes dir);
+    let loaded = or_fail (Preset.load ~base_path winner.name) in
+    Alcotest.(check bool) "the successful create publishes the complete snapshot" true
+      (loaded = winner))
+;;
+
+let test_concurrent_creates_publish_one_complete_snapshot () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let first = or_fail (Preset.capture ~base_path ~name:"race" ~description:"first") in
+    let first = { first with instructions = ["alpha", "First caller's instructions."] } in
+    let second = { first with description = "second"; instructions = ["alpha", "Second caller's instructions."] } in
+    let mutex = Mutex.create () and condition = Condition.create () in
+    let ready = ref 0 and start = ref false in
+    let compete snapshot =
+      Mutex.lock mutex;
+      incr ready;
+      Condition.broadcast condition;
+      while not !start do Condition.wait condition mutex done;
+      Mutex.unlock mutex;
+      Preset.create ~base_path snapshot
+    in
+    let left = Domain.spawn (fun () -> compete first) in
+    let right = Domain.spawn (fun () -> compete second) in
+    Mutex.lock mutex;
+    while !ready <> 2 do Condition.wait condition mutex done;
+    start := true;
+    Condition.broadcast condition;
+    Mutex.unlock mutex;
+    let results = [Domain.join left; Domain.join right] in
+    Alcotest.(check int) "exactly one concurrent caller creates the name" 1
+      (List.length (List.filter (function Ok () -> true | Error _ -> false) results));
+    List.iter (function
+      | Ok () | Error (Preset.Already_exists "race") -> ()
+      | Error error -> Alcotest.fail (Preset.create_error_to_string error)) results;
+    let loaded = or_fail (Preset.load ~base_path first.name) in
+    Alcotest.(check bool) "the published files all belong to one caller" true
+      (loaded = first || loaded = second);
+    let staging = Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets-staging" in
+    Alcotest.(check (array string)) "both staging holders are cleaned" [||] (Sys.readdir staging))
+;;
+
+let test_create_rejects_invalid_input_and_reports_write_failure () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let snapshot = or_fail (Preset.capture ~base_path ~name:"valid" ~description:"") in
+    (match Preset.create ~base_path { snapshot with name = "../outside" } with
+     | Error (Preset.Invalid_name _) -> ()
+     | Error error -> Alcotest.fail (Preset.create_error_to_string error)
+     | Ok () -> Alcotest.fail "an invalid create name was accepted");
+    Alcotest.(check bool) "invalid input creates no preset directory" false
+      (Sys.file_exists (Preset.source_directory ~base_path snapshot));
+    (match Preset.create ~base_path { snapshot with instructions = [String.make 300 'k', "not saved"] } with
+     | Error (Preset.Failed _) -> ()
+     | Error error -> Alcotest.fail (Preset.create_error_to_string error)
+     | Ok () -> Alcotest.fail "a failed staged write was published");
+    Alcotest.(check int) "a failed create publishes no preset" 0
+      (List.length (Preset.list ~base_path).presets))
+;;
+
+let test_create_keeps_existing_empty_directory_and_dangling_symlink () =
+  with_base (fun ~base_path ~keepers:_ ~config:_ ->
+    let snapshot = or_fail (Preset.capture ~base_path ~name:"occupied" ~description:"") in
+    let path = Preset.source_directory ~base_path snapshot in
+    mkdir_p path;
+    let expect_exists () =
+      match Preset.create ~base_path snapshot with
+      | Error (Preset.Already_exists _) -> ()
+      | Error error -> Alcotest.fail (Preset.create_error_to_string error)
+      | Ok () -> Alcotest.fail "an occupied path was replaced"
+    in
+    expect_exists ();
+    Alcotest.(check (array string)) "the occupied empty directory stays empty" [||] (Sys.readdir path);
+    Unix.rmdir path;
+    Unix.symlink "missing-preset-target" path;
+    expect_exists ();
+    Alcotest.(check string) "the dangling symlink is preserved" "missing-preset-target" (Unix.readlink path);
+    Unix.unlink path)
+;;
+
 (* Restoring the autosave undoes the latest restore: the state from before it
    comes back, and the autosave then holds the state the undo replaced. *)
 let test_restoring_the_autosave_undoes_the_latest_restore () =
@@ -1352,6 +1463,14 @@ let () =
             test_a_second_restore_replaces_the_autosave
         ; Alcotest.test_case "a failed save keeps the preset it was replacing" `Quick
             test_a_failed_save_keeps_the_preset_it_was_replacing
+        ; Alcotest.test_case "create preserves a name taken after listing" `Quick
+            test_create_preserves_a_name_taken_after_listing
+        ; Alcotest.test_case "concurrent creates publish one complete snapshot" `Quick
+            test_concurrent_creates_publish_one_complete_snapshot
+        ; Alcotest.test_case "create rejects invalid input and staged write failure" `Quick
+            test_create_rejects_invalid_input_and_reports_write_failure
+        ; Alcotest.test_case "create preserves empty directories and dangling symlinks" `Quick
+            test_create_keeps_existing_empty_directory_and_dangling_symlink
         ; Alcotest.test_case "restoring the autosave undoes the latest restore" `Quick
             test_restoring_the_autosave_undoes_the_latest_restore
         ; Alcotest.test_case "the overrides file is read under an installed Eio fs" `Quick

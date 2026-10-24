@@ -655,32 +655,56 @@ let write_preset_files dir (s : snapshot) =
      Yojson.Safe.pretty_to_string json ^ "\n")
 ;;
 
-(* The preset is written whole into a fresh holder, then put in place in one
-   step: renamed in when the name is new, exchanged with the old directory
-   when it is not. A save that stops midway leaves the preset it was
-   replacing as it was, which matters most for the autosave, the one copy of
-   the state from before a restore. The holder goes afterwards, and with it
-   the directory that was replaced. *)
-let save ~base_path (s : snapshot) =
+type create_error =
+  | Invalid_name of string
+  | Already_exists of string
+  | Failed of { name : string; reason : string }
+
+let create_error_to_string = function
+  | Invalid_name name -> "invalid preset name: " ^ name
+  | Already_exists name -> "a preset named " ^ name ^ " already exists"
+  | Failed { name; reason } -> "preset " ^ name ^ " could not be saved: " ^ reason
+;;
+
+(* Both publication paths prepare the complete tree outside the listing.
+   Only the final atomic operation decides whether a name may be replaced. *)
+let with_staged_preset ~base_path (s : snapshot) publish =
+  let failed reason = Failed { name = s.name; reason } in
   if not (is_valid_name s.name)
-  then Error ("invalid preset name: " ^ s.name)
+  then Error (Invalid_name s.name)
   else
-    guard (fun () ->
+    let write () =
       let target = preset_dir ~base_path s.name in
-      let* () = mkdir_p (presets_dir ~base_path) in
-      let* () = mkdir_p (staging_dir ~base_path) in
+      let* () = mkdir_p (presets_dir ~base_path) |> Result.map_error failed in
+      let* () = mkdir_p (staging_dir ~base_path) |> Result.map_error failed in
       let holder = Filename.temp_dir ~temp_dir:(staging_dir ~base_path) (s.name ^ "-") "" in
       let staged = Filename.concat holder s.name in
-      let published =
-        let* () = write_preset_files staged s in
-        guard (fun () ->
-          if Sys.file_exists target
-          then Fs_compat.exchange_paths staged target
-          else Fs_compat.rename_noreplace staged target;
-          Ok ())
-      in
-      remove_quietly holder;
-      published)
+      Fun.protect ~finally:(fun () -> remove_quietly holder) (fun () ->
+        let* () = write_preset_files staged s |> Result.map_error failed in
+        publish ~staged ~target)
+    in
+    match write () with
+    | result -> result
+    | exception Sys_error reason -> Error (failed reason)
+    | exception Unix.Unix_error (error, operation, argument) ->
+      Error (failed (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)))
+;;
+
+(* Replacing saves are used by explicit overwrite and the rotating autosave. *)
+let save ~base_path (s : snapshot) =
+  with_staged_preset ~base_path s (fun ~staged ~target ->
+    if Sys.file_exists target
+    then Fs_compat.exchange_paths staged target
+    else Fs_compat.rename_noreplace staged target;
+    Ok ())
+  |> Result.map_error create_error_to_string
+;;
+
+let create ~base_path (s : snapshot) =
+  with_staged_preset ~base_path s (fun ~staged ~target ->
+    match Fs_compat.rename_noreplace staged target with
+    | () -> Ok ()
+    | exception Unix.Unix_error (Unix.EEXIST, _, _) -> Error (Already_exists s.name))
 ;;
 
 let read_manifest dir =

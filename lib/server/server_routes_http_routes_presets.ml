@@ -3,6 +3,7 @@
    GET  /api/v1/presets          — manifests under <base>/.masc/presets
    GET  /api/v1/presets/show     — ?name=<n>: everything that preset would change
    POST /api/v1/presets          — {name, description?}: snapshot the live state
+   POST /api/v1/presets/create   — {name, description?}: create without replacing
    POST /api/v1/presets/restore  — {name}: autosave, then apply the preset
    POST /api/v1/presets/delete   — {name}: remove the preset, readable or not
 
@@ -66,6 +67,36 @@ let listing_json (listing : Prompt_preset.listing) =
              (fun (name, reason) -> `Assoc [ "name", `String name; "reason", `String reason ])
              listing.Prompt_preset.unreadable) )
     ]
+;;
+
+let write_snapshot ~save request reqd =
+  with_permission_auth
+    ~permission:Masc_domain.CanAdmin
+    (fun state _req reqd ->
+      Http.Request.read_body_async reqd (fun body ->
+        match decode_save body with
+        | Error message ->
+          respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
+        | Ok { name; description } ->
+          let base_path = base_path_of state in
+          let saved =
+            match Prompt_preset.capture ~base_path ~name ~description with
+            | Error message -> Error (`Internal_server_error, message)
+            | Ok snapshot ->
+              save ~base_path snapshot |> Result.map (fun () -> snapshot)
+          in
+          (match saved with
+           | Ok snapshot ->
+             respond_json_value_with_cors request reqd
+               (ok_json [ "preset", Prompt_preset.manifest_to_json
+                   (Prompt_preset.manifest_of_snapshot snapshot) ])
+           | Error (status, message) ->
+             (match status with
+              | `Internal_server_error -> Log.Pages.error "preset save %s failed: %s" name message
+              | `Bad_request | `Conflict -> ());
+             respond_json_value_with_cors ~status:(status :> Httpun.Status.t)
+               request reqd (error_json message))))
+    request reqd
 ;;
 
 let add_routes router =
@@ -133,43 +164,20 @@ let add_routes router =
                    (error_json message)))
          request
          reqd)
-  |> Http.Router.post "/api/v1/presets" (fun request reqd ->
-       with_permission_auth
-         ~permission:Masc_domain.CanAdmin
-         (fun state _req reqd ->
-           Http.Request.read_body_async reqd (fun body ->
-             match decode_save body with
-             | Error message ->
-               respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
-             | Ok { name; description } ->
-               let base_path = base_path_of state in
-               let saved =
-                 match Prompt_preset.capture ~base_path ~name ~description with
-                 | Error _ as error -> error
-                 | Ok snapshot ->
-                   (match Prompt_preset.save ~base_path snapshot with
-                    | Ok () -> Ok snapshot
-                    | Error _ as error -> error)
-               in
-               (match saved with
-                | Ok snapshot ->
-                  respond_json_value_with_cors
-                    request
-                    reqd
-                    (ok_json
-                       [ ( "preset"
-                         , Prompt_preset.manifest_to_json
-                             (Prompt_preset.manifest_of_snapshot snapshot) )
-                       ])
-                | Error message ->
-                  Log.Pages.error "preset save %s failed: %s" name message;
-                  respond_json_value_with_cors
-                    ~status:`Internal_server_error
-                    request
-                    reqd
-                    (error_json message))))
-         request
-         reqd)
+  |> Http.Router.post "/api/v1/presets"
+       (write_snapshot ~save:(fun ~base_path snapshot ->
+          Prompt_preset.save ~base_path snapshot
+          |> Result.map_error (fun message -> `Internal_server_error, message)))
+  |> Http.Router.post "/api/v1/presets/create"
+       (write_snapshot ~save:(fun ~base_path snapshot ->
+          Prompt_preset.create ~base_path snapshot
+          |> Result.map_error (fun error ->
+            let status = match error with
+              | Prompt_preset.Invalid_name _ -> `Bad_request
+              | Prompt_preset.Already_exists _ -> `Conflict
+              | Prompt_preset.Failed _ -> `Internal_server_error
+            in
+            status, Prompt_preset.create_error_to_string error)))
   |> Http.Router.post "/api/v1/presets/restore" (fun request reqd ->
        with_permission_auth
          ~permission:Masc_domain.CanAdmin

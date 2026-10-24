@@ -115,3 +115,12 @@ request at upper source `9a9109d9c5c34dbfbe457f2e0a0e8ebfb092051c` selects only
 `test_telegram_native_gateway,test_keeper_owner,test_telegram_poll_custody,test_telegram_rest_client`.
 The result remains pending at this update. Frontend source is unchanged from the
 140-test and candidate screenshot observations above.
+
+A subsequent interface audit corrected the added fixture itself to use the
+exported `canonical_json_string` API and parse its result, rather than refer to
+a private error formatter. This strengthens the fixture to exercise the stored
+JSON string boundary. Production/Owner fixture sources remain byte-identical to
+run 40110391139's selected source (verified by an empty diff). A separate narrow
+follow-up runs only the native gateway/custody/REST suites at source
+`145ef89b52a1b5bf6296c4e4d1a805b2dedec045`; no running job was cancelled and the
+Owner suite is not needlessly repeated for this fixture-only change.

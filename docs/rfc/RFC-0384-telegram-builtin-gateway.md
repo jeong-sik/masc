@@ -15,7 +15,7 @@ python-telegram-bot). The third and simplest instance of the move
 
 > **Status.** Implementation is in Native Stack #45832: custody #45819,
 > native Keeper integration #45831 and external poller removal #45834, with
-> dashboard cleanup above them. These are draft source changes, not deployed
+> dashboard cleanup above them. These are source changes under review, not deployed
 > cutover or live Telegram proof. Public structured blocks are rendered as HTML;
 > private media upload and automatic partial-send resume remain open acceptance.
 > See [connector configuration](../CONNECTOR-CONFIG-SCHEMA.md) for the source contract.

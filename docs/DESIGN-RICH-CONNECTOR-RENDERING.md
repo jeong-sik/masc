@@ -128,9 +128,9 @@ Legend: ✅ supported · ⚠️ partial / degraded · ❌ silently dropped / uns
 
 ---
 
-### 5.4 Telegram / iMessage / CLI sidecars
+### 5.4 Telegram / iMessage / CLI connectors
 
-**Finding:** All three consume only `GateResponse.reply` (plain text) and ignore `GateResponse.structured`. Images embedded as `![alt](url)` are sent as text. Telegram chunking splits inside markdown entities. iMessage has no length guard. CLI prints raw text with no markdown awareness.
+**Audit finding:** The original connector implementations consumed plain replies and lost structured rendering. Native Telegram now projects the exact committed assistant blocks into independently balanced HTML chunks, retains public media/link references and refuses unsupported private media as delivery failure. Binary media upload remains open. The iMessage/CLI observations below describe the original audit scope.
 
 **Improvements:**
 - **Telegram** (`lib/keeper/keeper_telegram_render.ml`, `keeper_chat_telegram.ml`)

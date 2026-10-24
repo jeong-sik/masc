@@ -1,0 +1,246 @@
+{
+  "spaceId": 20,
+  "result": {
+    "completed": [
+      {
+        "index": 0,
+        "method": "fill",
+        "receipt": {}
+      },
+      {
+        "index": 1,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 2,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 3,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 4,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 5,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 6,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 7,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 8,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 9,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 10,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 11,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 12,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 13,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 14,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 15,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 16,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 17,
+        "method": "waitForSelector",
+        "receipt": null
+      },
+      {
+        "index": 18,
+        "method": "click",
+        "receipt": {}
+      },
+      {
+        "index": 19,
+        "method": "waitForSelector",
+        "receipt": null
+      }
+    ],
+    "effectStarted": true,
+    "completedEffect": true,
+    "failure": null,
+    "urlBefore": "http://127.0.0.1:61046/",
+    "url": "http://127.0.0.1:61046/",
+    "title": "Native Ego waits",
+    "snapshot": "[p1 \"Native Ego waits\" | space \"masc-ego-native-sdk-20261024\"(20): 1 managed, 0 untracked — p1* \"Native Ego waits\"]\nroot\n  heading\n    text \"Native Ego waits\"\n  container\n    text \"Name\"\n    textbox [ref=1]\n      text \"Ego owns waits\"\n  button [ref=2]\n    text \"Save\"\n  paragraph\n    text \"Saved: Ego owns waits\"\n",
+    "truncated": false,
+    "chars": 313
+  },
+  "state": {
+    "text": "Saved: Ego owns waits",
+    "submissions": 1
+  },
+  "request": {
+    "expectedUrl": "http://127.0.0.1:61046/",
+    "steps": [
+      {
+        "method": "fill",
+        "selector": "#name",
+        "text": "Ego owns waits"
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#save",
+        "state": "visible",
+        "timeoutMs": 75000
+      },
+      {
+        "method": "click",
+        "selector": "#save"
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "#result",
+        "state": "visible"
+      }
+    ],
+    "snapshotScope": "viewport",
+    "maxChars": 12000,
+    "cursor": "Verify native SDK waits"
+  },
+  "script_sha256": "ff96902e331b3b8ea0e3d07b1d4dcb8ebb2d638218104276bc29ed6b1e29d061",
+  "scope": "Production JS on installed Ego only; not full host or Keeper dispatch"
+}

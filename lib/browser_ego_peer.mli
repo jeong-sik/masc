@@ -53,11 +53,11 @@ type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) re
     [now] is the time in seconds; a command that runs twice gives its
     second run what is left of its window. Downloads that agent pages start
     are saved and published through [downloads]. [run_native] uses the same
-    serial SDK process under the request's bounded execution budget; timeout or
-    explicit cancellation stops the process. *)
+    serial SDK process, without a cumulative reply window: SDK operations own
+    their waits and explicit cancellation still stops the process. *)
 val open_space
   :  run:runner
-  -> run_native:runner
+  -> run_native:(string -> (string, run_failure) result)
   -> now:(unit -> float)
   -> space:string
   -> version:string

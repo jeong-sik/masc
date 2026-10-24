@@ -28,8 +28,14 @@ let install ~sw domain_mgr =
 
 let encode_state state =
   let run () =
-    Keeper_event_queue_state.to_yojson state
-    |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
+    let json = Keeper_event_queue_state.to_yojson state
+      |> Safe_ops.sanitize_json_utf8 in
+    (* Queue inputs can carry nonfinite timestamps. The compact writer rejects
+       those values even with [std:false], while the formatter represents
+       them. Both attempts use this same constructed, sanitized snapshot. *)
+    match Yojson.Safe.to_string json with
+    | bytes -> bytes
+    | exception Yojson.Json_error _ -> Yojson.Safe.pretty_to_string json
   in
   match Atomic.get pool, Eio_guard.execution_context () with
   | Some { executor; stopped }, Eio_guard.Eio_fiber ->

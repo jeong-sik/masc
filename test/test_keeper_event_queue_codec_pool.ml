@@ -117,13 +117,35 @@ let test_encoding_bytes_and_switch_lifetime () =
   in_child "snapshot codec switch lifetime" (fun () ->
     let state = State.with_pending
         (Queue.enqueue Queue.empty (stimulus "unicode-한글-invalid-\255-\192")) State.empty in
-    let previous_encoding value =
-      value |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
+    let compact_encoding value =
+      value |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.to_string
     in
-    let expected_state = previous_encoding (State.to_yojson state) in
+    let expected_json = State.to_yojson state |> Safe_ops.sanitize_json_utf8 in
+    let expected_state = compact_encoding (State.to_yojson state) in
     let check_encoding phase =
-      Alcotest.(check string) (phase ^ ": state construction, sanitizing and pretty-print bytes")
-        expected_state (Codec.encode_state state)
+      let encoded = Codec.encode_state state in
+      Alcotest.(check string) (phase ^ ": state construction, sanitizing and compact bytes")
+        expected_state encoded;
+      let decoded = Yojson.Safe.from_string encoded |> State.of_yojson
+        |> require_ok (phase ^ ": current snapshot decoder accepts encoded state") in
+      Alcotest.(check bool) (phase ^ ": decoded state preserves sanitized values") true
+        (Yojson.Safe.equal expected_json (State.to_yojson decoded));
+      List.iter (fun (label,arrived_at) ->
+        let item = { (stimulus ("nonfinite-" ^ label)) with arrived_at } in
+        let state = State.with_pending (Queue.enqueue Queue.empty item) State.empty in
+        let expected = State.to_yojson state |> Safe_ops.sanitize_json_utf8
+          |> Yojson.Safe.pretty_to_string in
+        let encoded = Codec.encode_state state in
+        Alcotest.(check string) (phase ^ ": " ^ label ^ " retains accepted encoding") expected encoded;
+        let decoded = Yojson.Safe.from_string encoded |> State.of_yojson
+          |> require_ok (phase ^ ": " ^ label ^ " remains decodable") in
+        match State.pending decoded |> Queue.to_list with
+        | [item] ->
+            Alcotest.(check bool) (phase ^ ": " ^ label ^ " timestamp survives") true
+              (if Float.is_nan arrived_at then Float.is_nan item.Queue.arrived_at
+               else Float.equal arrived_at item.arrived_at)
+        | _ -> Alcotest.fail (phase ^ ": nonfinite source was lost or duplicated"))
+        ["nan",nan;"positive infinity",infinity;"negative infinity",neg_infinity]
     in
     check_encoding "before Eio installation";
     Eio_main.run (fun env ->
@@ -201,7 +223,7 @@ let test_cancelled_switch_releases_protected_writer () =
          | ids -> Alcotest.failf "shutdown lost or duplicated pending input: %s"
                     (String.concat ", " ids));
         let after_shutdown = State.to_yojson State.empty
-          |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string in
+          |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.to_string in
         Alcotest.(check string) "released cancelled codec can encode again"
           after_shutdown
           (Codec.encode_state State.empty))))

@@ -13,7 +13,9 @@ val install : sw:Eio.Switch.t -> _ Eio.Domain_manager.t -> unit
     release clears this installation without clearing a later installation. *)
 
 val encode_state : Keeper_event_queue_state.t -> string
-(** Construct, sanitize and pretty-print a snapshot on
-    the encoding worker. Exceptions and cancellation propagate without replay.
+(** Construct and sanitize a snapshot once on the encoding worker. Return
+    compact JSON when its writer accepts the values; otherwise use the JSON
+    formatter, which also represents nonfinite scalars. Formatter failures
+    and cancellation propagate without repeating construction or sanitization.
     Before installation, or from a non-Eio caller, encode in the caller's
     context. Neither path depends on the shared executor. *)

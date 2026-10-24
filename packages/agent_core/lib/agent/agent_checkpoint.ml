@@ -80,13 +80,14 @@ let build_resume ~(checkpoint : Checkpoint.t) ?(eio_context = false) ?config ?pr
     | Some provider ->
       let provider = Agent_turn.provider_config_with_agent_config ~config:restored_config provider
         |> Llm_provider.Provider_config.freeze_for_request in
-      let* capability = Llm_provider.Reasoning_history_projection.validate_replay_continuity_for_provider_config
+      let* admission = Llm_provider.Reasoning_history_projection.validate_replay_continuity_for_provider_config
         provider checkpoint.messages
         |> Result.map_error (fun error -> Replay_rejected error) in
-      let disposition = match provider.preserve_thinking, checkpoint.provider_binding with
-        | Some false, _ -> Replay_disabled_by_caller
-        | (None | Some true), None -> Unrecorded_producer
-        | (None | Some true), Some stored ->
+      let capability = admission.capability in
+      let disposition = match admission.disposition, checkpoint.provider_binding with
+        | Llm_provider.Reasoning_history_projection.Caller_excluded_reasoning, _ -> Replay_disabled_by_caller
+        | Preserve_reasoning, None -> Unrecorded_producer
+        | Preserve_reasoning, Some stored ->
           if Reasoning_source.equal stored capability.target then Identical_source
           else if Reasoning_source.rotation_admits ~rotation_policy:capability.rotation
               ~stored ~target:capability.target then Declared_endpoint_rotation

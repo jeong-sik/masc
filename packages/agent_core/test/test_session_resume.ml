@@ -485,9 +485,9 @@ module Binding_projection = Llm_provider.Reasoning_history_projection
 module Binding_provider = Llm_provider.Provider_config
 
 let binding_provider ?(kind=Binding_provider.OpenAI_compat) ?(path="/chat")
-    ?(model="shared-model") endpoint =
+    ?(replay=Llm_provider.Capabilities.Force_preserve_always) ?(model="shared-model") endpoint =
   let caps = Llm_provider.Capabilities.{openai_compat_chat_capabilities with
-    supports_reasoning=true; reasoning_replay_override=Force_preserve_always} in
+    supports_reasoning=true; reasoning_replay_override=replay} in
   Binding_provider.make ~kind ~model_id:model ~base_url:endpoint ~request_path:path
     ~model_capabilities_override:caps ()
 ;;
@@ -585,7 +585,7 @@ let test_binding_text_only_rebind () = with_net (fun net ->
 ;;
 let test_binding_explicit_disable () = with_net (fun net ->
   let original=binding_provider "https://original.example" in
-  let target=binding_provider ~kind:Binding_provider.Kimi "https://other.example" in
+  let target=binding_provider ~replay:Llm_provider.Capabilities.Force_no_replay ~kind:Binding_provider.Kimi "https://other.example" in
   let cp=binding_checkpoint original [binding_message(binding_source original)] in
   let config={ (Types.default_config ~model:target.model_id) with preserve_thinking=Some false} in
   let plan=Agent_checkpoint.build_resume ~checkpoint:cp ~provider_config:target ~config () |> binding_resume_ok in
@@ -593,7 +593,11 @@ let test_binding_explicit_disable () = with_net (fun net ->
     (plan.binding_disposition=Agent_checkpoint.Replay_disabled_by_caller);
   let agent=Agent.resume ~net ~checkpoint:cp ~config ~options:(binding_options target) () |> binding_resume_ok in
   Alcotest.(check bool) "caller exclusion does not destroy canonical reasoning" true ((Agent.state agent).messages==cp.messages);
-  Agent.close agent)
+  Agent.close agent;
+  let ignores_false=binding_provider ~kind:Binding_provider.Kimi "https://other.example" in
+  Alcotest.(check int) "a wire ignoring false cannot claim caller exclusion" 0
+    (expect_binding_incompatible(Agent.resume ~net ~checkpoint:cp ~config
+      ~options:(binding_options ignores_false) ())))
 ;;
 let test_binding_missing_and_corrupt_source () = with_net (fun net ->
   let target=binding_provider "https://same.example" in
@@ -647,7 +651,7 @@ let test_binding_hook_cannot_reenable_incompatible_replay () = with_net (fun net
   Eio.Switch.run (fun sw ->
     List.iter(fun (stream, reenable) ->
       let original=binding_provider "https://original.example" in
-      let target=binding_provider ~kind:Binding_provider.Kimi "https://other.example" in
+      let target=binding_provider ~replay:Llm_provider.Capabilities.Force_no_replay ~kind:Binding_provider.Kimi "https://other.example" in
       let cp=binding_checkpoint original [binding_message(binding_source original)] in
       let before=Checkpoint.to_json cp in
       let calls=ref 0 in

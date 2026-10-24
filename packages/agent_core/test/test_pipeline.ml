@@ -322,7 +322,11 @@ let test_provider_context_retention () =
   Alcotest.(check int) "only Anthropic adds durable context"
     (if retained then 3 else 2) (List.length saved);
   let next_options = { options with provider_config = Some
-    { (Provider_mock.to_provider_config ()) with kind = next_kind } } in
+    { (Provider_mock.to_provider_config ()) with kind = next_kind;
+      model_capabilities_override = (if signed && kind<>next_kind then
+        Some Llm_provider.Capabilities.{openai_compat_chat_capabilities with
+          reasoning_replay_override=Force_no_replay}
+        else None) } } in
   let resumed = Internal_agent.create ~net:env#net
       ~config:{ (Types.default_config ~model:"test-model") with max_tokens = Some 64 }
       ~options:next_options () in

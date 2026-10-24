@@ -36,3 +36,7 @@ Directly inspected source: `lib/lane_addon/lane_addon_runtime.ml` instance seria
 The actual executable is the installed TUI, not a source projection or freshly built private executable. The HTTP server, worker data and action receipt are synthetic. The frame images are lossless PNG presentations of captured tmux text; original ANSI bytes and text remain available. The initial Dashboard has partial-source diagnostics because the fixture serves only the relevant role/action boundary, not a complete operator backend.
 
 The visible `confirmed` state describes the fixture's returned receipt. No real worker, external search, model, container, production server mutation, installation or deployment is proven by it. Both fixture listeners and private tmux sessions were explicitly stopped and their closure checked. No local Dune build, new screenshot/layout test or new control heuristic was introduced.
+
+## Independent artifact review
+
+The coordinating agent independently opened the original role, Flow and action-receipt images, read the captured original action POST, and separately opened the replacement-refusal image and read the zero-before-reselection count, replacement action POST and cleanup receipts. That review confirmed the stated observed target/withdrawal behavior within the fixture scope. It is an independent artifact observation, not a formal GitHub approval, additional execution, real worker effect or production-server proof.

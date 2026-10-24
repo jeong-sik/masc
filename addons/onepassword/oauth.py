@@ -232,6 +232,11 @@ class PrivateStore:
     backend storage under the operator's UID, not an OS isolation boundary.
     Provisioning is explicit; readers never create a missing directory.
     """
+    _record_name = "connection.json"
+    _reference_name = "connection.reference.json"
+    _reference_schema = "masc.1password.protected.v1"
+    _validate = staticmethod(validate_record)
+
     def __init__(self, directory: Path, *, records=None, provision: bool = False):
         if not directory.is_absolute():
             raise ConnectionError("store_path_not_absolute")
@@ -240,7 +245,8 @@ class PrivateStore:
             self.directory.mkdir(mode=0o700, exist_ok=True)
         self.identity = self._directory_identity()
         self.thread_lock = threading.RLock()
-        namespace = json.dumps([os.getuid(), str(directory.resolve()), *self.identity],
+        namespace = json.dumps([self._reference_schema, self._record_name, os.getuid(),
+                                str(directory.resolve()), *self.identity],
                                separators=(",", ":")).encode()
         self.records = records if records is not None else ProtectedRecords(hashlib.sha256(namespace).hexdigest())
 
@@ -286,7 +292,7 @@ class PrivateStore:
 
     def _reference(self, root: int) -> int | None:
         try:
-            os.stat("connection.json", dir_fd=root, follow_symlinks=False)
+            os.stat(self._record_name, dir_fd=root, follow_symlinks=False)
         except FileNotFoundError:
             pass
         else:
@@ -294,7 +300,7 @@ class PrivateStore:
             # silently adopt, copy, delete, or fall back to it.
             raise ConnectionError("plaintext_connection_reconciliation_required")
         try:
-            fd = os.open("connection.reference.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            fd = os.open(self._reference_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                          dir_fd=root)
         except FileNotFoundError:
             return None
@@ -308,7 +314,7 @@ class PrivateStore:
         finally:
             os.close(fd)
         if (not isinstance(value, dict) or set(value) != {"schema", "slot"}
-                or value["schema"] != "masc.1password.protected.v1"
+                or value["schema"] != self._reference_schema
                 or type(value["slot"]) is not int or value["slot"] not in {0, 1}):
             raise ConnectionError("invalid_connection_reference")
         return value["slot"]
@@ -326,11 +332,11 @@ class PrivateStore:
             value = json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
         except (ValueError, UnicodeError):
             raise ConnectionError("invalid_connection_record") from None
-        validate_record(value)
+        self._validate(value)
         return value
 
     def write(self, root: int, value: dict):
-        validate_record(value)
+        self._validate(value)
         current = self._reference(root)
         slot = 0 if current is None else 1 - current
         raw = json.dumps(value, allow_nan=False, separators=(",", ":"))
@@ -344,13 +350,13 @@ class PrivateStore:
                      0o600, dir_fd=root)
         try:
             with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as stream:
-                json.dump({"schema": "masc.1password.protected.v1", "slot": slot}, stream,
+                json.dump({"schema": self._reference_schema, "slot": slot}, stream,
                           separators=(",", ":"))
                 stream.flush()
                 os.fsync(fd)
             if self._directory_identity() != self.identity:
                 raise ConnectionError("secret_store_replaced")
-            os.replace(temporary, "connection.reference.json", src_dir_fd=root, dst_dir_fd=root)
+            os.replace(temporary, self._reference_name, src_dir_fd=root, dst_dir_fd=root)
             temporary = None
             os.fsync(root)
         finally:

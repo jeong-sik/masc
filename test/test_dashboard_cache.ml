@@ -399,6 +399,15 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
 
 module Execution_http = Server_dashboard_http_execution_surfaces.For_testing
 
+(* Encoding assertions only: observation changes have separate JSON assertions. *)
+let execution_cached_representation ~config request =
+  match Execution_http.cached_response ~config request with
+  | Some (Server_dashboard_http_execution_surfaces.Execution_payload payload) ->
+    let body, headers = Dashboard_cache.select_http_representation
+        ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding") payload in
+    Some (body, payload.etag, headers)
+  | Some (Server_dashboard_http_execution_surfaces.Execution_json _) | None -> None
+
 let with_execution_http_fixture f =
   let config = Workspace.default_config "/tmp/execution-http-preparation" in
   let invalidate = Server_dashboard_http_execution_surfaces.invalidate_execution_cache in
@@ -435,7 +444,7 @@ let test_execution_preparation_reuse_and_scope () =
       (Option.is_none (Execution_http.prepared_payload_for_snapshot
                         ~config:other_workspace snapshot));
     let read ?target encoding =
-      Execution_http.cached_representation ~config (execution_request ?target encoding)
+      execution_cached_representation ~config (execution_request ?target encoding)
     in
     (match read "gzip", read "identity" with
      | Some (compressed, compressed_tag, headers), Some (body, tag, _) ->
@@ -489,8 +498,41 @@ let test_execution_preparation_cannot_resurrect_invalidated_snapshot () =
     Alcotest.(check bool) "cold response cannot reuse bytes invalidated during preparation" true
       (Option.is_none (Execution_http.prepared_payload_for_snapshot ~config snapshot));
     Alcotest.(check bool) "worker result cannot undo mutation" true
-      (Option.is_none (Execution_http.cached_representation ~config
+      (Option.is_none (execution_cached_representation ~config
                         (execution_request "gzip"))))
+
+let test_execution_observation_cannot_serve_invalidated_snapshot () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "obsolete";
+    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    let observe ~config json =
+      let observed = Dashboard_projection_cache.with_current_keeper_observations ~config json in
+      Server_dashboard_http_execution_surfaces.invalidate_execution_cache ();
+      observed in
+    Alcotest.(check bool) "observation cannot return metadata invalidated while it read" true
+      (Option.is_none (Execution_http.cached_response ~observe ~config
+                        (execution_request "identity"))))
+
+let test_execution_observation_cannot_serve_replaced_snapshot () =
+  with_execution_http_fixture (fun config ->
+    publish_execution_fixture "old";
+    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    let observe ~config json =
+      let observed = Dashboard_projection_cache.with_current_keeper_observations ~config json in
+      publish_execution_fixture "new";
+      observed in
+    Alcotest.(check bool) "observation cannot return a source superseded while it read" true
+      (Option.is_none (Execution_http.cached_response ~observe ~config
+                        (execution_request "identity")));
+    ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
+    match Execution_http.cached_response ~config (execution_request "identity") with
+    | None -> Alcotest.fail "new publication should be readable"
+    | Some response ->
+      let json = match response with
+        | Server_dashboard_http_execution_surfaces.Execution_json json -> json
+        | Server_dashboard_http_execution_surfaces.Execution_payload payload -> payload.json in
+      Alcotest.(check string) "new source wins" "new"
+        Yojson.Safe.Util.(json |> member "marker" |> to_string))
 
 let test_execution_preparation_rejects_replaced_source () =
   with_execution_http_fixture (fun config ->
@@ -501,7 +543,7 @@ let test_execution_preparation_rejects_replaced_source () =
     (* A new success must hide the old bytes before its own codecs are ready. *)
     publish_execution_fixture "new";
     Alcotest.(check bool) "new source hides old prepared bytes immediately" true
-      (Option.is_none (Execution_http.cached_representation ~config
+      (Option.is_none (execution_cached_representation ~config
                         (execution_request "gzip")));
     let prepare body =
       publish_execution_fixture "latest";
@@ -509,12 +551,12 @@ let test_execution_preparation_rejects_replaced_source () =
     in
     ignore (Execution_http.refresh_execution_default_light_http_body ~prepare ~config ());
     Alcotest.(check bool) "superseded worker bytes stay hidden" true
-      (Option.is_none (Execution_http.cached_representation ~config
+      (Option.is_none (execution_cached_representation ~config
                         (execution_request "identity")));
     ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
     Alcotest.(check bool) "new Ready bytes cannot replace an older selected response" true
       (Option.is_none (Execution_http.prepared_payload_for_snapshot ~config snapshot));
-    match Execution_http.cached_representation ~config (execution_request "identity") with
+    match execution_cached_representation ~config (execution_request "identity") with
     | None -> Alcotest.fail "latest snapshot was not prepared"
     | Some (body, _, _) ->
       Alcotest.(check string) "newest publication wins" "latest"
@@ -533,7 +575,7 @@ let test_execution_preparation_failure_releases_owner () =
     Alcotest.(check bool) "preparation failure propagates" true raised;
     ignore (Execution_http.refresh_execution_default_light_http_body ~config ());
     Alcotest.(check bool) "later request can prepare" true
-      (Option.is_some (Execution_http.cached_representation ~config
+      (Option.is_some (execution_cached_representation ~config
                         (execution_request "gzip"))))
 
 let test_execution_concurrent_polls_share_preparation () =
@@ -570,7 +612,7 @@ let test_execution_preparation_failure_wakes_waiter () =
     Alcotest.(check bool) "owner failed" true failed;
     Alcotest.(check int) "waiter prepared after failure" 2 !preparations;
     Alcotest.(check bool) "waiter published usable response" true
-      (Option.is_some (Execution_http.cached_representation ~config
+      (Option.is_some (execution_cached_representation ~config
                         (execution_request "gzip"))))
 
 let test_stats () =
@@ -1785,6 +1827,10 @@ let () =
             test_execution_preparation_reuse_and_scope;
           test_case "execution preparation cannot undo invalidation" `Quick
             test_execution_preparation_cannot_resurrect_invalidated_snapshot;
+          test_case "execution observation cannot undo invalidation" `Quick
+            test_execution_observation_cannot_serve_invalidated_snapshot;
+          test_case "execution observation rejects replaced source" `Quick
+            test_execution_observation_cannot_serve_replaced_snapshot;
           test_case "execution preparation rejects replaced source" `Quick
             test_execution_preparation_rejects_replaced_source;
           test_case "execution preparation failure releases owner" `Quick

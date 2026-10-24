@@ -3406,7 +3406,7 @@ let test_execution_request_resolves_actor_once () =
   let context = Surface.execution_http_request ~state req in
   check (float 0.0) "request resolves actor once" (before +. 1.0) (count ());
   check bool "parameterized request falls through prepared default lookup" true
-    (Option.is_none (Surface.dashboard_execution_cached_http_representation context));
+    (Option.is_none (Surface.dashboard_execution_cached_http_response context));
   let payload = match Surface.dashboard_execution_http_response
       ~sw ~clock:(Eio.Stdenv.clock env) context with
     | Surface.Execution_payload payload -> payload
@@ -3438,7 +3438,7 @@ let test_execution_default_response_reuses_prepared_bytes () =
       (request_with_headers "/api/v1/dashboard/execution"
          ["accept-encoding", "gzip"]) in
   check bool "selected snapshot has no prepared bytes before first response" true
-    (Option.is_none (Surface.dashboard_execution_cached_http_representation context));
+    (Option.is_none (Surface.dashboard_execution_cached_http_response context));
   match Surface.dashboard_execution_http_response
       ~sw ~clock:(Eio.Stdenv.clock env)
       context with
@@ -3459,18 +3459,22 @@ let test_execution_default_response_reuses_prepared_bytes () =
       (List.assoc_opt "content-encoding" headers);
     check bool "first compressed response is smaller" true
       (String.length gzip < String.length payload.raw_json);
-    (match Surface.dashboard_execution_cached_http_representation context with
-     | None -> fail "first response did not leave prepared cache bytes"
-     | Some (warm, etag, warm_headers) ->
+    (match Surface.dashboard_execution_cached_http_response context with
+     | None | Some (Surface.Execution_json _) -> fail "first response did not leave prepared cache bytes"
+     | Some (Surface.Execution_payload warm_payload) ->
+       let warm, warm_headers = Dashboard_cache.select_http_representation
+           ~accept_encoding:(Some "gzip") warm_payload in
+       let etag = warm_payload.etag in
        check bool "first and warm responses share gzip bytes" true (gzip == warm);
        check string "same ETag" payload.etag etag;
        check (list (pair string string)) "same representation headers" headers warm_headers);
     let identity = Surface.execution_http_request ~state
         (request_with_headers "/api/v1/dashboard/execution"
            ["accept-encoding", "identity"]) in
-    (match Surface.dashboard_execution_cached_http_representation identity with
-     | None -> fail "identity bytes were not prepared"
-     | Some (warm, _, _) ->
+    (match Surface.dashboard_execution_cached_http_response identity with
+     | None | Some (Surface.Execution_json _) -> fail "identity bytes were not prepared"
+     | Some (Surface.Execution_payload warm_payload) ->
+       let warm = warm_payload.raw_json in
        check bool "identity bytes are reused without serialization" true
          (payload.raw_json == warm))
 
@@ -3487,15 +3491,15 @@ let test_execution_fixture_selection_isolates_prepared_live_bytes () =
       ~sw ~clock:(Eio.Stdenv.clock env) (context "")));
   List.iter (fun query ->
     check bool ("fixture does not reuse prepared live bytes: " ^ query) true
-      (Option.is_none (Surface.dashboard_execution_cached_http_representation
+      (Option.is_none (Surface.dashboard_execution_cached_http_response
         (context query))))
     [ ""; "?fixture="; "?fixture=execution_smoke" ];
   check bool "explicit unknown uses its own parameterized response" true
-    (Option.is_none (Surface.dashboard_execution_cached_http_representation
+    (Option.is_none (Surface.dashboard_execution_cached_http_response
       (context "?fixture=unknown")));
   with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" (fun () ->
     check bool "disabled explicit fixture uses its own parameterized response" true
-      (Option.is_none (Surface.dashboard_execution_cached_http_representation
+      (Option.is_none (Surface.dashboard_execution_cached_http_response
         (context "?fixture=execution_smoke"))))
 
 let test_execution_first_compute_reuses_prepared_bytes () =
@@ -3526,9 +3530,10 @@ let test_execution_first_compute_reuses_prepared_bytes () =
          | `Int _ -> true | _ -> false);
       check bool "computed identity bytes match JSON" true
         (Yojson.Safe.equal payload.json (Yojson.Safe.from_string payload.raw_json));
-      match Surface.dashboard_execution_cached_http_representation context with
-      | None -> fail "first compute did not leave prepared bytes"
-      | Some (warm, etag, _) ->
+      match Surface.dashboard_execution_cached_http_response context with
+      | None | Some (Surface.Execution_json _) -> fail "first compute did not leave prepared bytes"
+      | Some (Surface.Execution_payload warm_payload) ->
+        let warm, etag = warm_payload.raw_json, warm_payload.etag in
         check bool "first compute and warm read reuse identity bytes" true
           (payload.raw_json == warm);
         check string "first compute and warm read retain ETag" payload.etag etag)
@@ -3630,6 +3635,10 @@ beanie = 200
         Yojson.Safe.Util.(member "candle_balance_milli" row))) rows in
   let assert_surfaces label ~expected_portrait ~expected_candle ~expected_balance =
     let execution = read_execution () in
+    let observed = match Surface.dashboard_execution_cached_http_response (context ()) with
+      | Some (Surface.Execution_json json) -> json
+      | Some (Surface.Execution_payload payload) -> payload.json
+      | None -> fail "prepared snapshot must return its current observation" in
     let mission = read_mission () in
     (* The production proactive on_result uses this exact preparation function
        before broadcasting. Assert its payload, not a replacement test-only
@@ -3650,6 +3659,7 @@ beanie = 200
             expected_balance balance
         | _ -> fail "cached surface lost or duplicated its Keeper") paths)
       ["HTTP execution", execution, [["keepers"]; ["continuity_briefs"]];
+       "HTTP prepared observation", observed, [["keepers"]; ["continuity_briefs"]];
        "HTTP briefing", mission, [["keeper_briefs"]; ["operator_targets"; "keepers"]];
        "SSE payload preparation", broadcast, [["keepers"]; ["continuity_briefs"]]] in
   (* Distinct whole-second reads must not invalidate encoded responses when
@@ -3665,11 +3675,12 @@ beanie = 200
   check bool "clock-only reads preserve the full prepared-response observation" true
     (project later = first_observation);
   let first = execution_payload ~state ~sw ~clock req in
-  (match Surface.dashboard_execution_cached_http_representation (context ()) with
-   | Some (body, etag, _) ->
+  (match Surface.dashboard_execution_cached_http_response (context ()) with
+   | Some (Surface.Execution_payload payload) ->
+     let body, etag = payload.raw_json, payload.etag in
      check bool "unchanged portrait retains prepared identity bytes" true (body == first.raw_json);
      check string "unchanged portrait retains its ETag" first.etag etag
-   | None -> fail "unchanged authority discarded prepared execution bytes");
+   | None | Some (Surface.Execution_json _) -> fail "unchanged authority discarded prepared execution bytes");
   assert_surfaces "starting"
     ~expected_portrait:(fun reading -> reading = Portrait.Ready starting)
     ~expected_candle:(fun candle -> candle = ready_candle) ~expected_balance:(Some "1000");
@@ -3682,7 +3693,9 @@ beanie = 200
    | Tool_result.Completed _ -> ()
    | result -> fail (Tool_result.message result));
   check bool "equipped authority refuses old prepared HTTP bytes" true
-    (Option.is_none (Surface.dashboard_execution_cached_http_representation (context ())));
+    (match Surface.dashboard_execution_cached_http_response (context ()) with
+     | Some (Surface.Execution_json _) -> true
+     | Some (Surface.Execution_payload _) | None -> false);
   assert_surfaces "equipped"
     ~expected_portrait:(fun reading -> reading = Portrait.Ready expected)
     ~expected_candle:(fun candle -> candle = Candle_observation.Ready
@@ -3696,7 +3709,9 @@ beanie = 200
   Fs_compat.append_file ledger "{partial";
   let corrupt = Fs_compat.load_file ledger in
   check bool "unreadable authority refuses prepared HTTP bytes" true
-    (Option.is_none (Surface.dashboard_execution_cached_http_representation (context ())));
+    (match Surface.dashboard_execution_cached_http_response (context ()) with
+     | Some (Surface.Execution_json _) -> true
+     | Some (Surface.Execution_payload _) | None -> false);
   assert_surfaces "unreadable"
     ~expected_portrait:(function Portrait.Unavailable _ -> true | Portrait.Ready _ -> false)
     ~expected_candle:(function
@@ -3932,7 +3947,7 @@ let test_execution_fixture_broadcast_and_unknown_override () =
     ["candle";"keepers";"continuity_briefs"];
   let unknown_request = request "/api/v1/dashboard/execution?fixture=unknown" in
   check bool "explicit unknown cannot take prepared default bytes" true
-    (Option.is_none (Surface.For_testing.cached_representation ~config unknown_request));
+    (Option.is_none (Surface.For_testing.cached_response ~config unknown_request));
   let actual = Surface.dashboard_execution_http_json ~state ~sw ~clock:(Eio.Stdenv.clock env)
     unknown_request in
   check bool "explicit unknown does not reuse the fixture-seeded cache" true

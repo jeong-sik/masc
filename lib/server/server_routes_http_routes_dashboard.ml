@@ -2927,17 +2927,13 @@ let add_routes ~sw ~clock router =
          let context, cached =
            Server_timing.measure timing Server_timing.Cache_lookup (fun () ->
              let context = execution_http_request ~state request in
-             context, dashboard_execution_cached_http_representation context)
+             context, dashboard_execution_cached_http_response context)
          in
-         match cached with
-         | Some (body, etag, extra_headers) ->
-           Http.Response.json_lazy ~compress:false ~request:req ~etag
-             ~extra_headers:(extra_headers @ Server_timing.extra_header timing)
-             (fun () -> body) reqd
-         | None ->
-           let response = Server_timing.measure timing Server_timing.Cache_compute
-             (fun () -> dashboard_execution_http_response ~sw ~clock context) in
-           (match response with
+         let response = match cached with
+           | Some response -> response
+           | None -> Server_timing.measure timing Server_timing.Cache_compute
+               (fun () -> dashboard_execution_http_response ~sw ~clock context) in
+         (match response with
             | Execution_json json ->
               Http.Response.json_value ~compress:false ~request:req
                 ~extra_headers:(Server_timing.extra_header timing) json reqd

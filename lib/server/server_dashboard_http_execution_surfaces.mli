@@ -31,7 +31,7 @@
       {!start_execution_trust_refresh_loop}).
     - {b snapshot access} ({!dashboard_execution_snapshot_json}).
     - {b HTTP route entries}
-      ({!dashboard_execution_cached_http_representation},
+      ({!dashboard_execution_cached_http_response},
       {!dashboard_execution_http_json},
       {!dashboard_execution_trust_http_json},
       {!dashboard_transport_health_http_json}).
@@ -64,6 +64,10 @@
 (** {1 Cache cells} *)
 
 type cached_surface = Server_dashboard_http_cache.cached_surface
+
+type execution_http_response =
+  | Execution_json of Yojson.Safe.t
+  | Execution_payload of Dashboard_cache.cached_payload
 
 val execution_cache : cached_surface
 (** Cached execution surface JSON.  Reached by
@@ -155,9 +159,10 @@ module For_testing : sig
       attempt's [exn] from the attempt, then its window's message from
       [on_failure], both under one attempt. *)
 
-  val cached_representation :
+  val cached_response :
+    ?observe:(config:Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t) ->
     config:Workspace.config -> Httpun.Request.t ->
-    (string * string * (string * string) list) option
+    execution_http_response option
 
   val refresh_execution_default_light_http_body :
     ?prepare:(string -> Http_response_payload.prepared) ->
@@ -230,17 +235,16 @@ type execution_http_request
 val execution_http_request :
   state:Mcp_server.server_state -> Httpun.Request.t -> execution_http_request
 
-val dashboard_execution_cached_http_representation :
+val dashboard_execution_cached_http_response :
   execution_http_request ->
-  (string * string * (string * string) list) option
-(** Negotiated pre-compressed body, weak ETag of the identity JSON, and
-    representation headers. Returns [None] for actor, fixture, full, force,
-    initializing or stale/error requests. No serialization or compression on
-    cache hits. *)
-
-type execution_http_response =
-  | Execution_json of Yojson.Safe.t
-  | Execution_payload of Dashboard_cache.cached_payload
+  execution_http_response option
+(** Observe current Keeper addresses and Candle state against a prepared
+    default snapshot. Unchanged observations retain its prepared payload;
+    changed observations return their fresh JSON directly, without discarding
+    it and repeating the reads in the fallback path. Neither case serializes
+    or compresses here. [None] means actor, fixture, full, force, initializing,
+    stale/error, or publication changed during observation. Source identity
+    and publication validity are checked again after the yielding observation. *)
 
 val dashboard_execution_http_response :
   sw:Eio.Switch.t ->

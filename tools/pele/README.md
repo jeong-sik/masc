@@ -22,8 +22,11 @@ six-digit RGB hex strings. Without an observed palette, the standalone preview
 uses Pele's light defaults. Failure writes diagnostics to stderr and exits
 nonzero without an image. The caller retains source and owns preview selection.
 
-Optional `fontSize` is a positive safe integer (default `16`) passed to Pele as
-a layout input, so a document can use the terminal's measured text size.
+Optional `fontSize` is a positive safe integer (default `16`) describing the
+physical text density. Pele lays out at its logical default of 16 with available
+width `maxWidth / (fontSize / 16)`, then the complete SVG viewport scales by
+`fontSize / 16`. Text, authored font sizes, strokes, spacing and chart geometry
+scale together; fixed logical chart spacing stays readable at terminal density.
 Generated SVG declares its default font family and size explicitly for resvg;
 authored child font overrides and diagram label proportions remain intact.
 `maxWidth`, `fontSize` and `colors` stay fixed while inspecting one diagram.

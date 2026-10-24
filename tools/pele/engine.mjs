@@ -2,15 +2,19 @@ import { render } from 'pele';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { Resvg } from '@resvg/resvg-js';
 
+const logicalFontSize = 16;
+
 // resvg does not implement CSS custom properties. Resolve them in attributes,
 // with element-local inheritance, without touching label text or path data.
-function concreteSvg(svg, colors, fontSize) {
+function concreteSvg(svg, colors, viewport) {
   const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
   // Pele measures inherited labels with this font, but resvg does not expand
   // Pele's CSS `font` shorthand. Declare the known defaults explicitly without
   // overriding authored font sizes or families on child elements.
-  document.documentElement.setAttribute('font-size', String(fontSize));
+  document.documentElement.setAttribute('font-size', String(logicalFontSize));
   document.documentElement.setAttribute('font-family', 'sans-serif');
+  document.documentElement.setAttribute('width', String(viewport.width));
+  document.documentElement.setAttribute('height', String(viewport.height));
   const presentationAttributes = new Set([
     'fill', 'stroke', 'color', 'stop-color', 'flood-color', 'lighting-color',
     'font-family', 'font-size', 'font-weight', 'font-style',
@@ -219,7 +223,7 @@ function rasterWindow(svg, raster, natural) {
 export function renderDocument(request) {
   if (typeof request?.source !== 'string') throw new TypeError('source must be a string');
   positiveInteger(request.maxWidth, 'maxWidth');
-  const fontSize = request.fontSize === undefined ? 16 : positiveInteger(request.fontSize, 'fontSize');
+  const fontSize = request.fontSize === undefined ? logicalFontSize : positiveInteger(request.fontSize, 'fontSize');
   const raster = rasterRequest(request.raster);
   let colors = new Map();
   let background;
@@ -230,12 +234,17 @@ export function renderDocument(request) {
   }
   let result, svg, renderer;
   switch (request.format) {
-    case 'mermaid':
+    case 'mermaid': {
+      // Pele uses fixed logical spacing in several diagram families. Keep its
+      // logical font and geometry together, scaling the complete viewport to
+      // the requested physical text density instead of enlarging labels alone.
+      const density = fontSize / logicalFontSize;
       result = render(request.source, {
-        maxWidth: request.maxWidth, images: false, links: false,
-        responsive: false, fontFamily: 'sans-serif', fontSize,
+        maxWidth: request.maxWidth / density, images: false, links: false,
+        responsive: false, fontFamily: 'sans-serif', fontSize: logicalFontSize,
       });
-      svg = concreteSvg(result.svg, colors, fontSize);
+      result = { ...result, width: result.width * density, height: result.height * density };
+      svg = concreteSvg(result.svg, colors, result);
       renderer = new Resvg(svg, {
         background: background ?? '#ffffff',
         fitTo: raster === undefined
@@ -243,6 +252,7 @@ export function renderDocument(request) {
           : { mode: 'original' },
       });
       break;
+    }
     case 'svg': {
       svg = retainedSvg(request.source);
       const original = new Resvg(svg, { background });

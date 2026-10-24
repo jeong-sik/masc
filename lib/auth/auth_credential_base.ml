@@ -92,13 +92,19 @@ let read_regular_auth_file_with_open ~open_file path =
     (* Following a regular-file symlink remains supported. Nonblocking open
        prevents a replacement FIFO from waiting for a writer before fstat. *)
     let fd = open_file path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
-    let channel = Unix.in_channel_of_descr fd in
-    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
-      let before = Unix.fstat fd in
-      if before.Unix.st_kind <> Unix.S_REG then
+    match Unix.fstat fd with
+    | before when before.Unix.st_kind <> Unix.S_REG ->
+        Unix.close fd;
         Error (System (System_error.ValidationError
           (Printf.sprintf "auth path is not a regular file: %s" path)))
-      else
+    | before ->
+      (* Inspect the raw descriptor before transferring ownership to a
+         channel: Linux rejects directory descriptors during that transfer. *)
+      let channel =
+        match Unix.in_channel_of_descr fd with
+        | channel -> channel
+        | exception exn -> Unix.close fd; raise exn in
+      Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
         let content = In_channel.input_all channel in
         let after = Unix.fstat fd in
         let named = Unix.stat path in
@@ -109,7 +115,8 @@ let read_regular_auth_file_with_open ~open_file path =
            || after.Unix.st_ino <> named.Unix.st_ino then
           Error (System (System_error.IoError
             (Printf.sprintf "auth path changed during verified read: %s" path)))
-        else Ok content))) in
+        else Ok content)
+    | exception exn -> Unix.close fd; raise exn)) in
   result
 ;;
 

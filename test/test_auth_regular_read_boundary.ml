@@ -113,6 +113,29 @@ let test_replacement_at_open_refuses_without_blocking () = with_fifo_workspace @
   Unix.unlink path; Unix.rename preserved path;
   check_readers base_path (Some "original-reader-bytes")
 
+let test_directory_refusal_closes_raw_descriptor () = with_workspace @@ fun base_path ->
+  let path = Auth.raw_token_file base_path "reader" in
+  Unix.mkdir path 0o700;
+  let opened = ref None in
+  let open_directory path flags mode =
+    let fd = Unix.openfile path flags mode in
+    opened := Some fd;
+    fd in
+  let result = Auth.Regular_read_for_testing.read_with_open ~open_file:open_directory path in
+  let closed = match !opened with
+    | None -> fail "directory fixture was not opened"
+    | Some fd ->
+      (match Unix.fstat fd with
+       | _ -> Unix.close fd; false
+       | exception Unix.Unix_error (Unix.EBADF, _, _) -> true) in
+  (match result with
+   | Error (D.System (D.System_error.ValidationError _)) -> ()
+   | Error error -> fail (D.masc_error_to_string error)
+   | Ok _ -> fail "directory descriptor was admitted as a regular file");
+  check bool "nonregular refusal closes the descriptor before returning" true closed;
+  check bool "refusal preserves the occupied directory" true
+    ((Unix.lstat path).Unix.st_kind = Unix.S_DIR)
+
 let config_refused base_path =
   match Auth.load_auth_config base_path with
   | _config -> fail "occupied unreadable config must not select a default"
@@ -362,6 +385,7 @@ let () = run "Auth regular file read authority" [
     test_case "regular, symlink, dangling, directory and blank raw tokens" `Quick test_public_reader_file_states;
     test_case "public readers refuse a FIFO without a writer" `Quick test_public_reader_fifo;
     test_case "replacement before and after open cannot block or admit retired bytes" `Quick test_replacement_at_open_refuses_without_blocking;
+    test_case "directory refusal retains its typed error and closes its raw descriptor" `Quick test_directory_refusal_closes_raw_descriptor;
     test_case "strict config presence and secure missing defaults" `Quick test_config_file_states;
     test_case "config FIFO refuses actual publishers and repaired admission works" `Quick test_config_fifo_publishers;
     test_case "expected read errors do not swallow cancellation" `Quick test_cancellation_propagates;

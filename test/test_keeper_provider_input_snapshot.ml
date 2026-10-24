@@ -152,6 +152,7 @@ let test_exact_turn_round_trip () =
         (Yojson.Safe.equal
            (`Assoc
              [ "role", `String "user"
+             ; "origin", `String "conversation"
              ; ( "content_blocks"
                , `List
                    [ `Assoc

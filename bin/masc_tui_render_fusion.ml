@@ -640,9 +640,7 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
     fusion_tool_trace_lines ~width evidence.fe_tool_trace
   in
   (* One line per seat: the route it was given and who answered, each
-     failed candidate under it. A post the sink wrote without routes draws
-     no block and keeps the evidence section at 5; with routes the seats are
-     5 and the evidence is 6. *)
+     failed candidate under it. *)
   let seat_route_lines =
     match evidence.fe_seat_routes with
     (* An empty array draws nothing rather than a header with no seat under
@@ -650,22 +648,20 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
        seated nobody reaches here as [Some []]. *)
     | None | Some [] -> []
     | Some routes ->
-        [ Ansi.dim, ""; Ansi.bold, "  5  SEAT ROUTES" ]
-        @ List.concat_map
-            (fun line ->
-              Message_layout.split_cells ~max_cells:(max 1 (width - 2)) line
-              |> List.map (fun line -> Ansi.reset, "  " ^ line))
-            (Masc_tui_fusion_seat_routes.lines routes)
+        List.concat_map
+          (fun line ->
+            Message_layout.split_cells ~max_cells:(max 1 (width - 2)) line
+            |> List.map (fun line -> Ansi.reset, "  " ^ line))
+          (Masc_tui_fusion_seat_routes.lines routes)
   in
-  let evidence_section = if seat_route_lines = [] then "5" else "6" in
-  [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
-  ; Ansi.dim, ""
-  ; Ansi.bold, "  1  QUESTION"
-  ]
+  [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title ]
+  @ detail_section_heading "1. 질문 · 최종 판정 (Question & Judge Synthesis)"
   @ fusion_markdown_block ~width ~indent:"    " evidence.fe_question
-  @ [ Ansi.dim, ""
-    ; Ansi.bold, "  2  PANEL RESPONSES"
-    ; ( Ansi.dim
+  @ [ Ansi.dim, "" ]
+  @ judge_lines
+  @ judges_lines
+  @ detail_section_heading "2. 패널 응답 · 토큰 분포 (Panel Responses)"
+  @ [ ( Ansi.dim
       , let usage =
           if answered = 0 then "panel token usage: not recorded"
           else if failed = 0 then
@@ -676,23 +672,15 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
         in
         Printf.sprintf "  %d answered / %d failed  \xc2\xb7  %s"
           answered failed usage )
-  ]
-  @ [ Ansi.dim, "" ]
+    ; Ansi.dim, ""
+    ]
   @ panel_chart_lines
   @ panel_lines
-  @ [ Ansi.dim, ""
-    ; Ansi.bold, "  3  JUDGE"
-    ]
-  @ judge_lines
-  @ judges_lines
-  @ [ Ansi.dim, ""
-    ; Ansi.bold, "  4  TOOL EXECUTIONS"
-    ]
+  @ detail_section_heading "3. 도구 실행 추적 (Tool Executions)"
   @ tool_lines
+  @ detail_section_heading "4. 시트 라우팅 · 기록 증거 (Seat Routes & Board Link)"
   @ seat_route_lines
-  @ [ Ansi.dim, ""
-    ; Ansi.bold, "  " ^ evidence_section ^ "  EVIDENCE RECORDED"
-    ; ( Ansi.dim
+  @ [ ( Ansi.dim
       , "  Board link: "
         ^ Link.reference Board_post
             (Terminal_text.single_line evidence.fe_post_id) )

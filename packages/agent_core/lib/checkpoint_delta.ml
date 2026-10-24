@@ -112,7 +112,7 @@ let limits_patch_changed (before : t) (after : t) =
   || before.cache_system_prompt <> after.cache_system_prompt
 ;;
 
-let delta_version = 3
+let delta_version = 4
 
 let apply_context_patch ctx diff =
   let next = Context.copy ctx in
@@ -129,6 +129,7 @@ let compute_delta (before : t) (after : t) =
     before.session_id <> after.session_id
     || before.agent_name <> after.agent_name
     || before.model <> after.model
+    || before.provider_binding <> after.provider_binding
     || before.created_at <> after.created_at
   then
     push
@@ -136,6 +137,7 @@ let compute_delta (before : t) (after : t) =
          { session_id = after.session_id
          ; agent_name = after.agent_name
          ; model = after.model
+         ; provider_binding = after.provider_binding
          ; created_at = after.created_at
          });
   if before.system_prompt <> after.system_prompt
@@ -212,6 +214,7 @@ let apply_delta base delta =
               session_id = patch.session_id
             ; agent_name = patch.agent_name
             ; model = patch.model
+            ; provider_binding = patch.provider_binding
             ; created_at = patch.created_at
             }
         | Replace_system_prompt system_prompt -> Ok { checkpoint with system_prompt }

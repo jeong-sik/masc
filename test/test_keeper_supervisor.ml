@@ -341,7 +341,7 @@ let seed_durable_librarian_baseline
     ]
   in
   let checkpoint : Agent_core.Checkpoint.t =
-    { version = Agent_core.Checkpoint.checkpoint_version
+    { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = trace_id
     ; agent_name = meta.name
     ; model = "fixture-model"

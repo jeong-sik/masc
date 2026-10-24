@@ -1571,7 +1571,7 @@ let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () 
           let canonical_checkpoint_bytes =
             Agent_core.Checkpoint.to_string
               Agent_core.Checkpoint.
-                { version = checkpoint_version
+                { provider_binding = None; version = checkpoint_version
                 ; session_id = "gate-trace"
                 ; agent_name = "keeper-exec-tools"
                 ; model = "fixture"

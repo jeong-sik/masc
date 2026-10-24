@@ -84,7 +84,7 @@ let test_a_superseded_checkpoint_has_nothing_to_recover () =
       [ Agent_core.Types.ToolUse { id = "call-open"; name = "read_file"; input = `Assoc [] } ]
   in
   let checkpoint : Agent_core.Checkpoint.t =
-    { version = Agent_core.Checkpoint.checkpoint_version
+    { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = trace_id
     ; agent_name = name
     ; model = "fixture-model"

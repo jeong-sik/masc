@@ -372,6 +372,7 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
          in
          { state with
            messages = collected_messages messages
+         ; provider_binding = Option.bind response.telemetry (fun telemetry -> telemetry.reasoning_source)
          ; turn_count = next_turn
          ; usage
          });

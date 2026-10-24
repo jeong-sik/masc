@@ -35,6 +35,7 @@ let build_resume ~(checkpoint : Checkpoint.t) ?(eio_context = false) ?config ?co
   in
   let state =
     { config = restored_config
+    ; provider_binding = checkpoint.provider_binding
     ; messages = checkpoint.messages
     ; turn_count = checkpoint.turn_count
     ; usage = checkpoint.usage
@@ -65,6 +66,7 @@ let build_checkpoint
   ; session_id
   ; agent_name = state.config.name
   ; model = state.config.model
+  ; provider_binding = state.provider_binding
   ; system_prompt = state.config.system_prompt
   ; messages = state.messages
   ; usage = state.usage

@@ -5,6 +5,20 @@ open Result_syntax
 let checkpoint_version = Checkpoint_types.checkpoint_version
 let checkpoint_context = Printf.sprintf "Checkpoint v%d" checkpoint_version
 
+let provider_binding_to_json = function
+  | None -> `Null
+  | Some source -> Reasoning_source.to_yojson source
+;;
+
+let provider_binding_of_json ~scope = function
+  | `Null -> Ok None
+  | value ->
+    Reasoning_source.of_yojson value
+    |> Result.map Option.some
+    |> Result.map_error (fun detail ->
+      Error.Serialization (JsonParseError {detail = scope ^ ".provider_binding: " ^ detail}))
+;;
+
 let reasoning_effort_option_to_json = function
   | Some effort -> `String (Llm_provider.Reasoning_effort.to_string effort)
   | None -> `Null
@@ -516,6 +530,7 @@ let checkpoint_fields_around_messages cp =
     ; "session_id", `String cp.session_id
     ; "agent_name", `String cp.agent_name
     ; "model", model_to_yojson cp.model
+    ; "provider_binding", provider_binding_to_json cp.provider_binding
     ; "system_prompt", Util.json_of_string_opt cp.system_prompt
     ]
   , [ "usage", usage_to_json cp.usage
@@ -594,6 +609,7 @@ let decode_current_json json =
         ~scope:"Checkpoint"
         (json |> member "reasoning_effort")
     in
+    let* provider_binding = provider_binding_of_json ~scope:"Checkpoint" (json |> member "provider_binding") in
     let* usage = json |> member "usage" |> usage_of_json in
     let* pending_input =
       match json |> member "pending_input" with
@@ -612,6 +628,7 @@ let decode_current_json json =
       ; session_id = json |> member "session_id" |> to_string
       ; agent_name = json |> member "agent_name" |> to_string
       ; model
+      ; provider_binding
       ; system_prompt = json |> member "system_prompt" |> to_string_option
       ; messages
       ; usage
@@ -804,6 +821,7 @@ let delta_to_json (delta : delta) =
         ; "session_id", `String patch.session_id
         ; "agent_name", `String patch.agent_name
         ; "model", model_to_yojson patch.model
+        ; "provider_binding", provider_binding_to_json patch.provider_binding
         ; "created_at", `Float patch.created_at
         ]
     | Replace_system_prompt prompt ->
@@ -888,6 +906,12 @@ let delta_of_json json =
     let kind = op_json |> member "kind" |> to_string in
     match kind with
     | "replace_identity" ->
+      let* () = validate_exact_object_fields
+        ~scope:"Checkpoint.delta identity"
+        ~expected:["kind";"session_id";"agent_name";"model";"provider_binding";"created_at"]
+        op_json in
+      let* provider_binding = provider_binding_of_json
+        ~scope:"Checkpoint.delta identity" (op_json |> member "provider_binding") in
       let+ model =
         model_of_yojson (op_json |> member "model")
         |> Result.map_error (fun e -> Error.Serialization (JsonParseError { detail = e }))
@@ -896,6 +920,7 @@ let delta_of_json json =
         { session_id = op_json |> member "session_id" |> to_string
         ; agent_name = op_json |> member "agent_name" |> to_string
         ; model
+        ; provider_binding
         ; created_at = op_json |> member "created_at" |> to_float
         }
     | "replace_system_prompt" ->

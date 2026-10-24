@@ -20,7 +20,7 @@ let make_checkpoint
       ()
   : Checkpoint.t
   =
-  { version = Checkpoint.checkpoint_version
+  { provider_binding = None; version = Checkpoint.checkpoint_version
   ; session_id
   ; agent_name
   ; model

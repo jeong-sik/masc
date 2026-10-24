@@ -2369,7 +2369,7 @@ let test_agent_run_resumes_tool_without_duplicate_effects
        in
        Agent.set_state
          agent
-         { config
+         { provider_binding = None; config
          ; messages =
              [ { origin = Llm_provider.Types.Conversation;  Types.role = User
                ; content = [ Text "run the tool" ]
@@ -2909,7 +2909,7 @@ let test_agent_run_resumes_settled_closed_turn
           so resume replays the settled result without re-running the effect. *)
        Agent.set_state
          agent
-         { config
+         { provider_binding = None; config
          ; messages =
              [ { origin = Llm_provider.Types.Conversation;  Types.role = User
                ; content = [ Text "run the tool" ]
@@ -3050,7 +3050,7 @@ let test_advanced_replays_nonzero_settled_terminal_ordinal () =
     let options = {Agent.default_options with transport=Some transport;
       provider_config=Some provider_config;hooks} in
     let agent = Agent.create ~net:(Eio.Stdenv.net env) ~config ~tools:[] ~options () in
-    Agent.set_state agent {config;messages=[Types.user_msg "finish this request";
+    Agent.set_state agent { provider_binding = None;config;messages=[Types.user_msg "finish this request";
       Types.make_message ~role:Types.Assistant persisted.content];turn_count=8;usage=Types.empty_usage};
     let execution_store = Agent.execution_store ~runtime ~dir ~resume:locator () in
     (match Agent.Advanced.run_blocks ~sw:runtime_sw ~execution_store ~api_strategy:Agent.Sync
@@ -3426,7 +3426,7 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
                in
                Internal_agent.set_state
                  agent
-                 { config; messages; turn_count = 1; usage = Types.empty_usage };
+                 { provider_binding = None; config; messages; turn_count = 1; usage = Types.empty_usage };
                let outcome =
                  Internal.Execution_context.with_agent_scope scope (fun () ->
                    Internal.Execution_context.with_resume_once (fun () ->
@@ -3491,7 +3491,7 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
                in
                Internal_agent.set_state
                  agent
-                 { config
+                 { provider_binding = None; config
                  ; messages =
                      [ Types.user_msg "run malformed authority"
                      ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
@@ -3943,7 +3943,7 @@ let test_agent_run_resumes_all_blocked_settled_turn () =
           node exists. Only the tool_use_id drives the resume classification. *)
        Agent.set_state
          agent
-         { config
+         { provider_binding = None; config
          ; messages =
              [ { origin = Llm_provider.Types.Conversation;  Types.role = User
                ; content = [ Text "run the tool" ]
@@ -4141,7 +4141,7 @@ let test_agent_run_resume_fires_on_yield () =
           first tool implementation runs. *)
        Agent.set_state
          agent
-         { config
+         { provider_binding = None; config
          ; messages =
              [ { origin = Llm_provider.Types.Conversation;  Types.role = User
                ; content = [ Text "run the tool" ]
@@ -4203,6 +4203,37 @@ let test_agent_run_resume_fires_on_yield () =
 
 (* ── Runner ──────────────────────────────────────────────── *)
 
+let test_text_response_persists_actual_provider_binding () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let snapshots = ref [] in
+  let agent = make_pipeline_test_agent ~net:(Eio.Stdenv.net env)
+    ~response:(pipeline_response EndTurn) in
+  let agent = {agent with Internal_agent.checkpoint_sink=Some(fun snapshot ->
+    snapshots := snapshot::!snapshots; Ok ())} in
+  Alcotest.(check bool) "unexecuted agent has no invented source" true
+    (agent.state.provider_binding=None);
+  match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
+  | Error error -> Alcotest.fail (Error.to_string error)
+  | Ok (Internal_pipeline.ToolsExecuted _ | Internal_pipeline.TerminalToolCompleted _) ->
+    Alcotest.fail "expected plain completed response"
+  | Ok (Internal_pipeline.Complete response) ->
+    let module Source = Llm_provider.Types.Reasoning_source in
+    let source = match Option.bind response.telemetry (fun t -> t.Types.reasoning_source) with
+      | Some source -> source | None -> Alcotest.fail "actual response source missing" in
+    let same = function Some actual -> Source.equal source actual | None -> false in
+    Alcotest.(check bool) "text-only state records actual collected source" true (same agent.state.provider_binding);
+    let checkpoint = Agent_checkpoint.build_checkpoint ~pending_input:agent.pending_input
+      ~state:agent.state ~tools:agent.tools ~context:agent.context
+      ~mcp_clients:agent.options.mcp_clients () in
+    let restored = Checkpoint.of_json (Checkpoint.to_json checkpoint) |> Result.get_ok in
+    Alcotest.(check bool) "checkpoint retains actual source" true (same restored.provider_binding);
+    let clone = Internal_agent.clone agent in
+    Alcotest.(check bool) "clone retains producer" true (same clone.state.provider_binding);
+    Alcotest.(check bool) "turn sink sees producer" true
+      (List.exists(fun snapshot -> same (snapshot : Agent.checkpoint_snapshot).checkpoint.provider_binding) !snapshots)
+;;
+
 let () =
   Alcotest.run
     "Pipeline"
@@ -4217,7 +4248,8 @@ let () =
         ; Alcotest.test_case "to_provider_config" `Quick test_mock_to_provider_config
         ] )
     ; ( "agent_state"
-      , [ Alcotest.test_case "initial state" `Quick test_agent_initial_state
+      , [ Alcotest.test_case "text-only actual provider binding" `Quick test_text_response_persists_actual_provider_binding
+        ; Alcotest.test_case "initial state" `Quick test_agent_initial_state
         ; Alcotest.test_case "tools registered" `Quick test_agent_tools_registered
         ; Alcotest.test_case "initial usage" `Quick test_agent_initial_usage
         ; Alcotest.test_case "empty tools" `Quick test_agent_empty_tools

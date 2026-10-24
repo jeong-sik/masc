@@ -1009,7 +1009,7 @@ let checkpoint_with_messages
       (messages : Agent_core.Types.message list)
   : Agent_core.Checkpoint.t
   =
-  { version = Agent_core.Checkpoint.checkpoint_version
+  { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
   ; session_id = "agent_core-session"
   ; agent_name = "agent_core-agent"
   ; model = "agent_core-model"

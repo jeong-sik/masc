@@ -48,7 +48,7 @@ let with_model_catalog_content content f =
         f ())
 
 let checkpoint_with_session_id session_id : Agent_core.Checkpoint.t =
-  { version = Agent_core.Checkpoint.checkpoint_version
+  { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
   ; session_id
   ; agent_name = "agent-test"
   ; model = "model-test"

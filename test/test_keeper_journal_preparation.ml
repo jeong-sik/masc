@@ -229,7 +229,7 @@ let input_checkpoint pending =
   let context = Core.Context.create_sync () in
   Core.Context.set context "operator-evidence" (`String "retain this context");
   Core.Checkpoint.
-    {version=checkpoint_version;session_id="journal-input-trace";agent_name="imp";
+    { provider_binding = None;version=checkpoint_version;session_id="journal-input-trace";agent_name="imp";
      model="fixture-runtime";system_prompt=Some "Retain original system";
      messages=[Core.Types.{ origin = Llm_provider.Types.Conversation; role=User;content=[Text "Retained original history"];
        name=None;tool_call_id=None;metadata=["origin",`String "original"]}];

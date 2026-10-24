@@ -1,0 +1,87 @@
+{
+  "scope": "actual Reasoning_source module/interface and leaf modules, actual provider-binding codec helpers and checkpoint field builders with fixture checkpoint payload dependencies",
+  "before_base": "f9803add95065c6af4a69bba130308f402785ecd",
+  "sources": {
+    "provider_kind.mli": {
+      "source_sha256": "29a1c58543a11e3baed31d6ea598c32b5e5d5e6d0ab3f3a4f36c75387b1374c4",
+      "compiled_sha256": "29a1c58543a11e3baed31d6ea598c32b5e5d5e6d0ab3f3a4f36c75387b1374c4"
+    },
+    "provider_kind.ml": {
+      "source_sha256": "fffc5db7246ab06882c9832c99e395a19e7edc21836bda6093d3ade1fee7e5b6",
+      "compiled_sha256": "fffc5db7246ab06882c9832c99e395a19e7edc21836bda6093d3ade1fee7e5b6"
+    },
+    "reasoning_replay_contract.mli": {
+      "source_sha256": "a172916eae51b597d857777a6235a6250c00f84b7a760a5a849b909f77436bd6",
+      "compiled_sha256": "a172916eae51b597d857777a6235a6250c00f84b7a760a5a849b909f77436bd6"
+    },
+    "reasoning_replay_contract.ml": {
+      "source_sha256": "a03590c3243ee912f7418c2e5d4a6667d440ee9b1e2b9daf3feb3d9106085a6f",
+      "compiled_sha256": "a03590c3243ee912f7418c2e5d4a6667d440ee9b1e2b9daf3feb3d9106085a6f"
+    },
+    "json_object_keys.mli": {
+      "source_sha256": "2635c7afad9a4ea8c8a1368dabed933ae9c497e276e3f35145e9786f9024ffd3",
+      "compiled_sha256": "2635c7afad9a4ea8c8a1368dabed933ae9c497e276e3f35145e9786f9024ffd3"
+    },
+    "json_object_keys.ml": {
+      "source_sha256": "84ee57e05a676bafa4c5d867bec482bdaf42097e761ae1d802f6fde8afef045f",
+      "compiled_sha256": "84ee57e05a676bafa4c5d867bec482bdaf42097e761ae1d802f6fde8afef045f"
+    },
+    "types.mli:Reasoning_source": {
+      "source_sha256": "c817e9e5eb851eb2b42415d27ff0ff28442508ca2db77477d327d31623a39225",
+      "compiled_sha256": "e81c4d7e94cdbc7aa1bc5a6b7d7821214a6855b674710d10bc5e46455f21a59a"
+    },
+    "types.ml:Reasoning_source": {
+      "source_sha256": "328fadd45c36af067bbb27ed3d7305bbe570aff4220fdef3115c80de933d32c6",
+      "compiled_sha256": "90077a6eb5879ce51d0c845b93470eddb140ebbee5a399a0ef519bf985b97261"
+    },
+    "codec_helpers": {
+      "source_sha256": "e21132c4e98ae768ae1dc49aeff16e1acca5f8ef9d6d663e303b10641cc44254",
+      "compiled_sha256": "951064af7a59c343d74ae66adcba7a565cf86d662ce528d3a6ef9d8bb3a69d7c"
+    },
+    "current_fields": {
+      "source_sha256": "e21132c4e98ae768ae1dc49aeff16e1acca5f8ef9d6d663e303b10641cc44254",
+      "compiled_sha256": "37107c68c2cfe541f34e59b94670799daef7ddffadd2da95175c1d310cc0a3b3"
+    },
+    "before_fields": {
+      "source_sha256": "24158dca583b0edb25a9ee47c4a48f17b05edf7d07ab07863db469080371a911",
+      "compiled_sha256": "34ce241549c7f5e3dbd3b729781305c76805a60d4c13b7c70048d8f04f740030"
+    },
+    "payloads.ml": {
+      "source_sha256": "759b102ad2ab65a450f99d6dacc3a90c55a9523678e1b688f0bc370fbe3ddc5e",
+      "compiled_sha256": "759b102ad2ab65a450f99d6dacc3a90c55a9523678e1b688f0bc370fbe3ddc5e"
+    },
+    "fixture.ml": {
+      "source_sha256": "eb9a71a676bbdeb60a2d2e29ef40ad675c008f4e52bdc9c916ff16e40f5e0255",
+      "compiled_sha256": "eb9a71a676bbdeb60a2d2e29ef40ad675c008f4e52bdc9c916ff16e40f5e0255"
+    }
+  },
+  "checks": {
+    "historical_checkpoint_fields_drop_producer": true,
+    "current_field_builder_emits_exact_source": true,
+    "actual_binding_codec_roundtrip": true,
+    "no_artifact_messages_required": true,
+    "explicit_null_roundtrip": true,
+    "unrecorded_field_is_explicit_null": true,
+    "noncanonical_kind_rejected": true,
+    "invalid_endpoint_hash_rejected": true,
+    "missing_model_rejected": true,
+    "duplicate_model_rejected": true,
+    "duplicate_contract_field_rejected": true,
+    "unknown_binding_field_rejected": true,
+    "binding_contains_only_nonsecret_fields": true,
+    "endpoint_difference_is_observable": true,
+    "declared_text_rotation_still_admits": true,
+    "declared_signed_rotation_still_refuses": true
+  },
+  "fixture_dependencies": [
+    "checkpoint record payload types",
+    "non-binding payload encoders",
+    "Error serialization envelope",
+    "metadata type alias"
+  ],
+  "project_linked": false,
+  "delta_executed": false,
+  "pipeline_executed": false,
+  "resume_admission_implemented": false,
+  "provider_called": false
+}

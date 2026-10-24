@@ -19,6 +19,7 @@ type t =
   ; session_id : string
   ; agent_name : string
   ; model : Types.model
+  ; provider_binding : Llm_provider.Types.Reasoning_source.t option
   ; system_prompt : string option
   ; messages : Types.message list
   ; usage : Types.usage_stats
@@ -52,6 +53,7 @@ type identity_patch =
   { session_id : string
   ; agent_name : string
   ; model : Types.model
+  ; provider_binding : Llm_provider.Types.Reasoning_source.t option
   ; created_at : float
   }
 
@@ -98,11 +100,11 @@ type delta =
 (** {1 Serialization} *)
 
 (** Serialize an exact current checkpoint to JSON. Raises [Invalid_argument]
-    when a manually constructed value violates the v13 contract. *)
+    when a manually constructed value violates the current contract. *)
 val to_json : t -> Yojson.Safe.t
 
 (** Serialize an exact current checkpoint to JSON without raising when a
-    manually constructed value violates the v13 contract. *)
+    manually constructed value violates the current contract. *)
 val to_json_result : t -> (Yojson.Safe.t, Error.t) result
 
 (** [drop_unencodable_json cp] is the recovery copy for a checkpoint whose
@@ -114,8 +116,9 @@ val to_json_result : t -> (Yojson.Safe.t, Error.t) result
     including its schema, is preserved exactly rather than discarded. *)
 val drop_unencodable_json : t -> t option
 
-(** Deserialize only the exact current v13 checkpoint schema. Every other
-    version is rejected. *)
+(** Deserialize only the exact current checkpoint schema. Every other
+    version is rejected. The required [provider_binding] field is null only
+    when no producing binding has been recorded; no identity is inferred. *)
 val of_json : Yojson.Safe.t -> (t, Error.t) result
 
 (** Serialize checkpoint to a JSON string. *)
@@ -161,7 +164,7 @@ val create_encoding_memo : unit -> encoding_memo
     encode, validation or decode. That is a record the previous successful call
     wrote, the decode that call returned for it, or a record
     {!of_string_with_encoding_memo} read. Every other message is encoded,
-    validated against the v13 contract, and decoded once from the bytes written
+    validated against the current contract, and decoded once from the bytes written
     for it. After a success, [memo] holds the messages of [cp] and their
     decodes.
 
@@ -203,7 +206,7 @@ val delta_of_json : Yojson.Safe.t -> (delta, Error.t) result
 val compute_delta : t -> t -> delta
 
 (** Apply a delta to a base checkpoint. Both the base and resulting checkpoint
-    must satisfy the exact current v13 contract. *)
+    must satisfy the exact current contract. *)
 val apply_delta : t -> delta -> (t, Error.t) result
 
 (** {1 Queries} *)

@@ -772,7 +772,7 @@ let test_admission_dispatches_an_interrupted_history () =
 
 
 let checkpoint_with_messages messages : Agent_core.Checkpoint.t =
-  {
+  { provider_binding = None;
     Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version;
     session_id = "session-test";
     agent_name = "agent-test";

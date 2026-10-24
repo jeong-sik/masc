@@ -9,7 +9,7 @@ let history_retained () =
 
 let checkpoint ?(working_context = Some (`Assoc [])) messages =
   Agent_core.Checkpoint.
-    { version = checkpoint_version
+    { provider_binding = None; version = checkpoint_version
     ; session_id = "old-session"
     ; agent_name = "test-agent"
     ; model = "test-model"

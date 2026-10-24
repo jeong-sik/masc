@@ -81,7 +81,7 @@ let message marker =
 ;;
 
 let checkpoint ~trace_id messages turn_count : Agent_core.Checkpoint.t =
-  { version = Agent_core.Checkpoint.checkpoint_version
+  { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
   ; session_id = trace_id
   ; agent_name = keeper_name
   ; model = "fixture-model"

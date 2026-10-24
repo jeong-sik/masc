@@ -338,7 +338,7 @@ let test_show_agent_config () =
 
 let test_show_agent_state () =
   let state : Types.agent_state =
-    { config = Types.default_config ~model:"test-model"
+    { provider_binding = None; config = Types.default_config ~model:"test-model"
     ; messages = []
     ; turn_count = 0
     ; usage = Types.empty_usage

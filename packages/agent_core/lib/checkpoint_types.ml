@@ -1,12 +1,13 @@
 open Types
 
-let checkpoint_version = 14
+let checkpoint_version = 15
 
 type t =
   { version : int
   ; session_id : string
   ; agent_name : string
   ; model : model
+  ; provider_binding : Llm_provider.Types.Reasoning_source.t option
   ; system_prompt : string option
   ; messages : message list
   ; usage : usage_stats
@@ -40,6 +41,7 @@ type identity_patch =
   { session_id : string
   ; agent_name : string
   ; model : model
+  ; provider_binding : Llm_provider.Types.Reasoning_source.t option
   ; created_at : float
   }
 

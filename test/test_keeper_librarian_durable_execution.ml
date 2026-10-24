@@ -157,7 +157,7 @@ let reconcile fixture=Runtime.reconcile_configuration ~config:fixture.config
 let set_enabled fixture enabled=io (fun () -> write fixture.source (fixture.declaration enabled));reconcile fixture
 let message text = Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text text]
 let checkpoint ~trace_id messages turn_count : Agent_core.Checkpoint.t =
-  { version = Agent_core.Checkpoint.checkpoint_version
+  { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
   ; session_id = trace_id
   ; agent_name = keeper_name
   ; model = "fixture-model"

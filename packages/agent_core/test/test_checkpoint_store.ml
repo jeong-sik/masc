@@ -5,7 +5,7 @@ open Agent_core
 let make_checkpoint ?(session_id = "test-session") ?(created_at = 1000.0) ()
   : Checkpoint.t
   =
-  { version = Checkpoint.checkpoint_version
+  { provider_binding = None; version = Checkpoint.checkpoint_version
   ; session_id
   ; agent_name = "test-agent"
   ; model = "claude-sonnet-5"

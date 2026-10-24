@@ -2094,7 +2094,7 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
         Eio.Switch.on_release sw (fun () ->
           Agent_core.Agent.close agent)));
   let checkpoint =
-    { Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
+    { provider_binding = None; Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = "session"
     ; agent_name = "agent_core-runpod_mtp.qwen"
     ; model = "qwen"
@@ -2149,7 +2149,7 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
       ~tools:[]
   in
   let checkpoint =
-    { Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
+    { provider_binding = None; Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = "session"
     ; agent_name = "agent_core-runpod_mtp.qwen"
     ; model = "qwen"
@@ -2579,7 +2579,7 @@ let context_fit_runtime_config base_url =
     ~tools:[]
 
 let context_fit_checkpoint () =
-  { Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
+  { provider_binding = None; Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
   ; session_id = "context-fit-session"
   ; agent_name = "context-fit-fixture"
   ; model = "context-fit-fixture"

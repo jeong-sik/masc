@@ -194,7 +194,7 @@ max-concurrent = 1
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let persisted = history ~exchanges:5 ~text_bytes:100 in
   let checkpoint : Agent_core.Checkpoint.t =
-    { version = Agent_core.Checkpoint.checkpoint_version
+    { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = trace_id
     ; agent_name = meta.name
     ; model = "forecast-test-model"
@@ -340,7 +340,7 @@ max-concurrent = 1
   Keeper_next_request_forecast.forecast ~config ~keeper_name:meta.name
 
 let checkpoint_with_messages ~session_id ~agent_name messages : Agent_core.Checkpoint.t =
-  { version = Agent_core.Checkpoint.checkpoint_version
+  { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
   ; session_id
   ; agent_name
   ; model = "forecast-test-model"
@@ -469,7 +469,7 @@ max-concurrent = 1
    | Error detail -> Alcotest.fail detail);
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let checkpoint : Agent_core.Checkpoint.t =
-    { version = Agent_core.Checkpoint.checkpoint_version
+    { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = trace_id
     ; agent_name = meta.name
     ; model = "forecast-test-model"
@@ -585,7 +585,7 @@ max-concurrent = 1
    | Error detail -> Alcotest.fail detail);
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let checkpoint : Agent_core.Checkpoint.t =
-    { version = Agent_core.Checkpoint.checkpoint_version
+    { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = trace_id
     ; agent_name = meta.name
     ; model = "forecast-head-model"
@@ -1253,7 +1253,7 @@ let test_observed_boundary_forecast ~marks ~samples ~expected_front () =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let messages = history ~exchanges:6 ~text_bytes:100 in
   let checkpoint : Agent_core.Checkpoint.t =
-    { version = Agent_core.Checkpoint.checkpoint_version; session_id = trace_id
+    { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version; session_id = trace_id
     ; agent_name = keeper_name; model = "forecast-model"; system_prompt = None
     ; messages; usage = Agent_core.Types.empty_usage; turn_count = 1; created_at = 1000.
     ; tools = []; tool_choice = None; disable_parallel_tool_use = false

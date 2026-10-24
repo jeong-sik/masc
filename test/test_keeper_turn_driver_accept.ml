@@ -21,7 +21,7 @@ let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.mess
   { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 
 let checkpoint_with_messages messages : Agent_core.Checkpoint.t =
-  {
+  { provider_binding = None;
     Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version;
     session_id = "session-test";
     agent_name = "agent-test";

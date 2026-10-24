@@ -166,13 +166,13 @@ let test_metric_nullable_outcomes () =
     let components = member "components" row in
     Alcotest.(check bool) "pending completion is a measured zero" true (member "completion" components = `Float 0.0);
     List.iter (fun key -> Alcotest.(check bool) (key ^ " is unobserved") true
-      (member key components = `Null)) ["reliability"; "speed"; "handoff_task_success"];
+      (member key components = `Null)) ["task_lifecycle_success"; "speed"; "handoff_task_success"];
     let completed = { metric with completed_at = Some metric.started_at; handoff_to = Some "next" } in
     record_ok ctx.config completed;
     let row = fitness () in
     let components = member "components" row in
     Alcotest.(check bool) "failure is a measured zero" true
-      (member "reliability" components = `Float 0.0 && member "handoff_task_success" components = `Float 0.0);
+      (member "task_lifecycle_success" components = `Float 0.0 && member "handoff_task_success" components = `Float 0.0);
     Alcotest.(check bool) "real zero duration has no defined speed ratio" true (member "speed" components = `Null);
     let metrics = member "metrics" row in
     Alcotest.(check int) "raw observations" 2 (member "record_count" metrics |> to_int);
@@ -188,7 +188,7 @@ let test_metric_nullable_outcomes () =
     Alcotest.(check int) "conflicting Task is explicit" 1 (member "conflicting_tasks" metrics |> to_int);
     Alcotest.(check int) "conflict fabricates no completed outcome" 0 (member "completed_tasks" metrics |> to_int);
     Alcotest.(check bool) "conflict leaves outcome and duration unknown" true
-      (member "reliability" (member "components" row) = `Null && member "avg_completion_time_s" metrics = `Null);
+      (member "task_lifecycle_success" (member "components" row) = `Null && member "avg_completion_time_s" metrics = `Null);
     let healthy = { completed with agent_id = "Healthy"; task_id = "healthy"; success = true } in
     record_ok ctx.config healthy;
     let pool = dispatch_exn ctx ~name:"masc_agent_fitness" ~args:(`Assoc []) in
@@ -196,7 +196,15 @@ let test_metric_nullable_outcomes () =
     let rows = Yojson.Safe.from_string (Tool_result.message pool) |> member "agents" |> to_list in
     let healthy_row = List.find (fun row -> member "agent_id" row = `String "Healthy") rows in
     Alcotest.(check int) "unrelated agent keeps its observed completion" 1
-      (member "completed_tasks" (member "metrics" healthy_row) |> to_int))
+      (member "completed_tasks" (member "metrics" healthy_row) |> to_int);
+    let metrics = member "metrics" healthy_row in
+    Alcotest.(check string) "success is scoped to the Task lifecycle" "task_lifecycle"
+      (member "outcome_basis" metrics |> to_string);
+    Alcotest.(check bool) "Task approval provides no external acceptance observation" true
+      (member "external_acceptance" metrics
+       = `Assoc [ "kind", `String "unobserved"; "completed_tasks", `Int 1 ]);
+    Alcotest.(check bool) "the ambiguous reliability claim is absent" true
+      (member "reliability" (member "components" healthy_row) = `Null))
 
 let test_metric_source_failure () =
   with_ctx (fun ctx ->

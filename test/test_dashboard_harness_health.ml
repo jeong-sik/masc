@@ -1,6 +1,8 @@
 open Alcotest
 
 module H = Dashboard_harness_health
+module Calibration = Masc.Eval_calibration
+module Review = Masc.Task.Anti_rationalization
 
 let temp_dir_counter = ref 0
 
@@ -176,6 +178,38 @@ let test_wake_payload_reader_rejects_malformed_exact_records () =
 
 let sample_hash = String.concat "" (List.init 8 (fun _ -> "0123abcd"))
 
+let test_model_identity_gaps_reach_the_dashboard_without_a_zero_rate () =
+  with_temp_dir "harness-model-identities" @@ fun dir ->
+  Calibration.For_testing.set_store ~base_path:dir;
+  Fun.protect ~finally:Calibration.For_testing.reset_store @@ fun () ->
+  let assert_observation ~verdict_count ~runtime_rate =
+    let json = H.json () in
+    let overview = Yojson.Safe.Util.member "overview" json in
+    let calibration = Yojson.Safe.Util.member "calibration" json in
+    let observation = Yojson.Safe.Util.member "model_identity_observation" overview in
+    check string "model identities remain unobserved" "unobserved"
+      Yojson.Safe.Util.(observation |> member "kind" |> to_string);
+    check int "the missing coverage reaches the overview" verdict_count
+      Yojson.Safe.Util.(observation |> member "verdict_count" |> to_int);
+    check bool "the overview preserves the ledger's nullable runtime rate" true
+      (Yojson.Safe.Util.member "distinct_runtime_rate" overview = runtime_rate);
+    check bool "the ledger and overview retain the same identity observation" true
+      (observation = Yojson.Safe.Util.member "model_identity_observation" calibration);
+    check bool "the obsolete model-rate claim is absent" false
+      (List.mem_assoc "cross_model_rate" (Yojson.Safe.Util.to_assoc overview))
+  in
+  assert_observation ~verdict_count:0 ~runtime_rate:`Null;
+  let req : Review.review_request =
+    { task_title = "bound output"; task_description = "review"; task_id = "task-model-gap"
+    ; completion_notes = "filed"; agent_name = "producer"; evidence_refs = []; evidence_images = [] } in
+  let result : Review.review_result =
+    { verdict = Some (Review.Approve "")
+    ; evaluator_runtime = "judge-alias"; generator_runtime = Some "producer-alias"
+    ; gate = Review.Structured_tool; fallback_reason = None
+    ; retryable_runtimes = []; model_absent_runtimes = [] } in
+  Calibration.record_verdict ~task_id:"task-model-gap" ~req ~result ();
+  assert_observation ~verdict_count:1 ~runtime_rate:(`Float 1.0)
+
 let test_label_body_approve_parses () =
   match
     Dashboard_harness_health.parse_label_body
@@ -235,6 +269,9 @@ let () =
   run
     "dashboard_harness_health"
     [
+      ( "model_identity",
+        [ test_case "identity gaps reach the dashboard without a zero rate" `Quick
+            test_model_identity_gaps_reach_the_dashboard_without_a_zero_rate ] );
       ( "operator_labels",
         [
           test_case "a well-formed approve label parses" `Quick

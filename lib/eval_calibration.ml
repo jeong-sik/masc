@@ -372,8 +372,8 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
   let total_verdicts, approve_count, reject_count,
       gate_counts, verdict_hashes, labeled_hashes,
       recent_fallback_reasons,
-      verdicts_with_generator, cross_model_match =
-    List.fold_left (fun (tv, ac, rc, gc, vh, lh, fbr, vwg, cmm) json ->
+      verdicts_with_generator, distinct_runtime_count =
+    List.fold_left (fun (tv, ac, rc, gc, vh, lh, fbr, vwg, drc) json ->
       let rt = string_field json "record_type" |> record_type_of_string in
       let hash = string_field json "notes_hash" in
       match rt with
@@ -391,12 +391,12 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
               let vh' = StringMap.add hash v vh in
               let ev_runtime = string_field json "evaluator_runtime" in
               let gen_runtime = string_field json "generator_runtime" in
-              let vwg', cmm' =
+              let vwg', drc' =
                 if gen_runtime <> "" && ev_runtime <> "" then
                   vwg + 1,
-                  (if not (String.equal gen_runtime ev_runtime) then cmm + 1 else cmm)
+                  (if not (String.equal gen_runtime ev_runtime) then drc + 1 else drc)
                 else
-                  vwg, cmm
+                  vwg, drc
               in
               let fbr' =
                 if List.mem gate evaluator_failure_tags
@@ -407,19 +407,19 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
                 else
                   fbr
               in
-              (tv + 1, ac', rc', gc', vh', lh, fbr', vwg', cmm')
+              (tv + 1, ac', rc', gc', vh', lh, fbr', vwg', drc')
           | None ->
-              (tv, ac, rc, gc, vh, lh, fbr, vwg, cmm)
+              (tv, ac, rc, gc, vh, lh, fbr, vwg, drc)
         end
       | Some Label_record -> begin
           match label_verdict_of_string (string_field json "human_verdict") with
           | Some v ->
-              (tv, ac, rc, gc, vh, StringMap.add hash v lh, fbr, vwg, cmm)
+              (tv, ac, rc, gc, vh, StringMap.add hash v lh, fbr, vwg, drc)
           | None ->
-              (tv, ac, rc, gc, vh, lh, fbr, vwg, cmm)
+              (tv, ac, rc, gc, vh, lh, fbr, vwg, drc)
         end
       | None ->
-          (tv, ac, rc, gc, vh, lh, fbr, vwg, cmm)
+          (tv, ac, rc, gc, vh, lh, fbr, vwg, drc)
     ) (0, 0, 0, StringMap.empty, StringMap.empty, StringMap.empty,
        [], 0, 0) records
   in
@@ -460,9 +460,9 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       0
       evaluator_failure_tags
   in
-  let cross_model_rate =
-    if verdicts_with_generator = 0 then 0.0
-    else float_of_int cross_model_match /. float_of_int verdicts_with_generator
+  let distinct_runtime_rate =
+    if verdicts_with_generator = 0 then `Null
+    else `Float (float_of_int distinct_runtime_count /. float_of_int verdicts_with_generator)
   in
   `Assoc [
     ("total_verdicts", `Int total_verdicts);
@@ -475,8 +475,16 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
     ("agreement_rate", `Float agreement_rate);
     ("fallback_count", `Int fallback_count);
     ("verdicts_with_generator_runtime", `Int verdicts_with_generator);
-    ("cross_model_match_count", `Int cross_model_match);
-    ("cross_model_rate", `Float cross_model_rate);
+    ("distinct_runtime_count", `Int distinct_runtime_count);
+    ("distinct_runtime_rate", distinct_runtime_rate);
+    (* Runtime slots can alias the same model and their configuration may
+       change after submission. Neither name proves a producer/judge model
+       pair. Keep the missing observation visible until the request and
+       verdict retain their actual execution identities. *)
+    ("model_identity_observation", `Assoc
+       [ "kind", `String "unobserved"
+       ; "verdict_count", `Int total_verdicts
+       ]);
     ("recent_fallback_reasons",
      `List (List.rev_map (fun s -> `String s) recent_fallback_reasons));
   ]

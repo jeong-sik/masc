@@ -1,0 +1,51 @@
+{
+  "scope": "Changed OCaml parsing and canonical TOML parsing; native Task tool/whole Keeper unrun.",
+  "checks": [
+    {
+      "path": "lib/keeper/keeper_tasks_list_cursor.ml",
+      "sha256": "e83d4bb60a2d6c966a90f8f3620bf90cfd43b435c7193d5b23e62685e1debae4",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_tasks_list_cursor.mli",
+      "sha256": "b76cfe3c57427a8487aef05c27ea4cbfc1a367a673adb308e12c78016592bd85",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_tasks_list_query.ml",
+      "sha256": "ca5de6749cfc1553588dc91f62a985f77e4177cf3ef86eac4afaa81c814a3713",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_tasks_list_query.mli",
+      "sha256": "7dbde07b195b4686362c210ce6869a47280f786462ffc50a19fdc463d4e42495",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_tool_task_runtime.ml",
+      "sha256": "dc0bea014d5a1ebfd5b42cba8705d342a0f655e88df3ce525acf7585e6cb08da",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_task_outcomes.ml",
+      "sha256": "15b15dcb73a61631cacca9b002bed95ffd1ff2dc98d7322ac421feaa427baac7",
+      "exit": 0,
+      "stderr": ""
+    }
+  ],
+  "toml": {
+    "path": "config/tools/keeper_tasks_list.toml",
+    "sha256": "118a671d25c7b5efed760397ae2985c8b491f37a1d9485bf29715a5c4f3d8261",
+    "parsed_tool": "keeper_tasks_list"
+  },
+  "diff_check": {
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+}

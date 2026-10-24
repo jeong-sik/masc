@@ -1131,6 +1131,69 @@ let test_web_fetch_refuses_a_private_target () =
     | Error _ -> ())
 ;;
 
+let test_remote_surface_keeps_its_captured_destination () =
+  let log_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> rm_rf log_dir) (fun () ->
+    let log_path = Filename.concat log_dir "requests.jsonl" in
+    let trailer = Exec_ssh_protocol.render_trailer
+      { v=Exec_ssh_protocol.newest; exit=Some 0; signal=None; timed_out=false;
+        shim_error=None; observed_syscalls=[] } in
+    let script = Printf.sprintf {|#!/usr/bin/env python3
+import sys, json, base64
+prefix = sys.stdin.buffer.read(8)
+length = int.from_bytes(prefix, "big")
+request, _ = json.JSONDecoder().raw_decode(sys.stdin.buffer.read(length).decode())
+argv = [base64.b64decode(arg).decode() for arg in request['argv']]
+with open(%s, 'a') as log:
+    log.write(json.dumps({'ssh': sys.argv[1:], 'argv': argv, 'cwd': base64.b64decode(request['cwd']).decode()}) + '\n')
+sys.stdout.write('{"entries":[],"checkouts":[],"limit":null}' if argv[-1] == 'layout' else 'original endpoint content')
+sys.stderr.write(%s)
+|} (Yojson.Safe.to_string (`String log_path)) (Yojson.Safe.to_string (`String trailer)) in
+    with_surface ~ssh_script:script (fun config surface ->
+      let get = function Ok value -> value | Error reason -> Alcotest.fail reason in
+      let original_endpoint = Masc.Keeper_sandbox_ssh.resolve_endpoint
+        ~base_path:config.base_path ~keeper_name:producer |> get in
+      let changed = {original_endpoint with Exec_ssh_endpoint.host="replacement.invalid";
+        remote_root="/replacement-root"; allowed_paths=["/widened-root"]} in
+      Out_channel.with_open_text (Filename.concat config.base_path ".masc/config/runtime.toml")
+        (fun output -> output_string output (Exec_ssh_endpoint.to_toml changed));
+      let replacement = VAT.create ~config ~producer ~submitted_evidence:[] |> get in
+      ignore (VAT.root_layout surface |> require_root);
+      ignore (dispatch_text surface ~name:"tool_read_file"
+        ~args:(`Assoc ["file_path",`String "evidence.txt"]) |> get);
+      ignore (dispatch_text surface ~name:"tool_search_files"
+        ~args:(`Assoc ["pattern",`String "content"]) |> get);
+      let read_log () = In_channel.with_open_text log_path (fun input ->
+        let rec read acc = match input_line input with
+          | line -> read (Yojson.Safe.from_string line :: acc)
+          | exception End_of_file -> List.rev acc in read []) in
+      let calls = read_log () in
+      Alcotest.(check bool) "actual endpoint commands were dispatched" true (calls <> []);
+      List.iter (fun call ->
+        let open Yojson.Safe.Util in
+        let ssh = member "ssh" call |> to_list |> List.map to_string in
+        Alcotest.(check bool) "original surface keeps its exact SSH destination" true
+          (List.mem (original_endpoint.user ^ "@" ^ original_endpoint.host) ssh);
+        Alcotest.(check string) "layout, binary probe, Read and Grep keep the original workspace"
+          (Filename.concat original_endpoint.remote_root producer) (member "cwd" call |> to_string)) calls;
+      (match dispatch_text surface ~name:"tool_read_file"
+          ~args:(`Assoc ["file_path",`String "/widened-root/secret.txt"]) with
+       | Error _ -> () | Ok _ -> Alcotest.fail "old surface accepted new endpoint's declared root");
+      Alcotest.(check int) "new declared paths never reach the old endpoint"
+        (List.length calls) (List.length (read_log ()));
+      ignore (dispatch_text replacement ~name:"tool_read_file"
+        ~args:(`Assoc ["file_path",`String "evidence.txt"]) |> get);
+      let replacement_calls = List.drop (List.length calls) (read_log ()) in
+      Alcotest.(check bool) "new surface reaches its own endpoint" true (replacement_calls <> []);
+      List.iter (fun call ->
+        let open Yojson.Safe.Util in
+        let ssh = member "ssh" call |> to_list |> List.map to_string in
+        Alcotest.(check bool) "replacement uses the replacement destination" true
+          (List.mem (changed.user ^ "@" ^ changed.host) ssh);
+        Alcotest.(check string) "replacement uses its own workspace"
+          (Filename.concat changed.remote_root producer) (member "cwd" call |> to_string)) replacement_calls))
+;;
+
 let test_keeper_endpoint_read_preserves_png_bytes () =
   let fixture = Filename.concat
       (match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ())
@@ -1485,6 +1548,8 @@ let () =
             test_goal_and_task_read_deliver_full_png
         ; Alcotest.test_case "Keeper endpoint read keeps exact PNG bytes" `Quick
             test_keeper_endpoint_read_preserves_png_bytes
+        ; Alcotest.test_case "captured endpoint survives configuration replacement" `Quick
+            test_remote_surface_keeps_its_captured_destination
         ; Alcotest.test_case "unknown tool name is an error" `Quick
             test_unknown_tool_name_is_an_error
         ; Alcotest.test_case "web fetch is offered and dispatches" `Quick

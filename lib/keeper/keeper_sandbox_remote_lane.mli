@@ -1,5 +1,31 @@
 (** The remote lane's endpoint for a keeper, by profile. *)
 
+type read_authority
+(** One attached endpoint and its declared path authority, captured together.
+    It starts no guest and cannot select a replacement endpoint on dispatch. *)
+
+val capture_read_authority :
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> unit ->
+  (read_authority option, string) result
+(** [None] for a shared Docker tree. SSH captures the actual typed declaration;
+    MicroVM captures its already attached endpoint without booting it. *)
+
+val read_authority_endpoint :
+  read_authority -> config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  (Keeper_sandbox_remote.t, string) result
+(** Check the owning workspace, Keeper and profile before returning the same
+    endpoint captured above. Reads no current endpoint configuration. *)
+
+val read_authority_identity : read_authority -> Yojson.Safe.t
+val read_authority_route : read_authority -> Yojson.Safe.t
+(** Configuration route of this same captured endpoint, in the Task review's
+    route vocabulary. The host compares current configuration with this value;
+    it must not recapture a different route after acquiring the endpoint. *)
+val read_authority_workspace_root : read_authority -> string
+val read_authority_declared_path : read_authority -> string -> string option
+val read_authority_declared_path_of_args :
+  read_authority -> path:string -> cwd:string option -> string option
+
 val microvm_endpoint :
   ?timeout_sec:float ->
   Keeper_turn_sandbox_runtime.t ->

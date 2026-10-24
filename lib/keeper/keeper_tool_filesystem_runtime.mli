@@ -36,6 +36,13 @@ val handle_read_file_with_outcome :
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
 
+val handle_read_file_with_authority :
+  read_authority:Keeper_sandbox_remote_lane.read_authority ->
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  args:Yojson.Safe.t -> Keeper_tool_execution.t
+(** Read with one captured endpoint for admission, translation and execution. *)
+
 type prepared_read
 
 val prepare_read :
@@ -59,6 +66,7 @@ val handle_prepared_read_file_with_outcome :
     after accepting a preparation. *)
 
 val read_complete_sandbox_bytes :
+  ?read_authority:Keeper_sandbox_remote_lane.read_authority ->
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   path:string -> ?cwd:string -> unit -> (string, string) result
@@ -260,6 +268,7 @@ module For_testing : sig
 end
 
 val read_sandbox_raw_prefix :
+  ?read_authority:Keeper_sandbox_remote_lane.read_authority ->
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   path:string -> ?cwd:string -> max_bytes:int -> unit ->

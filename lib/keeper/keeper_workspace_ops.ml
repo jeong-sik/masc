@@ -14,7 +14,8 @@ include Keeper_workspace_ops_setup
 
 (* TEL-OK: handler rename only; [render_completed_process_result] records
    command history and failure telemetry through Keeper_workspace_ops_setup. *)
-let handle_tool_search_files_with_outcome
+let handle_tool_search_files_with_read_authority
+      ~read_authority
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -29,7 +30,7 @@ let handle_tool_search_files_with_outcome
   match requested_op with
   | None | Some "" | Some "rg" ->
     (match
-       Keeper_workspace_read_ops.try_handle_with_outcome ~turn_sandbox_factory ~config ~meta
+       Keeper_workspace_read_ops.try_handle_with_authority ~read_authority ~turn_sandbox_factory ~config ~meta
          ~args ~op:"rg" ~raw_path
      with
     | Some response -> response
@@ -65,6 +66,12 @@ let handle_tool_search_files_with_outcome
                       other) )
              ]))
 ;;
+
+let handle_tool_search_files_with_outcome ~turn_sandbox_factory ~config ~meta ~args =
+  handle_tool_search_files_with_read_authority ~read_authority:None ~turn_sandbox_factory ~config ~meta ~args
+
+let handle_tool_search_files_with_authority ~read_authority ~turn_sandbox_factory ~config ~meta ~args =
+  handle_tool_search_files_with_read_authority ~read_authority:(Some read_authority) ~turn_sandbox_factory ~config ~meta ~args
 
 let handle_tool_search_files ~turn_sandbox_factory ~config ~meta ~args =
   (handle_tool_search_files_with_outcome

@@ -61,7 +61,8 @@ let rg_error_class ~status ~file_type ~read_type_list =
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Tool_result.Runtime_failure
 ;;
 
-let try_handle_with_outcome
+let try_handle_with_authority
+      ~read_authority
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -99,8 +100,12 @@ let try_handle_with_outcome
         | cwd -> Some cwd
       in
       (match
-         Keeper_sandbox_remote_lane.declared_endpoint_path_of_args
-           ~config ~meta ~path:(arg "path") ~cwd
+         (match read_authority with
+          | None -> Keeper_sandbox_remote_lane.declared_endpoint_path_of_args ~config ~meta ~path:(arg "path") ~cwd
+          | Some authority ->
+            let open Result.Syntax in
+            let* _ = Keeper_sandbox_remote_lane.read_authority_endpoint authority ~config ~meta in
+            Ok (Keeper_sandbox_remote_lane.read_authority_declared_path_of_args authority ~path:(arg "path") ~cwd))
        with
        | Ok (Some endpoint_path) -> Ok endpoint_path
        | Ok None -> Error refusal
@@ -110,6 +115,16 @@ let try_handle_with_outcome
          Error
            (Keeper_alerting_path.endpoint_unresolved ~tree_refusal:refusal ~endpoint_error))
   in
+  let container_path_of_host ~host_path = match read_authority with
+    | None -> Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path
+    | Some authority -> Keeper_sandbox_read_backend.container_path_of_host_with_authority
+        ~read_authority:authority ~config ~meta ~host_path in
+  let run_command_with_status ?ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec () =
+    match read_authority with
+    | None -> Keeper_sandbox_read_runner.run_command_with_status ?turn_sandbox_factory
+        ?ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+    | Some authority -> Keeper_sandbox_read_backend.run_command_with_status ~read_authority:authority
+        ?turn_sandbox_factory ?ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec () in
   let sandbox_read_error ~target msg =
     error_json ~fields:[ "op", `String op; "path", `String target ] msg
   in
@@ -135,13 +150,12 @@ let try_handle_with_outcome
          failed, is not claimed as the caller's: a declared endpoint path maps
          only through the endpoint's configuration. *)
       match
-        Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path:target
+        container_path_of_host ~host_path:target
       with
       | Error e -> Error (Tool_result.Runtime_failure, sandbox_read_error ~target e)
       | Ok cpath -> (
           match
-            Keeper_sandbox_read_runner.run_command_with_status
-              ?turn_sandbox_factory
+            run_command_with_status
               ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
               ~max_bytes ~timeout_sec ()
           with
@@ -220,8 +234,7 @@ let try_handle_with_outcome
                     Keeper_tool_execution.failure
                       ~class_:(rg_error_class ~status:st ~file_type ~read_type_list:(fun () ->
                         match
-                          Keeper_sandbox_read_runner.run_command_with_status
-                            ?turn_sandbox_factory
+                          run_command_with_status
                             ~config ~meta ~command_argv:[ "rg"; "--type-list" ]
                             ~max_bytes:rg_type_list_max_bytes
                             ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
@@ -240,3 +253,6 @@ let try_handle_with_outcome
            | Ok target -> rg_in_sandbox target)))
   | _ -> None
 ;;
+
+let try_handle_with_outcome ~turn_sandbox_factory ~config ~meta ~args ~op ~raw_path =
+  try_handle_with_authority ~read_authority:None ~turn_sandbox_factory ~config ~meta ~args ~op ~raw_path

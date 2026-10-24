@@ -41,6 +41,7 @@ type layout =
   }
 
 val discover_layout :
+  ?read_authority:Keeper_sandbox_remote_lane.read_authority ->
   timeout_sec:float -> config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta -> unit ->
   (layout, Keeper_playground_checkouts.scan_error) result

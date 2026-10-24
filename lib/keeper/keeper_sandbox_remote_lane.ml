@@ -153,6 +153,67 @@ let declared_endpoint_path_of_args ~config ~meta ~path ~cwd =
   | Some spelling -> declared_endpoint_path ~config ~meta spelling
 ;;
 
+type read_authority = {
+  base_path : string;
+  keeper : string;
+  profile : Keeper_types_profile.sandbox_profile;
+  endpoint : Keeper_sandbox_remote.t;
+  declaration : Exec_ssh_endpoint.t option;
+}
+
+let capture_read_authority ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  let capture endpoint declaration =
+    Some {base_path=config.base_path;keeper=meta.name;profile=meta.sandbox_profile;
+      endpoint;declaration} in
+  match meta.sandbox_profile with
+  | Docker -> Ok None
+  | Remote_ssh ->
+    let* declaration = Keeper_sandbox_ssh.resolve_endpoint ~base_path:config.base_path ~keeper_name:meta.name in
+    let* endpoint = Keeper_sandbox_ssh.create ~base_path:config.base_path ~keeper_name:meta.name ~endpoint:declaration () in
+    let* endpoint = ready endpoint in
+    Ok (capture endpoint (Some declaration))
+  | Micro_vm ->
+    let* endpoint = attached_guest_endpoint ~config ~meta () in
+    Ok (capture endpoint None)
+
+let read_authority_endpoint authority ~(config : Workspace.config) ~(meta : keeper_meta) =
+  if String.equal authority.base_path config.base_path && String.equal authority.keeper meta.name
+     && authority.profile = meta.sandbox_profile
+  then Ok authority.endpoint
+  else Error "captured read authority belongs to another workspace, Keeper or sandbox profile"
+
+let read_authority_workspace_root authority = Keeper_sandbox_remote.workspace_root authority.endpoint
+
+let read_authority_identity authority =
+  let strings values = `List (List.map (fun value -> `String value) values) in
+  `Assoc ["workspace",`String authority.base_path;"keeper",`String authority.keeper;
+    "profile",`String (Keeper_types_profile.sandbox_profile_to_string authority.profile);
+    "workspace_root",`String (read_authority_workspace_root authority);
+    "transport_argv",strings (Keeper_sandbox_remote.transport_argv authority.endpoint);
+    "declaration",(match authority.declaration with
+      | None -> `Null | Some declaration -> `String (Exec_ssh_endpoint.to_toml declaration))]
+
+let read_authority_route authority =
+  match authority.declaration with
+  | Some declaration ->
+    `Assoc ["kind", `String "ssh"; "endpoint", `String (Exec_ssh_endpoint.to_toml declaration)]
+  | None ->
+    `Assoc ["kind", `String "microvm";
+      "argv", `List (List.map (fun value -> `String value)
+        (Keeper_sandbox_remote.transport_argv authority.endpoint));
+      "root", `String (read_authority_workspace_root authority)]
+
+let read_authority_declared_path authority path = match authority.declaration with
+  | None -> None
+  | Some declaration -> declared_path_of_endpoint declaration path
+
+let read_authority_declared_path_of_args authority ~path ~cwd =
+  match Filename.is_relative path, cwd with
+  | false, _ -> read_authority_declared_path authority path
+  | true, Some cwd when not (Filename.is_relative cwd) ->
+    read_authority_declared_path authority (Filename.concat cwd path)
+  | true, (Some _ | None) -> None
+
 let is_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
   match meta.sandbox_profile with
   | Docker -> false

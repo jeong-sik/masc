@@ -21,13 +21,16 @@ let host_playground_root ~config ~(meta : keeper_meta) =
 let container_root ~(meta : keeper_meta) =
   Keeper_sandbox.container_root meta.name
 
-let container_path_of_host ~(config : Workspace.config) ~(meta : keeper_meta) ~host_path
+let container_path_of_host_impl ~read_authority ~(config : Workspace.config) ~(meta : keeper_meta) ~host_path
     : (string, string) result =
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Endpoint_owned ->
     let ( let* ) = Result.bind in
     let* remote_workspace_root =
-      Keeper_sandbox_remote_lane.workspace_root ~config ~meta
+      (match read_authority with
+       | None -> Keeper_sandbox_remote_lane.workspace_root ~config ~meta
+       | Some authority -> Result.map Keeper_sandbox_remote.workspace_root
+           (Keeper_sandbox_remote_lane.read_authority_endpoint authority ~config ~meta))
     in
     (match
        Keeper_remote_path.host_to_remote ~base_path:config.base_path
@@ -40,7 +43,9 @@ let container_path_of_host ~(config : Workspace.config) ~(meta : keeper_meta) ~h
           itself. A name in the tree always translates, however a declared
           root is spelled. *)
        let* declared =
-         Keeper_sandbox_remote_lane.declared_endpoint_path ~config ~meta host_path
+         (match read_authority with
+          | None -> Keeper_sandbox_remote_lane.declared_endpoint_path ~config ~meta host_path
+          | Some authority -> Ok (Keeper_sandbox_remote_lane.read_authority_declared_path authority host_path))
        in
        (match declared with
         | Some endpoint_path -> Ok endpoint_path
@@ -65,6 +70,12 @@ let container_path_of_host ~(config : Workspace.config) ~(meta : keeper_meta) ~h
         (Printf.sprintf
            "container_path_of_host: %s is not inside playground %s"
            host_norm host_root)
+
+let container_path_of_host ~config ~meta ~host_path =
+  container_path_of_host_impl ~read_authority:None ~config ~meta ~host_path
+
+let container_path_of_host_with_authority ~read_authority ~config ~meta ~host_path =
+  container_path_of_host_impl ~read_authority:(Some read_authority) ~config ~meta ~host_path
 
 (* Argv prefix kept private — distinct from keeper_tool_command_runtime's bash
    argv to avoid coupling the two surfaces. The trailing
@@ -270,14 +281,19 @@ let resolve_read_dispatch ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
         | Remote_ssh -> Ok Remote_dispatch))
 ;;
 
-let run_command_with_capture ?turn_sandbox_factory
+let run_command_with_capture ?read_authority ?turn_sandbox_factory
     ?(ok_exit_codes = [ 0 ])
     ~config ~(meta : keeper_meta)
     ~(command_argv : string list) ~(max_bytes : int option)
     ~(timeout_sec : float) () : (Unix.process_status * string, string) result =
   if command_argv = [] then
     Error "run_command_with_status: command_argv is empty"
-  else
+  else match read_authority with
+  | Some authority ->
+    run_endpoint_command_with_status
+      ~acquire_endpoint:(fun ~cwd:_ -> Keeper_sandbox_remote_lane.read_authority_endpoint authority ~config ~meta)
+      ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+  | None ->
     let cwd = host_playground_root ~config ~meta in
     match resolve_read_dispatch ~turn_sandbox_factory ~meta ~cwd with
     | Error _ as error -> error
@@ -435,15 +451,15 @@ let run_command_with_capture ?turn_sandbox_factory
              Error
                (Printf.sprintf "docker_%s_stopped: signal=%d" head_program n))
 
-let run_command_with_status ?turn_sandbox_factory ?(ok_exit_codes=[0])
+let run_command_with_status ?read_authority ?turn_sandbox_factory ?(ok_exit_codes=[0])
     ~config ~meta ~command_argv ~max_bytes ~timeout_sec () =
-  run_command_with_capture ?turn_sandbox_factory ~ok_exit_codes ~config ~meta
+  run_command_with_capture ?read_authority ?turn_sandbox_factory ~ok_exit_codes ~config ~meta
     ~command_argv ~max_bytes:(Some max_bytes) ~timeout_sec ()
 
-let run_command ?turn_sandbox_factory ?(ok_exit_codes = [ 0 ]) ~config ~meta
+let run_command ?read_authority ?turn_sandbox_factory ?(ok_exit_codes = [ 0 ]) ~config ~meta
     ~command_argv ~max_bytes ~timeout_sec () =
   match
-    run_command_with_status ?turn_sandbox_factory
+    run_command_with_status ?read_authority ?turn_sandbox_factory
       ~ok_exit_codes ~config ~meta
       ~command_argv ~max_bytes ~timeout_sec ()
   with
@@ -488,9 +504,9 @@ let read_window_argv ~start_line ~max_bytes ~path =
   ; string_of_int (max 0 max_bytes)
   ]
 
-let read_file ?turn_sandbox_factory ?(start_line = 1) ~config ~(meta : keeper_meta)
+let read_file ?read_authority ?turn_sandbox_factory ?(start_line = 1) ~config ~(meta : keeper_meta)
     ~host_path ~(max_bytes : int) ~(timeout_sec : float) () : (string, read_error) result =
-  match container_path_of_host ~config ~meta ~host_path with
+  match container_path_of_host_impl ~read_authority ~config ~meta ~host_path with
   | Error detail -> Error (Read_failed detail)
   | Ok backend_path ->
     let profile_label =
@@ -514,7 +530,7 @@ let read_file ?turn_sandbox_factory ?(start_line = 1) ~config ~(meta : keeper_me
          Same shape, and same reason, as the bounded [od -N] chunk read in
          Keeper_browser_upload. *)
       match
-        run_command_with_status ?turn_sandbox_factory
+        run_command_with_status ?read_authority ?turn_sandbox_factory
           ~ok_exit_codes:[ 0; read_window_missing_exit; read_window_not_a_file_exit ]
           ~config ~meta
           ~command_argv:(read_window_argv ~start_line ~max_bytes ~path:backend_path)
@@ -577,14 +593,14 @@ let read_file ?turn_sandbox_factory ?(start_line = 1) ~config ~(meta : keeper_me
              (Printf.sprintf "%s_read_failed: %s(%s): %s" profile_label
                 operation argument (Unix.error_message error)))
 
-let read_complete_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path ~timeout_sec () =
+let read_complete_file ?read_authority ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path ~timeout_sec () =
   let ( let* ) = Result.bind in
-  let* path = container_path_of_host ~config ~meta ~host_path in
-  let* _, bytes = run_command_with_capture ?turn_sandbox_factory ~config ~meta
+  let* path = container_path_of_host_impl ~read_authority ~config ~meta ~host_path in
+  let* _, bytes = run_command_with_capture ?read_authority ?turn_sandbox_factory ~config ~meta
       ~command_argv:["cat"; path] ~max_bytes:None ~timeout_sec () in
   Ok bytes
 
-let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
+let read_raw_prefix ?read_authority ?turn_sandbox_factory ~config ~(meta : keeper_meta)
     ~host_path ~max_bytes ~timeout_sec () =
   if max_bytes <= 0 then
     Error (Read_failed "Raw prefix byte limit must be positive")
@@ -601,7 +617,7 @@ let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
 
      The frozen Turn_runtime binary capture honours [ok_exit_codes], so the
      sentinel exits classify as [Missing_file] / [Not_a_file] there too. *)
-  match container_path_of_host ~config ~meta ~host_path with
+  match container_path_of_host_impl ~read_authority ~config ~meta ~host_path with
   | Error detail -> Error (Read_failed detail)
   | Ok backend_path ->
     let profile_label =
@@ -611,7 +627,7 @@ let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
       let missing_exit = read_window_missing_exit
       and not_a_file_exit = read_window_not_a_file_exit in
       match
-        run_command_with_capture ?turn_sandbox_factory ~config ~meta
+        run_command_with_capture ?read_authority ?turn_sandbox_factory ~config ~meta
           ~ok_exit_codes:[ 0; missing_exit; not_a_file_exit ]
           ~command_argv:
             [ "sh"

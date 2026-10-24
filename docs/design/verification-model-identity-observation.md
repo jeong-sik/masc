@@ -16,9 +16,25 @@ identity does not prove different model weights or statistical independence.
 ## Native capture and immutable binding
 
 `Runtime_response_identity` in `masc_types` owns the validated immutable value:
-a host execution ID, actor, actual runtime ID, provider response ID, provider
+a host execution ID, actor, actual runtime ID, SDK response correlation label, provider
 ID, reported model ID, exact tool-use ID, provider-turn ordinal, and the
 original ToolUse ordinal before name admission.
+
+`response_id` copies SDK `api_response.id`. It does not attest a provider-native
+or globally unique response ID. For example, the Ollama JSON parser uses the
+wire model name (or its `ollama` fallback) as this label. It can repeat across
+responses. Exact occurrence binding comes from the host execution, provider
+turn and original ToolUse ordinal; pair measurement compares only the captured
+provider and reported-model identities.
+
+Capture coverage also depends on the SDK retaining response metadata. Native
+Ollama streaming currently emits no `MessageStart` metadata into the response
+accumulator, leaving its response ID and reported model empty. The Gemini JSON
+parser also supplies an empty response ID. These paths remain unobserved under
+the current capture contract, even when other output or wire metadata exists.
+They are not same-model observations, and neither configured labels nor invented
+provider IDs fill the gaps. Broader capture needs an explicit producer-owned
+metadata contract; it is outside this change.
 
 `Runtime_agent.config.execution_actor` is supplied by the named-runtime
 driver from the host-owned Keeper name. It is independent of the synthetic

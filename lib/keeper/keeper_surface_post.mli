@@ -12,6 +12,7 @@ type rich_block = Yojson.Safe.t
 (** Slack Block Kit block rendered as a JSON value. *)
 
 type post_target =
+  | To_native of Keeper_native_origin_reply.t
   | To_dashboard
       (** Persist an assistant line + broadcast [keeper_chat_appended];
           the dashboard is always present. *)
@@ -71,6 +72,7 @@ val blocks_of_args :
     text. *)
 
 type delivery_target =
+  | Delivered_to_native of Keeper_native_origin_reply.t
   | Delivered_to_dashboard
   | Delivered_to_discord of { channel_id : string }
   | Delivered_to_slack of { channel_id : string; thread_ts : string option }
@@ -112,6 +114,7 @@ val resolve_target :
   channel_id:string option ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?requested_thread_ts:string ->
+  ?native_reply:Keeper_native_origin_reply.t ->
   ?bound_discord_channels:string list ->
   ?bound_slack_channels:string list ->
   unit ->
@@ -131,8 +134,9 @@ val resolve_target :
       a typed Slack continuation supplies its [thread_ts], which travels with
       the target only when the post lands on the continuation's own channel.
       A continuation for another connector never supplies an id.
-    - any other label → error: P4 ships discord + dashboard + slack
-      (generic gate connectors have no send surface yet). *)
+    - Telegram/iMessage require [native_reply] resolved from the original
+      continuation and freshly authorized binding. Explicit channel IDs may
+      only repeat that origin. Other labels are rejected. *)
 
 val set_blocks : post_target -> rich_block list option -> post_target
 (** [set_blocks target blocks] attaches [blocks] to a [To_slack] target and

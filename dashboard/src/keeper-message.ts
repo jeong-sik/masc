@@ -41,7 +41,7 @@ export function normalizeKeeperExternalEffectTarget(
   // snake-cases them. Accept both so a persisted draft restores its target.
   const channelId = (asString(value.channel_id) ?? asString(value.channelId))?.trim() ?? ''
   if (!channelId) return null
-  if (kind === 'discord') return { kind: 'discord', channelId }
+  if (kind === 'discord' || kind === 'telegram' || kind === 'imessage') return { kind, channelId }
   if (kind === 'slack') {
     const threadTs = (asString(value.thread_ts) ?? asString(value.threadTs))?.trim() ?? ''
     return { kind: 'slack', channelId, threadTs: threadTs || null }

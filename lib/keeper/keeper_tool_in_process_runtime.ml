@@ -1181,6 +1181,8 @@ let handle_person_note_set ~config ~meta ~args =
 let slack_token_opt = Env_config_slack.bot_token_opt
 
 type connector_post_replay = Keeper_connector_post_replay.connector_post_replay =
+  | Replay_native_post of
+      { input : Yojson.Safe.t; route : Keeper_native_origin_reply.t; content : string }
   | Replay_discord_post of
       { input : Yojson.Safe.t
       ; channel_id : string
@@ -1257,6 +1259,32 @@ let replay_connector_post_with_outcome
   in
   fun replay ->
   match replay with
+  | Replay_native_post {input;route;content} ->
+    with_connector_post_gate_execution ~config ~meta ?continuation_channel
+      ?gate_context ?gate_grant ~input
+      ~call_summary:(connector_post_call_summary replay)
+    @@ fun () ->
+    (match Keeper_native_origin_reply.check_binding ~keeper_name:meta.name route with
+     | Error detail -> fail (Keeper_native_origin_reply.connector route)
+         ~effect_disposition:Tool_result.Proven_pre_effect detail
+     | Ok () ->
+       match Eio_context.get_clock_opt () with
+       | None -> fail (Keeper_native_origin_reply.connector route)
+           ~effect_disposition:Tool_result.Proven_pre_effect "native reply requires the runtime clock"
+       | Some clock ->
+         match Keeper_native_origin_reply.send ~clock route ~content with
+         | Error detail -> fail (Keeper_native_origin_reply.connector route)
+             ~effect_disposition:Tool_result.Effect_outcome_unknown detail
+         | Ok () ->
+           match Keeper_chat_store.append_assistant_message_result
+             ~base_dir:config.Workspace.base_path ~keeper_name:meta.name ~content
+             ~surface:(Keeper_native_origin_reply.surface route) () with
+           | Error detail -> fail_after_effect (Keeper_native_origin_reply.connector route)
+               ("message sent, but local chat persistence failed: " ^ detail)
+           | Ok () ->
+             Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
+               ~source:(Keeper_native_origin_reply.connector route) ~content ();
+             succeed (Keeper_native_origin_reply.connector route) ())
   | Replay_discord_post { input; channel_id; content; mention_user_ids } ->
     with_connector_post_gate_execution
       ~config
@@ -1473,7 +1501,9 @@ let handle_surface_post_with_outcome
         requested_blocks
     in
     match
-      Channel_gate_discord_state.bound_channels_result ~keeper_name:meta.name
+      (if String.equal surface Keeper_surface_post.discord_label then
+         Channel_gate_discord_state.bound_channels_result ~keeper_name:meta.name
+       else Ok [])
     with
     | Error detail ->
       fail
@@ -1482,7 +1512,9 @@ let handle_surface_post_with_outcome
         (Keeper_surface_post.error_json
            (Channel_gate_discord_state.binding_lookup_error_to_string detail))
     | Ok bound_discord_channels ->
-      (match Channel_gate_slack_state.bound_channels ~keeper_name:meta.name with
+      (match (if String.equal surface Keeper_surface_post.slack_label then
+                Channel_gate_slack_state.bound_channels ~keeper_name:meta.name
+              else Ok []) with
        | Error detail ->
          fail
            ~class_:Tool_result.Runtime_failure
@@ -1521,8 +1553,27 @@ let handle_surface_post_with_outcome
            | None -> Some requested)
          | other -> other
        in
+       let native_reply =
+         match surface, continuation_channel with
+         | "telegram", Some (Keeper_continuation_channel.Telegram _ as channel) ->
+           Result.map Option.some (Keeper_native_origin_reply.of_continuation channel)
+         | "imessage", Some (Keeper_continuation_channel.Imessage {chat_guid;_} as channel) ->
+           Result.bind (Channel_gate_imessage_state.reply_target ~chat_guid) (fun destination ->
+             Result.map Option.some (Keeper_native_origin_reply.of_continuation
+               ~imessage_destination:destination channel))
+         | _ -> Ok None in
+       match native_reply with
+       | Error detail -> fail ~class_:Tool_result.Workflow_rejection
+           ~effect_disposition:Tool_result.Proven_pre_effect (Keeper_surface_post.error_json detail)
+       | Ok native_reply ->
+       let binding = match native_reply with None -> Ok () | Some route ->
+         Keeper_native_origin_reply.check_binding ~keeper_name:meta.name route in
+       match binding with
+       | Error detail -> fail ~class_:Tool_result.Workflow_rejection
+           ~effect_disposition:Tool_result.Proven_pre_effect (Keeper_surface_post.error_json detail)
+       | Ok () ->
        match
-         Keeper_surface_post.resolve_target ~surface ~channel_id
+         Keeper_surface_post.resolve_target ~surface ~channel_id ?native_reply
            ?continuation_channel
            ?requested_thread_ts
            ~bound_slack_channels ~bound_discord_channels ()
@@ -1554,6 +1605,15 @@ let handle_surface_post_with_outcome
              (Keeper_surface_post.error_json message)
          | Ok () ->
          match target with
+         | Keeper_surface_post.To_native route ->
+           let input = `Assoc [
+             "connector", `String (Keeper_native_origin_reply.connector route);
+             "channel_id", `String (Keeper_native_origin_reply.channel_id route);
+             "content", `String safe_content; "mention_user_ids", `List [];
+             "native_route", Keeper_native_origin_reply.to_yojson route] in
+           replay_connector_post_with_outcome ~config ~meta ?continuation_channel
+             ?gate_context ?gate_grant (Replay_native_post {input;route;content=safe_content})
+           |> Keeper_tool_execution.with_surface_post_receipt target
          | Keeper_surface_post.To_dashboard ->
         (match
            Keeper_chat_store.append_assistant_message_result

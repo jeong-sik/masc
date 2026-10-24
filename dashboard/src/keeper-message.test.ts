@@ -301,6 +301,13 @@ describe('normalizeKeeperToolResponse', () => {
 // ================================================================
 
 describe('normalizeKeeperExternalEffectTarget', () => {
+  it('retains native destinations through stored receipt normalization', () => {
+    expect(normalizeKeeperExternalEffectTarget({ kind: 'telegram', channel_id: '-1005' }))
+      .toEqual({ kind: 'telegram', channelId: '-1005' })
+    expect(normalizeKeeperExternalEffectTarget({ kind: 'imessage', channelId: 'source' }))
+      .toEqual({ kind: 'imessage', channelId: 'source' })
+  })
+
   it('decodes the three delivery target kinds', () => {
     expect(normalizeKeeperExternalEffectTarget({ kind: 'dashboard' }))
       .toEqual({ kind: 'dashboard' })

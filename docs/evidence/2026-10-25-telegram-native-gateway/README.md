@@ -165,3 +165,32 @@ this consolidation. Command from dashboard:
 `pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/config/navigation.test.ts src/components/connector-constants.test.ts`.
 See [the execution output](connector-ids-followup.txt). This is a separate run
 from the earlier 140 cases; suite overlap is not counted as new unique coverage.
+
+## Autonomous native wake follow-up (separate upper layer)
+
+An original-scope gap remained after the native Owner operation path: generic
+Ask/Fusion/owned-job wakes retained the continuation, but the autonomous
+`keeper_surface_post` tool rejected Telegram/iMessage. There is no automatic
+terminal publisher that compensates for that rejection.
+
+The upper `fix/native-origin-wake-reply-20261025` layer adds a closed native
+route behind the existing post tool and exact Gate approval/replay. Initial
+admission reads only the selected connector's binding authority, and replay
+reads its current binding again. Telegram retains bot/chat/topic/reply fields.
+iMessage resolves the configured reply mode before approval and pins the actual
+GUID; self-chat delivery is not evidence of delivery to the original group.
+Actual delivery metadata distinguishes that destination from the origin binding
+key. Uncertain transport failures do not authorize an automatic resend.
+
+The new fixture restores an Ask_answered stimulus through the queue JSON wire,
+uses the production wake projection and target/replay decoder, and exercises
+the native sender with injected transport. It also covers refusal to change the
+origin and authoritative binding ownership. This is not a complete model-driven
+autonomous turn, actual Telegram/macOS send, or installed runtime test.
+At this entry, OCaml parsing and tool TOML parsing passed; **the added OCaml
+scenario has not executed**. Earlier 24/92 results do not certify this new layer.
+
+The existing keeper-message and chat-primitives suites passed **211 tests**
+including native receipt normalization. See [the output](wake-dashboard.txt).
+This is fixture/DOM execution, without a new browser observation of this layer.
+The earlier two unrelated baseline typecheck failures still apply.

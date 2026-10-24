@@ -1,6 +1,7 @@
 type rich_block = Yojson.Safe.t
 
 type post_target =
+  | To_native of Keeper_native_origin_reply.t
   | To_dashboard
   | To_discord of { channel_id : string }
   | To_slack of
@@ -179,7 +180,7 @@ let message_matches_target target (message : Keeper_chat_store.chat_message) =
       { channel_id = target_channel; thread_ts = target_thread; blocks = _ },
     Some (Surface_ref.Slack { channel_id; thread_ts; _ }) ->
     String.equal target_channel channel_id && target_thread = thread_ts
-  | To_dashboard, _ -> false
+  | To_native _, _ | To_dashboard, _ -> false
   | To_discord _,
     ( None
     | Some
@@ -222,17 +223,23 @@ let validate_user_mentions_against_roster ~target ~messages mention_user_ids =
            (String.concat ", " missing))
 
 type delivery_target =
+  | Delivered_to_native of Keeper_native_origin_reply.t
   | Delivered_to_dashboard
   | Delivered_to_discord of { channel_id : string }
   | Delivered_to_slack of { channel_id : string; thread_ts : string option }
 
 let delivery_target_of_post_target = function
+  | To_native route -> Delivered_to_native route
   | To_dashboard -> Delivered_to_dashboard
   | To_discord { channel_id } -> Delivered_to_discord { channel_id }
   | To_slack { channel_id; thread_ts; blocks = _ } ->
     Delivered_to_slack { channel_id; thread_ts }
 
 let delivery_target_to_yojson = function
+  | Delivered_to_native route -> `Assoc [
+      "kind", `String (Keeper_native_origin_reply.connector route);
+      "channel_id", `String (Keeper_native_origin_reply.destination_id route);
+      "native_route", Keeper_native_origin_reply.to_yojson route]
   | Delivered_to_dashboard -> `Assoc [ "kind", `String dashboard_label ]
   | Delivered_to_discord { channel_id } ->
     `Assoc [ "kind", `String discord_label; "channel_id", `String channel_id ]
@@ -269,6 +276,15 @@ let delivery_target_of_yojson json =
              Ok (Delivered_to_slack { channel_id; thread_ts = Some thread_ts })
            | Some _ ->
              Error "delivery target thread_ts must be a non-empty string")
+     | Some (`String (("telegram" | "imessage") as kind)) ->
+       (match List.assoc_opt "native_route" fields with
+        | None -> Error "native delivery target is missing native_route"
+        | Some value -> Result.bind (Keeper_native_origin_reply.of_yojson value) (fun route ->
+          Result.bind (field "channel_id" fields) (fun channel_id ->
+            if kind = Keeper_native_origin_reply.connector route
+              && channel_id = Keeper_native_origin_reply.destination_id route then
+              Ok (Delivered_to_native route)
+            else Error "native delivery metadata differs from its route")))
      | Some (`String kind) ->
        Error (Printf.sprintf "unknown delivery target kind %S" kind)
      | Some _ -> Error "delivery target kind must be a string"
@@ -278,7 +294,7 @@ let delivery_target_of_yojson json =
 let delivery_target_wire_key = "external_effect_target"
 
 let resolve_target ~surface ~channel_id ?continuation_channel
-    ?requested_thread_ts
+    ?requested_thread_ts ?native_reply
     ?(bound_discord_channels = [])
     ?(bound_slack_channels = []) () : (post_target, string) result =
   let surface = String.trim surface in
@@ -401,20 +417,22 @@ let resolve_target ~surface ~channel_id ?continuation_channel
                "channel_id %s is not bound to this keeper (bound: %s)"
                requested
                (String.concat ", " bound))
-  else
-    Error
-      (Printf.sprintf
-         "posting to %S is not supported: discord, dashboard, and slack only \
-          in this phase (generic gate connectors have no send surface yet)"
-         surface)
+  else if String.equal surface "telegram" || String.equal surface "imessage" then
+    (match native_reply with
+     | Some route when String.equal surface (Keeper_native_origin_reply.connector route)
+         && Option.fold ~none:true ~some:(String.equal (Keeper_native_origin_reply.channel_id route)) channel_id ->
+       Ok (To_native route)
+     | Some _ | None -> Error "native post requires the exact originating continuation and current binding")
+  else Error (Printf.sprintf "unsupported post surface %S" surface)
 
 let set_blocks target blocks_opt =
   match target with
   | To_slack s -> To_slack { s with blocks = blocks_opt }
-  | (To_dashboard | To_discord _) as other -> other
+  | (To_native _ | To_dashboard | To_discord _) as other -> other
 
 let matches_continuation_route target channel =
   match target, channel with
+  | To_native route, channel -> Keeper_native_origin_reply.matches_continuation route channel
   | ( To_discord { channel_id = posted }
     , Keeper_continuation_channel.Discord { channel_id; _ } ) ->
     (* Discord [channel_id] is the innermost conversation locus — a thread's id

@@ -775,6 +775,7 @@ export type KeeperExternalEffectTarget =
   | { kind: 'dashboard' }
   | { kind: 'discord'; channelId: string }
   | { kind: 'slack'; channelId: string; threadTs: string | null }
+  | { kind: 'telegram' | 'imessage'; channelId: string }
 
 export interface KeeperConversationDetails {
   traceId?: string | null

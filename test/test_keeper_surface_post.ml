@@ -12,6 +12,7 @@ module Store = Masc.Keeper_chat_store
 module SP = Masc.Keeper_surface_post
 
 let target_pp fmt = function
+  | SP.To_native route -> Format.fprintf fmt "To_native{%s}" (Yojson.Safe.to_string (Masc.Keeper_native_origin_reply.to_yojson route))
   | SP.To_dashboard -> Format.fprintf fmt "To_dashboard"
   | SP.To_discord { channel_id } ->
       Format.fprintf fmt "To_discord{%s}" channel_id
@@ -347,6 +348,7 @@ let test_terminal_receipt_requires_exact_supported_route () =
 (* ── delivery_target codec ──────────────────────────────────────── *)
 
 let delivery_target_pp fmt = function
+  | SP.Delivered_to_native route -> Format.fprintf fmt "native{%s}" (Yojson.Safe.to_string (Masc.Keeper_native_origin_reply.to_yojson route))
   | SP.Delivered_to_dashboard -> Format.fprintf fmt "dashboard"
   | SP.Delivered_to_discord { channel_id } ->
       Format.fprintf fmt "discord{%s}" channel_id

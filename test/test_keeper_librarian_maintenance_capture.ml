@@ -82,9 +82,9 @@ let with_fixture f =
           ; source_revision = "1111111111111111111111111111111111111111"
           ; configuration_revision = "2222222222222222222222222222222222222222" }
         in
-        let prepared = R.prepare_durable ~now:123. (input ()) |> get in
         Prompt_registry.set_markdown_dir "../config/prompts";
         Prompt_defaults.init ();
+        let prepared = R.prepare_durable ~now:123. (input ()) |> get in
         f ~owner ~destination ~prepared))
 
 let test_create_and_roundtrip ~owner ~destination ~prepared =

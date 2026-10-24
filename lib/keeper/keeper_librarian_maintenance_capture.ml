@@ -267,8 +267,7 @@ let preparation_of_json ~source_input json =
     ; rendered_prompt; output_schema } in
   let* () =
     Keeper_librarian_runtime.validate_durable_preparation preparation in
-  if String.equal preparation.prompt.effective Prompt_names.librarian then Ok preparation
-  else Error (error "resolved another prompt template")
+  Ok preparation
 
 let to_json t =
   `Assoc

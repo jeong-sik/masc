@@ -209,7 +209,8 @@ let test_prepared_claim_conflicts_and_uncertain_write () = with_claim_root (fun 
     {|{"schema_version":1,"schema_version":1,"operation_id":"changed","identity":{}}|} |> ok;
   check bool "corrupt claim cannot be replaced by current recipient" true
     (match ensure ~sync:Fs_compat.sync_file_and_parent_strict identity with
-     | Error Claim.Invalid_claim->true | _->false);
+     | Error Claim.Invalid_claim->true
+     | Error (Claim.Conflicting_claim | Claim.Storage_failed _) | Ok ()->false);
   let unicode_identity=`Assoc["recipient",`String "A";"content",`String "�"] in
   let unicode_path=ref None in
   Claim.For_testing.ensure_with_io ~root:claim_root ~operation_id:"telegram-bot-777-generation-0-update-92"
@@ -221,7 +222,8 @@ let test_prepared_claim_conflicts_and_uncertain_write () = with_claim_root (fun 
   Fs_compat.save_file_atomic_strict (Option.get !unicode_path) malformed |> ok;
   check bool "invalid durable UTF-8 cannot normalize into an admitted identity" true
     (match Claim.ensure ~root:claim_root ~operation_id:"telegram-bot-777-generation-0-update-92"
-      ~identity:unicode_identity with Error Claim.Invalid_claim->true | _->false);
+      ~identity:unicode_identity with Error Claim.Invalid_claim->true
+     | Error (Claim.Conflicting_claim | Claim.Storage_failed _) | Ok ()->false);
   let output=open_out(Filename.concat claim_root "not-a-directory") in close_out output;
   let blocked=Gateway.accept_update ~claim_root:(Filename.concat claim_root "not-a-directory")
     ~resolve:(fun ~channel_id:_ -> Ok(Some "B")) ~dispatch_for_delivery ~bot_user_id:777L ~operation_id:"blocked" update in

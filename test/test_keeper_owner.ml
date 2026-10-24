@@ -5337,7 +5337,8 @@ let test_telegram_claim_pins_owner_across_cursor_failure () =
       let first=Telegram_poll_custody.For_testing.step_with_cursor_writer ~write_cursor ~post ~clock (custody ())
         ~now:(fun()->Eio.Time.now clock) ~poll_timeout_sec:0 ~accept () in
       check bool "first Owner acceptance outlives failed cursor publication" true
-        (match first with Error(Telegram_poll_custody.Storage_failed _)->true | _->false);
+        (match first with Error(Telegram_poll_custody.Storage_failed _)->true
+         | Error(Telegram_poll_custody.Api _ | Cursor_refused _ | Acceptance_refused _) | Ok _->false);
       check int "A has the actual queued operation" 1 (count a.name);
       check int "B has no operation" 0 (count b.name));
     (* The real registry/Owner stores have closed. Reopen both against the same
@@ -5348,7 +5349,8 @@ let test_telegram_claim_pins_owner_across_cursor_failure () =
       let step ()=Telegram_poll_custody.step ~post ~clock (custody ())
         ~now:(fun()->Eio.Time.now clock) ~poll_timeout_sec:0 ~accept () in
       check bool "B cannot take the same persisted update after reopen" true
-        (match step () with Error(Telegram_poll_custody.Acceptance_refused _)->true | _->false);
+        (match step () with Error(Telegram_poll_custody.Acceptance_refused _)->true
+         | Error(Telegram_poll_custody.Api _ | Cursor_refused _ | Storage_failed _) | Ok _->false);
       check (list string) "conflict never reached B's Gate admission" [a.name] !dispatches;
       check int "A still owns exactly one operation" 1 (count a.name);
       check int "B remains empty" 0 (count b.name);

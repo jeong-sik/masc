@@ -71,7 +71,7 @@ let run_case source () =
   let base_path = Filename.temp_dir "direct-goal-wire-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
   let config = Workspace.default_config base_path in
-  Fs_compat.mkdir_p (Workspace.masc_dir config);
+  ignore (Workspace.init config ~agent_name:None);
   install_prompts base_path;
   let goal, measurement = match source with
     | Empty -> None, None
@@ -178,7 +178,9 @@ let test_goal_survives_read_then_task_creation () =
   let base_path = Filename.temp_dir "goal-tool-loop-wire-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
   let config = Workspace.default_config base_path in
-  Fs_compat.mkdir_p (Workspace.masc_dir config);
+  (* The real bundled Task writer requires the same initialized workspace as
+     a Keeper turn; creating only [.masc] leaves no state or backlog. *)
+  ignore (Workspace.init config ~agent_name:(Some "goal-loop-wire"));
   install_prompts base_path;
   let goal = create_goal config in
   let measurement = observe config goal in
@@ -266,11 +268,31 @@ let test_goal_survives_read_then_task_creation () =
     List.iter (fun needle -> check bool "other world context stays first-request only" (index=0)
       (contains ~needle context)) ["INITIAL_GATE_SNAPSHOT";"INITIAL_OWNER_CONVERSATION";
         "INITIAL_WORKTREE_SNAPSHOT";"INITIAL_TURN_INSTRUCTIONS";"INITIAL_CLOCK"]) bodies;
+  let checkpoint = match result.checkpoint with Some checkpoint -> checkpoint | None -> fail "checkpoint missing" in
+  let task_results = List.concat_map (fun (message : Agent_core.Types.message) ->
+      List.filter_map (function
+        | Agent_core.Types.ToolResult {tool_use_id; content; outcome; _}
+          when String.equal tool_use_id "create-linked-task" -> Some (content, outcome)
+        | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult _ | Image _ | Document _ | Audio _ -> None) message.content)
+      checkpoint.messages in
+  let task_result, task_outcome = match task_results with
+    | [result] -> result
+    | _ -> fail "one actual create-linked-task result required in the runtime checkpoint" in
+  Printf.printf "actual keeper_task_create callback: %s\n%!" task_result;
+  check bool "actual bundled Task creation reports success" false
+    (Agent_core.Types.tool_result_outcome_is_error task_outcome);
+  let task_payload = match Yojson.Safe.from_string task_result with
+    | payload -> payload
+    | exception Yojson.Json_error detail ->
+      failf "Task creation returned invalid JSON: %s; actual callback: %s" detail task_result in
+  check bool "Task creation payload confirms success" true (Json.member "ok" task_payload = `Bool true);
+  check bool "Task creation payload confirms the explicit requested Goal" true
+    (Json.member "goal_id" task_payload = `String goal.id);
   let links = match Workspace_goal_index.read_goal_task_links_authoritative_r config with
     | Ok links -> links | Error detail -> fail detail in
   check bool "real Task creation persisted its explicit Goal association" true
     (match List.assoc_opt goal.id links with Some [_] -> true | None | Some [] | Some (_::_::_) -> false);
-  let checkpoint = match result.checkpoint with Some checkpoint -> checkpoint | None -> fail "checkpoint missing" in
   check bool "Goal snapshot carrier stays out of returned durable conversation" false
     (List.exists (fun (message : Agent_core.Types.message) ->
       List.exists (function Agent_core.Types.Text text -> contains ~needle:measurement.id text

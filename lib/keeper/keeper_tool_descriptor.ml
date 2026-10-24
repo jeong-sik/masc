@@ -1842,11 +1842,10 @@ let agent_metrics_output_properties =
   [ "agent_id", `Assoc [ "type", `String "string" ]
   ; "period_start", metric_number_schema
   ; "period_end", metric_number_schema
-  ; "outcome_basis", `Assoc
-      [ "type", `String "string"; "enum", `List [ `String "task_lifecycle" ] ]
+  ; "outcome_basis", `Assoc [ "type", `String "string" ]
   ; "external_acceptance", object_output_schema
       ~properties:
-        [ "kind", `Assoc [ "type", `String "string"; "enum", `List [ `String "unobserved" ] ]
+        [ "kind", `Assoc [ "type", `String "string" ]
         ; "completed_tasks", `Assoc [ "type", `String "integer" ] ]
       ~required:[ "kind"; "completed_tasks" ]
   ]

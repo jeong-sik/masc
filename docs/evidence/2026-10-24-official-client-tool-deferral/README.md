@@ -69,10 +69,13 @@ Candle proposal contradicted its deliberate discovery decision; those changes
 were removed and the corrected fourteen-file diff passed re-review.
 No Dune build or full regression was run for this declaration-only change.
 
-`gh stack init` recorded the branch, but `gh stack submit` refused with
-`Stacked PRs are not enabled for this repository`. No native PR was created and
-no ordinary PR was substituted. The branch is pushed for review; the change is
-not merged or installed. Installed-runtime verification remains pending.
+PR #45714 was created through `gh stack submit`. Its earlier generic warning
+`Stacked PRs are not enabled for this repository` was a misleading client error:
+the actual Stacks API request returned HTTP 401 Bad credentials, while `gh api`
+using the active CLI credential returned the stack list successfully. Passing
+that active credential to the extension for one invocation allowed submission;
+no repository feature setting or persistent authentication configuration changed.
+The change is not merged or installed. Installed-runtime verification remains pending.
 
 ## Follow-up audit of the remaining client settings
 

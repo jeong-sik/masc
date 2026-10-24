@@ -2748,8 +2748,8 @@ let test_native_image_admission_continues_turn () =
         | _ -> text_response "inspection completed"
       in
       let transport : Llm_provider.Llm_transport.t =
-        { complete_sync=(fun _ -> {response=Ok (next ());latency_ms=None})
-        ; complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> Ok (next ())) } in
+        Llm_provider.Llm_transport.custom ({ complete_sync=(fun _ -> {response=Ok (next ());latency_ms=None})
+        ; complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> Ok (next ())) }) in
       let provider_config = Llm_provider.Provider_config.make
           ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"test"
           ~api_key:"" ~base_url:"http://mock.local" ~request_path:"/v1/chat/completions"

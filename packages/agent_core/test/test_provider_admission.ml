@@ -445,11 +445,11 @@ let test_a_stale_remover_keeps_the_later_observer () =
 ;;
 
 let reject_dispatch_transport : Llm_transport.t =
-  { complete_sync = (fun _ -> fail "invalid declaration must never dispatch")
+  Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> fail "invalid declaration must never dispatch")
   ; complete_stream =
       (fun ?on_telemetry:_ ~on_event:_ _ ->
         fail "invalid declaration must never dispatch")
-  }
+  })
 ;;
 
 let test_zero_declaration_rejected_before_dispatch () =
@@ -558,7 +558,7 @@ let test_complete_dispatch_is_admitted () =
   let in_flight = Atomic.make 0 in
   let max_seen = Atomic.make 0 in
   let counting_transport : Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun _ ->
           record_max_seen ~in_flight ~max_seen;
           Eio.Fiber.yield ();
@@ -572,7 +572,7 @@ let test_complete_dispatch_is_admitted () =
           })
     ; complete_stream =
         (fun ?on_telemetry:_ ~on_event:_ _ -> fail "sync test must not stream")
-    }
+    })
   in
   let job () =
     ignore
@@ -602,7 +602,7 @@ let call_deadline_s = 1.0
 let call_deadline_slack_s = 0.5
 
 let slow_declining_transport ~clock ~on_dispatch ~provider_takes_s : Llm_transport.t =
-  { complete_sync =
+  Llm_provider.Llm_transport.custom ({ complete_sync =
       (fun _ ->
         on_dispatch ();
         Eio.Time.sleep clock provider_takes_s;
@@ -613,7 +613,7 @@ let slow_declining_transport ~clock ~on_dispatch ~provider_takes_s : Llm_transpo
         ; latency_ms = None
         })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> fail "sync test must not stream")
-  }
+  })
 ;;
 
 let within_call_deadline ~started ~clock =
@@ -689,14 +689,14 @@ let test_admission_deadline_ends_the_wait_for_a_stream_permit () =
     Provider_admission.with_admission ~config (fun () -> Eio.Promise.await release));
   let dispatched = ref false in
   let transport : Llm_transport.t =
-    { complete_sync = (fun _ -> fail "stream test must not complete synchronously")
+    Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> fail "stream test must not complete synchronously")
     ; complete_stream =
         (fun ?on_telemetry:_ ~on_event:_ _ ->
           dispatched := true;
           Error
             (Http_client.NetworkError
                { message = "test transport declines"; kind = Http_client.Unknown }))
-    }
+    })
   in
   let started = Eio.Time.now clock in
   (match

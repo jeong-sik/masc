@@ -295,8 +295,8 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
     | [] -> Alcotest.fail "completed tool was retried after terminal response"
   in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync = (fun _ -> {response=Ok (next ()); latency_ms=None})
-    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok (next ())) } in
+    Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> {response=Ok (next ()); latency_ms=None})
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok (next ())) }) in
   let provider_config = Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"test"
       ~api_key:"" ~base_url:"http://mock.local" ~request_path:"/v1/chat/completions"

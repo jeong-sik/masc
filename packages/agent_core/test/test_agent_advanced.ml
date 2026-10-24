@@ -53,11 +53,11 @@ let sequence_transport ?(on_call = ignore) responses =
     | [] -> Alcotest.fail "mock transport exhausted"
   in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun _request ->
           { Llm_provider.Llm_transport.response = Ok (next ()); latency_ms = Some 0 })
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok (next ()))
-    }
+    })
   in
   transport, call_count
 ;;

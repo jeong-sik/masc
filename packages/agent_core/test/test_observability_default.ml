@@ -145,11 +145,11 @@ let sequence_transport responses : Llm_provider.Llm_transport.t =
       r
     | [] -> Alcotest.fail "mock transport exhausted"
   in
-  { complete_sync =
+  Llm_provider.Llm_transport.custom ({ complete_sync =
       (fun _req ->
         { Llm_provider.Llm_transport.response = Ok (next ()); latency_ms = Some 0 })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _req -> Ok (next ()))
-  }
+  })
 ;;
 
 let first_index pred xs =

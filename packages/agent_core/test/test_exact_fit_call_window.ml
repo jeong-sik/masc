@@ -151,7 +151,7 @@ type bounds =
    and declines at once, since an injected transport arms that budget
    itself. *)
 let recording_transport ~clock ~dispatched ~stream_first_event_s : Llm_transport.t =
-  { complete_sync =
+  Llm_provider.Llm_transport.custom ({ complete_sync =
       (fun _ ->
         dispatched := true;
         Eio.Time.sleep clock provider_takes_s;
@@ -163,7 +163,7 @@ let recording_transport ~clock ~dispatched ~stream_first_event_s : Llm_transport
         Error
           (Http_client.NetworkError
              { message = "the stream declines"; kind = Http_client.Unknown }))
-  }
+  })
 ;;
 
 let build_agent ~net ~provider_config ~transport ~bounds =

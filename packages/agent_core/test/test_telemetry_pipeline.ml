@@ -29,7 +29,7 @@ let make_mock_transport () : Llm_provider.Llm_transport.t =
     ; telemetry = None
     }
   in
-  { complete_sync =
+  Llm_provider.Llm_transport.custom ({ complete_sync =
       (fun _req ->
         { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 })
   ; complete_stream =
@@ -51,7 +51,7 @@ let make_mock_transport () : Llm_provider.Llm_transport.t =
                 })
          | None -> ());
         Ok response)
-  }
+  })
 ;;
 
 let text_response ?(id = "checkpoint-text") text : Types.api_response =
@@ -89,13 +89,13 @@ let make_sequence_transport responses : Llm_provider.Llm_transport.t =
       response
     | [] -> Alcotest.fail "mock transport exhausted"
   in
-  { complete_sync =
+  Llm_provider.Llm_transport.custom ({ complete_sync =
       (fun _req ->
         { Llm_provider.Llm_transport.response = Ok (next_response ())
         ; latency_ms = Some 0
         })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _req -> Ok (next_response ()))
-  }
+  })
 ;;
 
 let make_agent ~net ~transport () =
@@ -226,12 +226,12 @@ let test_run_stream_without_event_bus_skips_telemetry () =
   let on_telemetry_received = Atomic.make false in
   let transport_with_probe =
     { transport with
-      complete_stream =
+      invoke_stream =
         (fun ?on_telemetry ~on_event req ->
           (match on_telemetry with
            | Some _ -> Atomic.set on_telemetry_received true
            | None -> ());
-          transport.complete_stream ?on_telemetry ~on_event req)
+          transport.invoke_stream ?on_telemetry ~on_event req)
     }
   in
   let options = { options with transport = Some transport_with_probe } in

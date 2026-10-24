@@ -29,11 +29,11 @@ let make_transport ~clock ~sleep_s () : Llm_provider.Llm_transport.t =
     Eio.Time.sleep clock sleep_s;
     response
   in
-  { complete_sync =
+  Llm_provider.Llm_transport.custom ({ complete_sync =
       (fun _req ->
         { Llm_provider.Llm_transport.response = Ok (complete ()); latency_ms = Some 0 })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _req -> Ok (complete ()))
-  }
+  })
 ;;
 
 let make_agent ?on_run_complete ?raw_trace ~net ~transport ?(periodic_callbacks = []) () =
@@ -300,13 +300,13 @@ let test_exception_preserved_when_raw_trace_finalization_fails () =
            Printexc.raise_with_backtrace exn backtrace
        in
        let transport : Llm_provider.Llm_transport.t =
-         { complete_sync =
+         Llm_provider.Llm_transport.custom ({ complete_sync =
              (fun _req ->
                Sys.remove trace_path;
                Unix.mkdir trace_path 0o755;
                raise_primary ())
          ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _req -> Ok response)
-         }
+         })
        in
        let agent = make_agent ~net:(Eio.Stdenv.net env) ~transport ~raw_trace () in
        let observed_backtrace =

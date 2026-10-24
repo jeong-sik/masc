@@ -30,7 +30,7 @@ let mk_mock_response () : Types.api_response =
 ;;
 
 let mk_mock_transport (counter : int ref) : Llm_provider.Llm_transport.t =
-  { complete_sync =
+  Llm_provider.Llm_transport.custom ({ complete_sync =
       (fun _req ->
         incr counter;
         { response = Ok (mk_mock_response ()); latency_ms = Some 42 })
@@ -38,11 +38,11 @@ let mk_mock_transport (counter : int ref) : Llm_provider.Llm_transport.t =
       (fun ?on_telemetry:_ ~on_event:_ _req ->
         incr counter;
         Ok (mk_mock_response ()))
-  }
+  })
 ;;
 
 let mk_header_capture_transport headers_ref : Llm_provider.Llm_transport.t =
-  { complete_sync =
+  Llm_provider.Llm_transport.custom ({ complete_sync =
       (fun req ->
         headers_ref := req.Llm_provider.Llm_transport.config.headers;
         { response = Ok (mk_mock_response ()); latency_ms = Some 5 })
@@ -50,14 +50,14 @@ let mk_header_capture_transport headers_ref : Llm_provider.Llm_transport.t =
       (fun ?on_telemetry:_ ~on_event:_ req ->
         headers_ref := req.Llm_provider.Llm_transport.config.headers;
         Ok (mk_mock_response ()))
-  }
+  })
 ;;
 
 let mk_empty_transport stop_reason : Llm_provider.Llm_transport.t =
   let response = { (mk_mock_response ()) with stop_reason; content = [] } in
-  { complete_sync = (fun _ -> { response = Ok response; latency_ms = Some 1 })
+  Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> { response = Ok response; latency_ms = Some 1 })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok response)
-  }
+  })
 ;;
 
 let make_empty_agent ~net ~stop_reason ~name =
@@ -345,9 +345,9 @@ let test_core_error_preserves_streaming_timeout_phase () =
       }
   in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync = (fun _ -> { response = Error timeout_error; latency_ms = None })
+    Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> { response = Error timeout_error; latency_ms = None })
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Error timeout_error)
-    }
+    })
   in
   let provider =
     Some

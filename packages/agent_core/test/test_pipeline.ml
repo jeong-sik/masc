@@ -255,11 +255,11 @@ let pipeline_response ?telemetry stop_reason : Types.api_response =
 ;;
 
 let transport_returning response =
-  { Llm_provider.Llm_transport.complete_sync =
+  Llm_provider.Llm_transport.custom ({ Llm_provider.Llm_transport.complete_sync =
       (fun _req ->
         { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _req -> Ok response)
-  }
+  })
 ;;
 
 let test_provider_context_retention () =
@@ -280,9 +280,9 @@ let test_provider_context_retention () =
     else Ok response
   in
   let transport =
-    { Llm_provider.Llm_transport.complete_sync = (fun request ->
+    Llm_provider.Llm_transport.custom ({ Llm_provider.Llm_transport.complete_sync = (fun request ->
         { Llm_provider.Llm_transport.response = capture request; latency_ms = Some 0 });
-      complete_stream = (fun ?on_telemetry:_ ~on_event:_ request -> capture request) }
+      complete_stream = (fun ?on_telemetry:_ ~on_event:_ request -> capture request) })
   in
   let hooks =
     { Hooks.empty with before_turn_params = Some (function
@@ -393,12 +393,12 @@ let test_pipeline_sends_exact_supplied_tools () =
   let captured = ref None in
   let response = pipeline_response EndTurn in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun request ->
           captured := Some request.tools;
           { response = Ok response; latency_ms = Some 0 })
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok response)
-    }
+    })
   in
   let options =
     { Internal_agent.default_options with
@@ -454,12 +454,12 @@ let test_effective_provider_config_drives_lifecycle_and_pricing () =
     }
   in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun request ->
           captured_model := Some request.config.model_id;
           { response = Ok response; latency_ms = Some 0 })
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok response)
-    }
+    })
   in
   let carrier =
     (* An explicit [provider_id] selects provider-scoped catalog rows. This
@@ -579,11 +579,11 @@ let test_provider_turn_identity_is_shared_across_multiturn_tool_loop () =
            { reason = "provider-turn identity fixture exhausted responses" })
   in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun _request ->
           { Llm_provider.Llm_transport.response = next_response (); latency_ms = Some 0 })
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> next_response ())
-    }
+    })
   in
   let event_bus = Event_bus.create () in
   let event_config =
@@ -806,14 +806,14 @@ let test_stream_route_carries_exact_raw_trace_run_id () =
        let captured_id = ref None in
        let response = pipeline_response EndTurn in
        let transport : Llm_provider.Llm_transport.t =
-         { complete_sync =
+         Llm_provider.Llm_transport.custom ({ complete_sync =
              (fun _req ->
                { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 })
          ; complete_stream =
              (fun ?on_telemetry:_ ~on_event:_ request ->
                captured_id := request.Llm_provider.Llm_transport.capture_id;
                Ok response)
-         }
+         })
        in
        let options =
          { Internal_agent.default_options with
@@ -1037,13 +1037,13 @@ let test_repeated_validation_error_without_judge_continues_to_provider () =
     | _ -> Alcotest.fail "unexpected fourth provider call"
   in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun req ->
           { Llm_provider.Llm_transport.response = Ok (next_response req)
           ; latency_ms = None
           })
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ req -> Ok (next_response req))
-    }
+    })
   in
   let executed = ref 0 in
   let tool =
@@ -1667,11 +1667,11 @@ let test_terminal_disposition_retires_settled_provider_failure () =
     | [] -> Alcotest.fail "provider failure fixture exhausted responses"
   in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun _request ->
           { Llm_provider.Llm_transport.response = next_response (); latency_ms = Some 0 })
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> next_response ())
-    }
+    })
   in
   let tool =
     Tool.create
@@ -1724,11 +1724,11 @@ let test_terminal_disposition_sink_failure_fails_call () =
   let callback_count = ref 0 in
   let response = Provider_mock.text_response "done" [] in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync =
+    Llm_provider.Llm_transport.custom ({ complete_sync =
         (fun _request ->
           { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 })
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok response)
-    }
+    })
   in
   let agent =
     Agent.create
@@ -1771,9 +1771,9 @@ let test_terminal_disposition_observes_cancellation () =
   let terminal_disposition = ref None in
   let cancel () = raise (Eio.Cancel.Cancelled Exit) in
   let transport : Llm_provider.Llm_transport.t =
-    { complete_sync = (fun _request -> cancel ())
+    Llm_provider.Llm_transport.custom ({ complete_sync = (fun _request -> cancel ())
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> cancel ())
-    }
+    })
   in
   let agent =
     Agent.create
@@ -1883,10 +1883,10 @@ let test_native_parent_cancellation ?(resumed = false) source boundary () =
           ~tool_name:"interrupted_effect" ~tool_input:(`Assoc []) () []
     in
     let transport : Llm_provider.Llm_transport.t =
-      { complete_sync = (fun _ ->
+      Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ ->
           { Llm_provider.Llm_transport.response=Ok (response ()); latency_ms=Some 0 })
       ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok (response ()))
-      }
+      })
     in
     let tool = Tool.create ~name:"interrupted_effect"
         ~description:"Effect whose completion is interrupted" ~parameters:[]
@@ -2041,14 +2041,14 @@ let test_agent_run_uses_durable_tool_authority () =
                 { reason = "durable execution test exhausted responses" })
        in
        let transport : Llm_provider.Llm_transport.t =
-         { complete_sync =
+         Llm_provider.Llm_transport.custom ({ complete_sync =
              (fun _request ->
                { Llm_provider.Llm_transport.response = next_response ()
                ; latency_ms = Some 0
                })
          ; complete_stream =
              (fun ?on_telemetry:_ ~on_event:_ _request -> next_response ())
-         }
+         })
        in
        let journal = Durable_event.create () in
        let event_bus = Event_bus.create () in
@@ -2324,11 +2324,11 @@ let test_agent_run_resumes_tool_without_duplicate_effects
        in
        let response = Provider_mock.text_response "done-after-restart" [] in
        let transport : Llm_provider.Llm_transport.t =
-         { complete_sync =
+         Llm_provider.Llm_transport.custom ({ complete_sync =
              (fun _request ->
                { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 })
          ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok response)
-         }
+         })
        in
        let effect_count = ref 0 in
        let pre_hook_count = ref 0 in
@@ -2869,7 +2869,7 @@ let test_agent_run_resumes_settled_closed_turn
        let response = Provider_mock.text_response "done-after-restart" [] in
        let provider_call_count = ref 0 in
        let transport : Llm_provider.Llm_transport.t =
-         { complete_sync =
+         Llm_provider.Llm_transport.custom ({ complete_sync =
              (fun _request ->
                incr provider_call_count;
                { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 })
@@ -2877,7 +2877,7 @@ let test_agent_run_resumes_settled_closed_turn
              (fun ?on_telemetry:_ ~on_event:_ _request ->
                incr provider_call_count;
                Ok response)
-         }
+         })
        in
        let effect_count = ref 0 in
        let terminal_disposition = ref None in
@@ -3041,10 +3041,10 @@ let test_advanced_replays_nonzero_settled_terminal_ordinal () =
         | Ok value -> value | Error detail -> Alcotest.fail detail) in
     let provider_calls = ref 0 in
     let transport : Llm_provider.Llm_transport.t =
-      {complete_sync=(fun _ -> incr provider_calls;
+      Llm_provider.Llm_transport.custom ({complete_sync=(fun _ -> incr provider_calls;
          {Llm_provider.Llm_transport.response=Ok (Provider_mock.text_response "unexpected new answer" []);latency_ms=Some 0});
        complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> incr provider_calls;
-         Ok (Provider_mock.text_response "unexpected new answer" []))} in
+         Ok (Provider_mock.text_response "unexpected new answer" []))}) in
     let after_turns = ref 0 in
     let hooks = {Hooks.empty with after_turn=Some (fun _ -> incr after_turns; Hooks.Continue)} in
     let options = {Agent.default_options with transport=Some transport;
@@ -3120,7 +3120,7 @@ let test_terminal_durability_failure_is_typed_non_retryable () =
          | _ -> Alcotest.fail "terminal fixture did not produce one exact ToolUse"
        in
        let transport : Llm_provider.Llm_transport.t =
-         { complete_sync =
+         Llm_provider.Llm_transport.custom ({ complete_sync =
              (fun _request ->
                incr provider_calls;
                { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 })
@@ -3128,7 +3128,7 @@ let test_terminal_durability_failure_is_typed_non_retryable () =
              (fun ?on_telemetry:_ ~on_event:_ _request ->
                incr provider_calls;
                Ok response)
-         }
+         })
        in
        let config =
          { (Types.default_config ~model:"test-model") with
@@ -3659,14 +3659,14 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
              then response
              else Provider_mock.text_response "unexpected-provider-resume" []
            in
-           { complete_sync =
+           Llm_provider.Llm_transport.custom ({ complete_sync =
                (fun _request ->
                  { Llm_provider.Llm_transport.response = Ok (next_response ())
                  ; latency_ms = Some 0
                  })
            ; complete_stream =
                (fun ?on_telemetry:_ ~on_event:_ _request -> Ok (next_response ()))
-           }
+           })
          in
          let options =
            { Agent.default_options with
@@ -3912,11 +3912,11 @@ let test_agent_run_resumes_all_blocked_settled_turn () =
        in
        let response = Provider_mock.text_response "done-after-restart" [] in
        let transport : Llm_provider.Llm_transport.t =
-         { complete_sync =
+         Llm_provider.Llm_transport.custom ({ complete_sync =
              (fun _request ->
                { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 })
          ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok response)
-         }
+         })
        in
        let effect_count = ref 0 in
        let terminal_disposition = ref None in
@@ -4107,11 +4107,11 @@ let test_agent_run_resume_fires_on_yield () =
        in
        let response = Provider_mock.text_response "done-after-restart" [] in
        let transport : Llm_provider.Llm_transport.t =
-         { complete_sync =
+         Llm_provider.Llm_transport.custom ({ complete_sync =
              (fun _request ->
                { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 })
          ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok response)
-         }
+         })
        in
        let effect_count = ref 0 in
        let yield_count = ref 0 in

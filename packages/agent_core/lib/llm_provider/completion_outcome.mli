@@ -12,6 +12,8 @@ type serialized_request = private
 type request_provenance =
   | Not_serialized
   | Serialized of serialized_request
+  | External_unobserved
+  | Interrupted_unobserved
 
 type 'a t = private
   { result : 'a
@@ -27,3 +29,13 @@ val after_serialization
   :  request:Complete_common.serialized_http_request
   -> 'a
   -> 'a t
+
+(** Preserve request provenance while transforming only the returned value. *)
+val map_result : ('a -> 'b) -> 'a t -> 'b t
+
+(** An injected callback did not return authoritative native wire evidence. *)
+val external_unobserved : 'a -> 'a t
+
+(** The caller interrupted work before receiving its native outcome. No
+    serialization or non-serialization fact is inferred from cancellation. *)
+val interrupted_unobserved : 'a -> 'a t

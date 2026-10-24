@@ -1279,9 +1279,9 @@ let usage =
 ;;
 
 let fake_transport response : Llm_provider.Llm_transport.t =
-  { complete_sync = (fun _request -> { response = Ok response; latency_ms = Some 1 })
+  Llm_provider.Llm_transport.custom ({ complete_sync = (fun _request -> { response = Ok response; latency_ms = Some 1 })
   ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> Ok response)
-  }
+  })
 ;;
 
 let successful_response model : api_response =
@@ -1295,11 +1295,11 @@ let successful_response model : api_response =
 ;;
 
 let rejected_before_transport : Llm_provider.Llm_transport.t =
-  { complete_sync = (fun _ -> Alcotest.fail "sync transport must not be called")
+  Llm_provider.Llm_transport.custom ({ complete_sync = (fun _ -> Alcotest.fail "sync transport must not be called")
   ; complete_stream =
       (fun ?on_telemetry:_ ~on_event:_ _ ->
         Alcotest.fail "stream transport must not be called")
-  }
+  })
 ;;
 
 let complete_sync_and_stream ~config ~transport =

@@ -692,10 +692,10 @@ let admitted_round_one ~stream =
     }
   in
   let transport =
-    { Llm_transport.complete_sync =
+    Llm_provider.Llm_transport.custom ({ Llm_transport.complete_sync =
         (fun _ -> { Llm_transport.response = Ok response; latency_ms = None })
     ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok response)
-    }
+    })
   in
   let completed =
     Eio_main.run

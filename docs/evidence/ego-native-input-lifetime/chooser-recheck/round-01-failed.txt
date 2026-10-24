@@ -33,5 +33,3 @@ root
       text "선택된 파일 없음"
   paragraph
     text "ready"
-
-

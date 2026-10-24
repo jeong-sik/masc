@@ -1444,7 +1444,7 @@ let recipe_checkpoint () : Agent_core.Checkpoint.t =
   ; model = "recipe-model"
   ; system_prompt = Some "accepted system prompt"
   ; messages =
-      [ { Agent_core.Types.role = Agent_core.Types.User
+      [ { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.User
         ; content = [ Agent_core.Types.Text "accepted history" ]
         ; name = None
         ; tool_call_id = None

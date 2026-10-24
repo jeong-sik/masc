@@ -15,7 +15,7 @@ let checkpoint_write_error_to_string =
 
 let test_message_to_json_omits_flat_content () =
   let msg : T.message =
-    {
+    { origin = Llm_provider.Types.Conversation;
       T.role = T.User;
       content = [ T.Text "hello" ];
       name = None;
@@ -39,7 +39,7 @@ let test_message_to_json_omits_flat_content () =
 let test_message_of_json_new_content_blocks_only () =
   (* New checkpoints have only content_blocks — must load as before. *)
   let new_msg : T.message =
-    {
+    { origin = Llm_provider.Types.Conversation;
       T.role = T.Assistant;
       content = [ T.Text "world" ];
       name = None;
@@ -55,7 +55,7 @@ let test_message_of_json_new_content_blocks_only () =
 
 let test_message_of_json_rejects_unknown_role () =
   let json : Yojson.Safe.t =
-    `Assoc [ ("role", `String "operator"); ("content_blocks", `List []) ]
+    `Assoc [ "origin", `String "conversation";  ("role", `String "operator"); ("content_blocks", `List []) ]
   in
   Alcotest.check_raises
     "unknown role rejected"
@@ -65,7 +65,7 @@ let test_message_of_json_rejects_unknown_role () =
 let test_message_of_json_rejects_flat_content () =
   let json : Yojson.Safe.t =
     `Assoc
-      [
+      [ "origin", `String "conversation";
         ("role", `String "tool");
         ("content", `String "legacy tool output");
         ("tool_call_id", `String "call_old");
@@ -81,7 +81,7 @@ let test_message_of_json_rejects_flat_content () =
 let test_history_jsonl_text_uses_blocks_first () =
   let new_format : Yojson.Safe.t =
     C.message_to_json
-      {
+      { origin = Llm_provider.Types.Conversation;
         T.role = T.User;
         content = [ T.Text "structured payload" ];
         name = None;
@@ -101,7 +101,7 @@ let test_history_jsonl_text_empty_when_neither () =
 
 let test_roundtrip_text_preserved () =
   let original : T.message =
-    {
+    { origin = Llm_provider.Types.Conversation;
       T.role = T.Assistant;
       content = [ T.Text "alpha"; T.Text "beta" ];
       name = None;
@@ -128,7 +128,7 @@ let test_roundtrip_text_preserved () =
    wire copy (#25109). *)
 let test_roundtrip_preserves_tool_result_payload_and_provenance () =
   let original : T.message =
-    {
+    { origin = Llm_provider.Types.Conversation;
       T.role = T.Tool;
       content =
         [
@@ -173,7 +173,7 @@ let test_roundtrip_preserves_tool_result_payload_and_provenance () =
 
 let test_roundtrip_preserves_thinking_signature () =
   let original : T.message =
-    {
+    { origin = Llm_provider.Types.Conversation;
       T.role = T.Assistant;
       content =
         [
@@ -209,7 +209,7 @@ let test_roundtrip_preserves_thinking_signature () =
 
 let test_thinking_block_json_uses_agent_core_signature () =
   let original : T.message =
-    {
+    { origin = Llm_provider.Types.Conversation;
       T.role = T.Assistant;
       content =
         [ T.Thinking { signature = Some "anthropic-signature"; content = "signed" } ];
@@ -239,7 +239,7 @@ let test_thinking_block_json_uses_agent_core_signature () =
 let test_legacy_thinking_type_is_not_promoted_to_signature () =
   let json : Yojson.Safe.t =
     `Assoc
-      [
+      [ "origin", `String "conversation";
         ("role", `String "assistant");
         ( "content_blocks",
           `List
@@ -264,7 +264,7 @@ let test_legacy_thinking_type_is_not_promoted_to_signature () =
 (* --- checkpoint projection: exact message preservation --- *)
 
 let text_message text : T.message =
-  {
+  { origin = Llm_provider.Types.Conversation;
     T.role = T.User;
     content = [ T.Text text ];
     name = None;
@@ -294,7 +294,7 @@ let test_resume_checkpoint_preserves_full_tool_result () =
   let content = String.make 20_000 'x' in
   let json = `Assoc [ "payload", `String (String.make 20_000 'y') ] in
   let tool_result : T.message =
-    {
+    { origin = Llm_provider.Types.Conversation;
       T.role = T.Tool;
       content =
         [
@@ -414,7 +414,7 @@ let test_checkpoint_write_accepts_exact_open_tool_cycle () =
         C.create_session ~session_id:"checkpoint-open-cycle" ~base_dir
       in
       let open_tool_use : T.message =
-        { role = T.Assistant
+        { origin = Llm_provider.Types.Conversation;  role = T.Assistant
         ; content =
             [ T.ToolUse { id = "open-call"; name = "test"; input = `Null } ]
         ; name = None
@@ -453,7 +453,7 @@ let test_checkpoint_write_rejects_orphan_tool_result () =
       let session_id = "checkpoint-orphan-result" in
       let session = C.create_session ~session_id ~base_dir in
       let orphan : T.message =
-        { role = T.User
+        { origin = Llm_provider.Types.Conversation;  role = T.User
         ; content =
             [ T.ToolResult
                 { tool_use_id = "orphan"

@@ -55,7 +55,7 @@ let input () : L.input =
     current=Some {L.facts=[fact "Second in lexical order";fact "First in lexical order"]};
     working_context={C.sources=[source "current-b";source "current-a"];previous=Some prior;
       unavailable=["source unavailable";"another source unavailable"];execution_basis=Some "current-progress"};
-    messages=List.map (fun role -> {T.role;content=blocks;name=Some "original-name";
+    messages=List.map (fun role -> { origin = Llm_provider.Types.Conversation; T.role;content=blocks;name=Some "original-name";
       tool_call_id=Some "original-call";metadata}) [T.User;T.Assistant;T.Tool;T.System];
     tool_observations=[{L.tool_name="browser_read";outcome=L.Succeeded};
       {tool_name="browser_click";outcome=L.Failed};{tool_name="browser_drag";outcome=L.Unknown}];

@@ -231,7 +231,7 @@ let input_checkpoint pending =
   Core.Checkpoint.
     {version=checkpoint_version;session_id="journal-input-trace";agent_name="imp";
      model="fixture-runtime";system_prompt=Some "Retain original system";
-     messages=[Core.Types.{role=User;content=[Text "Retained original history"];
+     messages=[Core.Types.{ origin = Llm_provider.Types.Conversation; role=User;content=[Text "Retained original history"];
        name=None;tool_call_id=None;metadata=["origin",`String "original"]}];
      usage=Core.Types.empty_usage;turn_count=4;created_at=10.;tools=[];
      tool_choice=Some Core.Types.Auto;disable_parallel_tool_use=true;
@@ -407,7 +407,7 @@ let native_input_fixture ~terminal ~conflicting_seed ~base_path ~store ~snapshot
   let latest = Checkpoint.exact_snapshot_checkpoint snapshot in
   let seed_value = {latest with pending_input=(input_checkpoint (Option.is_none latest.pending_input)).pending_input} in
   let seed_value = if conflicting_seed then {seed_value with messages=[Core.Types.
-    {role=User;content=[Text "conflicting admission history"];name=None;tool_call_id=None;metadata=[]}]} else seed_value in
+    { origin = Llm_provider.Types.Conversation; role=User;content=[Text "conflicting admission history"];name=None;tool_call_id=None;metadata=[]}]} else seed_value in
   let trace = (Checkpoint.exact_snapshot_reference snapshot).trace_id in
   let seed = match Checkpoint.exact_snapshot_of_value ~expected_session_id:trace seed_value with
     | Ok seed -> seed | Error cause -> fail (Checkpoint.checkpoint_ref_load_error_to_string cause) in

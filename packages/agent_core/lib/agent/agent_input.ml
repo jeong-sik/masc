@@ -85,7 +85,7 @@ let validate_user_input_metadata metadata =
    whole message. *)
 let append_user_input agent ~metadata user_blocks =
   let user_msg =
-    { role = User
+    { origin = Llm_provider.Types.Conversation;  role = User
     ; content = sanitize_user_input_blocks user_blocks
     ; name = None
     ; tool_call_id = None

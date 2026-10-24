@@ -27,8 +27,8 @@ let source
   | Error detail -> Alcotest.fail detail
 ;;
 
-let message ?(metadata = []) role content : message =
-  { role; content; name = None; tool_call_id = None; metadata }
+let message ?(origin=Types.Conversation) ?(metadata = []) role content : message =
+  { origin; role; content; name = None; tool_call_id = None; metadata }
 ;;
 
 let with_source source role content =
@@ -239,7 +239,7 @@ let test_latest_user_turn_policy_keeps_only_current_tool_reasoning () =
    latest-user boundary while a real trailing user message still resets it. *)
 let extra_context_carrier () =
   message
-    ~metadata:Types.Extra_system_context_provenance.metadata
+    ~origin:Types.System_context
     User
     [ Text "[system context] world state" ]
 ;;
@@ -256,6 +256,9 @@ let test_latest_user_turn_policy_ignores_extra_context_carrier () =
         ]
     ; message Tool [ tool_result "current-call" ]
     ; extra_context_carrier ()
+    ; message ~origin:Recovery_instruction User [Text "correct the rejected tool name"]
+    ; message ~origin:Tool_result_followup User [Text "tool image description"]
+    ; message ~origin:Agent_instruction User [Text "runtime range preamble"]
     ]
   in
   match

@@ -1433,35 +1433,29 @@ let user_text_of_messages messages =
 ;;
 
 let test_runtime_context_is_not_new_memory_evidence () =
-  let module Context = Agent_core.Types.Extra_system_context_provenance in
-  let carrier metadata text =
-    Agent_core.Types.make_message ~metadata ~role:Agent_core.Types.User
+  let carrier origin text =
+    Agent_core.Types.make_message ~origin ~role:Agent_core.Types.User
       [Agent_core.Types.Text text]
   in
-  let messages =
-    [ Agent_core.Types.user_msg "actual new observation"
-    ; carrier Context.metadata "injected current memory payload"
-    ; carrier Context.historical_metadata "injected historical memory payload"
-    ; carrier (List.map (fun (key, _) -> key, `Bool false) Context.metadata)
-        "injected invalid memory payload"
-    ; carrier (Context.metadata @ Context.historical_metadata)
-        "injected duplicate memory payload"
-    ; Agent_core.Types.user_msg "[system context] is literal user text"
-    ; Agent_core.Types.assistant_msg "actual response"
-    ]
-  in
+  let messages = Agent_core.Types.[
+    user_msg "actual new observation";
+    carrier System_context "injected current memory payload";
+    carrier Historical_system_context "injected historical memory payload";
+    carrier Recovery_instruction "injected recovery memory payload";
+    carrier Tool_result_followup "injected tool followup payload";
+    user_msg "[system context] is literal user text";
+    assistant_msg "actual response"] in
   let selected = { (input ()) with messages } in
   let check_rendering label rendered =
     List.iter (fun text ->
       check bool (label ^ ": omits " ^ text) false
         (String_util.contains_substring rendered text))
       ["injected current memory payload"; "injected historical memory payload";
-       "injected invalid memory payload"; "injected duplicate memory payload"];
+       "injected recovery memory payload"; "injected tool followup payload"];
     List.iter (fun text ->
       check bool (label ^ ": retains " ^ text) true
         (String_util.contains_substring rendered text))
       ["actual new observation"; "actual response"; "source=runtime_context";
-       "provenance=invalid"; "provenance=duplicate";
        "[system context] is literal user text"]
   in
   let history = List.assoc "conversation_history" (Librarian.prompt_variables selected) in

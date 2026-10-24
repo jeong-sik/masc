@@ -21,7 +21,7 @@ let measure_message_bytes (m : Types.message) =
 ;;
 
 let tool_message ?(content_blocks = None) ~id body : Types.message =
-  { role = Types.Tool
+  { origin = Llm_provider.Types.Conversation;  role = Types.Tool
   ; content =
       [ Types.ToolResult
           { tool_use_id = id
@@ -38,7 +38,7 @@ let tool_message ?(content_blocks = None) ~id body : Types.message =
 ;;
 
 let assistant text : Types.message =
-  { role = Types.Assistant
+  { origin = Llm_provider.Types.Conversation;  role = Types.Assistant
   ; content = [ Types.Text text ]
   ; name = None
   ; tool_call_id = None
@@ -1209,7 +1209,7 @@ let measurer_counts_the_same_bytes_as_to_string () =
    만든 레코드가 앞 요청의 측정을 그대로 쓰는지 본다. *)
 let rebuilt_records_reuse_measurements () =
   let envelope_free role text : Types.message =
-    { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+    { origin = Llm_provider.Types.Conversation;  role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
   in
   let history =
     List.init 200 (fun i ->

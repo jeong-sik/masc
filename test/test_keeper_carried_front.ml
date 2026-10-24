@@ -366,7 +366,7 @@ let test_of_ledger_reads_the_last_request_front () =
 ;;
 
 let text_message role text : Types.message =
-  { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 (* [exchanges n] is [2n] atoms: a user message and an assistant reply each. *)

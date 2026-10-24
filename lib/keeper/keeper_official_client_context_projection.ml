@@ -59,7 +59,7 @@ let text_of_blocks ~runtime_label ~field blocks =
 let encode_history_message = Keeper_official_client_context_codec.encode
 
 let user_message text : Agent_core.Types.message =
-  { role = User
+  { origin = Llm_provider.Types.Conversation;  role = User
   ; content = [ Text text ]
   ; name = None
   ; tool_call_id = None
@@ -87,8 +87,8 @@ let user_message text : Agent_core.Types.message =
    The working state carries {!Runtime_model_input_tail_window.working_state_metadata},
    as on the Agent Core lane, and the adapters select both through
    [is_composed_system_context]. *)
-let system_context_message ~metadata text : Agent_core.Types.message =
-  { role = System
+let system_context_message ~origin ~metadata text : Agent_core.Types.message =
+  { origin; role = System
   ; content = [ Text text ]
   ; name = None
   ; tool_call_id = None
@@ -98,23 +98,18 @@ let system_context_message ~metadata text : Agent_core.Types.message =
 
 let extra_system_context_message text =
   system_context_message
-    ~metadata:Agent_core.Types.Extra_system_context_provenance.metadata
+    ~origin:Agent_core.Types.System_context ~metadata:[]
     text
 ;;
 
 let working_state_message text =
   system_context_message
-    ~metadata:Runtime_model_input_tail_window.working_state_metadata
+    ~origin:Agent_core.Types.Agent_instruction ~metadata:Runtime_model_input_tail_window.working_state_metadata
     text
 ;;
 
 let is_composed_system_context (message : Agent_core.Types.message) =
-  (match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
-   | Agent_core.Types.Extra_system_context_provenance.Present -> true
-   | Agent_core.Types.Extra_system_context_provenance.Absent
-   | Agent_core.Types.Extra_system_context_provenance.Historical
-   | Agent_core.Types.Extra_system_context_provenance.Invalid
-   | Agent_core.Types.Extra_system_context_provenance.Duplicate -> false)
+  (message.origin = Agent_core.Types.System_context)
   || Runtime_model_input_tail_window.is_working_state message
   || Runtime_model_input_tail_window.is_unread_context message
 ;;

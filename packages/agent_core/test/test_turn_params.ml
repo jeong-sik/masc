@@ -36,7 +36,7 @@ let test_empty_reasoning () =
 
 let test_reasoning_with_thinking () =
   let messages : Types.message list =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content =
           [ Types.Thinking
               { signature = None; content = "I'm not sure about this approach" }
@@ -55,7 +55,7 @@ let test_reasoning_with_thinking () =
 
 let test_reasoning_tool_rationale () =
   let messages : Types.message list =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content =
           [ Types.Thinking
               { signature = None

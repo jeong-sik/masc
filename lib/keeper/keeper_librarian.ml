@@ -169,14 +169,11 @@ let message_to_text ~position_label ~position (m : Agent_core.Types.message) : s
      not a new observation. Keep its position for range accounting without
      feeding recalled memories or instructions back into memory selection. *)
   let attribution, body =
-    match Agent_core.Types.Extra_system_context_provenance.classify m.metadata with
-    | Present | Historical ->
+    match m.origin with
+    | System_context | Historical_system_context | Recovery_instruction
+    | Tool_result_followup | Agent_instruction ->
       " source=runtime_context", "[runtime context omitted]"
-    | Invalid ->
-      " source=runtime_context provenance=invalid", "[runtime context omitted]"
-    | Duplicate ->
-      " source=runtime_context provenance=duplicate", "[runtime context omitted]"
-    | Absent ->
+    | Conversation ->
       let parts = List.filter_map text_of_content m.content in
       speaker_header_field m, String.concat "\n" parts |> String.trim
   in

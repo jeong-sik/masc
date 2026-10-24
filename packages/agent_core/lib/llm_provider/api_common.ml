@@ -685,6 +685,9 @@ let message_has_tool_result (msg : message) =
 let merge_tool_result_followup_user_messages_with_source_indices messages =
   let mergeable_followup (msg : message) =
     msg.role = User
+    && (match msg.origin with
+        | Recovery_instruction | Tool_result_followup -> true
+        | Conversation | System_context | Historical_system_context | Agent_instruction -> false)
     && msg.name = None
     && msg.tool_call_id = None
     && Conversation_metadata.is_mergeable_followup msg.metadata

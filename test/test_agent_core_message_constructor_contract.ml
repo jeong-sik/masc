@@ -19,7 +19,7 @@ module T = Agent_core.Types
 (* Canonical message shape the delegated sites previously hand-rolled. *)
 let msg ?(role = T.User) ?(name = None) ?(tool_call_id = None) ?(metadata = [])
     content : T.message =
-  { role; content; name; tool_call_id; metadata }
+  { origin = Llm_provider.Types.Conversation;  role; content; name; tool_call_id; metadata }
 
 let test_user_msg () =
   check bool "user_msg = User single-Text record" true

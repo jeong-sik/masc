@@ -7,7 +7,6 @@ type unavailable_reason =
   | Stale_issuer
   | Invalid_subset
   | Unsupported_carrier
-  | Invalid_provenance
   | Trimmed_occurrence
 
 type evidence =
@@ -151,10 +150,10 @@ let source assembly selected_blocks ~omitted_sections ~omitted_rows
                     omitted_rows) ]))))
     | _ -> Unavailable Issuer_has_no_carrier
   in
-  match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
-  | Absent | Historical -> Not_applicable
-  | Invalid | Duplicate -> Unavailable Invalid_provenance
-  | Present ->
+  match message.origin with
+  | Conversation | Historical_system_context | Recovery_instruction
+  | Tool_result_followup | Agent_instruction -> Not_applicable
+  | System_context ->
     (match message.role, message.content, assembly with
      | System, [Text _], None -> Unavailable Missing_issuer
      | System, [Text actual], Some assembly -> inspect assembly actual
@@ -210,7 +209,6 @@ let reason_to_string = function
   | Stale_issuer -> "stale_issuer"
   | Invalid_subset -> "invalid_subset"
   | Unsupported_carrier -> "unsupported_carrier"
-  | Invalid_provenance -> "invalid_provenance"
   | Trimmed_occurrence -> "trimmed_occurrence"
 
 let issuer_attribution acquisitions =

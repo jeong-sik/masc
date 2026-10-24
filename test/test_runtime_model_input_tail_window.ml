@@ -20,8 +20,8 @@ let carried_digest = function
 
 let k = Window.atoms_per_window
 
-let message ?(metadata = []) ~role text : Types.message =
-  { role
+let message ?(origin=Types.Conversation) ?(metadata = []) ~role text : Types.message =
+  { origin;  role
   ; content = [ Types.Text text ]
   ; name = None
   ; tool_call_id = None
@@ -62,7 +62,7 @@ let tool i = padded ~role:Types.Tool ~tag:(Printf.sprintf "tool-%d|" i) atom_byt
 
 let extra_context =
   message
-    ~metadata:Types.Extra_system_context_provenance.metadata
+    ~origin:Types.System_context
     ~role:Types.User
     "extra-system-context"
 ;;
@@ -91,10 +91,9 @@ let count_atoms messages =
          if is_preamble m
          then count
          else (
-           match Types.Extra_system_context_provenance.classify m.metadata with
-           | Types.Extra_system_context_provenance.Absent ->
-             if Window.is_working_state m then count else count + 1
-           | _ -> count)
+           if m.origin = Types.Conversation then
+             (if Window.is_working_state m then count else count + 1)
+           else count)
        | Types.System | Types.Tool -> count)
     0
     messages
@@ -193,7 +192,7 @@ let test_heavy_atoms_cut_below_the_count_threshold () =
 let test_next_shrink_capacity_clamps_to_lopsided_newest_atom () =
   let pinned =
     message
-      ~metadata:Types.Extra_system_context_provenance.metadata
+      ~origin:Types.System_context
       ~role:Types.User
       "pinned-context"
   in
@@ -237,7 +236,7 @@ let test_next_shrink_capacity_clamps_to_lopsided_newest_atom () =
 let test_next_shrink_capacity_ignores_materialized_preamble () =
   let preamble =
     message
-      ~metadata:[ (Window.preamble_marker_key, `Bool true) ]
+      ~origin:Types.Agent_instruction ~metadata:[ (Window.preamble_marker_key, `Bool true) ]
       ~role:Types.User
       "synthetic preamble"
   in
@@ -346,7 +345,7 @@ let test_next_shrink_reaches_the_empty_history_past_a_larger_clamp () =
 let test_bootstrap_floor_drops_the_only_prior_atom () =
   let pinned =
     message
-      ~metadata:Types.Extra_system_context_provenance.metadata
+      ~origin:Types.System_context
       ~role:Types.User
       "pinned-context"
   in
@@ -734,7 +733,7 @@ let test_no_preamble_when_nothing_is_cut () =
 
 let test_extra_context_pinned () =
   let historical =
-    { extra_context with metadata = Types.Extra_system_context_provenance.historical_metadata }
+    { extra_context with origin = Llm_provider.Types.Historical_system_context; metadata = [] }
   in
   let historical_window =
     ok_exn ~what:"historical context" (project ~capacity_bytes:60_000
@@ -742,7 +741,7 @@ let test_extra_context_pinned () =
   in
   Alcotest.(check bool) "historical context can leave the window" false
     (List.exists (fun (m : Types.message) ->
-       Types.Extra_system_context_provenance.classify m.metadata = Historical)
+       m.origin = Types.Historical_system_context)
       historical_window);
   let history = atoms (4 * k) @ [ extra_context ] in
   let projected =
@@ -752,9 +751,7 @@ let test_extra_context_pinned () =
     "extra context survives the cut" true
     (List.exists
        (fun (m : Types.message) ->
-          match Types.Extra_system_context_provenance.classify m.metadata with
-          | Types.Extra_system_context_provenance.Present -> true
-          | _ -> false)
+          m.origin = Types.System_context)
        projected);
   let padded_history = extra_context :: atoms ((2 * k) - 1) in
   let unchanged = ok_exn ~what:"pinned identity" (project padded_history) in
@@ -769,7 +766,7 @@ let test_pinned_bytes_are_charged_before_atoms () =
      instead of cutting atoms that cannot help. *)
   let pinned =
     message
-      ~metadata:Types.Extra_system_context_provenance.metadata
+      ~origin:Types.System_context
       ~role:Types.User
       (String.make 50_000 'p')
   in
@@ -963,7 +960,7 @@ let test_from_atom_view_keeps_the_atoms_from_the_front () =
    pinned like the per-turn context, but not read as that context. *)
 let test_from_atom_view_keeps_the_working_state_under_its_own_tag () =
   let working_state =
-    message ~metadata:Window.working_state_metadata ~role:Types.User "working-state"
+    message ~origin:Types.Agent_instruction ~metadata:Window.working_state_metadata ~role:Types.User "working-state"
   in
   Alcotest.(check bool) "the working state is not the per-turn context" false
     (Window.is_extra_context working_state);

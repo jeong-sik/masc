@@ -11,7 +11,7 @@ let make_checkpoint ?(session_id = "test-session") ?(created_at = 1000.0) ()
   ; model = "claude-sonnet-5"
   ; system_prompt = Some "test prompt"
   ; messages =
-      [ { role = User
+      [ { origin = Llm_provider.Types.Conversation;  role = User
         ; content = [ Text "hello" ]
         ; name = None
         ; tool_call_id = None
@@ -246,13 +246,13 @@ let test_roundtrip_preserves_messages () =
     let cp =
       { (make_checkpoint ~session_id:"rt-msg" ()) with
         messages =
-          [ { role = User
+          [ { origin = Llm_provider.Types.Conversation;  role = User
             ; content = [ Text "hello" ]
             ; name = None
             ; tool_call_id = None
             ; metadata = []
             }
-          ; { role = Assistant
+          ; { origin = Llm_provider.Types.Conversation;  role = Assistant
             ; content = [ Text "world" ]
             ; name = None
             ; tool_call_id = None

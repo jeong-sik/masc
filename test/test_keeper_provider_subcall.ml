@@ -61,7 +61,7 @@ let start_server_that_never_answers ~sw ~net =
 ;;
 
 let fixture_messages =
-  [ { Agent_core.Types.role = Agent_core.Types.User
+  [ { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.User
     ; content = [ Agent_core.Types.Text "fixture" ]
     ; name = None
     ; tool_call_id = None

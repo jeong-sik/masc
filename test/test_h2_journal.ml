@@ -227,7 +227,7 @@ let durable_result (row : Executor.node_result) =
       | None -> `Null
       | Some content ->
         let message : Agent_core.Types.message =
-          {role = Tool; content; name = None; tool_call_id = None; metadata = []} in
+          { origin = Llm_provider.Types.Conversation; role = Tool; content; name = None; tool_call_id = None; metadata = []} in
         Agent_core.Checkpoint.message_to_json message);
     "result_bytes", `Int row.result_bytes;
     "truncated_to", (match row.truncated_to with None -> `Null | Some limit -> `Int limit)]

@@ -1358,7 +1358,7 @@ let test_purge_keeps_the_librarian_position_and_every_message () =
      and clears the result, and keeps every message. *)
   let wake = Agent_core.Types.user_msg "(autonomous wake)" in
   let assistant content =
-    { Agent_core.Types.role = Agent_core.Types.Assistant
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant
     ; content
     ; name = None
     ; tool_call_id = None
@@ -1542,7 +1542,7 @@ let test_purge_preview_reports_what_a_structural_break_drops () =
   |> Result.map_error (fun detail -> fail detail) |> Result.get_ok;
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
   let assistant content =
-    { Agent_core.Types.role = Agent_core.Types.Assistant
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant
     ; content
     ; name = None
     ; tool_call_id = None

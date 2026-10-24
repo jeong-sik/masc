@@ -320,7 +320,7 @@ let test_show_content_block_variants () =
 
 let test_show_message () =
   let m : Types.message =
-    { role = Types.User
+    { origin = Llm_provider.Types.Conversation;  role = Types.User
     ; content = [ Types.Text "test" ]
     ; name = None
     ; tool_call_id = None
@@ -826,7 +826,7 @@ let test_text_of_content_empty () =
 
 let test_text_of_message () =
   let m : Types.message =
-    { role = Types.User
+    { origin = Llm_provider.Types.Conversation;  role = Types.User
     ; content = [ Types.Text "hi" ]
     ; name = None
     ; tool_call_id = None

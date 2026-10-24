@@ -95,7 +95,7 @@ let completed_run_result () : Runtime_agent.run_result =
   }
 
 let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.message =
-  { role; content; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 
 let test_recorder = Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"failover-test"
 

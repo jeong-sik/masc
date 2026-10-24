@@ -9,10 +9,10 @@ module Types = Agent_core.Types
 module Keeper_transcript_unit = Masc.Keeper_transcript_unit
 
 let text_message role text : Types.message =
-  { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
 
 let block_message role content : Types.message =
-  { role; content; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 
 let tool_use id : Types.content_block =
   Types.ToolUse { id; name = "test_tool"; input = `Assoc [ "id", `String id ] }

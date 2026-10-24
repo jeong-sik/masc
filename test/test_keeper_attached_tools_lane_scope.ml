@@ -200,7 +200,7 @@ let with_bundle
 ;;
 
 let called name =
-  { Agent_core.Types.role = Agent_core.Types.Assistant
+  { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant
   ; content =
       [ Agent_core.Types.ToolUse
           { id = "toolu_fixture"
@@ -761,7 +761,7 @@ let test_an_unknown_actual_tool_stays_out_of_the_identity_expectation () =
    actually missing. *)
 let test_a_declared_tool_this_conversation_ran_is_not_reported_as_held () =
   let ran_a_declared_builtin =
-    { Agent_core.Types.role = Agent_core.Types.Assistant
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant
     ; content =
         [ Agent_core.Types.ToolUse
             { id = "toolu_fixture"; name = "keeper_ide_annotate"; input = `Assoc [] }

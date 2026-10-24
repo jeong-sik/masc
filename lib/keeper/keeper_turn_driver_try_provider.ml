@@ -1193,7 +1193,7 @@ let range_start_origin = function
    a turn boundary always carries the newest atom ({!Keeper_carried_front.clamp});
    an unknown boundary carries that atom alone. *)
 let working_state_message snapshot : Agent_core.Types.message =
-  { role = Agent_core.Types.User
+  { origin = Llm_provider.Types.Agent_instruction;  role = Agent_core.Types.User
   ; content = [ Agent_core.Types.Text (working_state_text snapshot) ]
   ; name = None; tool_call_id = None
   ; metadata = Runtime_model_input_tail_window.working_state_metadata

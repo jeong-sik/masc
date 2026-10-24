@@ -140,10 +140,10 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
            let original_request = match decoded.turn_instructions with
              | None -> decoded.message
              | Some instructions -> decoded.message ^ "\n\nOriginal turn instructions:\n" ^ instructions in
-           let resume = Agent_core.Types.user_msg (Printf.sprintf
+           let resume = Agent_core.Types.make_message ~origin:Recovery_instruction ~role:User [Text (Printf.sprintf
              "Resume the original direct operation %s below. The preceding history includes its completed tool effects and newer shared work. Preserve those results and continue only the remaining work; do not repeat completed writes, Board posts, or peer requests.\nOriginal admitted input:\n%s"
              (Keeper_chat_operation.Operation_id.to_string operation_id)
-             original_request) in
+             original_request)] in
            Ok (checkpoint.messages @ [resume])) in
     let context = Agent_core.Context.copy checkpoint.context ~eio:true in
     Keeper_repetition_scope.save context frame;

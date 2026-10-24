@@ -582,11 +582,16 @@ let validate_message_in ~scope json =
   let* fields =
     validate_object_shape
       ~scope
-      ~required:[ "role"; "content" ]
+      ~required:[ "role"; "origin"; "content" ]
       ~optional:[ "name"; "tool_call_id"; "metadata" ]
       json
   in
   let* role = required_field ~scope "role" fields in
+  let* origin = required_field ~scope "origin" fields in
+  let* () = match origin with
+    | `String value when Option.is_some (Types.message_origin_of_string value) -> Ok ()
+    | `String value -> scope_errorf scope ".origin has unsupported value %S" value
+    | _ -> scope_errorf scope ".origin must be a string" in
   let* content = required_field ~scope "content" fields in
   let* role =
     match role with

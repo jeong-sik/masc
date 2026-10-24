@@ -136,6 +136,7 @@ let message_to_json (m : Agent_core.Types.message) : Yojson.Safe.t =
   let base =
     [
       ("role", `String (role_to_string m.role));
+      ("origin", `String (Agent_core.Types.message_origin_to_string m.origin));
       ("content_blocks", content_blocks_to_json m.content);
     ]
   in
@@ -146,6 +147,15 @@ let message_to_json (m : Agent_core.Types.message) : Yojson.Safe.t =
      @ if m.metadata = [] then [] else [ ("metadata", `Assoc m.metadata) ])
 
 let message_of_json (json : Yojson.Safe.t) : Agent_core.Types.message =
+  let origin = match json with
+    | `Assoc fields ->
+      (match List.filter_map (fun (key,value) -> if key="origin" then Some value else None) fields with
+       | [`String value] ->
+         (match Agent_core.Types.message_origin_of_string value with
+          | Some origin -> origin
+          | None -> invalid_arg "keeper_context_core: unknown message origin")
+       | [] | _::_ -> invalid_arg "keeper_context_core: missing or duplicate message origin")
+    | _ -> invalid_arg "keeper_context_core: message must be an object" in
   let raw_role =
     match Json_util.get_string json "role" with
     | Some s -> s
@@ -165,8 +175,7 @@ let message_of_json (json : Yojson.Safe.t) : Agent_core.Types.message =
         invalid_arg "keeper_context_core: missing or invalid content_blocks"
   in
   Inference_utils.sanitize_message_utf8
-    {
-      Agent_core.Types.role;
+    { origin; Agent_core.Types.role;
       content;
       name =
         (Json_util.get_string json "name"

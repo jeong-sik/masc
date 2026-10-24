@@ -273,8 +273,8 @@ let denial_input (selected : Semantic.gate_resolution) =
     let* identity = Keeper_approval_input_admission.identity
       ~approval_id:selected.obligation.approval_id ~evidence_fingerprint
       |> Result.map_error Keeper_approval_input_admission.error_to_string in
-    Ok (identity, Agent_core.Types.user_msg
-      ("Gate request " ^ selected.obligation.approval_id ^ " was denied: " ^ detail))
+    Ok (identity, Agent_core.Types.make_message ~origin:Recovery_instruction ~role:User
+      [Text ("Gate request " ^ selected.obligation.approval_id ^ " was denied: " ^ detail)])
 
 let load_ready ~config ~(meta : Keeper_meta_contract.keeper_meta) ~operation_id ~session_dir =
   let base_path = config.Workspace.base_path and keeper_name = meta.name in

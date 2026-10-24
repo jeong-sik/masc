@@ -38,15 +38,15 @@ let test_checkpoint_roundtrip () =
   (* Simulate 3 completed turns by manually updating state *)
   let msgs = [
     Agent_core.Types.user_msg "turn 1 user";
-    { Agent_core.Types.role = Agent_core.Types.Assistant;
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant;
       content = [Agent_core.Types.Text "turn 1 response"];
       name = None; tool_call_id = None; metadata = [] };
     Agent_core.Types.user_msg "turn 2 user";
-    { Agent_core.Types.role = Agent_core.Types.Assistant;
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant;
       content = [Agent_core.Types.Text "turn 2 response"];
       name = None; tool_call_id = None; metadata = [] };
     Agent_core.Types.user_msg "turn 3 user";
-    { Agent_core.Types.role = Agent_core.Types.Assistant;
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant;
       content = [Agent_core.Types.Text "turn 3 response"];
       name = None; tool_call_id = None; metadata = [] };
   ] in
@@ -97,10 +97,10 @@ let test_multi_runtime_accumulation () =
   Agent_core.Agent.set_state agent_a { (Agent_core.Agent.state agent_a) with
     messages = [
       Agent_core.Types.user_msg "t1";
-      { Agent_core.Types.role = Agent_core.Types.Assistant;
+      { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant;
         content = [Agent_core.Types.Text "r1"]; name = None; tool_call_id = None; metadata = [] };
       Agent_core.Types.user_msg "t2";
-      { Agent_core.Types.role = Agent_core.Types.Assistant;
+      { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant;
         content = [Agent_core.Types.Text "r2"]; name = None; tool_call_id = None; metadata = [] };
     ];
     turn_count = 2;
@@ -112,7 +112,7 @@ let test_multi_runtime_accumulation () =
   Agent_core.Agent.set_state agent_b { (Agent_core.Agent.state agent_b) with
     messages = (Agent_core.Agent.state agent_b).messages @ [
       Agent_core.Types.user_msg "t3";
-      { Agent_core.Types.role = Agent_core.Types.Assistant;
+      { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant;
         content = [Agent_core.Types.Text "r3"]; name = None; tool_call_id = None; metadata = [] };
     ];
     turn_count = 3;

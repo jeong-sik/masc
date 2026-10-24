@@ -1,4 +1,4 @@
-let schema = "masc.official-client-context-message.v2"
+let schema = "masc.official-client-context-message.v3"
 
 let media_source_to_json ~media_type ~data ~source_type =
   `Assoc
@@ -89,6 +89,7 @@ let rec content_block_to_json = function
 let message_to_json (message : Agent_core.Types.message) =
   `Assoc
     [ "role", `String (Agent_core.Types.role_to_string message.role)
+    ; "origin", `String (Agent_core.Types.message_origin_to_string message.origin)
     ; "content_blocks", `List (List.map content_block_to_json message.content)
     ; ( "name"
       , Option.fold ~none:`Null ~some:(fun value -> `String value) message.name )

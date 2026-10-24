@@ -511,7 +511,7 @@ let test_a_turn_that_loaded_and_called_nothing_names_what_it_loaded () =
 (* One assistant message calling [name], the shape the model leaves behind in
    history when it actually runs an attached tool. *)
 let called tool_name_called =
-  { Agent_core.Types.role = Agent_core.Types.Assistant
+  { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant
   ; content =
       [ Agent_core.Types.ToolUse
           { id = "toolu_fixture"; name = tool_name_called; input = `Assoc [] }
@@ -524,7 +524,7 @@ let called tool_name_called =
 
 (* Asking for a tool through the listing, which is not the same as running it. *)
 let asked_for names =
-  { Agent_core.Types.role = Agent_core.Types.Assistant
+  { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant
   ; content =
       [ Agent_core.Types.ToolUse
           { id = "toolu_ask"

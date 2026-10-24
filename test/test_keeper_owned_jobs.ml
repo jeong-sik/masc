@@ -5213,7 +5213,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
     | Error error -> failf "actual child handoff persistence failed: %s" (Delivery.error_to_string error)
   and on_error error = errors := error :: !errors in
   let stage_response ?(id=status_id) ?(content=wire) ?(turn=2) () =
-    let messages = [{Agent_core.Types.role=Tool;
+    let messages = [{ origin = Llm_provider.Types.Conversation; Agent_core.Types.role=Tool;
       content=[Agent_core.Types.ToolResult {tool_use_id=id;content;
         outcome=Agent_core.Llm_provider.Types.Tool_succeeded;json=None;content_blocks=None}];
       name=None;tool_call_id=None;metadata=[]}] in

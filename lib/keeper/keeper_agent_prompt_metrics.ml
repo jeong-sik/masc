@@ -46,8 +46,6 @@ type provenance_failure =
       ; projected_messages : int
       }
   | Input_prefix_rewritten of { first_divergent_index : int }
-  | Prompt_context_carrier_metadata_invalid
-  | Prompt_context_carrier_metadata_duplicate
   | Prompt_context_carrier_repeated
   | Prompt_context_presence_mismatch of
       { carrier_observed : bool
@@ -57,10 +55,6 @@ type provenance_failure =
 let provenance_failure_reason = function
   | Input_prefix_dropped _ -> "projection_dropped_input_prefix"
   | Input_prefix_rewritten _ -> "projection_rewrote_input_prefix"
-  | Prompt_context_carrier_metadata_invalid ->
-    "prompt_context_carrier_metadata_invalid"
-  | Prompt_context_carrier_metadata_duplicate ->
-    "prompt_context_carrier_metadata_duplicate"
   | Prompt_context_carrier_repeated -> "prompt_context_carrier_repeated"
   | Prompt_context_presence_mismatch _ -> "prompt_context_presence_mismatch"
 ;;
@@ -75,8 +69,6 @@ let provenance_failure_detail = function
          projected_messages)
   | Input_prefix_rewritten { first_divergent_index } ->
     Some (Printf.sprintf "first_divergent_index=%d" first_divergent_index)
-  | Prompt_context_carrier_metadata_invalid
-  | Prompt_context_carrier_metadata_duplicate
   | Prompt_context_carrier_repeated -> None
   | Prompt_context_presence_mismatch { carrier_observed; prompt_context_present }
     ->
@@ -168,25 +160,21 @@ let remove_prompt_context ~prompt_context_present messages =
              { carrier_observed = seen; prompt_context_present })
     | (message : Agent_core.Types.message) :: rest ->
       (match
-         Agent_core.Types.Extra_system_context_provenance.classify
-           message.metadata
+         message.origin
        with
-       | Agent_core.Types.Extra_system_context_provenance.Absent
-       | Agent_core.Types.Extra_system_context_provenance.Historical ->
+       | Agent_core.Types.Conversation
+       | Agent_core.Types.Historical_system_context
+       | Recovery_instruction | Tool_result_followup | Agent_instruction ->
          walk seen (message :: rev_retained) rest
-       | Agent_core.Types.Extra_system_context_provenance.Present
+       | Agent_core.Types.System_context
          when prompt_context_present && not seen -> walk true rev_retained rest
-       | Agent_core.Types.Extra_system_context_provenance.Present ->
+       | Agent_core.Types.System_context ->
          if seen
          then Error Prompt_context_carrier_repeated
          else
            Error
              (Prompt_context_presence_mismatch
-                { carrier_observed = true; prompt_context_present })
-       | Agent_core.Types.Extra_system_context_provenance.Invalid ->
-         Error Prompt_context_carrier_metadata_invalid
-       | Agent_core.Types.Extra_system_context_provenance.Duplicate ->
-         Error Prompt_context_carrier_metadata_duplicate)
+                { carrier_observed = true; prompt_context_present }))
   in
   walk false [] messages
 ;;

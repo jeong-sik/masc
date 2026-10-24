@@ -46,11 +46,11 @@ let context_message turn_params =
        the signed thinking prefix; other providers retain their existing
        request-only context behavior. *)
     let system_msg =
-      { role = User
+      { origin = System_context; role = User
       ; content = [ Text ("[system context] " ^ ctx) ]
       ; name = None
       ; tool_call_id = None
-      ; metadata = Extra_system_context_provenance.metadata
+      ; metadata = []
       }
     in
     Some system_msg
@@ -85,7 +85,7 @@ let prepare_turn ~tools ~messages ~turn_params ?model_input_projection () =
       | None -> Ok None
       | Some _ ->
         (match List.filter (fun (message : Types.message) ->
-           Extra_system_context_provenance.classify message.metadata = Present)
+           message.origin = System_context)
            effective_messages with
          | [] -> Ok None
          | [message] -> Ok (Some message)

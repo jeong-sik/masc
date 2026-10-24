@@ -260,7 +260,7 @@ let domain_schema (requirement : output_requirement) =
 ;;
 
 let text_json_instruction schema : Types.message =
-  { role = Types.User
+  { origin = Types.Agent_instruction; role = Types.User
   ; content = [ Types.Text (domain_schema_instruction_text schema) ]
   ; name = None
   ; tool_call_id = None

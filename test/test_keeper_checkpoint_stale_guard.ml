@@ -51,9 +51,9 @@ let cleanup_dir dir =
 
 let make_checkpoint ~session_id ~turn_count ~marker =
   let messages = [
-    Agent_core.Types.{ role = User; content = [Text "hello"]; name = None;
+    Agent_core.Types.{ origin = Llm_provider.Types.Conversation;  role = User; content = [Text "hello"]; name = None;
                       tool_call_id = None; metadata = [] };
-    Agent_core.Types.{ role = Assistant; content = [Text marker]; name = None;
+    Agent_core.Types.{ origin = Llm_provider.Types.Conversation;  role = Assistant; content = [Text marker]; name = None;
                       tool_call_id = None; metadata = [] };
   ] in
   Agent_core.Checkpoint.{
@@ -98,7 +98,7 @@ let save_ok ~session_dir ckpt label =
 let checkpoint_with_orphan_tool_result ~session_id =
   let messages =
     [ Agent_core.Types.
-        { role = User
+        { origin = Llm_provider.Types.Conversation;  role = User
         ; content = [ Text "hello" ]
         ; name = None
         ; tool_call_id = None
@@ -106,7 +106,7 @@ let checkpoint_with_orphan_tool_result ~session_id =
         }
       (* A result for a tool call that was never requested. *)
     ; Agent_core.Types.
-        { role = Tool
+        { origin = Llm_provider.Types.Conversation;  role = Tool
         ; content = [ ToolResult { tool_use_id = "tu-never-requested"; content = "x"; outcome = Tool_succeeded; json = None; content_blocks = None } ]
         ; name = None
         ; tool_call_id = Some "tu-never-requested"
@@ -161,14 +161,14 @@ let test_structurally_invalid_checkpoint_is_refused_at_the_store () =
 let checkpoint_with_unencodable_tool_use ~session_id =
   let messages =
     [ Agent_core.Types.
-        { role = User
+        { origin = Llm_provider.Types.Conversation;  role = User
         ; content = [ Text "run it" ]
         ; name = None
         ; tool_call_id = None
         ; metadata = []
         }
     ; Agent_core.Types.
-        { role = Assistant
+        { origin = Llm_provider.Types.Conversation;  role = Assistant
         ; content =
             [ ToolUse
                 { id = "call-1"
@@ -261,7 +261,7 @@ let test_stage_saves_sharing_one_memo_write_canonical_bytes () =
     { cp with Agent_core.Checkpoint.turn_count; messages = cp.messages @ messages }
   in
   let text role body : Agent_core.Types.message =
-    { role; content = [ Agent_core.Types.Text body ]; name = None; tool_call_id = None; metadata = [] }
+    { origin = Llm_provider.Types.Conversation;  role; content = [ Agent_core.Types.Text body ]; name = None; tool_call_id = None; metadata = [] }
   in
   let first = make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"stage one" in
   let second = append first ~turn_count:2 [ text Agent_core.Types.User "stage two" ] in
@@ -1198,7 +1198,7 @@ let chatty_checkpoint ~session_id ~turn_count ~marker ~messages =
 let many_short_messages count =
   List.init count (fun index ->
     Agent_core.Types.
-      { role = Assistant
+      { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ Text (Printf.sprintf "%d %s" index (String.make 60 'x')) ]
       ; name = None
       ; tool_call_id = None
@@ -2017,7 +2017,7 @@ let test_checkpoint_read_refuses_a_symlinked_canonical_file () =
    wire does not carry [ToolResult.json]. *)
 let checkpoint_with_parsed_tool_result ~session_id ~turn_count =
   let open Agent_core.Types in
-  let message role content = { role; content; name = None; tool_call_id = None; metadata = [] } in
+  let message role content = { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] } in
   { (make_checkpoint ~session_id ~turn_count ~marker:"done") with
     Agent_core.Checkpoint.messages =
       [ message User [ Text "count the rows" ]
@@ -2177,7 +2177,7 @@ let test_a_save_after_a_load_encodes_only_the_new_messages () =
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
   let sid = "written-value-reuse" in
   let text role body : Agent_core.Types.message =
-    { role; content = [ Agent_core.Types.Text body ]; name = None; tool_call_id = None; metadata = [] }
+    { origin = Llm_provider.Types.Conversation;  role; content = [ Agent_core.Types.Text body ]; name = None; tool_call_id = None; metadata = [] }
   in
   let history =
     List.init messages_in_the_reuse_fixture (fun index ->
@@ -2338,7 +2338,7 @@ let test_a_load_for_save_keeps_what_it_read () =
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
   let sid = "read-for-save" in
   let text role body : Agent_core.Types.message =
-    { role; content = [ Agent_core.Types.Text body ]; name = None; tool_call_id = None; metadata = [] }
+    { origin = Llm_provider.Types.Conversation;  role; content = [ Agent_core.Types.Text body ]; name = None; tool_call_id = None; metadata = [] }
   in
   let history =
     List.init messages_in_the_reuse_fixture (fun index ->
@@ -2522,7 +2522,7 @@ let test_summary_follows_a_checkpoint_replaced_behind_it () =
       messages =
         base.messages
         @ [ Agent_core.Types.
-              { role = User
+              { origin = Llm_provider.Types.Conversation;  role = User
               ; content = [ Text "again" ]
               ; name = None
               ; tool_call_id = None

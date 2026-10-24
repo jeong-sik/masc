@@ -210,14 +210,14 @@ let test_user_message_sanitizer_preserves_semantic_content () =
 let test_ctx_composition_splits_final_provider_input_bytes () =
   let input_messages =
     [
-      {
+      { origin = Llm_provider.Types.Conversation;
         Agent_core.Types.role = Agent_core.Types.User;
         content = [Agent_core.Types.Text "Earlier user request"];
         name = None;
         tool_call_id = None;
         metadata = [];
       };
-      {
+      { origin = Llm_provider.Types.Conversation;
         Agent_core.Types.role = Agent_core.Types.Assistant;
         content =
           [
@@ -233,7 +233,7 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
         tool_call_id = None;
         metadata = [];
       };
-      {
+      { origin = Llm_provider.Types.Conversation;
         Agent_core.Types.role = Agent_core.Types.Tool;
         content =
           [
@@ -250,7 +250,7 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
         tool_call_id = None;
         metadata = [];
       };
-      {
+      { origin = Llm_provider.Types.Conversation;
         Agent_core.Types.role = Agent_core.Types.User;
         content = [Agent_core.Types.Text "Current user message"];
         name = None;
@@ -335,8 +335,8 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
 let message text : Agent_core.Types.message = Agent_core.Types.user_msg text
 
 let prompt_carrier text =
-  { (message text) with
-    metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+  { (message text) with origin = Llm_provider.Types.System_context;
+    metadata = []
   }
 ;;
 
@@ -388,7 +388,7 @@ let test_provider_content_messages_removes_typed_prompt_carrier () =
 let test_provider_content_messages_keeps_the_working_state () =
   let working_state =
     { (message "[Librarian working state] summary") with
-      metadata = Runtime_model_input_tail_window.working_state_metadata
+      origin = Llm_provider.Types.Agent_instruction; metadata = Runtime_model_input_tail_window.working_state_metadata
     }
   in
   let history = [ message "history"; message "current user" ] in
@@ -424,18 +424,6 @@ let test_provider_content_messages_keeps_the_working_state () =
 let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
   let plain = message "[system context] same text without typed identity" in
   let marked = prompt_carrier "typed prompt context" in
-  let invalid =
-    match Agent_core.Types.Extra_system_context_provenance.metadata with
-    | [ key, _ ] -> { marked with metadata = [ key, `Bool false ] }
-    | _ -> fail "AGENT_CORE prompt carrier metadata must contain exactly one field"
-  in
-  let duplicate =
-    { marked with
-      metadata =
-        Agent_core.Types.Extra_system_context_provenance.metadata
-        @ Agent_core.Types.Extra_system_context_provenance.metadata
-    }
-  in
   (* The whole summary the log line carries, not the reason alone -- the
      keeper prefixes keeper= and trace= around this value. Two of these five reach
      [Prompt_context_presence_mismatch] from opposite conditions -- announced
@@ -470,13 +458,7 @@ let test_provider_content_messages_rejects_prompt_carrier_mismatch () =
      so the branch that omits the separator is what keeps them passing. *)
   check string "a second typed carrier is repeated, not missing"
     "prompt_context_carrier_repeated"
-    (failure_line ~prompt_context_present:true [ marked; marked ]);
-  check string "invalid carrier metadata is named as such"
-    "prompt_context_carrier_metadata_invalid"
-    (failure_line ~prompt_context_present:true [ invalid ]);
-  check string "duplicate carrier metadata is named as such"
-    "prompt_context_carrier_metadata_duplicate"
-    (failure_line ~prompt_context_present:true [ duplicate ])
+    (failure_line ~prompt_context_present:true [ marked; marked ])
 ;;
 
 let test_provider_content_messages_rejects_projection_rewrite () =
@@ -516,7 +498,7 @@ let test_provider_content_messages_rejects_projection_rewrite () =
    several has no honest one to keep. *)
 let test_a_merged_bucket_has_no_fingerprint_and_a_single_one_keeps_it () =
   let user text =
-    { Agent_core.Types.role = Agent_core.Types.User
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.User
     ; content = [ Agent_core.Types.Text text ]
     ; name = None
     ; tool_call_id = None
@@ -657,8 +639,8 @@ let test_transmitted_carrier_removal_ignores_a_prefix_cut () =
   (* The head of the history is gone: this is what a tail window returns. *)
   let transmitted = [ message "surviving history"; carrier; message "goal" ] in
   let historical =
-    { (message "previous context") with
-      metadata = Agent_core.Types.Extra_system_context_provenance.historical_metadata }
+    { (message "previous context") with origin = Llm_provider.Types.Historical_system_context;
+      metadata = [] }
   in
   check (option (list string)) "historical context is history, not a second carrier"
     (Some [ "previous context"; "surviving history"; "goal" ])

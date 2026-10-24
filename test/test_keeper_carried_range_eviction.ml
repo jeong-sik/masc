@@ -32,7 +32,7 @@ let unattributed_refusal =
 ;;
 
 let text_message role text : Types.message =
-  { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 (* Exchanges [from] to [from + n - 1], two atoms each. *)

@@ -113,9 +113,7 @@ let suffix_records_tool_activity (messages : Agent_core.Types.message list) =
 
 let drop_trailing_assistants messages =
   let retained_context (message : Agent_core.Types.message) =
-    match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
-    | Historical -> true
-    | Absent | Present | Invalid | Duplicate -> false
+    message.origin = Agent_core.Types.Historical_system_context
   in
   let rec drop dropped = function
     | ({ Agent_core.Types.role = Agent_core.Types.Assistant; _ } :

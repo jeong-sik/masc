@@ -16,10 +16,10 @@ let () = Server_startup_state.mark_state_ready () |> Result.get_ok
 let make_checkpoint ~session_id ~turn_count ~marker =
   let messages =
     [ Agent_core.Types.
-        { role = User; content = [ Text "hello" ]; name = None; tool_call_id = None
+        { origin = Llm_provider.Types.Conversation;  role = User; content = [ Text "hello" ]; name = None; tool_call_id = None
         ; metadata = [] }
     ; Agent_core.Types.
-        { role = Assistant; content = [ Text marker ]; name = None
+        { origin = Llm_provider.Types.Conversation;  role = Assistant; content = [ Text marker ]; name = None
         ; tool_call_id = None; metadata = [] }
     ]
   in

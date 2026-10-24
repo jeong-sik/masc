@@ -182,13 +182,13 @@ let test_tool_use_id_roundtrip () =
   in
   let messages =
     [ Types.user_msg "What's the weather?"
-    ; { Types.role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
       ; content = [ Types.ToolUse { id = tu_id; name = tu_name; input = tu_input } ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { Types.role = Tool
+    ; { origin = Llm_provider.Types.Conversation;  Types.role = Tool
       ; content =
           [ Types.ToolResult
               { tool_use_id = tu_id

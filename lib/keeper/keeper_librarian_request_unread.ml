@@ -31,5 +31,5 @@ let attach ?(include_empty=false) ~role value messages =
   match text ~include_empty value with
   | None -> messages
   | Some text ->
-    {Agent_core.Types.role;content=[Agent_core.Types.Text text];name=None;tool_call_id=None;
+    { origin = Llm_provider.Types.Agent_instruction; Agent_core.Types.role;content=[Agent_core.Types.Text text];name=None;tool_call_id=None;
       metadata=Runtime_model_input_tail_window.unread_context_metadata} :: messages

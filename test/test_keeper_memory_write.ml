@@ -1980,33 +1980,20 @@ let test_history_search_deduplicates_identical_messages () =
 ;;
 
 let test_history_search_excludes_runtime_context () =
-  let module Context = Agent_core.Types.Extra_system_context_provenance in
   with_temp_dir
   @@ fun base_path ->
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "history-provenance" in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  let user ~metadata text =
-    Agent_core.Types.make_message ~role:Agent_core.Types.User ~metadata
+  let user ?(origin=Agent_core.Types.Conversation) ~metadata text =
+    Agent_core.Types.make_message ~origin ~role:Agent_core.Types.User ~metadata
       [ Agent_core.Types.Text text ]
   in
-  let carrier_metadata =
-    let invalid =
-      match Context.metadata with
-      | [ key, _ ] -> [ key, `Bool false ]
-      | _ -> Alcotest.fail "expected the canonical runtime-context marker"
-    in
-    [ "present", Context.metadata
-    ; "historical", Context.historical_metadata
-    ; "invalid", invalid
-    ; "duplicate", Context.metadata @ Context.historical_metadata
-    ]
-  in
   let carriers location =
-    List.map
-      (fun (kind, metadata) ->
-         user ~metadata ("history-provenance runtime-context-only-sentinel " ^ location ^ " " ^ kind))
-      carrier_metadata
+    List.map (fun origin -> user ~origin ~metadata:[]
+      ("history-provenance runtime-context-only-sentinel " ^ location))
+      Agent_core.Types.[System_context; Historical_system_context;
+        Recovery_instruction; Tool_result_followup; Agent_instruction]
   in
   let ordinary location =
     user ~metadata:[ "unrelated", `String "preserve user text" ]
@@ -2036,7 +2023,12 @@ let test_history_search_excludes_runtime_context () =
   Out_channel.with_open_gen [ Open_wronly; Open_append ] 0o600
     (Masc.Keeper_types_support.keeper_history_path config trace_id)
     (fun output ->
-       output_string output (Yojson.Safe.to_string malformed_metadata ^ "\n"));
+       List.iter (fun json -> output_string output (Yojson.Safe.to_string json ^ "\n"))
+         (malformed_metadata :: List.map (fun origin ->
+           match Masc.Keeper_context_core.message_to_json (user ~metadata:[] "invalid stored origin") with
+           | `Assoc fields -> `Assoc (("origin", origin) :: List.remove_assoc "origin" fields)
+           | _ -> Alcotest.fail "message serializer returned a non-object")
+           [`String "unknown"; `Null]));
   List.iter
     (fun source ->
        let search query =

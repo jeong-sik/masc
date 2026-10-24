@@ -16,7 +16,7 @@ let history_retained () =
   Runtime_params.get Masc.Runtime_settings.keeper_checkpoint_history_retained
 
 let message role content =
-  Agent_core.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }
+  Agent_core.Types.{ origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 let text_of_message = Agent_core.Types.text_of_message
@@ -526,7 +526,7 @@ let test_success_preserves_typed_replay_suffix () =
 let test_suppressed_response_releases_only_its_retained_context () =
   let open Agent_core.Types in
   let context text =
-    make_message ~role:User ~metadata:Extra_system_context_provenance.historical_metadata
+    make_message ~role:User ~origin:Historical_system_context
       [Text text] in
   let history =
     [message User [Text "old input"]; context "old context";
@@ -922,7 +922,7 @@ let test_autonomous_turn_with_tool_keeps_the_tool_record () =
 let test_autonomous_reasoning_only_final_is_not_replayed () =
   let open Agent_core.Types in
   let context =
-    make_message ~role:User ~metadata:Extra_system_context_provenance.historical_metadata
+    make_message ~role:User ~origin:Historical_system_context
       [ Text "context for the signed reasoning" ]
   in
   let reasoning_only =

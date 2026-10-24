@@ -16,7 +16,7 @@ let carried_digest = function
 ;;
 
 let message role content : Types.message =
-  { role; content; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 let user text = message Types.User [ Types.Text text ]

@@ -606,13 +606,13 @@ let test_agent_run_context_like_http_400_is_unknown_invalid_request_without_retr
     let options = { Agent.default_options with provider_config = Some provider_config } in
     let agent = Agent.create ~net:env#net ~config ~options () in
     let history =
-      [ { Types.role = User
+      [ { origin = Llm_provider.Types.Conversation;  Types.role = User
         ; content = [ Text "summarize the large result" ]
         ; name = None
         ; tool_call_id = None
         ; metadata = []
         }
-      ; { Types.role = Assistant
+      ; { origin = Llm_provider.Types.Conversation;  Types.role = Assistant
         ; content =
             [ ToolUse
                 { id = "tool_1"; name = "search"; input = `Assoc [ "q", `String "logs" ] }
@@ -621,7 +621,7 @@ let test_agent_run_context_like_http_400_is_unknown_invalid_request_without_retr
         ; tool_call_id = None
         ; metadata = []
         }
-      ; { Types.role = Tool
+      ; { origin = Llm_provider.Types.Conversation;  Types.role = Tool
         ; content =
             [ ToolResult
                 { tool_use_id = "tool_1"

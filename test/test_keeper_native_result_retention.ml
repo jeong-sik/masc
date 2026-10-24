@@ -2,7 +2,7 @@ module T = Agent_core.Types
 module Retention = Masc.Keeper_native_result_retention
 
 let message role content : T.message =
-  {role; content; name=None; tool_call_id=None; metadata=[]}
+  { origin = Llm_provider.Types.Conversation; role; content; name=None; tool_call_id=None; metadata=[]}
 
 let result id content =
   T.ToolResult {tool_use_id=id; content; outcome=T.Tool_succeeded;

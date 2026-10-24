@@ -36,7 +36,7 @@ let test_roundtrip_system_msg_dropped () =
 
 let test_roundtrip_tool_msg () =
   let msg : Agent_core.Types.message =
-    { role = Agent_core.Types.Tool;
+    { origin = Llm_provider.Types.Conversation;  role = Agent_core.Types.Tool;
       content =
         [ Agent_core.Types.ToolResult
             { tool_use_id = "tc-1"
@@ -65,9 +65,9 @@ let test_roundtrip_tool_msg () =
 
 let test_restore_messages_all_roles () =
   let agent_core_msgs : Agent_core.Types.message list = [
-    { Agent_core.Types.role = Agent_core.Types.User;
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.User;
       content = [Agent_core.Types.Text "user question"]; name = None; tool_call_id = None; metadata = [] };
-    { Agent_core.Types.role = Agent_core.Types.Assistant;
+    { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant;
       content = [Agent_core.Types.Text "assistant answer"]; name = None; tool_call_id = None; metadata = [] };
   ] in
   let masc_msgs = List.map Fun.id agent_core_msgs in

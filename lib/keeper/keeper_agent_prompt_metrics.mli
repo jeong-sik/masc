@@ -48,8 +48,6 @@ type provenance_failure =
       ; projected_messages : int
       }
   | Input_prefix_rewritten of { first_divergent_index : int }
-  | Prompt_context_carrier_metadata_invalid
-  | Prompt_context_carrier_metadata_duplicate
   | Prompt_context_carrier_repeated
   | Prompt_context_presence_mismatch of
       { carrier_observed : bool

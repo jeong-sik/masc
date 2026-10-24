@@ -9,7 +9,7 @@ let test_injection_type () =
     { context_updates = [ "key1", `String "value1"; "key2", `Int 42 ]
     ; extra_messages =
         [ Types.
-            { role = User
+            { origin = Llm_provider.Types.Conversation;  role = User
             ; content = [ Text "injected observation" ]
             ; name = None
             ; tool_call_id = None
@@ -65,7 +65,7 @@ let test_injector_with_extra_messages () =
       { Hooks.context_updates = []
       ; extra_messages =
           [ Types.
-              { role = User
+              { origin = Llm_provider.Types.Conversation;  role = User
               ; content = [ Text "[system] git status: clean" ]
               ; name = None
               ; tool_call_id = None

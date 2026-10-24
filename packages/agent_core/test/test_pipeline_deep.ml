@@ -36,7 +36,7 @@ let context_messages ~original = function
 (** Multiple thinking blocks from multiple messages. *)
 let test_reasoning_multiple_messages () =
   let messages : Types.message list =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content =
           [ Types.Thinking { signature = None; content = "First thought" }
           ; Types.Text "response 1"
@@ -45,13 +45,13 @@ let test_reasoning_multiple_messages () =
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = User
+    ; { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "follow-up" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content =
           [ Types.Thinking
               { signature = None; content = "Second thought, I'm not sure about this" }
@@ -71,13 +71,13 @@ let test_reasoning_multiple_messages () =
 (** No thinking blocks but has text messages. *)
 let test_reasoning_no_thinking_blocks () =
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "question" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ Text "answer" ]
       ; name = None
       ; tool_call_id = None
@@ -94,7 +94,7 @@ let test_reasoning_no_thinking_blocks () =
 (** Thinking prose mentioning tools does not produce inferred tool_rationale. *)
 let test_reasoning_no_tool_rationale_inference () =
   let messages : Types.message list =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content =
           [ Types.Thinking
               { signature = None
@@ -127,7 +127,7 @@ let test_reasoning_no_uncertainty_marker_inference () =
   List.iter
     (fun marker ->
        let messages : Types.message list =
-         [ { role = Assistant
+         [ { origin = Llm_provider.Types.Conversation;  role = Assistant
            ; content =
                [ Types.Thinking { signature = None; content = "Analysis: " ^ marker } ]
            ; name = None
@@ -147,7 +147,7 @@ let test_reasoning_no_uncertainty_marker_inference () =
 (** Thinking block without uncertainty markers. *)
 let test_reasoning_no_uncertainty () =
   let messages : Types.message list =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content =
           [ Types.Thinking { signature = None; content = "The answer is clearly 42" } ]
       ; name = None
@@ -171,7 +171,7 @@ let expect_turn_params = function
 let test_resolve_params_no_hook () =
   let hooks = Hooks.empty in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "hello" ]
       ; name = None
       ; tool_call_id = None
@@ -195,7 +195,7 @@ let test_resolve_params_no_hook () =
 let test_resolve_params_continue () =
   let hooks = { Hooks.empty with before_turn_params = Some (fun _ -> Hooks.Continue) } in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "hello" ]
       ; name = None
       ; tool_call_id = None
@@ -235,7 +235,7 @@ let test_resolve_params_adjust () =
     { Hooks.empty with before_turn_params = Some (fun _ -> Hooks.AdjustParams adjusted) }
   in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "hello" ]
       ; name = None
       ; tool_call_id = None
@@ -273,7 +273,7 @@ let test_resolve_params_system_prompt_override () =
     { Hooks.empty with before_turn_params = Some (fun _ -> Hooks.AdjustParams adjusted) }
   in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "review this" ]
       ; name = None
       ; tool_call_id = None
@@ -302,7 +302,7 @@ let test_resolve_params_system_prompt_override () =
 let test_resolve_params_no_system_prompt_override () =
   let hooks = Hooks.empty in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "hello" ]
       ; name = None
       ; tool_call_id = None
@@ -337,19 +337,19 @@ let test_resolve_params_with_tool_results () =
     }
   in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "do something" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ ToolUse { id = "tu_1"; name = "search"; input = `Assoc [] } ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Tool
+    ; { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "tu_1"
@@ -396,19 +396,19 @@ let test_resolve_params_error_tool_results () =
     }
   in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "try this" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ ToolUse { id = "tu_e"; name = "risky"; input = `Assoc [] } ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Tool
+    ; { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "tu_e"
@@ -452,7 +452,7 @@ let test_resolve_params_error_tool_results () =
 let test_context_injection_sets_values () =
   let context = Context.create_sync () in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "query" ]
       ; name = None
       ; tool_call_id = None
@@ -499,7 +499,7 @@ let test_context_injection_sets_values () =
 let test_context_injection_none () =
   let context = Context.create_sync () in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "query" ]
       ; name = None
       ; tool_call_id = None
@@ -531,13 +531,13 @@ let test_context_injection_none () =
 let test_context_injection_extra_messages () =
   let context = Context.create_sync () in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "query" ]
       ; name = None
       ; tool_call_id = None
       ; metadata = []
       }
-    ; { role = Assistant
+    ; { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content = [ ToolUse { id = "tu_m"; name = "tool"; input = `Assoc [] } ]
       ; name = None
       ; tool_call_id = None
@@ -549,7 +549,7 @@ let test_context_injection_extra_messages () =
     Some
       { Hooks.context_updates = []
       ; extra_messages =
-          [ { Types.role = User
+          [ { origin = Llm_provider.Types.Conversation;  Types.role = User
             ; content = [ Text "injected context" ]
             ; name = None
             ; tool_call_id = None
@@ -582,7 +582,7 @@ let test_context_injection_error_result () =
   let context = Context.create_sync () in
   let received_output = ref None in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "query" ]
       ; name = None
       ; tool_call_id = None
@@ -623,7 +623,7 @@ let test_context_injection_error_result () =
 let test_context_injection_raises () =
   let context = Context.create_sync () in
   let messages : Types.message list =
-    [ { role = User
+    [ { origin = Llm_provider.Types.Conversation;  role = User
       ; content = [ Text "query" ]
       ; name = None
       ; tool_call_id = None

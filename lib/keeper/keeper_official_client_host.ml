@@ -2005,14 +2005,14 @@ let persist_pre_tool_rejects ~keeper_name ~session_dir ~session_id rejects =
              | Keeper_checkpoint_store.Agent_core_error detail -> detail))
      | Ok checkpoint ->
        let roundtrip { call_id; tool_name; input; detail } =
-         [ { Agent_core.Types.role = Agent_core.Types.Assistant
+         [ { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Assistant
            ; content =
                [ Agent_core.Types.ToolUse { id = call_id; name = tool_name; input } ]
            ; name = None
            ; tool_call_id = None
            ; metadata = []
            }
-         ; { Agent_core.Types.role = Agent_core.Types.Tool
+         ; { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.Tool
            ; content =
                [ Agent_core.Types.ToolResult
                    { tool_use_id = call_id

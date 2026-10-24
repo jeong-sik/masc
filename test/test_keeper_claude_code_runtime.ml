@@ -393,7 +393,7 @@ let keeper_response_text (result : Runtime_agent.run_result) =
 ;;
 
 let message role text : Agent_core.Types.message =
-  { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+  { origin = Llm_provider.Types.Conversation;  role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
 (* [Runtime_claude_code.user_message] always sends a content-block array —
@@ -1041,7 +1041,7 @@ let test_agent_core_checkpoint_starts_official_client_turn () =
   let prompt_marker = Filename.concat base_path "checkpoint-prompt.json" in
   let manifests = ref [] in
   let checkpoint_history : Agent_core.Types.message list =
-    [ { role = Assistant
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
       ; content =
           [ ToolUse
               { id = "agent_core-tool-call"
@@ -1149,7 +1149,7 @@ let test_keeper_projects_typed_tool_history_and_lifecycle () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        let tool_use : Agent_core.Types.message =
-         { role = Assistant
+         { origin = Llm_provider.Types.Conversation;  role = Assistant
          ; content =
              [ ToolUse
                  { id = "prior-tool-call"
@@ -2497,15 +2497,15 @@ let test_keeper_settles_and_resumes () =
   (* The two messages the host composes for each turn: the per-turn context
      carrier and the Librarian working state. *)
   let carrier : Agent_core.Types.message =
-    { role = System
+    { origin = Llm_provider.Types.System_context;  role = System
     ; content = [ Text "MASC_TURN_CONTEXT memory revision 903" ]
     ; name = None
     ; tool_call_id = None
-    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    ; metadata = []
     }
   in
   let working_state : Agent_core.Types.message =
-    { role = System
+    { origin = Llm_provider.Types.Agent_instruction;  role = System
     ; content = [ Text "MASC_WORKING_STATE two asks answered" ]
     ; name = None
     ; tool_call_id = None
@@ -2721,11 +2721,11 @@ let test_resume_prompt_carries_the_task_reference () =
       metadata = [ "masc_official_historical_task", `String "v1" ] }
   in
   let carrier : Agent_core.Types.message =
-    { role = System
+    { origin = Llm_provider.Types.System_context;  role = System
     ; content = [ Text "MASC_TURN_CONTEXT" ]
     ; name = None
     ; tool_call_id = None
-    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    ; metadata = []
     }
   in
   check bool "the reference is recognised" true
@@ -2758,11 +2758,11 @@ let test_resume_prompt_sends_only_changed_blocks () =
     let blocks = blocks texts in
     let assembled = String.concat "\n\n" (List.map snd blocks) in
     let carrier : Agent_core.Types.message =
-      { role = System
+      { origin = Llm_provider.Types.System_context;  role = System
       ; content = [ Text assembled ]
       ; name = None
       ; tool_call_id = None
-      ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+      ; metadata = []
       }
     in
     ( Some
@@ -2772,11 +2772,11 @@ let test_resume_prompt_sends_only_changed_blocks () =
   let rendered_blocks texts =
     Keeper_official_client_host.history_role_label Agent_core.Types.System
     ^ Keeper_official_client_host.encode_history_message
-        ({ role = System
+        ({ origin = Llm_provider.Types.System_context;  role = System
          ; content = [ Text (String.concat "\n\n" texts) ]
          ; name = None
          ; tool_call_id = None
-         ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+         ; metadata = []
          }
          : Agent_core.Types.message)
   in
@@ -2822,11 +2822,11 @@ let test_whole_carrier_supersedes_held_blocks () =
     ]
   in
   let carrier_of assembled : Agent_core.Types.message =
-    { role = System
+    { origin = Llm_provider.Types.System_context;  role = System
     ; content = [ Text assembled ]
     ; name = None
     ; tool_call_id = None
-    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    ; metadata = []
     }
   in
   let turn texts =
@@ -5608,7 +5608,7 @@ let test_an_unhandled_runtime_exception_recovers_as_protocol_failed () =
    a seeded range and a seed never widens the ceiling's. *)
 let start_seed_history () =
   let message role text : Agent_core.Types.message =
-    { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+    { origin = Llm_provider.Types.Conversation;  role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
   in
   List.concat
     (List.init 60 (fun i ->
@@ -6070,11 +6070,11 @@ let test_a_working_state_beside_the_turn_carrier_passes_the_composition_check ()
     check int "the working state is sent" 1
       (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
     let carrier : Agent_core.Types.message =
-      { role = System
+      { origin = Llm_provider.Types.System_context;  role = System
       ; content = [ Text "turn context" ]
       ; name = None
       ; tool_call_id = None
-      ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+      ; metadata = []
       }
     in
     (match
@@ -6093,7 +6093,7 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
      from there: more than one quantum, so a window that failed at 0 would
      jump to 60 rather than drop the preamble alone. *)
   let messages =
-    ({ role = User; content = [ Text "ask intro" ]; name = None; tool_call_id = None
+    ({ origin = Llm_provider.Types.Conversation;  role = User; content = [ Text "ask intro" ]; name = None; tool_call_id = None
      ; metadata = [] }
      : Agent_core.Types.message)
     :: start_seed_history ()
@@ -6183,7 +6183,7 @@ let test_a_working_state_that_displaces_nothing_goes () =
   in
   let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
   let pinned : Agent_core.Types.message =
-    { role = System
+    { origin = Llm_provider.Types.Agent_instruction;  role = System
     ; content = [ Text working_state ]
     ; name = None
     ; tool_call_id = None

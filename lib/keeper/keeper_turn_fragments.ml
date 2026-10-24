@@ -53,7 +53,7 @@ let path ~session_dir = function
 
 (* The keys a message line may carry: the writer's own three, the routing
    source, and the message's fields. *)
-let message_line_required = [ H.key_ts_unix; H.key_turn_ref; H.key_kind; "role"; "content_blocks" ]
+let message_line_required = [ H.key_ts_unix; H.key_turn_ref; H.key_kind; "role"; "origin"; "content_blocks" ]
 let message_line_optional = [ H.key_source; "name"; "tool_call_id"; "metadata" ]
 let tool_observation_fields =
   [ H.key_ts_unix; H.key_turn_ref; H.key_kind; H.key_tool_name; H.key_outcome ]

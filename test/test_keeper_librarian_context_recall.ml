@@ -127,8 +127,8 @@ let test_recall_lifecycle_retires_and_restores_held_pointer () =
       Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
         ~blocks:[Prompt_block_id.Librarian_working_context, body] in
     let message : Agent_core.Types.message =
-      { role = System; content = [Text body]; name = None; tool_call_id = None
-      ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata } in
+      { origin = Llm_provider.Types.System_context;  role = System; content = [Text body]; name = None; tool_call_id = None
+      ; metadata = [] } in
     let delivery = Host.resume_prompt ~goal:"NEXT_TICK" ~held:!held
       ~composed_context [message] in
     held := delivery.held_context;

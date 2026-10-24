@@ -489,7 +489,7 @@ let test_checkpoint_sink_does_not_clobber_intervening_state () =
   @@ fun sw ->
   let agent_ref = ref None in
   let marker_message =
-    { Types.role = Types.System
+    { origin = Llm_provider.Types.Conversation;  Types.role = Types.System
     ; content = [ Types.Text "sink-side-effect" ]
     ; name = None
     ; tool_call_id = None

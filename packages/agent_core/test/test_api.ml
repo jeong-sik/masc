@@ -181,7 +181,7 @@ let test_reasoning_details_requires_details_list () =
 
 let test_kimi_message_to_json_tool_result_uses_text_blocks () =
   let msg =
-    { Types.role = Tool
+    { origin = Llm_provider.Types.Conversation;  Types.role = Tool
     ; content =
         [ Types.ToolResult
             { tool_use_id = "tu_001"
@@ -520,7 +520,7 @@ let test_parse_openai_response_reasoning_content_preferred () =
 
 let test_message_to_json () =
   let msg =
-    { Types.role = Types.User
+    { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
     ; content = [ Types.Text "hi" ]
     ; name = None
     ; tool_call_id = None
@@ -536,7 +536,7 @@ let test_message_to_json () =
 
 let test_message_to_json_ignores_metadata () =
   let msg =
-    { Types.role = Types.Assistant
+    { origin = Llm_provider.Types.Conversation;  Types.role = Types.Assistant
     ; content = [ Types.Text "visible" ]
     ; name = Some "assistant"
     ; tool_call_id = Some "call_1"
@@ -726,7 +726,7 @@ let test_parse_sse_malformed_json () =
 
 let test_message_to_json_assistant () =
   let msg =
-    { Types.role = Types.Assistant
+    { origin = Llm_provider.Types.Conversation;  Types.role = Types.Assistant
     ; content =
         [ Types.Text "hi"; Types.ToolUse { id = "t1"; name = "calc"; input = `Null } ]
     ; name = None
@@ -747,7 +747,7 @@ let test_message_to_json_assistant () =
 
 let test_openai_messages_text_only () =
   let msg =
-    { Types.role = Types.User
+    { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
     ; content = [ Types.Text "hello" ]
     ; name = None
     ; tool_call_id = None
@@ -764,7 +764,7 @@ let test_openai_messages_text_only () =
 
 let test_openai_messages_with_image () =
   let msg =
-    { Types.role = Types.User
+    { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
     ; content =
         [ Types.Text "describe this"
         ; Types.Image

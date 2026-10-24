@@ -69,7 +69,7 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
         messages =
           Util.snoc
             s.messages
-            { role = User
+            { origin = Recovery_instruction; role = User
             ; content = [ Text nudge_msg ]
             ; name = None
             ; tool_call_id = None
@@ -121,7 +121,7 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
    itself (agent_turn.ml:221). The test now names the function it pins. *)
 let%test "last_tool_results_from routes through canonical projection (with json)" =
   let msgs =
-    [ { role = Tool
+    [ { origin = Llm_provider.Types.Conversation;  role = Tool
       ; content =
           [ ToolResult
               { tool_use_id = "t1"

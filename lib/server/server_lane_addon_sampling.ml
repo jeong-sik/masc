@@ -84,7 +84,7 @@ let native_messages (params : S.create_message_params) =
       | S.Text {text;type_=_} -> L.Text text
       | S.Image {data;mime_type;type_=_} ->
           L.Image {media_type=mime_type;data;source_type=L.Base64} in
-    {L.role=role;content=[content];name=None;tool_call_id=None;metadata=[]}) params.messages
+    { origin = Llm_provider.Types.Conversation; L.role=role;content=[content];name=None;tool_call_id=None;metadata=[]}) params.messages
 
 let sampling_stop_reason = function
   | L.EndTurn -> Some "endTurn"

@@ -904,50 +904,58 @@ let media_reading_maintenance_cmd =
 let validate_stores base_path =
   let module D = Masc.Keeper_durable_store in
   let module L = Masc.Lane_addon_store_preflight in
+  let print_store (name, on_refusal, result) =
+    match result with
+    | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail
+    | Ok (report : D.report) ->
+      Printf.printf "%s rows=%d refused=%d\n%!" name report.rows report.refused;
+      (match report.first_refusal with
+       | None -> ()
+       | Some detail ->
+         Printf.printf "  first refusal: %s\n%!" detail;
+         Printf.printf "  on refusal: %s\n%!" on_refusal;
+         Printf.printf
+           "  fresh state: docs/guides/DURABLE-STORE-HARD-CUT.md; preserve evidence and reconcile readers before setting files aside\n%!")
+  in
   let reports =
     List.filter_map
       (fun id ->
          Option.map
-           (fun scan -> D.name id, D.on_refusal scan, D.run scan ~base_path)
+           (fun scan ->
+              let report = D.name id, D.on_refusal scan, D.run scan ~base_path in
+              print_store report;
+              report)
            (D.preflight_scan id))
       D.Id.all
   in
-  List.iter
-    (fun (name, on_refusal, result) ->
-       match result with
-       | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail
-       | Ok (report : D.report) ->
-         Printf.printf "%s rows=%d refused=%d\n%!" name report.rows report.refused;
-         (match report.first_refusal with
-          | None -> ()
-          | Some detail ->
-            Printf.printf "  first refusal: %s\n%!" detail;
-            Printf.printf "  on refusal: %s\n%!" on_refusal))
-    reports;
-  let lane_addon_reports =
-    List.map (fun store -> L.name store, L.on_refusal store, L.scan store ~base_path) L.Store.all
+  let print_lane_addon (name, on_refusal, result) =
+    match result with
+    | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail
+    | Ok (report : L.report) ->
+      Printf.printf
+        "%s rows=%d refused=%d\n%!"
+        name
+        report.rows
+        (List.length report.refusals);
+      List.iter
+        (fun (refusal : L.refusal) ->
+           Printf.printf
+             "  refusal: %s: %s: %s\n%!"
+             refusal.path
+             (L.decoder_name refusal.decoder)
+             refusal.detail;
+           Printf.printf "  fresh state: %s\n%!" (L.fresh_state_step refusal))
+        report.refusals;
+      if report.refusals <> [] then Printf.printf "  on refusal: %s\n%!" on_refusal
   in
-  List.iter
-    (fun (name, on_refusal, result) ->
-       match result with
-       | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail
-       | Ok (report : L.report) ->
-         Printf.printf
-           "%s rows=%d refused=%d\n%!"
-           name
-           report.rows
-           (List.length report.refusals);
-         List.iter
-           (fun (refusal : L.refusal) ->
-              Printf.printf
-                "  refusal: %s: %s: %s\n%!"
-                refusal.path
-                (L.decoder_name refusal.decoder)
-                refusal.detail;
-              Printf.printf "  fresh state: %s\n%!" (L.fresh_state_step refusal))
-           report.refusals;
-         if report.refusals <> [] then Printf.printf "  on refusal: %s\n%!" on_refusal)
-    lane_addon_reports;
+  let lane_addon_reports =
+    List.map
+      (fun store ->
+         let report = L.name store, L.on_refusal store, L.scan store ~base_path in
+         print_lane_addon report;
+         report)
+      L.Store.all
+  in
   let refused =
     List.fold_left
       (fun total (_, _, result) ->
@@ -983,9 +991,26 @@ let validate_stores base_path =
   else if refused = 0
   then Ok ()
   else
+    let refused_stores =
+      List.filter_map
+        (fun (name, _, result) ->
+           match result with
+           | Ok (report : D.report) when report.refused > 0 ->
+             Some (Printf.sprintf "%s=%d" name report.refused)
+           | Ok _ | Error _ -> None)
+        reports
+      @ List.filter_map
+          (fun (name, _, result) ->
+             match result with
+             | Ok (report : L.report) when report.refusals <> [] ->
+               Some (Printf.sprintf "%s=%d" name (List.length report.refusals))
+             | Ok _ | Error _ -> None)
+          lane_addon_reports
+    in
     errorf
-      "%d stored row(s) the runtime about to serve them cannot read"
+      "%d stored row(s) the runtime about to serve them cannot read (%s)"
       refused
+      (String.concat "; " refused_stores)
 ;;
 
 let validate_stores_cmd =

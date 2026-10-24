@@ -415,15 +415,17 @@ let turn_record_store =
          in
          let scan_file report path =
            match open_in path with
-           | exception Sys_error _ -> report
+           | exception Sys_error detail -> count_row report (Error (path ^ ": " ^ detail))
            | ic ->
              Fun.protect
                ~finally:(fun () -> close_in_noerr ic)
                (fun () ->
                   let acc = ref report in
+                  let line_number = ref 0 in
                   (try
                      while true do
                        let line = input_line ic in
+                       incr line_number;
                        if String.trim line <> ""
                        then
                          acc :=
@@ -431,12 +433,12 @@ let turn_record_store =
                              !acc
                              (match Yojson.Safe.from_string line with
                               | exception Yojson.Json_error _ ->
-                                Error (Filename.basename path ^ ": not JSON")
+                                Error (Printf.sprintf "%s line %d: not JSON" path !line_number)
                               | json ->
                                 (match Turn_record.of_json json with
                                  | Ok _ -> Ok ()
                                  | Error detail ->
-                                   Error (Filename.basename path ^ ": " ^ detail)))
+                                   Error (Printf.sprintf "%s line %d: %s" path !line_number detail)))
                      done
                    with End_of_file -> ());
                   !acc)
@@ -669,12 +671,12 @@ let turn_fragment_store =
            (directories
             |> List.fold_left
                  (fun report session_dir ->
-                    let trace_id = Filename.basename session_dir in
                     List.fold_left
                       (fun report file ->
+                         let path = Keeper_turn_fragments.path ~session_dir file in
                          match Keeper_turn_fragments.read ~session_dir file with
                          | Error detail ->
-                           count_row report (Error (trace_id ^ ": " ^ detail))
+                           count_row report (Error (path ^ ": " ^ detail))
                          | Ok lines ->
                            List.fold_left
                              (fun report (line, decoded) ->
@@ -691,7 +693,7 @@ let turn_fragment_store =
                                     (Error
                                        (Printf.sprintf
                                           "%s line %d: %s"
-                                          trace_id
+                                          path
                                           line
                                           (Keeper_turn_fragments.read_error_to_string
                                              error))))

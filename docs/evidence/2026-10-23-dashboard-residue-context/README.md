@@ -35,12 +35,17 @@ GET-only proxy to the installed server `107c58401723313611f7c599bbe15225de5910da
 The actual Command panel showed a collapsed seven-Keeper unobserved note;
 expansion displayed their usage-scope-unavailable reasons, with **zero context
 invalid-payload alerts**. Both screenshots were visually inspected. The proxy
-forwarded zero writes and rejected the two POSTs attempted by automatic nav
+forwarded zero write verbs and rejected the two POSTs attempted by automatic nav
 telemetry/MCP setup. It did not forward browser credentials or Origin, so
 visible auth errors and a reconnect indication do not establish a production
 transport failure or repair. The bundle mismatch warning came from the
 server's installed bundle metadata (`25faf147...`), while the candidate's own
-build identity is recorded separately. No action button was used.
+build identity is recorded separately. No action button was used. The browser also automatically requested the
+loopback dev-token GET, whose handler can issue or rotate credentials. A separate
+[effects audit](integration-20261024/auth-get-effect-audit.json) found both stored
+Dashboard Admin pair members last changed on 2026-10-23, before this preview,
+and no pending journal. Their metadata supports reuse without issue/rotation;
+GET-only filtering alone would not establish that result.
 [Observation receipt](integration-20261024/browser-observation.json) records
 private screenshot hashes, response hash, scope and cleanup. Screenshots contain
 live workspace data and remain local. The owned space finished with no retained

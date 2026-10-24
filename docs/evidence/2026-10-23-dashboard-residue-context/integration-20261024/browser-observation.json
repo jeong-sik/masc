@@ -69,5 +69,6 @@
       "at": "2026-10-24T03:57:18.091Z"
     },
     "listener_closed": true
-  }
+  },
+  "http_method_limit": "No write verbs forwarded. Automatic dev-token GET can issue/rotate; actual unchanged auth pair metadata is audited separately in auth-get-effect-audit.json."
 }

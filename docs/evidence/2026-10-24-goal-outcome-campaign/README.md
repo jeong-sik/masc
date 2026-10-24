@@ -7,8 +7,8 @@ The metric is defined by fixed cases G1–G4 and A1–A7. Task count and Goal li
 | Case | Observed status | Evidence and scope |
 | --- | --- | --- |
 | G1 Current Goal criterion, revision, measurement and explicit unknown reach Keeper | Pass | Actual7501 direct-provider request plus deterministic native missing/stale/error controls. [Direct context](../2026-10-24-direct-goal-context/README.md). |
-| G2 Model creates a related Task with matching Goal | Pass, measured cohorts | Source54e8 Qwen creates and claims the matching Goal-linked Task, then executes and submits the partial artifact. No Goal ID hint, operator association or execution reminder. Earlier Gemma creation remains separate historical evidence. [Actual runtime](../2026-10-25-goal-lookup-runtime/README.md). |
-| G3 Approval returns attention to actual Goal measurement and remaining work without inferring Goal completion | Measured failure | Source54e8 Qwen continues actual beta/gamma work and persists 3/3 after controlled approval, with no further Keeper message. Final public text falsely calls measurement Goal verification and predicts completion after Task approval; Goal remains Executing. [Strict diagnosis](../2026-10-25-goal-lookup-runtime/README.md). |
+| G2 Model creates a related Task with matching Goal | Latest measured failure; earlier passes preserved | Source3014 Qwen receives Goal/revision but omits the association through terminal. Earlier54 Qwen and Gemma passes remain historical. [Latest runtime](../2026-10-25-goal-receipt-runtime/README.md). |
+| G3 Approval returns attention to actual Goal measurement and remaining work without inferring Goal completion | Latest measured failure | Source3014 controlled linked-Task approval reaches the model; actual exact-ID Done lookup works, but model resubmits Done and ends with no measurement or remaining work. New receipt is never invoked. [Latest diagnosis](../2026-10-25-goal-receipt-runtime/README.md). |
 | G4 Independent Tasks remain supported | Pass | Isolated external-agent create/claim/start, actual Node Docker computation, submission and controlled operator approval. This is not Keeper inference proof. |
 | A1 Grading execution boundary | Pass, Docker scope | [Actual grading stages](../2026-10-24-coding-boundary/README.md) use captured bytes inside fresh unprivileged containers. |
 | A2 Oracle-only success forgery | Pass | Both broken Node implementations remained unchanged and both oracle-only edits were rejected; both reference controls passed. |
@@ -18,16 +18,21 @@ The metric is defined by fixed cases G1–G4 and A1–A7. Task count and Goal li
 | A6 Producer/judge model observation | Pass, controlled native scope | Actual native provider parsing, admitted ToolUse ordinal, submission/verdict persistence and calibration tests at7501. Missing raw model identity remains unknown; response ID is a correlation label. This does not prove independent weights. |
 | A7 Lifecycle approval, external acceptance and human Goal confirmation | Pass within explicit scopes | [Actual API](../2026-10-24-outcome-api-runtime/README.md) and [visually inspected dashboard](../2026-10-24-outcome-dashboard-runtime/README.md): lifecycle approval1, external acceptance unobserved1, Goal unchanged. Controlled operator proxy is not an independent LLM or actual human Goal verdict. |
 
-Current score: **10/11**. The latest completed source54e8 Qwen cohort passes G2
-and the actual remaining-work/measurement parts of G3, but fails G3's full fixed
-contract because its final report infers Goal verification/completion. Its owner
-also requested an intermediate measurement before further edits; that order was
-missed. The run issued no exact-ID lookup after approval, so improved work is not
-isolated causal evidence for the new lookup default. The lookup's native cases
-pass separately. A same-transaction lifecycle receipt is under actual candidate
-validation; [frozen final-request comparisons](../2026-10-25-goal-measurement-receipt/frozen-inference/README.md)
-are diagnostic and do not pass G3.
+Latest acceptance: **9/11**, measured after candidate3014 completed. G2 is
+reopened and G3 remains failed. The earlier **10/11 historical case evidence
+coverage** is preserved, not presented as current candidate success. G1/G4 and
+A1–A7 keep their explicitly bound older scopes; this is not a single-head full
+regression result. [The latest cohort](../2026-10-25-goal-receipt-runtime/README.md)
+received the current Goal and new receipt instructions, omitted the Task link,
+and failed continuation after controlled link/approval. Exact-ID Done lookup
+worked; the model still resubmitted Done and never called goal_measure. A typed
+completion-authority retention repair is in progress, with no success inferred.
 
+The prior54e8 Qwen cohort passed G2 and actual remaining-work/3/3 measurement,
+but failed G3's full contract through incorrect Goal verification/completion
+reporting and missed the requested intermediate measurement order. Its
+[frozen final-request comparisons](../2026-10-25-goal-measurement-receipt/frozen-inference/README.md)
+remain diagnostic, with negative arms preserved.
 Historical failures remain visible. The older1eef cohort failed before Task
 creation. The3bad Gemma cohort failed G3 after correctly delivered approval and
 had one disclosed pre-approval execution reminder. The3bad Qwen cohort omitted
@@ -54,7 +59,7 @@ The inspected microVM runtime executes through its guest/shim path; it was not t
 -3badb88117794510dac576bf3fc34f0336e17d8a: six selected native suites passed40101087040; macOS build40101087227 succeeded. Server-only extraction/checks and real Gemma canary: G2 pass, G3 measured failure; actual browser/API/System-wire evidence is in the linked runtime directory.
 - d3a242837194e94c435a228228ac0eaab10724aa: official Resume repair, two selected suites passed40102214212. cf60643a1680b6c1cfa678feb5c97034b3bd8d22: official blank-instructions repair, two selected suites passed40103733597 (87 Host +13 projection tests). Neither result is a live vendor-session or whole-regression verdict.
 -54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8: native Task-outcome and tool parity checks passed40105703498; macOS candidate40105705308 built. Actual Qwen executes Goal-linked work and records3/3 but fails strict completion reporting. [Runtime evidence](../2026-10-25-goal-lookup-runtime/README.md).
--3014cfce79636f1e41cc39f6019a3428c6912145: native40110334799 passed50 Goal gate cases and one canonical tool parity case; direct HTTP cases5PASS/1FAIL exposed a parent empty-Goal assertion mismatch. The test-only correction is ec664e53b7eda6a7dae4eb09daa04b56ad98997d; all six corrected HTTP cases then passed run40111175993 separately. The3014 macOS server was checked against packaged SHA and embedded source, SHA256 bd9042e019d31c377e8c9ca72409bc5b152052dc79dd70621f027cc008c475b6. New actual Keeper inference is in progress, not a G3 verdict.
+-3014cfce79636f1e41cc39f6019a3428c6912145: native40110334799 passed50 Goal gate cases and one canonical tool parity case; direct HTTP cases5PASS/1FAIL exposed a parent empty-Goal assertion mismatch. The test-only correction is ec664e53b7eda6a7dae4eb09daa04b56ad98997d; all six corrected HTTP cases then passed run40111175993 separately. The3014 macOS server was checked against packaged SHA and embedded source, SHA256 bd9042e019d31c377e8c9ca72409bc5b152052dc79dd70621f027cc008c475b6. The actual3014 Qwen cohort completed G2FAIL/G3FAIL; the model never invoked the receipt. See the latest runtime evidence.
 
 No full regression, production installation, deployment, stack merge or actual human Goal completion is claimed. Ordinary independent source reviews, native execution, isolated runtime and browser observations are separate evidence. The lower boundary PR45755 still has a historical standalone request-changes; its two additional identity repairs are in upper layer45779. Integrate the reviewed native stack whole through its top; do not merge lower layers separately.
 

@@ -79,8 +79,50 @@ let test_initial_login_identity () =
   (match Server_upgrade_preparation.authorize_initial ~base_path ~expected_version:"0.35.4" ~body ~login with
    | Ok () -> () | Error _ -> Alcotest.fail "exact identity rejected");
   Alcotest.check Alcotest.int "exact identity authorizes once" 1 !calls
+let test_termination_request_survives_observation_failure () =
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let base = Unix.realpath (Filename.get_temp_dir_name ()) in
+    let health () = Ok (Yojson.Safe.to_string (`Assoc ["version",`String "fixture";
+      "paths",`Assoc ["effective_base_path",`String base]])) in
+    List.iter (fun expected ->
+      let signals = ref 0 in
+      let owner = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
+        ~observe:health ~authorize:(fun () -> true)
+        ~capture:(fun () -> Ok ((fun () -> incr signals; Ok ()),(fun () -> ()))) |> Result.get_ok in
+      (match Server_upgrade_preparation.request_termination_and_observe owner ~observe:(fun () -> expected) with
+       | Requested observed when observed = expected -> ()
+       | Requested _ | Not_requested _ -> Alcotest.fail "termination request lost or readiness invented");
+      (match Server_upgrade_preparation.request_termination_and_observe owner
+        ~observe:(fun () -> Alcotest.fail "duplicate termination observed again") with
+       | Not_requested Already_requested -> ()
+       | Not_requested _ | Requested _ -> Alcotest.fail "termination was replayed");
+      Alcotest.check Alcotest.int "one signal regardless of observed readiness" 1 !signals;
+      Server_upgrade_preparation.close owner)
+      [Error Server_upgrade_preparation.Owner_unavailable; Ok Owner_draining; Ok Port_busy; Ok Replacement_can_start];
+    let owner = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
+      ~observe:health ~authorize:(fun () -> true)
+      ~capture:(fun () -> Ok ((fun () -> Ok ()),(fun () -> ()))) |> Result.get_ok in
+    (match Server_upgrade_preparation.request_termination_and_observe owner
+      ~observe:(fun () -> raise (Sys_error "lease observation failed")) with
+     | Requested (Error Owner_unavailable) -> ()
+     | Requested _ | Not_requested _ -> Alcotest.fail "post-request file error lost termination evidence")))
+let test_refused_termination_never_observes () =
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let base = Unix.realpath (Filename.get_temp_dir_name ()) and admin = ref true in
+    let owner = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
+      ~observe:(fun () -> Ok (Yojson.Safe.to_string (`Assoc ["version",`String "fixture";
+        "paths",`Assoc ["effective_base_path",`String base]])))
+      ~authorize:(fun () -> !admin)
+      ~capture:(fun () -> Ok ((fun () -> Alcotest.fail "unauthorized signal"),(fun () -> ()))) |> Result.get_ok in
+    admin := false;
+    match Server_upgrade_preparation.request_termination_and_observe owner
+      ~observe:(fun () -> Alcotest.fail "observation after refused termination") with
+    | Not_requested Admin_required -> ()
+    | Not_requested _ | Requested _ -> Alcotest.fail "refused request reported as sent"))
 let () = Alcotest.run "upgrade preparation"
   ["owner checks",[Alcotest.test_case "initial login identity" `Quick test_initial_login_identity;Alcotest.test_case "admin and exact incumbent" `Quick test_admin_workspace_and_incarnation;
     Alcotest.test_case "workspace conflict" `Quick test_other_workspace_never_receives_credentials;
     Alcotest.test_case "kernel lease and port drain" `Quick test_drain_requires_lease_and_port_release;
+    Alcotest.test_case "request and observation stay distinct" `Quick test_termination_request_survives_observation_failure;
+    Alcotest.test_case "refused request never observes" `Quick test_refused_termination_never_observes;
     Alcotest.test_case "duplicate health identity" `Quick test_duplicate_health_never_authorizes]]

@@ -1,0 +1,40 @@
+TAP version 13
+# Subtest: each closed snapshot action uses its exact native method once after both URL reads
+ok 1 - each closed snapshot action uses its exact native method once after both URL reads
+  ---
+  duration_ms: 2.003667
+  type: 'test'
+  ...
+# Subtest: navigation during target discovery refuses every action before native input
+ok 2 - navigation during target discovery refuses every action before native input
+  ---
+  duration_ms: 0.290625
+  type: 'test'
+  ...
+# Subtest: missing or ambiguous target refuses every action before native input
+ok 3 - missing or ambiguous target refuses every action before native input
+  ---
+  duration_ms: 0.242
+  type: 'test'
+  ...
+# Subtest: an input failure stays uncertain and is never replayed by this boundary
+ok 4 - an input failure stays uncertain and is never replayed by this boundary
+  ---
+  duration_ms: 0.400042
+  type: 'test'
+  ...
+# Subtest: a failed URL re-read refuses every native action before input
+ok 5 - a failed URL re-read refuses every native action before input
+  ---
+  duration_ms: 0.338208
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 87.028833

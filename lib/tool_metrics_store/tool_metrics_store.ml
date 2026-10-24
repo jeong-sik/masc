@@ -350,28 +350,35 @@ let read_recent ~masc_root ?since_ts ?until_ts ~n () =
     then Ok []
     else
       with_store ~masc_root (fun store ->
+        (* Optional-bound OR predicates force an index scan even when the
+           requested window has no rows. Keep each supplied range visible to
+           SQLite's planner. SQLite binds NaN as NULL, which is an absent
+           bound under this reader's existing NULL semantics. *)
+        let predicate column operator = function
+          | None -> [], []
+          | Some value when Float.is_nan value -> [], []
+          | Some value -> [column ^ " " ^ operator ^ " ?"], [Sqlite3.Data.FLOAT value]
+        in
+        let lower, lower_values = predicate "ts" ">=" since_ts in
+        let upper, upper_values = predicate "ts" "<=" until_ts in
+        let where = match lower @ upper with
+          | [] -> ""
+          | predicates -> " WHERE " ^ String.concat " AND " predicates
+        in
         with_statement
           store.db
           ~operation:"read recent tool metrics"
-          "SELECT record_id, ts, tool_name, disposition, duration_ms \
-           FROM tool_metric_events \
-           WHERE (?1 IS NULL OR ts >= ?1) \
-             AND (?2 IS NULL OR ts <= ?2) \
-           ORDER BY ts DESC, record_id DESC LIMIT ?3"
+          ("SELECT record_id, ts, tool_name, disposition, duration_ms \
+            FROM tool_metric_events"
+           ^ where ^ " ORDER BY ts DESC, record_id DESC LIMIT ?")
           (fun statement ->
             let* () =
               bind_all
                 store.db
                 statement
                 ~operation:"bind tool metric read filters"
-                [ (match since_ts with
-                   | None -> Sqlite3.Data.NULL
-                   | Some value -> Sqlite3.Data.FLOAT value)
-                ; (match until_ts with
-                   | None -> Sqlite3.Data.NULL
-                   | Some value -> Sqlite3.Data.FLOAT value)
-                ; Sqlite3.Data.INT (Int64.of_int n)
-                ]
+                (lower_values @ upper_values
+                 @ [Sqlite3.Data.INT (Int64.of_int n)])
             in
             let rec loop rows =
               match Sqlite3.step statement with

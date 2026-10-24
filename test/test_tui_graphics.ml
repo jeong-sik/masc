@@ -477,11 +477,27 @@ let test_the_evidence_slots_are_four_distinct_ids () =
     ids
 ;;
 
+let test_inspection_crop_and_reuse () =
+  let view : Masc_tui_image_viewport.window =
+    {x=120;y=40;width=320;height=160;columns=40;rows=10} in
+  let data = "retained PNG bytes" in
+  let sent = Masc_tui_graphics.place_viewport ~data view |> bodies in
+  let keys,payload = keys_and_payload (List.hd sent) in
+  List.iter (fun key -> check bool ("protocol source crop " ^ key) true (List.mem key keys))
+    ["x=120";"y=40";"w=320";"h=160";"c=40";"r=10";"a=T";"q=2"];
+  check string "original retained bytes" data (Base64.decode_exn payload);
+  let reused = Masc_tui_graphics.put_viewport {view with x=128} in
+  check bool "pan uses stored pixels" true (String.contains reused '=');
+  check bool "pan carries no image payload" false (String.contains reused ';');
+  check bool "pan requests a placement" true
+    (List.exists (fun body -> String.starts_with ~prefix:"a=p," body) (bodies reused))
+
 let () =
   run
     "tui_graphics"
     [ ( "place"
-      , [ test_case "screenshot pointer excludes text and padding" `Quick test_image_pointer_geometry
+      , [ test_case "inspection names source crop and reuses retained pixels" `Quick test_inspection_crop_and_reuse
+        ; test_case "screenshot pointer excludes text and padding" `Quick test_image_pointer_geometry
         ; test_case "the payload is the file" `Quick
             test_the_payload_is_the_file
         ; test_case "every chunk but the last says more" `Quick

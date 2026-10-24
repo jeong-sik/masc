@@ -27,6 +27,7 @@ type image =
   | Keeper_portrait
   | About_keeper_1 | About_keeper_2 | About_keeper_3 | About_keeper_4
   | Evidence_image_1 | Evidence_image_2 | Evidence_image_3 | Evidence_image_4
+  | Image_inspection
 [@@deriving enumerate]
 
 (* Fixed, so a query reply arriving late -- after the deadline, into the key
@@ -44,6 +45,7 @@ let image_id = function
   | Evidence_image_2 -> 52
   | Evidence_image_3 -> 53
   | Evidence_image_4 -> 54
+  | Image_inspection -> 55
 
 let evidence_images =
   [ Evidence_image_1; Evidence_image_2; Evidence_image_3; Evidence_image_4 ]
@@ -234,6 +236,19 @@ let replace_rgba ~image_id ~placement_id ~data ~pixel_width ~pixel_height ~rows 
 let replace_png ~image_id ~placement_id ~data ~rows ~cols ~crop =
   place_png ~identity:(identity ~image_id ~placement_id)
     ~extent:(extent ~rows ~cols ~crop) ~data
+
+let viewport_extent (view : Masc_tui_image_viewport.window) =
+  Printf.sprintf ",x=%d,y=%d,w=%d,h=%d,c=%d,r=%d"
+    view.x view.y view.width view.height view.columns view.rows
+
+let place_viewport ~data view =
+  place_png ~identity:(identity ~image_id:(image_id Image_inspection) ~placement_id:1)
+    ~extent:(viewport_extent view) ~data
+
+let put_viewport view =
+  Printf.sprintf "%sa=p%s%s,q=2%s" apc
+    (identity ~image_id:(image_id Image_inspection) ~placement_id:1)
+    (viewport_extent view) st
 
 let delete_all = Printf.sprintf "%sa=d%s" apc st
 

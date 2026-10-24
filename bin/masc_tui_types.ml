@@ -8389,6 +8389,7 @@ type state = {
      record of what was drawn -- the title line above the picture is drawn by
      [draw_image] from its own parameter, and nothing reads the rest. *)
   mutable image_open: bool;
+  mutable image_inspection : (string * string * Masc_tui_image_viewport.t) option;
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   mutable image_catalog: image_catalog option;
@@ -15442,6 +15443,7 @@ let create_state
      else Workspace_identity_unread);
   help_scroll = 0;
   image_open = false;
+  image_inspection = None;
   browser_viewport = None;
   image_request_generation = 0;
   image_catalog = None;

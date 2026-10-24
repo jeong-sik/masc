@@ -1591,6 +1591,7 @@ module For_testing = struct
     let runtime=make_runtime ~config ~sw ~clock in
     match process_task_once runtime task ~assignee ~verification_id with
     | Committed -> Ok ()
+    | Superseded_by {authority} -> Error ("original superseded by " ^ authority)
     | Stalled cause -> Error (stop_cause_detail cause)
 
   let commit_original ~config ~task ~store ~attempt ~installation_id ~package_id ~verification_id ~notes =

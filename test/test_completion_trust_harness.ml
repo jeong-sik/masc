@@ -745,8 +745,8 @@ let test_late_verdict_respects_actual_terminal_authority () =
             | Some ({task_status=Masc_domain.AwaitingVerification {verification_id;_}; _} as task) -> task,verification_id
             | Some _ | None -> fail "race fixture never reached AwaitingVerification" in
           let previous = Atomic.get AR.run_llm_reviewer_fn in
-          let racing_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
-              ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () =
+          let racing_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_
+              ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
             let commit verdict = Workspace.commit_verdict_r config
               ~authority:(Masc_domain.Human_operator {operator_id="race-operator"})
               ~task_id:task.id ~verification_id ~verdict () in
@@ -769,6 +769,19 @@ let test_late_verdict_respects_actual_terminal_authority () =
            | Completed {outcome=Superseded_by _; _} when is_terminal -> ()
            | Completed {outcome=Commit_failed _; _} when not is_terminal -> ()
            | Running | Completed _ -> fail "run did not distinguish terminal supersession from a nonterminal refusal");
+          let store=Masc.Lane_addon_store.create
+            ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+          let installation_id="masc.completion-authority"
+          and package_id="masc.completion-authority.review" in
+          let retained=match Masc.Verifier_review_owner.load_retained ~store ~verification_id ~attempt:0
+            ~installation_id ~package_id with
+            | Ok retained -> retained | Error _ -> fail "late verdict lost its retained original" in
+          (match Masc.Lane_addon_request_progress.phase (Masc.Verifier_review_owner.progress retained) with
+           | Conflicted _ -> ()
+           | _ -> fail "competing authority must leave an exact retained commit conflict");
+          (match Masc.Verifier_review_owner.pending_commits ~store ~installation_id ~package_id with
+           | Ok [] -> ()
+           | Ok (_::_) | Error _ -> fail "resolved conflict must not reopen on boot recovery");
           check bool "no shared retry batch was armed" false
             (Masc.Completion_authority_agent.For_testing.retry_pending ~task_id:task.id ~verification_id);
           let stalls = Masc.Board_dispatch.list_posts ~hearth:"verification" ~limit:200 ()

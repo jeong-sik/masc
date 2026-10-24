@@ -91,7 +91,9 @@ function terminalTheme(foreground, background) {
     const tinted = mix(background, foreground, weight);
     return contrast(foreground, tinted) >= 4.5 ? tinted : background;
   };
-  const node = surface(0.06), group = surface(0.12);
+  // Pele composites cluster fills at half opacity. Keep their visible tint
+  // distinct from the node surface after that compositing step.
+  const node = surface(0.06), group = surface(0.24);
   const readable = (weight, minimum) => {
     const tinted = mix(background, foreground, weight);
     return [background, node, group].every(bg => contrast(tinted, bg) >= minimum)

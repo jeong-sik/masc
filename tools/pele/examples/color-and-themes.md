@@ -32,6 +32,7 @@ flowchart LR
  end
  F --> G
  style custom fill:#dbeafe,fill-opacity:1,stroke:#2563eb,color:#172554,stroke-width:2px
+ linkStyle 1,2 stroke:#64748b,stroke-width:2px
 ```
 
 ## 시퀀스

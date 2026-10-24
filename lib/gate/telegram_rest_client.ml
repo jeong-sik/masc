@@ -22,7 +22,7 @@ let create ~token =
 
 type user = {id:int64;is_bot:bool;first_name:string;username:string option}
 type message = {
-  chat_id:int64; message_id:int; message_thread_id:int option;
+  chat_id:int64; message_id:int; message_thread_id:int option; direct_messages_topic_id:int64 option;sender_chat_id:int64 option;
   from_user:user option; text:string option; caption:string option;
 }
 type update_kind = Message of message | Edited_message of message | Unsupported
@@ -60,10 +60,14 @@ let message json =
   let* chat = required "chat" object_fields fields in
   let* chat_id = required "id" integer64 chat in
   let* message_thread_id = optional "message_thread_id" nonnegative fields in
+  let chat_identity field json = let* fields=object_fields field json in required "id" integer64 fields in
+  let topic_identity field json = let* fields=object_fields field json in required "topic_id" nonnegative64 fields in
+  let* direct_messages_topic_id=optional "direct_messages_topic" topic_identity fields in
+  let* sender_chat_id=optional "sender_chat" chat_identity fields in
   let* from_user = optional "from" user fields in
   let* text = optional "text" string fields in
   let* caption = optional "caption" string fields in
-  Ok {chat_id;message_id;message_thread_id;from_user;text;caption}
+  Ok {chat_id;message_id;message_thread_id;direct_messages_topic_id;sender_chat_id;from_user;text;caption}
 (* Decode Update's JSON field discriminants once at the wire boundary.
    Known alternatives are mutually exclusive, including events not subscribed
    to now: Telegram may still return a previously queued update. *)
@@ -156,14 +160,17 @@ let get_updates ?post ?clock ?timeout_sec client ?offset ~poll_timeout_sec () =
       |> add_optional "offset" int64_json offset in
     call ?post ?clock ?timeout_sec client "getUpdates" fields parse_updates_response
 let send_message ?post ?clock ?(timeout_sec=Masc_http_client.default_request_timeout_sec)
-    client ~chat_id ?message_thread_id ?reply_to_message_id ~text () =
+    client ~chat_id ?message_thread_id ?direct_messages_topic_id ?reply_to_message_id ?(html=false) ~text () =
   if Option.fold ~none:false ~some:(fun n -> n <= 0) message_thread_id
      || Option.fold ~none:false ~some:(fun n -> n <= 0) reply_to_message_id
+     || Option.fold ~none:false ~some:(fun n -> n <= 0L) direct_messages_topic_id
   then Error (Invalid_request "message coordinates")
   else if text = "" then Error (Invalid_request "text")
   else
     let fields = ["chat_id",int64_json chat_id;"text",`String text]
+      |> add_optional "parse_mode" (fun () -> `String "HTML") (if html then Some () else None)
       |> add_optional "message_thread_id" (fun n -> `Int n) message_thread_id
+      |> add_optional "direct_messages_topic_id" int64_json direct_messages_topic_id
       |> add_optional "reply_parameters" (fun n -> `Assoc ["message_id",`Int n]) reply_to_message_id in
     call ?post ?clock ~timeout_sec client "sendMessage" fields parse_message_response
 let edit_message_text ?post ?clock ?(timeout_sec=Masc_http_client.default_request_timeout_sec)

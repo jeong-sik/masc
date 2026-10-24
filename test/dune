@@ -2652,6 +2652,7 @@
 (include stanzas/test_slack_rest_client.inc)
 (include stanzas/test_telegram_rest_client.inc)
 (include stanzas/test_telegram_poll_custody.inc)
+(include stanzas/test_telegram_native_gateway.inc)
 
 (include stanzas/test_slack_user_directory.inc)
 

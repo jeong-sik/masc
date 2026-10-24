@@ -1418,7 +1418,8 @@ let handle_surface_post_with_outcome
          | Keeper_continuation_channel.Discord _
          | Keeper_continuation_channel.Dashboard _
          | Keeper_continuation_channel.Slack _
-         | Keeper_continuation_channel.Imessage _
+         | Keeper_continuation_channel.Telegram _
+      | Keeper_continuation_channel.Imessage _
          | Keeper_continuation_channel.Keeper _
          | Keeper_continuation_channel.Unrouted _ -> channel)
       continuation_channel

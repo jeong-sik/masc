@@ -14,6 +14,14 @@ type t =
       thread_ts : string option;
       user_id : string;
     }
+  | Telegram of {
+      bot_user_id : int64;
+      chat_id : int64;
+      direct_messages_topic_id : int64 option;
+      message_thread_id : int option;
+      reply_to_message_id : int option;
+      user_id : int64;
+    }
   | Imessage of {
       chat_identifier : string;
       chat_guid : string option;
@@ -81,7 +89,7 @@ let discord_thread_parent t ~parent_channel_id =
       ; reply_to_message_id
       ; user_id
       }
-  | Dashboard _ | Slack _ | Imessage _ | Keeper _ | Unrouted _ -> t
+  | Dashboard _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _ -> t
 ;;
 
 let slack ~team_id ~channel_id ~thread_ts ~user_id =
@@ -104,6 +112,15 @@ let imessage ~chat_identifier ~chat_guid ~user_id =
   Ok (Imessage { chat_identifier; chat_guid; user_id })
 ;;
 
+let telegram ~bot_user_id ~chat_id ~message_thread_id ~direct_messages_topic_id ~reply_to_message_id ~user_id =
+  if bot_user_id<=0L || user_id<=0L || chat_id=0L then Error "telegram continuation: invalid identity"
+  else if Option.fold ~none:false ~some:(fun n->n<=0L) direct_messages_topic_id then Error "telegram continuation: invalid direct topic"
+  else if Option.fold ~none:false ~some:(fun n -> n<=0) message_thread_id
+       || Option.fold ~none:false ~some:(fun n -> n<=0) reply_to_message_id
+  then Error "telegram continuation: invalid topic/reply identity"
+  else Ok (Telegram {bot_user_id;chat_id;message_thread_id;direct_messages_topic_id;reply_to_message_id;user_id})
+;;
+
 let unrouted reason =
   match validate_nonblank "reason" reason with
   | Ok reason -> Unrouted { reason }
@@ -112,12 +129,13 @@ let unrouted reason =
 
 let is_routable = function
   | Unrouted _ -> false
-  | Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ -> true
+  | Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Keeper _ -> true
 
 let kind_label = function
   | Dashboard _ -> "dashboard"
   | Discord _ -> "discord"
   | Slack _ -> "slack"
+  | Telegram _ -> "telegram"
   | Imessage _ -> "imessage"
   | Keeper _ -> "keeper"
   | Unrouted _ -> "unrouted"
@@ -153,6 +171,10 @@ let describe = function
       channel_id
       (opt "thread_ts" thread_ts)
       user_id
+  | Telegram {bot_user_id;chat_id;message_thread_id;direct_messages_topic_id;reply_to_message_id;user_id} ->
+    let opt name value = match value with None -> "" | Some n -> Printf.sprintf " %s=%d" name n in
+    Printf.sprintf "telegram bot=%Ld chat=%Ld%s%s user=%Ld" bot_user_id chat_id
+      (opt "topic" message_thread_id ^ (match direct_messages_topic_id with None -> "" | Some n -> Printf.sprintf " direct_topic=%Ld" n)) (opt "reply" reply_to_message_id) user_id
   | Imessage { chat_identifier; chat_guid; user_id } ->
     let opt label = function
       | None -> ""
@@ -222,14 +244,17 @@ let same_route a b =
     String.equal left_chat right_chat
     && same_string_option left_guid right_guid
     && String.equal left_user right_user
+  | Telegram a, Telegram b ->
+    a.bot_user_id=b.bot_user_id && a.chat_id=b.chat_id
+    && a.message_thread_id=b.message_thread_id && a.direct_messages_topic_id=b.direct_messages_topic_id && a.reply_to_message_id=b.reply_to_message_id && a.user_id=b.user_id
   | Keeper { keeper_name = left }, Keeper { keeper_name = right } ->
     String.equal left right
   | Unrouted _, Unrouted _ -> false
   (* Distinct-constructor pairs share no route. Listing the constructors
      explicitly (not [_]) keeps this exhaustive: a new variant forces a
      compile error here rather than silently defaulting to [false]. *)
-  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _)
-    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _) )
+  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _)
+    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _) )
     -> false
 
 (* RFC-0377: batching pending Connector_attention stimuli needs "is this the
@@ -270,6 +295,8 @@ let same_conversation a b =
   | ( Imessage { chat_identifier = left_chat; _ }
     , Imessage { chat_identifier = right_chat; _ } ) ->
     String.equal left_chat right_chat
+  | Telegram a, Telegram b ->
+    a.bot_user_id=b.bot_user_id && a.chat_id=b.chat_id && a.message_thread_id=b.message_thread_id && a.direct_messages_topic_id=b.direct_messages_topic_id
   | Keeper { keeper_name = left }, Keeper { keeper_name = right } ->
     String.equal left right
   | Unrouted _, Unrouted _ -> false
@@ -277,8 +304,8 @@ let same_conversation a b =
      constructors explicitly (not [_]) keeps this exhaustive: a new
      connector forces a compile error here rather than silently
      defaulting to [false]. *)
-  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _)
-    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _) )
+  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _)
+    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _) )
     -> false
 
 let option_string_fields fields =
@@ -315,6 +342,14 @@ let to_yojson = function
        ; ("user_id", `String user_id)
        ]
        @ option_string_fields [ ("team_id", team_id); ("thread_ts", thread_ts) ])
+  | Telegram {bot_user_id;chat_id;message_thread_id;direct_messages_topic_id;reply_to_message_id;user_id} ->
+    let int64 n = `Intlit (Int64.to_string n) in
+    let optional_int name = function None -> [] | Some n -> [name,`Int n] in
+    `Assoc (["kind",`String "telegram";"bot_user_id",int64 bot_user_id;
+      "chat_id",int64 chat_id;"user_id",int64 user_id]
+      @ optional_int "message_thread_id" message_thread_id
+      @ optional_int "reply_to_message_id" reply_to_message_id
+      @ (match direct_messages_topic_id with None -> [] | Some n -> ["direct_messages_topic_id",int64 n]))
   | Imessage { chat_identifier; chat_guid; user_id } ->
     `Assoc
       ([ ("kind", `String "imessage")
@@ -370,6 +405,18 @@ let optional_string_field name fields =
   | Some _ ->
     Error (Printf.sprintf "continuation_channel: field %s must be a string or null" name)
 
+let int64_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`Int n) -> Ok (Int64.of_int n)
+  | Some (`Intlit n) -> (match Int64.of_string_opt n with
+    | Some n -> Ok n | None -> Error ("continuation_channel: invalid integer " ^ name))
+  | Some _ | None -> Error ("continuation_channel: missing/invalid integer " ^ name)
+let optional_int_field name fields =
+  match List.assoc_opt name fields with
+  | None -> Ok None
+  | Some (`Int n) when n>0 -> Ok (Some n)
+  | Some _ -> Error ("continuation_channel: invalid optional integer " ^ name)
+
 let of_yojson json =
   let* fields = assoc_fields json in
   let* () = validate_unique_fields fields in
@@ -421,6 +468,17 @@ let of_yojson json =
     let* team_id = optional_string_field "team_id" fields in
     let* thread_ts = optional_string_field "thread_ts" fields in
     slack ~team_id ~channel_id ~thread_ts ~user_id
+  | "telegram" ->
+    let* () = validate_allowed_fields ~kind
+      ["kind";"bot_user_id";"chat_id";"message_thread_id";"direct_messages_topic_id";"reply_to_message_id";"user_id"] fields in
+    let* bot_user_id=int64_field "bot_user_id" fields in
+    let* chat_id=int64_field "chat_id" fields in
+    let* user_id=int64_field "user_id" fields in
+    let* message_thread_id=optional_int_field "message_thread_id" fields in
+    let* reply_to_message_id=optional_int_field "reply_to_message_id" fields in
+    let* direct_messages_topic_id=match List.assoc_opt "direct_messages_topic_id" fields with
+      | None -> Ok None | Some _ -> Result.map Option.some (int64_field "direct_messages_topic_id" fields) in
+    telegram ~bot_user_id ~chat_id ~message_thread_id ~direct_messages_topic_id ~reply_to_message_id ~user_id
   | "imessage" ->
     let* () =
       validate_allowed_fields

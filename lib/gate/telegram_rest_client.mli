@@ -25,6 +25,8 @@ type message = {
   chat_id : int64;
   message_id : int;
   message_thread_id : int option;
+  direct_messages_topic_id : int64 option;
+  sender_chat_id : int64 option;
   from_user : user option;
   text : string option;
   caption : string option;
@@ -52,9 +54,10 @@ val get_updates :
 
 val send_message :
   ?post:post -> ?clock:[> float Eio.Time.clock_ty] Eio.Resource.t ->
-  ?timeout_sec:float -> t -> chat_id:int64 -> ?message_thread_id:int ->
-  ?reply_to_message_id:int -> text:string -> unit -> (message, error) result
-(** Sends plain text unchanged. Caller owns formatting/chunking. Topic and reply
+  ?timeout_sec:float -> t -> chat_id:int64 -> ?message_thread_id:int -> ?direct_messages_topic_id:int64 ->
+  ?reply_to_message_id:int -> ?html:bool -> text:string -> unit -> (message, error) result
+(** Sends text unchanged; [html=true] selects Telegram HTML parsing.
+    Caller owns safe formatting and chunking after entity parsing. Topic and reply
     coordinates use the native message_thread_id and reply_parameters fields. *)
 
 val edit_message_text :

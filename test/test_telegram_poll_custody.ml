@@ -30,7 +30,7 @@ let accept ~operation_id _ = Ok (C.Accepted(receipt operation_id))
 let offset_on_disk path = Yojson.Safe.Util.member "next_offset" (Yojson.Safe.from_string(Fs_compat.load_file path))
 let test_frontier_restart_and_rotation () = with_cursor (fun ~clock path ->
   let offsets=ref [] in let post=transport ~offsets [10;11;12] in
-  let t=C.open_cursor ~post ~client:(client "token-A") ~path () |> ok in
+  let t=C.open_cursor ~post ~client:(client "token-A") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
   let calls=ref [] in
   let original_id=ref None in
   let stop ~operation_id update =
@@ -42,7 +42,7 @@ let test_frontier_restart_and_rotation () = with_cursor (fun ~clock path ->
   check (list int64) "later update never submitted" [10L;11L] !calls;
   check bool "only committed predecessor persisted" true (offset_on_disk path=`Int 11);
   let post=transport ~offsets [11;12] in
-  let rotated=C.open_cursor ~post ~client:(client "token-B") ~path () |> ok in
+  let rotated=C.open_cursor ~post ~client:(client "token-B") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
   check int64 "actual bot identity survives credential rotation" 777L (C.bot_user_id rotated);
   let continued ~operation_id update =
     if update.A.update_id=11L then check (option string) "operation identity independent of token" !original_id (Some operation_id);
@@ -55,7 +55,7 @@ let test_frontier_restart_and_rotation () = with_cursor (fun ~clock path ->
 let test_unconfirmed_and_wrong_receipts () =
   List.iter (fun corrupt -> with_cursor (fun ~clock path ->
     let offsets=ref [] in let post=transport ~offsets [10;11] in
-    let t=C.open_cursor ~post ~client:(client "token") ~path () |> ok in
+    let t=C.open_cursor ~post ~client:(client "token") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
     let accepted=ref [] in
     let accept ~operation_id update = accepted:=update.A.update_id::!accepted;Ok(C.Accepted(corrupt(receipt operation_id))) in
     (match C.step ~clock ~post t ~now ~poll_timeout_sec:0 ~accept () with
@@ -72,7 +72,7 @@ let test_wrong_bot_and_corrupt_cursor () = with_cursor (fun ~clock path ->
   let offsets=ref [] in let post=transport ~offsets [1] in
   List.iter (fun body ->
     Fs_compat.save_file path body;
-    (match C.open_cursor ~post ~client:(client "token") ~path () with
+    (match C.open_cursor ~post ~client:(client "token") ~path:(fun ~bot_user_id:_ -> path) () with
      | Error(C.Cursor_refused _) -> () | _ -> fail "invalid cursor accepted"))
     [ {|{"schema_version":1,"bot_user_id":778,"generation":0,"observed_at":1000000,"next_offset":100}|};
       {|{"schema_version":1,"bot_user_id":777,"generation":0,"observed_at":1000000,"next_offset":-1}|};
@@ -83,7 +83,7 @@ let test_wrong_bot_and_corrupt_cursor () = with_cursor (fun ~clock path ->
   check int "invalid state never reaches getUpdates" 0 (List.length !offsets))
 let test_stale_concurrent_page () = with_cursor (fun ~clock path ->
   let offsets=ref [] in let post=transport ~offsets [10] in
-  let t=C.open_cursor ~post ~client:(client "token") ~path () |> ok in
+  let t=C.open_cursor ~post ~client:(client "token") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
   let submitted=ref 0 in
   let accept ~operation_id update = incr submitted;accept ~operation_id update in
   let interleaved_post ~url ~body =
@@ -103,7 +103,7 @@ let fail_before_rename path body =
     ~sync_parent:ignore path body |> Result.map_error Fs_compat.atomic_replace_failure_to_string
 let test_storage_failure_does_not_ack () = with_cursor (fun ~clock path ->
   let offsets=ref [] in let post=transport ~offsets [10] in
-  let t=C.open_cursor ~post ~client:(client "token") ~path () |> ok in
+  let t=C.open_cursor ~post ~client:(client "token") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
   let seen=ref [] in
   let accept ~operation_id update = seen:=operation_id::!seen;accept ~operation_id update in
   (match C.For_testing.step_with_cursor_writer ~write_cursor:fail_before_rename
@@ -117,13 +117,13 @@ let test_storage_failure_does_not_ack () = with_cursor (fun ~clock path ->
   | _ -> fail "missing replay attempts")
 let test_failed_first_commit_then_idle_reset () = with_cursor (fun ~clock path ->
   let offsets=ref [] in let post=transport ~offsets [10] in
-  let t=C.open_cursor ~post ~client:(client "token") ~path () |> ok in
+  let t=C.open_cursor ~post ~client:(client "token") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
   let seen=ref [] in
   let accept ~operation_id update = seen:=operation_id::!seen;accept ~operation_id update in
   (match C.For_testing.step_with_cursor_writer ~write_cursor:fail_before_rename
     ~clock ~post t ~now ~poll_timeout_sec:0 ~accept () with
    | Error(C.Storage_failed _) -> () | _ -> fail "missing first cursor failure");
-  let restarted=C.open_cursor ~post ~client:(client "rotated") ~path () |> ok in
+  let restarted=C.open_cursor ~post ~client:(client "rotated") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
   let later ()=now () +. 7. *. 24. *. 60. *. 60. in
   let result=C.step ~clock ~post restarted ~now:later ~poll_timeout_sec:0 ~accept () |> ok in
   check int64 "failed first submit observed its retiring generation" 1L result.generation;
@@ -132,7 +132,7 @@ let test_failed_first_commit_then_idle_reset () = with_cursor (fun ~clock path -
   | _ -> fail "missing generation attempts")
 let test_after_rename_sync_recovery () = with_cursor (fun ~clock path ->
   let offsets=ref [] in let post=transport ~offsets [10] in
-  let t=C.open_cursor ~post ~client:(client "token") ~path () |> ok in
+  let t=C.open_cursor ~post ~client:(client "token") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
   let write_cursor path body =
     if Yojson.Safe.Util.member "next_offset" (Yojson.Safe.from_string body)=`Null
     then Fs_compat.save_file_atomic_strict path body
@@ -147,7 +147,7 @@ let test_after_rename_sync_recovery () = with_cursor (fun ~clock path ->
   check bool "resync admits only already durable frontier" true (!offsets=[`Null;`Int 11]))
 let test_explicit_ignore_and_overflow () = with_cursor (fun ~clock path ->
   let offsets=ref [] in let post=transport ~offsets [10] in
-  let t=C.open_cursor ~post ~client:(client "token") ~path () |> ok in
+  let t=C.open_cursor ~post ~client:(client "token") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
   let result=C.step ~clock ~post t ~now ~poll_timeout_sec:0 ~accept:(fun ~operation_id:_ _ -> Ok(C.Intentionally_ignored C.Unsupported_update)) () |> ok in
   check int "explicit ignore accounted" 1 result.ignored;
   check bool "explicit ignore persisted" true (offset_on_disk path=`Int 11);
@@ -158,12 +158,12 @@ let test_explicit_ignore_and_overflow () = with_cursor (fun ~clock path ->
   check bool "overflow refused before submit" false !called)
 let test_long_idle_reset_generation () = with_cursor (fun ~clock path ->
   let offsets=ref [] in let post=transport ~offsets [1000] in
-  let t=C.open_cursor ~post ~client:(client "token") ~path () |> ok in
+  let t=C.open_cursor ~post ~client:(client "token") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
   let old_id=ref None in
   ignore(C.step ~clock ~post t ~now ~poll_timeout_sec:0
     ~accept:(fun ~operation_id update -> old_id:=Some operation_id;accept ~operation_id update) () |> ok);
   let post=transport ~offsets [2;1000] in
-  let restarted=C.open_cursor ~post ~client:(client "new-token") ~path () |> ok in
+  let restarted=C.open_cursor ~post ~client:(client "new-token") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
   let observed=ref [] in
   let later ()=now () +. 7. *. 24. *. 60. *. 60. in
   let result=C.step ~clock ~post restarted ~now:later ~poll_timeout_sec:0
@@ -175,7 +175,7 @@ let test_long_idle_reset_generation () = with_cursor (fun ~clock path ->
     (!old_id <> List.assoc_opt 1000L !observed))
 let test_invalid_clock_does_not_ack () = with_cursor (fun ~clock path ->
   let offsets=ref [] in let post=transport ~offsets [10] in
-  let t=C.open_cursor ~post ~client:(client "token") ~path () |> ok in
+  let t=C.open_cursor ~post ~client:(client "token") ~path:(fun ~bot_user_id:_ -> path) () |> ok in
   ignore(C.step ~clock ~post t ~now ~poll_timeout_sec:0 ~accept () |> ok);
   List.iter (fun time ->
     let calls=List.length !offsets in

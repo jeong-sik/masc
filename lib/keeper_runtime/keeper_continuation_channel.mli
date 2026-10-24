@@ -30,6 +30,14 @@ type t = private
       thread_ts : string option;
       user_id : string;
     }
+  | Telegram of {
+      bot_user_id : int64;
+      chat_id : int64;
+      direct_messages_topic_id : int64 option;
+      message_thread_id : int option;
+      reply_to_message_id : int option;
+      user_id : int64;
+    }
   | Imessage of {
       chat_identifier : string;
       chat_guid : string option;
@@ -69,6 +77,12 @@ val slack :
   user_id:string ->
   (t, string) result
 
+val telegram :
+  bot_user_id:int64 -> chat_id:int64 -> message_thread_id:int option -> direct_messages_topic_id:int64 option ->
+  reply_to_message_id:int option -> user_id:int64 -> (t, string) result
+(** Native bot/chat/topic/reply coordinates. Bot identity is checked again at
+    send time so a credential for a different bot cannot deliver this route. *)
+
 (** [imessage] routes a continuation back to a Messages.app conversation.
     [chat_identifier] is the conversation and the binding key, so it is
     required. [chat_guid] is the handle a reply is addressed to and is optional
@@ -92,7 +106,7 @@ val unrouted : string -> t
 val is_routable : t -> bool
 
 (** [kind_label t] is a stable lowercase tag for metrics / observability:
-    ["dashboard"] | ["discord"] | ["slack"] | ["keeper"] | ["unrouted"]. *)
+    ["dashboard"] | ["discord"] | ["slack"] | ["telegram"] | ["imessage"] | ["keeper"] | ["unrouted"]. *)
 val kind_label : t -> string
 
 (** [describe t] is a human-readable one-line summary for logs. *)

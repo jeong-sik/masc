@@ -1,0 +1,5 @@
+src/components/memory-inspector.ts(119,7): error TS2741: Property '"prompt.completion_authority"' is missing in type '{ 'prompt.keeper_instructions': BlockMeta; 'prompt.dynamic_context': BlockMeta; 'prompt.active_goals': BlockMeta; 'prompt.temporal_summary': BlockMeta; ... 14 more ...; message_audio: { ...; }; }' but required in type 'Readonly<Record<TurnInputComponentId, BlockMeta>>'.
+src/keeper-stream.test.ts(1862,7): error TS2322: Type '{ id: string; role: string; content: string; ts: number; delivery_provenance: KeeperChatDeliveryProvenance; delivery_provenance_status: string; }' is not assignable to type 'RestChatHistoryMessage'.
+  Types of property 'delivery_provenance_status' are incompatible.
+    Type 'string' is not assignable to type '"absent" | "invalid" | "valid" | undefined'.
+src/keeper-stream.test.ts(1873,9): error TS2322: Type 'string' is not assignable to type '"absent" | "invalid" | "valid" | undefined'.

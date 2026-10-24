@@ -2498,6 +2498,12 @@ type evidence_withheld =
       (** not an image the terminal can show: a PDF, audio, video or archive *)
   | Withheld_body_not_filed
   | Withheld_body_unreadable
+  | Withheld_body_identity_mismatch of {
+      expected_bytes : int;
+      actual_bytes : int;
+      expected_sha256 : string;
+      actual_sha256 : string;
+    }
   | Withheld_over_delivery_ceiling of { bytes : int; ceiling : int }
   | Withheld_over_response_budget
 

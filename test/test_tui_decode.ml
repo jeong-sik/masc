@@ -12577,6 +12577,8 @@ let test_verification_evidence_malformed_preview_fails () =
     ; "unknown reason", {|{"state":"withheld","reason":"too_pretty"}|}
     ; "withheld without reason", {|{"state":"withheld"}|}
     ; "ceiling without numbers", {|{"state":"withheld","reason":"over_delivery_ceiling"}|}
+    ; "identity mismatch without observed facts", {|{"state":"withheld","reason":"body_identity_mismatch"}|}
+    ; "identity mismatch without observed digest", {|{"state":"withheld","reason":"body_identity_mismatch","expected_bytes":8,"actual_bytes":8,"expected_sha256":"before"}|}
     ; "preview not an object", {|"inline"|}
     ];
   match

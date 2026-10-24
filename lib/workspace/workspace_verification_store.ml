@@ -248,10 +248,18 @@ let persist_binary_body ~base_path ?request_id ?index data =
    delivery ceiling and is judged on its recorded hash and size. A caller
    that reads only a string cannot tell these apart, so the sum is closed
    and carries the numbers the ceiling case is decided on. *)
+type binary_body_identity_mismatch =
+  { expected_bytes : int
+  ; actual_bytes : int
+  ; expected_sha256 : string
+  ; actual_sha256 : string
+  }
+
 type read_binary_error =
   | Not_binary
   | Body_not_filed
   | Body_unreadable of string
+  | Body_identity_mismatch of binary_body_identity_mismatch
   | Over_delivery_ceiling of { bytes : int; ceiling : int }
 
 (* Read the request-owned body back as base64, including after the snapshot
@@ -281,34 +289,27 @@ let filed_body_path relative =
 
 let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
   match item with
-  | Evidence_artifact_binary { body = Some relative; _ } ->
+  | Evidence_artifact_binary { body = Some relative; bytes = expected_bytes; sha256 = expected_sha256; _ } ->
     if not (filed_body_path relative)
     then Error (Body_unreadable "body path is not under the evidence directory")
     else
-    let path =
-      Filename.concat
-        (Common.masc_dir_from_base_path ~base_path)
-        relative
-    in
-    (try
-       let on_disk = (Unix.stat path).Unix.st_size in
-       if on_disk > verification_evidence_max_bytes
-       then
-         Error
-           (Over_delivery_ceiling
-              { bytes = on_disk; ceiling = verification_evidence_max_bytes })
-       else
-         let data = Fs_compat.load_file path in
-         let bytes = String.length data in
-         if bytes > verification_evidence_max_bytes
-         then
-           Error
-             (Over_delivery_ceiling
-                { bytes; ceiling = verification_evidence_max_bytes })
-         else Ok (Base64.encode_string data)
-     with
-     | Sys_error reason -> Error (Body_unreadable reason)
-     | Unix.Unix_error (code, _, _) -> Error (Body_unreadable (Unix.error_message code)))
+    let ownership_root = Common.masc_dir_from_base_path ~base_path in
+    let path = Filename.concat ownership_root relative in
+    (match Fs_compat.load_owned_regular_file_prefix ~ownership_root
+             ~max_bytes:verification_evidence_max_bytes path with
+     | Error error ->
+       Error (Body_unreadable (Fs_compat.owned_regular_file_read_error_to_string error))
+     | Ok None -> Error (Body_unreadable "filed binary body is missing")
+     | Ok (Some body) when body.truncated ->
+       Error (Over_delivery_ceiling
+         { bytes = body.file_size; ceiling = verification_evidence_max_bytes })
+     | Ok (Some body) ->
+       let actual_bytes = String.length body.content in
+       let actual_sha256 = Digestif.SHA256.(digest_string body.content |> to_hex) in
+       if actual_bytes <> expected_bytes || not (String.equal actual_sha256 expected_sha256)
+       then Error (Body_identity_mismatch
+         { expected_bytes; actual_bytes; expected_sha256; actual_sha256 })
+       else Ok (Base64.encode_string body.content))
   | Evidence_artifact_binary { body = None; _ } -> Error Body_not_filed
   | Evidence_collaboration _ -> Error Not_binary
   | Evidence_note _ -> Error Not_binary

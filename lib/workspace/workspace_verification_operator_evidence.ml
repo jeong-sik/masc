@@ -4,6 +4,7 @@ type withheld_reason =
   | Not_image_format
   | Body_not_filed
   | Body_unreadable
+  | Body_identity_mismatch of Store.binary_body_identity_mismatch
   | Over_delivery_ceiling of { bytes : int; ceiling : int }
   | Over_response_budget
 
@@ -15,6 +16,13 @@ let withheld_fields = function
   | Not_image_format -> [ "reason", `String "not_image_format" ]
   | Body_not_filed -> [ "reason", `String "body_not_filed" ]
   | Body_unreadable -> [ "reason", `String "body_unreadable" ]
+  | Body_identity_mismatch { expected_bytes; actual_bytes; expected_sha256; actual_sha256 } ->
+    [ "reason", `String "body_identity_mismatch"
+    ; "expected_bytes", `Int expected_bytes
+    ; "actual_bytes", `Int actual_bytes
+    ; "expected_sha256", `String expected_sha256
+    ; "actual_sha256", `String actual_sha256
+    ]
   | Over_delivery_ceiling { bytes; ceiling } ->
     [ "reason", `String "over_delivery_ceiling"
     ; "bytes", `Int bytes
@@ -62,6 +70,7 @@ let preview_of_binary ~base_path ~remaining item ~format ~bytes =
       | Error Store.Not_binary -> Withheld Not_image_format
       | Error Store.Body_not_filed -> Withheld Body_not_filed
       | Error (Store.Body_unreadable _) -> Withheld Body_unreadable
+      | Error (Store.Body_identity_mismatch mismatch) -> Withheld (Body_identity_mismatch mismatch)
       | Error (Store.Over_delivery_ceiling { bytes; ceiling }) ->
         Withheld (Over_delivery_ceiling { bytes; ceiling })
       | Ok body_base64 ->

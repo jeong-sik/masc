@@ -155,10 +155,17 @@ context_recovery_cases_selected() {
   return 1
 }
 
-# Runtime and model ids must match [A-Za-z0-9._-]+; the raw provider tag
-# (slashes, colons) goes into api-name and the id is its sanitized alias.
+# The complete original identity owns the binding. Replacing punctuation would
+# merge distinct provider/model names into one runtime or run directory.
 model_alias_of() {
-  printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'
+  python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_inputs.py" model-alias \
+    --provider "$1" --model "$2"
+}
+
+run_id_of() {
+  python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_inputs.py" run-id \
+    --provider "$1" --model "$2" --case-id "$3" --run-index "$4" \
+    --experiment-digest "${EXPERIMENT_DIGEST}" --memory-mode "${MEMORY_MODE}"
 }
 
 # The server dispatches only runtimes declared in runtime.toml, so a model
@@ -173,7 +180,7 @@ declare_requested_runtimes() {
   for entry in "${entries[@]}"; do
     provider="${entry%%:*}"
     model="${entry#*:}"
-    alias="$(model_alias_of "${model}")"
+    alias="$(model_alias_of "${provider}" "${model}")"
     if grep -qF "[${provider}.${alias}]" "${runtime_toml}" \
       || grep -qF "[${provider}.\"${alias}\"]" "${runtime_toml}"; then
       continue
@@ -670,18 +677,16 @@ run_one() {
   # convention Coding_eval_case also defaults to.
   test_files="$(jq -r '(.test_files // ["check.sh"])[]' "${case_dir}/case.json")"
 
-  local run_id run_dir workspace evidence_path mode_suffix=""
-  if [[ -f "${case_dir}/memory.json" || -f "${case_dir}/source-memory.json" ]]; then
-    mode_suffix="-${MEMORY_MODE}"
-  fi
-  run_id="$(printf '%s-%s-%s%s-r%d' "${provider}" "${model}" "${case_id}" "${mode_suffix}" "${repeat_index}" \
-    | tr -c 'A-Za-z0-9._-' '-')"
+  local run_id run_dir workspace evidence_path
+  run_id="$(run_id_of "${provider}" "${model}" "${case_id}" "${repeat_index}")"
   run_dir="${OUT_DIR}/runs/${run_id}"
   evidence_path="${run_dir}/evidence.json"
   assert_experiment_inputs >/dev/null || return 1
   if [[ -f "${evidence_path}" ]]; then
-    if ! jq -e --arg digest "${EXPERIMENT_DIGEST}" --arg mode "${MEMORY_MODE}" \
-      '.experiment_digest == $digest and .memory_mode == $mode' "${evidence_path}" >/dev/null; then
+    if ! python3 "${ROOT_DIR}/scripts/harness/lib/coding_eval_inputs.py" check-receipt \
+      --receipt "${evidence_path}" --run-id "${run_id}" --provider "${provider}" \
+      --model "${model}" --case-id "${case_id}" --run-index "${repeat_index}" \
+      --experiment-digest "${EXPERIMENT_DIGEST}" --memory-mode "${MEMORY_MODE}"; then
       echo "[coding-eval] refusing stale receipt ${run_id}" >&2
       return 1
     fi
@@ -707,7 +712,7 @@ run_one() {
     coding_keeper_instructions
     printf '"""\n'
   } > "${profile_dir}/${keeper_name}.toml"
-  local runtime_id="${provider}.$(model_alias_of "${model}")"
+  local runtime_id="${provider}.$(model_alias_of "${provider}" "${model}")"
   local start_epoch end_epoch duration_ms recorded_at
   start_epoch="$(date +%s)"
 

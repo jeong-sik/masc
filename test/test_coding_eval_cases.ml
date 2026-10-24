@@ -317,8 +317,9 @@ let test_failed_admission_is_recorded_without_grading () =
             (Some "keeper_up: controlled admission failure") row.error
         | _ -> fail "expected exactly one failed-episode row");
        let marker =
+         let run_id = match rows with [row] -> row.Coding_eval_report.run_id | _ -> fail "one row required" in
          Filename.concat proof_dir
-           "target/.masc/playground/docker/coding-eval-fixture-model-l1-calc-add-r1/workspace/unexpected-grading"
+           ("target/.masc/playground/docker/coding-eval-" ^ run_id ^ "/workspace/unexpected-grading")
        in
        check bool "stale workspace was not graded" false (Sys.file_exists marker))
     [ "fresh"; "stale" ]
@@ -356,7 +357,8 @@ let test_status_response_must_identify_admitted_operation () =
          |> Yojson.Safe.Util.member "operation_id" |> Yojson.Safe.Util.to_string
        in
        check string "lookup uses the admitted identity" "kmsg-accepted" lookup;
-       let run_dir = Filename.concat proof_dir "out/runs/fixture-model-l1-calc-add-r1" in
+       let run_id = match rows with [row] -> row.Coding_eval_report.run_id | _ -> fail "one row required" in
+       let run_dir = Filename.concat proof_dir ("out/runs/" ^ run_id) in
        if invalid_response then (
          let read_file path =
            let channel = open_in_bin path in

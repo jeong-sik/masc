@@ -29,6 +29,7 @@ module A = Keeper_context_assembly
 module P = Prompt_block_id
 module Link = Keeper_context_submission_link
 module W = Runtime_official_client_write
+module Start = Host_start
 let checks = ref 0
 let check label okay = if not okay then failwith label else
   (incr checks; Printf.printf "PASS %s\n" label)
@@ -76,7 +77,7 @@ let () =
     check "local held omission retains System-derived evidence"
       (List.exists (fun proof -> member "source_carrier" proof = `String "system_prompt")
         (binding same.context_projection |> member "omitted_held" |> to_list));
-    let stale = Link.encoded_system_observation ~block:P.Active_goals ~assembly:(Some before) (H.user_message text) in
+    let stale = Link.encoded_system_observation ~target:Official_resume_user ~block:P.Active_goals ~assembly:(Some before) (H.user_message text) in
     check "stale System issuer cannot prove new observation"
       (binding stale |> member "issuer_attribution" |> member "status" = `String "unavailable");
     let authority_text = "Approved task-1 vrf-1 human_operator fixture-operator" in
@@ -98,11 +99,11 @@ let () =
     let span = List.nth physical.partition.spans index in
     check "authority source selects its own unique block" (span.kind = A.Block P.Completion_authority);
     check "authority source bytes equal the delivered row" (String.sub physical.text span.offset span.bytes = authority_text);
-    let missing = Link.encoded_system_observation ~block:P.Completion_authority ~assembly:None (H.user_message authority_text) in
+    let missing = Link.encoded_system_observation ~target:Official_resume_user ~block:P.Completion_authority ~assembly:None (H.user_message authority_text) in
     check "missing authority issuer remains unknown" (binding missing |> member "issuer_attribution" |> member "status" = `String "unavailable");
-    let stale = Link.encoded_system_observation ~block:P.Completion_authority ~assembly:(Some authority) (H.user_message "FOREIGN") in
+    let stale = Link.encoded_system_observation ~target:Official_resume_user ~block:P.Completion_authority ~assembly:(Some authority) (H.user_message "FOREIGN") in
     check "stale authority issuer remains unknown" (binding stale |> member "issuer_attribution" |> member "status" = `String "unavailable");
-    let absent = Link.encoded_system_observation ~block:P.Completion_authority ~assembly:(Some after) (H.user_message authority_text) in
+    let absent = Link.encoded_system_observation ~target:Official_resume_user ~block:P.Completion_authority ~assembly:(Some after) (H.user_message authority_text) in
     check "Goal receipt cannot attest an absent authority observation" (binding absent |> member "issuer_attribution" |> member "status" = `String "unavailable");
     check "duplicate authority kinds are rejected before issuing a System carrier"
       (try ignore (A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks:[]
@@ -115,7 +116,98 @@ let () =
     check "JSON turn-text slot binds the actual projection"
       (Link.binding_to_json ~slot:(W.Turn_text 0) result.context_projection write |> member "status"
        = `String "matched_completed_slot");
-  Printf.printf "%d exact-source official Resume checks passed\n" !checks
+  let make observations base = A.assemble ~dynamic_context_partition:None
+      ~existing_extra_system_context:None ~blocks:[]
+    |> A.with_system_observations ~base_text:base ~observations in
+  let goal_text = "GOAL 현재 criterion" in
+  let first_text = "Approved task-first vrf-first operator-첫번째" in
+  let next_text = "Rejected task-other vrf-new operator-second" in
+  let first = make [A.Active_goals goal_text; A.Completion_authority first_text] "BASE" in
+  let canonical = Option.get first.system_prompt in
+  let system, start_context, issuer = H.project_start_system
+      ~system_prompt:canonical.text ~composed_context:(Some first) in
+  let start = Start.start_prompt {Start.start_context} "FIRST OWNER" in
+  check "fixed Start System preserves Goal and excludes the authority event"
+    (system = "BASE\n\n" ^ goal_text);
+  check "complete first User packet contains authority once and no Goal copy"
+    (Link.text start = "USER:\n" ^ H.encode_history_message (H.user_message first_text) ^ "\n\nFIRST OWNER");
+  let proof = match binding start |> member "occurrences" |> to_list with
+    | [occurrence] -> member "source" occurrence | _ -> failwith "one initial authority occurrence" in
+  check "initial proof names actual Start User target"
+    (member "target_carrier" proof = `String "official_start_user_prompt");
+  check "initial proof distinguishes canonical issuer from submitted System"
+    (member "source_scope" proof = `String "canonical_issued_system_prompt"
+     && member "sha256" (member "assembly" proof) = `String canonical.partition.sha256
+     && canonical.text <> system);
+  let held = H.start_held_context ?composed_context:issuer [] in
+  let resumed = H.resume_prompt ~goal:"OWNER" ~held ?composed_context:issuer [] in
+  check "same event Resume sends one authority and omits held Goal"
+    (resumed.prompt = "USER:\n" ^ H.encode_history_message (H.user_message first_text) ^ "\n\nOWNER");
+  let absent = make [A.Active_goals goal_text] "BASE" in
+  let absent_system, absent_context, absent_issuer = H.project_start_system
+      ~system_prompt:(Option.get absent.system_prompt).text ~composed_context:(Some absent) in
+  let no_event = H.resume_prompt ~goal:"NEXT OWNER" ~held:resumed.held_context
+      ?composed_context:absent_issuer [] in
+  check "later owner with no event adds no observation to Start or Resume"
+    (Link.text (Start.start_prompt {Start.start_context=absent_context} "NEXT OWNER") = "NEXT OWNER"
+     && no_event.prompt = "NEXT OWNER" && absent_system = system);
+  let changed = make [A.Active_goals goal_text; A.Completion_authority next_text] "BASE" in
+  let changed_system, changed_context, changed_issuer = H.project_start_system
+      ~system_prompt:(Option.get changed.system_prompt).text ~composed_context:(Some changed) in
+  let changed_start = Start.start_prompt {Start.start_context=changed_context} "NEXT OWNER" in
+  check "changed event and verification keys replace old keys at Start"
+    (Link.text changed_start = "USER:\n" ^ H.encode_history_message (H.user_message next_text) ^ "\n\nNEXT OWNER"
+     && changed_system = system);
+  check "changed event and verification keys reach held Resume"
+    ((H.resume_prompt ~goal:"NEXT OWNER" ~held:no_event.held_context
+        ?composed_context:changed_issuer []).prompt = Link.text changed_start);
+  List.iter (fun observations ->
+    let assembly = make observations "  BASE  " in
+    let actual, context, _ = H.project_start_system
+      ~system_prompt:(Option.get assembly.system_prompt).text ~composed_context:(Some assembly) in
+    check "four Goal/authority combinations preserve exact standing base and Goal"
+      (actual = (if List.exists (function A.Active_goals _ -> true | Completion_authority _ -> false) observations
+         then "  BASE  \n\n" ^ goal_text else "  BASE  "));
+    check "authority is the only initial User observation"
+      (Link.text context = (if List.exists (function A.Completion_authority _ -> true | Active_goals _ -> false) observations
+        then "USER:\n" ^ H.encode_history_message (H.user_message first_text) else "")))
+    [[]; [A.Active_goals goal_text]; [A.Completion_authority first_text];
+     [A.Active_goals goal_text; A.Completion_authority first_text]];
+  List.iter (fun candidate ->
+    let actual, context, retained = H.project_start_system
+      ~system_prompt:(Option.get changed.system_prompt).text ~composed_context:candidate in
+    check "missing/stale issuer cannot rewrite or attest selected System"
+      (actual = (Option.get changed.system_prompt).text && Link.text context = "" && retained = None);
+    check "missing/stale issuer cannot lend an old event to Resume"
+      ((H.resume_prompt ~goal:"OWNER" ~held:[] ?composed_context:retained []).prompt = "OWNER");
+    let piece = Link.encoded_system_observation ~target:Official_start_user
+      ~block:P.Completion_authority ~assembly:candidate (H.user_message next_text) in
+    check "missing/stale initial event proof remains unavailable"
+      (binding piece |> member "issuer_attribution" |> member "status" = `String "unavailable"))
+    [None; Some first];
+  List.iter (fun observation -> List.iter (fun base ->
+    let assembly = make [observation] base in
+    let reads = ref 0 in
+    let result = Guard.prepare_guard ~system_prompt:base
+      ~composed_context:(Some (fun () -> incr reads; Some assembly))
+      {Guard.system_prompt_override=Some (Option.get assembly.system_prompt).text} in
+    check "actual Host guard rejects blank base beneath Goal or authority"
+      (match result with Error (Guard.InvalidConfig {field;_}) -> field = "system_prompt" | Ok _ -> false);
+    check "actual Host guard acquires issuer only once" (!reads = 1)) [""; " \n\t "])
+    [A.Active_goals goal_text; A.Completion_authority first_text];
+  let frame = `Assoc ["input", `List [`Assoc ["type",`String "text";"text",`String (Link.text start)]]] in
+  let write = W.json_line (W.Fields ["input", W.turn_input]) frame (Yojson.Safe.to_string frame) in
+  check "complete actual Start User slot binds the exact source"
+    (Link.binding_to_json ~slot:(W.Turn_text 0) start write |> member "status" = `String "matched_completed_slot");
+  Printf.printf "PACKET %s\n" (Yojson.Safe.to_string (`Assoc [
+    "canonical_issued_system", `String canonical.text;
+    "submitted_start_system", `String system;
+    "submitted_start_user", `String (Link.text start);
+    "submitted_same_event_resume", `String resumed.prompt;
+    "submitted_next_absent_resume", `String no_event.prompt;
+    "submitted_changed_event_start", `String (Link.text changed_start);
+    "start_source_binding", binding start]));
+  Printf.printf "%d exact-source official Start/Resume checks passed\n" !checks
 '''
 
 with tempfile.TemporaryDirectory(prefix="masc-official-goal-source-") as temporary:
@@ -144,6 +236,20 @@ with tempfile.TemporaryDirectory(prefix="masc-official-goal-source-") as tempora
     for extension in [".mli", ".ml"]:
         path = "lib/keeper/keeper_context_submission_link" + extension
         put(Path(path).name, read(path), path)
+    put("host_start.ml", "type prepared_turn = {start_context:Keeper_context_submission_link.t}\n" + extract(
+        "lib/keeper/keeper_official_client_host.ml", "let start_prompt prepared prompt =", "type transmitted_model_input ="),
+        "exact Host.start_prompt; minimal record port, not full Host")
+    put("string_util.ml", extract("lib/string_util/string_util.ml", "let trim_nonempty value =", "(* The .mli says this maps trim_nonempty"),
+        "exact trim_nonempty fragment")
+    host = read("lib/keeper/keeper_official_client_host.ml")
+    host = host[host.index("let prepare_turn ~runtime_label"):]
+    guard = host[host.index("  let system_prompt =\n"):host.index("  (* No preemptive cut of the seed.")]
+    put("guard.ml", 'type turn_params = {system_prompt_override:string option}\n'
+        'type error = InvalidConfig of {field:string; detail:string}\n'
+        'let config_error ~field detail = InvalidConfig {field;detail}\n'
+        'let ( let* ) = Result.bind\n'
+        'let prepare_guard ~system_prompt ~composed_context turn_params =\n' + guard + '  Ok system_prompt\n',
+        "exact Host selected-System/snapshot/blank-base guard statements; minimal typed ports")
     (directory / "probe.ml").write_text(probe)
     outputs = []
     for label, full in [("repair", read("lib/keeper/keeper_official_client_context_projection.ml"))]:
@@ -160,5 +266,5 @@ with tempfile.TemporaryDirectory(prefix="masc-official-goal-source-") as tempora
         print(label + "\n" + ran.stdout + ran.stderr)
         if ran.returncode:
             raise SystemExit(ran.returncode)
-    (OUT / "official-resume-check.json").write_text(json.dumps({"scope": "actual pure projection/codec/receipt only; no Host.prepare_turn, hooks, SDK, client, transport or remote retention proof",
+    (OUT / "official-resume-check.json").write_text(json.dumps({"scope": "actual pure Start/Resume projection, codec, receipt, Host.start_prompt and selected Host issuer/blank guard statements; not full Host.prepare_turn, hooks, SDK, client, transport or remote retention proof",
         "base_head": "cc5104805e3963a9ef1a4fcb0013145514466a91", "sources": records, "results": outputs}, indent=2) + "\n")

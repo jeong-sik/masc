@@ -168,7 +168,7 @@ let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.pr
   then Ok (Host.resume_prompt ~goal ~held ?composed_context prepared.messages).Host.prompt
   else
     let* history = render_messages prepared.messages in
-    Ok
+    Ok (Host.start_prompt prepared
       ([ String_util.trim_nonempty prepared.system_prompt
          |> Option.map (fun value -> system_instructions_label () ^ value)
       ; String_util.trim_nonempty history
@@ -176,6 +176,7 @@ let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.pr
       ]
       |> List.filter_map Fun.id
       |> String.concat prompt_section_separator)
+      |> Keeper_context_submission_link.text)
 ;;
 
 (* Antigravity sends a tool's schema to the model only when the MCP config
@@ -735,7 +736,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
          then Host.Held_by_client_session
          else Host.Whole_input_transmitted prepared.messages)
     in
-    let composed_context = Option.bind composed_context (fun read -> read ()) in
+    let composed_context = prepared.composed_context in
     (* Antigravity exposes no compaction or context-reset witness. A settled
        delivery cannot prove these blocks remain in its current model input,
        so keep the frontier's held set empty and resend on every resume. *)

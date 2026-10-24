@@ -194,5 +194,6 @@ let receipt_to_json (receipt : receipt) =
 
 let system_prompt_receipt_to_json issued =
   `Assoc ["carrier", `String "system_prompt";
+    "scope", `String "canonical_issued_system_prompt_before_transport_projection";
     "partition", receipt_to_json issued.partition]
 ;;

@@ -259,9 +259,18 @@ let host_stop_result
 type prepared_turn =
   { messages : Agent_core.Types.message list
   ; system_prompt : string
+  ; start_context : Keeper_context_submission_link.t
+  ; composed_context : Keeper_context_assembly.t option
   ; tools : Agent_core.Tool.t list
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
+
+let start_prompt prepared prompt =
+  if Keeper_context_submission_link.text prepared.start_context = ""
+  then Keeper_context_submission_link.literal prompt
+  else Keeper_context_submission_link.concat ~separator:"\n\n"
+      [prepared.start_context; Keeper_context_submission_link.literal prompt]
+;;
 
 type transmitted_model_input =
   | Whole_input_transmitted of Agent_core.Types.message list
@@ -1110,9 +1119,9 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
   let system_prompt =
     Option.value turn_params.system_prompt_override ~default:system_prompt
   in
+  let composed_context = Option.bind composed_context (fun read -> read ()) in
   let keeper_instructions =
-    match Option.bind composed_context (fun read ->
-        Option.bind (read ()) (fun assembly -> assembly.Keeper_context_assembly.system_prompt)) with
+    match Option.bind composed_context (fun assembly -> assembly.Keeper_context_assembly.system_prompt) with
     | Some issued when String.equal issued.text system_prompt -> issued.base_text
     | Some _ | None -> system_prompt
   in
@@ -1165,9 +1174,12 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
       ~enable_thinking:turn_params.enable_thinking
       ~reasoning_effort:turn_params.reasoning_effort
   in
+  let system_prompt, start_context, composed_context = project_start_system ~system_prompt ~composed_context in
   Ok
     { messages
     ; system_prompt
+    ; start_context
+    ; composed_context
     ; tools
     ; reasoning_effort
     }

@@ -834,15 +834,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
        ({!Host.resume_prompt}). What it holds is read from the frontier the
        resumed settlement acknowledged; a start holds everything it composed.
        The frontier and the input report say so. *)
-    let composed_context =
-      match composed_context with
-      | None -> None
-      | Some read -> read ()
-    in
+    let composed_context = prepared.composed_context in
     let prompt, held_context =
       match session_mode with
       | Runtime_claude_code.Start ->
-        ( initial_turn_prompt ~history ~goal
+        ( Host.start_prompt prepared (initial_turn_prompt ~history ~goal)
+          |> Keeper_context_submission_link.text
         , Host.start_held_context ?composed_context prepared.messages )
       | Runtime_claude_code.Resume _ ->
         let delivery =

@@ -586,7 +586,7 @@ let test_minimax_native_catalog_replay () =
     feed "[DONE]";
     match Complete_stream_acc.finalize_stream_acc acc with
     | Ok response -> assistant response
-    | Error error -> Alcotest.fail (show_stream_error error)
+    | Error _ -> Alcotest.fail "native MiniMax SSE fixture failed"
   in
   let cases =
     [ "split reasoning", `String "", ["reasoning_content", `String "check forecast"],

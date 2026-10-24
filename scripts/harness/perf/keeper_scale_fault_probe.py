@@ -5,7 +5,9 @@ import copy
 import json
 from pathlib import Path
 import sqlite3
+import sys
 import tempfile
+from unittest import mock
 
 import keeper_scale_session as harness
 
@@ -97,6 +99,55 @@ def main():
                lambda: harness.verify_operation_backup(columns, source_rows, backup))
         backup.write_bytes(b"not a SQLite database\n")
         reject("corrupt closed backup", lambda: harness.verify_operation_backup(columns, source_rows, backup))
+
+        existing_out = base / "existing-packet"
+        existing_out.mkdir()
+        sentinel_summary = existing_out / "summary.json"
+        sentinel_failure = existing_out / "failure.json"
+        sentinel_summary.write_bytes(b'{"overall_original_run_verdict":"PASS"}\n')
+        sentinel_failure.write_bytes(b'{"type":"OriginalError","message":"preserve-me"}\n')
+        before_files = {p.name: p.read_bytes() for p in sorted(existing_out.iterdir())}
+        def run_main_with_argv(output_path):
+            with mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "keeper_scale_session.py",
+                    "--output",
+                    str(output_path),
+                    "--binary",
+                    str(base / "missing-binary"),
+                    "--repo",
+                    str(base),
+                ],
+            ):
+                harness.main()
+
+        try:
+            run_main_with_argv(existing_out)
+        except FileExistsError as error:
+            after_files = {p.name: p.read_bytes() for p in sorted(existing_out.iterdir())}
+            assert after_files == before_files
+            cases.append({"case": "existing --output directory rejected without writing failure.json or cleanup.json",
+                          "result": "rejected", "error": type(error).__name__, "preserved_files": sorted(after_files)})
+        else:
+            raise AssertionError("existing --output directory was accepted")
+
+        symlink_out = base / "symlink-packet"
+        symlink_out.symlink_to(existing_out)
+        reject("symlink --output rejected without touching target packet",
+               lambda: run_main_with_argv(symlink_out))
+        assert {p.name: p.read_bytes() for p in sorted(existing_out.iterdir())} == before_files
+
+        owned_out = base / "owned-failed-packet"
+        try:
+            run_main_with_argv(owned_out)
+        except FileNotFoundError:
+            assert (owned_out / "failure.json").is_file() and (owned_out / "cleanup.json").is_file()
+            cases.append({"case": "owned --output directory receives fallback failure.json and cleanup.json on post-mkdir failure",
+                          "result": "accepted"})
+        else:
+            raise AssertionError("missing --binary was accepted")
 
     report = {"schema": harness.EVIDENCE_SCHEMA, "harness_sha256": harness.digest(Path(harness.__file__)),
               "fault_probe_sha256": harness.digest(Path(__file__)), "masc_processes_started": 0, "cases": cases, "passed": True}

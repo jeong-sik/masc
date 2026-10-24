@@ -486,8 +486,10 @@ def wait_for(description, predicate, process, timeout):
 
 
 def run(args, owner):
+    require(not args.output.is_symlink(), "output path must not be a symlink")
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
+    owner["output"] = out
     shutil.copy2(Path(__file__), out / Path(__file__).name)
     binary = args.binary.resolve(strict=True)
     pinned = out / "masc-installed-copy"
@@ -865,14 +867,15 @@ def main():
         base = owner.get("base")
         if base is not None and base.exists():
             shutil.rmtree(base)
-        if args.output.is_dir():
-            if not (args.output / "cleanup.json").exists():
-                write_json(args.output / "cleanup.json", {"fallback_cleanup": True,
+        owned_output = owner.get("output")
+        if owned_output is not None and owned_output.is_dir():
+            if not (owned_output / "cleanup.json").exists():
+                write_json(owned_output / "cleanup.json", {"fallback_cleanup": True,
                     "server_reaped": process is None or process.poll() is not None,
                     "server_returncode": None if process is None else process.poll(),
                     "model_server_stopped": thread is None or not thread.is_alive(),
                     "base_removed": base is None or not base.exists()})
-            write_json(args.output / "failure.json", {"type": type(error).__name__, "message": str(error)})
+            write_json(owned_output / "failure.json", {"type": type(error).__name__, "message": str(error)})
         raise
 
 

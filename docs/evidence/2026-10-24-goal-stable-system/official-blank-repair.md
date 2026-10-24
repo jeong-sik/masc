@@ -35,5 +35,7 @@ execution of the full Host hook path or a vendor client.
 The authored native Host fixture publishes the production assembly inside the
 actual `before_turn_params` hook, so reading the issuer before the hook would
 miss the regression. Its negative and positive cases are coupled to real
-`Host.prepare_turn`. Native execution is pending. All eight changed OCaml
+`Host.prepare_turn`. The parent integration executed the coupled native Host suite atcf60643a1680b6c1cfa678feb5c97034b3bd8d22 in run40103733597:87 Host tests and13 projection tests passed. This is not a live vendor client session. All eight changed OCaml
 files parse and `git diff --check` passes; no local Dune or CI watch was used.
+
+The repeatable probe now reads published baselined3a242837194e94c435a228228ac0eaab10724aa; `blank-probe-baseline-binding.json` records byte equality with author baseline0232349.

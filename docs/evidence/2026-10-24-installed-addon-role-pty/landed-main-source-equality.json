@@ -1,0 +1,21 @@
+{
+  "main": "c2dfa238ebd318a9152e70d874ac2cbf68ae2ad8",
+  "installed_binary_source": "107c58401723313611f7c599bbe15225de5910da",
+  "source_equality": {
+    "bin/masc_tui_lane_addons.ml": {
+      "installed_source_sha256": "495e5979c4b3ee6c283da78165414aa3d57a279b8b3dba07c823c21b3a478951",
+      "main_source_sha256": "495e5979c4b3ee6c283da78165414aa3d57a279b8b3dba07c823c21b3a478951",
+      "identical": true
+    },
+    "lib/lane_addon/lane_addon_category.ml": {
+      "installed_source_sha256": "13b076129d5ef9065585934c6289370050eeeee90de69ecdebe3c515eaf3eb17",
+      "main_source_sha256": "13b076129d5ef9065585934c6289370050eeeee90de69ecdebe3c515eaf3eb17",
+      "identical": true
+    },
+    "lib/lane_addon/lane_addon_category.mli": {
+      "installed_source_sha256": "d8ed92107ea9c7855ee4196ddc622fc1c5038330c77add7b12d0e2b74172f5ee",
+      "main_source_sha256": "d8ed92107ea9c7855ee4196ddc622fc1c5038330c77add7b12d0e2b74172f5ee",
+      "identical": true
+    }
+  }
+}

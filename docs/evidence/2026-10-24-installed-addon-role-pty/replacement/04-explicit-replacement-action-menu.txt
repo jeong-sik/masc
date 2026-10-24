@@ -1,0 +1,46 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Plugins                                                                                                                             │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│Run action on Replacement Browser requires explicit selection                                                                             │
+│Action 1/1 · Up/Down:choose · Enter:run once · Esc:cancel                                                                                 │
+│J/K:scroll action details                                                                                                                 │
+│operation: "inspect"                                                                                                                      │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel  ?:help
+ Choose a Keeper before writing · i:choose

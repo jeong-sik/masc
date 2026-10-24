@@ -1,0 +1,46 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Plugins                                                                                                                             │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│Plugins · 3 declared · 3 active · 0 failed workers                                                                                        │
+│Retained history · 0 instances · h:open                                                                                                   │
+│                                                                                                                                          │
+│── Browser ──                                                                                                                             │
+│> ● browser-installation · Browser original target · attached · 0 records                                                                 │
+│    Applied · worker worker-browser                                                                                                       │
+│    role: worker started as Analysis · declaration now Browser                                                                            │
+│    Enter:open  o:observe  a:actions  d:remove TOML + worker                                                                              │
+│── Voice & media ──                                                                                                                       │
+│  ● mismatch-installation · no current worker · different-path.toml                                                                       │
+│    Applied · worker worker-mismatch                                                                                                      │
+│    Enter:installation                                                                                                                    │
+│── Execution environment ──                                                                                                               │
+│  ● Execution worker raw-first · attached · 0 records                                                                                     │
+│    Enter:open  o:observe  a:actions  d:remove worker                                                                                     │
+│── Category unverified ──                                                                                                                 │
+│  ● mismatch-installation · Mismatch must stay unverified · attached · 0 records                                                          │
+│    Enter:open  o:observe  a:actions  d:remove TOML + worker                                                                              │
+│                                                                                                                                          │
+│?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command  r:refresh                            │
+│Action request 01a16bfb-2042-7000-946d-7d1bf155fb80 · t:read status (never replays)                                                       │
+│  instance worker-browser · incarnation worker-browser                                                                                    │
+│  state confirmed                                                                                                                         │
+│  requester isolated-proof-fixture · executor unknown                                                                                     │
+│{ "fixture": true }                                                                                                                       │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command  r:refresh
+ Choose a Keeper before writing · i:choose

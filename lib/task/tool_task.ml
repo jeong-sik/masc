@@ -312,7 +312,7 @@ and handle_transition ~tool_name ~start_time ctx args =
          ~task_id
          ~started_at
          ~completed_at:(Some (Time_compat.now ()))
-         ~success:true
+         ~terminal:Task_outcome_measurement.Approved
          ~error_message:None
          ~collaborators:completion_collaborators
          ~handoff_from:None
@@ -324,7 +324,7 @@ and handle_transition ~tool_name ~start_time ctx args =
          ~task_id
          ~started_at
          ~completed_at:(Some (Time_compat.now ()))
-         ~success:false
+         ~terminal:Task_outcome_measurement.Cancelled
          ~error_message:
            (Some
               (* The same sentence the transition recorded: the caller may have

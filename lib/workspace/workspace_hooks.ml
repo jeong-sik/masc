@@ -272,13 +272,13 @@ let record_task_metric_fn
      task_id:string ->
      started_at:float ->
      completed_at:float option ->
-     success:bool ->
+     terminal:Task_outcome_measurement.terminal ->
      error_message:string option ->
      collaborators:string list ->
      handoff_from:string option ->
      handoff_to:string option ->
      unit) Atomic.t
-  = Atomic.make (fun _config ~agent_id:_ ~task_id:_ ~started_at:_ ~completed_at:_ ~success:_ ~error_message:_ ~collaborators:_ ~handoff_from:_ ~handoff_to:_ -> ())
+  = Atomic.make (fun _config ~agent_id:_ ~task_id:_ ~started_at:_ ~completed_at:_ ~terminal:_ ~error_message:_ ~collaborators:_ ~handoff_from:_ ~handoff_to:_ -> ())
 
 let push_task_event_fn
   : (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t

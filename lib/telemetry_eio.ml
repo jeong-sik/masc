@@ -372,7 +372,8 @@ let track_agent_unbound ?fs config ~agent_id ~reason =
 let track_task_started ?fs config ~task_id ~agent_id =
   track ?fs config (Task_started { task_id; agent_id })
 
-let track_task_completed ?fs config ~task_id ~duration_ms ~success =
+let track_task_completed ?fs config ~task_id ~duration_ms ~terminal =
+  let success = Task_outcome_measurement.lifecycle_success terminal in
   track ?fs config (Task_completed { task_id; duration_ms; success })
 
 let track_error ?fs config ~code ~message ~context =

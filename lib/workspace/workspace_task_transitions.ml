@@ -1136,7 +1136,7 @@ let commit_verdict_r
                     ~task_id
                     ~started_at
                     ~completed_at:(Some (Time_compat.now ()))
-                    ~success:true
+                    ~terminal:Task_outcome_measurement.Approved
                     ~error_message:None
                     ~collaborators:[]
                     ~handoff_from:None

@@ -129,7 +129,7 @@ let test_task_metric_is_not_recorded_without_a_real_start () =
   let previous = Atomic.get Workspace_hooks.record_task_metric_fn in
   Atomic.set
     Workspace_hooks.record_task_metric_fn
-    (fun _config ~agent_id:_ ~task_id:_ ~started_at:_ ~completed_at:_ ~success:_
+    (fun _config ~agent_id:_ ~task_id:_ ~started_at:_ ~completed_at:_ ~terminal:_
       ~error_message:_ ~collaborators:_ ~handoff_from:_ ~handoff_to:_ ->
       incr recorded);
   Fun.protect

@@ -259,6 +259,7 @@ let read_composition (components : Turn_record.input_component list) =
           instructions + component.bytes, schemas, blocks, first_round
         | Turn_record.Prompt_block
             (( Prompt_block_id.Dynamic_context
+             | Prompt_block_id.Active_goals
              | Prompt_block_id.Temporal_summary
              | Prompt_block_id.Memory_os_recall
              | Prompt_block_id.Librarian_working_context

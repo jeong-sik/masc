@@ -100,6 +100,11 @@ val prepare_rows : head:string -> rows:string list -> tail:string -> prepared_co
 type rendered
 val text : rendered -> string
 val unattributed : unattributed -> string -> rendered
+val singleton : layer_id -> string -> rendered
+(** One producer-owned typed layer, with its exact byte span. *)
+val partition_layer : layer_id -> rendered -> rendered * rendered
+(** Split one typed layer from the other spans, preserving each side's source
+    order, bytes and row divisions. Both partitions get fresh offsets. *)
 val append_unattributed : rendered -> unattributed -> string -> rendered
 val prepend_unattributed : unattributed -> string -> rendered -> rendered
 val prepend_prepared_unattributed : unattributed -> prepared_content -> rendered -> rendered

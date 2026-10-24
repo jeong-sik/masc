@@ -114,6 +114,9 @@ val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
     prove the package did not consume the result. *)
 
 val action_schema : t -> Yojson.Safe.t option
+val operator_schema : t -> Yojson.Safe.t option
+val call_operator : t -> admit:(unit -> (unit, Lane_addon_worker_protocol.operator_error) result) -> arguments:Yojson.Safe.t ->
+  (Yojson.Safe.t, Lane_addon_worker_protocol.operator_error) result
 val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, error) result
 
 val container_id : t -> string

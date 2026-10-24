@@ -54,6 +54,9 @@ val await_completion : t -> (release, error) result
     neither requests stop nor confirms retirement; [stop] still does both. *)
 val exported_tools : t -> Mcp_protocol.Mcp_types.tool list
 val action_schema : t -> Yojson.Safe.t option
+val operator_schema : t -> Yojson.Safe.t option
+val call_operator : t -> admit:(unit -> (unit, Lane_addon_worker_protocol.operator_error) result) -> arguments:Yojson.Safe.t ->
+  (Yojson.Safe.t, Lane_addon_worker_protocol.operator_error) result
 val host_requests : t -> (Yojson.Safe.t, error) result
 val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
 val observe : t -> binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->

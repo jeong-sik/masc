@@ -1,6 +1,6 @@
 {
   "scope": "Actual pure Query/Cursor/Snapshot modules + baseline visibility/current production revision fragments. Minimal unrelated typed ports; no full native Task tool, Keeper, SDK or model execution claim.",
-  "baseline": "44c28d74fbfb22279a1e47877736fb102e51645c",
+  "baseline": "0596143ca7393557f072662e11d7e8359d23743b",
   "sources": [
     {
       "compiled": "masc_domain.ml",

@@ -1,8 +1,9 @@
 # 1Password connector
 
 Backend connection foundation for [#45736](https://github.com/jeong-sik/masc/issues/45736).
-This package is under development. It is not yet an installable Lane Add-on,
-does not yet export Keeper tools, and has not performed a real 1Password login.
+This package is under development. It exports safe connection status through a
+native Lane Add-on. Browser sign-in and Keeper continuation are not yet connected,
+and it has not performed a real 1Password login.
 The objective remains an installed connector that a Keeper uses in its existing
 Browser Add-on session, through verified website sign-in and continuation.
 
@@ -16,7 +17,10 @@ The HTTPS callback must authenticate the operator, capture `integration_key`
 from the fragment, clear that fragment, and call `complete()` with the matching
 state. Tokens use the fixed production API origin and redirects are refused.
 
-`credentials(use)` is a backend callback, not a public tool. It retains the
+`credentials(use, expected_connection_id=...)` is a backend callback, not a public
+tool. A browser operation pins `connection_identity()` at creation and retains
+that identity through its lifetime; reconnecting cannot move it to a new account.
+The callback retains the
 connection lock through a private operation, serializes rotating refreshes and
 fences an interrupted exchange or refresh. Remote revocation must be confirmed
 by `disconnect(revoke)` before claiming the connection is disconnected. A lost
@@ -48,8 +52,8 @@ private plaintext record and starting a new connection.
 1. An authenticated operator surface for connect, callback, approval links,
    revocation and explicit interrupted-exchange recovery. A new account must not
    borrow an earlier account's integration key.
-2. A package declaration, safe exported tools, skill and installation path using
-   the existing Lane Add-on discovery and host-context caller identity.
+2. Complete the status-only package's login tools and operator UI integration
+   through existing Lane Add-on discovery and host-context caller identity.
 3. Supported 1Password extension loading in the original owned Chromium session.
    `createAccessRequest`, status and `fillCredential` run under that Browser
    Add-on's existing page-operation ownership. No separate CDP fill bypass.
@@ -67,6 +71,24 @@ private plaintext record and starting a new connection.
 
 Run `python3 -m unittest discover -s addons/tests -p test_onepassword_oauth.py`.
 The checks use a transport fixture, never a personal account or real tokens.
+
+## Install the development status connector
+
+Python 3.11 or later and the installed `masc-native-addon-launcher` are required.
+Use the [example declaration](../../docs/examples/lane-addons/onepassword.toml),
+resolve `manifest_path` relative to its installed location, and save it under the
+runtime's resolved `lane-addons` directory. This package is a normal MCP Add-on;
+it does not declare a second `service = "browser"` or replace the Browser owner.
+Its skill and `onepassword_status` export are discovered through ordinary Add-on
+installation. Configuration/state failure reports unavailable, never connected.
+
+The operator may provision `connection-config.json` next to `server.py`, owned
+by their UID with mode 0600, containing exactly `client_id`, `client_secret_file`,
+`redirect_uri` and `store_directory`. Both file/directory paths must be absolute.
+The client secret file must be an owned regular 0600 file. The store must be a
+dedicated 0700 directory outside Lane retention and agent work disks. Avoid
+putting a credential value in the declaration, package skill or config document.
+No configuration is required to discover the tool and observe `not_configured`.
 
 Protocol references: [partner guide](https://www.1password.dev/agentic-autofill/partners),
 [connect](https://www.1password.dev/agentic-autofill/partners/connect),

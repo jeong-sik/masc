@@ -59,3 +59,14 @@ to historical head `d3443448650294b27c7d33cb5268cb14d5785adc`. It is not
 relabelled as execution of this restacked source. Current source review,
 whole-stack approval, executable checks, installation and live browser proof
 remain separate claims.
+
+## Fixed main baseline for executable verification
+
+After the first complete restack, the original main build repair #45675 merged.
+All seven browser layers were rebased together again onto main
+`c2dfa238ebd318a9152e70d874ac2cbf68ae2ad8`. This second whole-stack rebase had
+no conflicts. The browser helper and its focused Node test source hashes stay
+identical to the recorded helper receipt; that receipt names the first restack
+baseline and is retained as that earlier source-boundary execution. Native
+browser suites can now be requested against this repaired main dependency tree.
+A new dispatch remains an execution request, not a passing test result.

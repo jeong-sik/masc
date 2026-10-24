@@ -53,7 +53,7 @@ let recall_text =
 
 let test_text_survives_the_round_trip () =
   with_workspace (fun config ->
-    Capture.write
+    Capture.write ~system_prompt:None
       ~config
       ~keeper
       ~trace_id:"trace-a"
@@ -88,9 +88,9 @@ let test_text_survives_the_round_trip () =
    runs, which is the cost this subsystem exists to bound. *)
 let test_capture_overwrites_rather_than_accumulates () =
   with_workspace (fun config ->
-    Capture.write ~config ~keeper ~trace_id:"trace-a" ~absolute_turn:1
+    Capture.write ~system_prompt:None ~config ~keeper ~trace_id:"trace-a" ~absolute_turn:1
       ~blocks:[ Block_id.Keeper_instructions, "first" ] ~assembled:(Some "first");
-    Capture.write ~config ~keeper ~trace_id:"trace-b" ~absolute_turn:2
+    Capture.write ~system_prompt:None ~config ~keeper ~trace_id:"trace-b" ~absolute_turn:2
       ~blocks:[ Block_id.Keeper_instructions, "second" ] ~assembled:(Some "second");
     match Capture.read ~config ~keeper with
     | Error error -> Alcotest.failf "read failed: %s" (Capture.read_error_to_string error)
@@ -103,7 +103,7 @@ let test_capture_overwrites_rather_than_accumulates () =
    that rendered to nothing — a different observation. *)
 let test_no_blocks_is_none_not_empty_string () =
   with_workspace (fun config ->
-    Capture.write ~config ~keeper ~trace_id:"trace-a" ~absolute_turn:1 ~blocks:[]
+    Capture.write ~system_prompt:None ~config ~keeper ~trace_id:"trace-a" ~absolute_turn:1 ~blocks:[]
       ~assembled:None;
     match Capture.read ~config ~keeper with
     | Error error -> Alcotest.failf "read failed: %s" (Capture.read_error_to_string error)
@@ -121,6 +121,56 @@ let test_never_captured_is_its_own_error () =
       Alcotest.failf "expected Not_captured, got %s" (Capture.read_error_to_string error))
 ;;
 
+let test_system_observation_has_a_separate_physical_capture () =
+  with_workspace (fun config ->
+    let module A = Masc.Keeper_context_assembly in
+    let extra = A.assemble ~dynamic_context_partition:None
+        ~existing_extra_system_context:None ~blocks:[] in
+    List.iter (fun previous ->
+      let unchanged = A.with_goal_system_prompt ~base_text:(Option.value ~default:"base" previous)
+          ~goal_text:None extra in
+      Alcotest.(check (option string)) "no Goal preserves None versus an empty override"
+        previous (A.system_prompt_override ~previous unchanged)) [None;Some "";Some "prior override"];
+    let issued = A.with_goal_system_prompt ~base_text:"prior override"
+        ~goal_text:(Some "Goal observation: 1/3") extra in
+    Capture.write ~config ~keeper ~trace_id:"trace-system" ~absolute_turn:2
+      ~blocks:((Block_id.Keeper_instructions,"prior override") :: A.logical_blocks issued)
+      ~assembled:issued.extra_system_context ~system_prompt:issued.system_prompt;
+    let capture = match Capture.read ~config ~keeper with
+      | Ok capture -> capture | Error error -> Alcotest.fail (Capture.read_error_to_string error) in
+    Alcotest.(check (option string)) "extra carrier remains absent" None capture.assembled;
+    Alcotest.(check (option string)) "system suffix survives capture without reclassification"
+      (Some "prior override\n\nGoal observation: 1/3") capture.system_prompt;
+    Alcotest.(check (list string)) "instructions and Goal are attributed exactly once"
+      ["keeper_instructions";"active_goals"]
+      (List.map (fun (block : Capture.block) -> Block_id.to_string block.id) capture.blocks);
+    Alcotest.(check bool) "the retained partition explicitly names its physical carrier" true
+      (match capture.system_prompt_partition with
+       | Some json -> Yojson.Safe.Util.member "carrier" json = `String "system_prompt"
+       | None -> false);
+    let fields = match Capture.to_json capture with
+      | `Assoc fields -> fields | _ -> Alcotest.fail "capture must be an object" in
+    let earlier = List.filter (fun (key, _) ->
+        key <> "system_prompt" && key <> "system_prompt_partition") fields in
+    let rewrite fields = match Fs_compat.save_file_atomic (Capture.path_for config keeper)
+        (Yojson.Safe.to_string (`Assoc fields)) with
+      | Ok () -> () | Error detail -> Alcotest.fail detail in
+    rewrite earlier;
+    let earlier_capture = match Capture.read ~config ~keeper with
+      | Ok capture -> capture | Error error -> Alcotest.fail (Capture.read_error_to_string error) in
+    Alcotest.(check (option string)) "an earlier capture means system unrecorded" None
+      earlier_capture.system_prompt;
+    rewrite (("system_prompt", `String "base") :: earlier);
+    (match Capture.read ~config ~keeper with
+     | Error (Capture.Malformed _) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "a half-present system carrier must be malformed");
+    rewrite (("system_prompt_partition", `Assoc ["carrier", `String "extra_system_context"])
+      :: List.remove_assoc "system_prompt_partition" fields);
+    match Capture.read ~config ~keeper with
+    | Error (Capture.Malformed _) -> ()
+    | Ok _ | Error _ -> Alcotest.fail "a system receipt must not claim another carrier")
+;;
+
 let test_invalid_keeper_name_is_refused () =
   with_workspace (fun config ->
     match Capture.read ~config ~keeper:"../escape" with
@@ -135,7 +185,7 @@ let test_invalid_keeper_name_is_refused () =
    operator comparing block counts is the one who would be misled. *)
 let test_unknown_block_id_is_malformed_not_dropped () =
   with_workspace (fun config ->
-    Capture.write ~config ~keeper ~trace_id:"trace-a" ~absolute_turn:1
+    Capture.write ~system_prompt:None ~config ~keeper ~trace_id:"trace-a" ~absolute_turn:1
       ~blocks:[ Block_id.Keeper_instructions, "text" ] ~assembled:(Some "text");
     let path = Capture.path_for config keeper in
     let contents =
@@ -218,6 +268,8 @@ let () =
     [ ( "round trip"
       , [ Alcotest.test_case "text survives the round trip" `Quick
             test_text_survives_the_round_trip
+        ; Alcotest.test_case "system Goal observations retain a separate carrier" `Quick
+            test_system_observation_has_a_separate_physical_capture
         ; Alcotest.test_case "no blocks is None, not empty string" `Quick
             test_no_blocks_is_none_not_empty_string
         ] )

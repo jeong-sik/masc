@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /private/tmp/masc-dashboard-stack-45588-20261024/dashboard
+
+
+ Test Files  16 passed (16)
+      Tests  498 passed (498)
+   Start at  12:52:36
+   Duration  13.27s (tests 33%, environment 24%, import 23%, setup 13%, transform 6%)
+
+    Isolate  16 workers spawned · ~271ms startup each (spawn + environment, per file)
+             at least ~4.07s faster with isolate: false — reuses workers across files instead of one per file
+

@@ -1,0 +1,74 @@
+{
+  "space_id": 1,
+  "scope": "Private built candidate assets with read-only proxy to installed server; no deployment",
+  "build_identity": {
+    "schema": "masc.dashboard-build.v1",
+    "source_commit": "4a94c8cc5f9d6ed71e81c2e7cfd6257cf9f1917f"
+  },
+  "upstream_binary_commit": "107c58401723313611f7c599bbe15225de5910da",
+  "upstream_reported_installed_dashboard_commit": "25faf14776f1115e962a4c4873e668af386211ad",
+  "candidate_http_port": 59417,
+  "upstream_writes_forwarded": 0,
+  "blocked_write_requests": 2,
+  "operator_reads": [
+    {
+      "at_unix": 1792814210.836457,
+      "method": "GET",
+      "path": "/api/v1/operator",
+      "status": 200,
+      "bytes": 698839,
+      "sha256": "0c16cf8c06fc2f4c2c0f6f185042e30629693dfc4c1bd15974c01dfdb42451a2"
+    }
+  ],
+  "observation": {
+    "route": "#command?section=operations",
+    "collapsed_note_keepers": 7,
+    "expanded_reasons_visible": true,
+    "context_invalid_alerts": 0,
+    "observed_reason": "usage_scope_unavailable",
+    "occupancy_fabricated": false
+  },
+  "limitations": [
+    "Read-only proxy rejects every write verb, including nav telemetry and MCP transport POSTs.",
+    "Proxy does not forward browser credentials/origin; auth errors and reconnect indication remain.",
+    "Bundle warning comes from installed server metadata, not private candidate .build-identity.json.",
+    "No server typecheck, installed bundle replacement, full transport repair or worker action validation."
+  ],
+  "private_files": [
+    {
+      "local_path": "/tmp/dashboard-45588-browser/command-collapsed.png",
+      "bytes": 163179,
+      "sha256": "c925cfef3bb2b9c1d6dbdbcca5a274f4d2a185458280a26634701dbb9109d9f6"
+    },
+    {
+      "local_path": "/tmp/dashboard-45588-browser/command-expanded.png",
+      "bytes": 226410,
+      "sha256": "c1f38bd0fca90d8aecb7504d677e44842dee39a5751b076945baf5887fc0dbe4"
+    },
+    {
+      "local_path": "/tmp/dashboard-45588-browser/command-observation-private.json",
+      "bytes": 1408,
+      "sha256": "5ebf2337eb00a6f4d849ceca58ce5d419d00e7e554f66f83264609050d243581"
+    },
+    {
+      "local_path": "/tmp/dashboard-45588-browser/requests.jsonl",
+      "bytes": 11220,
+      "sha256": "d4ca020fbcd95d110f69e5b4780026706b4e7a435ffede7030e01b53ca8b86eb"
+    },
+    {
+      "local_path": "/tmp/dashboard-45588-browser/readonly-preview.py",
+      "bytes": 2146,
+      "sha256": "a45afe15153b2968140df6abed1edeb2782fbd6b0b8c71e7cd581a052ce45767"
+    }
+  ],
+  "cleanup": {
+    "browser": {
+      "spaceId": 1,
+      "finishCompleted": true,
+      "keptPages": [],
+      "at": "2026-10-24T03:57:18.091Z"
+    },
+    "listener_closed": true
+  },
+  "http_method_limit": "No write verbs forwarded. Automatic dev-token GET can issue/rotate; actual unchanged auth pair metadata is audited separately in auth-get-effect-audit.json."
+}

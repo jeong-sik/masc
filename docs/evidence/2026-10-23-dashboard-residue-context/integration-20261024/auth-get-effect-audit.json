@@ -1,0 +1,29 @@
+{
+  "scope": "Post-observation filesystem metadata only; token/credential values were not read or retained.",
+  "preview_started_unix": 1792814210.660536,
+  "files": [
+    {
+      "path": "/Users/dancer/me/.masc/auth/dashboard.token",
+      "mode": "0o100600",
+      "inode": 4358673122,
+      "bytes": 64,
+      "mtime_utc": "2026-10-23T08:48:28.147758+00:00",
+      "ctime_utc": "2026-10-23T08:48:28.147834+00:00"
+    },
+    {
+      "path": "/Users/dancer/me/.masc/auth/agents/dashboard.json",
+      "mode": "0o100600",
+      "inode": 4358673121,
+      "bytes": 243,
+      "mtime_utc": "2026-10-23T08:48:28.147212+00:00",
+      "ctime_utc": "2026-10-23T08:48:28.147494+00:00"
+    }
+  ],
+  "pending_journal_exists": false,
+  "inference": "Both persisted Admin pair members were last changed before this preview. The installed dev-token handler reuses an existing valid Admin pair; any issue/rotation publication would rewrite both paths. No issue/rotation is observed during this preview. GET-only HTTP method filtering alone is not an effects guarantee.",
+  "source_paths": [
+    "lib/server/server_routes_http_dashboard_dev_token.ml",
+    "lib/server/server_routes_http_routes_dashboard.ml"
+  ],
+  "source_identity": "The dev-token implementation file matches installed embedded107c58401723313611f7c599bbe15225de5910da byte for byte. The router file has unrelated intervening changes; its dev-token route remains unchanged."
+}

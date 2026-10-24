@@ -1,0 +1,32 @@
+{
+  "base": "b4bd81124965c7829df08a3d8e36dec5027865a3",
+  "code_head": "ab64e15c82e57d4428db1ddd18a14bd485af3331",
+  "groups": {
+    "production_typescript": {
+      "added": 177,
+      "removed": 1042,
+      "net": -865
+    },
+    "styles": {
+      "added": 0,
+      "removed": 349,
+      "net": -349
+    },
+    "ocaml": {
+      "added": 19,
+      "removed": 61,
+      "net": -42
+    },
+    "tests": {
+      "added": 202,
+      "removed": 1188,
+      "net": -986
+    },
+    "documentation": {
+      "added": 19,
+      "removed": 3,
+      "net": 16
+    }
+  },
+  "net": -2226
+}

@@ -162,14 +162,53 @@ let source assembly selected_blocks ~omitted_sections ~omitted_rows
      | (Agent_core.Types.System, [], _)
      | ((Agent_core.Types.User | (Agent_core.Types.Assistant | Agent_core.Types.Tool)), _, _) -> Unavailable Unsupported_carrier)
 
-let encoded_carrier ~assembly ~selected_blocks ?(omitted_sections = []) ?(omitted_rows = [])
-    message =
+let system_goal_source assembly (message : Agent_core.Types.message) =
+  match message.role, message.content, assembly with
+  | User, [Text _], None -> Unavailable Missing_issuer
+  | User, [Text actual], Some assembly ->
+    (match assembly.Assembly.system_prompt with
+     | None | Some {goal_text = None; _} -> Unavailable Issuer_has_no_carrier
+     | Some {goal_text = Some expected; _} when not (String.equal actual expected) ->
+       Unavailable Stale_issuer
+     | Some ({goal_text = Some _; _} as issued) ->
+       let indices = List.filter_map (fun (index, (span : Assembly.span)) ->
+            match span.kind with
+            | Block Prompt_block_id.Active_goals -> Some index
+            | Block (Keeper_instructions | Dynamic_context | Temporal_summary | Memory_os_recall
+                | Librarian_working_context | Operator_note | Skill_compositions)
+            | Unattributed _ -> None)
+         (List.mapi (fun index span -> index, span) issued.partition.spans) in
+       (match indices with
+           | [index] -> Verified (`Assoc
+               [ "assembly", Assembly.receipt_to_json issued.partition
+               ; "source_carrier", `String "system_prompt"
+               ; "source_span_indices", `List [`Int index]
+               ; "rendered_text_bytes", `Int (String.length actual)
+               ; "rendered_text_sha256", `String (hash actual)
+               ; "rendering", `String "system_goal_observation_to_official_resume_user"
+               ; "target_carrier", `String "official_resume_user_prompt"
+               ; "codec_schema", `String Keeper_official_client_context_codec.schema
+               ; "codec_text_path", `String "/message/content_blocks/0/text"
+               ])
+           | [] | _ :: _ :: _ -> Unavailable Invalid_subset))
+  | (System | Assistant | Tool), _, _
+  | User, ([] | _ :: _ :: _), _
+  | User, [(Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+      | ToolResult _ | Document _ | Image _ | Audio _)], _ -> Unavailable Unsupported_carrier
+
+let encode_with_evidence evidence message =
   let text = Keeper_official_client_context_codec.encode message in
-  let evidence = source assembly selected_blocks ~omitted_sections ~omitted_rows message in
   let occurrences = match evidence with
     | Not_applicable | Unavailable _ -> []
     | Verified proof -> [ { offset = 0; bytes = String.length text; proof } ] in
   { text; occurrences; omitted = []; acquisitions = [{ disposition = Delivered; evidence }] }
+
+let encoded_carrier ~assembly ~selected_blocks ?(omitted_sections = []) ?(omitted_rows = [])
+    message =
+  encode_with_evidence (source assembly selected_blocks ~omitted_sections ~omitted_rows message) message
+
+let encoded_system_goal ~assembly message =
+  encode_with_evidence (system_goal_source assembly message) message
 
 let concat ~separator pieces =
   let offset = ref 0 in
@@ -195,13 +234,18 @@ let trim piece =
     else piece.acquisitions @ [{ disposition = Delivered; evidence = Unavailable Trimmed_occurrence }] in
   { piece with text; occurrences; acquisitions }
 
-let omit_held ~assembly ~blocks message piece =
-  let evidence = source assembly blocks ~omitted_sections:[] ~omitted_rows:[] message in
+let omit_with_evidence evidence piece =
   let omitted = match evidence with
     | Verified proof -> piece.omitted @ [proof]
     | Not_applicable | Unavailable _ -> piece.omitted in
   { piece with omitted;
     acquisitions = piece.acquisitions @ [{ disposition = Omitted_held; evidence }] }
+
+let omit_held ~assembly ~blocks message piece =
+  omit_with_evidence (source assembly blocks ~omitted_sections:[] ~omitted_rows:[] message) piece
+
+let omit_held_system_goal ~assembly message piece =
+  omit_with_evidence (system_goal_source assembly message) piece
 
 let reason_to_string = function
   | Missing_issuer -> "missing_issuer"

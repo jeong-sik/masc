@@ -1,0 +1,40 @@
+{
+  "scope": "Parsing only; pure projection compilation/execution is separately scoped in official-resume-check.json. Native Host suite, full SDK sessions and actual vendor transport unrun.",
+  "checks": [
+    {
+      "path": "lib/keeper/keeper_context_submission_link.mli",
+      "sha256": "9a5fad9bfff683d5931e312203ba8eded7941d4c8f0bf04d0ca8dc9be1a7783d",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_official_client_host.mli",
+      "sha256": "650d27cfb2528c8ef766213c9922c15187556b28d52e818befcf619a5c8ab8a0",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_context_submission_link.ml",
+      "sha256": "8044dd16bce6405a0a86873de2448df38aa4cc1d4b26933b77c65442e1c89307",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_official_client_context_projection.ml",
+      "sha256": "9067a0b05a78139f296cc44f856aefc345f02cfc8104df5c5ae8eb532246835b",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_official_client_host.ml",
+      "sha256": "7f35a5041e44c876d5e0f3853c38e937d8203ba195d76c7d82a8dcb15ab91040",
+      "exit": 0,
+      "stderr": ""
+    }
+  ],
+  "diff_check": {
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+}

@@ -62,7 +62,14 @@ val dispatch :
     [ask_source_turn_ref] is frozen host provenance, never a Tool argument;
     omission records an unobserved source. It grants no effect authority.
     [browser_principal] is verified by the caller; omission is anonymous and
-    cannot execute a browser Add-on command. *)
+    cannot execute a browser Add-on command.
+    Successful Lane Evidence results attach the complete typed-result artifact
+    manifest through the existing I/O executor after the Runtime returns,
+    retaining the original evidence and
+    delivery data. The explicit bounded inline projection includes that durable
+    root; larger results use its marker. A manifest error retains the same data
+    in a typed [Effect_outcome_unknown] failure without repeating Runtime or
+    inferring delivery completion from evidence publication. *)
 
 val tool_inventory_json :
   context -> include_hidden:bool -> Yojson.Safe.t

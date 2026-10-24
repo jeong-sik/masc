@@ -1330,6 +1330,80 @@ let test_private_broadcast_retry_uses_saved_visibility () = with_fixture (fun en
     (Tool_result.is_success alias_result);
   check string "alias Broadcast commits under the verified Keeper" "committed"
     (Tool_result.data alias_result |> member "delivery" |> text "status");
+  let reference, presentation =
+    Tool_bridge.artifact_manifest_reference alias_result |> unwrap in
+  check bool "complete result is explicitly available inline" true
+    (presentation = Tool_output.Inline_with_reference);
+  let manifest = match Tool_blob_store.fetch
+    (Tool_blob_store.create ~base_path:config.base_path) ~sha256:reference.sha256 with
+    | Ok (Some bytes) ->
+        check Alcotest.int "complete manifest length is exact" reference.bytes (String.length bytes);
+        Yojson.Safe.from_string bytes
+    | Ok None -> fail "complete result manifest is absent"
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+  check bool "durable outer manifest preserves the exact publication and delivery" true
+    (Yojson.Safe.equal (Tool_result.data alias_result) (member "structured_content" manifest));
+  let wire = match Tool_bridge.to_agent_core_typed_result
+    ~base_path:config.base_path alias_result with
+    | Ok output -> Yojson.Safe.from_string output.content
+    | Error error -> fail error.message in
+  check bool "Keeper model receives the original publication and committed receipt" true
+    (Yojson.Safe.equal (Tool_result.data alias_result) (member "structured_content" wire));
+  let blobs = Tool_blob_store.create ~base_path:config.base_path in
+  let read_artifact (artifact : Tool_output.artifact_ref) =
+    match Tool_blob_store.fetch blobs ~sha256:artifact.sha256 with
+    | Ok (Some bytes) -> bytes
+    | Ok None -> fail "recorded artifact is absent"
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+  let inner_reference = match Tool_output.normalized_artifact_ref_of_json
+    (member "keeper_artifact" (Tool_result.data alias_result)) with
+    | Tool_output.Decoded_normalized_artifact_ref artifact -> artifact
+    | Tool_output.Not_normalized_artifact_ref
+    | Tool_output.Invalid_normalized_artifact_ref _ -> fail "published evidence root is invalid" in
+  check bool "inner publication differs from the complete result root" true
+    (inner_reference.sha256 <> reference.sha256);
+  let inner_bytes = read_artifact inner_reference in
+  let outer_bytes = read_artifact reference in
+  let outer_path = Filename.concat
+    (Filename.concat (Tool_blob_store.root_dir blobs) (String.sub reference.sha256 0 2))
+    reference.sha256 in
+  let saved_path = Filename.temp_file ~temp_dir:(Filename.dirname outer_path)
+    "lane-result-manifest-" ".saved" in
+  let moved = ref false in
+  Fun.protect ~finally:(fun () ->
+    if !moved then
+      Fun.protect ~finally:(fun () -> Unix.rename saved_path outer_path)
+        (fun () -> if Sys.file_exists outer_path then Unix.rmdir outer_path)
+    else Sys.remove saved_path) (fun () ->
+    Unix.rename outer_path saved_path;
+    moved := true;
+    Unix.mkdir outer_path 0o700;
+    let unavailable = match Tool_misc.dispatch
+      ~lane_access:(Lane_addon_sources.Keeper owner) alias_context
+      ~name:"masc_lane_evidence" ~args:alias_args with
+      | Some result -> result | None -> fail "completed Lane evidence retry was not dispatched" in
+    (match unavailable with
+     | Tool_result.Failed {class_=Tool_result.Runtime_failure;
+         effect_disposition=Tool_result.Effect_outcome_unknown;_} -> ()
+     | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+         fail "outer manifest obstruction did not preserve unknown runtime failure");
+    check bool "manifest failure retains the exact completed original result" true
+      (Yojson.Safe.equal (Tool_result.data alias_result) (Tool_result.data unavailable));
+    check bool "failed outer publication does not invent manifest metadata" true
+      (Tool_result.metadata unavailable = None);
+    check bool "outer address remains deterministically obstructed" true
+      (Sys.is_directory outer_path);
+    check string "published inner evidence remains accessible" inner_bytes
+      (read_artifact inner_reference);
+    (match Tool_bridge.to_agent_core_typed_result
+      ~base_path:config.base_path unavailable with
+     | Error error ->
+         check bool "unknown storage failure is not recoverable" false error.recoverable;
+         check bool "projection retains the generic storage error class" true
+           (error.error_class = Agent_core.Types.Unknown)
+     | Ok _ -> fail "failed result manifest became a successful model receipt"));
+  check string "protected cleanup restores the exact complete manifest" outer_bytes
+    (read_artifact reference);
   let store_root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   let store = Store.create ~root:store_root in
   let broadcast_id = member "delivery" original |> member "receipt" |> text "request_id" in

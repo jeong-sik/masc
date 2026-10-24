@@ -1,0 +1,28 @@
+{
+  "source": "a96d1a9d1f428b8d4832f8a65ad00c2e44086c09",
+  "scope": "live tree; argv and environment excluded; no running-launcher claim",
+  "processes": [
+    {
+      "pid": 5218,
+      "ppid": 1,
+      "comm": "/tmp/masc-ego-runtime-a96d1a9d/masc",
+      "executable": "/private/tmp/masc-ego-runtime-a96d1a9d/masc",
+      "sha256": "059a3cdb8624132c8e747f83c4ce68956de0f5695bdd64a901d622a7a8a221cf"
+    },
+    {
+      "pid": 5266,
+      "ppid": 5218,
+      "comm": "masc-browser-addon-worker",
+      "path_source": "lsof process text mapping",
+      "executable": "/private/tmp/masc-ego-runtime-a96d1a9d/masc-browser-addon-worker",
+      "sha256": "8fe49cecd2ca6fc847ef2e9add57ef78bbd4eee157a3c885af23aa3d9bfef672"
+    },
+    {
+      "pid": 5338,
+      "ppid": 5266,
+      "comm": "/Users/dancer/.local/bin/ego-browser",
+      "executable": "/Applications/ego lite.app/Contents/Frameworks/ego Framework.framework/Versions/0.6.0.20/Helpers/ego-browser",
+      "sha256": "6706a072959a4d09858d4dd29d8bde57584e78191ef704aeb56662c8e04cf4b0"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "source": "14c9f0c701768ed3242e3fcde219b3dfaf9a80ce",
+  "operation": "ego-native-proof-14c9f0c7-lifetime-1",
+  "state": "Succeeded",
+  "sdk_space": 25,
+  "page": "p1",
+  "submissions": 1,
+  "id": "EGO-001",
+  "processing_elapsed_s": 130.00956049999513,
+  "long_tool_use_id": "call_8179b027da414d30a5bbf8d2",
+  "long_tool_elapsed_s": 81.92549991607666,
+  "long_tool_method": "waitForLoadState networkidle",
+  "scope": "real provider + compiled host + native SDK, not production deployment; does not prove a >120s single SDK call",
+  "screenshot": "root native screenshot after Keeper completion, visually inspected",
+  "screenshot_sha256": "813f2ed6c5a31cf166ec5d94e7d0c7ae5dd57dc75a2dd4c8f094abab52bc70e5",
+  "known_failures": [
+    "initial BrowserRead omitted clientId and was refused before effect; same original client then used",
+    "first post-submit wait watched hidden address and completed immediately, separate networkidle call waited81.93s"
+  ]
+}

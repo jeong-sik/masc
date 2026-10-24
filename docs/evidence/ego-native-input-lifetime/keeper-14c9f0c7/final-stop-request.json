@@ -1,0 +1,30 @@
+{
+  "requested_stops": [
+    {
+      "pid": 76809,
+      "kind": "private candidate server",
+      "signal": "SIGTERM",
+      "executable": "/private/tmp/masc-ego-runtime-14c9f0c7/masc"
+    },
+    {
+      "pid": 5218,
+      "kind": "private candidate server",
+      "signal": "SIGTERM",
+      "executable": "/private/tmp/masc-ego-runtime-a96d1a9d/masc"
+    },
+    {
+      "pid": 20809,
+      "kind": "owned test HTTP fixture",
+      "signal": "SIGTERM",
+      "script": "/tmp/ego-native-lifetime-fixture-20261025.py",
+      "port": 9449
+    },
+    {
+      "pid": 92745,
+      "kind": "owned test HTTP fixture",
+      "signal": "SIGTERM",
+      "script": "/tmp/ego-native-lifetime-marker-fixture-20261025.py",
+      "port": 9451
+    }
+  ]
+}

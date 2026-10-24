@@ -1,0 +1,13 @@
+{
+  "source": "14c9f0c701768ed3242e3fcde219b3dfaf9a80ce",
+  "binaries": {
+    "masc": "df9a7379d75a18e1fd9eb2f90c94ce7409e141d732d544d8e5912a5bc811ba63",
+    "masc-browser-addon-worker": "dd2942ffec17252d422b3e427496fcb1c6cc7142650a45f07afe13f636d1b13e",
+    "masc-native-addon-launcher": "6abaa24068773b8cd75514715edb082e57aad0c4ebec145a73c7adbe39ed0801"
+  },
+  "external_process_owner": {
+    "path": "/Users/dancer/.local/bin/masc-browser-process-owner",
+    "sha256": "44541511fb7f09c7146df602e104641a6543326cbfae8b37902811777fc3a987"
+  },
+  "production_installation_changed": false
+}

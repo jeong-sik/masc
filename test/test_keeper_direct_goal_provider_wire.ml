@@ -462,7 +462,7 @@ let test_completion_observation_survives_tool_reply approved () =
     (Keeper_event_queue.queue_to_yojson pending = before);
   let checkpoint = match result.checkpoint with Some value -> value | None -> fail "checkpoint missing" in
   List.iter (fun (message : Agent_core.Types.message) -> List.iter (function
-    | Text text -> check bool "authority observation is absent from durable history" false
+    | Agent_core.Types.Text text -> check bool "authority observation is absent from durable history" false
         (contains ~needle:verification_id text)
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
     | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages

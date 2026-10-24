@@ -156,5 +156,7 @@ carrier repair is still needed; no whole-stack source PASS is claimed.
 
 The author's completed native run 40114401559 at 2be9 also reports an
 unqualified Text constructor compilation error before any selected suite ran.
-This local candidate preserves the original direct fixture and does not claim
-that failure was repaired or that the six suites executed.
+The introducing-layer candidate qualifies only that first pattern as
+`Agent_core.Types.Text`; later patterns resolve from the same closed type.
+This is a minimal source compile repair. The complete native fixture was not
+built here, and none of the six suites is counted as executed after it.

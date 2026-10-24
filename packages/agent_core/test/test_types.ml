@@ -551,6 +551,7 @@ let test_usage_and_inference_telemetry_yojson_roundtrip () =
     ; provider_kind = Some Llm_provider.Provider_config.OpenAI_compat
     ; reasoning_effort = Some "medium"
     ; canonical_model_id = Some "gpt"
+    ; reported_model = Some (Provider_reported_model "wire-gpt")
     ; reasoning_source = None
     ; reasoning_prefix = None
     ; inline_content_replay = None
@@ -566,6 +567,8 @@ let test_usage_and_inference_telemetry_yojson_roundtrip () =
   with
   | Ok decoded ->
     Alcotest.(check (option string)) "fingerprint" (Some "fp") decoded.system_fingerprint;
+    Alcotest.(check bool) "reported model evidence survives serialization" true
+      (decoded.reported_model = Some (Provider_reported_model "wire-gpt"));
     Alcotest.(check bool)
       "telemetry show"
       true
@@ -575,6 +578,8 @@ let test_usage_and_inference_telemetry_yojson_roundtrip () =
 
 let test_default_inference_telemetry () =
   let telemetry = Types.default_inference_telemetry in
+  Alcotest.(check bool) "default reported model is unobserved" true
+    (Option.is_none telemetry.reported_model);
   Alcotest.(check (option string))
     "default system fingerprint unknown"
     None

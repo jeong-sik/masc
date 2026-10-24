@@ -221,11 +221,23 @@ let snapshot_target_of_json = function
      | ["text"] | ["exact";"text"] ->
        let* text = nonblank "text" in
        let* exact = exact () in
-       (* Unquoted, ego reads a leading quote as an exact text and >> as a
-          chained selector. *)
+       (* ego trims ECMAScript whitespace before reading a leading quote as
+          exact text. String.trim alone misses NBSP, BOM and Unicode spaces.
+          https://tc39.es/ecma262/#sec-white-space *)
+       let rec quoted i =
+         if i >= String.length text then false else
+         let decoded = String.get_utf_8_uchar text i in
+         match Uchar.to_int (Uchar.utf_decode_uchar decoded) with
+         | 0x22 | 0x27 -> true
+         | 0x09 | 0x0A | 0x0B | 0x0C | 0x0D | 0x20 | 0xA0 | 0x1680
+         | 0x2028 | 0x2029 | 0x202F | 0x205F | 0x3000 | 0xFEFF ->
+           quoted (i + Uchar.utf_decode_length decoded)
+         | code when code >= 0x2000 && code <= 0x200A ->
+           quoted (i + Uchar.utf_decode_length decoded)
+         | _ -> false in
+       (* >> starts a chained selector. *)
        let rec chained i = i + 1 < String.length text && ((text.[i] = '>' && text.[i + 1] = '>') || chained (i + 1)) in
-       let* () = if exact || not (String.starts_with ~prefix:"\"" text || String.starts_with ~prefix:"'" text
-                                  || chained 0) then Ok ()
+       let* () = if exact || not (quoted 0 || chained 0) then Ok ()
          else Error "a part-of-text target cannot start with a quote or contain >>; set exact to true" in
        Ok (Target_text {text;exact})
      | _ -> Error "target is {ref}, {role, name, exact} or {text, exact}")

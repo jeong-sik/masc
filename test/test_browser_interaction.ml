@@ -337,6 +337,10 @@ let test_snapshot_targets () =
      "a role that is not one lowercase word",target "click" (`Assoc ["role",`String "Button";"name",`String "Send"]);
      "a blank text",target "click" (`Assoc ["text",`String " "]);
      "a part of a text starting with a quote",target "click" (`Assoc ["text",`String "\"Send";"exact",`Bool false]);
+     "a part of a text with a space before a quote",target "click" (`Assoc ["text",`String " \"Send\"";"exact",`Bool false]);
+     "a part of a text with a tab before a single quote",target "click" (`Assoc ["text",`String "\t'Send'";"exact",`Bool false]);
+     "a part of a text with NBSP before a quote",target "click" (`Assoc ["text",`String "\u{00a0}\"Send\"";"exact",`Bool false]);
+     "a part of a text with BOM before a quote",target "click" (`Assoc ["text",`String "\u{feff}\"Send\"";"exact",`Bool false]);
      "a part of a text with a chain",target "click" (`Assoc ["text",`String "a >> nth=1";"exact",`Bool false]);
      "exact that is not a boolean",target "click" (`Assoc ["text",`String "Send";"exact",`String "yes"]);
      "a fill without text",target "fill" (`Assoc ["ref",`Int 5])];

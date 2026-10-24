@@ -609,7 +609,7 @@ let sent_notices = function
    for. It is host text, not issuer bytes, so it claims no context
    provenance. *)
 let unchanged_sections_message notice =
-  system_context_message ~metadata:[] notice
+  extra_system_context_message notice
 ;;
 
 let rec rendered_messages = function

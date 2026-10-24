@@ -605,7 +605,7 @@ let failure_certainty ~dispatch error =
         | NotFound _ | InvalidRequest _ | EmptyCompletion _) -> Definite_refusal
     | Agent_core.Error.Provider (MissingApiKey _ | InvalidConfig _ | ParseError _
         | UnknownVariant _ | ProviderUnavailable _ | NetworkError _ | Timeout _
-        | ProviderTerminal _ | RepeatingGeneration _ | ProviderReportedError _ | ProviderWireError _)
+        | ProviderTerminal _ | ProviderReportedError _ | ProviderWireError _)
     | Agent_core.Error.Agent _ | Mcp _ | Config _ | Serialization _ | Io _
     | Orchestration _ | Internal _ | Internal_carried _ -> Outcome_unknown
 

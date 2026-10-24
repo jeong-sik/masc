@@ -928,7 +928,8 @@ let commit_verdict_with_config
            |> Result.map_error (function O.Not_found -> "original absent"
              | Load_store_unavailable d | Corrupt_original d -> d) in
          Ok (`Superseded authority))
-    | Error error -> Error (commit_error error) in
+    | Error (W.Original_not_found | Original_corrupt _ | Grants_mismatch _
+        | Persistence_unavailable _ as error) -> Error (commit_error error) in
   match operation () with
   | Ok `Committed ->
     Log.Misc.info "system LLM completion authority confirmed task_id=%s verification_id=%s authority=%s verdict=%s"

@@ -37,21 +37,22 @@ The URL check precedes SDK entry and does not atomically guard a later input.
 No local Dune build, OCaml type check, OCaml suite execution, Add-on dispatch,
 installed MASC replacement, or autonomous Keeper scenario is claimed here.
 
-## Remaining scope of the user goal
+## Integration follow-up
 
-The overall native-first objective remains open:
+This folder's SDK proof was the first layer, not completion of the overall
+objective. The [workflow layer](../ego-native-workflow/) adds the known sequence,
+SDK wait and final snapshot through the existing broker. The
+[transfer layer](../ego-native-transfers/) audits the remaining adapters and
+keeps demonstrated SDK gaps plus sandbox/file ownership responsibilities.
 
-1. The workflow layer implements a known action sequence, native wait and
-   final snapshot in one broker command (see ../ego-native-workflow/). Its host
-   dispatch and real Keeper behavior still need verification. Keep host Node filesystem/process access
-   outside the browser capability; do not expose the worker's host AsyncFunction
-   to Keeper-provided JavaScript or build another locator/composition engine.
-2. The transfers layer audits the remaining input adapters (see
-   ../ego-native-transfers/), delegates uploads/default selector drag and
-   retains demonstrated SDK gaps plus MASC ownership/artifact responsibilities.
-   Its integrated host behavior still needs verification.
-3. Verify the resulting host path and a real Keeper task, including human
-   handoff and uncertain input. Source/fixture results alone do not close this.
+The [integration audit](../ego-native-integration/) records later exact-source
+CI, real-provider Keeper tasks and runtime identities, including the viewport
+defect those tasks exposed. Host Node filesystem/process access remains outside
+the browser capability: no Keeper-supplied AsyncFunction or new locator engine.
+Existing handoff/ownership refusal is covered by peer contract tests; a new
+human-interaction scenario is not claimed. Actual uncertain input and subsequent
+observation are retained in the real Keeper records.
 
-The dedicated probe task space is retained for the continuing user goal. Its
-ID is recorded in proof.json. Resume it rather than creating another space.
+The historical SDK proof records space 4. It was later found missing and the
+operator explicitly approved continuing in 9; the integration audit tracks its
+lifecycle. Do not create replacement spaces to recover from browser errors.

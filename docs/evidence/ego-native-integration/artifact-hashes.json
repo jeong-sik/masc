@@ -1,0 +1,24 @@
+{
+  "runtime_source": "7ee0dd6e13086c9faaab9d63b6b13bd901aa4da1",
+  "repaired_runtime_execution": "pending",
+  "files": {
+    "README.md": "37dc8b9c7ab8597014412a640cda7331c92941ffa9ae6f21895cd82bacf31997",
+    "selected-ci.json": "871ce5127b6055c70f89ee7105e62d8b5ef8295e62a87dbe178ea2534599f19b",
+    "original-candidate/fixture-submissions.json": "8068a65a05072bce1cddc7ed074a9f212e74a78d5427dce429ea798d51da8054",
+    "original-candidate/fixture.py": "8ab819e6b2a26b7543d1c3c424691508e9692d74d6f63e6c0402dcfdd3049d5c",
+    "original-candidate/keeper-goal-resume.json": "790039a2f406ccd41fe7d01e7db8821c8913c7727c0289a07f6c4572de8314ab",
+    "original-candidate/fixture-http.txt": "6d1b725a188b74fdf6e6d377d4ff7232314ffdef3d8560e5e344b36aa6ad9846",
+    "original-candidate/build-receipt.json": "4c8124e3c559e716e3d5c3613e259d7c24c810ddd2a3c35c2abc7cbc5de2225c",
+    "original-candidate/keeper-declaration.json": "4e13f48cf145404d1bff3df338c891a7771a1fc65fdf5934457db44813f36234",
+    "original-candidate/keeper-completion.png": "df2d513fc3ac70b1d9fd7529b1bc196e29bac5ed21c246656fba645caa506084",
+    "original-candidate/keeper-goal.json": "5910741c3df77680cfe4566a6dfae680ee7215c4e026cb27951087871380c771",
+    "original-candidate/visible-chat.json": "b3639addd516b38c655e12783294c4f7e91813a72d67e2c5ba3ebad739a2ff7c",
+    "original-candidate/host-identity.json": "bc0c2716ed5dfaeabcd07d7b70e4082cc4c4eed3d7d3b3f16373fa7b50d76872",
+    "original-candidate/retained-raw-tool-records.json": "0a3dd6436d1323dac6f01bbf0fd3eb5b139a0fe630bd078e4c098ba336cc4fe9",
+    "original-candidate/idle-host-replacement.json": "29b0decbc615a9fe636f76bc93874d9b58df0b8ea21faeb776b70d578f888137",
+    "original-candidate/keeper-goal-workflow.json": "3059df3fa518d35ac39925ac698b0c030ab864b9f06898139fbb8510f4f01505",
+    "original-candidate/tool-trajectory.json": "e5fc78ddb1714c9516c4d1bcadf1a2d3827032ccda3bdc8695caf8c137753626",
+    "original-candidate/queued-before-replacement.json": "8c525a3be43489150b03853c767754687d9977a43274ff907e2c354a97f35e9b",
+    "original-candidate/keeper-created.json": "1112fb4c2fb662dfb26c213b4b2bbffd8dce3474a49ae5d60104b43d66e0d9f8"
+  }
+}

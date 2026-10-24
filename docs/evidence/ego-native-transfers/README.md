@@ -38,15 +38,17 @@ so later input is refused while observation/dialog handling/finish remain.
 - Node production-boundary tests cover unchanged native selectors and uncertain
   failure without replay. OCaml sources parse; full host tests remain separate.
 
-This evidence proves the production JavaScript on installed Ego, not full OCaml
-host routing, a real Keeper workflow or deployment. The selected workflow-layer
-CI run 40072146277 failed compilation on a pointer_target fragile-match warning
-before tests ran; its repair is tracked separately on the bottom stack layer.
-No local Dune/full regression or installed MASC replacement is claimed.
+This folder proves the production JavaScript on installed Ego. It does not by
+itself prove full OCaml host routing, a real Keeper workflow or deployment.
+The earlier workflow-layer run 40072146277 failed on a pointer_target warning;
+the bottom-layer repair and later selected-suite/runtime evidence are recorded
+in the [integration audit](../ego-native-integration/). No local Dune/full
+regression or installed MASC replacement is claimed.
 
 Remaining adapters were checked against the SDK: document-window scrolling is
 not wheel-under-pointer; direct href navigation preserves observed node and
 referrer semantics; scene/coordinate identity has no Ego equivalent. Dialogs
 and downloads already use native SDK calls, retaining only MASC receipts and
-artifact/process/file lifetime integration. The continuing goal still needs
-host and real Keeper evidence. Resume task space 4 until that goal ends.
+artifact/process/file lifetime integration. See the integration audit for
+host/Keeper proof and lifecycle. Original space 4 was found missing; the
+operator explicitly approved continuing in space 9.

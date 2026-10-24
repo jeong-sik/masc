@@ -1,0 +1,41 @@
+{
+  "base_head": "915fcedb3f68c8b892dfa8876bd24351d182bf0f",
+  "scope": "OCaml parser only; not native typecheck, link, test execution or live Keeper proof",
+  "checks": [
+    {
+      "file": "lib/keeper/keeper_unified_prompt.mli",
+      "status": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_direct_turn_context.mli",
+      "status": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_unified_prompt.ml",
+      "status": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_direct_turn_context.ml",
+      "status": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "lib/keeper/keeper_turn.ml",
+      "status": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "test/test_keeper_wake_turn_context.ml",
+      "status": 0,
+      "diagnostic": ""
+    },
+    {
+      "file": "test/test_keeper_direct_goal_provider_wire.ml",
+      "status": 0,
+      "diagnostic": ""
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 type t =
-  { task_context : string option
+  { goal_context : string option
+  ; task_context : string option
   ; remaining_context : string option
   ; workspace_memory : Workspace_memory_ledger.observation
   ; wiki_contents : Keeper_wiki_contents.t
@@ -37,17 +38,18 @@ let direct_turn_task_context
   in
   current ^ held
 
-let prepare ~current_task ~held_task_skills ~task_skill_surfaces
+let prepare ~active_goal_summaries ~current_task ~held_task_skills ~task_skill_surfaces
     ~workspace_memory ~wiki_contents ~lane_updates ~approval_authority_text
     ~recent_direct_conversation_text ~worktree_text ~telemetry_feedback_text
     ~turn_instructions_text () =
+  let goal_context = Keeper_unified_prompt.format_active_goal_summaries active_goal_summaries in
   let task_context = prepare_common
       [direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces] in
   let remaining_context = prepare_common
       (Option.to_list (Lane_addon_subscription.render lane_updates)
        @ [approval_authority_text; recent_direct_conversation_text; worktree_text;
           telemetry_feedback_text; turn_instructions_text]) in
-  { task_context; remaining_context; workspace_memory; wiki_contents }
+  { goal_context; task_context; remaining_context; workspace_memory; wiki_contents }
 
 let project prepared ~workspace_memory_access =
   let dynamic =
@@ -58,7 +60,7 @@ let project prepared ~workspace_memory_access =
     |> nonempty in
   (* Common fragments have already been filtered and coalesced. Do not scan
      their text again for each request; concatenation retains the original
-     Task / memory / wiki / Lane-and-conversation order and exact separators. *)
+     Goal / Task / memory / wiki / Lane-and-conversation order and exact separators. *)
   String.concat "\n\n"
-    (Option.to_list prepared.task_context @ dynamic
+    (Option.to_list prepared.goal_context @ Option.to_list prepared.task_context @ dynamic
      @ Option.to_list prepared.remaining_context)

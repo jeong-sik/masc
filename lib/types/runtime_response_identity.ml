@@ -7,26 +7,29 @@ type t =
   ; model_id : string
   ; tool_use_id : string
   ; provider_turn : int
+  ; source_tool_use_ordinal : int
   }
 
-let make ~execution_id ~actor ~runtime_id ~response_id ~provider_id ~model_id ~tool_use_id ~provider_turn =
+let make ~execution_id ~actor ~runtime_id ~response_id ~provider_id ~model_id ~tool_use_id ~provider_turn ~source_tool_use_ordinal =
   let fields = [ "execution_id", execution_id; "actor", actor; "runtime_id", runtime_id
     ; "response_id", response_id; "provider_id", provider_id; "model_id", model_id; "tool_use_id", tool_use_id ] in
   match List.find_opt (fun (_, value) -> String.trim value = "") fields with
   | Some (name, _) -> Error ("runtime response identity has no " ^ name)
   | None when provider_turn < 0 -> Error "runtime response identity has a negative provider turn"
-  | None -> Ok { execution_id; actor; runtime_id; response_id; provider_id; model_id; tool_use_id; provider_turn }
+  | None when source_tool_use_ordinal < 0 -> Error "runtime response identity has a negative source ToolUse ordinal"
+  | None -> Ok { execution_id; actor; runtime_id; response_id; provider_id; model_id; tool_use_id; provider_turn; source_tool_use_ordinal }
 
 let to_yojson value =
   `Assoc [ "execution_id", `String value.execution_id; "actor", `String value.actor
     ; "runtime_id", `String value.runtime_id; "response_id", `String value.response_id
     ; "provider_id", `String value.provider_id; "model_id", `String value.model_id
-    ; "tool_use_id", `String value.tool_use_id; "provider_turn", `Int value.provider_turn ]
+    ; "tool_use_id", `String value.tool_use_id; "provider_turn", `Int value.provider_turn
+    ; "source_tool_use_ordinal", `Int value.source_tool_use_ordinal ]
 
 let of_yojson = function
   | `Assoc fields ->
     let ( let* ) = Result.bind in
-    let allowed = [ "execution_id"; "actor"; "runtime_id"; "response_id"; "provider_id"; "model_id"; "tool_use_id"; "provider_turn" ] in
+    let allowed = [ "execution_id"; "actor"; "runtime_id"; "response_id"; "provider_id"; "model_id"; "tool_use_id"; "provider_turn"; "source_tool_use_ordinal" ] in
     let* () =
       if List.length fields = List.length allowed
          && List.for_all (fun name -> List.length (List.filter (fun (key, _) -> key = name) fields) = 1) allowed
@@ -41,10 +44,12 @@ let of_yojson = function
     let* provider_id = field "provider_id" in
     let* model_id = field "model_id" in
     let* tool_use_id = field "tool_use_id" in
-    let* provider_turn = match List.assoc_opt "provider_turn" fields with
+    let integer_field name = match List.assoc_opt name fields with
       | Some (`Int value) -> Ok value
-      | Some _ | None -> Error "runtime response identity has no integer provider_turn" in
-    make ~execution_id ~actor ~runtime_id ~response_id ~provider_id ~model_id ~tool_use_id ~provider_turn
+      | Some _ | None -> Error ("runtime response identity has no integer " ^ name) in
+    let* provider_turn = integer_field "provider_turn" in
+    let* source_tool_use_ordinal = integer_field "source_tool_use_ordinal" in
+    make ~execution_id ~actor ~runtime_id ~response_id ~provider_id ~model_id ~tool_use_id ~provider_turn ~source_tool_use_ordinal
   | _ -> Error "runtime response identity must be an object"
 
 let same_model_identity left right =

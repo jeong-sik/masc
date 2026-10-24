@@ -17,7 +17,8 @@ identity does not prove different model weights or statistical independence.
 
 `Runtime_response_identity` in `masc_types` owns the validated immutable value:
 a host execution ID, actor, actual runtime ID, provider response ID, provider
-ID, reported model ID, exact tool-use ID, and provider-turn ordinal.
+ID, reported model ID, exact tool-use ID, provider-turn ordinal, and the
+original ToolUse ordinal before name admission.
 
 `Runtime_agent.config.execution_actor` is supplied by the named-runtime
 driver from the host-owned Keeper name. It is independent of the synthetic
@@ -37,8 +38,11 @@ Each tool handler freezes that response with its own exact invocation through
 handlers and terminal contracts. The frozen fiber binding survives nested
 work without being overwritten by another provider response. A new native
 scope and the named-runtime dispatch boundary mask the invoking tool's
-identity. Globally duplicated tool-use IDs stay unknown even when registered
-tool names differ. An uncaptured official-client execution cannot borrow its caller's
+identity. `Invocation.planned_index` selects its entry in Agent Core's existing
+`AfterTurn.tool_source_map`, which retains `source_tool_use_ordinal` across
+name admission. The identity stores that original ordinal: a rejected sibling
+sharing the same wire ID cannot be confused with the admitted occurrence.
+Missing or ambiguous mappings stay unknown. An uncaptured official-client execution cannot borrow its caller's
 model.
 
 `Verification_protocol.create_submit_request` writes the current submitting
@@ -116,17 +120,20 @@ they are not a claim that the changed candidate has built or run.
 
 ## Validation scope
 
-Fifteen standalone checks compile and execute the actual pure identity module
+Eighteen standalone checks compile and execute the actual pure identity module
 against its interface: validation, strict JSON roundtrip, duplicate/negative
 input rejection, same-model runtime aliases, a changed model under one alias,
 all missing-pair cases, observed/unknown coverage and its nullable rate, and
-immutable identity retention. This is actual-source
+immutable identity retention, including original-ordinal validation and
+readback. This is actual-source
 pure behavior evidence; it does not link the MASC runtime.
 
 Authored native tests exercise the real provider/tool loop on fresh,
 cooperative, and checkpoint entries; exact submitting response and invocation;
 synthetic agent name versus host actor; missing actor; blank reported model
-through presentation fallback; nested identity masking;
+through presentation fallback; nested identity masking; a real pipeline with
+registered and rejected ToolUse siblings sharing one ID and retained original
+source ordinal;
 immutable submit/reload; duplicate metadata without a review gate; actual
 winning reviewer reply; and calibration observed/unknown coverage. OCaml
 syntax and whitespace checks are local source evidence. Native linked tests,

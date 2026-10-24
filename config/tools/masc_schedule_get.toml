@@ -1,3 +1,4 @@
+defer_loading = true
 name = "masc_schedule_get"
 description = """
 Read the current durable scheduled request by schedule_id. A recurring \

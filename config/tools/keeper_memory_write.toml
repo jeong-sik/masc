@@ -1,3 +1,4 @@
+defer_loading = true
 name = "keeper_memory_write"
 description = """
 Persist a memory candidate or an explicit current-memory update.

@@ -1,3 +1,4 @@
+defer_loading = true
 name = "keeper_artifact_publish"
 description = """
 Publish a standalone report, document or self-contained interactive HTML result \

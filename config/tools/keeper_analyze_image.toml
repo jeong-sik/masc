@@ -1,3 +1,4 @@
+defer_loading = true
 name = "keeper_analyze_image"
 description = "Delegate analysis of a stored artifact or sandbox image to a separate vision model. Returns text or a typed failure. Prefer keeper_image_read to inspect pixels directly when the current runtime accepts images. Provide exactly one of artifact or path."
 additional_properties = false

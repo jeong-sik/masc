@@ -54,9 +54,17 @@ private structured object:
 Each field has `name`, `label` and `secret` (boolean). All field values and
 prefilled action arguments are strings. `secret=true` masks operator input.
 `opens_window` is optional and requests a popup from the operator gesture. An
-optional `open_url` may be HTTPS without userinfo; it is consumed only in that
-popup. Views stay in component memory and are discarded on workspace,
+optional `open_url` may be HTTPS without userinfo, or the exact
+`onepassword://grant-brokered-access` authority with an optional query and no userinfo,
+port, path or fragment. It is consumed only in that popup. Other app schemes
+and destinations are refused. Views stay in component memory and are discarded on workspace,
 incarnation or dashboard credential changes.
+
+Opening an app requests navigation; it does not prove the operating system
+opened the app or that the person approved anything. The 1Password package
+offers separate operation-pinned opened and approved acknowledgements. Its
+approval link is redeliverable without creating another access request. These
+controls never place the link in Ask, observations or model tool results.
 
 An optional `callback` has `action`, `field`, prefilled `arguments` and `state`.
 `GET /addons/oauth/callback` is a static page with no external resources, a

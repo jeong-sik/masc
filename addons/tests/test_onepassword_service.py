@@ -314,7 +314,7 @@ class ServiceTests(unittest.TestCase):
         original_interrupt = engine.interrupt
 
         def counted_interrupt(operation_id, caller):
-            if threading.current_thread() is business_thread:
+            if threading.current_thread() is business_thread and caller == CALLER:
                 business_interrupts.append(operation_id)
             return original_interrupt(operation_id, caller)
 
@@ -437,6 +437,27 @@ class ServiceTests(unittest.TestCase):
             clock=lambda: self.now)
         self.addCleanup(restored.close)
         self.assertEqual(restored.status(operation, CALLER)["phase"], "outcome_unknown")
+
+    def test_owner_thread_close_retires_without_claiming_self_join(self):
+        original_request = self.engine.request
+        observed, attempted = [], threading.Event()
+
+        def close_before_request(*args, **kwargs):
+            try:
+                self.service.close()
+            except LoginError as error:
+                observed.append(str(error))
+            finally:
+                attempted.set()
+            return original_request(*args, **kwargs)
+
+        self.engine.request = close_before_request
+        self.submit()
+        self.assertTrue(attempted.wait(2))
+        self.service.close()
+        self.assertEqual(observed, ["outcome_unknown"])
+        self.assertFalse(self.service._thread.is_alive())
+        self.assertEqual([name for bridge in self.bridges for name, _ in bridge.calls], ["withdraw"])
 
     def test_background_exception_is_fixed_and_has_no_stderr_traceback(self):
         self.next_bridge.request_failure = True

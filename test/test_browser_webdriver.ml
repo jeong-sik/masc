@@ -231,6 +231,8 @@ let test_selected_binary () =
     let options = sent |> member "capabilities" |> member "alwaysMatch" |> member "moz:firefoxOptions" in
     check string "configured Zen binary forwarded exactly" "/test/Zen.app/Contents/MacOS/zen"
       (options |> member "binary" |> to_string);
+    check bool "firefoxOptions pins resource_guard_prefs" true
+      ((options |> member "prefs") = `Assoc Masc.Browser_gecko_profile.resource_guard_prefs);
     let default = Driver.create ~start_downloads ~request () in
     ignore (Driver.execute default (Lane.Session_open {headless=None}));
     let sent = Option.get (List.hd !requests) in

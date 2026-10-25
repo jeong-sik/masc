@@ -144,7 +144,9 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
           let* admission=lease (Lease.prepare ~directories:(claim_directories c) ~instance_id:id
             ~cleanup_context:(Some (context c ~incarnation ~directory))) in
           let* child=lease (Lease.reopen ~directories:[c.claim_directory] ~instance_id:id) in
-          Ok (admission,child)) in
+          match Browser_gecko_profile.ensure_resource_guards ~profile:c.profile with
+          | Ok () -> Ok (admission,child)
+          | Error _ as error -> ignore (Lease.retire admission);error) in
         let process=ref None and input=ref None and validation=ref Idle in
         let abort_requested,request_abort=Eio.Promise.create () in
         let signal_original () =

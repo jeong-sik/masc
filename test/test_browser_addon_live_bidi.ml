@@ -88,6 +88,12 @@ let scenario mode =
     let profile=Filename.concat root "profile" and allocation=Filename.concat root "allocation" in
     Unix.mkdir profile 0o700;Unix.mkdir allocation 0o700;
     let sentinel=Filename.concat profile "operator-login" in write sentinel "preserved";
+    let prefs_js=Filename.concat profile "prefs.js" and user_js=Filename.concat profile "user.js" in
+    write prefs_js
+      "user_pref(\"remote.prefs.recommended.applied\", true);\n\
+       user_pref(\"browser.tabs.unloadOnLowMemory\", false);\n\
+       user_pref(\"widget.windows.window_occlusion_tracking.enabled\", false);\n\
+       user_pref(\"operator.custom\", true);\n";
     write (Filename.concat root "mode") mode;
     let binary=Filename.concat root "scripted-firefox" in write binary firefox;Unix.chmod binary 0o700;
     let reservation,port=reserved_port () in
@@ -162,8 +168,18 @@ let scenario mode =
              |Download_reply _|Poll_result _|Receipt|Issue_result _) -> false);
       check string "operator profile is never cleared" "preserved" (read sentinel);
       let commands=Filename.concat root "commands" in
-      if mode="occupied" then check bool "occupied port never spawns or adopts a browser" false (Sys.file_exists (Filename.concat root "spawned"))
+      if mode="occupied" then (
+        check bool "occupied port never spawns or adopts a browser" false (Sys.file_exists (Filename.concat root "spawned"));
+        check bool "occupied port never writes user.js before admission" false (Sys.file_exists user_js))
       else (
+        check string "poisoned RecommendedPreferences keys are stripped while preserving operator prefs"
+          "user_pref(\"operator.custom\", true);\n" (read prefs_js);
+        let pinned_user_js=read user_js in
+        List.iter (fun (key,value) ->
+          let expected=Printf.sprintf "user_pref(%S, %s);" key (Yojson.Safe.to_string value) in
+          check bool ("user.js pins " ^ key) true
+            (List.mem expected (String.split_on_char '\n' pinned_user_js)))
+          Masc.Browser_gecko_profile.resource_guard_prefs;
         let calls=String.split_on_char '\n' (read commands) in
         check int "session is created once, without reattachment" 1
           (List.length (List.filter (String.equal "session.new") calls));

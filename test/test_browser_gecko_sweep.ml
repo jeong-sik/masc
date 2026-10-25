@@ -21,6 +21,8 @@ let with_profile work =
       | Ok instance -> instance | Error detail -> Alcotest.fail detail in
     let profile = match Gecko.create ~instance with
       | Ok profile -> profile | Error detail -> Alcotest.fail detail in
+    Alcotest.(check bool) "fresh gecko profile seeds user.js resource guards" true
+      (Sys.file_exists (Filename.concat profile "user.js"));
     Out_channel.with_open_bin (Filename.concat profile "prefs.js") (fun _ -> ());
     Out_channel.with_open_bin (Filename.concat profile Gecko.lock_name) (fun _ -> ());
     work ~root ~instance_id ~instance ~profile)

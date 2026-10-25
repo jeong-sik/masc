@@ -162,7 +162,10 @@ type keeper_reaction_evidence_batch =
 
 type schedule_evidence_snapshot =
   { queue_by_keeper :
-      (string, Keeper_event_queue_persistence.snapshot_with_errors) Hashtbl.t
+      (string, (Keeper_event_queue_state.t,
+                Keeper_event_queue_persistence.snapshot_read_error list) result) Hashtbl.t
+  ; disposition_by_occurrence :
+      (string * string, (Server_schedule_consumers.resolved_occurrence_disposition, string) result) Hashtbl.t
   ; reaction_by_keeper : (string, keeper_reaction_evidence_batch) Hashtbl.t
   }
 
@@ -202,23 +205,48 @@ let schedule_evidence_snapshot ~config wakes =
     wakes;
   let queue_by_keeper = Hashtbl.create (Hashtbl.length requested_stimulus_ids) in
   let reaction_by_keeper = Hashtbl.create (Hashtbl.length requested_stimulus_ids) in
+  (* Capture queue authority before ledger projection. These are per-owner
+     coherent observations, not one globally atomic cross-store snapshot. *)
+  Hashtbl.iter
+    (fun keeper_name _ ->
+       Hashtbl.add queue_by_keeper keeper_name
+         (Keeper_event_queue_persistence.observe_state_result
+            ~base_path:config.Workspace_utils.base_path ~keeper_name))
+    requested_stimulus_ids;
+  let used_initial = Hashtbl.create (Hashtbl.length queue_by_keeper) in
+  let read_state ~base_path keeper_name =
+    let observed =
+      match Hashtbl.find_opt queue_by_keeper keeper_name with
+      | Some initial when not (Hashtbl.mem used_initial keeper_name) ->
+        Hashtbl.add used_initial keeper_name ();
+        initial
+      | Some _ | None ->
+        Keeper_event_queue_persistence.observe_state_result ~base_path ~keeper_name
+    in
+    Result.map_error
+      (fun errors -> String.concat "; "
+          (List.map (fun (error : Keeper_event_queue_persistence.snapshot_read_error) ->
+               error.message) errors))
+      observed
+  in
+  let occurrences =
+    Hashtbl.fold (fun keeper_name ids acc ->
+        List.fold_left (fun acc id -> (keeper_name, id) :: acc)
+          acc (String_set.elements ids)) requested_stimulus_ids []
+  in
+  let disposition_by_occurrence = Hashtbl.create (List.length occurrences) in
+  Server_schedule_consumers.resolve_keeper_wake_occurrences_with
+    ~read_state ~base_path:config.Workspace_utils.base_path occurrences
+  |> List.iter (fun (keeper_name, stimulus_id, result) ->
+      Hashtbl.add disposition_by_occurrence (keeper_name, stimulus_id) result);
   Hashtbl.iter
     (fun keeper_name stimulus_ids ->
-       Hashtbl.add
-         queue_by_keeper
-         keeper_name
-         (Keeper_event_queue_persistence.observe_snapshot_with_errors
-            ~base_path:config.Workspace_utils.base_path
-            ~keeper_name);
-       Hashtbl.add
-         reaction_by_keeper
-         keeper_name
+       Hashtbl.add reaction_by_keeper keeper_name
          (Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
-            ~base_path:config.Workspace_utils.base_path
-            ~keeper_name
+            ~base_path:config.Workspace_utils.base_path ~keeper_name
             ~stimulus_ids:(String_set.elements stimulus_ids)))
     requested_stimulus_ids;
-  { queue_by_keeper; reaction_by_keeper }
+  { queue_by_keeper; disposition_by_occurrence; reaction_by_keeper }
 ;;
 
 type schedule_reaction_evidence_lookup =
@@ -268,7 +296,8 @@ let schedule_queue_match
     &&
     match stimulus.payload with
     | Keeper_event_queue.Schedule_due wake ->
-      String.equal wake.schedule_instance_id schedule_instance_id
+      String.equal wake.occurrence_id post_id
+      && String.equal wake.schedule_instance_id schedule_instance_id
       && String.equal wake.schedule_id schedule_id
       && Float.equal wake.due_at due_at
       && String.equal wake.payload_digest payload_digest
@@ -327,6 +356,7 @@ let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimu
 let schedule_keeper_queue_evidence_dashboard_json
   ~now
   ~evidence_snapshot
+  ~(request : Schedule_domain.schedule_request)
   ~(schedule_status : Schedule_domain.schedule_status)
   (wake : Schedule_domain.wake_record option)
   =
@@ -373,7 +403,7 @@ let schedule_keeper_queue_evidence_dashboard_json
               ; post_id
               ; queue
               ; stimulus
-              ; stimulus_id = _
+              ; stimulus_id
               ; reaction_ledger_status = _
               ; result_delivery_policy = _
               ; occurrence_status = _
@@ -383,7 +413,11 @@ let schedule_keeper_queue_evidence_dashboard_json
           let payload_digest = wake.Schedule_domain.payload_digest in
           let snapshot =
             match Hashtbl.find_opt evidence_snapshot.queue_by_keeper keeper_name with
-            | Some snapshot -> snapshot
+            | Some (Ok state) ->
+              { Keeper_event_queue_persistence.pending = Keeper_event_queue_state.pending state
+              ; read_errors = [] }
+            | Some (Error read_errors) ->
+              { Keeper_event_queue_persistence.pending = Keeper_event_queue.empty; read_errors }
             | None ->
               { Keeper_event_queue_persistence.pending = Keeper_event_queue.empty
               ; read_errors =
@@ -423,32 +457,92 @@ let schedule_keeper_queue_evidence_dashboard_json
             ; "read_errors", `List read_errors
             ]
           in
-          (match pending_match, snapshot.read_errors with
-           | Some match_, _ when schedule_cancelled ->
-             `Assoc
-               (( "projection_status"
-                , `String "retained_terminal_wake" )
-                :: base_fields
-                @ schedule_queue_match_fields ~now "retained" match_)
-           | Some match_, _ ->
-             `Assoc
-               (("projection_status", `String "matched_pending")
-                :: base_fields
-                @ schedule_queue_match_fields ~now "pending" match_)
-           | None, _ :: _ ->
-             `Assoc (("projection_status", `String "read_error") :: base_fields)
-           | None, [] when schedule_cancelled ->
-             (* Cancel propagation (task-370): the cancel boundary withdraws a
-                cancelled schedule's enqueued utterance from the durable queue,
-                so an absent pending match is the healthy outcome here, not a
-                lost wake. Rows written before that propagation may still show
-                a legacy [retained_terminal_wake] match above. *)
-             `Assoc
-               (( "projection_status"
-                , `String "withdrawn_at_cancel" )
-                :: base_fields)
-           | None, [] ->
-             `Assoc (("projection_status", `String "not_found") :: base_fields))))
+          let encode status fields =
+            `Assoc (("projection_status", `String status) :: base_fields @ fields)
+          in
+          let invalid reason = encode "evidence_invalid" [ "reason", `String reason ] in
+          let source_matches source =
+            let full_matches source =
+              schedule_queue_match
+                ~schedule_instance_id:wake.schedule_instance_id
+                ~schedule_id ~due_at ~payload_digest ~post_id
+                ~stimulus_label:stimulus
+                (Keeper_event_queue.enqueue Keeper_event_queue.empty source)
+            in
+            match source with
+            | Keeper_event_queue_state.Full_source source ->
+              (match full_matches source with
+               | Some source -> Ok source
+               | None -> Error "durable source does not match this schedule occurrence")
+            | Keeper_event_queue_state.Compact_source compact ->
+              (* Recover every source byte from the same decoder as dispatch,
+                 using the receipt's arrival time. The hash commits title,
+                 message, delivery, urgency and the exact occurrence identity. *)
+              if not (String.equal payload_digest (Schedule_domain.payload_digest request.payload))
+              then Error "current schedule payload cannot verify the retired occurrence"
+              else
+                (match Server_schedule_consumers.keeper_wake_stimulus_for_occurrence
+                    ~request ~occurrence_id:post_id ~due_at ~arrived_at:compact.arrived_at with
+                 | Error detail -> Error detail
+                 | Ok (_, source) ->
+                   if String.equal compact.post_id source.post_id
+                      && compact.urgency = source.urgency
+                      && String.equal compact.source_ref
+                           (Keeper_event_queue_state.source_snapshot_ref source)
+                   then (match full_matches source with
+                       | Some source -> Ok source
+                       | None -> Error "compact source does not match this schedule occurrence")
+                   else Error "compact durable source provenance conflicts with this occurrence")
+          in
+          let disposition = match stimulus_id with
+            | None -> Error "dispatch receipt has no exact stimulus identity"
+            | Some id ->
+              (match Hashtbl.find_opt evidence_snapshot.disposition_by_occurrence (keeper_name, id) with
+               | Some result -> result
+               | None -> Error "durable occurrence was not captured in the request snapshot")
+          in
+          let terminal owner source evidence outcome reason =
+            match source_matches source with
+            | Error detail -> invalid detail
+            | Ok source ->
+              let fields = [ "resolved_owner", `String owner
+                ; "terminal_outcome", `String outcome
+                ; "terminal_reason", (match reason with None -> `Null | Some reason -> `String reason) ]
+                @ schedule_queue_match_fields ~now "terminal" source in
+              (match evidence with
+               | Keeper_event_queue_state.Terminal_evidence_pending id ->
+                 encode "terminal_projection_pending" (("transition_id", `String id) :: fields)
+               | Keeper_event_queue_state.Terminal_evidence_recorded ->
+                 encode ("matched_terminal_" ^ outcome) fields)
+          in
+          match stimulus_id, snapshot.read_errors, disposition with
+          | None, _, _ -> encode "unrecognized_receipt"
+              [ "reason", `String "dispatch receipt has no exact stimulus identity" ]
+          | Some _, _ :: _, _ -> encode "read_error" []
+          | Some _, [], Error reason -> encode "read_error" [ "reason", `String reason ]
+          | Some _, [], Ok (Server_schedule_consumers.Terminal_completed_at (owner, source, evidence)) ->
+            terminal owner source evidence "completed" None
+          | Some _, [], Ok (Server_schedule_consumers.Terminal_failed_at (owner, source, reason, evidence)) ->
+            terminal owner source evidence "failed" (Some reason)
+          | Some _, [], Ok (Server_schedule_consumers.Terminal_cancelled_at (owner, source, reason, evidence)) ->
+            terminal owner source evidence "cancelled" (Some reason)
+          | Some _, [], Ok (Server_schedule_consumers.Transfer_projecting_at (owner, target)) ->
+            encode "transfer_projection_pending"
+              [ "resolved_owner", `String owner; "transfer_target", `String target ]
+          | Some _, [], Ok (Server_schedule_consumers.Pending_at (owner, source)) ->
+            (match source_matches source with
+             | Error detail -> invalid detail
+             | Ok source ->
+               let status, bucket = if schedule_cancelled
+                 then "retained_terminal_wake", "retained" else "matched_pending", "pending" in
+               encode status (("resolved_owner", `String owner)
+                 :: schedule_queue_match_fields ~now bucket source))
+          | Some _, [], Ok (Server_schedule_consumers.Absent_at _) ->
+            (* A true exact negative still needs ledger correlation in the UI.
+               Dispatch-only evidence remains a miss. *)
+            (match pending_match with
+             | Some _ -> invalid "pending source conflicts with exact durable occurrence identity"
+             | None -> encode (if schedule_cancelled then "withdrawn_at_cancel" else "not_found") [])))
 ;;
 
 let schedule_keeper_reaction_evidence_dashboard_json
@@ -806,6 +900,7 @@ let schedule_request_dashboard_json
       , schedule_keeper_queue_evidence_dashboard_json
           ~now
           ~evidence_snapshot
+          ~request
           ~schedule_status:request.status
           last_wake )
     ; ( "keeper_reaction_evidence"

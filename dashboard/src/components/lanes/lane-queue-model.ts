@@ -28,7 +28,8 @@ import type { CompositeObservation, LaneKey, SwimlaneSegment } from '../fsm-hub-
 import { isObservedStall } from '../fsm-hub-lane-analysis'
 import { laneChangedAt, laneTransitionCount } from '../fsm-hub-derivations'
 import { enumLabel } from '../tools/keeper-waiting-inventory-panel'
-import type { QueueDrainState } from '../schedule/queue-drain-status'
+import { queueDrainStateOfEvidence as drainStateOfEvidence, type QueueDrainState } from '../schedule/queue-drain-status'
+export { drainStateOfEvidence }
 
 /** Observation window of the swimlane, seconds (design WINDOW_S = 20분). */
 export const LANE_QUEUE_WINDOW_S = 1200
@@ -404,7 +405,7 @@ export function waitingDueMinutes(row: DashboardKeeperWaitingRow, nowSec: number
 /* ── 예약 wake 드레인 (dl-* / dm-*) ───────────────────────────────────── */
 
 /** Queue-evidence axis of the drain matrix (design Q_AXIS). */
-export const DRAIN_QUEUE_AXIS = ['matched_pending', 'not_found', 'read_error', 'unrecognized_receipt'] as const
+export const DRAIN_QUEUE_AXIS = ['matched_pending', 'terminal_projection_pending', 'transfer_projection_pending', 'matched_terminal_completed', 'matched_terminal_failed', 'matched_terminal_cancelled', 'evidence_invalid', 'retained_terminal_wake', 'withdrawn_at_cancel', 'not_found', 'read_error', 'unrecognized_receipt'] as const
 
 /** Reaction-evidence axis of the drain matrix (design R_AXIS; null = 행 없음). */
 export const DRAIN_REACTION_AXIS: readonly (string | null)[] = [
@@ -412,50 +413,13 @@ export const DRAIN_REACTION_AXIS: readonly (string | null)[] = [
   'matched_turn_started', 'matched_stimulus', 'not_found', 'quarantined', 'read_error', null,
 ]
 
-/** keeper_reaction_evidence statuses that prove the keeper handled the
- *  stimulus. matched_stimulus is deliberately absent — it is the producer's
- *  own dispatch record (see queue-drain-status.ts header). */
-const REACTED: ReadonlySet<string> = new Set([
-  'matched_consumed_ack',
-  'matched_turn_finished',
-  'matched_turn_started',
-])
-
-/** Mirror of queue-drain-status.ts stateOf() on bare (queue, reaction)
- *  projection statuses, for matrix cells that have no request row behind
- *  them. Keep the decision table in lockstep — lane-queue-model.test.ts
- *  asserts parity against queueDrainStatusOf for every axis combination. */
-export function drainStateOfEvidence(
-  queue: string | null | undefined,
-  reaction: string | null | undefined,
-): QueueDrainState | null {
-  if (queue == null) return null
-  switch (queue) {
-    case 'matched_pending':
-      return 'pending'
-    case 'read_error':
-      return 'read_error'
-    case 'unrecognized_receipt':
-      return 'indeterminate'
-    case 'not_found': {
-      if (reaction != null && REACTED.has(reaction)) return 'drained'
-      if (reaction === 'matched_terminal_cancelled') return 'cancelled'
-      if (reaction === 'conflicting_terminal_evidence') return 'evidence_invalid'
-      if (reaction === 'matched_stimulus' || reaction === 'not_found') return 'missed'
-      if (reaction === 'read_error') return 'read_error'
-      if (reaction === 'quarantined') return 'evidence_invalid'
-      return 'indeterminate'
-    }
-    default:
-      return 'indeterminate'
-  }
-}
-
 export type DrainTone = 'info' | 'ok' | 'bad' | 'warn' | 'dim'
 
 /** Design DRAIN_PRESENT — per-state chip label, data-tone, the operator
  *  sentence (op, default view) and the wiring explanation (why, dev view). */
 export const DRAIN_PRESENT: Record<QueueDrainState, { label: string; tone: DrainTone; op: string; why: string }> = {
+  settling: { label: '처리 반영 중', tone: 'info', op: '종결 또는 이관은 저장됐고 반응 기록 반영을 기다린다', why: 'durable terminal/transfer commit exists; reaction projection pending' },
+  failed: { label: '실행 실패', tone: 'warn', op: '실행 시도가 실패로 종결됐다', why: 'exact durable occurrence has a recorded failed terminal' },
   pending: { label: '큐 대기', tone: 'info', op: '아직 실행되지 않고 차례를 기다리는 중', why: 'wake 가 keeper_event_queue pending 에 있음 — 드레인 대기 중' },
   drained: { label: '완료', tone: 'ok', op: 'keeper 가 받아서 실행했다', why: '큐에서 빠졌고 keeper 반응이 기록됨 (consumed_ack / turn_finished / turn_started)' },
   cancelled: { label: '취소됨', tone: 'warn', op: '큐가 취소해서 keeper 턴 없이 끝났다 — 대상 keeper 가 없으면 예약 정의를 지우거나 옮겨야 한다', why: '큐에서 accepted cancellation 으로 빠짐 (owner-absent drain 등) — keeper 반응 없이 종결' },
@@ -513,7 +477,7 @@ export function drainRowOfRequest(
 
 /** Operator sort — actionable verdicts first (design DrainList order). */
 const DRAIN_SORT_ORDER: readonly QueueDrainState[] = [
-  'missed', 'cancelled', 'read_error', 'evidence_invalid', 'pending', 'indeterminate', 'drained',
+  'missed', 'failed', 'cancelled', 'read_error', 'evidence_invalid', 'settling', 'pending', 'indeterminate', 'drained',
 ]
 
 export function sortedDrainRows(
@@ -526,7 +490,7 @@ export function sortedDrainRows(
 }
 
 /** Legend entries of the operator drain list (design DrainList footer). */
-export const DRAIN_LEGEND_STATES: readonly QueueDrainState[] = ['missed', 'cancelled', 'pending', 'read_error', 'drained']
+export const DRAIN_LEGEND_STATES: readonly QueueDrainState[] = ['missed', 'failed', 'cancelled', 'settling', 'pending', 'read_error', 'drained']
 
 /* ── 라이프사이클 이벤트 (lc-*) ───────────────────────────────────────── */
 

@@ -141,3 +141,26 @@ val resolve_keeper_wake_occurrence :
 (** Resolves where one wake occurrence lives now, following transfers. A
     retired occurrence is answered from its exact-id receipt; a damaged
     receipt is an [Error], never absence. *)
+
+val resolve_keeper_wake_occurrences_with :
+  read_state:(base_path:string -> string -> (Keeper_event_queue_state.t, string) result) ->
+  base_path:string ->
+  (string * string) list ->
+  (string * string * (resolved_occurrence_disposition, string) result) list
+(** Request-scoped resolution using caller-supplied owner observations. Shares
+    the writer resolver's latest incarnation, conflict, transfer-cycle and exact
+    retired-receipt semantics. Each owner index is shared across the request;
+    an already-cached transfer target that appears absent is read again. The
+    callback must therefore permit a fresh observation on a repeated call.
+    No queue mutation or reaction projection is performed here. A dashboard
+    caller supplies lock-free observations and owns I/O offloading. *)
+
+val keeper_wake_stimulus_for_occurrence :
+  request:Schedule_domain.schedule_request ->
+  occurrence_id:string ->
+  due_at:float ->
+  arrived_at:float ->
+  (string * Keeper_event_queue.stimulus, string) result
+(** Decode the same complete source used by dispatch, with the occurrence's
+    own identity, due time and arrival time. Also used to verify compact
+    durable receipt provenance; this does not dispatch or enqueue. *)

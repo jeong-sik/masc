@@ -229,6 +229,9 @@ let test_overwrite_sends_content_on_stdin () =
   check bool "ok" true (member "ok" result = `Bool true);
   check bool "mode" true (member "mode" result = `String "overwrite");
   check bool "via names the profile" true (member "via" result = `String "remote_ssh");
+  check string "guest bookkeeping path is preserved"
+    (Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config:f.config f.meta) "src/a.ml")
+    (Yojson.Safe.Util.to_string (member "path" result));
   check bool "evidence records the write" true
     (Option.is_some result.file_change_evidence);
   let request, stdin = write_frame f in
@@ -384,6 +387,33 @@ let declared_fixture ~mode =
       }
   in
   { f with endpoint }
+;;
+
+let test_ssh_success_names_the_endpoint_file () =
+  with_eio @@ fun () ->
+  let endpoint_path = "/srv/masc/playground/keeper-a/src/a.ml" in
+  List.iter
+    (fun (mode, path, fields, writes) ->
+      let f = declared_fixture ~mode:"ok" in
+      save (f.frame_path ^ ".source") "before\n";
+      let result = handle f ([ "path", `String path; "mode", `String mode ] @ fields) in
+      check bool "completed" true (completed result);
+      check string "the returned path names the captured endpoint's file" endpoint_path
+        (Yojson.Safe.Util.to_string (member "path" result));
+      check bool "SSH response route" true (member "via" result = `String "remote_ssh");
+      check bool "only changed operations write" writes
+        (Sys.file_exists (f.frame_path ^ ".write"));
+      if writes then (
+        let request, _ = write_frame f in
+        check string "response and actual write name the same file" endpoint_path
+          (List.hd (List.rev request.argv))))
+    [ "overwrite", "src/a.ml", [ "content", `String "after\n" ], true
+    ; "append", endpoint_path, [ "content", `String "tail\n" ], true
+    ; "patch", endpoint_path,
+      [ "old_string", `String "before"; "new_string", `String "after" ], true
+    ; "patch", endpoint_path,
+      [ "old_string", `String "before"; "new_string", `String "before" ], false
+    ]
 ;;
 
 (* Runs the handler with a Gate that answers [decision] and records what it
@@ -769,6 +799,7 @@ let () =
           ; test_case "patch arguments recover and I/O stays runtime" `Quick test_remote_patch_arguments_recover_but_write_failure_stays_runtime
           ; test_case "identical remote patch does not write" `Quick test_identical_remote_patch_does_not_write
           ; test_case "patch reads then replaces" `Quick test_patch_reads_then_replaces
+          ; test_case "SSH successes name the endpoint file" `Quick test_ssh_success_names_the_endpoint_file
           ; test_case "declared root write lands when the Gate allows" `Quick
               test_declared_root_write_lands_when_the_gate_allows
           ; test_case "declared root write waits when the Gate defers" `Quick

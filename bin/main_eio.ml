@@ -953,9 +953,24 @@ let run_cmd ?schema_observation ?(record_default = false) ~executable_path host 
   let run_observed env =
     match schema_observation with
     | None -> run_inside_scheduler env
-    | Some observer ->
-      Agent_core.Base.Schema_observation.within observer
-        (fun () -> run_inside_scheduler env)
+    | Some (mode, directory) ->
+      (* Runtime-events setup above can exec this same argv before starting
+         the scheduler. Own the output only after that handoff, and install
+         the finalizer only after exclusive creation succeeds. *)
+      Unix.mkdir directory 0o700;
+      let observer = Agent_core.Base.Schema_observation.create ~mode in
+      Fun.protect
+        (fun () -> Agent_core.Base.Schema_observation.within observer
+          (fun () -> run_inside_scheduler env))
+        ~finally:(fun () ->
+          (* All server-owned switches and pool jobs have settled. The
+             observer binding is gone before snapshot serialization and I/O. *)
+          let report = Agent_core.Base.Schema_observation.snapshot observer
+            |> Agent_core.Base.Schema_observation.report_to_json in
+          match Fs_compat.save_file_atomic (Filename.concat directory "report.json")
+                  (Yojson.Safe.pretty_to_string report ^ "\n") with
+          | Ok () -> ()
+          | Error detail -> failwith ("schema observation report: " ^ detail))
   in
   (match Eio_main.run run_observed with
    | () -> ()
@@ -1353,31 +1368,19 @@ let schema_observe_cmd =
   let directory =
     Arg.(required & opt (some string) None
       & info ["observation-directory"] ~docv:"NEW_DIRECTORY"
-          ~doc:"Create an exclusive diagnostic output directory. After the server scheduler exits, write report.json. A forced exit leaves no final report.")
+          ~doc:"Create an exclusive diagnostic output directory after startup handoff. After owned server work settles, write report.json. A forced exit leaves no final report.")
   in
   let run mode directory host port = function
     | None ->
       prerr_endline "schema-observe requires an explicit --base-path for its owned workspace";
       Cmd.Exit.cli_error
     | Some workspace ->
-    Unix.mkdir directory 0o700;
-    let observer = Observation.create ~mode in
     let identity = Build_identity.current () in
     Installed_dashboard.initialize ~executable_path:identity.executable_path
       ~binary_commit:identity.binary_commit;
-    Fun.protect
-      (fun () ->
-         run_cmd ~schema_observation:observer ~executable_path:identity.executable_path
-           host port (Some workspace) false;
-         Cmd.Exit.ok)
-      ~finally:(fun () ->
-        (* The scheduler and its owned children have returned before the
-           immutable scalar snapshot is serialized. No event retains a tool. *)
-        let report = Observation.snapshot observer |> Observation.report_to_json in
-        match Fs_compat.save_file_atomic (Filename.concat directory "report.json")
-                (Yojson.Safe.pretty_to_string report ^ "\n") with
-        | Ok () -> ()
-        | Error detail -> failwith ("schema observation report: " ^ detail))
+    run_cmd ~schema_observation:(mode, directory) ~executable_path:identity.executable_path
+      host port (Some workspace) false;
+    Cmd.Exit.ok
   in
   Cmd.v (Cmd.info "schema-observe"
     ~doc:"Run an owned server experiment and record actual schema work until shutdown.")

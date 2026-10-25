@@ -107,6 +107,7 @@
   (eio-ssl (>= 0.3.0))
   ;; Agent execution is built from packages/agent_core in this repository.
   ;; It is a private MASC library, not an independently versioned package.
+  angstrom
   (uri (>= 4.4))
   (tls (>= 2.1.2))
   (tls-eio (>= 2.1.2))

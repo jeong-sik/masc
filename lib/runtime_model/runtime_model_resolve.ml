@@ -123,8 +123,9 @@ let parse_custom_model selection =
       |> String.trim in
     if model = "" then Error Empty_model
     else
-      match Uri.of_string url with
-      | uri ->
+      match Angstrom.parse_string ~consume:All Uri.Parser.uri_reference url with
+      | Error _ -> Error Invalid_endpoint
+      | Ok uri ->
         (match Uri.scheme uri, Uri.host uri with
          | Some ("http" | "https"), Some host when host <> "" -> Ok (model, url)
          | _ -> Error Invalid_endpoint)

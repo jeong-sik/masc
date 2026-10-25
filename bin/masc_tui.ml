@@ -2470,7 +2470,7 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
                 | Keeper_chat_live.Stream_model_started _
                 | Keeper_chat_live.Model_content_activity _
                 | Keeper_chat_live.Stream_model_stopped _ | Keeper_chat_live.Stream_details _
-                | Keeper_chat_live.Text _ | Keeper_chat_live.Media _ | Keeper_chat_live.Thinking _
+                | Keeper_chat_live.Text _ | Keeper_chat_live.Media _ | (Keeper_chat_live.Thinking _ | Keeper_chat_live.Thinking_snapshot _)
                 | Keeper_chat_live.Native_tool_started _ | Keeper_chat_live.Native_tool_progress _
                 | Keeper_chat_live.Native_tool_ended _ | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _
                 | Keeper_chat_live.Tool_args _ | Keeper_chat_live.Tool_ended _
@@ -20520,7 +20520,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                           | Keeper_chat_live.Model_content_activity _
                           | Keeper_chat_live.Stream_model_stopped _
                           | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _ | Keeper_chat_live.Media _
-                          | Keeper_chat_live.Thinking _
+                          | (Keeper_chat_live.Thinking _ | Keeper_chat_live.Thinking_snapshot _)
                           | Keeper_chat_live.Native_tool_started _
                           | Keeper_chat_live.Native_tool_progress _
                           | Keeper_chat_live.Native_tool_ended _
@@ -20545,7 +20545,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
              | Keeper_chat_live.Provider_retry_observed _ | Keeper_chat_live.Stream_model_started _
              | Keeper_chat_live.Model_content_activity _ | Keeper_chat_live.Stream_model_stopped _
              | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _ | Keeper_chat_live.Media _
-             | Keeper_chat_live.Thinking _ | Keeper_chat_live.Native_tool_started _
+             | (Keeper_chat_live.Thinking _ | Keeper_chat_live.Thinking_snapshot _) | Keeper_chat_live.Native_tool_started _
              | Keeper_chat_live.Native_tool_progress _ | Keeper_chat_live.Native_tool_ended _
              | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _ | Keeper_chat_live.Tool_args _
              | Keeper_chat_live.Tool_ended _ | Keeper_chat_live.Tool_result _
@@ -20564,7 +20564,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                 | Keeper_chat_live.Stream_model_started _
                 | Keeper_chat_live.Model_content_activity _
                 | Keeper_chat_live.Stream_model_stopped _ | Keeper_chat_live.Stream_details _
-                | Keeper_chat_live.Text _ | Keeper_chat_live.Media _ | Keeper_chat_live.Thinking _
+                | Keeper_chat_live.Text _ | Keeper_chat_live.Media _ | (Keeper_chat_live.Thinking _ | Keeper_chat_live.Thinking_snapshot _)
                 | Keeper_chat_live.Native_tool_started _ | Keeper_chat_live.Native_tool_progress _
                 | Keeper_chat_live.Native_tool_ended _ | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _
                 | Keeper_chat_live.Tool_args _ | Keeper_chat_live.Tool_ended _
@@ -20631,7 +20631,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                                                    | Keeper_chat_live.Stream_details _
                                                    | Keeper_chat_live.Text _
                                                    | Keeper_chat_live.Media _
-                                                   | Keeper_chat_live.Thinking _
+                                                   | (Keeper_chat_live.Thinking _ | Keeper_chat_live.Thinking_snapshot _)
                                                    | Keeper_chat_live.Native_tool_started _
                                                    | Keeper_chat_live.Native_tool_progress _
                                                    | Keeper_chat_live.Native_tool_ended _
@@ -21645,7 +21645,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                          | Keeper_chat_live.Model_content_activity _
                          | Keeper_chat_live.Stream_model_stopped _
                          | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _ | Keeper_chat_live.Media _
-                         | Keeper_chat_live.Thinking _
+                         | (Keeper_chat_live.Thinking _ | Keeper_chat_live.Thinking_snapshot _)
                          | Keeper_chat_live.Native_tool_started _
                          | Keeper_chat_live.Native_tool_progress _
                          | Keeper_chat_live.Native_tool_ended _

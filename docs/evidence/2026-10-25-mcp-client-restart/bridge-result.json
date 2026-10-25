@@ -1,0 +1,47 @@
+{
+  "binary_sha256": "8ea247894bc801bf68907294479e641fde3c4e3813dec42b625a4dc179ca8f4d",
+  "base_isolated": true,
+  "server_runs": [
+    {
+      "ordinal": 1,
+      "pid": 12305,
+      "effective_paths_matched": true,
+      "unauthenticated_http_status": 401,
+      "bridge_pid": 12364,
+      "tools_list_count": 54,
+      "masc_tool_help_succeeded": true,
+      "client_credential_value_unchanged": true
+    },
+    {
+      "ordinal": 2,
+      "pid": 12538,
+      "effective_paths_matched": true,
+      "unauthenticated_http_status": 401,
+      "bridge_pid": 12364,
+      "tools_list_count": 54,
+      "masc_tool_help_succeeded": true,
+      "client_credential_value_unchanged": true
+    }
+  ],
+  "build_commit": "d98835aec86ae8c302b4cc43474c249ef1425d29",
+  "generated_client_config": {
+    "kind": "claude-desktop/mcp-remote",
+    "agent": "restart-proof-client",
+    "role": "worker",
+    "same_static_config": true,
+    "token_env_name": "MASC_RESTART_PROOF_TOKEN"
+  },
+  "initial_bridge_pid": 12364,
+  "continuous_bridge_after_server_restart": {
+    "same_process_live": true,
+    "response_has_result": true,
+    "response_has_error": false,
+    "error_code": null,
+    "timed_out": false
+  },
+  "explicit_bridge_relaunch_required": false,
+  "client_package_version": "0.15.2",
+  "internal_token_rotated": true,
+  "result": "PASS",
+  "server_processes_reaped": true
+}

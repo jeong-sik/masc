@@ -59,11 +59,53 @@ the actual registered tool with its required argument. A subsequent run adds an
 explicit distinct-session assertion; its final result is recorded separately in
 result.json rather than claiming an older run executed that assertion.
 
-#25890 remains open for actual configured external-client recovery, including
-app-specific restart/reconnect behavior. This proof establishes that the current
+The initial Python-only observation did not establish actual external-client recovery.
+The real configured bridge observation below now exercises that boundary. This proof establishes that the current
 per-client credential survives a server-process restart while the internal token
 rotates; it does not inspect every user config, change the production runtime,
 or prove an app reconnects automatically. The referenced `/Users/dancer/me/.mcp.json`
 was inspected without reading/publishing credential values: the MASC entry now
 uses headersHelper and has no static Authorization header. No user config was
 modified. No local builds, full regression or CI were requested.
+
+## Actual configured mcp-remote process across restart
+
+[bridge-probe.py](bridge-probe.py) consumes the actual generated Claude Desktop
+entry (`command`, `args`, `env`) and spawns its `npx -y mcp-remote` command.
+It runs from a temporary npm prefix containing pinned mcp-remote0.15.2;
+[client-package.json](client-package.json) records package identity and integrity.
+The driver sends ordinary MCP JSON-RPC over stdio to the real bridge; it does not
+replace the bridge HTTP transport or synthesize a successful tool response.
+The [upstream bridge documentation](https://github.com/punkpeye/mcp-remote)
+describes this stdio/HTTP configuration and environment-expanded custom header.
+
+Actual [bridge-result.json](bridge-result.json): server processes12305 and12538,
+bridge command process12364 throughout. Both server incarnations returned a54-tool list
+and successful `masc_tool_help` response through that same running bridge command. Its node child PID was not recorded separately.
+After restart the first new tools/list returned a result without an error or
+observation timeout. No explicit bridge relaunch was required. The internal
+Keeper token changed and the original external credential value remained equal.
+The probe does not claim a new MCP session ID or observe exactly how the bridge
+handled the server's session state. It proves continued actual client operations.
+Both unauthenticated probes returned401. All owned processes were terminated and
+reaped; private workspace and bridge state were removed. Production and user
+client configuration were not changed.
+
+Reproduce after installing the declared version in a private temporary prefix:
+
+```bash
+npm install --prefix /path/to/private/client-prefix --ignore-scripts \
+  --no-audit --no-fund mcp-remote@0.15.2
+python3 docs/evidence/2026-10-25-mcp-client-restart/bridge-probe.py \
+  --binary "$(command -v masc)" \
+  --client-prefix /path/to/private/client-prefix \
+  --output /tmp/masc-configured-bridge-result.json
+```
+
+The20-second per-request observation bound belongs to this manual probe. A
+no-response observation is recorded separately from a process exit and from a
+JSON-RPC error; it is not described as a token failure. The recovery branch can
+explicitly relaunch the owned bridge if continued operation fails, preserving
+that fact in the result. This run did not enter that branch. The cleanup does
+not establish graceful application shutdown or an app UI experience. Neither
+Claude Desktop's UI nor Codex's host process was launched.

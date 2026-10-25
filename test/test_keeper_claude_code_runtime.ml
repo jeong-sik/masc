@@ -3186,6 +3186,9 @@ let test_start_authority_is_user_context_not_standing_system () =
   let module Host = Keeper_official_client_host in
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let unread = Keeper_librarian_request_unread.empty in
+    let librarian_front _ = Ok
+      {Keeper_turn_driver_try_provider.point=No_position; unread} in
     let goal_text = "GOAL revision-current measurement=1/4" in
     let first_event = "Approved task-first vrf-first human_operator operator-first" in
     let new_event = "Rejected task-other vrf-new human_operator operator-second" in
@@ -3208,7 +3211,7 @@ let test_start_authority_is_user_context_not_standing_system () =
         [Emit (assistant ~turn_id:(string_of_int index) "ANSWER");
          Emit (result ~turn_id:(string_of_int index) "ANSWER")]
         (fun cli_path ->
-          let attempt = run_direct_attempt ~hooks
+          let attempt = run_direct_attempt ~hooks ~librarian_front
             ~composed_context:(fun () -> incr reads; Some assembly)
             ~system_prompt:"BASE" ~base_path ~cli_path ~goal:"OWNER" ~tools:[] () in
           (match attempt.result with
@@ -3222,7 +3225,13 @@ let test_start_authority_is_user_context_not_standing_system () =
       let system = In_channel.with_open_bin system_marker In_channel.input_all in
       let raw = In_channel.with_open_bin prompt_marker input_line in
       let user = content_of_wire_message raw in
-      check string "standing System never contains this-turn authority" ("BASE\n\n" ^ goal_text) system;
+      let standing = "BASE\n\n" ^ goal_text in
+      let expected_system = if index = 0 then
+          String.concat "\n\n" (standing :: List.map Host.encode_history_message
+            (attach_native_unread ~unread []))
+        else standing in
+      check string "complete System keeps the native unread contract and excludes authority"
+        expected_system system;
       let expected = match event with
         | None -> "OWNER"
         | Some text -> "USER:\n" ^ Host.encode_history_message (Agent_core.Types.user_msg text) ^ "\n\nOWNER" in

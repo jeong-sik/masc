@@ -2098,6 +2098,60 @@ let test_run_command_preserves_bare_command_argv () =
       Alcotest.(check string) "preserves bare head argv"
         "head -n 1 /home/keeper/playground/acme-sandbox/scratch/demo.txt\n" out
 
+(* Model an image whose default entrypoint intercepts an absent program and
+   returns 1, the exit Grep accepts as no match. Clearing that entrypoint must
+   expose the program's own outcome, including a genuine no-match exit 1. *)
+let with_image_entrypoint_search ~program_exit f =
+  let script = Printf.sprintf {|#!/bin/sh
+case "$1" in
+  info|image) printf '[]\n'; exit 0 ;;
+  run) shift ;;
+  *) exit 2 ;;
+esac
+cleared=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --entrypoint)
+      if [ "$2" = "" ]; then cleared=true; fi
+      shift 2 ;;
+    alpine:test) shift; break ;;
+    *) shift ;;
+  esac
+done
+if [ "$cleared" != true ]; then
+  printf 'image entrypoint intercepted the read program\n' >&2
+  exit 1
+fi
+exit %d
+|} program_exit in
+  with_fake_docker script @@ fun () ->
+  let base, config, meta = setup_config "entrypoint-search" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  ensure_dir (Keeper_sandbox.host_root_abs_of_meta ~config ~meta);
+  match Masc.Keeper_workspace_read_ops.try_handle_with_outcome
+      ~turn_sandbox_factory:None ~config ~meta ~op:"rg" ~raw_path:"."
+      ~args:(`Assoc ["path", `String "."; "pattern", `String "needle"]) with
+  | Some execution -> f execution
+  | None -> Alcotest.fail "Grep was not dispatched"
+
+let test_search_missing_program_is_runtime_failure () =
+  with_image_entrypoint_search ~program_exit:127 (fun execution ->
+    Alcotest.(check bool) "missing program is not successful lookup" true
+      (execution.disposition = Tool_result.Failed Tool_result.Runtime_failure))
+
+let test_search_real_no_match_survives_entrypoint_override () =
+  with_image_entrypoint_search ~program_exit:1 (fun execution ->
+    Alcotest.(check bool) "real no-match stays completed" true
+      (execution.disposition = Tool_result.Completed ());
+    match execution.data with
+    | Some data ->
+      Alcotest.(check bool) "successful empty search" true
+        (Yojson.Safe.Util.member "ok" data = `Bool true
+         && Yojson.Safe.Util.member "matches" data = `List [])
+    | None -> Alcotest.fail "completed search lost its structured data")
+
 (* [max_bytes] used to be a trim of a finished answer: [cat] wrote the whole
    file, the drainer read every byte to EOF, and only then was the prefix cut.
    The limit travels to the producer now, which is what this pins -- the
@@ -3122,6 +3176,10 @@ let run_tests ~clock () =
             test_run_command_allows_configured_nonzero_exit;
           Alcotest.test_case "preserves bare command argv" `Quick
             test_run_command_preserves_bare_command_argv;
+          Alcotest.test_case "image entrypoint cannot hide a missing search program" `Quick
+            test_search_missing_program_is_runtime_failure;
+          Alcotest.test_case "entrypoint override preserves real search no-match" `Quick
+            test_search_real_no_match_survives_entrypoint_override;
           Alcotest.test_case "read asks the sandbox for a bounded prefix" `Quick
             test_read_asks_the_sandbox_for_a_bounded_prefix;
           Alcotest.test_case "fallback uses Docker_spawn slot" `Quick

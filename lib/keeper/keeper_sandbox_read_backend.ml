@@ -122,6 +122,7 @@ let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
       ~container_root:croot
   @ secret_args
   @ [
+    "--entrypoint"; "";
     image;
   ]
   @ command_argv

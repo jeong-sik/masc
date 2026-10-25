@@ -347,7 +347,7 @@ let storable_runtime =
 
 let store_or_fail ~base_path theme =
   match Config.set_theme ~base_path theme with
-  | Ok () -> ()
+  | Ok _ignored_legacy_keys -> ()
   | Error message -> Alcotest.failf "storing the theme failed: %s" message
 
 (* Runtime's config write lock leaves a runtime.toml.lock beside the file it

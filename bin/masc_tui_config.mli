@@ -84,13 +84,18 @@ val text_with_theme : string -> theme:string option -> string
     when [theme] is [None]. The [tui] table is created when absent; comments
     and every other line are kept. Pure; the commit is {!set_theme}'s. *)
 
-val set_theme : base_path:string -> string option -> (unit, string) result
+val set_theme : base_path:string -> string option -> (string list, string) result
 (** Store the reader's theme pick in the runtime.toml {!load} reads, so it is
     still there on the next start. [None] withdraws the pick. The load, the
     edit and the write happen under Runtime's config write lock, so a
     concurrent write to another table of the same file is not lost. [Error]
     carries what stopped the write; the scheme is already applied to the
     screen by then, so the caller has to say which of the two happened.
+
+    [Ok keys] names the legacy keys the committed file still carries that
+    this masc reads past without a value (empty when there are none): the
+    save landed, and the caller says the keys so the reader knows the old
+    key is inert rather than still doing something (#45985).
 
     A write whose durability could not be confirmed is [Ok]: the replacement
     is already visible, which is what "stored" means to the next start. *)

@@ -75,6 +75,13 @@ val parse_string : string -> (Runtime_schema.config, parse_error list) result
 val parse_file : string -> (Runtime_schema.config, parse_error list) result
 (** Parse a TOML file into a Runtime config. *)
 
+val ignored_legacy_keys : string -> string list
+(** Dotted paths of the legacy keys this text still carries -- e.g.
+    ["models.gpt-5.max-prompt-bytes"] -- which {!parse_string} now reads past
+    without a value. Empty when the text parses without them or does not
+    parse at all. A save names them in its warning rather than refusing the
+    edit (#45985). *)
+
 (** {1 Internal: protocol resolution} *)
 
 val api_format_of_protocol : string -> (Runtime_schema.api_format, string) result

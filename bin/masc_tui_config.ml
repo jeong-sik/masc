@@ -137,8 +137,13 @@ let set_theme ~base_path theme =
       ~runtime_config_path:(runtime_toml_path ~base_path)
       (fun content -> text_with_theme content ~theme)
   with
-  | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
+  | Ok (receipt : Runtime.config_commit_receipt) -> Ok receipt.ignored_legacy_keys
   | Error message -> Error message
+
+(* [set_theme] now returns the legacy keys the committed file still carries.
+   A save that lands must still tell the reader them: the key is inert from
+   this commit on, and the reader is the one who has to decide whether to
+   clean it up. The message is one line -- the state bar is one line. *)
 
 (* Whether masc lifts colours the reader's theme leaves under the readable
    floor, [tui].lift_colours. Absent reads as "yes", which is what masc did

@@ -53,6 +53,10 @@ type config_commit_receipt =
   ; order : config_commit_order
   ; lock_warnings : config_lock_warning list
   ; exact_output_registry : exact_output_registry_application
+  ; ignored_legacy_keys : string list
+        (** Legacy keys the committed text still carries that this masc reads
+            past without a value; the receipt says them so the editor that
+            caused the commit can warn in one line (#45985). *)
   }
 
 and config_lock_warning =
@@ -139,6 +143,8 @@ let config_commit_receipt_to_yojson (receipt : config_commit_receipt) =
     ; ( "warnings"
       , `List
           (List.map config_lock_warning_to_yojson receipt.lock_warnings) )
+    ; ( "ignored_legacy_keys"
+      , `List (List.map (fun key -> `String key) receipt.ignored_legacy_keys) )
     ]
 ;;
 

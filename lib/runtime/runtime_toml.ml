@@ -1029,6 +1029,12 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
             other))
 ;;
 
+(* Keys under [models.*.capabilities] a released masc once read and no longer
+   reads. Recognized rather than rejected so a capabilities table written by
+   an older build does not refuse every save of the file (#45985); exact-name
+   matching keeps the misspelt-key typo guard whole. The value is ignored. *)
+let legacy_model_capability_keys = [ "supports-reasoning-budget" ]
+
 let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   : (Runtime_schema.model_capabilities, parse_error list) result
   =
@@ -1063,6 +1069,8 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
       List.concat_map
         (fun (key, _) ->
            if List.mem key keys
+           then []
+           else if List.mem key legacy_model_capability_keys
            then []
            else
              error
@@ -1402,12 +1410,24 @@ let model_keys =
   ]
 ;;
 
+(* Keys a released masc once read from [models.*] and no longer reads. They
+   are recognized rather than rejected so an operator's file written by an
+   older build still saves: a save revalidates the whole file, and one dead
+   key anywhere in it would otherwise refuse every unrelated edit (#45985).
+   Recognition is by exact name, not a prefix rule, so a genuinely misspelt
+   key still fails the load with the "unknown key" the typo guard exists to
+   give. The value is ignored -- the semantics moved to [max-context] in
+   18b85e62df -- and [ignored_legacy_model_keys] says it was seen. *)
+let legacy_model_keys = [ "max-prompt-bytes" ]
+
 let model_unknown_key_errors ~path (tbl : Otoml.t) =
   match tbl with
   | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
     List.concat_map
       (fun (key, _) ->
          if List.mem key model_keys
+         then []
+         else if List.mem key legacy_model_keys
          then []
          else
            error
@@ -3560,6 +3580,60 @@ let parse_string (content : string) : (Runtime_schema.config, parse_error list) 
   match Otoml.Parser.from_string_result content with
   | Ok toml -> parse_toml toml
   | Error msg -> Error [ { path = "<parse>"; message = msg } ]
+;;
+
+(* The legacy keys this text still carries, dotted paths like
+   ["models.gpt-5.max-prompt-bytes"], for a save to name in its warning.
+   Read straight off the parsed TOML rather than threading a side channel
+   through [parse_toml]: the keys are ignored there, and the reader that has
+   to name them is the caller, which already holds the document. *)
+let ignored_legacy_keys (content : string) : string list =
+  match Otoml.Parser.from_string_result content with
+  | Error _ -> []
+  | Ok toml ->
+    let entries_of = function
+      | Otoml.TomlTable entries | Otoml.TomlInlineTable entries -> entries
+      | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+      | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+      | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+      | Otoml.TomlTableArray _ -> []
+    in
+    let model_entries id =
+      match Otoml.find_opt toml Fun.id [ "models"; id ] with
+      | Some tbl -> entries_of tbl
+      | None -> []
+    in
+    let models =
+      match Otoml.find_opt toml Fun.id [ "models" ] with
+      | Some tbl ->
+        List.filter_map
+          (fun (id, _) -> if id <> "" then Some id else None)
+          (entries_of tbl)
+      | None -> []
+    in
+    List.concat_map
+      (fun id ->
+         let caps =
+           match List.assoc_opt "capabilities" (model_entries id) with
+           | Some tbl -> entries_of tbl
+           | None -> []
+         in
+         List.filter_map
+           (fun (key, _) ->
+              if List.mem key legacy_model_keys
+              then Some (Printf.sprintf "models.%s.%s" id key)
+              else if List.mem key legacy_model_capability_keys
+              then Some (Printf.sprintf "models.%s.capabilities.%s" id key)
+              else None)
+           (model_entries id)
+         @ List.filter_map
+              (fun (key, _) ->
+                 if List.mem key legacy_model_capability_keys
+                 then Some (Printf.sprintf "models.%s.capabilities.%s" id key)
+                 else None)
+              caps)
+      models
+    |> List.sort_uniq String.compare
 ;;
 
 let parse_file (path : string) : (Runtime_schema.config, parse_error list) result =

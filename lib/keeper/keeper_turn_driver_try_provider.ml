@@ -1614,18 +1614,23 @@ let bounded_model_input_projection
        | None -> Ok messages
        | Some project -> project messages)
   | Keeper_history _ ->
-  let reserved_bytes =
+  let reserved_bytes, prefix_digest =
     offload_model_input_cpu (fun () ->
-      declared_request_reserve_bytes ~system_prompt:ctx.system_prompt ~tools:ctx.tools)
-  in
-  (* The fixed prefix the ledger compares consecutive requests under: one
-     digest per attempt, since the system prompt and tool list are fixed for
-     the attempt's lifetime. *)
-  let prefix_digest =
-    offload_model_input_cpu (fun () ->
-      Keeper_model_input_ledger.prefix_digest
-        ~system_prompt:ctx.system_prompt
-        ~tools:ctx.tools)
+      let reserved_bytes =
+        declared_request_reserve_bytes ~system_prompt:ctx.system_prompt ~tools:ctx.tools
+      in
+      (* Give the worker cancellation branch a scheduling point between stages.
+         This preparation retains its CPU permit until both stages return. *)
+      Eio_guard.fair_yield ();
+      (* The fixed prefix the ledger compares consecutive requests under: one
+         digest per attempt, since the system prompt and tool list are fixed for
+         the attempt's lifetime. *)
+      let prefix_digest =
+        Keeper_model_input_ledger.prefix_digest
+          ~system_prompt:ctx.system_prompt
+          ~tools:ctx.tools
+      in
+      reserved_bytes, prefix_digest)
   in
   (* One memo per provider attempt, not per request.  A turn issues one
      projection per provider request — measured on the live wire capture:

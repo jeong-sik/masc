@@ -174,9 +174,17 @@ type argument_seed = Completed_seed | Open_seed | No_seed
 
 let test_historical_tool_results ?(argument_seed = Completed_seed)
     ?(input_policy = Keeper_input_policy.Small) ~completed ~reader_available () =
+  let module Observation = Agent_core.Base.Schema_observation in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
+  let previous_pool = Domain_pool_ref.get () in
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Eio.Switch.on_release sw (fun () ->
+    match previous_pool with
+    | None -> Domain_pool_ref.clear_for_tests ()
+    | Some previous -> Domain_pool_ref.set previous);
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Model_catalog.global () in
   let base_path = Filename.temp_file "keeper-no-body-gate-demote-" "" in
@@ -289,7 +297,7 @@ streaming = false
       (* The dispatch view already has a closer, but the raw pre-admission
          seed ends at the call. That closer cannot grant argument authority. *)
       Some (List.take 2 initial_messages) in
-  let trace_id = "demote-proof-trace" in
+  let trace_id = "demote-proof-trace-" ^ Filename.basename base_path in
   if completed then (
     let position = match Keeper_turn_boundaries.position_of_messages initial_messages with
       | Ok position -> position | Error detail -> fail detail in
@@ -335,11 +343,26 @@ streaming = false
     && (match input_policy with Keeper_input_policy.Small -> true | Wide -> false) in
   let expect_arguments_demoted = expect_demoted
     && (match argument_seed with Completed_seed -> true | Open_seed | No_seed -> false) in
+  let system_prompt = "Demotion fixture: \"quoted\"\nUTF-8 관측\\suffix." in
+  let manifest_config = Workspace.default_config base_path in
+  let manifest_context : Keeper_runtime_manifest.turn_context =
+    { manifest_keeper_name = "demote-proof"
+    ; manifest_trace_id = trace_id
+    ; manifest_keeper_turn_id = Some 2
+    }
+  in
+  check bool "the fresh trace has no earlier ledger" true
+    (Keeper_model_input_ledger.Table.lookup
+       ~keeper_name:"demote-proof" ~runtime_id:"fixture.sample" ~session_id:trace_id = None);
+  let observer = Observation.create ~mode:Timed in
   let result =
+    Observation.within observer (fun () ->
+    Observation.with_wake ~keeper:"demote-proof" ~trace_id ~absolute_turn:2
+      ~execution_scope:None ~cause:None (fun () ->
     Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = trace_id }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
       ~input_policy ?argument_demotion_seed
 
-      ~system_prompt:"Demotion fixture."
+      ~system_prompt
       ~runtime_id:"fixture.sample"
       ~keeper_name:"demote-proof"
       ~base_path
@@ -347,7 +370,10 @@ streaming = false
       ~agent_core_tools:tools
       ~goal:"execute tool"
       ~initial_messages
-      ~sw ~net:env#net ()
+      ~runtime_manifest_context:manifest_context
+      ~runtime_manifest_append:(fun row ->
+        Keeper_runtime_manifest.append_best_effort manifest_config row)
+      ~sw ~net:env#net ()))
   in
   (match result with
    | Ok _ -> ()
@@ -356,6 +382,88 @@ streaming = false
     (Exact_output_fixture.post_count server);
   check bool "the active tool executes once with the exact long original input" true
     (!executed_inputs = [active_input]);
+  let request_bodies = Exact_output_fixture.request_bodies server in
+  let expected_names = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
+  List.iter (fun body ->
+    let request = Yojson.Safe.from_string body in
+    let names = Yojson.Safe.Util.(member "tools" request |> to_list)
+      |> List.map (fun tool -> Yojson.Safe.Util.(member "function" tool |> member "name" |> to_string)) in
+    check (list string) "the actual provider requests retain nonempty declared tool order"
+      expected_names names;
+    let first_message = Yojson.Safe.Util.(member "messages" request |> to_list) |> List.hd in
+    check string "the actual first system message preserves escaped UTF-8 input"
+      system_prompt Yojson.Safe.Util.(member "content" first_message |> to_string)) request_bodies;
+  (* Compute expected byte and prefix values only after the real run, so
+     their encoding cannot prime the worker's cold SDK count lookup. *)
+  let expected_reserved_bytes =
+    List.fold_left (fun bytes tool ->
+      bytes + String.length (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)))
+      (String.length (Yojson.Safe.to_string (`String system_prompt))) tools
+  in
+  let manifest_path = Keeper_runtime_manifest.path_for_trace manifest_config
+    ~keeper_name:"demote-proof" ~trace_id in
+  let manifest_rows = In_channel.with_open_bin manifest_path In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> line <> "")
+    |> List.map (fun line ->
+      match Keeper_runtime_manifest.decode_persisted_row (Yojson.Safe.from_string line) with
+      | Ok (Keeper_runtime_manifest.Active_row row) -> row
+      | Ok (Keeper_runtime_manifest.Unsupported_row _) -> fail "fixture retained an unsupported manifest event"
+      | Error detail -> fail detail)
+  in
+  (match List.filter (fun (row : Keeper_runtime_manifest.t) ->
+     row.event = Keeper_runtime_manifest.History_projection_observed) manifest_rows with
+   | [row] ->
+     check string "reserve manifest belongs to this Keeper" "demote-proof" row.keeper_name;
+     check string "reserve manifest belongs to this fresh trace" trace_id row.trace_id;
+     check (option int) "reserve manifest belongs to this original turn" (Some 2) row.keeper_turn_id;
+     check string "the actual projection prepared its request" "history_projection_prepared" row.status;
+     check int "the retained decision charges exact declared schema and escaped prompt bytes"
+       expected_reserved_bytes Yojson.Safe.Util.(member "reserved_bytes" row.decision |> to_int)
+   | _ -> fail "expected the real attempt's one retained history projection decision");
+  (match Keeper_model_input_ledger.Table.lookup
+     ~keeper_name:"demote-proof" ~runtime_id:"fixture.sample" ~session_id:trace_id with
+   | Some ledger ->
+     check string "the accepted request ledger consumes the exact declared prefix"
+       (Keeper_model_input_ledger.prefix_digest ~system_prompt ~tools) ledger.prefix_digest
+   | None -> fail "the completed real requests did not populate their ledger");
+  let report = Observation.report_to_json (Observation.snapshot observer) in
+  (match Observation.report_of_json report with
+   | Ok _ -> ()
+   | Error detail -> fail detail);
+  let events = Yojson.Safe.Util.(member "events" report |> to_list) in
+  let payload event = Yojson.Safe.Util.member "payload" event in
+  let is_span kind site event =
+    Yojson.Safe.Util.member "kind" (payload event) = `String kind
+    && Yojson.Safe.Util.member "site" (payload event) = `String site in
+  let sequence event = Yojson.Safe.Util.(member "sequence" event |> to_int) in
+  let in_reserve event =
+    Yojson.Safe.Util.(member "scope" event |> member "parent_site") = `String "reserve_encode" in
+  let reserve = List.find (fun event ->
+    is_span "span_started" "sdk_byte_count_lookup" event && in_reserve event) events in
+  let prefixes = List.filter (is_span "span_started" "prefix_digest_encode") events in
+  check int "the real prefix encodes every declared tool occurrence once"
+    (List.length tools) (List.length prefixes);
+  List.iter (fun event ->
+    check bool "prefix encoding is outside the reserve dynamic scope" false
+      (in_reserve event)) prefixes;
+  let last_prefix = List.hd (List.rev prefixes) in
+  let enclosing_workers = List.filter (fun start ->
+    if not (is_span "span_started" "worker_work" start) then false
+    else
+      let span_id = Yojson.Safe.Util.member "span_id" (payload start) in
+      let finish = List.find (fun event ->
+        is_span "span_finished" "worker_work" event
+        && Yojson.Safe.Util.member "span_id" (payload event) = span_id) events in
+      sequence start < sequence reserve && sequence finish > sequence last_prefix) events in
+  check int "one real worker invocation encloses reserve and the complete prefix" 1
+    (List.length enclosing_workers);
+  check bool "the real reserve retains cold SDK encoding" true
+    (List.exists (fun event ->
+       is_span "span_finished" "sdk_byte_count_encode" event && in_reserve event) events);
+  check bool "the real reserve retains SDK count publication" true
+    (List.exists (fun event ->
+       is_span "span_finished" "sdk_byte_count_publication" event && in_reserve event) events);
   let second_body = List.nth (Exact_output_fixture.request_bodies server) 1 in
   check bool "historical body is replaced only with completion and reader" (not expect_demoted)
     (String_util.contains_substring second_body historical_payload);

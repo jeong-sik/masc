@@ -106,9 +106,11 @@ class Worker:
                     raise ConnectionError("callback_destination_mismatch")
                 query = parse.parse_qs(callback.query, strict_parsing=True, keep_blank_values=True)
                 fragment = parse.parse_qs(callback.fragment, strict_parsing=True, keep_blank_values=True)
-                if (not {"code", "state"} <= set(query)
-                        or not set(query) <= {"code", "state", "iss", "base_url"}
-                        or set(fragment) != {"integration_key"}
+                declined = "error" in query
+                required = {"error", "state"} if declined else {"code", "state"}
+                if (not required <= set(query)
+                        or not set(query) <= required | {"iss", "base_url"}
+                        or set(fragment) != (set() if declined else {"integration_key"})
                         or any(len(values) != 1 or not values[0] for values in [*query.values(), *fragment.values()])
                         or query["state"][0] != arguments["state"]):
                     raise ConnectionError("invalid_callback")
@@ -121,8 +123,14 @@ class Worker:
                     https_url(value)
                     if key == "base_url" and parse.urlsplit(value).path not in {"", "/"}:
                         raise ConnectionError("invalid_callback")
-                connector.complete(state=query["state"][0], code=query["code"][0],
-                                   integration_key=fragment["integration_key"][0])
+                if declined:
+                    if query["error"] != ["access_denied"]:
+                        raise ConnectionError("invalid_callback")
+                    connector.cancel_authorization(expected_state=query["state"][0],
+                                                   expected_connection_id=arguments["connection_id"])
+                else:
+                    connector.complete(state=query["state"][0], code=query["code"][0],
+                                       integration_key=fragment["integration_key"][0])
             return self.operator_view(connector)
         except (ConnectionError, OSError, InvalidInput, ValueError, TypeError, KeyError, UnicodeError):
             # The operator learns only a fixed outcome. The durable backend

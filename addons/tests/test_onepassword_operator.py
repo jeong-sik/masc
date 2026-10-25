@@ -86,31 +86,31 @@ class OperatorTests(unittest.TestCase):
         return arguments
 
     def test_optional_callback_metadata_completes_the_original_attempt_without_publication_or_replay(self):
-        for index, metadata in enumerate([
+        for metadata in [
             [("iss", "https://issuer.example/tenant")],
             [("base_url", "https://environment.example:8443/")],
             [("base_url", "https://environment.example"), ("iss", "https://issuer.example/tenant")],
-        ]):
+        ]:
             with self.subTest(metadata=metadata):
-                connector = Connector(self.connector.configuration,
-                    PrivateStore(self.root / f"metadata-{index}", provision=True), transport=self.transport)
-                with patch.object(server, "load_connector", return_value=connector):
-                    begun = self.call("connect")
-                    arguments = self.callback_with_query(begun, metadata)
-                    before = len(self.calls)
-                    completed = self.call("complete", arguments)
-                    self.assertEqual(connector.status()["phase"], "connected")
-                    self.assertEqual(connector.connection_identity(), begun["callback"]["arguments"]["connection_id"])
-                    self.assertEqual(len(self.calls), before + 1)
-                    self.assertEqual(set(self.calls[-1][1]), {"grant_type", "code", "redirect_uri", "code_verifier"})
-                    self.assertEqual(self.calls[-1][1]["code"], "CODE_MARKER")
-                    self.call("complete", arguments)
-                    self.assertEqual(len(self.calls), before + 1)
-                    public = json.dumps([completed, self.worker.status(),
-                        self.worker.observe({"binding": {"sources": []}, "sources": []})])
-                    for secret in [begun["callback"]["state"], "CODE_MARKER", "INTEGRATION_MARKER",
-                                   "ACCESS_MARKER", "REFRESH_MARKER", *[value for _, value in metadata]]:
-                        self.assertNotIn(secret, public)
+                begun = self.call("connect")
+                arguments = self.callback_with_query(begun, metadata)
+                before = len(self.calls)
+                completed = self.call("complete", arguments)
+                self.assertEqual(self.connector.status()["phase"], "connected")
+                self.assertEqual(self.connector.connection_identity(), begun["callback"]["arguments"]["connection_id"])
+                self.assertEqual(len(self.calls), before + 1)
+                self.assertEqual(set(self.calls[-1][1]), {"grant_type", "code", "redirect_uri", "code_verifier"})
+                self.assertEqual(self.calls[-1][1]["code"], "CODE_MARKER")
+                self.call("complete", arguments)
+                self.assertEqual(len(self.calls), before + 1)
+                public = json.dumps([completed, self.worker.status(),
+                    self.worker.observe({"binding": {"sources": []}, "sources": []})])
+                for secret in [begun["callback"]["state"], "CODE_MARKER", "INTEGRATION_MARKER",
+                               "ACCESS_MARKER", "REFRESH_MARKER", *[value for _, value in metadata]]:
+                    self.assertNotIn(secret, public)
+                # Close the fixture's established connection before the next
+                # metadata case; this callback performs no provider IO.
+                self.connector.disconnect(lambda access, key: None)
 
     def test_optional_metadata_never_changes_the_actual_token_request_authority(self):
         begun = self.call("connect")
@@ -153,23 +153,20 @@ class OperatorTests(unittest.TestCase):
                 "https://META\nDATA_MARKER.example", "https://META\x01DATA_MARKER.example",
             ]])
         invalid.append([("base_url", "https://METADATA_MARKER.example/not-an-origin")])
-        for index, metadata in enumerate(invalid):
+        begun = self.call("connect")
+        identity = self.connector.authorization_identity()
+        for metadata in invalid:
             with self.subTest(metadata=metadata):
-                connector = Connector(self.connector.configuration,
-                    PrivateStore(self.root / f"invalid-metadata-{index}", provision=True), transport=self.transport)
-                with patch.object(server, "load_connector", return_value=connector):
-                    begun = self.call("connect")
-                    identity = connector.authorization_identity()
-                    before = len(self.calls)
-                    output = io.StringIO()
-                    with contextlib.redirect_stderr(output):
-                        response = self.call("complete", self.callback_with_query(begun, metadata))
-                    self.assertEqual(connector.authorization_identity(), identity)
-                    self.assertEqual(len(self.calls), before)
-                    self.assertEqual([action["id"] for action in response["actions"]], ["view"])
-                    self.assertEqual(output.getvalue(), "")
-                    for secret in [identity["state"], "CODE_MARKER", "INTEGRATION_MARKER", "METADATA_MARKER", "VALUE_MARKER"]:
-                        self.assertNotIn(secret, json.dumps(response))
+                before = len(self.calls)
+                output = io.StringIO()
+                with contextlib.redirect_stderr(output):
+                    response = self.call("complete", self.callback_with_query(begun, metadata))
+                self.assertEqual(self.connector.authorization_identity(), identity)
+                self.assertEqual(len(self.calls), before)
+                self.assertEqual([action["id"] for action in response["actions"]], ["view"])
+                self.assertEqual(output.getvalue(), "")
+                for secret in [identity["state"], "CODE_MARKER", "INTEGRATION_MARKER", "METADATA_MARKER", "VALUE_MARKER"]:
+                    self.assertNotIn(secret, json.dumps(response))
 
     def test_late_cancel_cannot_cancel_replacement_or_completed_connection(self):
         first = self.call("connect")
@@ -180,6 +177,67 @@ class OperatorTests(unittest.TestCase):
         self.assertEqual(self.connector.authorization_identity(), second["callback"]["arguments"])
         self.call("complete", self.callback_arguments(second))
         self.call("cancel", second["callback"]["arguments"])
+        self.assertTrue(self.connector.status()["connected"])
+        self.assertEqual(len(self.calls), 1)
+
+    def test_declined_callback_cancels_only_the_original_pending_attempt_without_exchange(self):
+        begun = self.call("connect")
+        arguments = self.callback_arguments(begun)
+        arguments["callback_url"] = self.connector.configuration.redirect_uri + "?" + urlencode({
+            "error": "access_denied", "state": begun["callback"]["state"],
+            "iss": "https://issuer.example/tenant", "base_url": "https://environment.example"})
+        response = self.call("complete", arguments)
+        self.assertEqual(self.connector.status()["phase"], "disconnected")
+        self.assertEqual([action["id"] for action in response["actions"]], ["connect"])
+        self.assertEqual(self.calls, [])
+        self.assertNotIn(begun["callback"]["state"], json.dumps(response))
+        replacement = self.call("connect")
+        self.call("complete", arguments)
+        self.assertEqual(self.connector.authorization_identity(), replacement["callback"]["arguments"])
+        self.assertEqual(self.calls, [])
+
+    def test_decline_requires_exact_state_connection_and_closed_error_shape(self):
+        begun = self.call("connect")
+        identity = begun["callback"]["arguments"]
+        query = [("state", identity["state"]), ("error", "access_denied")]
+        invalid = [
+            (query + [("error", "access_denied")], "", {}),
+            (query + [("code", "CODE_MARKER")], "", {}),
+            (query + [("unknown", "")], "", {}),
+            (query, "integration_key=INTEGRATION_MARKER", {}),
+            ([("state", identity["state"]), ("error", "ERROR_MARKER")], "", {}),
+            ([("state", "STATE_MARKER"), ("error", "access_denied")], "", {}),
+            (query, "", {"state": "STATE_MARKER"}),
+            (query, "", {"connection_id": "other"}),
+        ]
+        for fields, fragment, changed in invalid:
+            with self.subTest(fields=fields, fragment=fragment, changed=changed):
+                callback = self.connector.configuration.redirect_uri + "?" + urlencode(fields)
+                if fragment:
+                    callback += "#" + fragment
+                output = io.StringIO()
+                with contextlib.redirect_stderr(output):
+                    response = self.call("complete", {**identity, "callback_url": callback, **changed})
+                self.assertEqual(self.connector.authorization_identity(), identity)
+                self.assertEqual(self.calls, [])
+                self.assertEqual(output.getvalue(), "")
+                for secret in [identity["state"], "STATE_MARKER", "ERROR_MARKER", "CODE_MARKER", "INTEGRATION_MARKER"]:
+                    self.assertNotIn(secret, json.dumps(response))
+
+    def test_absent_key_is_not_consumed_or_borrowed_and_existing_connection_is_preserved(self):
+        # Characterize the remaining recovery contract, not a completed
+        # keyless reconnect: this store has no account-pinned retained key.
+        begun = self.call("connect")
+        original = self.callback_arguments(begun)
+        missing = {**original, "callback_url": original["callback_url"].split("#", 1)[0]}
+        rejected = self.call("complete", missing)
+        self.assertEqual(self.connector.authorization_identity(), begun["callback"]["arguments"])
+        self.assertEqual(self.calls, [])
+        self.assertEqual([action["id"] for action in rejected["actions"]], ["view"])
+        self.call("complete", original)
+        retained = (self.root / "private" / "connection.json").read_bytes()
+        self.call("connect")
+        self.assertEqual((self.root / "private" / "connection.json").read_bytes(), retained)
         self.assertTrue(self.connector.status()["connected"])
         self.assertEqual(len(self.calls), 1)
 

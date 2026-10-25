@@ -271,20 +271,26 @@ model/protocol-specific conformance fixtures that carry these fields through
 production parse → history → request paths. The OpenAI phase portion is already
 implemented and must not be repeated as unfinished work.
 
-The native M3 fixture in #45689 covers split reasoning, structured reasoning
-and tool calls without thinking through sync/SSE parse → history → request.
-Inline `<think>` content is explicitly outside that conformance claim: the
-current sync parser and SSE splitter retain its text as `Thinking`, but discard
-the original inline carrier; the request serializer then emits `reasoning_content`
-instead of preserving the original `content`. This contradicts the native inline
-replay requirement above. The offline reproduction is recorded in
-[the inline replay gap evidence](../../../../docs/evidence/2026-10-24-minimax-inline-replay-gap/README.md).
-#27924 remains unresolved for a typed original-wire witness across sync/SSE,
-canonical history and same-provider replay. Reconstructing `<think>` tags from
-merged reasoning blocks cannot recover the original placement or bytes.
+The inline carrier repair #45772 is merged: original scalar content has a
+typed wire witness across sync/SSE, persistence, projection and matching Chat
+serialization. Native family activation and structured replay in #45859 have
+a separate 121-case Chat execution receipt; that PR remains unmerged. Its
+fixtures and source identity limits do not certify MiniMax Responses. Historical
+[inline gap evidence](../../../../docs/evidence/2026-10-24-minimax-inline-replay-gap/README.md)
+records the earlier failure, not the current implementation state.
 
-Neither page establishes MiniMax `tool_choice` acceptance parity or all MiniMax
-Responses replay semantics. Record those as unverified, rather than deriving
-restrictions from compatibility branding or changing capabilities without
-provider evidence. No MiniMax capability change or live-provider success is
-claimed by this document refresh.
+The official documentation index now links a Responses OpenAPI schema. Its
+request `tool_choice` enum contains only `auto`; the Chat schema does not list
+that field. This confirms the documented Responses policy without establishing
+Chat rejection or live acceptance. The Responses reasoning output uses
+`content` / `reasoning_text` as well as `summary`, while its input reasoning
+carrier is `summary` / `summary_text`. Current sync decoding reads only summary
+or encrypted content and therefore omits the documented content-only reasoning
+shape. Streaming reasoning-text deltas already have a decoder and require a
+separate terminal/replay audit.
+
+The [2026-10-25 source/schema comparison](../../../../docs/evidence/2026-10-25-minimax-responses-contract/README.md)
+retains exact official-source hashes, selected schemas, current source hashes
+and the remaining public-codec execution requirements. It does not change
+capabilities or claim an executed failure, MiniMax HTTP success, Responses
+activation, installed runtime or whole-issue completion.

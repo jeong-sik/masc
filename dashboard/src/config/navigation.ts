@@ -502,6 +502,7 @@ export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem
 
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {
   const next = { ...params }
+  if (tabId !== 'approvals') delete next.approval
   // Target identity only belongs to these receiver surfaces. Ordinary
   // navigation must not carry an old Lane selection into an unrelated screen.
   if (tabId !== 'monitoring' || !['runtime', 'lane-addons', 'internal-agents'].includes(next.section ?? '')) delete next.lane_target

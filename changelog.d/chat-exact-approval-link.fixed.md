@@ -1,0 +1,3 @@
+Fixed
+
+Keeper chat approval lifecycle cards now link to the exact pending request. The approval page preserves that identity across reloads and shows unavailable detail instead of selecting another request when the target cannot be shown.

@@ -1,0 +1,5 @@
+edfc36aefb9156074a8cf22c31d3220f348fb19cd9335dfa0bb3aa8edc423260  dashboard/src/components/chat/primitives.ts
+1fadbf6ec16b17c9f6c6cb86db9b96f081838245c5a32745f46d5d8b8983f886  dashboard/src/components/chat/primitives.test.ts
+986c1a97355bd340b93dad5a06424324a62bdd335cd13e2349d64da7defd91dc  dashboard/src/components/approvals/approvals-surface.ts
+e9ca6c027a999faa2a03151f73e71df34d22ae8e7857ead4f2580a08f5d46bb9  dashboard/src/components/approvals/approvals-surface.test.ts
+131a7c0d6e47eb8a919498673cf7f26c6ba7927b14ad4c0a519b644c9612404b  dashboard/src/config/navigation.ts

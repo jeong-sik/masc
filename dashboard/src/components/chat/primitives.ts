@@ -47,7 +47,7 @@ import { StatusDot } from '../common/status-dot'
 import { useInViewOnce } from '../common/use-in-view'
 import { hasMarkdownRenderCue } from './markdown-cue'
 import type { JSX } from 'preact'
-import { navigate } from '../../router'
+import { hashForRoute, navigate } from '../../router'
 import { normalizeFusionPanel, type FusionPanelEntry } from '../../lib/fusion-meta'
 import { isRecord } from '../../lib/type-guards'
 import { fusionDecisionSpec } from '../v2/fusion-constants'
@@ -2296,7 +2296,11 @@ function ApprovalLifecycleCard({ lifecycle }: { lifecycle: KeeperApprovalLifecyc
         ? html`<div class="font-mono text-2xs text-[var(--color-fg-muted)]">${lifecycle.callSummary}</div>`
         : null}
       <div class="flex flex-wrap gap-2 text-2xs text-[var(--color-fg-muted)]">
-        <code>${lifecycle.approvalId}</code>
+        <a href=${hashForRoute('approvals', { approval: lifecycle.approvalId })}
+          class="underline underline-offset-2"
+          aria-label=${`승인 요청 ${lifecycle.approvalId} 보기`}>
+          <code>${lifecycle.approvalId}</code>
+        </a>
         ${lifecycle.toolName ? html`<span>${lifecycle.toolName}</span>` : null}
         ${lifecycle.artifactSha256 ? html`<code>${lifecycle.artifactSha256.slice(0, 12)}</code>` : null}
       </div>
@@ -2705,7 +2709,7 @@ function ChatControlStatusCard({
             외부 작업을 실행하기 위한 확인 요청이 기록되었습니다.
           </p>
           <p class="mt-0.5 text-xs leading-paragraph text-[var(--color-fg-muted)]">
-            현재 승인 상태는 승인 화면에서 확인할 수 있습니다.
+            이 기록에는 승인 요청 ID가 없어 특정 요청을 열 수 없습니다.
           </p>
           <div class="mt-3 flex flex-wrap gap-2">
             <button
@@ -2713,7 +2717,7 @@ function ChatControlStatusCard({
               class="inline-flex items-center gap-1.5 rounded-[var(--r-1)] border border-[var(--warn-35)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)] ${CHAT_FOCUS_RING}"
               onClick=${() => navigate('approvals')}
             >
-              승인 화면 열기
+              전체 승인 목록
               <${ArrowRight} size=${13} aria-hidden="true" />
             </button>
             ${action?.onClick

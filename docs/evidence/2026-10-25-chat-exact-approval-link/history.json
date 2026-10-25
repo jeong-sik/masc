@@ -1,0 +1,1 @@
+[{"id": "persisted-approval-exact", "role": "system", "content": "", "ts": 1792905000, "delivery_provenance": {"delivery_key": {"kind": "approval_lifecycle", "approval_id": "appr-exact"}, "transcript_slot": {"kind": "approval_request"}}, "delivery_provenance_status": "valid", "approval_lifecycle": {"approval_id": "appr-exact", "phase": "requested", "tool_name": "Execute"}}]

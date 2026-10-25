@@ -1,0 +1,12 @@
+{
+  "run": 40179723721,
+  "head": "509df9de6eb0a433b1be632ca97adc2353e1f78c",
+  "suite": "test/test_schedule_consumer_dispatch",
+  "result": "SUCCESS",
+  "test_count": 56,
+  "test_seconds": 2.677,
+  "raw_log_path": "/tmp/masc-schedule-drain-40179723721.log",
+  "raw_log_sha256": "5f9038dff39d2e265334bb17cc0464dd2e58fac54409f3ab597d4f6a1903dca4",
+  "producer_rows": 14,
+  "parser": "split each actual SCHEDULE_DRAIN_PAGE line into case, stage, and JSON; require unique keys and exact14; no row fields rewritten"
+}

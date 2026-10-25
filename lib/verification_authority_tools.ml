@@ -815,15 +815,18 @@ type goal_subject = {
 type goal_review = {
   goal_tools : t;
   goal_subject : goal_subject;
+  goal_measurement : Goal_measurement.observation;
   goal_layout : string list;
   goal_binding : string;
 }
 
 let create_goal_review ~config ~goal_id =
   let open Result.Syntax in
-    let* _goal, (request_id, criterion, submitted_evidence) =
+    let* goal, (request_id, criterion, submitted_evidence) =
       Goal_verification.bind_review config ~goal_id in
     let subject = {goal_id; request_id; criterion} in
+    let goal_measurement = Goal_measurement.latest_for_goal
+      (Goal_measurement.load config) goal in
     let* goal_tools = create_goal_proof ~config ~submitted_evidence in
     let* goal_layout = goal_proof_root_layout goal_tools in
     let tool_json (tool : Types_core.tool_schema) =
@@ -839,9 +842,13 @@ let create_goal_review ~config ~goal_id =
         Workspace_verification_store.submitted_evidence_item_to_yojson submitted_evidence)] in
     let* canonical = Lane_addon_action.canonical projection in
     let goal_binding = Lane_addon_store.digest (Yojson.Safe.to_string canonical) in
-    Ok {goal_tools; goal_subject=subject; goal_layout; goal_binding}
+    (* The report is context, not a grant. Its bytes enter the retained
+       original prompt; an updated report cannot revoke that original's
+       unchanged subject, submitted snapshot or read-only lookup authority. *)
+    Ok {goal_tools; goal_subject=subject; goal_measurement; goal_layout; goal_binding}
 
 let goal_review_subject t = t.goal_subject
+let goal_review_measurement t = t.goal_measurement
 let goal_review_evidence t = t.goal_tools.submitted_evidence
 let goal_review_binding t = t.goal_binding
 let goal_review_root_layout t = t.goal_layout

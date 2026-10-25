@@ -66,6 +66,12 @@ val create_goal_review :
     request write, proof transition or human confirmation occurs here. *)
 
 val goal_review_subject : goal_review -> goal_subject
+val goal_review_measurement : goal_review -> Goal_measurement.observation
+(** Informational measurement captured for this subject's exact Goal and
+    criterion revision. [None] means no matching observation; [Error] retains
+    an unavailable measurement store. This reported value and evidence locator
+    grant no lookup authority and certify no success. Later measurements do
+    not invalidate an already retained original or change its prompt bytes. *)
 val goal_review_evidence : goal_review -> Workspace_verification_store.submitted_evidence_item list
 val goal_review_binding : goal_review -> string
 val goal_review_root_layout : goal_review -> string list

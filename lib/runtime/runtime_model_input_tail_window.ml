@@ -174,17 +174,7 @@ let annotate (messages : Agent_core.Types.message list) :
 
    Partial application does the labelling once; each lookup encodes and
    hashes one message. *)
-let message_json_for_digest ~include_origin opener =
-  let json = Agent_core.Checkpoint.message_to_json opener in
-  if include_origin
-  then json
-  else (
-    match json with
-    | `Assoc fields -> `Assoc (List.remove_assoc "origin" fields)
-    | other -> other)
-;;
-
-let atom_opening_digest ?(include_origin = true) (messages : Agent_core.Types.message list) =
+let atom_opening_digest (messages : Agent_core.Types.message list) =
   let labelled, _atom_count = annotate messages in
   let openers_rev, _next =
     List.fold_left
@@ -202,7 +192,7 @@ let atom_opening_digest ?(include_origin = true) (messages : Agent_core.Types.me
     else (
       let encoded =
         Yojson.Safe.to_string
-          (message_json_for_digest ~include_origin openers.(atom))
+          (Agent_core.Checkpoint.message_to_json openers.(atom))
       in
       Some Digestif.SHA256.(digest_string encoded |> to_hex))
 ;;

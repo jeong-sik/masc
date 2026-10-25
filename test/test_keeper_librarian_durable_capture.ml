@@ -272,92 +272,37 @@ let test_source_changes_do_not_replace_the_original () = with_fixture Mixed @@ f
   check bool "original immutable observation does not advance the actual cursor" true
     (P.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name=atom_before
      && Keeper_librarian_official_progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name=official_before)
-let strip_origin_field = function
-  | `Assoc fields ->
-    `Assoc (List.filter (fun (k, _) -> not (String.equal k "origin")) fields)
-  | json -> json
-let test_legacy_v13_checkpoint_and_originless_messages_roundtrip () =
-  with_fixture Atoms @@ fun _ _ original ->
-  let cp =
-    match Capture.source original with
-    | Capture.Checkpoint_only value -> value
-    | Official_only _ | Mixed _ -> fail "expected checkpoint fixture"
-  in
-  let digest_map =
-    List.mapi
-      (fun index _ ->
-         match
-           ( Runtime_model_input_tail_window.atom_opening_digest
-               ~include_origin:true
-               cp.messages
-               index
-           , Runtime_model_input_tail_window.atom_opening_digest
-               ~include_origin:false
-               cp.messages
-               index )
-         with
-         | Some new_digest, Some old_digest -> Some (new_digest, old_digest)
-         | (Some _ | None), None | None, Some _ -> None)
-      cp.messages
-    |> List.filter_map Fun.id
-  in
-  let rec replace_digests = function
-    | `String s ->
-      (match List.assoc_opt s digest_map with
-       | Some old_digest -> `String old_digest
-       | None -> `String s)
-    | `List items -> `List (List.map replace_digests items)
-    | `Assoc fields -> `Assoc (List.map (fun (k, v) -> (k, replace_digests v)) fields)
-    | (`Bool _ | `Float _ | `Int _ | `Intlit _ | `Null) as other -> other
-  in
-  let v13_canonical_bytes =
-    match Yojson.Safe.from_string cp.canonical_bytes with
-    | `Assoc fields ->
-      `Assoc
-        (List.filter_map
-           (fun (k, v) ->
-              if String.equal k "pending_input" then None
-              else if String.equal k "version" then Some (k, `Int 13)
-              else if String.equal k "messages" then
-                match v with
-                | `List msgs -> Some (k, `List (List.map strip_origin_field msgs))
-                | _ -> Some (k, v)
-              else Some (k, v))
-           fields)
+let test_superseded_checkpoint_is_refused () = with_fixture Atoms @@ fun _ _ original ->
+  let cp = match Capture.source original with
+    | Capture.Checkpoint_only checkpoint -> checkpoint
+    | Official_only _ | Mixed _ -> fail "expected checkpoint fixture" in
+  let canonical_bytes = match Yojson.Safe.from_string cp.canonical_bytes with
+    | `Assoc fields -> `Assoc (("version",`Int 13)::List.remove_assoc "version" fields)
       |> Yojson.Safe.to_string
-    | _ -> fail "expected canonical_bytes object"
-  in
-  let v13_sha256 = Keeper_checkpoint_ref.sha256_of_canonical_bytes v13_canonical_bytes in
-  let legacy_json =
-    Capture.to_json original
-    |> replace_digests
-    |> map_field "input_text"
-         (map_json_text
-            (map_field "messages" (function
-              | `List msgs -> `List (List.map strip_origin_field msgs)
-              | _ -> fail "expected messages array")))
-    |> map_field "source_text"
-         (map_json_text (function
-           | `List [`String "checkpoint"; checkpoint_json] ->
-             let updated =
-               checkpoint_json
-               |> replace_digests
-               |> map_field "canonical_bytes" (fun _ -> `String v13_canonical_bytes)
-               |> map_field "sha256" (fun _ -> `String v13_sha256)
-               |> map_field "messages" (function
-                 | `List msgs -> `List (List.map strip_origin_field msgs)
-                 | _ -> fail "expected messages array")
-             in
-             `List [`String "checkpoint"; updated]
-           | _ -> fail "expected checkpoint source"))
-  in
-  let restored =
-    Capture.of_json legacy_json
-    |> Result.map_error Capture.error_to_string
-    |> get
-  in
-  check bool "legacy v13 capture roundtrips to identical JSON" true
-    (Yojson.Safe.equal legacy_json (Capture.to_json restored))
+    | _ -> fail "canonical bytes must be an object" in
+  let sha256 = Keeper_checkpoint_ref.sha256_of_canonical_bytes canonical_bytes in
+  let refused = Capture.to_json original
+    |> map_field "source_text" (map_json_text (function
+      | `List [`String "checkpoint"; checkpoint] ->
+        `List [`String "checkpoint"; checkpoint
+          |> map_field "canonical_bytes" (fun _ -> `String canonical_bytes)
+          |> map_field "sha256" (fun _ -> `String sha256)]
+      | _ -> fail "expected checkpoint source")) in
+  check bool "valid current origins and recomputed hash cannot admit superseded checkpoint" true
+    (Result.is_error (Capture.of_json refused))
+
+let test_origin_tampering_disagrees_with_checkpoint () = with_fixture Atoms @@ fun _ _ original ->
+  let change_messages = function
+    | `List messages -> `List (List.map (map_field "origin" (fun _ -> `String "system_context")) messages)
+    | _ -> fail "expected messages" in
+  let tampered = Capture.to_json original
+    |> map_field "input_text" (map_json_text (map_field "messages" change_messages))
+    |> map_field "source_text" (map_json_text (function
+      | `List [`String "checkpoint"; checkpoint] ->
+        `List [`String "checkpoint";map_field "messages" change_messages checkpoint]
+      | _ -> fail "expected checkpoint source")) in
+  check bool "matching source/input origins cannot contradict canonical checkpoint" true
+    (Result.is_error (Capture.of_json tampered))
 let () = Alcotest.run "durable source original capture" ["actual source retention",[
   test_case "checkpoint original survives strict disk roundtrip" `Quick (check_roundtrip Atoms);
   test_case "official Main and Internal originals survive strict disk roundtrip" `Quick (check_roundtrip Official);
@@ -368,5 +313,7 @@ let () = Alcotest.run "durable source original capture" ["actual source retentio
   test_case "producer snapshot richer ToolResult JSON survives strict data restoration" `Quick
     test_richer_producer_snapshot_retains_complete_tool_json;
   test_case "later source replacement and restart cannot substitute a retained original" `Quick test_source_changes_do_not_replace_the_original;
-  test_case "legacy v13 checkpoint and originless messages survive strict roundtrip" `Quick
-    test_legacy_v13_checkpoint_and_originless_messages_roundtrip]]
+  test_case "superseded canonical checkpoint refuses despite current origins and matching hash" `Quick
+    test_superseded_checkpoint_is_refused;
+  test_case "source and input origin tampering cannot contradict canonical bytes" `Quick
+    test_origin_tampering_disagrees_with_checkpoint]]

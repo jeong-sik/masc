@@ -87,6 +87,37 @@ let test_complete_original () =
     (L.observations_for_absorption original=L.observations_for_absorption restored
      && C.prompt_json original.working_context=C.prompt_json restored.working_context)
 
+let test_typed_origin_roundtrip () =
+  let original = input () in
+  let origins = T.[Conversation;System_context;Historical_system_context;
+    Recovery_instruction;Tool_result_followup;Agent_instruction] in
+  let messages = List.map (fun origin ->
+    { (List.hd original.messages) with T.origin;
+      metadata=["agent_core.extra_system_context.v1",`String "historical";
+        "masc.librarian_working_state.v1",`Bool true] }) origins in
+  let restored = reread {original with messages} in
+  check bool "current explicit origins survive disk despite conflicting metadata" true
+    (List.map (fun (message:T.message) -> message.origin) restored.messages = origins)
+
+let test_origin_is_required_and_closed () =
+  let original = input () in
+  let first = List.hd original.messages in
+  let base = match Capture.message_json first with
+    | `Assoc fields -> List.remove_assoc "origin" fields
+    | _ -> fail "message must be an object" in
+  let malformed = [ `Assoc base;
+    `Assoc (("origin",`Null)::base);
+    `Assoc (("origin",`String "invented-origin")::base);
+    `Assoc (("origin",`String "conversation")::("origin",`String "system_context")::base) ] in
+  List.iter (fun message ->
+    check bool "message decoder refuses absent duplicate null or unknown origin" true
+      (Result.is_error (Capture.message_of_json message));
+    let retained = match Capture.to_json original with
+      | `Assoc fields -> `Assoc (("messages",`List [message])::List.remove_assoc "messages" fields)
+      | _ -> fail "input must be an object" in
+    check bool "complete input decoder cannot rescue origin with metadata" true
+      (Result.is_error (Capture.of_json retained))) malformed
+
 let test_absence_and_failure () =
   let original=input () in
   List.iter (fun goal_context ->
@@ -109,5 +140,7 @@ let test_refused_envelope () =
 
 let () = run "Original Librarian input retention" ["retention",[
   test_case "complete original survives restart with nested tool payloads and provenance" `Quick test_complete_original;
+  test_case "all typed origins survive disk without metadata inference" `Quick test_typed_origin_roundtrip;
+  test_case "origin is required and closed in retained messages and complete inputs" `Quick test_origin_is_required_and_closed;
   test_case "unavailable authority is distinct from no Task or empty goals" `Quick test_absence_and_failure;
   test_case "malformed retained envelopes refuse without defaults" `Quick test_refused_envelope]]

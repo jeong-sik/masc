@@ -502,7 +502,15 @@ val classify_volume_probe
 (** Apple provisions a capacity-limited guest disk. Nerdctl provisions a
     persistent managed directory and logs that [size] is not enforced.
     [`Ensured] means idempotent create followed by strict inspect confirmation;
-    it does not claim to distinguish a new volume from an existing one. *)
+    it does not claim to distinguish a new volume from an existing one.
+
+    On Apple, a typed process timeout after create triggers one exact-name
+    volume probe. Confirmed presence returns [`Already_present], without
+    claiming which actor created the volume. Absence or an unreadable probe
+    retains the create failure; neither proves that the backend had no effect.
+    The create is never replayed here. Other create failures and cancellation
+    keep their existing behavior. This does not retain a pending operation
+    across calls or guarantee recovery after restart. *)
 val ensure_work_volume_for
   :  Keeper_microvm_backend.t
   -> volume_name:string
@@ -608,7 +616,13 @@ val recreate_apple_build_volume
     guest cannot discard its own blocks and `container volume` has no
     attach/detach to swap the volume under a running guest. A probe failure refuses rather than
     guesses; deleting on an ambiguous answer risks a volume this call did
-    not create the record for. *)
+    not create the record for.
+
+    A create timeout uses the same single exact-name reconciliation as
+    {!ensure_work_volume_for}: confirmed presence returns [`Already_present],
+    without replaying create or asserting its origin. An absent/unreadable
+    post-timeout probe remains a create failure, not proof of no backend effect.
+    There is no pending-operation recovery across calls or restart. *)
 
 (** {3 Finding checkouts and their [_build] state inside the guest}
 

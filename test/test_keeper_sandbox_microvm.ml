@@ -1691,6 +1691,135 @@ let test_recreate_apple_build_volume_shares_the_work_volume_commands () =
     (calls ())
 ;;
 
+type timed_out_volume_state = Confirmed_present | Still_absent | Probe_unreadable
+type volume_create_fixture_completion = Process_timeout | Native_timeout_status | Create_failure
+
+let with_timed_out_apple_volume ?(completion = Native_timeout_status) ~build ~state f =
+  with_eio_fs @@ fun () ->
+  let dir = temp_dir "apple-volume-timeout-" in
+  let cli = Filename.concat dir "container" in
+  let log = Filename.concat dir "calls" in
+  let attempted = Filename.concat dir "attempted" in
+  let present = Filename.concat dir "present" in
+  let volume_name = if build then "masc-keeper-build-timeout" else "masc-keeper-work-timeout" in
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Process_eio.reset_spawn_guard_for_testing ();
+      Unix.putenv "PATH" previous_path;
+      List.iter (fun p -> if Sys.file_exists p then Unix.unlink p)
+        [ cli; log; attempted; present ];
+      Unix.rmdir dir)
+  @@ fun () ->
+  let oc = open_out cli in
+  Printf.fprintf oc
+    "#!/bin/sh\n\
+     printf '%%s\\n' \"$*\" >> %s\n\
+     case \"$*\" in\n\
+     'volume inspect %s') %s; [ -e %s ] && exit 0; exit 1;;\n\
+     'volume list --format json') printf '[{\"id\":\"other-volume\"}]\\n'; exit 0;;\n\
+     'volume create -s 128g %s') : > %s; %s; printf 'creating-fixture\\n' >&2; %s;;\n\
+     *) exit 99;;\n\
+     esac\n"
+    (Filename.quote log) volume_name
+    (match state with
+     | Probe_unreadable -> "[ ! -e " ^ Filename.quote attempted ^ " ] || exit 2"
+     | Confirmed_present | Still_absent -> ":")
+    (Filename.quote present) volume_name (Filename.quote attempted)
+    (match state with
+     | Confirmed_present -> ": > " ^ Filename.quote present
+     | Still_absent | Probe_unreadable -> ":")
+    (match completion with
+     | Process_timeout -> "exec sleep 60"
+     | Native_timeout_status -> "exit 124"
+     | Create_failure -> "exit 3");
+  close_out oc;
+  Unix.chmod cli 0o755;
+  let ensure () =
+    if build then
+      (M.recreate_apple_build_volume ~volume_name ~size:"128g" ~timeout_sec:5.0
+       :> ([ `Created | `Already_present | `Ensured ], string) result)
+    else M.ensure_work_volume_for Backend.Apple_container ~volume_name ~size:"128g" ~timeout_sec:5.0
+  in
+  let calls () =
+    if Sys.file_exists log then
+      In_channel.with_open_bin log (fun channel -> In_channel.input_lines channel)
+    else []
+  in
+  f ~volume_name ~ensure ~calls
+;;
+
+let check_apple_volume_timeout ?(completion = Native_timeout_status) ~build ~state () =
+  with_timed_out_apple_volume ~completion ~build ~state @@ fun ~volume_name ~ensure ~calls ->
+  let result = ensure () in
+  (match state, result with
+   | Confirmed_present, Ok `Already_present -> ()
+   | Confirmed_present, Ok (`Created | `Ensured) ->
+     Alcotest.fail "a timeout may confirm presence, not the origin of creation"
+   | Confirmed_present, Error message -> Alcotest.failf "confirmed volume was refused: %s" message
+   | (Still_absent | Probe_unreadable), Error message ->
+     let prefix = if build then "microvm_build_volume_create_failed: " else "microvm_work_volume_create_failed: " in
+     Alcotest.(check string) "original role-specific create failure remains unchanged"
+       (prefix ^ volume_name ^ " (exit 124; creating-fixture)") message
+   | (Still_absent | Probe_unreadable), Ok _ ->
+     Alcotest.fail "an unconfirmed backend effect must remain a failure");
+  let inspect = "volume inspect " ^ volume_name in
+  let listing = "volume list --format json" in
+  let create = "volume create -s 128g " ^ volume_name in
+  let initial = if build then [ inspect; listing; inspect; listing ] else [ inspect; listing ] in
+  let reconciliation =
+    match state with
+    | Confirmed_present | Probe_unreadable -> [ inspect ]
+    | Still_absent -> [ inspect; listing ]
+  in
+  Alcotest.(check (list string)) "one create followed by one exact-name probe, without replay"
+    (initial @ [ create ] @ reconciliation) (calls ())
+;;
+
+let test_apple_volume_non_timeout_failure_is_not_reconciled () =
+  with_timed_out_apple_volume ~completion:Create_failure ~build:false ~state:Confirmed_present
+  @@ fun ~volume_name ~ensure ~calls ->
+  (match ensure () with
+   | Error message ->
+     Alcotest.(check string) "non-timeout failure remains unchanged despite a present marker"
+       ("microvm_work_volume_create_failed: " ^ volume_name ^ " (exit 3; creating-fixture)") message
+   | Ok _ -> Alcotest.fail "a non-timeout error must not be reconciled");
+  Alcotest.(check (list string)) "no post-failure probe or repeated create"
+    [ "volume inspect " ^ volume_name; "volume list --format json";
+      "volume create -s 128g " ^ volume_name ] (calls ())
+;;
+
+let test_apple_volume_create_preserves_gate_and_cancellation () =
+  List.iter (fun cancel ->
+    with_timed_out_apple_volume ~build:false ~state:Confirmed_present
+    @@ fun ~volume_name ~ensure ~calls ->
+    let invocations = ref 0 in
+    let caught =
+      try
+        Eio.Cancel.sub (fun context ->
+          Process_eio.set_spawn_guard
+            { run = (fun run ->
+                incr invocations;
+                if !invocations = 3 then (
+                  if cancel then (
+                    Eio.Cancel.cancel context Exit;
+                    Eio.Fiber.await_cancel ())
+                  else raise Exit)
+                else run ()) };
+          ignore (ensure ()));
+        false
+      with
+      | Eio.Cancel.Cancelled _ -> cancel
+      | Exit -> not cancel
+    in
+    Alcotest.(check bool) "pre-create interruption reaches the caller" true caught;
+    Alcotest.(check int) "no recovery process is dispatched after interruption" 3 !invocations;
+    Alcotest.(check (list string)) "create never ran after the guard refused it"
+      [ "volume inspect " ^ volume_name; "volume list --format json" ] (calls ()))
+    [ false; true ]
+;;
+
 let test_plan_build_link_never_deletes_real_build_output () =
   let target = "/masc-build/masc-t362" in
   Alcotest.(check bool)
@@ -3873,6 +4002,18 @@ let () =
             test_an_unreadable_volume_listing_is_an_error
         ; Alcotest.test_case "recreate shares the work volume's commands" `Quick
             test_recreate_apple_build_volume_shares_the_work_volume_commands
+        ; Alcotest.test_case "work create timeout reconciles confirmed presence" `Quick
+            (check_apple_volume_timeout ~completion:Process_timeout ~build:false ~state:Confirmed_present)
+        ; Alcotest.test_case "build create timeout reconciles confirmed presence" `Quick
+            (check_apple_volume_timeout ~build:true ~state:Confirmed_present)
+        ; Alcotest.test_case "create timeout with absent volume remains a failure" `Quick
+            (check_apple_volume_timeout ~build:false ~state:Still_absent)
+        ; Alcotest.test_case "create timeout with unreadable volume remains a failure" `Quick
+            (check_apple_volume_timeout ~build:true ~state:Probe_unreadable)
+        ; Alcotest.test_case "non-timeout create failure never reconciles" `Quick
+            test_apple_volume_non_timeout_failure_is_not_reconciled
+        ; Alcotest.test_case "volume create preserves gate refusal and cancellation" `Quick
+            test_apple_volume_create_preserves_gate_and_cancellation
         ; Alcotest.test_case "plan never deletes real build output" `Quick
             test_plan_build_link_never_deletes_real_build_output
         ; Alcotest.test_case "build link target is flat and unique per checkout" `Quick

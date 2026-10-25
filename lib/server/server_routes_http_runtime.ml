@@ -315,7 +315,9 @@ let make_health_probe_fields ?timing ?(listener = "http/1.1") ?full_health_url
 let make_health_probe_json ?timing ?(listener = "http/1.1") ~request_authority request =
   Tool_args.ok_assoc
     (make_health_probe_fields ?timing ~listener ~health_detail:"probe"
-       ~full_health_url:"/health?full=1" ~request_authority request)
+       ~full_health_url:"/health?full=1" ~request_authority request
+     @ [ "auxiliary_startup",
+         Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global ])
 
 (* Keeper fleet scan / paused-keeper diagnostics / phase counts / fleet safety
    extracted to [Server_routes_http_runtime_fleet_scan] (godfile decomp). *)
@@ -585,6 +587,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("runtime_startup_degradation", runtime_startup_degradation_json);
     ("dashboard_surface", Web_dashboard.surface_status_json ());
     ("subsystems", Subsystem_health.to_yojson ());
+    ("auxiliary_startup", Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global);
     (* Server log visibility belongs on the first health probe too.  Keep the
        payload cheap and redacted: only ring counters, latest metadata, and
        file-sink state are exposed here; full log rows stay behind the
@@ -893,6 +896,8 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "skill_catalog",
       Server_skill_catalog_health.placeholder ?error ~component_timed_out
         ~status () );
+    ( "auxiliary_startup",
+      Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global );
     ( "paused_keepers",
       `Assoc
         [

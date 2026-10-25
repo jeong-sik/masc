@@ -1,6 +1,6 @@
 # Viewer TRPG unavailable boundary
 
-Refs #26362. Base main3cce9a517b25863c00b48cfb3dd79b994ebc1044.
+Refs #26362. Authoring base main3cce9a517b25863c00b48cfb3dd79b994ebc1044; restacked base6f28acccdc73822004da5bb486fc6136a4a86c74.
 
 ## Current contract and implementation
 
@@ -19,3 +19,9 @@ The selected alias uses the existing Test workflow and runner; it adds no period
 Locked cargo metadata succeeds, Python syntax compiles, changed Rust sources parse through rustfmt emit-stdout, and committed whitespace passes. Whole-tree cargo fmt reports pre-existing formatting differences; no unrelated files were reformatted. No local Dune, Rust/WASM build, typecheck, Chrome behavior or selected execution has been claimed. Full regression unrun. Independent adversarial source review passed predecessor5a433245; current recovery check additionally waits for the actual Monitor ECS panel. Both independent source sessions passed feature head ec30b1e61e0140de57daadf292d5433f81374f82. The final documentation/changelog head and selected execution must be recorded separately.
 
 Native stack init adopted this own branch; submit refused “Stacked PRs are not enabled for this repository”. No native membership, merge, installation, provider or whole-issue completion is inferred. #26362 remains OPEN until the actual viewer/WASM evidence and integration are established.
+
+## Restack and requested execution
+
+During review main advanced through unrelated Cohere, MCP, dashboard/metadata and prompt recovery changes. gh stack rebase fetched origin/main6f28accc and preserved the dirty original main worktree. The one-layer stack had an end-of-file test/dune conflict; both the incoming prompt mutation recovery include and this viewer alias were retained. Nine Viewer/Python inputs are unchanged; source-sha256.txt refreshes the whole test/dune blob, whose unrelated include advanced. This is not a new behavior change or a fabricated execution.
+
+Run40182013461 was requested for predecessor d20baab64c20bc4552e0690a4399e1df97ecc8aa with only test/test_viewer_trpg_unavailable. It has not yet been inspected. The restack does not replace/cancel that live request or imply a new run at the rebased head. Actual candidate identities and result must be read separately. Full regression unrun.

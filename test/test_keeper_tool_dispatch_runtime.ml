@@ -244,6 +244,9 @@ let with_exec_fixture
       ?(always_allow = false)
       ?(bind_eio_context = false)
       ?(require_sandbox = false)
+      (* Own the actual native browser attachment around only the cases that
+         need one; other fixtures do not attach or adopt a browser. *)
+      ?(with_browser = fun ~env:_ ~config:_ run -> run ())
       name
       fn
   =
@@ -308,11 +311,12 @@ let with_exec_fixture
                in
                let run () =
                  if process && bind_eio_context then Eio_context.set_env env;
-                 fn
-                   ~config
-                   ~meta
-                   ~publication_recovery
-                   ~ctx_work:(make_ctx ())
+                 with_browser ~env ~config (fun () ->
+                   fn
+                     ~config
+                     ~meta
+                     ~publication_recovery
+                     ~ctx_work:(make_ctx ()))
                in
                if bind_eio_context
                then
@@ -7434,7 +7438,29 @@ let test_shipped_browser_composition_refuses_text_mode skill_name arguments () =
 
 let test_composition_read_failure_preserves_same_turn
     ?(break_evidence = false) ~observe ~break_receipt ~terminal ~unknown_write () =
-  with_exec_fixture ~always_allow:true ~bind_eio_context:true "composition-read-recovery"
+  let reads = ref 0 and navigations = ref 0 in
+  let scene = `Assoc ["schema",`String "masc.browser.scene.v1";"tabId",`Int 7;
+    "documentId",`String "after-navigation";"url",`String "https://example.org/next";
+    "title",`String "Observed page";"view",`String "content";"scope",`Null;
+    "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
+    "chars",`Int 0;"truncated",`Bool false;"nodes",`List []] in
+  let respond ~route:_ = function
+    | Browser_lane.Page_goto _ ->
+      incr navigations;
+      if unknown_write then Browser_lane.Refused "navigation result unknown"
+      else Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
+        "url",`String "https://example.org/next";"title",`String "Observed page"]])
+    | Browser_lane.Page_scene _ ->
+      incr reads;
+      if !reads = 1 then (
+        if break_receipt then Masc.Keeper_tool_call_log.reset_for_testing ();
+        Browser_lane.Refused "Missing host permission for the tab")
+      else Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",scene])
+    | _ -> fail "unexpected browser effect in recovery fixture" in
+  with_exec_fixture ~process:true ~always_allow:true ~bind_eio_context:true
+    ~with_browser:(fun ~env ~config run ->
+      Browser_addon_fixture.with_worker ~env ~config ~respond (fun _ -> run ()))
+    "composition-read-recovery"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let declaration = {|[[compositions]]
 name = "navigate-read-recovery"
@@ -7461,37 +7487,16 @@ kind = "literal"
 value = {surface="dashboard", content="must not run"}
 |} else "") in
       let skill_catalog = skill_catalog_of_composition ~name:"navigate-read-recovery" declaration in
-      let reads = ref 0 and navigations = ref 0 in
-      let scene = `Assoc ["schema",`String "masc.browser.scene.v1";"tabId",`Int 7;
-        "documentId",`String "after-navigation";"url",`String "https://example.org/next";
-        "title",`String "Observed page";"view",`String "content";"scope",`Null;
-        "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
-        "chars",`Int 0;"truncated",`Bool false;"nodes",`List []] in
       Masc.Keeper_tool_call_log.reset_for_testing ();
       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
       if break_evidence then (
         let path = Filename.concat (Masc.Workspace.masc_dir config) "skill-composition-evidence-v1" in
         Out_channel.with_open_bin path (fun channel -> output_string channel "occupied"));
-      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
-      Browser_lane.install_automation_executor (Some (function
-        | Browser_lane.Page_goto _ ->
-          incr navigations;
-          if unknown_write then Browser_lane.Refused "navigation result unknown"
-          else Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
-            "url",`String "https://example.org/next";"title",`String "Observed page"]])
-        | Browser_lane.Page_scene _ ->
-          incr reads;
-          if !reads = 1 then (
-            if break_receipt then Masc.Keeper_tool_call_log.reset_for_testing ();
-            Browser_lane.Refused "Missing host permission for the tab")
-          else Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",scene])
-        | _ -> fail "unexpected browser effect in recovery fixture"));
       let turn_ctx_cell = if observe then Some (Masc.Keeper_tool_call_log.create_turn_ctx_cell ()) else None in
       let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
         ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~skill_catalog ?turn_ctx_cell () in
       Fun.protect ~finally:(fun () -> bundle.cleanup ();
-        Browser_lane.install_activity_observer None;
-        Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
+        Masc.Keeper_tool_call_log.reset_for_testing ())
       (fun () ->
         let projected = match Masc.Keeper_official_client_host.dynamic_tools
           ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
@@ -7557,7 +7562,20 @@ value = {surface="dashboard", content="must not run"}
    aggregate says. Neither node is read-only, so #35703's read exception
    cannot be what decides. *)
 let test_composition_failure_after_navigation_follows_the_failed_node ~second () =
-  with_exec_fixture ~always_allow:true ~bind_eio_context:true "composition-node-boundary"
+  let navigations = ref 0 and seconds = ref 0 in
+  let respond ~route:_ = function
+    | Browser_lane.Page_goto _ ->
+      incr navigations;
+      Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
+        "url",`String "https://example.org/next";"title",`String "Observed page"]])
+    | Browser_lane.Page_interact _ | Browser_lane.Page_act _ ->
+      incr seconds;
+      Browser_lane.Refused "the page went away mid-action"
+    | _ -> fail "unexpected browser effect in node boundary fixture" in
+  with_exec_fixture ~process:true ~always_allow:true ~bind_eio_context:true
+    ~with_browser:(fun ~env ~config run ->
+      Browser_addon_fixture.with_worker ~env ~config ~respond (fun _ -> run ()))
+    "composition-node-boundary"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let name, second_node =
         match second with
@@ -7593,25 +7611,13 @@ id = "second"
 %s|} name second_node
       in
       let skill_catalog = skill_catalog_of_composition ~name declaration in
-      let navigations = ref 0 and seconds = ref 0 in
       Masc.Keeper_tool_call_log.reset_for_testing ();
       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
-      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
-      Browser_lane.install_automation_executor (Some (function
-        | Browser_lane.Page_goto _ ->
-          incr navigations;
-          Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
-            "url",`String "https://example.org/next";"title",`String "Observed page"]])
-        | Browser_lane.Page_interact _ | Browser_lane.Page_act _ ->
-          incr seconds;
-          Browser_lane.Refused "the page went away mid-action"
-        | _ -> fail "unexpected browser effect in node boundary fixture"));
       let turn_ctx_cell = Some (Masc.Keeper_tool_call_log.create_turn_ctx_cell ()) in
       let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
         ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~skill_catalog ?turn_ctx_cell () in
       Fun.protect ~finally:(fun () -> bundle.cleanup ();
-        Browser_lane.install_activity_observer None;
-        Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
+        Masc.Keeper_tool_call_log.reset_for_testing ())
       (fun () ->
         let projected = match Masc.Keeper_official_client_host.dynamic_tools
           ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
@@ -9495,8 +9501,7 @@ let test_composable_outputs_satisfy_declared_schema () =
     ~process:true
     ~always_allow:true
     ~bind_eio_context:true
-    "keeper_tool_dispatch_runtime_composable_output"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+    ~with_browser:(fun ~env ~config run ->
        (* The seam is the primitive WebDriver HTTP transport. Execute/sync
           evaluates the actual production JavaScript, then Browser_webdriver
           constructs the response consumed by Keeper and the schema validator. *)
@@ -9539,12 +9544,8 @@ let test_composable_outputs_satisfy_declared_schema () =
            check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture"); block=(fun ~context:_ ~hosts:_ -> Error "no BiDi block in this fixture");unblock=(fun ~intercept:_ -> Error "no BiDi block in this fixture");close=(fun () -> ())}
        in
        let driver = Driver.create ~start_downloads ~request () in
-       Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
-       Browser_lane.install_automation_executor (Some (Driver.execute driver));
        Fun.protect ~finally:(fun () ->
          Msx_lane.install_activity_observer None;
-         Browser_lane.install_activity_observer None;
-         Browser_lane.install_automation_executor None;
          ignore (Driver.close driver);
          ignore (Msx_lane.eject ()))
        @@ fun () ->
@@ -9553,6 +9554,12 @@ let test_composable_outputs_satisfy_declared_schema () =
          | Browser_lane.Answered _ -> ()
          | _ -> fail "browser producer fixture initialization failed")
          [Browser_lane.Session_open {headless=Some true}; Browser_lane.Tabs_list];
+       Browser_addon_fixture.with_worker ~env ~config
+         ~respond:(fun ~route:_ verb -> Driver.execute driver verb)
+         (fun _ -> run ())
+    )
+    "keeper_tool_dispatch_runtime_composable_output"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
        (* Every probe reads durable workspace state. An uninitialized base
           path fails them before they reach the shape under test. *)
        ignore (Workspace.init config ~agent_name:None);

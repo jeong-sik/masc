@@ -6667,3 +6667,5 @@
 (include stanzas/test_lane_addon_companion_origin.inc)
 
 (include stanzas/test_lane_addon_companion_publication.inc)
+
+(include stanzas/test_startup_listener_authority.inc)

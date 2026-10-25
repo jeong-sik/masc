@@ -88,6 +88,12 @@ class Publication:
                         for key, value in expected["output"].items()))
 
 
+@dataclass(frozen=True)
+class PublicationSnapshot:
+    phase: Phase
+    pending: tuple[dict, ...]
+
+
 class _Lifecycle(StrEnum):
     OPEN = "open"
     CLOSING = "closing"
@@ -358,8 +364,17 @@ class Logins:
         Re-read the same immutable envelopes after an uncertain host ACK.
         This read never allocates a replacement host/Browser binding.
         """
+        return list(self.publication_snapshot(operation_id, caller).pending)
+
+    def publication_snapshot(self, operation_id, caller):
+        """Phase and pending envelopes from one committed immutable Record.
+
+        Separate reads could observe an empty older outbox and a newer terminal
+        phase, incorrectly retiring the owner before that final notice is sent.
+        """
         record = self._owned(operation_id, caller)
-        return [publication.public(operation_id) for publication in record.publications if not publication.host_accepted]
+        return PublicationSnapshot(record.phase, tuple(publication.public(operation_id)
+            for publication in record.publications if not publication.host_accepted))
 
     def acknowledge_publication(self, operation_id, caller, envelope):
         """Commit an exact original sender's ACK without replaying its effect.

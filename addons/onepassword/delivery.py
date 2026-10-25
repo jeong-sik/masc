@@ -7,7 +7,7 @@ from enum import Enum, auto
 import threading
 
 from companion import BridgeError
-from login import LoginError, Phase, TERMINAL
+from login import LoginError, TERMINAL
 
 
 class _Phase(Enum):
@@ -93,9 +93,8 @@ class Delivery:
                 if not self._active(owner):
                     return
                 self.engine.acknowledge_publication(owner.operation_id, owner.caller, envelope)
-            pending = self.engine.pending_publications(owner.operation_id, owner.caller)
-            phase = Phase(self.engine.status(owner.operation_id, owner.caller)["phase"])
-            if not pending and phase in TERMINAL:
+            snapshot = self.engine.publication_snapshot(owner.operation_id, owner.caller)
+            if not snapshot.pending and snapshot.phase in TERMINAL:
                 self.discard(owner.operation_id)
         except BridgeError:
             # Only the same durable envelopes may be tried on later activity.

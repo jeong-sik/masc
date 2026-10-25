@@ -5,9 +5,8 @@
    [Keeper_librarian_input_refusal].
 
    The suite links through [exact_output_fixture] like its Librarian
-   siblings and opens [Masc] so the wrapped library's modules resolve. *)
+   siblings and opens [Masc] so the wrapped library's modules resolve.
 
-open Masc
    Two boundaries had no test of their own:
 
    - [Input_refusal.union] returns the distinct causes in canonical
@@ -18,6 +17,8 @@ open Masc
      [measured_cli_capacity] keeps the larger limit and [invalid_output]
      poisons the size verdict; [after_cli_fallback] must drop a prior
      measured limit before folding the fallback walk's CLI observations. *)
+
+open Masc
 
 module S = Keeper_exact_walk_failure
 module I = Keeper_librarian_input_refusal
@@ -84,8 +85,8 @@ let test_of_string_boundary () =
     (match I.of_string "" with None -> true | Some _ -> false)
 
 let test_combine_refusal_order_independence () =
-  let left = named I.Input_capacity in
-  let right = named I.Context_overflow in
+  let left = named Input_capacity in
+  let right = named Context_overflow in
   Alcotest.(check (list string)) "combine is order independent"
     (refusals (S.combine left right))
     (refusals (S.combine right left));
@@ -99,7 +100,7 @@ let test_combine_keeps_larger_cli_limit () =
     (max_of (S.combine (measured "cli-secondary" 25 21) (measured "cli-primary" 21 17)))
 
 let test_invalid_output_poisons_size () =
-  let evidence = S.combine (named I.Context_overflow) S.invalid_output in
+  let evidence = S.combine (named Context_overflow) S.invalid_output in
   Alcotest.(check bool) "invalid output blocks the size verdict" false
     (S.refuses_input_capacity evidence);
   Alcotest.(check bool) "invalid output blocks a smaller range" false
@@ -116,17 +117,16 @@ let test_named_causes_survive_the_receipt_codec () =
       in
       Alcotest.(check bool) "named actual causes survive the strict receipt codec" true
         (original = decoded))
-    [ provider_refusal I.Context_overflow
-    ; provider_refusal I.Input_capacity
-    ; provider_refusal I.Request_body_refused ]
+    [ provider_refusal Context_overflow
+    ; provider_refusal Input_capacity
+    ; provider_refusal Request_body_refused ]
 
 let test_after_cli_fallback_drops_prior_limit () =
-  let prior = S.combine (named I.Input_capacity) (measured "cli-primary" 23 17) in
+  let prior = S.combine (named Input_capacity) (measured "cli-primary" 23 17) in
   let fallback =
-    S.of_cli_failure
-      (Keeper_lane_cli_oneshot.Execution_failed
-         { runtime_id = "cli-secondary"
-         ; cause = Fusion_official_client.Missing_reply })
+    Keeper_lane_cli_oneshot.Execution_failed
+      { runtime_id = "cli-secondary"
+      ; cause = Fusion_official_client.Missing_reply }
   in
   let evidence = S.after_cli_fallback ~prior [ fallback ] in
   Alcotest.(check bool) "the prior measured limit is dropped" true

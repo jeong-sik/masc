@@ -83,6 +83,9 @@ val observe_terminal_reply : input_reader -> Masc_tui_input_decoder.reply -> uni
     including late palette, theme, query graphics and cell dimensions. No read
     or clock; reply publication runs on the owning input path. *)
 val observe_capabilities_applied : input_reader -> Masc_tui_terminal_probe.observation -> unit
+val is_operator_input : input_event -> bool
+(** Keys, paste and pointer events are operator input. Terminal graphics
+    replies are protocol observations and cannot cancel an owned operation. *)
 val observe_input_received : input_reader -> input_event -> unit
 (** Actual main-loop boundaries only. Input reception is not acceptance,
     dispatch success or paint. Synthetic recovered input is not a new decode. *)

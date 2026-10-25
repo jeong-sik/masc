@@ -78,6 +78,24 @@ val mermaid_sources : string -> string list
     between the opening and closing lines. Incomplete streams are excluded. *)
 
 type diagram_slot = { source : string; first_row : int; row_count : int }
+type block_kind = Source_block | Diagram_block
+type source_block = {
+  source_offset : int;
+  first_row : int;
+  row_count : int;
+  kind : block_kind;
+}
+type block_layout = {
+  layout_rows : string list;
+  layout_diagrams : diagram_slot list;
+  source_blocks : source_block list;
+}
+val render_with_blocks :
+  palette:palette -> width:int -> diagram_rows:(string -> int option) ->
+  string -> block_layout
+(** Canonical block identities and extents from the same walk as the rows.
+    [source_offset] indexes this immutable reading input, before rendering;
+    equal block contents at different offsets remain different occurrences. *)
 val render_with_diagrams :
   palette:palette -> width:int -> diagram_rows:(string -> int option) ->
   string -> string list * diagram_slot list

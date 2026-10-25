@@ -14,8 +14,10 @@ let window ~cell_pixels:(cw,ch) ~columns ~rows (t : t) =
   let fit = min (float_of_int columns *. float_of_int cw /. iw)
     (float_of_int rows *. float_of_int ch /. ih) in
   let scale = fit *. t.zoom in
-  let width = max 1 (min t.width (int_of_float (floor (float_of_int columns *. float_of_int cw /. scale)))) in
-  let height = max 1 (min t.height (int_of_float (floor (float_of_int rows *. float_of_int ch /. scale)))) in
+  let width = if t.zoom = 1. then t.width else
+    max 1 (min t.width (int_of_float (floor (float_of_int columns *. float_of_int cw /. scale)))) in
+  let height = if t.zoom = 1. then t.height else
+    max 1 (min t.height (int_of_float (floor (float_of_int rows *. float_of_int ch /. scale)))) in
   let x = clamp 0 (t.width-width) (int_of_float (floor (t.center_x -. float_of_int width/.2.))) in
   let y = clamp 0 (t.height-height) (int_of_float (floor (t.center_y -. float_of_int height/.2.))) in
   {x;y;width;height;

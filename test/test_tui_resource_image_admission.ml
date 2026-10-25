@@ -86,7 +86,8 @@ let attachment () =
 let pending state owner =
   { Types.sir_generation = state.Types.image_request_generation;
     sir_view = state.view; sir_keeper = state.msg_target_keeper_name;
-    sir_name = "local.png"; sir_owner = owner; sir_resource = None }
+    sir_name = "local.png"; sir_owner = owner; sir_resource = None;
+    sir_purpose = Types.Open_image }
 
 let test_local_peer_loss () =
   let state = state () and original = attachment () in
@@ -160,7 +161,17 @@ let test_suspended_diagram_preparation () =
   check bool "retained original response remains readable" true
     (saved state == original)
 
+let test_operator_protocol_boundary () =
+  let module Reader = Masc_tui_input_reader in
+  check bool "APC reply cannot withdraw an image request" false
+    (Reader.is_operator_input (Reader.Graphics_reply "i=31;OK"));
+  List.iter (fun event -> check bool "operator action can withdraw a request" true
+    (Reader.is_operator_input event))
+    [Reader.Key "esc";Reader.Mouse_left_press (1,1);
+     Reader.Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_up,1,1)]
+
 let () = run "resource image admission" ["stored source",[
+  test_case "protocol replies are not cancellation input" `Quick test_operator_protocol_boundary;
   test_case "workspace suspension retires diagram preparation" `Quick test_suspended_diagram_preparation;
   test_case "original SVG and multipart admission" `Quick test_original_admission;
   test_case "wrong pending URI" `Quick test_wrong_pending;

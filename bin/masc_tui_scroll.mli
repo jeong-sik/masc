@@ -24,6 +24,7 @@ module Position : sig
   type t
   type movement = First | Last | By of int
   val first : t
+  val is_end : t -> bool
   val at : int -> t
   (** An explicit source/search landing. Negative positions start at zero. *)
   val offset : count:int -> height:int -> t -> int

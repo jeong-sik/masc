@@ -79,7 +79,7 @@ let test_explicit_landings_release_end () =
   s.resource_scroll <- Position.move ~count:200 ~height:20 Position.First s.resource_scroll;
   check int "Home releases end after extent changes" 0
     (Position.offset ~count:300 ~height:20 s.resource_scroll)
-let () = run "resource document search decisions" ["admission",[
+let () = run "resource document search decisions" (["admission",[
   test_case "admitted original" `Quick test_admitted;
   test_case "unread" `Quick test_unread;
   test_case "pending other key" `Quick test_pending_other;
@@ -89,4 +89,4 @@ let () = run "resource document search decisions" ["admission",[
   test_case "list focus" `Quick test_list_focus;
   test_case "new source retires match" `Quick test_new_read;
   test_case "end follows reflow and relative navigation" `Quick test_end_after_reflow;
-  test_case "search and Home release end" `Quick test_explicit_landings_release_end]]
+  test_case "search and Home release end" `Quick test_explicit_landings_release_end]] @ Test_tui_resource_document_anchor.cases)

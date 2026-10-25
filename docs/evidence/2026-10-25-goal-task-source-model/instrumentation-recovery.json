@@ -1,0 +1,20 @@
+{
+  "schema": "masc.task-source.instrumentation-recovery.v1",
+  "initial_prepare_failure": {
+    "original_receipt_sha256": "e374c837d8f5c484290378dc5a6881b2817642eec0f2d852ebbe9f98af84f83a",
+    "basis": "Root-written event receipt plus early control flow; initial raw stderr and pre-fix script were not retained as files",
+    "failure": "macOS temporary root had not been resolved before ownership check",
+    "repair": "resolve the owned root",
+    "runtime_or_provider_started": false
+  },
+  "claim_response_parse_failure": {
+    "receipt_sha256": "a10c4ddf04b9340f7425b13a3abd8eb80dde8f2a435a70ba25b8985f5317d727",
+    "actual_claim_applied": true,
+    "creation_or_claim_retried": false,
+    "repair": "Retain MCP success envelope and verify typed primary state; continue the same Claimed Task",
+    "raw_request_response_and_error_retained_privately": true
+  },
+  "initial_after_successful_prepare_wrapper_sha256": "ccb3b505f5acf1e80f05a5c814b76d18a7350cf4d88060ad07479a2a30d6a4e4",
+  "repaired_wrapper_sha256": "3eb4a1631db3f1ccc56b4b3cedce1724f1ca21a85fc7bc3dbe0c1c1b8b704a94",
+  "metric_target_and_expected_control_outcomes_unchanged": true
+}

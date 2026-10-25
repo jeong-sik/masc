@@ -1,0 +1,482 @@
+{
+  "schema": "masc.task-source.actual-model-independent-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T14:09:16.611655+00:00",
+  "reviewer": "measurement_publication_review",
+  "verdict": "PASS_SCOPED_TWO_GOAL_MODEL_CONTROL_OBSERVATION",
+  "findings_P0_P1_P2_in_claimed_scope": [],
+  "scope": {
+    "source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "source_publication_head": "5ef6623937fab2a04f10862605b7d7db56ab8bdb",
+    "candidate_server_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "server_version": "0.64.0",
+    "saved_health_embedded_source_binary_sha_isolated_base_and_plan_match": true,
+    "saved_health_model_runtime_status": "available",
+    "runtime_role": "verifier_exact",
+    "evaluator_runtime": "glm-coding.glm-5-3",
+    "model_in_all9_actual_request_response_pairs": "glm-5.3",
+    "domain_scope": "One controlled Task approval and two isolated lifecycle-state Goal proofs.",
+    "UI_process_cleanup_or_future_public_projection_verdict": false,
+    "no_fresh_health_API_query": true
+  },
+  "authoritative_freeze": {
+    "name": "terminal-proof-private/manifest.json",
+    "bytes": 9301,
+    "sha256": "5e029c8a55d99ac776028b595d6616effd9669b7a637b35f00d3da4f18b19982",
+    "observed_at_utc": "2026-10-25T13:49:31.411402+00:00",
+    "files": 37,
+    "domain_and_ledger_files": 7,
+    "wire_files": 30,
+    "all37_frozen_files_hash_match": true,
+    "original_comparison_at_first_audit": "All37 originals matched at initial audit.",
+    "original_comparison_at_final_audit": "36 originals match; original Task backlog changed after freeze during recorded owned negative-Task cancellation. Frozen37 were not replaced.",
+    "later_original_difference": [
+      {
+        "name": "tasks/backlog.json",
+        "frozen_bytes": 3752,
+        "frozen_sha256": "46d78d5fae2d1f7a8b7723344f4fd7aa29160364ed4bd1f0961009c02b779554",
+        "later_bytes": 4160,
+        "later_sha256": "0ac11def062febe67de40f4152a0d7f8b35024bba22dab124d6df8a741dfc10a"
+      }
+    ]
+  },
+  "predeclared_control": {
+    "local_plan": {
+      "name": "plan-private.json",
+      "bytes": 2066,
+      "sha256": "6cc0b6bed6b4f21abdcd3324c534fdd05dfcdc1d70275c9cf7b7ab5fcffc100d"
+    },
+    "predicate": "1 iff referenced submitted canonical Task row status is done; else0.",
+    "both_targets": "1",
+    "both_reported_measurements": "1",
+    "local_plan_not_external_preregistration": true,
+    "operator_prepared_fixtures": true,
+    "P_N_labels_and_descriptions_unblinded": true,
+    "metric_and_goal_control_AST_unchanged_across_claim_adapter_repair": true,
+    "original_goal_criterion_weakening_claimed": false,
+    "scope_limit": "These are new lifecycle-state Goals, not the original exact-approval/actual-Edit temporal contract."
+  },
+  "counts": {
+    "catalog_GET": 1,
+    "actual_provider_POST": 9,
+    "unique_tool_calls": 6,
+    "Task_verification_runs": 1,
+    "Goal_verification_runs": 2,
+    "total_judgments": 3,
+    "Goal_complete_rows": 4,
+    "Goal_control_samples": 2,
+    "deduplication": "Reviewed/committed rows share each Goal run ID. Continuation POSTs are conversation turns, not separate samples."
+  },
+  "Task_positive": {
+    "task_id": "task-001",
+    "verification_id": "vrf-4aad634d6347ed69ed6807d5a1ef203d",
+    "authority_kind": "system_llm_agent",
+    "authority_actor": "verifier_exact",
+    "fixture_relative_path": "workspace/positive.json",
+    "fixture_bytes": 45,
+    "fixture_sha256": "92cb7294ca51ca773d72453b8cdb317e1acea54514c0cb6ede4097650775ff88",
+    "artifact_fields": {
+      "controlled_fixture": true,
+      "actual_value": 1
+    },
+    "actual_Read_equals_submitted_artifact": true,
+    "Read_truncated": false,
+    "Read_call_id": "call_-7138396243369128986",
+    "verdict_call_id": "call_-7138394491022469320",
+    "model_verdict": "APPROVE",
+    "reason_matches_Task_completion": true,
+    "reason_sha256": "f4c22141e3f995d1bc5adf27eb1c7f51fc369719429c448711d7862513229955",
+    "status_at_cohort_freeze": "done",
+    "completed_at": "2026-10-25T13:45:09Z",
+    "automatic_Task_review_observed": true,
+    "manual_Task_approval_observed": false,
+    "autonomous_Keeper_implementation_proven": false
+  },
+  "Goal_controls": [
+    {
+      "control": "N",
+      "goal_id": "goal-task-state-bde4636ab8314491942f146c375a2027-n",
+      "task_id": "task-002",
+      "request_id": "5169eb4872a5dfc3979fda70639e1b47",
+      "criterion_revision": "e10512767c265b311187d6ae89948e37",
+      "verification_run_id": "01a1734f-a7d4-7000-8e85-2b2358879605",
+      "target": "1",
+      "reported_value": "1",
+      "frozen_task_status": "in_progress",
+      "metric_from_frozen_row": 0,
+      "backlog_version": 10,
+      "backlog_last_updated": "2026-10-25T13:45:37Z",
+      "source_reference": "task:task-002",
+      "source_bytes": 527,
+      "source_sha256": "4b1f5e01e6ab54933347eafa604f9a691a23fafe7f81d7ee40fe4db011abf482",
+      "lookup_call_id": "call_-7138404730224501424",
+      "next_provider_request": "request-000008",
+      "decoded_lookup_result_exactly_equals_frozen_source": true,
+      "model_verdict": "REJECT",
+      "verdict_reason_sha256": "8de96867eb257e5bd1f2b1c37f02c9363e121062807f09fff506e0fac7b07fbb",
+      "proof_state_at_cohort_freeze": "proof_refuted",
+      "phase_at_cohort_freeze": "executing",
+      "committed_at": "2026-10-25T13:46:24Z",
+      "authority": {
+        "kind": "system_llm_agent",
+        "actor": "verifier_exact"
+      },
+      "ledger_lookup_excerpt_bytes": 628,
+      "ledger_lookup_excerpt_truncated": false,
+      "reviewed_and_committed_rows_are_same_run": true
+    },
+    {
+      "control": "P",
+      "goal_id": "goal-task-state-bde4636ab8314491942f146c375a2027-p",
+      "task_id": "task-001",
+      "request_id": "a292506b327eb99fabc643039af5bb31",
+      "criterion_revision": "a87186151ae1e7197793970a646e3c8e",
+      "verification_run_id": "01a1734f-92de-7000-8534-e53baff3df62",
+      "target": "1",
+      "reported_value": "1",
+      "frozen_task_status": "done",
+      "metric_from_frozen_row": 1,
+      "backlog_version": 10,
+      "backlog_last_updated": "2026-10-25T13:45:37Z",
+      "source_reference": "task:task-001",
+      "source_bytes": 2561,
+      "source_sha256": "a6c643bf14be8b9bfb49dfc848dd00174adfa0531fe99c7c1c559773f009867e",
+      "lookup_call_id": "call_-7138396449527558395",
+      "next_provider_request": "request-000007",
+      "decoded_lookup_result_exactly_equals_frozen_source": true,
+      "model_verdict": "APPROVE",
+      "verdict_reason_sha256": "ca7ff9e53c7e71c0be16960e8460e63d16e8a5f968ac49a289252b83ad2b6a92",
+      "proof_state_at_cohort_freeze": "proof_proven",
+      "phase_at_cohort_freeze": "awaiting_confirmation",
+      "committed_at": "2026-10-25T13:46:25Z",
+      "authority": {
+        "kind": "system_llm_agent",
+        "actor": "verifier_exact"
+      },
+      "ledger_lookup_excerpt_bytes": 1024,
+      "ledger_lookup_excerpt_truncated": true,
+      "reviewed_and_committed_rows_are_same_run": true
+    }
+  ],
+  "call_id_joins": [
+    {
+      "role": "Task artifact Read",
+      "response": "request-000002",
+      "next_request": "request-000003",
+      "tool_call_id": "call_-7138396243369128986",
+      "tool": "tool_read_file",
+      "safe_arguments": {},
+      "tool_result_bytes": 383,
+      "tool_result_sha256": "9c978bcbb2703e1ae06d7b7ea74c9b56a7f9226d988936e9add50e56581383c9"
+    },
+    {
+      "role": "Task verdict",
+      "response": "request-000003",
+      "next_request": "request-000004",
+      "tool_call_id": "call_-7138394491022469320",
+      "tool": "report_review_verdict",
+      "safe_arguments": {
+        "verdict": "APPROVE"
+      },
+      "tool_result_bytes": 348,
+      "tool_result_sha256": "4c71e4e84b56eaf1a1e3a099b2d770538d0e4cf759f13ab5fe33102ea07896f7"
+    },
+    {
+      "role": "Goal P Task-source Read",
+      "response": "request-000005",
+      "next_request": "request-000007",
+      "tool_call_id": "call_-7138396449527558395",
+      "tool": "keeper_tasks_list",
+      "safe_arguments": {
+        "task_ids": [
+          "task-001"
+        ]
+      },
+      "tool_result_bytes": 2984,
+      "tool_result_sha256": "35113670b0b53dff5a0645c4a55d270f3f777208b338157e06da598f398ba51f"
+    },
+    {
+      "role": "Goal N Task-source Read",
+      "response": "request-000006",
+      "next_request": "request-000008",
+      "tool_call_id": "call_-7138404730224501424",
+      "tool": "keeper_tasks_list",
+      "safe_arguments": {
+        "task_ids": [
+          "task-002"
+        ]
+      },
+      "tool_result_bytes": 628,
+      "tool_result_sha256": "702992748382d5a8acb47f508c0a1fde71a7f2a3b95a60eb90797dd8d2b1db05"
+    },
+    {
+      "role": "Goal P verdict",
+      "response": "request-000007",
+      "next_request": "request-000010",
+      "tool_call_id": "call_-7138402771719421001",
+      "tool": "report_review_verdict",
+      "safe_arguments": {
+        "verdict": "APPROVE"
+      },
+      "tool_result_bytes": 423,
+      "tool_result_sha256": "e578390172886d975c4088454b8b0da592ad820969ec2e93f291a8210e152fee"
+    },
+    {
+      "role": "Goal N verdict",
+      "response": "request-000008",
+      "next_request": "request-000009",
+      "tool_call_id": "call_-7138396243369124608",
+      "tool": "report_review_verdict",
+      "safe_arguments": {
+        "verdict": "REJECT"
+      },
+      "tool_result_bytes": 410,
+      "tool_result_sha256": "bcb7ee15058a409c14851f805966d09578e9e8e04dcdb2bbf41f8633cbd4692f"
+    }
+  ],
+  "transport_and_store_checks": {
+    "all_receipt_sizes_and_request_response_hashes_match_raw": true,
+    "all9_POST_status200": true,
+    "all9_request_and_response_model_fields_glm_5_3": true,
+    "response_calls_match_next_request_history_except_response_only_index": true,
+    "arguments_byte_equal": true,
+    "matching_tool_result_IDs_verified": true,
+    "actual_Goal_Task_schema_is_required_singleton_task_ids_plus_cursor_only": true,
+    "Goal_P_full_source_proof": "Provider request000007 decoded JSON lookup_result is2561B/a6c643bf14be8b9bfb49dfc848dd00174adfa0531fe99c7c1c559773f009867e and equals frozen content byte-for-byte. Its1024B/truncated ledger excerpt alone is insufficient.",
+    "Goal_N_full_source_proof": "Provider request000008 decoded JSON lookup_result is527B/4b1f5e01e6ab54933347eafa604f9a691a23fafe7f81d7ee40fe4db011abf482 and equals frozen content byte-for-byte.",
+    "criterion_revision_request_id_run_id_model_reason_match_registration_reviewed_committed_and_final_store": true,
+    "both_sources_match_primary_Task_rows_at_version10": true,
+    "Task001_Done_row_matches_earlier_positive_snapshot": true,
+    "Task002_no_Task_verification_submission_or_approval_during_controls": true
+  },
+  "harness_failures": [
+    {
+      "event": "First prepare failed before plan/runtime creation",
+      "receipt": {
+        "name": "prepare-failed-1/failure.json",
+        "bytes": 396,
+        "sha256": "e374c837d8f5c484290378dc5a6881b2817642eec0f2d852ebbe9f98af84f83a"
+      },
+      "reported_runtime_or_proxy_started": false,
+      "reported_provider_calls": 0,
+      "repair": "Resolve macOS owned-root symlink before helper containment comparison.",
+      "evidence_limit": "Parent-authored retrospective event receipt plus source explanation. Original stderr remained only in parent tool output and was not captured as a file; no pre-fix script copy exists. This is not independent raw-stderr/reproduction proof."
+    },
+    {
+      "event": "Client JSON parser rejected plain-text success after Task Claim had applied",
+      "receipt": {
+        "name": "claim-adapter-failure.json",
+        "bytes": 511,
+        "sha256": "a10c4ddf04b9340f7425b13a3abd8eb80dde8f2a435a70ba25b8985f5317d727"
+      },
+      "error": {
+        "name": "claim-adapter-error-private.txt",
+        "bytes": 2017,
+        "sha256": "9af065cc844645c089af4cc1b8a1590976aaef5ebb5fb90a1746c3c44ba640db"
+      },
+      "observed_readback": "SameTask001 Claimed under same operator",
+      "creation_or_Claim_retry": false,
+      "repair": "Use raw transition envelope, reject isError, verify canonical claim/start readback and explicitly resume exact same Claimed Task before Start/Submit.",
+      "product_helper_metric_target_outcome_changed": false,
+      "version_limit": "ccb3 initial-wrapper is after successful prepare and before claim-adapter repair; it is not the unarchived first failed-prepare script."
+    }
+  ],
+  "harness_binding": {
+    "prepared_wrapper": {
+      "name": "initial-wrapper-private.py",
+      "bytes": 11540,
+      "sha256": "ccb3b505f5acf1e80f05a5c814b76d18a7350cf4d88060ad07479a2a30d6a4e4"
+    },
+    "repaired_wrapper": {
+      "name": "repaired-wrapper-private.py",
+      "bytes": 12596,
+      "sha256": "3eb4a1631db3f1ccc56b4b3cedce1724f1ca21a85fc7bc3dbe0c1c1b8b704a94"
+    },
+    "launch_inputs": {
+      "name": "launch-inputs-private.json",
+      "bytes": 263,
+      "sha256": "08fe7d353598baffe7e328acc2ecf48bf892592c5d93c777aa777b66990022ef"
+    },
+    "original_helper_name": "canary.py",
+    "original_helper_sha256": "a60067e9d5d3ba8c6ce194056db0754f49171a68b4715d821f9c7193fab89830",
+    "original_helper_unchanged_against_launch_hash": true,
+    "proxy_name": "wire_proxy.py",
+    "proxy_sha256": "9ec19df518e28d16cb0bfb42a843115b4b820db4384a7787cd8ab517eca3bf60",
+    "prepare_client_task_state_negative_task_goal_control_AST_unchanged": true,
+    "recorded_operator_setup_request_count": 13,
+    "recorded_setup_actions": "Create/claim/start/submit Task001, create/claim/start Task002, upsert/measure/request_complete both new Goals. No recorded manual approval, Goal confirmation or model nudge."
+  },
+  "snapshot_chronology": {
+    "positive_Task_snapshot": {
+      "name": "positive-task-proof-private/manifest.json",
+      "bytes": 854,
+      "sha256": "39ba45141887971a801a03ae93866466bdb2a22baa6f8aeac2aaf6a2c459e7f3"
+    },
+    "positive_snapshot_files": 3,
+    "Goal_request_snapshot": {
+      "name": "goal-requests-proof-private/manifest.json",
+      "bytes": 1278,
+      "sha256": "d8f4dbaea154a8ec0b179bf14308508cf9c15068bfb5ac87524e3fecac80a910"
+    },
+    "Goal_request_snapshot_files": 5,
+    "Goal_request_snapshot_time": "2026-10-25T13:46:26.732061+00:00",
+    "limit": "The latter snapshot was taken after both Goal commits and already contains proof_proven/refuted. It is not pre-judgment pending-request evidence; submitted source bytes are identical to terminal freeze."
+  },
+  "post_freeze_owned_Task_cleanup": {
+    "action": "Operator cancels owned Task002 after judgments and terminal freeze.",
+    "readback": {
+      "name": "owned-negative-cleanup-private/readback.json",
+      "bytes": 411,
+      "sha256": "e5bc7d89ea2ccc8dd05235a4d1ac696d4aca04c70900f2c8ea268f3bf2b267b4"
+    },
+    "cancel_request": {
+      "name": "owned-negative-cleanup-private/cancel.request-private.json",
+      "bytes": 653,
+      "sha256": "70578ed4c8a7d957a98c5f53d72f2634a079c27fb15a525b4868a9bf05bab27b"
+    },
+    "cancel_response": {
+      "name": "owned-negative-cleanup-private/cancel.response-private",
+      "bytes": 595,
+      "sha256": "53a7e53840dbd08112efc4dd44d3f3404ecfa8f6b97dc23adb7c453df62b7c12"
+    },
+    "at_utc": "2026-10-25T13:58:28.863251+00:00",
+    "Task_status_change": "in_progress -> cancelled",
+    "primary_backlog_version_change": "10 -> 11",
+    "Task001_Done_row_unchanged": true,
+    "Goal_N_submitted_source_still_in_progress": true,
+    "Goal_N_source_sha256_unchanged": "4b1f5e01e6ab54933347eafa604f9a691a23fafe7f81d7ee40fe4db011abf482",
+    "Goal_records_unchanged_vs_frozen": true,
+    "new_model_request_issued": false,
+    "human_Goal_confirmation": false,
+    "count_as_new_model_control": false,
+    "scope_limit": "Only cancellation request/readback and resulting source immutability were checked. No browser screenshot or process-stop correctness verdict is included."
+  },
+  "wire_metadata_allowlist": [
+    {
+      "name": "request-000001",
+      "method": "GET",
+      "http_status": 200,
+      "request_bytes": 0,
+      "request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "response_bytes": 848,
+      "response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+      "model": null
+    },
+    {
+      "name": "request-000002",
+      "method": "POST",
+      "http_status": 200,
+      "request_bytes": 20255,
+      "request_sha256": "2c73434da5cb8d90499bf2179b1e0391a515f4bc724b873f4ce77bd3ca96b770",
+      "response_bytes": 3724,
+      "response_sha256": "d39f32ba4b313a2a26b4de87bdc8c44f04f6a4401dbfdd31466b8abe37452c09",
+      "model": "glm-5.3"
+    },
+    {
+      "name": "request-000003",
+      "method": "POST",
+      "http_status": 200,
+      "request_bytes": 21207,
+      "request_sha256": "b24897bb623cf27e74178ba6b6f92c552955700753e145e592ec35a14e081d04",
+      "response_bytes": 1967,
+      "response_sha256": "c269b23d7f51029ce299439017a4076f21e196c398ca28ff9c91456ba2aa3a22",
+      "model": "glm-5.3"
+    },
+    {
+      "name": "request-000004",
+      "method": "POST",
+      "http_status": 200,
+      "request_bytes": 22614,
+      "request_sha256": "12e9d9af92d8e84e8c68acde9e7436c1340ec824b2f27199e1c8bc0bfff23254",
+      "response_bytes": 667,
+      "response_sha256": "df8fab7ac3d8de3f4b3eed28893f46d5a0229a59c03ff3ae9dbc3d07710185b9",
+      "model": "glm-5.3"
+    },
+    {
+      "name": "request-000005",
+      "method": "POST",
+      "http_status": 200,
+      "request_bytes": 16780,
+      "request_sha256": "060b9c99ff0552e5b4b9944eea40eb5be6ee089e1cbe5acef27669ed5cc53048",
+      "response_bytes": 2134,
+      "response_sha256": "fa6d023498c2afe69ea8b5793fc1d7be5b286a2c21628c19f7e8987694ca8d40",
+      "model": "glm-5.3"
+    },
+    {
+      "name": "request-000006",
+      "method": "POST",
+      "http_status": 200,
+      "request_bytes": 16779,
+      "request_sha256": "26ac034e5a65a62e2e431dd8424dc5a6b841aca0f377bf574b13e27726ef09b4",
+      "response_bytes": 1079,
+      "response_sha256": "aa0785df136caaf4732fc6f57d525f88b5c99409e06bb522b39fba3b5c08030c",
+      "model": "glm-5.3"
+    },
+    {
+      "name": "request-000007",
+      "method": "POST",
+      "http_status": 200,
+      "request_bytes": 20768,
+      "request_sha256": "ef8bddefef683b5cda97540a9807aead6a8d6e87ba0cd5a2fb1d14c3d29ffc50",
+      "response_bytes": 1679,
+      "response_sha256": "3f1dad81022158688bbcc2fb5457c63158804673327fa6ba4956dcedb70bfa25",
+      "model": "glm-5.3"
+    },
+    {
+      "name": "request-000008",
+      "method": "POST",
+      "http_status": 200,
+      "request_bytes": 17767,
+      "request_sha256": "ff9c76f587fb0192433335f865ec23e3180ef7f8baaab10ce2c783400d3ec251",
+      "response_bytes": 1441,
+      "response_sha256": "d00f5bae707b15c9fe921bfb5bd385bb96640394ddc29f142b9e14c83c65d831",
+      "model": "glm-5.3"
+    },
+    {
+      "name": "request-000009",
+      "method": "POST",
+      "http_status": 200,
+      "request_bytes": 18839,
+      "request_sha256": "588ecd3bf0f376f5865c75cd3eca1904e33cf8d128ae0aee8af293b256a27995",
+      "response_bytes": 659,
+      "response_sha256": "f70eac76f5a791869a9a92a71770a7d9c312a5a12ca5c18da66509af0437a838",
+      "model": "glm-5.3"
+    },
+    {
+      "name": "request-000010",
+      "method": "POST",
+      "http_status": 200,
+      "request_bytes": 21858,
+      "request_sha256": "cafd501278096d9f265226dee11ad112af22047ca45f6367def89ad0895ae8c6",
+      "response_bytes": 720,
+      "response_sha256": "c11053076537184e39240804b4a7a3ea6c5beda9638e115bb4bd2c9ad5b189a0",
+      "model": "glm-5.3"
+    }
+  ],
+  "remaining_P2": [
+    {
+      "kind": "durable_exact_approval_certificate",
+      "status": "UNREPAIRED",
+      "detail": "This external audit joins one actual Task approval to its verifier run. Canonical Done rows still lack permanent typed verifier/verification_id/authority approval-attempt certification."
+    },
+    {
+      "kind": "original_actual_Edit_temporal_contract",
+      "status": "UNMEASURED_UNREPAIRED",
+      "detail": "No actual implementation/Edit-after-approval contract is measured. Operator prepared the positive JSON before review. Original Goal remains incomplete."
+    }
+  ],
+  "limitations": [
+    "Two unblinded Goal controls on one GLM5.3 model in separate roles. Role separation is not independent models, blinding, causal isolation or a population reliability estimate.",
+    "Observed Read-before-verdict and verdict consistency do not prove the source lookup caused correctness; labels/descriptions reveal control intent and no source-hidden or misleading-source ablation is present.",
+    "P is proof_proven/awaiting_confirmation, not human-confirmed completion. N is proof_refuted/executing. Task002 was InProgress during judgments/freeze and was cancelled later for owned cleanup.",
+    "Operator fixture preparation, API setup, harness adapter repair and later Task cancellation are explicit interventions. This is not autonomous Keeper implementation or external acceptance.",
+    "No primary installation, UI rendering, process-cleanup correctness, future public projection, source PR readiness, original Goal completion, merge or whole-stack approval is asserted.",
+    "Original main Goal untouched is parent-reported and consistent with isolated stores containing only two declared controls. Reviewer did not inspect or change main runtime.",
+    "Reviewer made no API/model/provider/build/CI/Docker/Git/runtime/Task/Goal/source/publication mutation. Only this external final review artifact was written."
+  ],
+  "public_safety": {
+    "input_paths": "Relative labels only.",
+    "projection": "Hashes, IDs, states, counts and join metadata. No raw thinking, request headers, credentials, full private Task body, absolute host path or full private output.",
+    "future_public_projection_audited": false
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "schema": "masc.task-source.goal-result-projection.v1",
+  "projection_of_private_primary_ledgers": true,
+  "private_primary_goal_verifications_sha256": "1b52c3006c0406d63e76067155e3c63b4f5c0d35f9479867c560cf814b4eb767",
+  "goal": {
+    "id": "goal-task-state-bde4636ab8314491942f146c375a2027-n",
+    "criterion_revision": "e10512767c265b311187d6ae89948e37",
+    "title": "Controlled submitted Task status observation N",
+    "metric": "Lifecycle state of exact submitted Task task-002. 1 exactly when the referenced submitted canonical Task row has status done; otherwise 0. The Goal tests this lifecycle observation only, not an approval certificate, external acceptance or actual Edit ordering.",
+    "target_value": "1",
+    "due_date": null,
+    "priority": 3,
+    "phase": "executing",
+    "last_review_note": "keeper_tasks_list로 제출된 원문 task:task-002의 canonical Task 행을 직접 읽었고, status는 \"in_progress\"(started_at 2026-10-25T13:45:37Z)입니다. metric은 status가 done일 때만 1이고 그 외에는 0이므로 측정값은 0이며 target 1에 도달하지 않습니다. reported_measurement의 observed_value \"1\"은 실제 원문 행과 모순됩니다.",
+    "last_review_at": "2026-10-25T13:46:24Z",
+    "created_at": "2026-10-25T13:46:02Z",
+    "updated_at": "2026-10-25T13:46:24Z"
+  },
+  "measurement": {
+    "id": "5d1f07aa73a3b25b996e1a4de04ff544",
+    "goal_id": "goal-task-state-bde4636ab8314491942f146c375a2027-n",
+    "criterion_revision": "e10512767c265b311187d6ae89948e37",
+    "observed_value": "1",
+    "evidence": "task:task-002",
+    "actor": "task-source-controls-operator",
+    "recorded_at": "2026-10-25T13:46:02Z"
+  },
+  "completion": {
+    "state": "proof_refuted",
+    "verdict": {
+      "outcome": "refuted",
+      "reason": "keeper_tasks_list로 제출된 원문 task:task-002의 canonical Task 행을 직접 읽었고, status는 \"in_progress\"(started_at 2026-10-25T13:45:37Z)입니다. metric은 status가 done일 때만 1이고 그 외에는 0이므로 측정값은 0이며 target 1에 도달하지 않습니다. reported_measurement의 observed_value \"1\"은 실제 원문 행과 모순됩니다.",
+      "request_id": "5169eb4872a5dfc3979fda70639e1b47",
+      "criterion": {
+        "revision": "e10512767c265b311187d6ae89948e37",
+        "title": "Controlled submitted Task status observation N",
+        "metric": "Lifecycle state of exact submitted Task task-002. 1 exactly when the referenced submitted canonical Task row has status done; otherwise 0. The Goal tests this lifecycle observation only, not an approval certificate, external acceptance or actual Edit ordering.",
+        "target_value": "1"
+      },
+      "verification_run_id": "01a1734f-a7d4-7000-8e85-2b2358879605",
+      "authority": {
+        "kind": "system_llm_agent",
+        "actor": "verifier_exact"
+      },
+      "evidence": "keeper_tasks_list로 제출된 원문 task:task-002의 canonical Task 행을 직접 읽었고, status는 \"in_progress\"(started_at 2026-10-25T13:45:37Z)입니다. metric은 status가 done일 때만 1이고 그 외에는 0이므로 측정값은 0이며 target 1에 도달하지 않습니다. reported_measurement의 observed_value \"1\"은 실제 원문 행과 모순됩니다.",
+      "recorded_at": "2026-10-25T13:46:24Z"
+    }
+  },
+  "submitted_source": {
+    "file": "source-N.json",
+    "reference": "task:task-002",
+    "bytes": 527,
+    "sha256": "4b1f5e01e6ab54933347eafa604f9a691a23fafe7f81d7ee40fe4db011abf482"
+  },
+  "observed_actual_structured_verdict": {
+    "tool_call_id": "call_-7138396243369124608",
+    "arguments": {
+      "verdict": "REJECT",
+      "reason": "keeper_tasks_list로 제출된 원문 task:task-002의 canonical Task 행을 직접 읽었고, status는 \"in_progress\"(started_at 2026-10-25T13:45:37Z)입니다. metric은 status가 done일 때만 1이고 그 외에는 0이므로 측정값은 0이며 target 1에 도달하지 않습니다. reported_measurement의 observed_value \"1\"은 실제 원문 행과 모순됩니다."
+    }
+  },
+  "full_source_in_model_input": {
+    "request": "request-000008",
+    "lookup_call_id": "call_-7138404730224501424",
+    "tool_message_bytes": 628,
+    "tool_message_sha256": "702992748382d5a8acb47f508c0a1fde71a7f2a3b95a60eb90797dd8d2b1db05",
+    "source_bytes_exactly_equal_submission": true
+  },
+  "source_capture_and_export_limit": "Export read after judgment; not claimed as a separate pending-state snapshot."
+}

@@ -4459,7 +4459,7 @@ let test_retention_does_not_hold_restoration () =
               Eio.Promise.await release;
               Eio.Promise.resolve finished_r ());
           Eio.Promise.await entered;
-          Alcotest.(check bool) "restoration still blocks Keeper autoboot"
+          Alcotest.(check bool) "pending restoration remains observable"
             false (Server_startup_state.pending_lazy_tasks () = []);
           Server_startup_state.finish_lazy_task ~task:"restore_sessions";
           Alcotest.(check (list string)) "held retention does not hold the barrier"

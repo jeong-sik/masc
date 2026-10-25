@@ -200,7 +200,6 @@ module Float_knob = struct
     | Full_health_refresh_timeout_sec
     | Repo_sync_interval_sec
     | Snapshot_interval_sec
-    | Lazy_task_boot_guard_sec
   [@@deriving enumerate]
 
   let spec = function
@@ -237,12 +236,6 @@ module Float_knob = struct
       , 5.0
       , "runtime"
       , "Minimum seconds between SSE snapshot broadcasts" )
-    | Lazy_task_boot_guard_sec ->
-      ( "MASC_LAZY_TASK_BOOT_GUARD_SEC"
-      , 120.0
-      , "server"
-      , "How long boot waits on lazy tasks before publishing readiness; a \
-         non-positive value keeps the default" )
   ;;
 
   let env_name t = let n, _, _, _ = spec t in n

@@ -55,7 +55,6 @@ module Float_knob : sig
     | Full_health_refresh_timeout_sec
     | Repo_sync_interval_sec
     | Snapshot_interval_sec
-    | Lazy_task_boot_guard_sec
   [@@deriving enumerate]
 
   val env_name : t -> string

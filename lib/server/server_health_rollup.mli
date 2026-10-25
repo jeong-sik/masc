@@ -44,7 +44,6 @@ val operator_summary :
   keeper_config_schema_blocking:bool ->
   keeper_config_schema_terminal_reason:string ->
   keeper_config_operator_action_required:bool ->
-  lazy_task_boot_guard_fires_total:int ->
   t
 (** [operator_summary ~sections ...] rolls the sections up.
 

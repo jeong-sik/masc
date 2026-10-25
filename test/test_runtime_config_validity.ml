@@ -4796,7 +4796,6 @@ let test_catalog_and_gap_degradation_name_both_reasons () =
       ~keeper_config_schema_blocking:false
       ~keeper_config_schema_terminal_reason:""
       ~keeper_config_operator_action_required:false
-      ~lazy_task_boot_guard_fires_total:0
   in
   check bool "the health rollup names the gaps" true
     (List.mem

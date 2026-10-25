@@ -41,7 +41,6 @@ let cached_field_names =
     "keeper_config_schema_blocking";
     "keeper_config_schema_terminal_reason";
     "keeper_config_operator_action_required";
-    "lazy_task_boot_guard_fires_total";
   ]
 ;;
 
@@ -67,7 +66,6 @@ let fallback_reason json component_status =
 let operator_summary ~sections ~runtime_startup_degradation
     ~keeper_config_schema_status ~keeper_config_schema_blocking
     ~keeper_config_schema_terminal_reason ~keeper_config_operator_action_required
-    ~lazy_task_boot_guard_fires_total
   =
   let status = ref "ok" in
   let reasons = ref [] in
@@ -155,17 +153,6 @@ let operator_summary ~sections ~runtime_startup_degradation
     reasons :=
       Printf.sprintf "keeper_config_schema:%s" keeper_config_schema_terminal_reason
       :: !reasons;
-  if lazy_task_boot_guard_fires_total > 0
-  then begin
-    status := Health_status.max_string !status "degraded";
-    let line =
-      Printf.sprintf
-        "lazy_task_boot_guard_fires_total:%d"
-        lazy_task_boot_guard_fires_total
-    in
-    status_lines := line :: !status_lines;
-    reasons := line :: !reasons
-  end;
   let operator_action_reasons = List.rev !reasons in
   { overall_status = !status
   ; operator_action_required = operator_action_reasons <> []

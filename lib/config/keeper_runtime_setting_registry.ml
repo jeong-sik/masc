@@ -149,20 +149,6 @@ let all =
         (Reader
            (fun () ->
               display_float
-                Env_config_keeper.KeeperBootstrap.lazy_startup_poll_interval_sec))
-      ~env_name:"MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC"
-      ~exposure:Env_only
-      ~value_kind:Float
-      ~default:"0.25"
-      ~consumers:[ "Server_bootstrap_loops lazy-startup poll" ]
-      ~category:Bootstrap
-      "Lazy-startup completion poll interval in seconds"
-  ; setting
-      ~range:(float_range ~min:0.05 ())
-      ~effective:
-        (Reader
-           (fun () ->
-              display_float
                 Env_config_keeper.KeeperBootstrap.keeper_listener_retry_interval_sec))
       ~env_name:"MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC"
       ~exposure:Env_only
@@ -171,16 +157,6 @@ let all =
       ~consumers:[ "Server_bootstrap_loops lifecycle-listener retry" ]
       ~category:Bootstrap
       "Keeper lifecycle-listener retry interval in seconds"
-  ; setting
-      ~range:(float_range ~min:0.0 ())
-      ~effective:(Reader (fun () -> display_float Env_config_keeper.KeeperBootstrap.post_startup_settle_sec))
-      ~env_name:"MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC"
-      ~exposure:Env_only
-      ~value_kind:Float
-      ~default:"5.0"
-      ~consumers:[ "Server_bootstrap_loops post-startup settle" ]
-      ~category:Bootstrap
-      "Delay between lazy startup completion and keeper bootstrap"
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperReactive.enabled ())))
       ~env_name:"MASC_KEEPER_REACTIVE_ENABLED"

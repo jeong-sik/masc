@@ -543,10 +543,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
         Server_skill_catalog_health.placeholder ~component_timed_out:false
           ~status:"snapshot_not_ready" ())
   in
-  let lazy_task_boot_guard_fires_total =
-    int_of_float
-      (Otel_metric_store.metric_total "masc_lazy_task_boot_guard_fired_total")
-  in
   let runtime_startup_degradation_json =
     Runtime.startup_degradation_to_yojson
          ~exact_slots:(Runtime.exact_slot_degradation ())
@@ -647,15 +643,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       `String keeper_config_schema_terminal_reason );
     ( "keeper_config_operator_action_required",
       `Bool keeper_config_operator_action_required );
-    (* P2 silent-failure fix: lazy_task_boot_guard fires when a keeper
-       startup task exceeds the boot timeout (server_bootstrap_loops.ml:116).
-       The Otel_metric_store counter `masc_lazy_task_boot_guard_fired_total`
-       was already incremented but `/health` did not surface it, so an
-       operator hitting /health would see "ok" while keepers had
-       silently failed to start.  Exposing the cumulative count here
-       lets dashboards / health probes alert on a non-zero value. *)
-    ("lazy_task_boot_guard_fires_total",
-     `Int lazy_task_boot_guard_fires_total);
+
   ]
   in
   let rollup =
@@ -667,7 +655,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       ~keeper_config_schema_blocking
       ~keeper_config_schema_terminal_reason
       ~keeper_config_operator_action_required
-      ~lazy_task_boot_guard_fires_total
   in
   let string_list reasons = `List (List.map (fun reason -> `String reason) reasons) in
   Tool_args.ok_assoc
@@ -923,7 +910,6 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ("keeper_config_schema_blocking", `Bool false);
     ("keeper_config_schema_terminal_reason", `String "snapshot_not_ready");
     ("keeper_config_operator_action_required", `Bool false);
-    ("lazy_task_boot_guard_fires_total", `Int 0);
   ]
 
 let cached_full_health_fields = function

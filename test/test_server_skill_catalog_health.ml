@@ -78,7 +78,6 @@ let rollup sections =
     ~keeper_config_schema_blocking:false
     ~keeper_config_schema_terminal_reason:""
     ~keeper_config_operator_action_required:false
-    ~lazy_task_boot_guard_fires_total:0
 ;;
 
 let test_rejected_config_degrades_with_each_diagnostic () =

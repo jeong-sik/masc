@@ -1575,117 +1575,6 @@ let start_keeper_loops_owned
         config
         operation
         action);
-  let wait_for_lazy_startup () =
-    (* Combines #10843 (per-task elapsed diagnostic, merged via #10854) with
-       a per-task boot guard.  The diagnostic surface stays as #10854
-       intended — running/HUNG tags + INFO→WARN escalation at 60s — and
-       the boot guard kicks in at [boot_guard_sec] (default 120s) to
-       fail-out tasks that exceed it via [Server_startup_state.fail_lazy_task].
-       Without a hard ceiling, a single hung task (e.g. [restore_sessions]
-       hanging 17 min, #10843) blocks keeper boot indefinitely; the 240s
-       startup watchdog still observes the blocking phase because
-       [prepare_lazy_tasks] records the pending inventory without publishing
-       readiness. *)
-    let started_at = Hashtbl.create 16 in
-    let hung_threshold_sec = 60.0 in
-    let boot_guard_sec =
-      let declared = Env_setting.Float_knob.default Lazy_task_boot_guard_sec in
-      match Sys.getenv_opt (Env_setting.Float_knob.env_name Lazy_task_boot_guard_sec) with
-      | Some v ->
-        (match float_of_string_opt (String.trim v) with
-         | Some f when f > 0.0 -> f
-         | _ -> declared)
-      | None -> declared
-    in
-    let format_pending now pending =
-      pending
-      |> List.map (fun task ->
-        let elapsed =
-          match Hashtbl.find_opt started_at task with
-          | Some t -> now -. t
-          | None -> 0.0
-        in
-        let tag = if elapsed >= hung_threshold_sec then "HUNG" else "running" in
-        Printf.sprintf "%s (%s %.1fs)" task tag elapsed)
-      |> String.concat ", "
-    in
-    let rec loop last_log_at =
-      let pending = Server_startup_state.pending_lazy_tasks () in
-      if pending = []
-      then ()
-      else (
-        let now = Eio.Time.now clock in
-        List.iter
-          (fun task ->
-             if not (Hashtbl.mem started_at task) then Hashtbl.add started_at task now)
-          pending;
-        Hashtbl.filter_map_inplace
-          (fun task t -> if List.mem task pending then Some t else None)
-          started_at;
-        let stuck =
-          List.filter
-            (fun task ->
-               match Hashtbl.find_opt started_at task with
-               | Some seen_at -> now -. seen_at >= boot_guard_sec
-               | None -> false)
-            pending
-        in
-        if stuck <> []
-        then (
-          List.iter
-            (fun task ->
-               let elapsed =
-                 match Hashtbl.find_opt started_at task with
-                 | Some seen_at -> now -. seen_at
-                 | None -> 0.0
-               in
-               Log.Keeper.error
-                 "autoboot: lazy task %s exceeded boot guard %.0fs (elapsed %.1fs) — \
-                  failing it so keeper boot can proceed"
-                 task
-                 boot_guard_sec
-                 elapsed;
-               Otel_metric_store.inc_counter
-                 "masc_lazy_task_boot_guard_fired_total"
-                 ~labels:[ "task", task ]
-                 ();
-               Server_startup_state.fail_lazy_task
-                 ~task
-                 ~error:(Printf.sprintf "lazy_task_boot_guard:%.0fs" boot_guard_sec))
-            stuck;
-          loop last_log_at)
-        else (
-          let last_log_at =
-            if now -. last_log_at >= 5.0
-            then (
-              let max_elapsed =
-                List.fold_left
-                  (fun m task ->
-                     match Hashtbl.find_opt started_at task with
-                     | Some s -> Float.max m (now -. s)
-                     | None -> m)
-                  0.0
-                  pending
-              in
-              let log_fn =
-                if max_elapsed >= hung_threshold_sec
-                then Log.Keeper.warn
-                else Log.Keeper.info
-              in
-              log_fn
-                "autoboot: waiting for lazy startup tasks to finish before keeper boot \
-                 [%s]"
-                (format_pending now pending);
-              now)
-            else last_log_at
-          in
-          Eio.Time.sleep
-            clock
-            Env_config_keeper.KeeperBootstrap.lazy_startup_poll_interval_sec;
-          loop last_log_at))
-    in
-    loop (Eio.Time.now clock)
-  in
   (* Create and install the MASC-owned event bus alongside Agent Core's.
      MASC domain events (masc.keeper.*, masc.harness.*, ...) publish here per
      the Event_bus contract. Dashboard SSE consumers receive both buses through
@@ -2061,10 +1950,9 @@ let start_keeper_loops_owned
            Log.Keeper.warn "autoboot: keeper names unread: %s" detail;
            []), [])
       else (
-      wait_for_lazy_startup ();
-      Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
-      (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
-      Eio.Time.sleep clock Env_config_keeper.KeeperBootstrap.post_startup_settle_sec;
+      (* Ownership and runtime prerequisites are already established above.
+         Agent session discovery merges through its own actor and must not
+         delay unrelated Keeper startup or be failed by elapsed time. *)
       let masc_root = Workspace.masc_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
       let shutdown_blocked_names =

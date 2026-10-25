@@ -102,3 +102,26 @@ establish an installed binary or live fleet result. Stronger model-level
 answer reconstruction, official-client session continuity and the other
 untested boundaries above remain unproved. Issue disposition is recorded
 separately after current-scope review; this run alone does not close it.
+
+## Exact catalog fixture after integration
+
+The fixture was rebased from `9dbf49976ad8d04f39b9a76bf16e507b247765a3`
+onto main `0ccb01b6ac91e47950fd3e74bdf9c38c95aefa92`. That main includes the
+strict model catalog contract from #45872. Its parser requires `model_id` and
+rejects the old `id_prefix` fixture before native request preparation. The
+fixture now names the same `informational-protocol-fixture` with `model_id`;
+all actual provider, durable request, checkpoint, ACK and fresh-process
+assertions are preserved.
+
+A direct component probe compiled the unchanged current parser identity and
+unknown-key boundary with actual `Model_identifiers` and Otoml. The old row
+returned `model entry missing required "model_id" field`; the corrected row
+passed that boundary with its exact model identity. This is an input-boundary
+probe, not execution of the complete catalog parser, native Keeper scenario
+or existing checkpoint/ACK assertions. No new Dune, CI, installation or full
+regression result is claimed.
+
+`source-sha256.txt` and the successful run above retain the original
+`4c947b3f97874478641f4ebfa21ab46ca17a0820` execution inputs. The catalog-field
+port changes fixture bytes, so those receipts are historical execution and do
+not certify execution of this rebased candidate.

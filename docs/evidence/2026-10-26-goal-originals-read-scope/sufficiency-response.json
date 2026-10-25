@@ -1,0 +1,282 @@
+{
+  "schema": "masc.goal.originals428e.semantic-review-response.v1",
+  "status": "FINAL_FROZEN",
+  "frozen_at_utc": "2026-10-25T19:44:22.246851+00:00",
+  "verdict": "AGREES_SEMANTIC_FAIL_A3_A7_WITH_A1_REPLAY_SCOPE_GAP_CLOSED",
+  "assessment": "The two P2 findings are justified by the existing finite requirements and actual returned observations. A3 leaves judge delivery unobserved; A7 leaves lifecycle/external-acceptance metric taxonomy unobserved. This is proof insufficiency in an accepted APPROVE, not failure of the underlying A3/A7 behavior. The actual partial A1 page contains the previously missing three-stage observations, so its earlier gap is closed within this428e replay only.",
+  "review_binding": {
+    "label": "originals428e-sufficiency-review/review.json",
+    "bytes": 49418,
+    "sha256": "e8a971f45f663b3f512ba9806bb968f86359724ed62b2b564377b825f8a63c28",
+    "read_in_full": true,
+    "frozen_verdict": "FAIL_PROOF_SUFFICIENCY_P2_A3_AND_A7_UNOBSERVED_REQUIRED_SUBCONDITIONS"
+  },
+  "protocol_boundary": {
+    "label": "originals428e-protocol-review/review.json",
+    "bytes": 51180,
+    "sha256": "c1fa4dd3239ce6022579e1eea683e60cc3b4102e421dac10adecabcb07093603",
+    "verdict": "PASS_PROTOCOL_INTEGRITY_ONLY_SEMANTIC_SUFFICIENCY_UNASSESSED",
+    "unchanged": true,
+    "interpretation": "Byte identity, accepted Tool verdict and persisted lifecycle can all be valid while semantic proof is insufficient. This response neither changes the protocol report nor upgrades it into an eleven-case semantic PASS.",
+    "no_repeat": "159-leaf inventory and full14-POST/45-call protocol audit were not repeated. Only selected decisive returned pages and missing-observation sources were compared."
+  },
+  "identity": {
+    "candidate_source_head": "577e6e10a5eb10869796fc4f7f862f3ea3d7e17d",
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "prompt_sha256": "428e2d7fd1db9ea920ff67ac1a959fa9e91867776b0ee40bef8b7f022307a47d",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "fixture_criterion_revision": "d6f0451381b7f9076e956759253e0fae",
+    "original_main_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "canonical_acceptance_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+    "request_id": "c69ddd0cf5f534dfe202252101a29877",
+    "run_id": "01a1747f-5f6e-7000-b943-9d98ded9e5d1",
+    "measurement_id": "ed38d5f1af49212a42bf17195b141ffc",
+    "requested_models": [
+      "glm-5.3-flash"
+    ],
+    "reported_models": [
+      "glm-5.3-flash"
+    ],
+    "model_name_boundary": "Reported/requested API model names do not prove weight identity or independence."
+  },
+  "confirmed_P2_findings": [
+    {
+      "case_id": "A3",
+      "requirement": "Image bytes and length must match stored identity before judge or operator delivery",
+      "declared_scope": "native filesystem image digest/length/symlink and judge/operator/TUI typed propagation",
+      "decision": "AGREE_PROOF_INSUFFICIENCY",
+      "actually_read": "Step32 operator evidence2212B proves changed-body withholding and retention of both sizes/digests through operator/TUI. Step39 returns0 lines. Step42 returns generic contract lines1–25. Step40 is30 unrelated context/chat lines.",
+      "unread_existing_observation": {
+        "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification.log",
+        "bytes": 62709,
+        "sha256": "da80a8d129024f2cda14559d3fe18f9c365d5f1d68e05a650c820b70d620c5a8",
+        "source_lines_1_based": [
+          853,
+          868
+        ],
+        "slice_sha256": "0d798bef74dd074775aefd2446cd2ac707543444db6014735050492b5c71d40b",
+        "facts": "Both measured sizes/digests; no replacement attached to judge; changed body remains unread; symlink and unreadable-image judgment handling."
+      },
+      "reason": "The actual read observations cover the operator route, while the declared scope also names judge delivery. No common actual page supplies the judge-route observation. The reviewer reading the missing lines does not backfill the model.",
+      "not_implied": "No assertion that the guard failed, a new behavior must be run, every file must be read, or a new acceptance condition is added."
+    },
+    {
+      "case_id": "A7",
+      "requirement": "LLM approval, observed external acceptance and human Goal confirmation remain distinct facts",
+      "decision": "AGREE_PROOF_INSUFFICIENCY",
+      "actually_read": "Step34 actual Goal readback supports Executing/Idle and no Goal/human completion. G3 receipts support measurement versus Goal proof separation. They do not contain an actual lifecycle/external-acceptance metric observation.",
+      "unread_existing_observation": {
+        "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-fitness-reread.json",
+        "bytes": 2920,
+        "sha256": "fd765483471c471fc3868e1ccfe1382b6c84dd28d65afde3f0ed904c8f5647cf",
+        "selected_fields": {
+          "components.task_lifecycle_success": 1.0,
+          "metrics.outcome_basis": "task_lifecycle",
+          "metrics.external_acceptance": {
+            "kind": "unobserved",
+            "completed_tasks": 1
+          }
+        }
+      },
+      "reason": "Those actual fields establish the declared lifecycle/acceptance distinction; none of the44 returned read contents contains the corresponding field names, and the fitness record was not requested. Canonical/case summaries are claims and locators, not replacement observations.",
+      "not_implied": "External acceptance need not succeed. Unobserved is the honest observed taxonomy; no independent LLM verdict or new external success criterion is demanded."
+    }
+  ],
+  "A1_finite_adjudication": {
+    "decision": "AGREE_PRIOR_GAP_CLOSED_WITHIN_THIS_REPLAY",
+    "actual_page_step": 31,
+    "returned_bytes": 19969,
+    "source_bytes": 29007,
+    "returned_lines": 537,
+    "truncated": true,
+    "content_sha256": "a11125acc1b3f2585760636c126fff3a037edf530caea56ce54abc2f3108a941",
+    "source_commit": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+    "actual_command_records_wholly_inside_returned_page": 5,
+    "observed_role_exit_pairs": [
+      [
+        "initial-isolation-verify",
+        0
+      ],
+      [
+        "frozen-verify",
+        0
+      ],
+      [
+        "frozen-regression",
+        0
+      ],
+      [
+        "frozen-build",
+        0
+      ],
+      [
+        "fresh-failing-candidate-verify",
+        7
+      ]
+    ],
+    "stage_exit_lines_1_based": [
+      375,
+      433,
+      491
+    ],
+    "three_complete_input_manifest_objects_equal": true,
+    "shared_manifest_sha256": "b04488ec3ce1be744c8a016f155c2cb6e393b4a01c0b8f525d53143689fb0729",
+    "declared_Docker_flags_verified_in_actual_commands": [
+      "network=none",
+      "read-only rootfs",
+      "read-only input mount",
+      "cap-drop=ALL",
+      "nonroot65534:65534"
+    ],
+    "limits": "Five actual command records and all three complete input manifests fit within the returned page. The third raw receipt SHA and later same_mount/isolation summaries do not. This is the retained Python Docker fixture scope, not project compilation, microVM execution, cancellation/cleanup repair, general prompt reliability, or a causal529f-to428e claim. Historical529f A1 FAIL remains unchanged."
+  },
+  "A5_identity_clarification": {
+    "decision": "AGREE_SHARED_ACTUAL_CONTENT_SUPPORTS_A5_WITHOUT_DUPLICATE_PATH_READ",
+    "actual_after_bytes": 1276,
+    "actual_after_sha256": "616547719f64cfa29dce32361136236d159d44646f7edda36c096057c80eacbc",
+    "actual_named_passing_controls": [
+      "test_frozen_resume_rejects_changed_inputs",
+      "test_resume_checks_every_original_run_field"
+    ],
+    "actual_test_count": "Seven listed, six executed and one Docker skip.",
+    "older_A4_A5_mirrors_equal_each_other": true,
+    "older_mirror_sha256": "b00ddc965bf4bcd8fc83ea1175d07aa2f9386fa73d6ee50da111a58621cc5db1",
+    "older_mirrors_equal_current_read_after": false,
+    "limit": "The current616547 content is credited directly. Olderb00ddc aliases are not falsely identified as that returned source or as additional execution."
+  },
+  "retained_coverage_limits": {
+    "ok_read_responses": 44,
+    "nonempty": 42,
+    "empty_EOF": 2,
+    "A1_partial_read_preserved": true,
+    "G1_actual_projection_scope": "825B metadata plus1079B decoded Goal slice, with native7707B checks. The referenced73127B raw request was not returned in full.",
+    "no_new_count_or_prose_gate": "No read-count, whole-file, sentence-count or duplicate-path requirement is added. One actual common source may support multiple declared conditions if its contents do so.",
+    "locator_coordinates": "Original-log line coordinates were applied to extracted-block paths, producing EOF or unrelated local lines. This diagnosis is not an implemented repair or an automatic behavior failure."
+  },
+  "selected_actual_page_bindings": [
+    {
+      "step_index_0_based": 31,
+      "call_id": "call_-7138017873930218564",
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-playground-bootstrap/coding-boundary/actual-coding-boundary.json",
+      "offset": 1,
+      "returned_lines": 537,
+      "returned_bytes": 19969,
+      "file_bytes": 29007,
+      "truncated": true,
+      "page_sha256": "a11125acc1b3f2585760636c126fff3a037edf530caea56ce54abc2f3108a941",
+      "source_sha256": "3a6dc21a39518bf62f303682808609272d4b49d92e2e7b8eba4b15e81016bd9a",
+      "actual_page_byte_equal_to_slice": true
+    },
+    {
+      "step_index_0_based": 32,
+      "call_id": "call_-7138017873930218563",
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification_operator_evidence.log",
+      "offset": 1,
+      "returned_lines": 44,
+      "returned_bytes": 2212,
+      "file_bytes": 2212,
+      "truncated": false,
+      "page_sha256": "1391f0eb56991349238cc8ef74eba40b05c22a7c6fe0024144154010f07b9d0f",
+      "source_sha256": "1391f0eb56991349238cc8ef74eba40b05c22a7c6fe0024144154010f07b9d0f",
+      "actual_page_byte_equal_to_slice": true
+    },
+    {
+      "step_index_0_based": 34,
+      "call_id": "call_-7138017873930218561",
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-goal-readback.json",
+      "offset": 1,
+      "returned_lines": 1,
+      "returned_bytes": 5063,
+      "file_bytes": 5063,
+      "truncated": false,
+      "page_sha256": "90c42f9359b03096742c84387846247027103ea4e9d2185ba7df137a7d1be79c",
+      "source_sha256": "90c42f9359b03096742c84387846247027103ea4e9d2185ba7df137a7d1be79c",
+      "actual_page_byte_equal_to_slice": true
+    },
+    {
+      "step_index_0_based": 38,
+      "call_id": "call_-7138005057747808652",
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-cohort-identities/after.txt",
+      "offset": 1,
+      "returned_lines": 14,
+      "returned_bytes": 1276,
+      "file_bytes": 1276,
+      "truncated": false,
+      "page_sha256": "616547719f64cfa29dce32361136236d159d44646f7edda36c096057c80eacbc",
+      "source_sha256": "616547719f64cfa29dce32361136236d159d44646f7edda36c096057c80eacbc",
+      "actual_page_byte_equal_to_slice": true
+    },
+    {
+      "step_index_0_based": 39,
+      "call_id": "call_-7138003648998532503",
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification.log",
+      "offset": 1193,
+      "returned_lines": 0,
+      "returned_bytes": 0,
+      "file_bytes": 62709,
+      "truncated": false,
+      "page_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_sha256": "da80a8d129024f2cda14559d3fe18f9c365d5f1d68e05a650c820b70d620c5a8",
+      "actual_page_byte_equal_to_slice": true
+    },
+    {
+      "step_index_0_based": 40,
+      "call_id": "call_-7138003648998532502",
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_tui_decode.log",
+      "offset": 2111,
+      "returned_lines": 30,
+      "returned_bytes": 1410,
+      "file_bytes": 115621,
+      "truncated": true,
+      "page_sha256": "ee88ccf691cfd79ea91d6fcf464bfbaa426435eaca693f9ad7147e15ee20e7cc",
+      "source_sha256": "8f3f944878fbbb4f212c9add2a6249694374a5d210196c87a1ba88db826ef762",
+      "actual_page_byte_equal_to_slice": true
+    },
+    {
+      "step_index_0_based": 42,
+      "call_id": "call_-7138015331309577220",
+      "source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification.log",
+      "offset": 1,
+      "returned_lines": 25,
+      "returned_bytes": 1297,
+      "file_bytes": 62709,
+      "truncated": true,
+      "page_sha256": "a6a29bbfd7a23f6c08a1dba236d80fa5aea6d5e0588852f6e19aab2581946570",
+      "source_sha256": "da80a8d129024f2cda14559d3fe18f9c365d5f1d68e05a650c820b70d620c5a8",
+      "actual_page_byte_equal_to_slice": true
+    }
+  ],
+  "Task_and_Goal_boundary": {
+    "Task2684": "A measurement-and-evidence contract can be satisfied by an honest preserved FAIL handoff. This response does not adjudicate TaskDone, submit it, or change its state.",
+    "original_Goal3067": "Still a separate incomplete proof/human-confirmation objective; the isolatedD6 accepted APPROVE is not original Goal completion.",
+    "new_candidate0dc": "Not read, applied, executed or evaluated in this response.",
+    "remaining_cases": "The other case assessments are read from the full independent review and are not relabelled as a fresh eleven-case audit by this responder."
+  },
+  "nonclaims": [
+    "No underlying A3/A7 behavior FAIL or absence of their retained sources.",
+    "No new original-eleven behavior execution, primary3067 proof/update, operational installation, formal GitHub approval, whole-stack admission or merge.",
+    "No inference of verifier reliability, causal A/B improvement, model-weight independence or pooling across the149/75/159 cohorts.",
+    "No canonical case state, metric, target, criterion or accepted fixture store is rewritten."
+  ],
+  "input_identities": {
+    "frozen159_manifest_bytes": 33019,
+    "frozen159_manifest_sha256": "aabafc30054b561115afb01984a76e7b75b26aa24c4c91ee2d82a09e8dd92b70",
+    "actual_provider_history_label": "wire/request-000015.request",
+    "actual_provider_history_bytes": 344920,
+    "actual_provider_history_sha256": "65551c8977de2bf64c9c6e2539c9ea23f07d0e91ea46b31135efb9bbff528383",
+    "canonical_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e"
+  },
+  "effects": {
+    "API_Git_model_test_CI_build_Docker_Board_or_runtime_process_control_calls": 0,
+    "source_PR_Task_Goal_store_or_existing_artifact_mutations": 0,
+    "new_agents": 0,
+    "external_messages": 0,
+    "only_new_output": "response.json in the requested external directory"
+  },
+  "finalization": {
+    "all_inputs_used_in_this_narrow_response_rechecked_stable": true,
+    "existing_frozen_protocol_and_semantic_reviews_unchanged": true,
+    "single_new_output_outside_evidence_tree": true
+  }
+}

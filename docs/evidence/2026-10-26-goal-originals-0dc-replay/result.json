@@ -1,0 +1,161 @@
+{
+  "schema": "masc.goal.originals.0dc-replay.actual-result.v1",
+  "main_task_id": "task-2686",
+  "candidate_source_head": "9099a54530edc0a6ecee98117ea1ebab02cebe2e",
+  "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+  "candidate_prompt_file_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+  "goal_id": "goal-outcome-driven-work-20261024",
+  "fixture_criterion_revision": "b39a4c8dc8d4af965c4d87ef802c17db",
+  "original_main_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+  "same_semantic_criterion_different_workspace_revision": true,
+  "original_provenance_preserved_in_immutable_inputs": true,
+  "canonical_acceptance_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+  "copied_input_files": 76,
+  "request_id": "44a299a96b28b6ff2d9bd2081ce0cfbc",
+  "run_id": "01a174a1-e0fb-7000-8c82-614a62d90870",
+  "measurement_id": "9c3a71e210ca7cf762e87f1563afdd12",
+  "observed_completion": "proof_refuted",
+  "observed_phase": "executing",
+  "structured_verdict": {
+    "verdict": "REJECT",
+    "reason": "선언된 측정값은 존재하고 대부분 원문으로 확인됨: metric이 지정한 codex-mcp-client/goal-outcomes-20261024/acceptance.json을 전체 읽어(376행 2회 페이지) required_case_ids가 정확히 [G1~G4,A1~A7] 11개, cases 11개 각 1회 보존, summary required 11/measured_pass 11/remaining[]/measured_fail_case_ids[] 및 not_measured=0(delivery index scoped_observation 일치)을 확인. 11개 케이스 각각의 실제 행동 원문도 직접 읽음: G1 provider-input projection(wire SHA a8428060…)+native direct-wire 5 tests OK+server-extraction-receipt, G2/G3 GLM-5.3 actual-tool-sequence-and-receipts(masc_goal_measure 1/3→3/3, Edit, task-002 submit, request_complete proof_pending)+README, G4 goalless create/execution(node 2+2 exit 0)/submit/approval 원본(goal_id null), A1 boundary README+테스트, A2 observations.json(oracle-only verify_exit 1×2, reference exit 0×2), A3 native operator-evidence 11 tests OK, A4/A5 cohort observations+duplicate-key 거부 exit 1×4+cohort-identities after.json(6 pass/1 Docker skip/4 fixtures)+root-check.txt(7 tests OK skipped=1), A6 native blocks(response identity 18 checks, eval_calibration 22 tests), A7 outcome-api README+a7-goal-readback(Executing 0/3)+a7-fitness. 소스/후보빌드/격리실행/운영 구분, 3228 보조 분리, 이력 실패 보존도 관측상 유지됨. 그러나 target의 'Goal 현재 revision과 증거 identity 불일치=0'이 충족됨으로 확인할 수 없음: 제출 record는 현재 revision b39a4c8dc8d4af965c4d87ef802c17db에 귀속되는데, 그 record가 인용하는 증거 원문들(delivery index.json, manifest.json, actor evidence 문구 'criterion 306708facbfb9379a9e51b8f7c815678 unchanged')은 전부 다른 revision 306708fa에 고정되어 있고, 원문 acceptance.json에는 criterion revision 필드가 없어 두 해시의 관계를 화해할 조회 수단이 없음. 현재 revision과 증거 identity 간 최소 1건의 불일치(또는 미확인)가 관측되어 11/11을 현재 revision의 측정값으로 수용할 수 없음. 부수적으로 acceptance.json SHA-256 4fdd1ec8 동일성 주장은 해시 재계산 도구가 없어 미검증(바이트 수 26469만 일치 확인). 조회 도구 실패가 아니라 선언된 identity 조건의 관측 불일치·미확인이 REJECT 사유임."
+  },
+  "actual_Goal_runs": 1,
+  "model_POSTs": 12,
+  "unique_tools": 41,
+  "successful_read_pages": 40,
+  "unique_successful_read_paths": 39,
+  "linked_file_lookup_coverage": [
+    {
+      "case_id": "A1",
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "linked_files_successfully_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-boundary/README.md"
+      ],
+      "scope": "Lookup coverage of linked sources only; not automatic sufficiency or new execution of this behavior."
+    },
+    {
+      "case_id": "A2",
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "linked_files_successfully_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-boundary/observations.json"
+      ],
+      "scope": "Lookup coverage of linked sources only; not automatic sufficiency or new execution of this behavior."
+    },
+    {
+      "case_id": "A3",
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "linked_files_successfully_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification_operator_evidence.log"
+      ],
+      "scope": "Lookup coverage of linked sources only; not automatic sufficiency or new execution of this behavior."
+    },
+    {
+      "case_id": "A4",
+      "source_sha": "2d92eeb337f6e38cc307211d5c662956b8891299",
+      "linked_files_successfully_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/A4/masc-goal-cohort-identities-root-check.txt",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-cohort-identities/README.md",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-cohort-identities/after.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-eval-cohorts/duplicate-keys/observations.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-eval-cohorts/observations.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-json-integrity/README.md"
+      ],
+      "scope": "Lookup coverage of linked sources only; not automatic sufficiency or new execution of this behavior."
+    },
+    {
+      "case_id": "A5",
+      "source_sha": "2d92eeb337f6e38cc307211d5c662956b8891299",
+      "linked_files_successfully_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-cohort-identities/README.md",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-cohort-identities/after.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-json-integrity/README.md"
+      ],
+      "scope": "Lookup coverage of linked sources only; not automatic sufficiency or new execution of this behavior."
+    },
+    {
+      "case_id": "A6",
+      "source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "linked_files_successfully_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_eval_calibration.log",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_runtime_response_identity.log"
+      ],
+      "scope": "Lookup coverage of linked sources only; not automatic sufficiency or new execution of this behavior."
+    },
+    {
+      "case_id": "A7",
+      "source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "linked_files_successfully_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/README.md",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-fitness.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-goal-readback.json"
+      ],
+      "scope": "Lookup coverage of linked sources only; not automatic sufficiency or new execution of this behavior."
+    },
+    {
+      "case_id": "G1",
+      "source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "linked_files_successfully_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/G1/test_keeper_direct_goal_provider_wire.log",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G1/server-extraction-receipt.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/projections/G1-provider-input.json"
+      ],
+      "scope": "Lookup coverage of linked sources only; not automatic sufficiency or new execution of this behavior."
+    },
+    {
+      "case_id": "G2",
+      "source_sha": "32805eb764eab2710262446e925b0ea5c3a44c08",
+      "linked_files_successfully_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/README.md",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json"
+      ],
+      "scope": "Lookup coverage of linked sources only; not automatic sufficiency or new execution of this behavior."
+    },
+    {
+      "case_id": "G3",
+      "source_sha": "32805eb764eab2710262446e925b0ea5c3a44c08",
+      "linked_files_successfully_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/README.md",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json"
+      ],
+      "scope": "Lookup coverage of linked sources only; not automatic sufficiency or new execution of this behavior."
+    },
+    {
+      "case_id": "G4",
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "linked_files_successfully_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-approval.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-create.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-execution.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-submit.json"
+      ],
+      "scope": "Lookup coverage of linked sources only; not automatic sufficiency or new execution of this behavior."
+    }
+  ],
+  "requested_models": [
+    "glm-5.3-flash"
+  ],
+  "reported_models": [
+    "glm-5.3-flash"
+  ],
+  "unknown_reported_models": 0,
+  "retained_user_and_system_equal_first_actual_provider_input": true,
+  "retained_user_and_system_equal_all_actual_provider_inputs": true,
+  "fixture_current_revision_and_measurement_in_actual_input": true,
+  "elapsed_s": 325.0767378807068,
+  "native_stages": [
+    "reviewed",
+    "committed"
+  ],
+  "private_originals_manifest": {
+    "entries": 154,
+    "sha256": "64bc1ecaf8fe34214aea02aab7696a6e7175f5b4d7459e05d18b7929fdacad41"
+  },
+  "limits": [
+    "One new verifier replay over retained historical behavior evidence; the original11 behaviors were not rerun.",
+    "The new fixture revision b39a4c8dc8d4af965c4d87ef802c17db and original main revision 306708facbfb9379a9e51b8f7c815678 remain distinct. An isolated verdict does not update or prove the primary Goal.",
+    "Lookup coverage alone does not establish sufficient proof per case. The full reason, actual evidence pages, identities and persisted verdict require independent review.",
+    "No source-only causal A/B, reliability rate, model-weight independence, current-head native build, formal GitHub approval, whole-stack merge, production install or human confirmation."
+  ]
+}

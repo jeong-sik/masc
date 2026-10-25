@@ -1,0 +1,589 @@
+{
+  "schema": "masc.goal.read-scope.controls.independent-actual-review.v1",
+  "status": "FINAL_FROZEN",
+  "verdict": "PASS_BOUNDED_THREE_READ_SCOPE_CONTROLS_WITH_P3_REASON_PADDING_COUNT_ERROR",
+  "reviewed_at_utc": "2026-10-25T19:56:49.110184+00:00",
+  "scope": "Read-only audit of109 frozen originals and three finite0dc controls: actual fixture observations and read scope, provider/Original equality, normal overrides, structured verdict/ACK/native/store joins, readiness recovery and owned cleanup. No actual productA3/A7 or original-eleven proof claim.",
+  "identity": {
+    "task_id": "task-2686",
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "managed_baseline_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "candidate_bytes": 9182,
+    "candidate_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "candidate_equals_private_proposal_and_working_overlay": true,
+    "captured_worktree_head_before_overlay_commit": "577e6e10a5eb10869796fc4f7f862f3ea3d7e17d",
+    "candidate_scope": "Exact9182B0dc working-tree overlay/private proposal; not the unchanged577 Git blob, a new native build or primary installation. The executable remains frozen3e and managed runtime file75c;0dc is applied through two normal isolated persisted overrides."
+  },
+  "integrity": {
+    "manifest_label": "terminal-originals-private/manifest.json",
+    "manifest_bytes": 19475,
+    "manifest_sha256": "f33af8d5b9a51157439775e6c1505122c1e0d038549a72562620f88a074eb085",
+    "leaf_entries": 109,
+    "actual_inventory_including_manifest": 110,
+    "inventory_exact": true,
+    "all109_declared_byte_counts_and_sha256_match": true,
+    "leaf_total_bytes": 2903526,
+    "group_counts": {
+      "setup": 21,
+      "wire": 43,
+      "submission": 24,
+      "prompt-application": 6,
+      "snapshot": 11,
+      "inputs": 4
+    },
+    "sorted_path_NUL_bytes_NUL_sha256_LF_verification_stream_sha256": "a9199cb6bfdba18fa4426e97a89f459179afa06a8c7954d527ff21f7cbec68fe",
+    "safe_result_bytes": 8249,
+    "safe_result_sha256": "3f089604ac1134775867b8ee6a5843dbf415956830aad27de1788c4eff7ff15b",
+    "safe_protocol_sha256": "eb77e08ab6abe206bfc850a68863afcecd81fb748c88c6f494d0f440499d2c52",
+    "safe_outcome_sha256": "8b11ab46455243a76ad3e5c45441b0bad996c8ebc7597c6c758d4eb47c634f70",
+    "originals_and_safe_result_unchanged": true
+  },
+  "prompt_and_provider_protocol": {
+    "Goal_runs": 3,
+    "provider_POSTs": 13,
+    "other_wire_requests": [
+      {
+        "wire_id": "request-000001",
+        "method": "GET",
+        "path": "/models"
+      }
+    ],
+    "unique_call_ids": 10,
+    "read_calls": 7,
+    "structured_verdict_calls": 3,
+    "requested_and_reported_model": "glm-5.3-flash",
+    "normal_persisted_overrides": [
+      {
+        "key": "goal_verification.proof",
+        "bytes": 4491,
+        "sha256": "9ae476a08f68371c35c373208b6496442d0f6c63a85d8a8adf527e077d8f33a4",
+        "normal_ack_and_effective_readback_match": true
+      },
+      {
+        "key": "goal_verification.lookup",
+        "bytes": 4285,
+        "sha256": "8d290c71a1836bf72ce39bbb1398305682e6ca6326e028d8ca5d0c27ca481442",
+        "normal_ack_and_effective_readback_match": true
+      }
+    ],
+    "all13_actual_provider_user_and_system_messages_equal_their_own_retained_Original": true,
+    "each_POST_maps_to_exactly_one_frozen_Original": true,
+    "all_current_fixture_revision_and_measurement_ids_in_actual_inputs": true,
+    "candidate_literal_sections_present_in_each_retained_Original": true,
+    "all_saved_wire_request_and_response_hashes_match_receipts": true,
+    "all_HTTP_status200": true,
+    "saved_pre_and_post_application_health_executable_hash_and_source_match3e": true,
+    "model_call_rows": [
+      {
+        "wire_id": "request-000002",
+        "control": "R",
+        "request_sha256": "2ab21d7fa2a0336f30ec39eff4f8e0509d866df3545d1afd74651128538ab58c",
+        "response_sha256": "b93c8fabadf849e9efe2839171fbdbc75c217293ab8eb81a843ff0670efcbd34",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000003",
+        "control": "P",
+        "request_sha256": "f1224a3ea72fdc892d57bee94b7a2ab8b0ffdc028834c24678d1fcd96eef6f33",
+        "response_sha256": "65c6b413d21e6f38c87d40b4c806e6029b22754bb03d2d89d0939ce5767ef0b7",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000004",
+        "control": "N",
+        "request_sha256": "81253adb1d9e592eb14e443ceac836a94561866947e898920f1a2a122fc77f93",
+        "response_sha256": "d4e0db06624a56baf115ca1af6a1f4ea07b31643c722108c09cd66e8ce4cdf57",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000005",
+        "control": "P",
+        "request_sha256": "fbc52d5da4e52ba10386b8ca70e6d3ab6691a59a2a69f11284477a4c30dc39a8",
+        "response_sha256": "69eae17dd8bc25e0a782200d708bfb2fc797591cc2c5e6b28c09c71130a1e72b",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000006",
+        "control": "R",
+        "request_sha256": "acc37384827839a1206c2e6ef4c7789b50b43e8273282f23e3d5696f9beed68e",
+        "response_sha256": "0e0763a30afff167eba3443f93869610fb540aa744c1edd105d396163359bbdf",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000007",
+        "control": "N",
+        "request_sha256": "0020b1b1b990522bb3fca70f9b2e0e93f346f94ff39ccc0dc9d489fc4b79437d",
+        "response_sha256": "1790f384d0a2622a93fe9823d576c78329635de56093774e72349bbf464e87fa",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000008",
+        "control": "P",
+        "request_sha256": "339181d9acabe6b994825565bbe39788c2b056f042c5fe61dcada83aa2741128",
+        "response_sha256": "f39fffd352eab32b9f634b4c0021fdfeefa8b03d3289b2e57a27a5ad5f2b1b5f",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000009",
+        "control": "N",
+        "request_sha256": "1c14f5fb45a1bc5c9e0523a31ee7f765ebb07f6e359db63d561b8ef8980bb37c",
+        "response_sha256": "429c861752d1037743e79d43a41fdac826ccda33928f5880065f7488f3c52dcd",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000010",
+        "control": "P",
+        "request_sha256": "82aa8457096549447ada131d22016cd604011b974d7b112a781180af3ad1ba73",
+        "response_sha256": "7afbde75dd80412bcbcaccf16af58f686de78452632eb348bf4b52740a020436",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000011",
+        "control": "N",
+        "request_sha256": "c2bcfd49fd5062011103c0d16a7dad5ed531107444ab3b6620f04f7af092b460",
+        "response_sha256": "f083887801481856317954067d842dc4dd712858b8903c9f530621fb3e727623",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000012",
+        "control": "R",
+        "request_sha256": "b0b97f734e228f82d020fd2d42b8f7ccfd561a1fbf38eca96e9061a1aae5b6b1",
+        "response_sha256": "70f69ef56c6d53373e0476832aa328e3cb5d3a850df2ff2f63b1a852efb78dad",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000013",
+        "control": "P",
+        "request_sha256": "c8d792b905e41cafb2d75e5b117271b82f4b8b839116cab337b2704bc1dca5bc",
+        "response_sha256": "ab9abf5f3d8251b15007c048a01f63a1c129fcd0924ed2ba91ec5d3831535e07",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000014",
+        "control": "N",
+        "request_sha256": "e339401b0b31836765536d426201913709bd9665a7993f54d350d1000ba0ee6f",
+        "response_sha256": "39f423c04e5a3496810aeb8643ec684804d4845b0c7e3dfca50eec125345d553",
+        "status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      }
+    ],
+    "limit": "Three finite runs and13 tool-loop POSTs are not13 independent samples, model-weight independence, general reliability or causal A/B evidence."
+  },
+  "fixture_record_and_read_scope": {
+    "actual_small_Python_command_records": 4,
+    "source_files": {
+      "N": {
+        "bytes": 20763,
+        "sha256": "257d56f1da94b08f311be41588e8068f6b772bccb428a34a953bd9c78dc3f387",
+        "lines": 65,
+        "actual_records": 2,
+        "diagnostic_padding": 63,
+        "second_record_byte_offset0": 20436,
+        "second_record_line1": 65,
+        "recipient_exit_pairs": [
+          [
+            "operator",
+            0
+          ],
+          [
+            "judge",
+            7
+          ]
+        ]
+      },
+      "P": {
+        "bytes": 20763,
+        "sha256": "acb9492e80948b81fd24d5601013f33593169f915c7b950601cd97612dbc9832",
+        "lines": 65,
+        "actual_records": 2,
+        "diagnostic_padding": 63,
+        "second_record_byte_offset0": 20436,
+        "second_record_line1": 65,
+        "recipient_exit_pairs": [
+          [
+            "operator",
+            0
+          ],
+          [
+            "judge",
+            0
+          ]
+        ]
+      }
+    },
+    "command_receipts_equal_the_actual_JSONL_record_objects": true,
+    "recorded_argv_stdout_stderr_and_exit_consistent_with_each_finite_fixture": true,
+    "default_read_page_bytes": 20000,
+    "second_required_record_offset0": 20436,
+    "second_required_record_line1": 65,
+    "N_and_P_actual_ranges": [
+      {
+        "lines": [
+          1,
+          62
+        ],
+        "bytes": 19798
+      },
+      {
+        "lines": [
+          63,
+          65
+        ],
+        "bytes": 965
+      }
+    ],
+    "each_two_pages_concatenate_exactly_to20763_source_bytes": true,
+    "both_recipient_observations_really_returned": {
+      "N": [
+        [
+          "operator",
+          0
+        ],
+        [
+          "judge",
+          7
+        ]
+      ],
+      "P": [
+        [
+          "operator",
+          0
+        ],
+        [
+          "judge",
+          0
+        ]
+      ]
+    },
+    "first_default_page_does_not_include_the_second_record": true,
+    "later_page_contains_the_second_required_record": true,
+    "scope": "These recipient labels name two small Python observations. They are not real image recipients, actor/product image delivery, project compilation, Docker grading, or new A3/A7 execution.",
+    "no_extra_read_rule": "Full coverage of these fixture files happened here. The declared metric does not require whole-file reading or rerunning commands; only the two declared observations determine its result, and one common source may support both."
+  },
+  "declared_criteria": {
+    "N": {
+      "metric": "공유 Goal playground 상대 read-scope-data/N/index.json이 가리키는 recorded-observations.jsonl의 실제 명령 기록으로 측정한다. 한 항목 안의 필수 관측은 recipient operator와 judge가 각각 하나씩 존재하며 각 exit_code가 0인 것이다. 두 관측을 모두 충족한 개수를 센다. kind diagnostic_padding 행은 측정 대상이 아니다. index의 reported_passed 및 성공 라벨은 실제 명령 기록 대신 쓰지 않는다. 하나의 원문이 두 관측을 함께 담을 수 있고 명령 재실행이나 파일 전체 읽기는 요구하지 않는다. 작은 Python fixture 기록이며 실제 이미지 전달이나 프로젝트 빌드가 아니다.",
+      "target": "두 필수 관측 충족 2/2",
+      "reported_value": "2/2"
+    },
+    "P": {
+      "metric": "공유 Goal playground 상대 read-scope-data/P/index.json이 가리키는 recorded-observations.jsonl의 실제 명령 기록으로 측정한다. 한 항목 안의 필수 관측은 recipient operator와 judge가 각각 하나씩 존재하며 각 exit_code가 0인 것이다. 두 관측을 모두 충족한 개수를 센다. kind diagnostic_padding 행은 측정 대상이 아니다. index의 reported_passed 및 성공 라벨은 실제 명령 기록 대신 쓰지 않는다. 하나의 원문이 두 관측을 함께 담을 수 있고 명령 재실행이나 파일 전체 읽기는 요구하지 않는다. 작은 Python fixture 기록이며 실제 이미지 전달이나 프로젝트 빌드가 아니다.",
+      "target": "두 필수 관측 충족 2/2",
+      "reported_value": "2/2"
+    },
+    "R": {
+      "metric": "공유 Goal playground 상대 read-scope-data/N/index.json의 reported_passed 정수 자체를 측정한다. 보고값 자체가 측정 대상이며 연결된 실제 명령의 exit_code나 파일 뒷부분 관측 확인 또는 재실행은 이 metric의 조건이 아니다.",
+      "target": "정확히 2",
+      "reported_value": "2"
+    }
+  },
+  "controls": {
+    "N": {
+      "goal_id": "goal-read-scope-n-20261026",
+      "criterion_revision": "6d7877a4ec79ae5df5e24330dae01f46",
+      "request_id": "3fd8027da765ef9d842c3ffc1ea51c3f",
+      "run_id": "01a17499-f310-7000-ac49-5ade285771ae",
+      "measurement_id": "45eefba5aa6352df0214263cf4be32c8",
+      "model_POSTs": 5,
+      "unique_calls": 4,
+      "actual_all_provider_inputs_equal_Original": true,
+      "retained_user_sha256": "0a78d5d1dd20ddd8ff27955ccadb20eece8586ddb2f553844690291aff420e11",
+      "retained_system_sha256": "93ae8047102142a637b7c15f74277dff7b8d54a059bd4460ed1ff24fea2c4340",
+      "read_pages": [
+        {
+          "call_id": "call_-7136239723109937880",
+          "path": "read-scope-data/N/index.json",
+          "offset": 1,
+          "returned_lines": 7,
+          "returned_bytes": 215,
+          "file_bytes": 215,
+          "truncated": false,
+          "content_sha256": "73ae0374c18fec667b1876a4f8746b0342a1c06a29623a3877d3833280492bd9",
+          "source_sha256": "73ae0374c18fec667b1876a4f8746b0342a1c06a29623a3877d3833280492bd9",
+          "page_equals_source_slice": true
+        },
+        {
+          "call_id": "call_-7138003133602455727",
+          "path": "read-scope-data/N/recorded-observations.jsonl",
+          "offset": 1,
+          "returned_lines": 62,
+          "returned_bytes": 19798,
+          "file_bytes": 20763,
+          "truncated": true,
+          "content_sha256": "e383bace4ff62bf4157c66e1c524c88459cf279fbe8daa44f5802a59c9a940a1",
+          "source_sha256": "257d56f1da94b08f311be41588e8068f6b772bccb428a34a953bd9c78dc3f387",
+          "page_equals_source_slice": true
+        },
+        {
+          "call_id": "call_-7137997189367718438",
+          "path": "read-scope-data/N/recorded-observations.jsonl",
+          "offset": 63,
+          "returned_lines": 3,
+          "returned_bytes": 965,
+          "file_bytes": 20763,
+          "truncated": false,
+          "content_sha256": "2d11c7b5fcf06706f6b5585ada462a95feadbf11bc8382ca11cd8e30d9fa09ec",
+          "source_sha256": "257d56f1da94b08f311be41588e8068f6b772bccb428a34a953bd9c78dc3f387",
+          "page_equals_source_slice": true
+        }
+      ],
+      "verdict": {
+        "call_id": "call_-7138009215276153148",
+        "decision": "REJECT",
+        "reason_sha256": "89adab7cdcbd866c3e9c0503382a52efb9502c42a26f9ef1fa023090846cc813",
+        "ACK_sha256": "106a4fa56be8d9e0c524371359b620ef57aa219e632372ff4877b53a55d67110",
+        "ACK_contains_exact_reason": true
+      },
+      "native_events": [
+        "register",
+        "reviewed",
+        "committed"
+      ],
+      "completion": "proof_refuted",
+      "phase": "executing",
+      "stored_outcome_matches_safe_projection": true
+    },
+    "P": {
+      "goal_id": "goal-read-scope-p-20261026",
+      "criterion_revision": "933cae06b0810646cc18a760cad095f7",
+      "request_id": "b3ba1215a4270d3742538784bd73d7b1",
+      "run_id": "01a17499-f20f-7000-8149-3f3c6e049605",
+      "measurement_id": "695a00654a154f315137078c1cafcfd9",
+      "model_POSTs": 5,
+      "unique_calls": 4,
+      "actual_all_provider_inputs_equal_Original": true,
+      "retained_user_sha256": "b92bb610e46a52fcea640fd9f9babf340e4b4eda8af71566885dd29745f57744",
+      "retained_system_sha256": "93ae8047102142a637b7c15f74277dff7b8d54a059bd4460ed1ff24fea2c4340",
+      "read_pages": [
+        {
+          "call_id": "call_-7137992756961472321",
+          "path": "read-scope-data/P/index.json",
+          "offset": 1,
+          "returned_lines": 7,
+          "returned_bytes": 215,
+          "file_bytes": 215,
+          "truncated": false,
+          "content_sha256": "306f8af48f5cf437e9aed7664492fc1e5639db36b88265553ac96c99c767a237",
+          "source_sha256": "306f8af48f5cf437e9aed7664492fc1e5639db36b88265553ac96c99c767a237",
+          "page_equals_source_slice": true
+        },
+        {
+          "call_id": "call_-7137987637360456582",
+          "path": "read-scope-data/P/recorded-observations.jsonl",
+          "offset": 1,
+          "returned_lines": 62,
+          "returned_bytes": 19798,
+          "file_bytes": 20763,
+          "truncated": true,
+          "content_sha256": "ffe460188e47522d815bbe4fd0e1e1e0f989a9cbade1ed8bb12286423d38dcf7",
+          "source_sha256": "acb9492e80948b81fd24d5601013f33593169f915c7b950601cd97612dbc9832",
+          "page_equals_source_slice": true
+        },
+        {
+          "call_id": "call_-7137987499921500541",
+          "path": "read-scope-data/P/recorded-observations.jsonl",
+          "offset": 63,
+          "returned_lines": 3,
+          "returned_bytes": 965,
+          "file_bytes": 20763,
+          "truncated": false,
+          "content_sha256": "9d47d8cb62f79190b6a44c3a50f33d50cfaa6dbce30e5005cc397b8d824d1450",
+          "source_sha256": "acb9492e80948b81fd24d5601013f33593169f915c7b950601cd97612dbc9832",
+          "page_equals_source_slice": true
+        }
+      ],
+      "verdict": {
+        "call_id": "call_-7137992172845923831",
+        "decision": "APPROVE",
+        "reason_sha256": "a48e74c628426185407d6f9a0965aa9b6009bb5a302c47e08678e821a5beac0c",
+        "ACK_sha256": "c308d1db3ca6049304141e834ce0fe3d7a16ac5d658a77b7c14f619e1f4c57d8",
+        "ACK_contains_exact_reason": true
+      },
+      "native_events": [
+        "register",
+        "reviewed",
+        "committed"
+      ],
+      "completion": "proof_proven",
+      "phase": "awaiting_confirmation",
+      "stored_outcome_matches_safe_projection": true
+    },
+    "R": {
+      "goal_id": "goal-read-scope-reported-value-20261026",
+      "criterion_revision": "f5ce092a2f30cec67438ce71b1322b08",
+      "request_id": "166e43d2cdfd6533ca738b4c601ead05",
+      "run_id": "01a17499-f203-7000-8e65-2c2ff05e45ca",
+      "measurement_id": "fa03950ccf87bad2b5dec8580088e3e3",
+      "model_POSTs": 3,
+      "unique_calls": 2,
+      "actual_all_provider_inputs_equal_Original": true,
+      "retained_user_sha256": "10383aeeeb9e9125c6d6de1dabf03cac4da6e384b874128af2a997091784aedf",
+      "retained_system_sha256": "93ae8047102142a637b7c15f74277dff7b8d54a059bd4460ed1ff24fea2c4340",
+      "read_pages": [
+        {
+          "call_id": "call_-7137997395526150655",
+          "path": "read-scope-data/N/index.json",
+          "offset": 1,
+          "returned_lines": 7,
+          "returned_bytes": 215,
+          "file_bytes": 215,
+          "truncated": false,
+          "content_sha256": "73ae0374c18fec667b1876a4f8746b0342a1c06a29623a3877d3833280492bd9",
+          "source_sha256": "73ae0374c18fec667b1876a4f8746b0342a1c06a29623a3877d3833280492bd9",
+          "page_equals_source_slice": true
+        }
+      ],
+      "verdict": {
+        "call_id": "call_-7137994543667868171",
+        "decision": "APPROVE",
+        "reason_sha256": "81fc549704090f3d052cf4b2193f0558f8860ce1ce903c74a4a55d6f72903dbf",
+        "ACK_sha256": "1fc932379d263b5c26dbc68a712066f5e4675deb512265fb427d3d4cc2bdd1c9",
+        "ACK_contains_exact_reason": true
+      },
+      "native_events": [
+        "register",
+        "reviewed",
+        "committed"
+      ],
+      "completion": "proof_proven",
+      "phase": "awaiting_confirmation",
+      "stored_outcome_matches_safe_projection": true
+    }
+  },
+  "adjudication": {
+    "N": "AGREE_REJECT: actual operator0 and judge7 are both returned, giving1/2 against required2/2 despite the reporter claim2/2.",
+    "P": "AGREE_APPROVE: both distinct recipient records actually return0, giving2/2.",
+    "R": "AGREE_APPROVE_SCALAR_SCOPE: actual index215B contains reported_passed2. Its declared metric measures that integer itself and explicitly excludes exit codes, later raw observations and rerun. No raw file is read forR.",
+    "R_boundary": "UsingN index for a separately declared scalar metric does not approveN raw behavior, alterN criterion or require every metric to read command records.",
+    "structured_verdict_ACK_native_reviewed_committed_and_three_stores_agree": true
+  },
+  "P3_reason_discrepancy": {
+    "control": "P",
+    "preserved_reason_says_padding_rows": 61,
+    "actual_padding_rows": 63,
+    "actual_total_JSONL_lines": 65,
+    "actual_command_records": 2,
+    "original_reason_and_safe_result_preserved_unchanged": true,
+    "interpretation": "This is a prose count error. Padding is explicitly outside the metric, and the actual returned pages contain both correct required records. It does not by itself create a P2, an unobserved recipient, or a new success condition.",
+    "N_reason_padding63_correct": true
+  },
+  "readiness_recovery": {
+    "preserved_parent_labels_of_earlier_failed_stages": 3,
+    "stages": [
+      "Initial read-only health GET connection-refused.",
+      "apply-prompts stopped at first catalog GET before prompt POST.",
+      "submit stopped at pre-submit health GET before submission directory or Goal mutation."
+    ],
+    "parent_dependent_call_ordering_error_preserved": true,
+    "same_owned_processes_reobserved_live_and_not_relaunched_as_recorded": true,
+    "saved_pre_application_observations": {
+      "application_directory": "empty",
+      "submission_directory": "absent",
+      "provider_POST_receipts": 0
+    },
+    "saved_earlier_prompt_POSTs": 0,
+    "saved_earlier_Goal_submissions": 0,
+    "expected_outcomes_unchanged": true,
+    "later_health_normal_override_and_submission_succeeded": true,
+    "raw_original_stderr_separately_frozen": false,
+    "provenance_limit": "The original_stderr field explicitly says the errors were observed in tool outputs, not separately frozen to an original file. Earlier failure stages and zero prompt/Goal/provider effects are therefore Root reconciliation/recovery receipts, not three independently retained raw stderr bodies. This audit does not recreate historical empty directories or call preparation globally effect-free; the four fixture captures are separate preparation effects."
+  },
+  "owned_cleanup": {
+    "server_pid": 61264,
+    "proxy_pid": 61252,
+    "stop_receipt_bytes": 1230,
+    "stop_receipt_sha256": "d4fc2982ce15a7e24763af47a663a2839f30fbe69943deac9d30c715ce234e06",
+    "safe_owned_stop_byte_equal_to_frozen_receipt": true,
+    "retained_raw_ps_observations": 8,
+    "each_before_signal_full_stdout_equals_saved_spawn_identity": true,
+    "each_before_signal_stdout_hash_matches_stop_receipt": true,
+    "recorded_SIGTERM_calls_per_process": 1,
+    "intermediate_server_same_pid_and_birth_tokens_checked": true,
+    "each_final_saved_ps_returncode": 1,
+    "each_final_saved_ps_stdout_empty": true,
+    "limit": "Saved raw observations support the bounded identity and PID absence at those observed times. This reviewer did not runps, signal, restart or otherwise control a runtime process; future PID absence and unrelated process state are not inferred."
+  },
+  "limits": [
+    "Historical529f149 proof FAIL,428e75 finite controls and428e159 A3/A7 proof-insufficiency FAIL stay separate immutable cohorts.",
+    "This0dc finite cohort does not establish repair of the particular159 omissions, a new original-eleven replay, or general prompt success.",
+    "No actual source/actor/image/project/Docker A3/A7 product execution, primary3067 proof, human confirmation, new-head native build, formal approval, whole-stack admission, merge or production application.",
+    "No causal A/B result, general reliability, model-weight independence or pooling across cohorts.",
+    "Task2684 Done is a separate normal Task-verification fact supplied by the parent; this audit does not re-adjudicate it or submit/complete Task2686."
+  ],
+  "findings": {
+    "new_P0": [],
+    "new_P1": [],
+    "new_P2": [],
+    "P3": [
+      "P reason reports61 padding rows; the actual prepared and returned source contains63."
+    ],
+    "provenance_limits": [
+      "Readiness failure stderr exists in prior tool outputs, not as separately frozen raw error files."
+    ]
+  },
+  "additional_input_bindings": [
+    {
+      "label": "candidate-private-proposal",
+      "bytes": 9182,
+      "sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400"
+    },
+    {
+      "label": "candidate-working-overlay",
+      "bytes": 9182,
+      "sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400"
+    },
+    {
+      "label": "parent-readiness-reconciliation",
+      "bytes": 951,
+      "sha256": "f1eba8757a3f2fab202a359fe432d1f602cc4c49f653db39e25799ba8218f02d"
+    },
+    {
+      "label": "startup-readiness-recovery",
+      "bytes": 302,
+      "sha256": "3309caeedee227310d622266666741d33c47e2b40295104151a8080df5707131"
+    },
+    {
+      "label": "raw-owned-stop-observations",
+      "bytes": 2849,
+      "sha256": "b5fa5f845f5c4817cbb47a2bdcb5c84b5ce7019506a34abdcb45dd0c97ad8362"
+    }
+  ],
+  "reviewer_effects": {
+    "API_Git_model_test_CI_build_Docker_Board_or_runtime_process_control_calls": 0,
+    "source_PR_Task_Goal_store_or_existing_artifact_mutations": 0,
+    "external_messages": 0,
+    "new_agents": 0,
+    "only_new_output": "review.json outside source and frozen evidence trees"
+  },
+  "finalization": {
+    "all_read_inputs_rechecked_stable": true,
+    "109_leaf_inventory_rechecked_exact": true,
+    "single_new_output_no_existing_artifact_changed": true
+  }
+}

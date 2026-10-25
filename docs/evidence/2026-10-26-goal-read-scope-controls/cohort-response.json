@@ -1,0 +1,257 @@
+{
+  "schema": "masc.goal.read-scope.controls.review-response.v1",
+  "freeze": "FINAL FROZEN",
+  "reviewed_at_utc": "2026-10-25T20:02:04.059361+00:00",
+  "verdict": "AGREE_BOUNDED_THREE_CONTROL_PASS_WITH_P3_AND_PROVENANCE_LIMITS",
+  "summary": "Agree with finite N/P/R PASS. Actual returned records support N1/2 REJECT and P2/2 APPROVE; actual index integer2 supports the separately declared R APPROVE. Selected wire, ACK, native-ledger and store joins support this scope. No new actionable P0-P2 identified. This is not proof of original A3/A7 repair or original Goal completion.",
+  "review_input": {
+    "path": "masc-goal-read-scope-controls-review-20261026-v1/review.json",
+    "bytes": 26621,
+    "sha256": "1a50f935795ad1c06d2bebf0df0e5881d59b58b1e687df3ddee099c2e4cc6501",
+    "read_in_full": true
+  },
+  "evidence_root_label": "masc-goal-read-scope-controls-3e0d-20261026",
+  "integrity_scope": {
+    "frozen_manifest": {
+      "path": "terminal-originals-private/manifest.json",
+      "bytes": 19475,
+      "sha256": "f33af8d5b9a51157439775e6c1505122c1e0d038549a72562620f88a074eb085"
+    },
+    "accepted_from_full_review": "Exact109-leaf inventory and109 length/SHA checks, total2903526 bytes. This response does not repeat that full audit.",
+    "independent_selection": "Explicitly checked20 leaf lengths/SHA against the manifest: eight provider requests, three verdict responses, three retained Original bodies, two raw inputs and four native/store files. Additional targeted receipt/setup/recovery/cleanup and safe-projection reads supplement those checks.",
+    "safe_projection_identities": [
+      {
+        "path": "safe-results/result.json",
+        "bytes": 8249,
+        "sha256": "3f089604ac1134775867b8ee6a5843dbf415956830aad27de1788c4eff7ff15b"
+      },
+      {
+        "path": "safe-results/actual-tool-sequence.json",
+        "bytes": 17134,
+        "sha256": "eb77e08ab6abe206bfc850a68863afcecd81fb748c88c6f494d0f440499d2c52"
+      },
+      {
+        "path": "safe-results/persisted-outcome.json",
+        "bytes": 14044,
+        "sha256": "8b11ab46455243a76ad3e5c45441b0bad996c8ebc7597c6c758d4eb47c634f70"
+      }
+    ]
+  },
+  "selected_observations": {
+    "counts": "Frozen wire receipts contain13POST and oneGET /models; POST status200 and reported model glm-5.3-flash. Committed native rows contain4/4/2 tools, totaling10: seven reads and three verdicts. Three Goal runs are not13 independent samples. Reviewed/committed rows are phases of each same run.",
+    "Original_transport": "Eight selected provider inputs match exactly one retained Original user prompt and its System instructions, covering N/P/R. Full13 equality is accepted from the complete review rather than independently repeated here.",
+    "N": {
+      "wire_inputs": [
+        "wire/request-000009.request",
+        "wire/request-000011.request"
+      ],
+      "ranges_1_based": [
+        [
+          1,
+          62
+        ],
+        [
+          63,
+          65
+        ]
+      ],
+      "returned_bytes": [
+        19798,
+        965
+      ],
+      "truncated": [
+        true,
+        false
+      ],
+      "actual_observations": [
+        [
+          "operator",
+          0
+        ],
+        [
+          "judge",
+          7
+        ]
+      ],
+      "pages_concatenate_exactly_to_frozen20763B_source": true
+    },
+    "P": {
+      "wire_inputs": [
+        "wire/request-000008.request",
+        "wire/request-000010.request"
+      ],
+      "ranges_1_based": [
+        [
+          1,
+          62
+        ],
+        [
+          63,
+          65
+        ]
+      ],
+      "returned_bytes": [
+        19798,
+        965
+      ],
+      "truncated": [
+        true,
+        false
+      ],
+      "actual_observations": [
+        [
+          "operator",
+          0
+        ],
+        [
+          "judge",
+          0
+        ]
+      ],
+      "pages_concatenate_exactly_to_frozen20763B_source": true
+    },
+    "R": {
+      "wire_input": "wire/request-000006.request",
+      "source": "read-scope-data/N/index.json",
+      "returned_bytes": 215,
+      "truncated": false,
+      "reported_passed": 2,
+      "raw_read_required": false
+    },
+    "verdict_joins": [
+      {
+        "control": "N",
+        "run_id": "01a17499-f310-7000-ac49-5ade285771ae",
+        "wire_response": "wire/request-000011.response",
+        "following_ACK_request": "wire/request-000014.request",
+        "decision": "REJECT",
+        "native_decision": "rejected",
+        "reason_sha256": "89adab7cdcbd866c3e9c0503382a52efb9502c42a26f9ef1fa023090846cc813",
+        "ACK_sha256": "106a4fa56be8d9e0c524371359b620ef57aa219e632372ff4877b53a55d67110",
+        "completion": "proof_refuted",
+        "phase": "executing"
+      },
+      {
+        "control": "P",
+        "run_id": "01a17499-f20f-7000-8149-3f3c6e049605",
+        "wire_response": "wire/request-000010.response",
+        "following_ACK_request": "wire/request-000013.request",
+        "decision": "APPROVE",
+        "native_decision": "approved",
+        "reason_sha256": "a48e74c628426185407d6f9a0965aa9b6009bb5a302c47e08678e821a5beac0c",
+        "ACK_sha256": "c308d1db3ca6049304141e834ce0fe3d7a16ac5d658a77b7c14f619e1f4c57d8",
+        "completion": "proof_proven",
+        "phase": "awaiting_confirmation"
+      },
+      {
+        "control": "R",
+        "run_id": "01a17499-f203-7000-8e65-2c2ff05e45ca",
+        "wire_response": "wire/request-000006.response",
+        "following_ACK_request": "wire/request-000012.request",
+        "decision": "APPROVE",
+        "native_decision": "approved",
+        "reason_sha256": "81fc549704090f3d052cf4b2193f0558f8860ce1ce903c74a4a55d6f72903dbf",
+        "ACK_sha256": "1fc932379d263b5c26dbc68a712066f5e4675deb512265fb427d3d4cc2bdd1c9",
+        "completion": "proof_proven",
+        "phase": "awaiting_confirmation"
+      }
+    ],
+    "ACK_join": "Each selected response calls report_review_verdict. Its following provider input has the same tool_call_id and the exact plaintext ACK containing decision and unmodified reason. ACK hashes match the full review.",
+    "native_join": "For each exact run, register then reviewed then committed are present. Both native completion rows preserve the same reason and the typed approved/rejected mapping of wire APPROVE/REJECT. These are actual runtime verification records, not a new native build/test.",
+    "store_join": "Goal, verification and measurement snapshots match goalid/requestid/runid/current revision/measurementid; stored evidence equals the wire reason. Final N proof_refuted/executing and P/R proof_proven/awaiting_confirmation match.",
+    "stored_reason_shape": "P/R proven verdict reason is null and evidence retains the full explanation; N refuted reason/evidence retain it. This difference is preserved, not silently converted into nonempty proven reason fields.",
+    "privacy": "Selected structured tool calls/results only are summarized. No provider thinking, credential or private absolute host path is copied into this response."
+  },
+  "adjudication": [
+    {
+      "control": "N",
+      "decision": "AGREE_REJECT",
+      "basis": "The first page contains operator0 and the later page contains judge7. The declared command-record metric therefore yields1/2 against2/2; producer label2 does not override the failed judge observation."
+    },
+    {
+      "control": "P",
+      "decision": "AGREE_APPROVE",
+      "basis": "Both distinct recipient records actually return0, yielding2/2. One original legitimately supports both required observations."
+    },
+    {
+      "control": "R",
+      "decision": "AGREE_APPROVE_SCALAR_ONLY",
+      "basis": "The declared metric measures reported_passed itself and excludes raw command outcomes/tail reading/rerun. Actual index2 meets exact2. This does not approve N raw behavior or impose raw-reading on every metric."
+    }
+  ],
+  "preserved_P3": {
+    "control": "P",
+    "reason_padding_claim": 61,
+    "actual_padding_rows": 63,
+    "total_JSONL_lines": 65,
+    "required_command_records": 2,
+    "interpretation": "A real prose count error, preserved in the original reason/ACK/store/safe result. Padding is explicitly excluded from the metric and both required observations were actually read, so it does not change this finite verdict or become a new P2."
+  },
+  "readiness_provenance": {
+    "reconciliation": {
+      "path": "terminal-originals-private/setup/parent-readiness-reconciliation.json",
+      "bytes": 951,
+      "sha256": "f1eba8757a3f2fab202a359fe432d1f602cc4c49f653db39e25799ba8218f02d"
+    },
+    "recovery": {
+      "path": "terminal-originals-private/setup/startup-readiness-recovery.json",
+      "bytes": 302,
+      "sha256": "3309caeedee227310d622266666741d33c47e2b40295104151a8080df5707131"
+    },
+    "facts_as_recorded": "Parent reconciliation names initial healthGET refusal, apply-prompts failure at first catalogGET, and submit failure at pre-submit healthGET; admits dependent-call ordering error; reports zero earlier promptPOST/Goal/provider effects and reconciliation of the same owned processes without relaunch.",
+    "limit": "Original stderr was seen in tool outputs but not separately frozen as raw files. These are parent stage/reconciliation receipts, not independently preserved historical stderr bodies or reconstructed empty-dir snapshots. Preparation separately included four fixture commands."
+  },
+  "cleanup_scope": {
+    "receipt": {
+      "path": "terminal-originals-private/setup/stop-receipt.json",
+      "bytes": 1230,
+      "sha256": "d4fc2982ce15a7e24763af47a663a2839f30fbe69943deac9d30c715ce234e06"
+    },
+    "raw_observations": {
+      "path": "terminal-originals-private/setup/stop-observations-private.json",
+      "bytes": 2849,
+      "sha256": "b5fa5f845f5c4817cbb47a2bdcb5c84b5ce7019506a34abdcb45dd0c97ad8362",
+      "rows": 8
+    },
+    "owned_pids": [
+      61264,
+      61252
+    ],
+    "scope": "Saved raw observations support the bounded pre-signal identity and final ps rc1/empty stdout of those PIDs at recorded times. Receipt records one SIGTERM each and same-birth reconciliation. This reviewer issued no ps/signal; current/future PID absence, descendants and fleet-wide absence are not inferred."
+  },
+  "source_chronology": {
+    "actual_binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "actual_candidate_bytes": 9182,
+    "actual_candidate_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "frozen_plan": {
+      "path": "terminal-originals-private/setup/plan-private.json",
+      "bytes": 5071,
+      "sha256": "65e1ff9ef3bd02672535dbe308f2c5c6083233151bef1012033d05987fe88beb",
+      "captured_head_before_overlay_commit": "577e6e10a5eb10869796fc4f7f862f3ea3d7e17d",
+      "scope": "Uncommitted0dc working overlay/private proposal at preparation; normal two-section persisted API overrides over managed75c."
+    },
+    "later_binding": "Parent reports identical0dc bytes later equal local9099a54530edc0a6ecee98117ea1ebab02cebe2e Git blob. This later source binding does not rewrite the frozen577-based plan or establish native9099 build/execution, publication or installation. This response made no Git query."
+  },
+  "remaining_scope": [
+    "Three finite labeled controls do not establish causal baseline improvement, general reliability or model-weight independence.",
+    "operator/judge labels name small Python fixture records, not real image delivery, external fitness acceptance, Docker grading or project compilation.",
+    "Whole fixture coverage happened here but the metric requires its two observations, not every byte/page or a fixed tool count. No new full-file/count gate follows.",
+    "Prior428e159 A3/A7 proof-insufficiency FAIL and earlier cohorts remain separate and unchanged. This finite PASS does not retroactively close specific omissions.",
+    "Separate full11 run01a174a1-e0fb-7000-8c82-614a62d90870 is not inspected or judged by this response.",
+    "Original3067 Goal proof/completion, human confirmation, operations/install, new-head native tests, formal approval, whole-stack admission and merge remain unestablished. Separate Task lifecycle states are not upgraded into those claims."
+  ],
+  "findings": {
+    "new_P0": [],
+    "new_P1": [],
+    "new_P2": [],
+    "preserved_P3": [
+      "P prose61 versus actual63 padding rows."
+    ],
+    "provenance_limits": [
+      "Earlier startup stderr not separately frozen.",
+      "Cleanup is bounded to saved identities and observed times."
+    ]
+  },
+  "reviewer_effects": "Read-only selected originals and offline decode/hash/equality checks; no API/Git/model/test/CI/Board/Task/Goal/process/source mutation, new agent or external message. Only this new response file is written."
+}

@@ -1,0 +1,156 @@
+{
+  "schema": "masc.goal.originals0dc.preparation-review-response.v1",
+  "status": "FINAL_FROZEN",
+  "frozen_at_utc": "2026-10-25T20:01:16.931241+00:00",
+  "verdict": "AGREES_SCOPED_DRIVER_DELTA_AND_PREPARED_IDENTITIES_PASS_NO_NEW_P0_P1_P2",
+  "review_binding": {
+    "label": "originals0dc-preparation-review/review.json",
+    "bytes": 9582,
+    "sha256": "9686617199ac1dd8ccd19fcce2a7f7be0d049c26fb7d5d2ab238024b2bddbb8d",
+    "read_in_full": true,
+    "verdict": "PASS_SCOPED_DRIVER_DELTA_AND_PREPARED_IDENTITIES"
+  },
+  "assessment": "The preparation PASS is justified within its stated scope. Exact static delta, unchanged submit behavior, prepared76-entry identity and selected copied leaves, unchanged criterion/reporter claim, exact0dc selection, local9099 source versus frozen3e binary and fresh-fixture versus3067 boundaries agree. No actual replay result or proof sufficiency follows.",
+  "driver_delta": {
+    "new_label": "masc-goal-originals-0dc-20261026.py",
+    "new_bytes": 9007,
+    "new_sha256": "6cabca382e1902c8b0e4e4056981789b6ca0b7fdcde26e32907455c93ed6d0b8",
+    "old_label": "masc-goal-originals-428e-20261026.py",
+    "old_bytes": 9018,
+    "old_sha256": "b6ed2c4c2c79c00e97a5d0e8fe5731cab395b9679d87bd8990cb1d696538f476",
+    "offline_unified_diff_bytes": 7548,
+    "offline_unified_diff_sha256": "1a2c9619c7f5f0c1aa67aa25c8c2a7d9f03896a2e8aa8d744a2da9d96b4b6cbf",
+    "matches_reviewed_diff": true,
+    "not_Git_canonical_diff": true,
+    "changed_scope": "Fresh resolved root/operator; candidate0dc hash/source selection with9099 assertions; new frozen preflight path and plan/task/source labels.",
+    "submit_AST_identical": true,
+    "normal_business_calls": [
+      "masc_goal_upsert",
+      "masc_goal_measure",
+      "masc_goal_transition(request_complete)"
+    ],
+    "one_source_call_each_outside_retry_loops": true,
+    "exclusive_submission_directory_preserved": true,
+    "no_preset_verdict_in_API_inputs": true,
+    "helper_boundary": "Same imports/helper choices are covered by the prior preparation review. No helper/driver import or full helper re-audit was performed."
+  },
+  "prepared_identity": {
+    "plan_label": "plan-private.json",
+    "plan_bytes": 4183,
+    "plan_sha256": "abaac7e85c1e6fa922cefaa9f54d21d0b7d066a8d30532bb5a41d754a154c29d",
+    "historical_plan_status": "prepared_unexecuted",
+    "candidate_source_head": "9099a54530edc0a6ecee98117ea1ebab02cebe2e",
+    "candidate_bytes": 9182,
+    "candidate_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "candidate_equals_private_proposal_and_selected_source_file": true,
+    "execution_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "execution_binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "actual_local_binary_hash_matches": true,
+    "managed_baseline_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "binding_limit": "Driver assertions and plan bind local9099 and exact candidate bytes. Parent reports its exact Git-blob check; this responder made no Git call and does not independently attest current refs/publication. Source9099 is separate from the3e executable. Intended execution uses normal isolated proof/lookup overrides."
+  },
+  "packet_and_criterion": {
+    "staged_manifest_bytes": 18299,
+    "staged_manifest_sha256": "584df4b041fbdee5a97a298bb55dc2e34c7220a1f42c3001a5c336ff1a9d987f",
+    "manifest_byte_equal_to_prior428e": true,
+    "unique_safe_relative_entries": 76,
+    "declared_total_bytes": 1736509,
+    "composition": "Same73 delivery leaves plus delivery manifest, canonical acceptance and root carrier.",
+    "criterion_fields_and_original_reported_measurement_equal_previous_plan": true,
+    "preflight_matches_plan": true,
+    "preflight_bytes": 3594,
+    "preflight_sha256": "0b625ef27c4c1adca1e9078f63bd9182502a096caca68d1e10ab104411494437",
+    "main_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "canonical_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+    "carrier_equals_index": true,
+    "selected_leaf_checks": [
+      {
+        "path": "codex-mcp-client/goal-outcomes-20261024/acceptance.json",
+        "bytes": 26469,
+        "sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+        "matches_manifest": true
+      },
+      {
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/manifest.json",
+        "bytes": 34933,
+        "sha256": "2003ed2a127f1dfdbf9d174685d982632c6af99c42c78deed607ad5e749018a8",
+        "matches_manifest": true
+      },
+      {
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/index.json",
+        "bytes": 5086,
+        "sha256": "0e52042fcd450c08024b068a6b139516b2cef8e26dceb9d4d7bf04772086d3c7",
+        "matches_manifest": true
+      },
+      {
+        "path": "goal-outcome-driven-work-20261024-evidence-index.json",
+        "bytes": 5086,
+        "sha256": "0e52042fcd450c08024b068a6b139516b2cef8e26dceb9d4d7bf04772086d3c7",
+        "matches_manifest": true
+      }
+    ],
+    "full76_reuse_limit": "The first independent preparation review performed all76 current staged-copy checks. This response reuses that bound assessment, confirms byte-identical manifest metadata and independently checks four decisive leaves. It does not claim a second all76-body audit.",
+    "fresh_fixture": "Submit preserves title/metric/target, asserts a distinct fresh runtime revision, measures that fresh revision and requests its proof. Original3067 stays historical evidence provenance.",
+    "reporter_claim_limit": "The retained11/11 measurement is offered for independent judgment; it is not an injected or observed verdict.",
+    "preparation_recovery_record_exists": false
+  },
+  "temporal_boundary": {
+    "preparation_status": "Frozen before launch; prepared_unexecuted is a historical snapshot, not current runtime status.",
+    "later_parent_report": "Parent separately reports15 read-only readiness GETs with samePID/source/binary/root checks, normal override2, one new Goal submission and run01a174a1-e0fb-7000-8c82-614a62d90870 in progress.",
+    "response_scope": "This response does not inspect or adjudicate that later runtime/provider/terminal result. No success or zero-current-execution claim is made."
+  },
+  "reused_frozen_assessments": [
+    {
+      "label": "prior428e-preparation-review",
+      "bytes": 12855,
+      "sha256": "6a3651f55749fe8b65bd242050e8b7e18a00c4a1a510fee603ba5406420a1dcf",
+      "verdict": "PASS_SCOPED_PRE_SUBMISSION_SOURCE_AND_INPUT_REVIEW",
+      "reuse_limit": "Frozen prior scope only; no new independent execution or repeated full audit."
+    },
+    {
+      "label": "0dc-source-proposal-review",
+      "bytes": 9152,
+      "sha256": "eb4a5b8d94863b66d280718adb228674ea83185b1b0cea13816ccfbbe4a5ef84",
+      "verdict": "PASS_SCOPED_PRIVATE_SOURCE_PROPOSAL",
+      "reuse_limit": "Frozen prior scope only; no new independent execution or repeated full audit."
+    },
+    {
+      "label": "428e159-semantic-review",
+      "bytes": 49418,
+      "sha256": "e8a971f45f663b3f512ba9806bb968f86359724ed62b2b564377b825f8a63c28",
+      "verdict": "FAIL_PROOF_SUFFICIENCY_P2_A3_AND_A7_UNOBSERVED_REQUIRED_SUBCONDITIONS",
+      "reuse_limit": "Frozen prior scope only; no new independent execution or repeated full audit."
+    },
+    {
+      "label": "0dc109-finite-control-review",
+      "bytes": 26621,
+      "sha256": "1a50f935795ad1c06d2bebf0df0e5881d59b58b1e687df3ddee099c2e4cc6501",
+      "verdict": "PASS_BOUNDED_THREE_READ_SCOPE_CONTROLS_WITH_P3_REASON_PADDING_COUNT_ERROR",
+      "reuse_limit": "Frozen prior scope only; no new independent execution or repeated full audit."
+    }
+  ],
+  "remaining_and_nonclaims": [
+    "Historical428e159 accepted APPROVE with A3/A7 proof-insufficiency FAIL remains unchanged.",
+    "0dc109 finite PASS, its P3 padding-count error and readiness provenance limits stay separate; they do not close the specific159 replay omissions.",
+    "A future replay result requires actual necessary source observations, structured verdict/ACK, registry and persisted state. Path/read counts, byte metadata, aliases and labels alone are not semantic proof.",
+    "No new eleven-behavior execution, primary3067 proof, original Goal completion, human confirmation, current-head native binary run, causal A/B effect, general reliability, operation/install, formal approval, whole-stack admission or merge."
+  ],
+  "findings": {
+    "new_P0": [],
+    "new_P1": [],
+    "new_P2": []
+  },
+  "effects": {
+    "API_Git_model_test_CI_build_Docker_Board_or_runtime_process_control_calls": 0,
+    "driver_helper_import_execution": 0,
+    "source_PR_Task_Goal_store_runtime_or_existing_artifact_mutations": 0,
+    "external_messages": 0,
+    "new_agents": 0,
+    "only_new_output": "response.json outside source and runtime/evidence trees"
+  },
+  "finalization": {
+    "read_inputs_rechecked_stable": true,
+    "single_new_output_no_prior_report_changed": true,
+    "no_run_result_or_semantic_PASS_inferred": true
+  }
+}

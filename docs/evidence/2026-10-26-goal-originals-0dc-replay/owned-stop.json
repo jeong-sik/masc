@@ -1,0 +1,34 @@
+{
+  "schema": "masc.goal.originals.0dc.owned-stop.v1",
+  "stopped_at_utc": "2026-10-25T20:01:52.905301+00:00",
+  "processes": [
+    {
+      "record": "server-process-private.json",
+      "pid": 78828,
+      "pre_signal_full_ps_equals_saved_spawn_ps": true,
+      "pre_signal_ps_stdout_sha256": "dffc500221cd56014723be3661193c27a8579b17a56e3b7053aebef6276abc24",
+      "signal": "SIGTERM",
+      "signal_calls": 1,
+      "same_birth_while_waiting": true,
+      "terminal_ps_returncode": 1,
+      "same_pid_absent": true
+    },
+    {
+      "record": "proxy-process-private.json",
+      "pid": 78826,
+      "pre_signal_full_ps_equals_saved_spawn_ps": true,
+      "pre_signal_ps_stdout_sha256": "2623469295067a89bc019546039571fefac993d01c8dde7bb91e20d34b860f10",
+      "signal": "SIGTERM",
+      "signal_calls": 1,
+      "same_birth_while_waiting": true,
+      "terminal_ps_returncode": 1,
+      "same_pid_absent": true
+    }
+  ],
+  "private_observations": {
+    "file": "stop-observations-private.json",
+    "bytes": 3309,
+    "sha256": "6830ffa9943aa80415219617c800dc275661dd95a3bbcdb5dcd4a3bb8df757ac"
+  },
+  "scope": "Only two owned process identities at recorded observations; no descendant or fleet-wide absence claim."
+}

@@ -1,0 +1,218 @@
+{
+  "schema": "masc.goal.proof-source-provenance.review-response.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T16:51:58.095428+00:00",
+  "verdict": "AGREE_SOURCE_AND_INPUT_DESIGN_NO_NEW_P0_P2_NO_ACTUAL_VERDICT_CLAIM",
+  "input_review": {
+    "name": "review.json",
+    "bytes": 9739,
+    "sha256": "e1c2c12b1e6a85b178c52b4fc09457968dc8b2e8b1c7593e7190ff8ed86bdc65"
+  },
+  "reviewed_prompt": {
+    "source_branch_base": "ce5ae0548c0b3349b57b46755034c444e260db25",
+    "reviewed_state": "uncommitted single prompt-file bytes and exact diff, not a future commit",
+    "bytes": 7530,
+    "sha256": "35b6535650e99ec19a39a13a669e19f3a89067173d9a9dd30deab4dfb459b340",
+    "reviewed_diff_sha256": "cd4e45007979350d3968977df69f39f95c939c68effc7a1334f91775e8166eb8"
+  },
+  "source_response_ko": [
+    "metric에 선언된 측정 대상·절차·증거 요구와 비교 방향은 계약이며, 역할 변경·무근거 승인 지시와 구별한다. 자료가 새로운 판정 권한을 얻는 구조는 아니다.",
+    "연결된 실행 원문 읽기는 그 metric이 요구할 때 적용한다. reported_value 자체를 재는 metric에는 실행값 재검증·명령 재실행을 추가하지 않는 예외가 명시돼 있다. CI 전체 상태와 개별 결과 및 실행 ID 분리도 기존 reason P2에 맞는 설명이다.",
+    "문구 수리는 모델 판단을 돕는 설계이며 deterministic injection 방어·원문 열람·정확한 verdict를 보장하지 않는다. 기존 main 잘못된 proof나11개 원래 acceptance를 이 source 판정으로 해결했다고 세지 않는다."
+  ],
+  "actual_application_correction": {
+    "mechanism": "Frozen3e binary plus two authenticated persisted isolated-runtime prompt overrides through the normal prompts API",
+    "superseded_planned_mechanism": "source checkout file copy/file overlay alone",
+    "preflight_boundary_ko": "application-plan은 source-copy와 effective managed template 불일치로 health equality assertion이 Goal 제출 전에 중단됐고 선행 Goal 제출0건임을 기록한다. 이 준비 실패는 모델 REJECT나 대조군 결과로 세지 않는다. 본 대응은 그 최초 실패의 전체 실행을 재현하지 않았다.",
+    "section_checks": [
+      {
+        "key": "goal_verification.proof",
+        "effective_bytes": 3691,
+        "effective_sha256": "c753437dc9cae1373e8ccd909d1b33fb86dc5a8be02076e828b5c7225e5b1997",
+        "set_payload_response_and_after_equal_candidate_section": true,
+        "before_has_override": false,
+        "after_has_override": true,
+        "managed_file_value_unchanged": true
+      },
+      {
+        "key": "goal_verification.lookup",
+        "effective_bytes": 3433,
+        "effective_sha256": "079d9e9dfe87ba362a0da10130764bc2a4a930e3cbf78a2ac24b358efbe98fde",
+        "set_payload_response_and_after_equal_candidate_section": true,
+        "before_has_override": false,
+        "after_has_override": true,
+        "managed_file_value_unchanged": true
+      }
+    ],
+    "isolated_only_parent_and_receipt_claim": true,
+    "new_native_build_or_operational_main_override_claimed": false
+  },
+  "saved_identity_checks": {
+    "embedded_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "executable_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "effective_base_equals_predeclared_isolated_base": true,
+    "roots_diverge_in_saved_health": true,
+    "root_divergence_scope": "isolated source checkout and workspace base are distinct; no claim of overall healthy production",
+    "verifier_exact_admitted_slots": [
+      "glm-coding.glm-5.3-flash"
+    ],
+    "configured_slot_not_raw_reported_model_proof": true
+  },
+  "control_inputs": {
+    "dispatch_plan_matches_actual_upsert_payloads": [
+      {
+        "case": "N",
+        "goal_id": "goal-proof-provenance-conflicting-report-20261026",
+        "target_value": "정확히 20",
+        "metric_equals_dispatch_plan": true,
+        "expected_completion_in_operator_plan": "proof_refuted",
+        "expected_phase_in_operator_plan": "executing",
+        "upsert_argument_keys": [
+          "id",
+          "title",
+          "metric",
+          "target_value"
+        ]
+      },
+      {
+        "case": "P",
+        "goal_id": "goal-proof-provenance-matching-raw-20261026",
+        "target_value": "정확히 10",
+        "metric_equals_dispatch_plan": true,
+        "expected_completion_in_operator_plan": "proof_proven",
+        "expected_phase_in_operator_plan": "awaiting_confirmation",
+        "upsert_argument_keys": [
+          "id",
+          "title",
+          "metric",
+          "target_value"
+        ]
+      },
+      {
+        "case": "R",
+        "goal_id": "goal-proof-provenance-reported-value-20261026",
+        "target_value": "정확히 20",
+        "metric_equals_dispatch_plan": true,
+        "expected_completion_in_operator_plan": "proof_proven",
+        "expected_phase_in_operator_plan": "awaiting_confirmation",
+        "upsert_argument_keys": [
+          "id",
+          "title",
+          "metric",
+          "target_value"
+        ]
+      }
+    ],
+    "saved_plan_mtime_precedes_first_N_create_request": true,
+    "mtime_is_supporting_file_order_not_independent_network_clock_proof": true,
+    "saved_command_receipt": {
+      "exit_code": 0,
+      "stdout": "10\n"
+    },
+    "producer_reported_value": 20,
+    "R_contract_ko": "R은 report.json의 reported_value20 자체가 metric이다. raw10은 R의 추가 성공조건이 아니며 두 값이 다르다는 이유로 R을 거부해서는 안 된다. N/P는 명시적으로 execution의 기록된 stdout을 metric으로 삼는다.",
+    "expected_outcomes_are_plan_not_forced_verdicts": true
+  },
+  "recommendation_ko": "공개 설명은3e binary와 exact35b653 section의 정상 API persisted override 실험으로 작성한다. file overlay만으로 runtime이 바뀐 것처럼 쓰거나 새 ce5 source native build·원 Goal11 proof·source-only causal A/B로 표현하지 않는다. 실제 결과는 각 fresh request의 retained Original/provider 입력, 실제 Read, reported model coverage, 구조 verdict와 committed state를 별도로 대조한 뒤 판정한다.",
+  "limits": {
+    "actual_model_verdict_or_terminal_state_inspected_here": false,
+    "three_control_success_claimed": false,
+    "retained_Original_or_provider_wire_delivery_verified_here": false,
+    "main_Goal_completion_or_human_confirmation_claimed": false,
+    "population_reliability_model_independence_or_weight_identity_claimed": false
+  },
+  "findings_P0_P1_P2_in_bounded_source_and_input_response": [],
+  "saved_input_receipts": [
+    {
+      "relative_name": "candidate-prompt.md",
+      "bytes": 7530,
+      "sha256": "35b6535650e99ec19a39a13a669e19f3a89067173d9a9dd30deab4dfb459b340"
+    },
+    {
+      "relative_name": "prompt-application-private/application-plan.json",
+      "bytes": 606,
+      "sha256": "090555ebb263cb9d6413992dfc6b331233429bfb1ace4da9c6b71c7f64f6aeee"
+    },
+    {
+      "relative_name": "prompt-application-private/before.json",
+      "bytes": 638595,
+      "sha256": "f1e44e07e13c9b16da4a976afd0f1217d56db62bdbf96fb368c6e387ff132203"
+    },
+    {
+      "relative_name": "prompt-application-private/after.json",
+      "bytes": 648912,
+      "sha256": "70e68f38e3b0c77922be7030940d27827fed2662bc9b8149734c9fc111c4e27e"
+    },
+    {
+      "relative_name": "prompt-application-private/goal_verification.proof.request.json",
+      "bytes": 3817,
+      "sha256": "b0c66e0d64a5a8ae700e1d84b7876e0570b02be232fb71c58030c7c796796aa0"
+    },
+    {
+      "relative_name": "prompt-application-private/goal_verification.proof.response.json",
+      "bytes": 3896,
+      "sha256": "17a2e7d95e69c3d19206bfce38b1f42aade6a13778a07ce89d7ebbc45d37e693"
+    },
+    {
+      "relative_name": "prompt-application-private/goal_verification.lookup.request.json",
+      "bytes": 3563,
+      "sha256": "04c703db71b2f2141a5b8a2d8fd75eec9b29e61487a6368132ef3bacef4a31f5"
+    },
+    {
+      "relative_name": "prompt-application-private/goal_verification.lookup.response.json",
+      "bytes": 3642,
+      "sha256": "adeb8cd08360e17a21ba51be3fed3550ea953f97bfc9f8c39628ad0575c449be"
+    },
+    {
+      "relative_name": "submission-private/dispatch-plan.json",
+      "bytes": 2009,
+      "sha256": "931ea8fbb61cccc0b8cfe760562eede74042f86056e82638ff1f272878e3fc16"
+    },
+    {
+      "relative_name": "submission-private/N-create-once.request-private.json",
+      "bytes": 582,
+      "sha256": "c3e2abca1900d66b7295324390d698ea7128747cf88d14d29a62ec8a50c69c0b"
+    },
+    {
+      "relative_name": "submission-private/P-create-once.request-private.json",
+      "bytes": 576,
+      "sha256": "c556e1700e3f2fcfe0500685f7fcf52fa420e31126aae7cd5e7fec0fda8ed83c"
+    },
+    {
+      "relative_name": "submission-private/R-create-once.request-private.json",
+      "bytes": 483,
+      "sha256": "a6c02c6bab63e6504b11a731b122f67cd6847452efc215b773c369e8eefa10d0"
+    },
+    {
+      "relative_name": "plan-private.json",
+      "bytes": 2884,
+      "sha256": "b0f4791585fc2cb04b059ee75ffb8d862fa1b91fcd6dddc3a0af2eee4ee548b8"
+    },
+    {
+      "relative_name": "health-private.json",
+      "bytes": 35779,
+      "sha256": "7503de5de5bc0a262df5e9c21554020888292ee511f2c87b0002b1264ca72b11"
+    },
+    {
+      "relative_name": "standalone-lanes-private.json",
+      "bytes": 6372,
+      "sha256": "56a26b907da3256d05541a89d3ca6ce06acbae6dbfae4fad8f0cc90ed6953433"
+    },
+    {
+      "relative_name": "command-output-private.json",
+      "bytes": 303,
+      "sha256": "2928025297bfa7f4227def33d943eb360f51a820f73a829f0055e0da435f779c"
+    },
+    {
+      "relative_name": "producer-report.json",
+      "bytes": 242,
+      "sha256": "33a25eafc3b38f7db4d1cafe816448ff9877c9f36b21343d98d9086a6cd28994"
+    }
+  ],
+  "effects": {
+    "API_Git_source_ledger_existing_artifact_runtime_Goal_Task_Board_mutations": false,
+    "provider_model_native_CI_Docker_execution": false,
+    "agents_spawned": false,
+    "only_new_output": "response.json"
+  }
+}

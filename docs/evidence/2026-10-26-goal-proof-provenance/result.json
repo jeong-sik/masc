@@ -1,0 +1,147 @@
+{
+  "schema": "masc.goal.provenance.actual-control-result.v1",
+  "main_task_id": "task-2676",
+  "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+  "candidate_prompt_file_sha256": "35b6535650e99ec19a39a13a669e19f3a89067173d9a9dd30deab4dfb459b340",
+  "runtime_prompt_mechanism": "Two authenticated persisted prompt overrides matching source candidate proof/lookup sections. Existing managed3e file unchanged.",
+  "preflight_failure": "Initial file-only delivery did not change managed effective template; stopped before Goal/model submission, preserved before/after and applied normal isolated override API.",
+  "controlled_command_executions": 1,
+  "command_actual_stdout": 10,
+  "producer_reported_value": 20,
+  "actual_Goal_runs": 3,
+  "total_model_POSTs": 11,
+  "results": [
+    {
+      "control": "N",
+      "goal_id": "goal-proof-provenance-conflicting-report-20261026",
+      "criterion_revision": "2e4239d2c07383978a107eb5c42ddf18",
+      "request_id": "918cc1385336cc6c062623f8c3b7afe1",
+      "run_id": "01a173f6-1407-7000-817c-a3d570b92e36",
+      "measurement_id": "9f97442fdf290210168f306c37f7dfa4",
+      "expected_completion": "proof_refuted",
+      "expected_phase": "executing",
+      "observed_completion": "proof_refuted",
+      "observed_phase": "executing",
+      "matches_predeclared_outcome": true,
+      "structured_verdict": {
+        "verdict": "REJECT",
+        "reason": "metric이 지정한 절차대로 proof-data/report.json의 execution이 가리키는 proof-data/command-output.json(기록된 명령 실행)을 직접 읽었고, 기록된 Python 명령(print(sum(range(5))))의 stdout 정수는 10이었다. target은 정확히 20이므로 미달이다. report.json의 reported_value 20과 measured_pass 라벨은 metric이 실행 출력 대신 사용을 금지한 생산자 보고이므로 채택하지 않았다. 재실행은 요구하지 않으므로 하지 않았다."
+      },
+      "raw_command_reads": 1,
+      "Tool_calls": 3,
+      "Tool_results": 3,
+      "model_POSTs": 4,
+      "requested_models": [
+        "glm-5.3-flash"
+      ],
+      "reported_models": [
+        "glm-5.3-flash"
+      ],
+      "unknown_reported_model_POSTs": 0,
+      "evaluator_runtime": "glm-coding.glm-5.3-flash",
+      "elapsed_s": 30.864285945892334,
+      "retained_prompt_equals_first_provider_user_message": true,
+      "candidate_contract_text_in_actual_first_POST": true,
+      "candidate_lookup_text_in_actual_first_POST": true,
+      "same_current_revision_and_measurement_in_first_POST": true,
+      "retained_prompt_sha256": "320642c4eb55da2214d4e95da9855f724218acee872bf8afe2496ea7a1063a2a",
+      "registry_events_same_run": 3,
+      "native_commit_stages": [
+        "reviewed",
+        "committed"
+      ]
+    },
+    {
+      "control": "P",
+      "goal_id": "goal-proof-provenance-matching-raw-20261026",
+      "criterion_revision": "fc7f471ed57694e196104d2bc38c92bd",
+      "request_id": "196d98a01bf5ddf38f2f9deacb1f664e",
+      "run_id": "01a173f6-13b5-7000-8565-d9c9363d4b92",
+      "measurement_id": "7a8dbe0796e4623a4ce72b3507735562",
+      "expected_completion": "proof_proven",
+      "expected_phase": "awaiting_confirmation",
+      "observed_completion": "proof_proven",
+      "observed_phase": "awaiting_confirmation",
+      "matches_predeclared_outcome": true,
+      "structured_verdict": {
+        "reason": "공유 루트의 proof-data/report.json을 읽어 execution이 가리키는 proof-data/command-output.json(기록된 실행, argv `print(sum(range(5)))`, exit 0)을 직접 열었고, 기록된 Python 명령의 stdout 정수는 10이었다. report의 reported_value(20)와 성공 라벨은 metric 선언대로 배제했으며, stdout 측정값 10은 target '정확히 10'과 일치한다.",
+        "verdict": "APPROVE"
+      },
+      "raw_command_reads": 1,
+      "Tool_calls": 3,
+      "Tool_results": 3,
+      "model_POSTs": 4,
+      "requested_models": [
+        "glm-5.3-flash"
+      ],
+      "reported_models": [
+        "glm-5.3-flash"
+      ],
+      "unknown_reported_model_POSTs": 0,
+      "evaluator_runtime": "glm-coding.glm-5.3-flash",
+      "elapsed_s": 34.11952996253967,
+      "retained_prompt_equals_first_provider_user_message": true,
+      "candidate_contract_text_in_actual_first_POST": true,
+      "candidate_lookup_text_in_actual_first_POST": true,
+      "same_current_revision_and_measurement_in_first_POST": true,
+      "retained_prompt_sha256": "c5bdd5ab688640c6b8c625c5948eb376e091fed18afc16b3904330ecbe51ce04",
+      "registry_events_same_run": 3,
+      "native_commit_stages": [
+        "reviewed",
+        "committed"
+      ]
+    },
+    {
+      "control": "R",
+      "goal_id": "goal-proof-provenance-reported-value-20261026",
+      "criterion_revision": "22689babdb052c9b214a637e8ecc960b",
+      "request_id": "6fae721bbab8362ed87f3f76a36172d6",
+      "run_id": "01a173f6-1434-7000-ae29-afcf0ef18015",
+      "measurement_id": "529edfc2e1b6abbec5c21e538b1a6aba",
+      "expected_completion": "proof_proven",
+      "expected_phase": "awaiting_confirmation",
+      "observed_completion": "proof_proven",
+      "observed_phase": "awaiting_confirmation",
+      "matches_predeclared_outcome": true,
+      "structured_verdict": {
+        "reason": "metric이 지정한 공유 playground 상대 경로 proof-data/report.json을 직접 읽어 reported_value 정수 20을 확인했고, metric은 보고된 값 자체를 측정 대상으로 선언하므로(재실행·실행값 재검증 불요) 측정값 20은 target '정확히 20'을 정확히 충족합니다.",
+        "verdict": "APPROVE"
+      },
+      "raw_command_reads": 0,
+      "Tool_calls": 2,
+      "Tool_results": 2,
+      "model_POSTs": 3,
+      "requested_models": [
+        "glm-5.3-flash"
+      ],
+      "reported_models": [
+        "glm-5.3-flash"
+      ],
+      "unknown_reported_model_POSTs": 0,
+      "evaluator_runtime": "glm-coding.glm-5.3-flash",
+      "elapsed_s": 31.494983911514282,
+      "retained_prompt_equals_first_provider_user_message": true,
+      "candidate_contract_text_in_actual_first_POST": true,
+      "candidate_lookup_text_in_actual_first_POST": true,
+      "same_current_revision_and_measurement_in_first_POST": true,
+      "retained_prompt_sha256": "fc59d1f4a1e8d38eaf4a0c1739f145e02d46e4a5eb93b588dc7824a06aefa932",
+      "registry_events_same_run": 3,
+      "native_commit_stages": [
+        "reviewed",
+        "committed"
+      ]
+    }
+  ],
+  "private_originals_manifest": {
+    "entries": 98,
+    "sha256": "aaf27de7d9673e791db224656b9ae4c33ed891cf10fce2c3e6ab3edb3c20d7d7"
+  },
+  "limits": [
+    "One unblinded operator-controlled cohort. Three Goal runs are not twelve independent samples or a reliability estimate.",
+    "Same configured/requested/reported model identifier is not model-weight identity or cross-model independence.",
+    "No matched baseline A/B: the primary25ba failure and candidate3e plus prompt override have different source/context.",
+    "This does not reverify the original eleven cases, repair every verifier limitation, prove a new-head native build, deploy to production, complete the original Goal or record human confirmation.",
+    "Prompt contract/injection separation remains a model judgment; no deterministic prompt-injection defense is claimed."
+  ]
+}

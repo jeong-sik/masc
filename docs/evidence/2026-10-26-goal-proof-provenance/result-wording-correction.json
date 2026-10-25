@@ -1,0 +1,12 @@
+{
+  "schema": "masc.goal.provenance.result-wording-correction.v1",
+  "corrects": "result.json",
+  "original_result_sha256": "a8d25dd6117dc94292a86647b968f98d171ec400a9c9db5995dc51089fd7c530",
+  "original_file_unchanged": true,
+  "field": "limits[0]",
+  "original_text": "One unblinded operator-controlled cohort. Three Goal runs are not twelve independent samples or a reliability estimate.",
+  "corrected_text": "One unblinded operator-controlled cohort: three Goal runs and eleven provider POSTs. POSTs are not independent experiment samples and the cohort is not a reliability estimate.",
+  "actual_Goal_runs": 3,
+  "actual_model_POSTs": 11,
+  "impact": "Wording correction only. Per-control counts4/4/3, tool reads and persisted verdicts are unchanged."
+}

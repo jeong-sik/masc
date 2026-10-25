@@ -1,0 +1,74 @@
+{
+  "schema": "masc.original-goal.root-index-proof-review.timing-correction.v1",
+  "status": "FINAL_FROZEN",
+  "corrected_at_utc": "2026-10-25T16:50:39.359249+00:00",
+  "reviewer": "measurement_publication_review",
+  "corrects_frozen_review": {
+    "file": "review.json",
+    "bytes": 12285,
+    "sha256": "be8401c9a93d8fbcabc526bdfb34de29cad9750f8bba299743de9aff6bb61954",
+    "original_file_unchanged": true
+  },
+  "scope": "Timing interpretation only. The prior P2 linked-original verification-omission verdict is unchanged.",
+  "request_id": "b698fd712cfeb95c27549460520d610f",
+  "run_id": "01a173e9-ffe9-7000-856a-d284a2cd20a2",
+  "chronology": [
+    {
+      "event": "APPROVE verdict tool finished",
+      "at_utc": "2026-10-25T16:36:48.294908+00:00",
+      "precision": "fractional-second native tool receipt"
+    },
+    {
+      "event": "proof_proven recorded",
+      "at_utc": "2026-10-25T16:37:09Z",
+      "precision": "second-resolution persisted verdict"
+    },
+    {
+      "event": "73-leaf hash readback observed",
+      "at_utc": "2026-10-25T16:37:17.838135+00:00",
+      "precision": "operator readback receipt"
+    },
+    {
+      "event": "Root terminal/gap observation receipt",
+      "at_utc": "2026-10-25T16:39:05.314801+00:00",
+      "precision": "operator observation receipt"
+    }
+  ],
+  "superseded_interpretations": [
+    {
+      "review_path": "availability_and_unchanged_sources.before_terminal_integrity_receipt_preserved",
+      "correction": "The referenced receipt is preserved, but its name must not imply a readback preceding the actual terminal/commit. It is a post-commit readback."
+    },
+    {
+      "review_path": "availability_and_unchanged_sources.observation_bound",
+      "superseded_text": "The operator receipt separately records73 valid leaves before terminal.",
+      "correction": "The73-leaf readback was observed after the persisted proof_proven timestamp and before Root recorded its terminal observation. It does not establish pre-terminal availability."
+    }
+  ],
+  "evidence_bound": {
+    "receipt_file_label": "pack-integrity-before-terminal.json",
+    "receipt_bytes": 373,
+    "receipt_sha256": "4b3ca597c60944fb8e559941a099bda40a792478056dca9008ff65053d74a866",
+    "filename_may_only_mean_before_Root_terminal_observation": true,
+    "supports_actual_terminal_before_availability": false,
+    "reviewer_later73_hash_readback_also_not_pre_terminal_proof": true,
+    "persisted_verdict_source_label": "verification-terminal.json",
+    "persisted_verdict_source_bytes": 2224,
+    "persisted_verdict_source_sha256": "9c775eaaf3373bb233132a5dd4e4b6c16a5af54b2934b8862af5679c86b15c39"
+  },
+  "unchanged_findings": {
+    "P2_linked_original_reads_omitted": true,
+    "retained_linked_original_leaf_read_count": 0,
+    "retained_canonical_page_reads": 2,
+    "retained_index_reads": 1,
+    "locator_delivery_and_index_read_success_still_recognized": true,
+    "existing11_behavior_observations_not_reclassified_as_failed": true,
+    "no_original_source_absence_finding": true,
+    "no_assertion_of_human_Goal_completion": true
+  },
+  "actions": {
+    "original_review_source_receipts_stores_or_ledgers_changed": false,
+    "API_model_source_Board_or_runtime_mutations": 0,
+    "only_new_output": "correction.json"
+  }
+}

@@ -1,1 +1,0 @@
-Freeze exact model policy from the provider selection so catalog replacement cannot change a selected request or restore replaced seed permissions.

@@ -246,7 +246,18 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
         | Error error -> lane_error error)
   | Some Tool_schemas_misc.Misc_lane_evidence ->
       Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Evidence args with
-        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Ok data ->
+            let result = Tool_result.make_ok ~tool_name:name ~start_time:start ~data () in
+            (match Domain_pool_ref.submit_io_or_inline (fun () ->
+              Tool_projection.attach_artifact_manifest
+                ~projection:Tool_output.Inline_with_reference
+                ~base_path:ctx.config.base_path result) with
+             | Ok result -> result
+             | Error error ->
+                 Tool_result.make_err ~tool_name:name ~start_time:start
+                   ~class_:Tool_result.Runtime_failure
+                   ~effect_disposition:Tool_result.Effect_outcome_unknown ~data
+                   ("Lane evidence result manifest unavailable: " ^ error.message))
         | Error error -> lane_error error)
   | Some Tool_schemas_misc.Misc_play_room ->
       let speaker = match lane_access with

@@ -1,0 +1,6 @@
+{
+  "dashboard/src/api/keeper.ts": "f4225312735ab85009e812627ebcb7a65d212745236f02ce482824408c64a454",
+  "dashboard/src/api/keeper.test.ts": "ae6e08fc86cde7ff928a228453895106f72239eb45d11433fd71920e8ef62792",
+  "dashboard/src/components/keeper-shared.ts": "da7cd98f5f1a1ef9954fbb17973504f597b247178ac4d135eee9546ef2597e31",
+  "dashboard/src/components/keeper-shared.test.ts": "cf9926bedd4efef6d7b20efe7cad0f10301a75b3de2a6a878f2ea2be17a85c86"
+}

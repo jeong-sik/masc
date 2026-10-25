@@ -1,0 +1,46 @@
+{
+  "before": {
+    "sha256": "bbedbc96913be3ce0dffac7c19b02b812ef3e3ee6b09c03777a0c028c284af98",
+    "excerpt": [
+      "     \u00d7 reconstructs every page beyond the server 100-row boundary from a fresh client 6ms",
+      "     \u00d7 preserves int64 cursor precision and keeps a moved operation once at its new position 2ms",
+      "     \u00d7 rejects a nonadvancing page instead of looping or publishing partial results 1ms",
+      "     \u00d7 does not publish a truncated queue when a later page fails 1ms",
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 4 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/api/keeper.test.ts > listQueuedKeeperChatOperations > reconstructs every page beyond the server 100-row boundary from a fresh client",
+      " FAIL  src/api/keeper.test.ts > listQueuedKeeperChatOperations > preserves int64 cursor precision and keeps a moved operation once at its new position",
+      " FAIL  src/api/keeper.test.ts > listQueuedKeeperChatOperations > rejects a nonadvancing page instead of looping or publishing partial results",
+      "- Expected:",
+      "+ Received:",
+      " FAIL  src/api/keeper.test.ts > listQueuedKeeperChatOperations > does not publish a truncated queue when a later page fails",
+      "- Expected:",
+      "+ Received:",
+      " Test Files  1 failed (1)",
+      "      Tests  4 failed | 55 skipped (59)"
+    ]
+  },
+  "two_suites": {
+    "sha256": "ddc591e2f0b9e441e90b64d8609b6d0646edd237695dcc22b89433e8bdf7dfcd",
+    "excerpt": [
+      "     \u00d7 wires the live tool-output hydration contract store into the transcript 5012ms",
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/components/keeper-shared.test.ts > KeeperConversationPanel > wires the live tool-output hydration contract store into the transcript",
+      "Expected: \"hydration-failed\"",
+      "Received: \"pending\"",
+      " Test Files  1 failed | 1 passed (2)",
+      "      Tests  1 failed | 83 passed (84)"
+    ]
+  },
+  "main_baseline": {
+    "sha256": "e475ee497e9919c377d0d7546ca8b4e1b26a998a8b540bf6a5eab9b324df469d",
+    "excerpt": [
+      "     \u00d7 wires the live tool-output hydration contract store into the transcript 5026ms",
+      "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+      " FAIL  src/components/keeper-shared.test.ts > KeeperConversationPanel > wires the live tool-output hydration contract store into the transcript",
+      "Expected: \"hydration-failed\"",
+      "Received: \"pending\"",
+      " Test Files  1 failed (1)",
+      "      Tests  1 failed | 24 skipped (25)"
+    ]
+  }
+}

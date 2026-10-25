@@ -33,3 +33,9 @@ All changed OCaml files were parsed with `ocamlc -stop-after parsing`; this is s
 ## Observed strict TUI execution
 
 [40195465261](https://github.com/jeong-sik/masc/actions/runs/40195465261) checked out exactly `1e665df9993b1a64848808a5adc1afaf24eacb5b` and completed SUCCESS: **50 actual strict-projection cases**. The all-current-events fixture with owned empty snapshot and the unowned-snapshot rejection both passed. The retained excerpt carries the raw-log SHA256. This selected suite does not compile the separate log/types consumers that failed at60e and were fixed at46f; its success cannot certify them or the seven-suite run. The projection source/fixture is unchanged at46f and later evidence-only heads.
+
+## Observed corrected seven-suite execution
+
+[40195602634](https://github.com/jeong-sik/masc/actions/runs/40195602634) checked out exactly `46f864170a4f4744436f599bfd06f510fb496dd7` and completed SUCCESS. Actual executable summaries: public SSE22 + sync reasoning16 + phase replay24 + secret redaction33 + chat event journal32 + TUI transcript107 + strict projection50 = **284 cases**. Full-history/message-file replay, split-secret replacement, exact response/block replacement and strict missing-owner rejection assertions were reached and passed. The retained raw-log digest and assertion/summary excerpt preserve the execution identity.
+
+This establishes the selected backend and root consumers, including the repaired log/types compilation, on that source. All55 recorded source/fixture hashes remain unchanged by later evidence-only heads. It is not a full executable/release build, full regression, joined redactor→journal→TUI execution, rendered UI, installed runtime, provider HTTP or native activation proof. The separate50-case run is a prior execution of one of these suites and is not added again to284.

@@ -378,6 +378,141 @@ let test_strict_decoder () =
     (update "bookkeeping" (update "calls" (fun _ -> `Int 1)) disabled)
 ;;
 
+let decoded_report json =
+  match Observation.report_of_json json with
+  | Ok report -> report
+  | Error detail -> Alcotest.fail detail
+;;
+
+let check_streamed_report report =
+  let output = Buffer.create 256 in
+  Observation.write_report_json ~write:(Buffer.add_string output) report;
+  let bytes = Buffer.contents output in
+  check_bool "stream ends with LF" true
+    (String.length bytes > 0 && bytes.[String.length bytes - 1] = '\n');
+  let expected = Observation.report_to_json report in
+  let actual = Yojson.Safe.from_string bytes in
+  check_bool "stream preserves exact fields, values and ordered arrays" true (actual = expected);
+  check_bool "stream is a strict v1 codec roundtrip" true
+    (Observation.report_to_json (decoded_report actual) = expected)
+;;
+
+let streaming_fixture mode =
+  Eio_main.run (fun _ ->
+    let owner = Observation.create ~mode in
+    let key = schema () and other = schema () in
+    let work () =
+      ignore (Observation.measure ~site:Worker_work (fun () -> 1));
+      ignore (Observation.measure ~site:Final_attribution_bytes ~schema:key (fun () -> 2));
+      ignore (Observation.constructor ~site:Bridge_execution_env_constructor (fun () -> Ok key));
+      ignore (Observation.constructor ~site:Bridge_plain_constructor (fun () -> Error "rejected"));
+      ignore (Observation.encode ~site:Reserve_encode ~schema:key (fun () -> "UTF-8 관측\n\""));
+      List.iter (fun expected -> check_exception expected (fun () ->
+        Observation.measure ~site:Worker_work (fun () -> raise expected)))
+        [Product_failure (ref 73); Eio.Cancel.Cancelled Exit];
+      Observation.surface ~site:Request_surface (fun () -> [other; key; other]);
+      List.iter (Observation.cache ~schema:key)
+        [ Json_lookup Created_json; Json_lookup Existing_json
+        ; Byte_lookup {json = Created_json; count = Missing_byte_count}
+        ; Byte_lookup {json = Existing_json; count = Missing_byte_count}
+        ; Byte_lookup {json = Existing_json; count = Existing_byte_count}
+        ; Byte_publication Published_byte_count
+        ; Byte_publication Concurrent_byte_count_won ]
+    in
+    Observation.within owner (fun () ->
+      Observation.with_wake ~keeper:"stream \"관측\"" ~trace_id:"stream\ntrace"
+        ~absolute_turn:3 ~execution_scope:(Some "owned scope") ~cause:(Some "explicit fixture") (fun () ->
+        Observation.with_attempt ~routing_run_id:"stream-run" ~lane_attempt_index:1
+          ~runtime_id:"stream-runtime" (fun () ->
+          Observation.with_provider_turn ~ordinal:2 (fun () ->
+            match Observation.fresh_object_id (), Observation.fresh_object_id () with
+            | Some descriptor_id, Some addon_owner_id ->
+              Observation.with_definition ~descriptor_id ~addon_owner_id:(Some addon_owner_id)
+                (fun () -> Observation.with_site Phase0_bytes work)
+            | None, None -> work ()
+            | Some _, None | None, Some _ -> Alcotest.fail "partial fixture identities"))));
+    Observation.snapshot owner)
+;;
+
+let test_streaming_modes_and_events () =
+  List.iter (fun mode ->
+    let report = streaming_fixture mode in
+    check_streamed_report report;
+    let kinds = List.map kind (events (Observation.report_to_json report))
+      |> List.sort_uniq Stdlib.compare in
+    let expected = match mode with
+      | Observation.Disabled -> []
+      | Identity_only | Timed ->
+        [`String "cache"; `String "span_finished"; `String "span_started"; `String "surface"] in
+    check_bool "all applicable event kinds were exercised" true (kinds = expected))
+    [Observation.Disabled; Identity_only; Timed]
+;;
+
+let test_streaming_incomplete_and_unsigned_clocks () =
+  let incomplete = Eio_main.run (fun _ ->
+    let owner = Observation.create ~mode:Timed in
+    Observation.within owner (fun () ->
+      ignore (Observation.observer_work (fun () -> raise (Product_failure (ref 79))));
+      Observation.surface ~site:Built_surface (fun () -> []));
+    Observation.snapshot owner) in
+  check_streamed_report incomplete;
+  let open_span = Eio_main.run (fun _ ->
+    let owner = Observation.create ~mode:Timed in
+    Observation.within owner (fun () ->
+      Observation.measure ~site:Worker_work (fun () -> Observation.snapshot owner))) in
+  check_bool "fixture retains a genuinely open span snapshot" true
+    (field "active_spans" (Observation.report_to_json open_span) = `Int 1);
+  check_streamed_report open_span;
+  let original = complete_timed_report () in
+  let origin = match field "clock_origin_ns" original with
+    | `String ns -> Int64.of_string ns
+    | _ -> Alcotest.fail "timed report has no origin" in
+  let unsigned_ns = function
+    | `String ns -> `String (Int64.to_string
+        (Int64.add Int64.min_int (Int64.sub (Int64.of_string ns) origin)))
+    | _ -> Alcotest.fail "clock is not an int64 string" in
+  let unsigned_measurement timing = timing
+    |> update "started_ns" unsigned_ns
+    |> update "finished_ns" unsigned_ns in
+  let unsigned = original
+    |> update "clock_origin_ns" unsigned_ns
+    |> update "events" (fun values -> `List (List.map (fun event ->
+      if kind event = `String "span_finished" then
+        update "payload" (update "measurement" unsigned_measurement) event
+      else event) (json_list values))) in
+  check_streamed_report (decoded_report unsigned)
+;;
+
+let test_streaming_writer_failures () =
+  let report = decoded_report (complete_timed_report ()) in
+  List.iter (fun expected ->
+    let calls = ref 0 in
+    check_exception expected (fun () ->
+      Observation.write_report_json report ~write:(fun _ ->
+        incr calls;
+        if !calls = 2 then raise expected));
+    check_int "failed output callback is never retried" 2 !calls)
+    [Product_failure (ref 83); Eio.Cancel.Cancelled Exit]
+;;
+
+let test_streaming_caller_owned_channel () =
+  let path = Filename.temp_file "schema-observation-stream-" ".json" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let report = decoded_report (complete_timed_report ()) in
+    Out_channel.with_open_bin path (fun channel ->
+      Observation.write_report_json ~write:(output_string channel) report;
+      output_char channel ' ');
+    let actual = In_channel.with_open_bin path In_channel.input_all
+      |> Yojson.Safe.from_string in
+    check_bool "caller can keep writing and owns channel close" true
+      (actual = Observation.report_to_json report);
+    let closed = open_out_bin path in
+    close_out closed;
+    match Observation.write_report_json ~write:(output_string closed) report with
+    | () -> Alcotest.fail "closed-channel output error was swallowed"
+    | exception Sys_error _ -> ())
+;;
+
 let () =
   Alcotest.run "Schema observation"
     [ "passthrough",
@@ -390,4 +525,9 @@ let () =
       ; Alcotest.test_case "capture across actual Eio domain" `Quick test_capture_across_domain
       ; Alcotest.test_case "report does not retain schemas" `Quick test_report_does_not_retain_schema ]
     ; "codec", [Alcotest.test_case "contradictory evidence rejected" `Quick test_strict_decoder]
+    ; "streaming",
+      [ Alcotest.test_case "all modes and event kinds preserve v1 values" `Quick test_streaming_modes_and_events
+      ; Alcotest.test_case "incomplete snapshots and unsigned clocks" `Quick test_streaming_incomplete_and_unsigned_clocks
+      ; Alcotest.test_case "output failure and cancellation propagate" `Quick test_streaming_writer_failures
+      ; Alcotest.test_case "channel remains owned by caller" `Quick test_streaming_caller_owned_channel ]
     ]

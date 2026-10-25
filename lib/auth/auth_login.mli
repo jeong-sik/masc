@@ -176,7 +176,7 @@ val ensure_local_operator :
     opaque bytes are verified first; if their verification fails, surrounding
     file whitespace is removed and that candidate must independently verify as
     Admin. The raw-token readers and verification API retain their exact-byte
-    contracts. If neither candidate verifies, use {!mint} with role [Admin] and
+    contracts. If no candidate verifies as Admin, use {!mint} with role [Admin] and
     return [Ok (Some report)], or propagate its error. This is the local setup
     and previous-owner-stop login policy; it does not refresh other clients or
     promise atomicity between verification and the caller's later operation.

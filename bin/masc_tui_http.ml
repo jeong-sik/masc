@@ -116,23 +116,22 @@ let credential_workspace : (string * string * int) option ref = ref None
    verdicts this client can answer by itself, with a mint; any other objection
    is left for the server to make, whose refusal names [masc login]. *)
 let stored_operator_token ~base_path : Masc_tui_credential.stored_token =
-  match
-    Auth_login.read_persisted_http_token ~base_path ~agent_name:default_agent_name
-  with
-  | None -> Masc_tui_credential.Not_stored
-  | Some token -> (
-      match
-        Auth.verify_token base_path ~agent_name:default_agent_name ~token
-      with
-      | Ok _ -> Masc_tui_credential.Stored token
-      | Error err -> (
-          match Auth_error_kind.classify err with
-          | Auth_error_kind.Token_expired -> Masc_tui_credential.Stored_expired
-          | Auth_error_kind.Token_mismatch -> Masc_tui_credential.Stored_mismatched
-          | Auth_error_kind.Unauthorized | Auth_error_kind.Forbidden
-          | Auth_error_kind.Agent_not_found | Auth_error_kind.Io_error
-          | Auth_error_kind.Invalid_json | Auth_error_kind.Other ->
-              Masc_tui_credential.Stored token))
+  Masc_tui_credential.stored_token_of_file
+    ~exact_token:(Auth_login.read_persisted_token ~base_path ~agent_name:default_agent_name)
+    ~read_http_candidate:(fun () ->
+      Auth_login.read_persisted_http_token ~base_path ~agent_name:default_agent_name)
+    ~verify:(fun token ->
+      match Auth.verify_token base_path ~agent_name:default_agent_name ~token with
+      | Ok _ -> Ok ()
+      | Error err ->
+        Error
+          (match Auth_error_kind.classify err with
+           | Auth_error_kind.Token_expired -> Masc_tui_credential.Expired_token
+           | Auth_error_kind.Token_mismatch -> Masc_tui_credential.Mismatched_token
+           | Auth_error_kind.Unauthorized | Auth_error_kind.Forbidden
+           | Auth_error_kind.Agent_not_found | Auth_error_kind.Io_error
+           | Auth_error_kind.Invalid_json | Auth_error_kind.Other ->
+             Masc_tui_credential.Other_rejection))
 
 (* Minting grants nothing this process did not already have: the credential
    store is a directory under the workspace, so anything that can read the

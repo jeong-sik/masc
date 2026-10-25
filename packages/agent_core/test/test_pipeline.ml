@@ -4792,10 +4792,10 @@ let () =
             "durable tool bus uses canonical committed facts"
             `Quick
             (test_durable_tool_bus_uses_canonical_facts ~delivery_fault:false)
-        ; test_case "checkpoint sink Error preserves canonical execution" `Quick
+        ; Alcotest.test_case "checkpoint sink Error preserves canonical execution" `Quick
             (test_durable_tool_bus_uses_canonical_facts
               ~checkpoint_failure:(fun () -> Error "checkpoint delivery refused"))
-        ; test_case "checkpoint sink exception preserves canonical execution" `Quick
+        ; Alcotest.test_case "checkpoint sink exception preserves canonical execution" `Quick
             (test_durable_tool_bus_uses_canonical_facts
               ~checkpoint_failure:(fun () -> raise (Failure "checkpoint delivery raised")))
         ; Alcotest.test_case

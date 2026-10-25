@@ -136,7 +136,6 @@ let exact_flow config =
         not used as the synchronization/assertion boundary in this fixture. *)
      body_timeout_s=Some 120.0} in
   let snapshot = EO.load_resolver_snapshot
-      ~io:{getenv=(fun _ -> Ok None)}
       ~catalog:(EO.Embedded_with_targets [declaration]) ()
       |> get_ok "exact snapshot must use the original runtime binding" in
   let admitted_target = EO.admit_target_ref snapshot "openai.chat"

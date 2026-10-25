@@ -58,3 +58,19 @@ the historical live operator4/reported2 condition, wait/watchdog separation,
 whole-tool-turn permit ownership, active cancellation/body-timeout coverage,
 live mixed fleet behavior and deployment are not proved by these two cases.
 No new Fusion/per-lane cap or numeric runtime gate is introduced.
+
+## Declared-target API after integration
+
+The fixture was rebased from `f2290279f47c0b2e16882d9efdfdb71c39683f7b`
+onto main `0ccb01b6ac91e47950fd3e74bdf9c38c95aefa92`. That main includes
+#45876, which removed `resolver_io` and the `io` label from the public
+`Exact_output.load_resolver_snapshot` interface. The fixture removes its old
+no-op environment reader and continues passing the same explicit declared target
+binding through `Embedded_with_targets`. Candidate admission, shared endpoint
+permits, cancellation, HTTP refusal and resource-return assertions are unchanged.
+
+The current public interface and direct call were checked as source; the
+fixture parses and the fragment/whitespace checks pass. This is compatibility
+with the current source contract, not a new native execution, full typecheck,
+CI or installation result. Earlier recorded executions remain bound to their
+original source inputs.

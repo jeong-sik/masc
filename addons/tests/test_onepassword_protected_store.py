@@ -18,7 +18,7 @@ class ProtectedStoreTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name) / "private"
         self.records = MemoryRecords(self.temporary.name)
-        self.store = oauth.PrivateStore(self.directory, records=self.records)
+        self.store = oauth.PrivateStore(self.directory, records=self.records, provision=True)
         self.original = {"phase": "disconnected", "configuration_id": "a" * 64}
         self.next = {"phase": "authorizing", "configuration_id": "a" * 64,
                      "connection_id": "0e250ad7-e876-4e74-9145-1a0d5aa3a15c",
@@ -40,6 +40,24 @@ class ProtectedStoreTests(unittest.TestCase):
         for path in self.directory.iterdir():
             self.assertNotIn(b"MARKER", path.read_bytes())
         self.assertFalse((self.directory / "connection.json").exists())
+
+    def test_declined_callback_schema_is_closed_and_invalid_write_keeps_active_authority(self):
+        self.write(self.next)
+        before = active_raw(self.store)
+        receipt = {"kind": "declined", "state": "STATE_MARKER",
+                   "connection_id": self.next["connection_id"]}
+        for changed in [{"kind": "captured"}, {"state": ""}, {"connection_id": "not-a-uuid"},
+                        {"unknown": "extra"}, {"connection_id": None}]:
+            with self.subTest(changed=changed):
+                with self.assertRaises(oauth.ConnectionError):
+                    self.write({**self.original, "declined_callback": {**receipt, **changed}})
+                self.assertEqual(active_raw(self.store), before)
+        with self.assertRaises(oauth.ConnectionError):
+            self.write({**self.next, "declined_callback": receipt})
+        self.assertEqual(active_raw(self.store), before)
+        declined = {**self.original, "declined_callback": receipt}
+        self.write(declined)
+        self.assertEqual(self.read(), declined)
 
     def test_delete_then_failed_add_cannot_erase_active_slot(self):
         self.write(self.next)

@@ -123,7 +123,7 @@ def validate_record(value: dict):
     pending = base | {"connection_id"}
     tokens = pending | {"integration_key", "access_token", "refresh_token", "expires_at"}
     fields = {
-        Phase.DISCONNECTED: base,
+        Phase.DISCONNECTED: base | ({"declined_callback"} if "declined_callback" in value else set()),
         Phase.AUTHORIZING: pending | {"state", "verifier"},
         Phase.EXCHANGING: pending | {"integration_key"},
         Phase.CONNECTED: tokens,
@@ -137,14 +137,22 @@ def validate_record(value: dict):
     identifier = text(value["configuration_id"], "invalid_connection_record")
     if len(identifier) != 64 or any(character not in "0123456789abcdef" for character in identifier):
         raise ConnectionError("invalid_connection_record")
-    for key in fields[phase] - {"phase", "configuration_id", "expires_at"}:
+    for key in fields[phase] - {"phase", "configuration_id", "expires_at", "declined_callback"}:
         text(value[key], "invalid_connection_record")
-    if "connection_id" in value:
+    connections = [value["connection_id"]] if "connection_id" in value else []
+    if "declined_callback" in value:
+        declined = value["declined_callback"]
+        if (not isinstance(declined, dict) or set(declined) != {"kind", "connection_id", "state"}
+                or declined["kind"] != "declined"):
+            raise ConnectionError("invalid_connection_record")
+        text(declined["state"], "invalid_connection_record")
+        connections.append(text(declined["connection_id"], "invalid_connection_record"))
+    for identity in connections:
         try:
-            connection = uuid.UUID(value["connection_id"])
+            connection = uuid.UUID(identity)
         except ValueError:
             raise ConnectionError("invalid_connection_record") from None
-        if str(connection) != value["connection_id"] or connection.version != 4:
+        if str(connection) != identity or connection.version != 4:
             raise ConnectionError("invalid_connection_record")
     if "expires_at" in value and not positive_finite(value["expires_at"]):
         raise ConnectionError("invalid_connection_record")
@@ -222,12 +230,14 @@ class PrivateStore:
     All file operations are relative to the original directory descriptor.
     Symlinks, hard-linked files and a replaced directory are refused. This is
     backend storage under the operator's UID, not an OS isolation boundary.
+    Provisioning is explicit; readers never create a missing directory.
     """
-    def __init__(self, directory: Path, *, records=None):
+    def __init__(self, directory: Path, *, records=None, provision: bool = False):
         if not directory.is_absolute():
             raise ConnectionError("store_path_not_absolute")
         self.directory = directory
-        self.directory.mkdir(mode=0o700, exist_ok=True)
+        if provision:
+            self.directory.mkdir(mode=0o700, exist_ok=True)
         self.identity = self._directory_identity()
         self.thread_lock = threading.RLock()
         namespace = json.dumps([os.getuid(), str(directory.resolve()), *self.identity],
@@ -248,8 +258,10 @@ class PrivateStore:
         return info.st_dev, info.st_ino
 
     @contextmanager
-    def locked(self):
-        with self.thread_lock:
+    def locked(self, *, blocking=True):
+        if not self.thread_lock.acquire(blocking=blocking):
+            raise ConnectionError("secret_store_busy")
+        try:
             if self._directory_identity() != self.identity:
                 raise ConnectionError("secret_store_replaced")
             root = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -261,7 +273,7 @@ class PrivateStore:
                 lock = os.open("connection.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
                                | os.O_NONBLOCK, 0o600, dir_fd=root)
                 self._owned(os.fstat(lock))
-                fcntl.flock(lock, fcntl.LOCK_EX)
+                fcntl.flock(lock, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
                 yield root
                 if self._directory_identity() != self.identity:
                     raise ConnectionError("secret_store_replaced")
@@ -269,6 +281,8 @@ class PrivateStore:
                 if lock is not None:
                     os.close(lock)
                 os.close(root)
+        finally:
+            self.thread_lock.release()
 
     def _reference(self, root: int) -> int | None:
         try:
@@ -402,22 +416,107 @@ class Connector:
             return {"phase": phase.value, "connected": phase is Phase.CONNECTED}
 
     def begin(self) -> dict:
-        """Operator-only result: MUST NOT enter MCP results or Lane rows."""
+        """Operator-only result: MUST NOT enter public MCP results or Lane rows."""
         with self.store.locked() as root:
             old = self._read(root)
             if Phase(old["phase"]) is not Phase.DISCONNECTED:
                 raise ConnectionError("disconnect_before_connecting")
             state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(64)
+            connection_id = str(uuid.uuid4())
             challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
             self.store.write(root, {"phase": Phase.AUTHORIZING.value,
                                     "configuration_id": self.configuration.identity,
-                                    "connection_id": str(uuid.uuid4()),
+                                    "connection_id": connection_id,
                                     "state": state, "verifier": verifier})
             parameters = {"response_type": "code", "client_id": self.configuration.client_id,
                           "redirect_uri": self.configuration.redirect_uri, "scope": SCOPES,
                           "state": state, "code_challenge": challenge,
                           "code_challenge_method": "S256"}
-            return {"authorization_url": WEB_ORIGIN + "/oauth/authorize?" + parse.urlencode(parameters)}
+            return {"authorization_url": WEB_ORIGIN + "/oauth/authorize?" + parse.urlencode(parameters),
+                    "connection_id": connection_id}
+
+    def callback_receipt(self) -> dict | None:
+        """Private observation of a durably captured key, never a use grant.
+
+        Only post-capture records carry a key. A busy/unavailable store must
+        not be replaced with an acknowledgement derived from UI state.
+        """
+        with self.store.locked(blocking=False) as root:
+            record = self._read(root)
+            if Phase(record["phase"]) in {Phase.EXCHANGING, Phase.CONNECTED, Phase.REFRESHING, Phase.REVOKING}:
+                # write() verifies the protected payload before publishing its
+                # reference. Confirm that reference even if the original
+                # directory fsync failed and its response became uncertain.
+                os.fsync(root)
+                return {"kind": "captured", "connection_id": record["connection_id"]}
+            return None
+
+    def authorization_identity(self) -> dict:
+        """Private operator continuation; never includes PKCE verifier/tokens."""
+        with self.store.locked() as root:
+            record = self._read(root)
+            if Phase(record["phase"]) is not Phase.AUTHORIZING:
+                raise ConnectionError("authorization_not_pending")
+            return {"state": record["state"], "connection_id": record["connection_id"]}
+
+    def cancel_authorization(self, *, expected_state: str, expected_connection_id: str) -> dict:
+        """Cancel exactly the pending authorization the operator was shown.
+
+        The authoritative phase and both identities are checked under the
+        same lock as the write. A late UI request cannot cancel a later
+        attempt or revoke an authorization whose callback has already begun.
+        This private operation never sends a provider request.
+        """
+        with self.store.locked() as root:
+            record = self._read(root)
+            if (Phase(record["phase"]) is not Phase.AUTHORIZING
+                    or not isinstance(expected_state, str)
+                    or not isinstance(expected_connection_id, str)):
+                raise ConnectionError("authorization_cancel_refused")
+            try:
+                matches_state = secrets.compare_digest(expected_state.encode(), record["state"].encode())
+                matches_connection = secrets.compare_digest(expected_connection_id.encode(),
+                                                              record["connection_id"].encode())
+            except UnicodeError:
+                raise ConnectionError("authorization_cancel_refused") from None
+            if not matches_state or not matches_connection:
+                raise ConnectionError("authorization_cancel_refused")
+            self.store.write(root, self._disconnected())
+            return {"phase": Phase.DISCONNECTED.value, "connected": False}
+
+    def decline_authorization(self, *, expected_state: str, expected_connection_id: str) -> dict:
+        """Commit the exact callback acknowledgement with its cancellation.
+
+        Redelivery may recover only this same state/connection receipt. A new
+        attempt replaces it, while ordinary cancellation and views do not
+        manufacture a declined callback. The protected record alone owns it.
+        """
+        def matches(identity):
+            if not isinstance(expected_state, str) or not isinstance(expected_connection_id, str):
+                return False
+            try:
+                return (secrets.compare_digest(expected_state.encode(), identity["state"].encode())
+                        and secrets.compare_digest(expected_connection_id.encode(),
+                                                   identity["connection_id"].encode()))
+            except UnicodeError:
+                return False
+
+        with self.store.locked() as root:
+            record = self._read(root)
+            phase = Phase(record["phase"])
+            if phase is Phase.AUTHORIZING and matches(record):
+                declined = {"kind": "declined", "connection_id": record["connection_id"],
+                            "state": record["state"]}
+                self.store.write(root, {**self._disconnected(), "declined_callback": declined})
+            elif (phase is Phase.DISCONNECTED and "declined_callback" in record
+                  and matches(record["declined_callback"])):
+                declined = record["declined_callback"]
+                # A prior reference rename can be visible after its directory
+                # sync failed. Confirm that same commit before acknowledging it.
+                os.fsync(root)
+            else:
+                raise ConnectionError("authorization_decline_refused")
+            return {"kind": declined["kind"], "connection_id": declined["connection_id"]}
 
     def _tokens(self, value: dict) -> dict:
         if not isinstance(value, dict):
@@ -511,7 +610,7 @@ class Connector:
             if phase is Phase.DISCONNECTED:
                 return {"phase": phase.value, "connected": False}
             if phase is Phase.AUTHORIZING:
-                self.store.write(root, self._disconnected())
+                raise ConnectionError("authorization_cancel_required")
             elif phase is Phase.CONNECTED:
                 # Revocation also needs a current access token. Only a known
                 # CONNECTED record can rotate; unknown refresh/revoke states

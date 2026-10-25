@@ -12,10 +12,12 @@ Browser Add-on session, through verified website sign-in and continuation.
 `oauth.py` owns the production OAuth code/PKCE exchange and rotating tokens in a
 separate operator-owned private store. Its only model-safe projection is
 `Connector.status()`. `begin()` is an operator-only control: its authorization
-URL must never enter a tool result, Ask text, observation, log or model context.
-The HTTPS callback must authenticate the operator, capture `integration_key`
-from the fragment, clear that fragment, and call `complete()` with the matching
-state. Tokens use the fixed production API origin and redirects are refused.
+URL must never enter a public tool result, Ask text, observation, log or model context.
+The HTTPS callback authenticates the operator and sends the original
+`integration_key` fragment to `complete()` with the matching state and connection.
+It preserves the URL/window or manual input until the backend confirms durable
+capture of that original key; only then may the page clear its URL and close.
+Tokens use the fixed production API origin and redirects are refused.
 
 `credentials(use, expected_connection_id=...)` is a backend callback, not a public
 tool. A browser operation pins `connection_identity()` at creation and retains
@@ -47,13 +49,38 @@ An existing plaintext `connection.json` is refused, preserved and not migrated;
 the operator must reconcile/revoke that old connection before removing its
 private plaintext record and starting a new connection.
 
+## Private connection controls
+
+The package now advertises the non-exportable `lane_operator` port for `view`,
+`connect`, `complete` and transaction-pinned `cancel`. The host's existing Add-on
+panel provides its connection form through the [private operator control
+contract](../../docs/design/lane-addon-operator-controls.md). Register the exact
+HTTPS URL `<your MASC origin>/addons/oauth/callback` with 1Password. The callback
+return is sent through authenticated private POST before the fragment is cleared.
+The private `callback_receipt` names the original connection and distinguishes
+key capture from a durably confirmed decline. Capture does not claim connection
+success: an exchange failure can leave a captured key with reconciliation still
+required. A lost response permits explicit redelivery of that same original
+return; the one-use code exchange is not reexecuted after its durable marker.
+For a decline, the protected disconnected record retains the exact receipt and
+original state together. Only a validated `access_denied` redelivery with that
+same state and connection can recover the receipt; generic views and manual
+cancellation do not return it, and a replacement attempt cannot borrow it.
+Unconfirmed/busy storage produces no capture acknowledgement. No tokens or PKCE
+verifier are returned to the page. Keyless, account-pinned recovery and confirmed
+remote revocation remain unfinished; another connection's key is never reused.
+
+These changes are source implementation, not an installed-host or real-account
+connection result. The previously installed development package still provides
+status only.
+
 ## Docking contract still to implement
 
-1. An authenticated operator surface for connect, callback, approval links,
+1. Extend the private connection controls with approval links, confirmed remote
    revocation and explicit interrupted-exchange recovery. A new account must not
    borrow an earlier account's integration key.
-2. Complete the status-only package's login tools and operator UI integration
-   through existing Lane Add-on discovery and host-context caller identity.
+2. Complete the package's login tools through existing Lane Add-on discovery
+   and host-context caller identity.
 3. Supported 1Password extension loading in the original owned Chromium session.
    `createAccessRequest`, status and `fillCredential` run under that Browser
    Add-on's existing page-operation ownership. No separate CDP fill bypass.
@@ -69,8 +96,10 @@ private plaintext record and starting a new connection.
 
 ## Verification
 
-Run `python3 -m unittest discover -s addons/tests -p test_onepassword_oauth.py`.
-The checks use a transport fixture, never a personal account or real tokens.
+Run `python3 -m unittest discover -s addons/tests -p 'test_onepassword_*.py'`.
+The checks use transport fixtures and actual MCP subprocesses, never a personal
+account or real tokens. The private callback checks also verify that public
+status/observations contain none of the fixture OAuth material.
 
 ## Install the development status connector
 

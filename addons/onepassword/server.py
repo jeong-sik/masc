@@ -1,15 +1,15 @@
-"""Model-safe MCP surface. OAuth URLs and credentials have no dispatch here."""
+"""Model-safe exports plus a separate, non-exportable operator control port."""
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 import stat
 import sys
 import time
+from urllib import parse
 
-from oauth import Configuration, ConnectionError, Connector, Phase, PrivateStore
+from oauth import Configuration, ConnectionError, Connector, Phase, PrivateStore, https_url
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from protocol import INPUT_SCHEMA, OUTPUT_SCHEMA, InvalidInput, decode_json, encode_output
@@ -33,6 +33,12 @@ CONTROL_SCHEMA = {"type": "object", "additionalProperties": False,
                   "properties": {"tool": {"type": "string"}, "arguments": EMPTY,
                                  "caller": {"type": "object"}},
                   "required": ["tool", "arguments", "caller"]}
+OPERATOR_SCHEMA = {"type": "object", "additionalProperties": False,
+                   "properties": {"action": {"type": "string", "enum": ["view", "connect", "complete", "cancel"]},
+                                  "arguments": {"type": "object", "additionalProperties": False,
+                                                "properties": {key: {"type": "string"} for key in
+                                                               ["state", "connection_id", "callback_url"]}}},
+                   "required": ["action", "arguments"]}
 
 
 def private_text(path: Path):
@@ -48,10 +54,10 @@ def private_text(path: Path):
         os.close(fd)
 
 
-def load_connector(path: Path):
+def load_connector(path: Path, *, provision=False):
     if not path.is_absolute():
         raise ConnectionError("configuration_path_not_absolute")
-    config = json.loads(private_text(path))
+    config = decode_json(private_text(path))
     if (not isinstance(config, dict) or set(config) != {
             "client_id", "client_secret_file", "redirect_uri", "store_directory"}):
         raise ConnectionError("invalid_configuration")
@@ -60,14 +66,114 @@ def load_connector(path: Path):
         raise ConnectionError("configuration_path_not_absolute")
     configuration = Configuration(config["client_id"], private_text(paths[0]).removesuffix("\n"),
                                   config["redirect_uri"])
-    if not paths[1].exists():
-        raise ConnectionError("connection_store_not_provisioned")
-    return Connector(configuration, PrivateStore(paths[1]))
+    return Connector(configuration, PrivateStore(paths[1], provision=provision))
 
 
 class Worker:
     def __init__(self, configuration: Path):
         self.configuration = configuration
+
+    def operator(self, envelope):
+        if (not isinstance(envelope, dict) or set(envelope) != {"action", "arguments"}
+                or not isinstance(envelope["arguments"], dict)):
+            raise InvalidInput("invalid private operator request")
+        action, arguments = envelope["action"], envelope["arguments"]
+        expected = {"view": set(), "connect": set(), "complete": {"state", "connection_id", "callback_url"},
+                    "cancel": {"state", "connection_id"}}
+        if (not isinstance(action, str) or action not in expected or set(arguments) != expected[action]
+                or not all(isinstance(value, str) and value for value in arguments.values())):
+            raise InvalidInput("invalid private operator action")
+        connector = None
+        try:
+            connector = load_connector(self.configuration, provision=action in {"view", "connect"})
+            if action == "connect":
+                pending = connector.begin()
+                view = self.operator_view(connector)
+                callback = view.get("callback")
+                if (callback is None
+                        or callback["arguments"]["connection_id"] != pending["connection_id"]):
+                    raise ConnectionError("authorization_attempt_mismatch")
+                return {**view, "open_url": pending["authorization_url"]}
+            if action == "cancel":
+                connector.cancel_authorization(expected_state=arguments["state"],
+                                               expected_connection_id=arguments["connection_id"])
+            elif action == "complete":
+                callback = parse.urlsplit(arguments["callback_url"])
+                configured = parse.urlsplit(connector.configuration.redirect_uri)
+                if (callback.scheme, callback.netloc, callback.path) != (configured.scheme, configured.netloc, configured.path):
+                    raise ConnectionError("callback_destination_mismatch")
+                query = parse.parse_qs(callback.query, strict_parsing=True, keep_blank_values=True)
+                fragment = parse.parse_qs(callback.fragment, strict_parsing=True, keep_blank_values=True)
+                declined = "error" in query
+                required = {"error", "state"} if declined else {"code", "state"}
+                if (not required <= set(query)
+                        or not set(query) <= required | {"iss", "base_url"}
+                        or set(fragment) != (set() if declined else {"integration_key"})
+                        or any(len(values) != 1 or not values[0] for values in [*query.values(), *fragment.values()])
+                        or query["state"][0] != arguments["state"]):
+                    raise ConnectionError("invalid_callback")
+                # Optional provider metadata never changes the configured
+                # token endpoint, client binding or redirect authority.
+                for key in {"iss", "base_url"} & set(query):
+                    value = query[key][0]
+                    if any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value):
+                        raise ConnectionError("invalid_callback")
+                    https_url(value)
+                    if key == "base_url" and parse.urlsplit(value).path not in {"", "/"}:
+                        raise ConnectionError("invalid_callback")
+                if declined:
+                    if query["error"] != ["access_denied"]:
+                        raise ConnectionError("invalid_callback")
+                    receipt = connector.decline_authorization(expected_state=query["state"][0],
+                                                              expected_connection_id=arguments["connection_id"])
+                    return {**self.operator_view(connector), "callback_receipt": receipt}
+                else:
+                    identity = connector.authorization_identity()
+                    if identity != {key: arguments[key] for key in ["state", "connection_id"]}:
+                        raise ConnectionError("callback_attempt_mismatch")
+                    connector.complete(state=query["state"][0], code=query["code"][0],
+                                       integration_key=fragment["integration_key"][0])
+            return self.operator_view(connector)
+        except (ConnectionError, OSError, InvalidInput, ValueError, TypeError, KeyError, UnicodeError):
+            # The operator learns only a fixed outcome. The durable backend
+            # phase, not an exception's wording, decides whether reconnect is safe.
+            return self.with_callback_receipt(connector, {
+                "title": "1Password", "message": "Connection unavailable. Inspect the account connection before another attempt.",
+                "actions": [{"id": "view", "label": "Inspect connection", "arguments": {}, "fields": []}]})
+
+    @staticmethod
+    def with_callback_receipt(connector, view):
+        if connector is not None:
+            try:
+                receipt = connector.callback_receipt()
+            except (ConnectionError, OSError, ValueError, TypeError, KeyError, UnicodeError):
+                receipt = None
+            if receipt is not None:
+                return {**view, "callback_receipt": receipt}
+        return view
+
+    def operator_view(self, connector):
+        status = connector.status()
+        phase = Phase(status["phase"])
+        actions = []
+        messages = {Phase.DISCONNECTED: "Connect your personal 1Password account.",
+                    Phase.AUTHORIZING: "Approve the connection in 1Password, then return here.",
+                    Phase.CONNECTED: "Account connected. Browser login docking is still under development.",
+                    Phase.RECONNECT_REQUIRED: "A previous connection operation has an unknown outcome. Reconcile it with 1Password before reconnecting."}
+        callback = None
+        if phase is Phase.DISCONNECTED:
+            actions.append({"id": "connect", "label": "Connect 1Password", "arguments": {}, "fields": [], "opens_window": True})
+        elif phase is Phase.AUTHORIZING:
+            identity = connector.authorization_identity()
+            actions.extend([
+                {"id": "complete", "label": "Finish connection", "arguments": identity,
+                 "fields": [{"name": "callback_url", "label": "Returned connection URL", "secret": True}]},
+                {"id": "cancel", "label": "Cancel this connection attempt", "arguments": identity, "fields": []}])
+            callback = {"action": "complete", "field": "callback_url", "arguments": identity, "state": identity["state"]}
+        result = {"title": "1Password", "message": messages[phase], "actions": actions}
+        if callback is not None:
+            result["callback"] = callback
+        return self.with_callback_receipt(connector, result)
 
     def status(self):
         # Only this first boundary constructs public data. No provider or OS
@@ -154,7 +260,9 @@ def serve(worker):
                                          "inputSchema": INPUT_SCHEMA, "outputSchema": OUTPUT_SCHEMA},
                                         STATUS_TOOL,
                                         {"name": "lane_call", "description": "Private host caller port.",
-                                         "inputSchema": CONTROL_SCHEMA}]}
+                                         "inputSchema": CONTROL_SCHEMA},
+                                        {"name": "lane_operator", "description": "Private authenticated operator controls.",
+                                         "inputSchema": OPERATOR_SCHEMA}]}
                 case "tools/call":
                     try:
                         match params.get("name"):
@@ -162,9 +270,12 @@ def serve(worker):
                                 value = worker.observe(params.get("arguments"))
                             case "lane_call":
                                 value = worker.admitted(params.get("arguments"))
+                            case "lane_operator":
+                                value = worker.operator(params.get("arguments"))
                             case _:
                                 raise InvalidInput("use the host-admitted exported tool")
-                        result = tool_result(value)
+                        result = (tool_result(value) if params.get("name") != "lane_operator" else
+                                  {"content": [], "structuredContent": value, "isError": False})
                     except InvalidInput:
                         result = {"content": [{"type": "text", "text": "connector input or caller refused"}],
                                   "isError": True}

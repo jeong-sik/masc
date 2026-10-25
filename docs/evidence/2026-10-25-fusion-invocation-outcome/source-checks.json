@@ -1,0 +1,21 @@
+{
+  "base": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+  "checks": {
+    "ocaml_parse": "PASS",
+    "whitespace": "PASS",
+    "typecheck": "NOT_RUN",
+    "execution": "NOT_RUN"
+  },
+  "source_sha256": {
+    "lib/fusion/fusion_metrics.mli": "f682a9bf6c82eae185aa4b909da4cd4c35fc3d8dea0f7558fefd260d8c7a4158",
+    "lib/fusion/fusion_metrics.ml": "2a67393c533d4cbf60e45f4d733a133b9cad66caf74796219c4a69f540b628ea",
+    "lib/fusion/fusion_orchestrator.ml": "6e81d38531e1fd51a9f5f021400693607d9dcf1614c76d6bffe03faa122a18b9",
+    "test/test_fusion_metrics.ml": "efa4dc28a7234a15b548dfa2775437b58337395552f78ef340e50818ad58b38e",
+    "test/test_fusion_wake.ml": "c2c38b1bb66bc2d89ca8ccac7ef7ebf55be3cfc0d4d95d6850fec96035e2399d"
+  },
+  "requested_suites": [
+    "test/test_fusion_metrics",
+    "test/test_fusion_wake"
+  ],
+  "full_regression": "NOT_RUN"
+}

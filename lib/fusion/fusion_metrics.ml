@@ -49,14 +49,31 @@ let record_judge_execution ~topology node =
       ]
     ()
 
-let record_invocation ~topology outcome =
-  let outcome_label =
-    match outcome with
-    | `Denied -> "denied"
-    | `Sink_failed -> "sink_failed"
-    | `Completed -> "completed"
-  in
+type delivery = Recorded | Sink_failed
+
+let record ~topology ~outcome ~judge_result =
   Otel_metric_store_core.inc_counter
     metric_fusion_invocations_total
-    ~labels:[ "topology", topology_label topology; "outcome", outcome_label ]
+    ~labels:[ "topology", topology_label topology; "outcome", outcome;
+              "judge_result", judge_result ]
     ()
+
+let record_denied ~topology =
+  record ~topology ~outcome:"denied" ~judge_result:"not_attempted"
+
+let record_projection ~topology ~delivery (evidence : deliberation_evidence) =
+  let judge_result =
+    match evidence.judge with
+    | Error _ ->
+      (match evidence.judges with
+       | [] -> "not_attempted"
+       | _ :: _ -> "failed")
+    | Ok _ ->
+      if List.exists
+           (function Synthesized _ -> false | Judge_failed _ -> true)
+           evidence.judges
+      then "synthesized_with_failures"
+      else "synthesized"
+  in
+  let outcome = match delivery with Recorded -> "completed" | Sink_failed -> "sink_failed" in
+  record ~topology ~outcome ~judge_result

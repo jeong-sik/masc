@@ -1,0 +1,3 @@
+### Fixed
+
+- Distinguish Fusion's delivered judge success, failure, skipped judgment and successful fallback with failed judge nodes in invocation metrics, separately from sink delivery success or failure. Refs #25913, #23005.

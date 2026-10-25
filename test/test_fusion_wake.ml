@@ -434,6 +434,83 @@ let discord_channel =
   |> Result.get_ok
 ;;
 
+(* Exercise the production projection, including real Board/chat/durable wake,
+   then reject a changed replay through that same sink. No provider is called:
+   these are already-computed terminal records, not dispatch evidence. *)
+let test_projection_metrics_preserve_judge_result () =
+  let synthesis = judge_synthesis "retained synthesis" in
+  let successful = Fusion_types.Synthesized
+      { role = Single; synthesis; usage = Fusion_types.zero_usage } in
+  let failed = Fusion_types.Judge_failed
+      { failed_role = Refine_pass; failure = Parse_error "private parse failure";
+        usage = Fusion_types.zero_usage; elapsed_s = None } in
+  let cases =
+    [ "synthesized", Ok synthesis, [successful]
+    ; "synthesized_with_failures", Ok synthesis, [successful; failed]
+    ; "failed", Error (Fusion_types.Parse_error "private parse failure"), [failed]
+    ; "not_attempted", Error (Fusion_types.Panels_unavailable "quorum not met"), []
+    ] in
+  let counter outcome judge_result =
+    Otel_metric_store.metric_value_or_zero
+      Fusion_metrics.metric_fusion_invocations_total
+      ~labels:["topology", "simple"; "outcome", outcome; "judge_result", judge_result] () in
+  List.iter (fun (expected, judge, judges) ->
+    with_isolated_base_path "fusion-projection-metrics" (fun base_dir registry ->
+      let keeper = "metric-keeper" in
+      let run_id = Printf.sprintf "metric-%d" (Random.bits ()) in
+      let request : Fusion_types.fusion_request =
+        { run_id; keeper; prompt = "retained question"; preset = "unit-test";
+          web_tools = false; roster = Fusion_types.preset_roster;
+          depth = Fusion_types.Fusion_depth.Top; trigger = Fusion_types.Explicit_tool_call } in
+      let evidence : Fusion_types.deliberation_evidence =
+        { question = request.prompt; panel = []; judge; judges;
+          judge_usage = Fusion_types.zero_usage; tool_trace = Fusion_types.empty_tool_trace;
+          seat_routes = [] } in
+      Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:request.preset
+        ~roster:request.roster ~topology:Fusion_types.Simple ~started_at:1.;
+      let project evidence = Fusion_orchestrator.project ~registry ~base_dir
+          ~topology:Fusion_types.Simple ~channel:discord_channel ~request evidence in
+      let completed_before = counter "completed" expected in
+      check bool "actual terminal projection succeeds" true (Result.is_ok (project evidence));
+      check (float 0.) "delivery success retains independent judge result"
+        (completed_before +. 1.) (counter "completed" expected);
+      check int "actual delivery creates one durable wake" 1
+        (Keeper_event_queue.length
+           (Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper));
+      let failed_before = counter "sink_failed" expected in
+      check bool "actual sink rejects conflicting replay" true
+        (Result.is_error (project {evidence with question = "changed question"}));
+      check (float 0.) "delivery failure retains independent judge result"
+        (failed_before +. 1.) (counter "sink_failed" expected);
+      check (float 0.) "failed sink never counts a successful delivery"
+        (completed_before +. 1.) (counter "completed" expected);
+      check int "conflict adds no durable wake" 1
+        (Keeper_event_queue.length
+           (Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper)))) cases
+;;
+
+let test_policy_denial_metrics_do_not_invent_judge_execution () =
+  with_isolated_eio_base_path "fusion-denied-metrics" (fun env sw base_dir _registry ->
+    let labels = ["topology", "simple"; "outcome", "denied";
+                  "judge_result", "not_attempted"] in
+    let count () = Otel_metric_store.metric_value_or_zero
+        Fusion_metrics.metric_fusion_invocations_total ~labels () in
+    let before = count () in
+    let policy : Fusion_policy.t =
+      { enabled = false; default_preset = "not-used"; presets = [];
+        staged_judge_group_size = Fusion_policy.default_staged_judge_group_size } in
+    let request : Fusion_types.fusion_request =
+      { run_id = "denied-metrics"; keeper = "metric-keeper"; prompt = "no dispatch";
+        preset = "not-used"; web_tools = false; roster = Fusion_types.preset_roster;
+        depth = Fusion_types.Fusion_depth.Top; trigger = Fusion_types.Explicit_tool_call } in
+    (match Fusion_orchestrator.compute ~base_dir ~sw ~net:env#net ~policy
+             ~topology:Fusion_types.Simple ~request () with
+     | Compute_denied _ -> ()
+     | Computed _ -> fail "disabled policy unexpectedly computed evidence");
+    check (float 0.) "actual policy refusal is visible as not_attempted"
+      (before +. 1.) (count ()))
+;;
+
 let test_emit_success_projects_board_chat_and_registry () =
   with_isolated_base_path "fusion-success-sink" (fun base_dir registry ->
     let keeper = "fusion-keeper" in
@@ -1202,6 +1279,10 @@ let () =
             "missing board_post_id falls back to fusion-run id"
             `Quick
             test_missing_board_post_id_fallback
+        ; test_case "actual policy denial records no judge attempt"
+            `Quick test_policy_denial_metrics_do_not_invent_judge_execution
+        ; test_case "actual projection metrics retain judge result through success and sink failure"
+            `Quick test_projection_metrics_preserve_judge_result
         ; test_case
             "emit success projects board, chat block, and registry"
             `Quick

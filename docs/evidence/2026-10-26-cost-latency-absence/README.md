@@ -38,3 +38,11 @@ is separate from typechecking or execution; no local Dune was run.
 This is the export/decoder slice. It does not repair or prove upstream provider
 omission preservation, cost-ledger producer semantics, all 11 retained #25852
 members, a visible browser dashboard, full regression, installation or deployment.
+
+Full Dashboard typecheck was attempted and failed: TS2532 at
+src/api/keeper.test.ts:687 and TS2322 at src/keeper-stream.test.ts:1862,1873.
+These files are outside this diff; no baseline typecheck was run, so this is
+recorded as a failed full check rather than a passing or proven pre-existing one.
+Corrected selected server run:
+https://github.com/jeong-sik/masc/actions/runs/40236647411
+at a3d6cd09380529b2fa8e36e146b1e18db7421cd0, outcome unverified.

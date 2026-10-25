@@ -517,6 +517,54 @@ let test_wire_schema_cache_shared_with_tool_schema_to_json () =
     (Tool.wire_bytes_of_schema schema)
 ;;
 
+let test_wire_schema_byte_count_preserves_shared_json () =
+  let schema description =
+    Types.tool_schema_of_params
+      ~name:"byte_count_identity"
+      ~description
+      ~parameters:[]
+      ()
+  in
+  let first_schema = schema "측정 \"값\"\n" in
+  let second_schema = schema "short" in
+  let first_count = Tool.wire_bytes_of_schema first_schema in
+  let first_json = Tool.wire_json_of_schema first_schema in
+  let second_count = Tool.wire_bytes_of_schema second_schema in
+  let second_json = Tool.wire_json_of_schema second_schema in
+  check int "byte-first measurement includes UTF-8 and escaping"
+    (String.length (Yojson.Safe.to_string first_json)) first_count;
+  check int "same name retains its distinct wire length"
+    (String.length (Yojson.Safe.to_string second_json)) second_count;
+  check bool "fixture exercises different byte lengths" true
+    (first_count <> second_count);
+  check int "another schema does not replace the measured length"
+    first_count (Tool.wire_bytes_of_schema first_schema);
+  check bool "publishing the length preserves the cached JSON identity" true
+    (first_json == Tool.wire_json_of_schema first_schema)
+;;
+
+let test_wire_schema_byte_count_across_domains () =
+  let schema =
+    Types.tool_schema_of_params
+      ~name:"domain_byte_count"
+      ~description:"동시 측정"
+      ~parameters:[]
+      ()
+  in
+  let json = Tool.wire_json_of_schema schema in
+  let expected = String.length (Yojson.Safe.to_string json) in
+  let other = Domain.spawn (fun () ->
+    Tool.wire_bytes_of_schema schema, Tool.wire_json_of_schema schema)
+  in
+  let local_count = Tool.wire_bytes_of_schema schema in
+  let other_count, other_json = Domain.join other in
+  check int "local measurement" expected local_count;
+  check int "other domain measurement" expected other_count;
+  check bool "both domains retain the original JSON" true (json == other_json);
+  check int "published measurement remains exact"
+    expected (Tool.wire_bytes_of_schema schema)
+;;
+
 let () =
   run
     "Tool"
@@ -584,6 +632,14 @@ let () =
             "tool and schema entry points share the memo"
             `Quick
             test_wire_schema_cache_shared_with_tool_schema_to_json
+        ; test_case
+            "byte-first measurement preserves JSON identity and exact length"
+            `Quick
+            test_wire_schema_byte_count_preserves_shared_json
+        ; test_case
+            "byte measurements agree across domains"
+            `Quick
+            test_wire_schema_byte_count_across_domains
         ] )
     ; ( "with_defaults"
       , [ test_case "injects missing args" `Quick (fun () ->

@@ -6641,3 +6641,9 @@
 (include stanzas/test_keeper_held_session_restore.inc)
 
 (include stanzas/test_server_auxiliary_startup.inc)
+
+; Opt-in SDK timing/allocation output; not a dependency of the regression suite.
+(rule
+ (alias runtest-schema_wire_bytes_bench)
+ (action
+  (run %{exe:../packages/agent_core/bench/schema_wire_bytes_bench.exe})))

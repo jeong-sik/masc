@@ -37,6 +37,16 @@ let tool_result_msg ~tool_use_id ~content : Types.message =
 let sum_counts counts =
   List.fold_left (fun acc (_, n) -> acc + n) 0 counts
 
+let schema_tool description =
+  Agent_core.Tool.create
+    ~name:"wake_schema_bytes"
+    ~description
+    ~parameters:[]
+    (fun _ -> Ok { Types.content = ""; content_blocks = None; _meta = None })
+
+let wire_bytes tool =
+  String.length (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool))
+
 let test_text_only_message () =
   let m = text_msg Types.User "hello" in
   check int "text length only" 5 (WT.bytes_of_message_content m)
@@ -117,16 +127,26 @@ let test_compute_sizes_bytes_breakdown () =
       text_msg Types.Assistant "BB";  (* 2 bytes *)
     ]
   in
-  let tools = [] in
+  let first = schema_tool "요청 \"값\"\n" in
+  let second = schema_tool "short" in
+  let tools = [ first; second; first ] in
+  let expected_tool_bytes = 2 * wire_bytes first + wire_bytes second in
   let sizes =
     WT.compute_sizes ~system_prompt:"sys" ~tools ~history_messages:history
       ~user_message:"CCCC" (* 4 bytes *)
       ()
   in
   check int "system_prompt_bytes" 3 sizes.system_prompt_bytes;
-  check int "tool_schema_json_bytes (empty)" 0 sizes.tool_schema_json_bytes;
+  check int "wire bytes retain UTF-8, distinct schemas and list multiplicity"
+    expected_tool_bytes sizes.tool_schema_json_bytes;
   check int "message_content_bytes (1 + 2 + 4)" 7 sizes.message_content_bytes;
-  check int "tool_count" 0 sizes.tool_count
+  check int "tool_count retains repeated occurrences" 3 sizes.tool_count;
+  let repeated =
+    WT.compute_sizes ~system_prompt:"sys" ~tools ~history_messages:history
+      ~user_message:"CCCC" ()
+  in
+  check int "a repeated nonempty surface retains exact wire bytes"
+    expected_tool_bytes repeated.tool_schema_json_bytes
 
 let test_compute_sizes_uses_structured_pending_user_blocks () =
   let user_blocks =
@@ -198,6 +218,8 @@ let test_role_counts_are_stably_sorted () =
     sorted_keys keys
 
 let test_phase0_record_always_emits_observation () =
+  let tools = [ schema_tool "실제 도구 스키마" ] in
+  let expected_tool_bytes = List.fold_left (fun sum tool -> sum + wire_bytes tool) 0 tools in
   let meta =
     match
       (* The fixture fills every field the current keeper-meta schema
@@ -223,22 +245,25 @@ let test_phase0_record_always_emits_observation () =
     (fun () ->
        Masc.Keeper_keepalive_signal.register_record_wake_payload
          (fun ~keeper_name ~trace_id:_ ~turn_index:_ ~context_window:_
-           ~system_prompt_bytes ~tool_schema_json_bytes:_ ~message_content_bytes:_
-           ~message_count ~role_counts:_ ~tool_count:_ ->
-            observed := Some (keeper_name, system_prompt_bytes, message_count));
+           ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes:_
+           ~message_count ~role_counts:_ ~tool_count ->
+            observed := Some
+              ((keeper_name, system_prompt_bytes, message_count),
+               (tool_schema_json_bytes, tool_count)));
        Masc.Keeper_agent_run_phase0_telemetry.record
          ~meta
          ~turn_system_prompt:"system"
-         ~tools:[]
+         ~tools
          ~history_messages:[ text_msg Types.Assistant "previous" ]
          ~user_message:"next"
          ~start_turn_count:3
          ~max_context:4096
          ();
        check
-         (option (triple string int int))
+         (option (pair (triple string int int) (pair int int)))
          "phase-0 emits exact observation without an admission switch"
-         (Some ("wake-observation-test", String.length "system", 2))
+         (Some (("wake-observation-test", String.length "system", 2),
+                (expected_tool_bytes, 1)))
          !observed)
 
 let () =

@@ -8,7 +8,7 @@ const Value=Schema.Union(Schema.Struct({kind:Schema.Literal('value'),type:Schema
 export const FrameInputsSchema=Schema.Struct({forms:Schema.Record({key:Schema.String,value:Value}),app:Schema.Unknown.pipe(Schema.filter(isJsonObject))})
 export type FrameInputs=typeof FrameInputsSchema.Type
 export type AppFrame={readonly token:string;readonly document:string}
-export type AppFrameMessage={kind:'ready'}|{kind:'initialized'}|{kind:'change';change:number;commit:boolean;data:FrameInputs}
+export type AppFrameMessage=({kind:'ready'}|{kind:'initialized'}|{kind:'change';change:number;commit:boolean;data:FrameInputs})&{instance:string}
 export function artifactPreviewDocument(source:string):string {
   return '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src \'none\'; frame-src \'none\'; object-src \'none\'; base-uri \'none\'; form-action \'none\'">'+source
 }
@@ -16,11 +16,11 @@ export function frameInputs(data:JsonObject):FrameInputs {
   return Schema.decodeUnknownSync(FrameInputsSchema)({forms:Object.hasOwn(data,'forms')?data.forms:{},app:Object.hasOwn(data,'app')?data.app:{}})
 }
 export function appFrameMessage(frame:AppFrame,input:unknown):AppFrameMessage|null {
-  if(!isJsonObject(input)||input.token!==frame.token)return null
-  if(input.type==='masc.artifact.inputs.ready.v1')return {kind:'ready'}
-  if(input.type==='masc.artifact.inputs.initialized.v1')return {kind:'initialized'}
+  if(!isJsonObject(input)||input.token!==frame.token||typeof input.instance!=='string'||input.instance==='')return null
+  if(input.type==='masc.artifact.inputs.ready.v1')return {kind:'ready',instance:input.instance}
+  if(input.type==='masc.artifact.inputs.initialized.v1')return {kind:'initialized',instance:input.instance}
   if(input.type!=='masc.artifact.inputs.change.v1'||typeof input.change!=='number'||!Number.isSafeInteger(input.change)||input.change<1||typeof input.commit!=='boolean')return null
-  try{return {kind:'change',change:input.change,commit:input.commit,data:Schema.decodeUnknownSync(FrameInputsSchema)(input.data)}}catch{return null}
+  try{return {kind:'change',instance:input.instance,change:input.change,commit:input.commit,data:Schema.decodeUnknownSync(FrameInputsSchema)(input.data)}}catch{return null}
 }
 
 // Stringified into the opaque frame. Keep every runtime dependency inside this
@@ -28,12 +28,13 @@ export function appFrameMessage(frame:AppFrame,input:unknown):AppFrameMessage|nu
 function bootstrap(config:{token:string;marker:string},valid:typeof isJson):void {
   type Inputs=FrameInputs
   type Control=HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement
+  const instance=crypto.randomUUID()
   let initialized=false,formsReady=false,change=0,current:Inputs={forms:{},app:{}}
   let defaults:Inputs['forms']={}
   let resolveReady!:()=>void
   const ready=new Promise<void>(resolve=>{resolveReady=resolve})
   let pending:{change:number;resolve:()=>void;reject:(error:Error)=>void}|null=null
-  const send=(type:string,fields:object={})=>parent.postMessage({type,token:config.token,...fields},'*')
+  const send=(type:string,fields:object={})=>parent.postMessage({type,token:config.token,instance,...fields},'*')
   const controls=():Map<string,Control>=>{
     const result=new Map<string,Control>(),duplicates=new Set<string>()
     for(const node of document.querySelectorAll(`[${config.marker}]`)) {
@@ -91,7 +92,7 @@ function bootstrap(config:{token:string;marker:string},valid:typeof isJson):void
   })
   Object.defineProperty(window,'MASC',{value:Object.freeze({inputs:sdk}),writable:false,configurable:false})
   window.addEventListener('message',event=>{
-    if(event.source!==parent||event.data?.token!==config.token)return
+    if(event.source!==parent||event.data?.token!==config.token||event.data?.instance!==instance)return
     const message=event.data
     if(message.type==='masc.artifact.inputs.init.v1'||message.type==='masc.artifact.inputs.restore.v1') {
       if(initialized&&message.type==='masc.artifact.inputs.init.v1')return

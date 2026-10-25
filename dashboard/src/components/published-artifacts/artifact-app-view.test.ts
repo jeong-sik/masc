@@ -30,7 +30,7 @@ async function open(){
   const iframe=await screen.findByTitle('메모') as HTMLIFrameElement
   const frame=vi.mocked(artifactAppFrame).mock.results.at(-1)!.value as AppFrame
   const send=async(fields:object,source:MessageEventSource|null=iframe.contentWindow)=>{
-    await act(async()=>{window.dispatchEvent(new MessageEvent('message',{source,data:{token:frame.token,...fields}}))})
+    await act(async()=>{window.dispatchEvent(new MessageEvent('message',{source,data:{token:frame.token,instance:'first-document',...fields}}))})
   }
   await send({type:'masc.artifact.inputs.ready.v1'});await send({type:'masc.artifact.inputs.initialized.v1'})
   return {...result,iframe,frame,send,onPending}
@@ -67,4 +67,16 @@ it('stops a cached handler immediately on credential replacement, preserving its
   expect(get).toHaveBeenCalledTimes(reads);expect(post).not.toHaveBeenCalled()
   expect(iframe.style.visibility).toBe('hidden')
   expect(appInputRecoveries(workspace,initial)[0]?.data).toEqual({forms:{},app:{memo:'보관할 입력'}})
+})
+it('accepts new input after the same iframe restarts its bootstrap counter',async()=>{
+  const {send}=await open()
+  await send({type:'masc.artifact.inputs.change.v1',instance:'first-document',change:1,commit:true,data:{forms:{},app:{memo:'first'}}})
+  await screen.findByText('입력이 저장됐습니다.')
+  await send({type:'masc.artifact.inputs.ready.v1',instance:'reloaded-document'})
+  await send({type:'masc.artifact.inputs.initialized.v1',instance:'reloaded-document'})
+  await send({type:'masc.artifact.inputs.change.v1',instance:'reloaded-document',change:1,commit:true,data:{forms:{},app:{memo:'after reload'}}})
+  await waitFor(()=>expect(post).toHaveBeenCalledTimes(2))
+  expect(server.data).toEqual({forms:{},app:{memo:'after reload'}})
+  await send({type:'masc.artifact.inputs.change.v1',instance:'first-document',change:99,commit:true,data:{forms:{},app:{memo:'late old input'}}})
+  expect(post).toHaveBeenCalledTimes(2);expect(server.data).toEqual({forms:{},app:{memo:'after reload'}})
 })

@@ -137,3 +137,10 @@ contentWindow와 렌더마다 새 capability를 대조합니다. 전달하는 �
 해당 문서 입력과 저장 결과뿐이며 bearer·사용자 이름·다른 문서 경로를
 전달하지 않습니다. connect-src/frame-src/form-action은 계속 none이며
 빠른 미리보기는 스크립트와 입력 저장 bridge를 실행하지 않습니다.
+
+같은 iframe이 다시 로드되면 bootstrap마다 새 instance ID를 만듭니다.
+부모는 ready에서 새 instance를 연결하고 그 문서의 입력 번호를 처음부터
+받습니다. 기존 서버 요청은 바꾸지 않으며 저장 결과에는 요청 당시의
+instance를 유지합니다. 이전 문서의 늦은 입력·ACK는 새 문서의 입력이나
+SDK Promise에 적용하지 않습니다. 이 instance는 화면 수명만 구분하며
+저장 요청의 문서·사용자·버전 권한을 대신하지 않습니다.

@@ -7,7 +7,8 @@ import { retainAppInput,discardAppInput,appInputRecoveries,type AppRecovery } fr
 export type AppSessionMode='ready'|'saving'|'checking'|'unknown'|'retry'|'conflict'
 export type AppSessionSnapshot={mode:AppSessionMode;server:AppState;data:JsonObject;pending:boolean;recovery:AppRecovery|null;copies:readonly AppRecovery[]}
 type Options={initial:AppState;workspace:ArtifactWorkspace;current:()=>boolean;changed:(state:AppSessionSnapshot)=>void;
-  result:(change:number,status:'saved'|'error')=>void;restore:(inputs:FrameInputs)=>void}
+  result:(instance:string|null,change:number,status:'saved'|'error')=>void;restore:(inputs:FrameInputs)=>void}
+type Operation={request:AppRequest;change:number;instance:string|null}
 export class ArtifactAppSession {
   private readonly id=crypto.randomUUID()
   private active=true
@@ -15,12 +16,17 @@ export class ArtifactAppSession {
   private server:AppState
   private data:JsonObject
   private change=0
+  private instance:string|null=null
   private wanted=false
-  private frozen:{request:AppRequest;change:number}|null=null
+  private frozen:Operation|null=null
   private recovery:AppRecovery|null=null
   private imported:AppRecovery[]=[]
   constructor(private readonly options:Options){this.server=options.initial;this.data=structuredClone(options.initial.data);frameInputs(this.data)}
   private current():boolean{return this.active&&this.options.current()}
+  attachFrame(instance:string):void {
+    if(!this.current()||instance===''||this.instance===instance)return
+    this.instance=instance;this.change=0
+  }
   snapshot():AppSessionSnapshot {
     return {mode:this.mode,server:this.server,data:this.data,pending:this.frozen!==null||!equalJson(this.data,this.server.data),recovery:this.recovery,
       copies:appInputRecoveries(this.options.workspace,this.server).filter(copy=>copy.id!==this.id)}
@@ -29,22 +35,22 @@ export class ArtifactAppSession {
   refreshCopies():void{this.emit()}
   private retain():void{this.recovery=retainAppInput(this.id,this.options.workspace,this.server,this.data,this.frozen?.request??null)}
   input(inputs:FrameInputs,change:number,commit:boolean):void {
-    if(!this.current()||change<=this.change)return
+    if(!this.current()||this.instance===null||change<=this.change)return
     this.change=change
     this.data=structuredClone({...this.data,forms:inputs.forms,app:inputs.app})
     if(this.frozen||!equalJson(this.data,this.server.data))this.retain()
     else if(this.mode==='ready'&&this.recovery){discardAppInput(this.recovery);this.recovery=null}
     if(commit){
       if(this.mode==='ready'||this.mode==='saving')this.wanted=true
-      else this.options.result(change,'error')
+      else this.options.result(this.instance,change,'error')
     }
     this.emit()
     if(commit&&this.mode==='ready')void this.save()
   }
   async save():Promise<void> {
     if(!this.current()||this.mode!=='ready'||this.frozen)return
-    if(equalJson(this.data,this.server.data)){this.wanted=false;this.options.result(this.change,'saved');return}
-    this.frozen={request:appRequest(this.server,this.data),change:this.change};this.wanted=false;this.retain()
+    if(equalJson(this.data,this.server.data)){this.wanted=false;this.options.result(this.instance,this.change,'saved');return}
+    this.frozen={request:appRequest(this.server,this.data),instance:this.instance,change:this.change};this.wanted=false;this.retain()
     await this.send()
   }
   private async send():Promise<void> {
@@ -57,17 +63,17 @@ export class ArtifactAppSession {
       this.acknowledge(saved,operation)
     }catch{
       if(!this.current()||this.frozen!==operation)return
-      this.mode='unknown';this.wanted=false;this.retain();this.options.result(this.change,'error');this.emit()
+      this.mode='unknown';this.wanted=false;this.retain();this.options.result(this.instance,this.change,'error');this.emit()
     }
   }
-  private acknowledge(saved:AppState,operation:{request:AppRequest;change:number}):void {
+  private acknowledge(saved:AppState,operation:Operation):void {
     this.server=saved;this.frozen=null;this.mode='ready'
     if(equalJson(this.data,saved.data)){
       if(this.recovery)discardAppInput(this.recovery)
       for(const copy of this.imported)discardAppInput(copy)
       this.imported=[];this.recovery=null
     }else this.retain()
-    this.options.result(operation.change,'saved');this.emit()
+    this.options.result(operation.instance,operation.change,'saved');this.emit()
     if(this.wanted)void this.save()
   }
   async check():Promise<void> {
@@ -82,7 +88,7 @@ export class ArtifactAppSession {
       this.mode=this.frozen&&current.version===this.frozen.request.expected_version
         &&!current.receipts.some(receipt=>receipt.id===this.frozen!.request.id)?'retry':'conflict'
       this.wanted=false;this.retain();this.emit()
-    }catch{if(this.current()){this.mode='unknown';this.wanted=false;this.options.result(this.change,'error');this.emit()}}
+    }catch{if(this.current()){this.mode='unknown';this.wanted=false;this.options.result(this.instance,this.change,'error');this.emit()}}
   }
   async retry():Promise<void>{if(this.current()&&this.mode==='retry')await this.send()}
   async overwrite():Promise<void>{
@@ -103,7 +109,7 @@ export class ArtifactAppSession {
     if(copy.request&&!sameAppTarget(copy.target,copy.request.target))return
     frameInputs(copy.data)
     this.data=structuredClone(copy.data);this.imported.push(copy)
-    this.frozen=copy.request?{request:structuredClone(copy.request),change:this.change}:null
+    this.frozen=copy.request?{request:structuredClone(copy.request),instance:null,change:this.change}:null
     this.mode=this.frozen?'unknown':'conflict';this.wanted=false;this.retain()
     this.options.restore(frameInputs(this.data));this.emit()
   }

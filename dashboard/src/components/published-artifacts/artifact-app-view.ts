@@ -16,15 +16,19 @@ export function ArtifactAppView({doc,workspaceRoot,authRevision,isCurrent,onPend
   const iframe=useRef<HTMLIFrameElement>(null),session=useRef<ArtifactAppSession|null>(null)
   const [state,setState]=useState<AppSessionSnapshot|null>(null),[error,setError]=useState(false),[attempt,setAttempt]=useState(0),[visible,setVisible]=useState(false)
   useLayoutEffect(()=>{
-    let active=true,created:ArtifactAppSession|null=null
+    let active=true,created:ArtifactAppSession|null=null,instance:string|null=null
     const current=()=>active&&currentStoredTokenRevision()===authRevision&&isCurrent()
-    const send=(type:string,fields:object)=>{if(current())iframe.current?.contentWindow?.postMessage({type,token:frame.token,...fields},'*')}
+    const send=(type:string,fields:object)=>{if(current()&&instance!==null)iframe.current?.contentWindow?.postMessage({type,token:frame.token,instance,...fields},'*')}
     const receive=(event:MessageEvent)=>{
       if(!current()||!created||event.source!==iframe.current?.contentWindow)return
       const message=appFrameMessage(frame,event.data);if(!message)return
-      if(message.kind==='ready')send('masc.artifact.inputs.init.v1',{data:frameInputs(created.snapshot().data)})
-      else if(message.kind==='initialized')setVisible(true)
-      else created.input(message.data,message.change,message.commit)
+      if(message.kind==='ready'){
+        if(instance!==message.instance){instance=message.instance;setVisible(false);created.attachFrame(instance)}
+        send('masc.artifact.inputs.init.v1',{data:frameInputs(created.snapshot().data)})
+      }else if(message.instance===instance){
+        if(message.kind==='initialized')setVisible(true)
+        else created.input(message.data,message.change,message.commit)
+      }
     }
     const storage=()=>created?.refreshCopies()
     window.addEventListener('message',receive);window.addEventListener('storage',storage)
@@ -36,7 +40,7 @@ export function ArtifactAppView({doc,workspaceRoot,authRevision,isCurrent,onPend
         const initial=await readAppState({artifact_id:doc.artifact.id,revision:doc.artifact.revision},workspace)
         if(!current())return
         created=new ArtifactAppSession({initial,workspace,current,changed:snapshot=>{onPending(snapshot.pending);setState(snapshot)},
-          result:(change,status)=>send('masc.artifact.inputs.result.v1',{change,status,message:status==='error'?'저장 결과를 확인해 주세요. 입력은 보관했습니다.':undefined}),
+          result:(origin,change,status)=>{if(origin===instance)send('masc.artifact.inputs.result.v1',{change,status,message:status==='error'?'저장 결과를 확인해 주세요. 입력은 보관했습니다.':undefined})},
           restore:data=>send('masc.artifact.inputs.restore.v1',{data})})
         session.current=created;setState(created.snapshot());setError(false)
       }catch{if(current())setError(true)}

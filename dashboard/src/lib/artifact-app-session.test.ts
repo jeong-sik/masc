@@ -14,6 +14,7 @@ function open(base:AppState=initial){
   let owner=true
   const result=vi.fn(),restore=vi.fn(),changed=vi.fn()
   const session=new ArtifactAppSession({initial:base,workspace,current:()=>owner,result,restore,changed})
+  session.attachFrame('first-document')
   return {session,result,restore,loseOwner:()=>{owner=false}}
 }
 beforeEach(()=>{vi.mocked(readAppState).mockReset();vi.mocked(writeAppState).mockReset()})
@@ -26,7 +27,7 @@ it('keeps typing locally, commits on change and clears only acknowledged inputs'
   session.input(inputs('저장할 입력'),2,true)
   await waitFor(()=>expect(session.snapshot().mode).toBe('ready'))
   expect(writeAppState).toHaveBeenCalledTimes(1);expect(session.snapshot().pending).toBe(false)
-  expect(appInputRecoveries(workspace,initial)).toHaveLength(0);expect(result).toHaveBeenLastCalledWith(2,'saved')
+  expect(appInputRecoveries(workspace,initial)).toHaveLength(0);expect(result).toHaveBeenLastCalledWith('first-document',2,'saved')
 })
 it('reconciles a lost committed response with GET only and preserves newer typing',async()=>{
   vi.mocked(writeAppState).mockRejectedValue(new Error('ACK lost'))
@@ -99,4 +100,19 @@ it('blocks writes during a reconciliation read and keeps edits made while it is 
   expect(session.snapshot().data).toEqual(inputs('edited during GET'));expect(session.snapshot().mode).toBe('conflict')
   session.useServer();expect(session.snapshot().data).toEqual(initial.data)
   expect(session.snapshot().pending).toBe(false)
+})
+it('binds an old in-flight receipt to its document instance while a new instance starts at one',async()=>{
+  const old=deferred<AppState>(),next=deferred<AppState>()
+  vi.mocked(writeAppState).mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise)
+  const {session,result}=open();session.input(inputs('old frame'),1,true)
+  const first=vi.mocked(writeAppState).mock.calls[0]![0]
+  session.attachFrame('reloaded-document');session.input(inputs('new frame'),1,true)
+  old.resolve(saved(first));await waitFor(()=>expect(writeAppState).toHaveBeenCalledTimes(2))
+  expect(result).toHaveBeenCalledWith('first-document',1,'saved')
+  expect(result).not.toHaveBeenCalledWith('reloaded-document',1,'saved')
+  expect(session.snapshot().pending).toBe(true)
+  const second=vi.mocked(writeAppState).mock.calls[1]![0]
+  next.resolve(saved(second,saved(first)));await waitFor(()=>expect(session.snapshot().pending).toBe(false))
+  expect(result).toHaveBeenLastCalledWith('reloaded-document',1,'saved')
+  expect(session.snapshot().server.data).toEqual(inputs('new frame'))
 })

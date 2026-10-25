@@ -18,7 +18,9 @@ async function open(source:string,data:FrameInputs={forms:{},app:{}}){
   child.document.write(frame.document)
   child.document.dispatchEvent(new child.Event('DOMContentLoaded'))
   await child.happyDOM.whenAsyncComplete()
-  const send=(fields:object)=>child.dispatchEvent(new child.MessageEvent('message',{source:child.eval('parent') as Window,data:{token:frame.token,...fields}}))
+  const instance=messages.find(message=>message.type==='masc.artifact.inputs.ready.v1')?.instance
+  expect(typeof instance).toBe('string')
+  const send=(fields:object)=>child.dispatchEvent(new child.MessageEvent('message',{source:child.eval('parent') as Window,data:{token:frame.token,instance,...fields}}))
   send({type:'masc.artifact.inputs.init.v1',data})
   await child.happyDOM.whenAsyncComplete()
   return {frame,child,messages,send}

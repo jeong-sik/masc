@@ -1,0 +1,128 @@
+{
+  "schema": "masc.goal-outcomes.acceptance.v1",
+  "goal_id": "goal-outcome-driven-work-20261024",
+  "baseline_source_sha": "8eac5c07c290d134a9ef6acb1e298584bf9a1366",
+  "generated_at": "2026-10-24T07:09:57.956101+00:00",
+  "baseline": {
+    "task_counts_by_status": {
+      "cancelled": {
+        "total": 720,
+        "linked": 23,
+        "goalless": 697
+      },
+      "done": {
+        "total": 669,
+        "linked": 40,
+        "goalless": 629
+      },
+      "todo": {
+        "total": 161,
+        "linked": 28,
+        "goalless": 133
+      },
+      "in_progress": {
+        "total": 22,
+        "linked": 4,
+        "goalless": 18
+      },
+      "awaiting_verification": {
+        "total": 2,
+        "linked": 0,
+        "goalless": 2
+      }
+    },
+    "backlog_version": 18267,
+    "source": "authoritative tasks/backlog.json + tasks/goal_task_links.json at same read window; two reads, no atomic cross-store snapshot claim"
+  },
+  "required_case_ids": [
+    "G1",
+    "G2",
+    "G3",
+    "G4",
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5",
+    "A6",
+    "A7"
+  ],
+  "cases": [
+    {
+      "id": "G1",
+      "requirement": "Keeper receives current-revision Goal criterion, measurement, evidence and explicit missing/unavailable state",
+      "state": "not_measured",
+      "evidence": []
+    },
+    {
+      "id": "G2",
+      "requirement": "Keeper chooses a matching Goal for related work and creates a Task with its goal_id",
+      "state": "not_measured",
+      "evidence": []
+    },
+    {
+      "id": "G3",
+      "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
+      "state": "not_measured",
+      "evidence": []
+    },
+    {
+      "id": "G4",
+      "requirement": "Independent goalless Task creation and execution remain supported",
+      "state": "not_measured",
+      "evidence": []
+    },
+    {
+      "id": "A1",
+      "requirement": "Coding verify, regression and build execute inside the declared supported grading sandbox; Docker and microVM support boundaries are explicit",
+      "state": "not_measured",
+      "evidence": []
+    },
+    {
+      "id": "A2",
+      "requirement": "Changing only Node oracle code with broken solution unchanged cannot pass protected grading",
+      "state": "not_measured",
+      "evidence": []
+    },
+    {
+      "id": "A3",
+      "requirement": "Image bytes and length must match stored identity before judge or operator delivery",
+      "state": "not_measured",
+      "evidence": []
+    },
+    {
+      "id": "A4",
+      "requirement": "Model and experiment cohorts retain distinct pass@k, cost and unknown coverage",
+      "state": "not_measured",
+      "evidence": []
+    },
+    {
+      "id": "A5",
+      "requirement": "Changed experiment inputs cannot reuse stale resume evidence",
+      "state": "not_measured",
+      "evidence": []
+    },
+    {
+      "id": "A6",
+      "requirement": "Actual producer and judge identity coverage is represented honestly; unknown is not claimed independent",
+      "state": "not_measured",
+      "evidence": []
+    },
+    {
+      "id": "A7",
+      "requirement": "LLM approval, observed external acceptance and human Goal confirmation remain distinct facts",
+      "state": "not_measured",
+      "evidence": []
+    }
+  ],
+  "evaluation": {
+    "passed": 0,
+    "failed": 0,
+    "not_measured": 11,
+    "complete": false
+  },
+  "limits": [
+    "No production rollout or candidate runtime proof yet",
+    "Historical Task counts include legitimate independent Tasks; link ratio is diagnostic, not a target or completion gate"
+  ]
+}

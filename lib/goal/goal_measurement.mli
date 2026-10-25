@@ -35,6 +35,12 @@ val load : Workspace_utils.config -> (t list, string) result
     recovery mirror is an error, rather than an empty snapshot. There is at
     most one observation per Goal; a new one replaces its previous revision. *)
 
+val latest_for_goal :
+  (t list, string) result -> Goal_store.goal -> (t option, string) result
+(** Select only an observation of the exact current criterion revision.
+    [Ok None] means that revision has no recorded measurement. A failed
+    authoritative read stays [Error], independently of the Goal store. *)
+
 val projection :
   (t list, string) result -> Goal_store.goal -> Yojson.Safe.t
 (** Explicit reported, not_recorded, or unavailable state for a Goal. *)

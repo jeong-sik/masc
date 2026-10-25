@@ -35,6 +35,9 @@ class Connector:
     def connection_identity(self):
         return self.identity
 
+    def callback_receipt(self):
+        return None
+
     def credentials(self, use, *, expected_connection_id):
         if expected_connection_id != self.identity:
             raise ConnectionError("connection_identity_mismatch")

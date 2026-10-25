@@ -308,7 +308,7 @@ remote_root = "/srv/first-create"
         | Ok None -> fail "successful first create has no metadata"
         | Error detail -> fail detail
       in
-      let trace_id = Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
       let checkpoint =
         match Masc.Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id with

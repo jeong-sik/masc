@@ -108,7 +108,8 @@ unrouted descriptors continue to use their status flow without fabricated ACKs.
 Controlled Service, actual private files and Unix-socket fixtures cover normal
 attention/fill/terminal delivery, lost ACK reconciliation, cancel during a blocked
 ACK and an ACK write that committed before reporting failure. Their host is a
-controlled ACK endpoint; an actual OCaml host/Keeper turn remains unexecuted.
+controlled ACK endpoint. The separate native failure-path probe below exercises
+the real OCaml host, worker Publisher and Keeper intake.
 
 The host implementation now retains each notice under the original invocation
 and publication ID in a private immutable file. It captures the export's closed
@@ -134,7 +135,9 @@ display preview must not discard the operation ID or public state. Unavailable/c
 not advance cycle failure state or manufacture an empty consumed result. The new
 type is explicit through queue persistence, reaction/disposition kinds, routing,
 paused-source handling, lifecycle selection and waiting inventory projections.
-There is still no executed original Keeper turn or private worker delivery proof.
+The isolated native failure-path probe has exercised this transport and a
+subsequent real Keeper turn. It does not establish a real-account fill or an
+original website Task's continuation.
 Intake now groups Add-on notices by the exact original invocation, source and
 captured channel. The first canonical source actually consumed sets the batch
 boundary. Same-invocation notices share that intake; other invocations and
@@ -177,13 +180,46 @@ publication/queue record, and the actual resumed Keeper turn with website and
 task evidence. Source review, fabricated provider tests, compiled artifacts,
 installation and this end-to-end result remain distinct claims.
 
-The new origin fixtures cover real private files, immutable-source conflicts,
-corrupt/unsafe records and cross-process first-writer behavior. They have only
-been parsed in this external coding session; no local Dune build or execution
-has verified them. They do not exercise progress publication or Keeper resumption.
+The origin fixtures cover real private files, immutable-source conflicts,
+corrupt/unsafe records and cross-process first-writer behavior. Five passed in
+[native run 40147809672](https://github.com/jeong-sik/masc/actions/runs/40147809672)
+at source `6e6491e9cec86347b6664d26821cba95eda080f7`. That run built the server
+and all selected suites, but failed overall on two other fixture scenarios.
 
-The new host publication fixtures use private files, the durable queue and actual
+The host publication fixtures use private files, the durable queue and actual
 canonical observation reads, including retry after simulated source consumption.
-They are source fixtures only: this coding session has parsed them without a local
-Dune build or execution. They do not simulate a resumed Keeper turn as proof of
-real continuation.
+Five passed in that same native run. The later three original-source batching
+scenarios belong to a newer candidate. Simulated completion receipts in fixtures
+do not prove that a model ran or continued a real website task.
+
+## Observed isolated failure continuation
+
+On 2026-10-25, the retained server and frozen 1Password package from source
+`6e6491e9cec86347b6664d26821cba95eda080f7` ran in a temporary workspace with
+fabricated local OAuth state and a nonexistent Browser selection. No real
+1Password account was connected, no OAuth network exchange ran, and no extension
+or page input was dispatched. This configuration exercises a pre-effect refusal,
+not authentication.
+
+An actual Keeper called `onepassword_login` and received `preparing`. The real
+Service then committed `outcome_unknown`; its separate Publisher sent the
+terminal envelope through the actual host broker. The immutable publication,
+original invocation record, reaction ledger and the next model input retained
+the same publication ID, tool-use ID and original turn reference. A second actual
+Keeper turn received that canonical event and reported the same operation ID and
+phase without another login or status call. With an explicit instruction to use
+the existing `keeper_surface_post` tool, a further probe persisted that response
+on the original Dashboard surface. Its source was
+`trace-1792891739983-00000#1`, the reply tool ran in `#2`, and message
+`msg-1792891759701373-4` contains the submitted response. The exact tool execution,
+canonical publication and actual reaction-ledger receipt were joined before
+recording the result. The initial observer assumed surface-post chat rows carried
+`turn_ref`; the actual producer omits it. A separate verification joined the
+successful post's payload to its persisted assistant row instead.
+
+The probe's original Task was explicitly null. These results establish private
+worker delivery, durable source consumption and a subsequent real Keeper turn
+for this controlled failure. They do not establish non-null Task restoration,
+successful fill, website authentication or production installation. Local
+receipts are retained under `reports/onepassword-addon-20261024/` in the
+development worktree.

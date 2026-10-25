@@ -75,3 +75,6 @@ to keep the review diff readable. `transcript-storage.json` binds each original
 filename, byte length and uncompressed SHA256; decompressed bytes are identical
 to the original public output files. Other receipts and tool results remain plain
 JSON/text. `SHA256SUMS` covers the complete retained directory except itself.
+The direct comparison preceded the native upgrade, and the Keeper subsequently
+created its files. The archived drivers record those initial-state assertions;
+repeating the full experiment requires a fresh owned fixture.

@@ -9,6 +9,7 @@ open Masc_domain
 
 type transition_backlog_update =
   { backlog : Masc_domain.backlog
+  ; transitioned_task : Masc_domain.task
   ; persisted_handoff_context : Masc_domain.task_handoff_context option
   }
 
@@ -96,13 +97,14 @@ let update_task_for_transition ~action ~new_status ~handoff_context task =
   }
 ;;
 
-let build_backlog_update ~backlog ~task_id ~action ~new_status ~handoff_context =
+let build_backlog_update ~backlog ~task ~action ~new_status ~handoff_context =
+  let transitioned_task =
+    update_task_for_transition ~action ~new_status ~handoff_context task
+  in
   let tasks =
     List.map
-      (fun (task : task) ->
-         if String.equal task.id task_id
-         then update_task_for_transition ~action ~new_status ~handoff_context task
-         else task)
+      (fun (candidate : task) ->
+         if String.equal candidate.id task.id then transitioned_task else candidate)
       backlog.tasks
   in
   let persisted_handoff_context =
@@ -110,6 +112,7 @@ let build_backlog_update ~backlog ~task_id ~action ~new_status ~handoff_context 
   in
   (* [write_backlog] stamps version/last_updated at the commit point. *)
   { backlog = { backlog with tasks }
+  ; transitioned_task
   ; persisted_handoff_context
   }
 ;;

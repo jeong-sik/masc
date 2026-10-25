@@ -326,16 +326,37 @@ let perform_task_transition
         in
         let new_status = decision.Workspace_task_lifecycle.new_status in
         let set_current = decision.set_current in
+        let backlog_update =
+          Workspace_task_transition_executor.build_backlog_update
+            ~backlog ~task ~action ~new_status ~handoff_context
+        in
+        (* An operator stops the Task without authoring its owner's handoff. *)
+        let backlog_update =
+          match request with
+          | Agent_action _ -> backlog_update
+          | Operator_cancel _ ->
+            let transitioned_task =
+              { backlog_update.transitioned_task with handoff_context = task.handoff_context }
+            in
+            let backlog = backlog_update.backlog in
+            { backlog_update with
+              transitioned_task;
+              backlog = { backlog with tasks =
+                List.map (fun (updated : task) ->
+                  if String.equal updated.id task_id then transitioned_task else updated)
+                  backlog.tasks }
+            }
+        in
         (* The obligation the lifecycle just created, if any: the evidence
            references parsed from the notes and handoff. Keyed on the produced
            state so every path into [AwaitingVerification] writes the record
            the authority reads. *)
         let* pending_verification =
-          match new_status with
+          match backlog_update.transitioned_task.task_status with
           | Masc_domain.AwaitingVerification
               { assignee; verification_id; _ } ->
             let has_summary =
-              match handoff_context with
+              match backlog_update.transitioned_task.handoff_context with
               | Some context -> String.trim context.Masc_domain.summary <> ""
               | None -> false
             in
@@ -355,9 +376,8 @@ let perform_task_transition
                        { evidence_refs =
                            Workspace_task_verification
                            .verification_submission_evidence_refs
-                             task
+                             backlog_update.transitioned_task
                              ~notes
-                             handoff_context
                        } ))
           | Masc_domain.Todo
           | Masc_domain.Claimed _
@@ -370,7 +390,8 @@ let perform_task_transition
           | None -> Ok ()
           | Some (assignee, verification_id, claim) ->
             (match
-               prepare_verification_request ~task ~assignee ~verification_id ~claim
+               prepare_verification_request
+                 ~task:backlog_update.transitioned_task ~assignee ~verification_id ~claim
              with
              | Ok () -> Ok ()
              | Error e ->
@@ -410,27 +431,6 @@ let perform_task_transition
             ; noop = true
             })
         else (
-          let backlog_update =
-            Workspace_task_transition_executor.build_backlog_update
-              ~backlog
-              ~task_id
-              ~action
-              ~new_status
-              ~handoff_context
-          in
-          (* An operator stops the Task, rather than authoring its owner's
-             handoff. Keep the owner's evidence and provenance intact. *)
-          let backlog_update =
-            match request with
-            | Agent_action _ -> backlog_update
-            | Operator_cancel _ ->
-              let backlog = backlog_update.backlog in
-              { backlog_update with backlog = { backlog with tasks =
-                  List.map (fun (updated : task) ->
-                    if String.equal updated.id task_id then
-                      { updated with handoff_context = task.handoff_context }
-                    else updated) backlog.tasks } }
-          in
           let backlog_update =
             match action with
             | Masc_domain.Claim | Masc_domain.Start -> backlog_update
@@ -479,7 +479,7 @@ let perform_task_transition
            | None -> None
            | Some (assignee, verification_id, claim) ->
                Some
-                 { task = { task with task_status = new_status }
+                 { task = backlog_update.transitioned_task
                  ; assignee
                  ; verification_id
                  ; claim
@@ -640,7 +640,7 @@ let perform_task_transition
                     (try
                        (Atomic.get Workspace_hooks.verification_submitted_fn)
                          config
-                         ~task:{ task with task_status = new_status }
+                         ~task:backlog_update.transitioned_task
                          ~assignee
                          ~verification_id
                      with
@@ -970,7 +970,7 @@ let commit_verdict_r
                  ; next_step = None
                  ; failure_mode = None
                  ; reclaim_policy = None
-                 ; evidence_refs = [ verification_id ]
+                 ; evidence_refs = []
                  ; updated_at = Some now
                  ; updated_by = Some authority_actor
                  }

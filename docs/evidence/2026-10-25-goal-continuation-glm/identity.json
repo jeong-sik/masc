@@ -1,0 +1,13 @@
+{
+  "source_sha": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "binary": "/tmp/masc-goal-runtime-32805eb7/masc",
+  "base_path": "/private/tmp/masc-goal-canary-32805eb7-glm53",
+  "pid": 49755,
+  "port": 51535,
+  "provider_proxy_port": 51429,
+  "model": "glm-5.3",
+  "runtime_id": "glm-coding.glm-5-3",
+  "pure_single_provider": true,
+  "fallback_enabled": false,
+  "production_deployment": false
+}

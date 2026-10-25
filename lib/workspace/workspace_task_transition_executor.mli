@@ -10,17 +10,23 @@
 
 type transition_backlog_update =
   { backlog : Masc_domain.backlog
+  ; transitioned_task : Masc_domain.task
   ; persisted_handoff_context : Masc_domain.task_handoff_context option
   }
 
 val build_backlog_update
   :  backlog:Masc_domain.backlog
-  -> task_id:string
+  -> task:Masc_domain.task
   -> action:Masc_domain.task_action
   -> new_status:Masc_domain.task_status
   -> handoff_context:Masc_domain.task_handoff_context option
   -> transition_backlog_update
-(** [handoff_context] is authored by an exit-class action only
+(** [task] is the authoritative member selected from [backlog]. The returned
+    [transitioned_task] is the same immutable value installed in [backlog]:
+    submission capture and post-commit notification use that value, including
+    the current handoff, rather than reconstructing a status-only Task.
+
+    [handoff_context] is authored by an exit-class action only
     ([Release | Done_action | Submit_for_verification | Cancel]); for those it
     replaces whatever the task held, and passing [None] there means the closing
     owner had nothing to state.

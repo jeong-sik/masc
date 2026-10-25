@@ -1,0 +1,5 @@
+{
+  "url": "http://127.0.0.1:53888/dashboard/#workspace?section=work",
+  "scope": "Actual DOM before screenshots; no element mutation",
+  "text": "Skip to main content\n작업\n⚑ 주의\n?\n⌄\n◷ 예약\nChat\n⌘J\n연결됨\nEmergency Stop\n오류 콘솔\nVerified @dashboard · admin\nM\nWORK\nARTIFACTS\nPLANS & GOALS\nREPOSITORIES\nVERIFICATION\nGOAL STORE\n작업 · 목표\n\nGoals · Tasks · Keepers · 우선순위와 검증 상태\n\n리스트\n칸반\n검증\n＋ 새 목표\n활성 목표\n0\n전체 작업\n2\n진행 중\n0\n검증 대기\n1\n백로그\n0\n▾\nP1\n검증 중\nalpha, beta, gamma 세 결과를 실제 파일에서 확인한다\nGC\n1/2 · 검증 1\nverifying\n검증 · 검증 대기\nplayground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric · 3/3: alpha=true, beta=true, gamma=true, each persisted and reread\n키퍼\ngoal-canary\n활동\n만든 날 6시간 전 · 마지막 변경 6시간 전 · 마지막 활동 6시간 전\n기록 2건 보기\ntask-001\nworkspace/acceptance.json의 alpha를 true로 변경한다\n▸\n완료\nGC\ngoal-canary\ntask-002\nworkspace/acceptance.json의 beta와 gamma를 true로 변경한다\n⚠ 검증 대기\n▸\n검증 대기\nGC\ngoal-canary\n목표 지표 · 작업 상태 흐름 · keeper 배정 · done은 gate 증거 후 완료 · 미배정 task는 백로그에서 claim\nChat"
+}

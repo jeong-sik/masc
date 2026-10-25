@@ -13,6 +13,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "onepassword"))
 from login import Extension, Journal, LoginError, Logins, Phase
+import oauth
+from onepassword_store_fixture import MemoryRecords, active_raw
 from oauth import ConnectionError
 from service import Service
 from test_onepassword_companion import Host
@@ -21,12 +23,15 @@ from test_onepassword_login import BROWSER, CALLER, REFERENCE, Bridge, Connector
 
 class DeliveryTests(unittest.TestCase):
     def setUp(self):
+        backend = patch.object(oauth, "ProtectedRecords", MemoryRecords)
+        backend.start()
+        self.addCleanup(backend.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name) / "journal"
         self.journal = Journal(self.directory, provision=True)
         self.bridge, self.now = Bridge(), 1000.
-        self.bridge.journal_path = self.directory / "operations.json"
+        self.bridge.journal_store = self.journal
         self.engine = Logins(Connector(), self.journal,
             Extension(Path(self.temp.name) / "extension", "a" * 32),
             bridge=lambda _: self.bridge, clock=lambda: self.now)
@@ -146,7 +151,7 @@ class DeliveryTests(unittest.TestCase):
             self.uncertain_close = True
             with self.assertRaises(LoginError):
                 self.service.close()
-        retained = json.loads((self.directory / "operations.json").read_text())["operations"][0]
+        retained = json.loads(active_raw(self.journal))["operations"][0]
         self.assertEqual([p["host_accepted"] for p in retained["publications"]], [True, False])
         self.assertEqual(host.connections, 1)
         self.assertFalse(self.service._delivery._thread.is_alive())

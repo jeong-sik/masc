@@ -568,6 +568,7 @@ let read_keeper_profile_snapshot ~base_path =
 (* A snapshot holds every declaration of its keepers dir, so an in-process
    write of one declaration drops every held snapshot. *)
 let invalidate_keeper_profile_snapshots () =
+  invalidate_parsed_toml_cache ();
   Stdlib.Mutex.protect profile_snapshot_mu (fun () ->
     Hashtbl.reset profile_snapshot_cache)
 

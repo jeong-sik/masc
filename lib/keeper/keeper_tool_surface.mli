@@ -45,6 +45,7 @@ val submit_keeper_msg
 
 module For_testing : sig
   val reset_keeper_list_cache : unit -> unit
+  val keeper_list_cache_entry_count : unit -> int
   val cached_keeper_list_data :
     key:string -> ttl_s:float -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
   val invalidate_keeper_list_cache : unit -> unit

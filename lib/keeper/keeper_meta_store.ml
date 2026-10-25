@@ -160,6 +160,35 @@ type meta_presence =
   | Meta_present of Keeper_meta_contract.keeper_meta
   | Meta_not_current of string
 
+type parsed_meta_cache_entry =
+  { content : string
+  ; meta : Keeper_meta_contract.keeper_meta
+  }
+
+let parsed_meta_cache_max_entries = 1024
+let parsed_meta_cache : (string, parsed_meta_cache_entry) Hashtbl.t =
+  Hashtbl.create 64
+let parsed_meta_mu = Stdlib.Mutex.create ()
+
+let find_cached_parsed_meta ~path ~content =
+  Stdlib.Mutex.protect parsed_meta_mu (fun () ->
+    match Hashtbl.find_opt parsed_meta_cache path with
+    | Some entry when String.equal entry.content content -> Some entry.meta
+    | Some _ | None -> None)
+;;
+
+let store_cached_parsed_meta ~path ~content meta =
+  Stdlib.Mutex.protect parsed_meta_mu (fun () ->
+    if Hashtbl.length parsed_meta_cache >= parsed_meta_cache_max_entries
+    then Hashtbl.reset parsed_meta_cache;
+    Hashtbl.replace parsed_meta_cache path { content; meta })
+;;
+
+let evict_cached_parsed_meta ~path =
+  Stdlib.Mutex.protect parsed_meta_mu (fun () ->
+    Hashtbl.remove parsed_meta_cache path)
+;;
+
 let read_meta_file_path_presence path : (meta_presence, string) result =
   (* A reader decodes and never writes: the per-Keeper Owner is the only
      writer of this file, and it writes through [meta_to_json], whose every
@@ -191,20 +220,34 @@ let read_meta_file_path_presence path : (meta_presence, string) result =
     Ok (Meta_not_current detail)
   in
   match Safe_ops.read_file_opt_result path with
-  | Error error -> Error (Safe_ops.read_file_error_to_string error)
+  | Error error ->
+    evict_cached_parsed_meta ~path;
+    Error (Safe_ops.read_file_error_to_string error)
   | Ok None ->
+    evict_cached_parsed_meta ~path;
     Problem_report_state.clear ~site:Meta_read ~path;
     Ok Meta_absent
-  | Ok (Some content) -> (
-    match Safe_ops.parse_json_off_fiber ~context:path content with
-    | Error e -> Error e
-    | Ok json ->
-      (match meta_of_json json with
-       | Ok meta ->
-         if Problem_report_state.note_recovered ~site:Meta_read ~path
-         then Log.Keeper.info "keeper meta parse recovered for %s" path;
-         Ok (Meta_present meta)
-       | Error detail -> fail_open detail))
+  | Ok (Some content) ->
+    (match find_cached_parsed_meta ~path ~content with
+     | Some meta ->
+       if Problem_report_state.note_recovered ~site:Meta_read ~path
+       then Log.Keeper.info "keeper meta parse recovered for %s" path;
+       Ok (Meta_present meta)
+     | None ->
+       (match Safe_ops.parse_json_off_fiber ~context:path content with
+        | Error e ->
+          evict_cached_parsed_meta ~path;
+          Error e
+        | Ok json ->
+          (match meta_of_json json with
+           | Ok meta ->
+             store_cached_parsed_meta ~path ~content meta;
+             if Problem_report_state.note_recovered ~site:Meta_read ~path
+             then Log.Keeper.info "keeper meta parse recovered for %s" path;
+             Ok (Meta_present meta)
+           | Error detail ->
+             evict_cached_parsed_meta ~path;
+             fail_open detail)))
 ;;
 
 let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =

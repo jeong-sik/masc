@@ -35,20 +35,25 @@ let tool_result_of_handler_error = function
   | Payload_error (class_, data) -> tool_result_error_data ~class_ data
 ;;
 
-type json_cache = {
-  generation : int;
-  key : string option;
-  value : Yojson.Safe.t option;
+module Cache_map = Map.Make (String)
+
+type json_cache_entry = {
+  value : Yojson.Safe.t;
   expires_at : float;
 }
+
+type json_cache = {
+  generation : int;
+  entries : json_cache_entry Cache_map.t;
+}
 (* Only explicit invalidation changes this identity. Publishing another
-   reader's key must not make a completed roster read start over. *)
+   reader's key must not make a completed roster read start over, and
+   distinct query keys (e.g. default names-only vs detailed TUI roster)
+   coexist within the same generation instead of evicting one another. *)
 let json_cache_generation = Atomic.make 0
 let empty_json_cache () =
   { generation = Atomic.fetch_and_add json_cache_generation 1
-  ; key = None
-  ; value = None
-  ; expires_at = 0.0
+  ; entries = Cache_map.empty
   }
 let keeper_list_cache = Atomic.make (empty_json_cache ())
 let cache_ttl_seconds env_var ~default =
@@ -82,31 +87,43 @@ let keeper_list_cache_ttl_s () =
 let invalidate_json_cache cache_ref =
   Atomic.set cache_ref (empty_json_cache ())
 let invalidate_keeper_list_cache () = invalidate_json_cache keeper_list_cache
+let rec publish_json_cache_entry cache_ref ~expected ~generation ~key ~entry =
+  if not (Int.equal expected.generation generation) then false
+  else
+    let now = Time_compat.now () in
+    let live_entries =
+      Cache_map.filter
+        (fun _ cached -> Stdlib.Float.compare now cached.expires_at < 0)
+        expected.entries
+    in
+    let next =
+      { expected with entries = Cache_map.add key entry live_entries }
+    in
+    if Atomic.compare_and_set cache_ref expected next then true
+    else begin
+      Otel_metric_store.inc_counter
+        Otel_metric_store.metric_tool_keeper_cache_cas_conflicts ();
+      let current = Atomic.get cache_ref in
+      publish_json_cache_entry cache_ref ~expected:current ~generation ~key ~entry
+    end
 let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
   let now = Time_compat.now () in
   let cache = Atomic.get cache_ref in
-  match cache.key, cache.value with
-  | Some cached_key, Some value
-    when String.equal cached_key key && Stdlib.Float.compare now cache.expires_at < 0 ->
-      value
+  match Cache_map.find_opt key cache.entries with
+  | Some entry when Stdlib.Float.compare now entry.expires_at < 0 ->
+      entry.value
   | _ ->
       let value = compute () in
-      let next =
-        {
-          generation = cache.generation;
-          key = Some key;
-          value = Some value;
-          expires_at = Time_compat.now () +. ttl_s;
-        }
-      in
-      if Atomic.compare_and_set cache_ref cache next then value
-      else begin
-        Otel_metric_store.inc_counter
-          Otel_metric_store.metric_tool_keeper_cache_cas_conflicts ();
-        let current = Atomic.get cache_ref in
-        if Int.equal cache.generation current.generation then value
-        else cached_json_by_key cache_ref ~key ~ttl_s compute
-      end
+      let entry = { value; expires_at = Time_compat.now () +. ttl_s } in
+      if
+        publish_json_cache_entry
+          cache_ref
+          ~expected:cache
+          ~generation:cache.generation
+          ~key
+          ~entry
+      then value
+      else cached_json_by_key cache_ref ~key ~ttl_s compute
 
 module For_testing = struct
   let reset_keeper_list_cache () =
@@ -114,6 +131,8 @@ module For_testing = struct
   let invalidate_keeper_list_cache = invalidate_keeper_list_cache
   let cached_keeper_list_data ~key ~ttl_s compute =
     cached_json_by_key keeper_list_cache ~key ~ttl_s compute
+  let keeper_list_cache_entry_count () =
+    Cache_map.cardinal (Atomic.get keeper_list_cache).entries
 end
 let annotate_keeper_json ~runtime_class json =
   match json with
@@ -195,11 +214,14 @@ let keeper_list_effective_meta_error_json name err =
       ("next_action", `String "fix_keeper_toml_or_keeper_instructions");
     ]
 
-let keeper_list_error_row_json ~runtime_class config name err =
+let keeper_list_error_row_json ?persisted_meta ~runtime_class config name err =
   let persisted_meta =
-    match read_meta config name with
-    | Ok (Some meta) -> Some meta
-    | Ok None | Error _ -> None
+    match persisted_meta with
+    | Some meta -> meta
+    | None ->
+        (match read_meta config name with
+         | Ok (Some meta) -> Some meta
+         | Ok None | Error _ -> None)
   in
   let keepalive_running =
     match persisted_meta with
@@ -242,8 +264,28 @@ let keeper_failure_cause = function
   | Keeper_registry.Operator_interrupt -> "operator_interrupt"
 
 let keeper_list_row_json ~runtime_class config name =
-  match read_effective_meta config name with
-  | Error err -> Some (keeper_list_error_row_json ~runtime_class config name err)
+  let effective_meta, persisted_meta =
+    match read_meta_resolved config name with
+    | Error err -> Error err, None
+    | Ok None -> Ok None, None
+    | Ok (Some (_resolved_name, persisted)) ->
+        (match
+           Keeper_meta_contract.effective_meta_result
+             ~base_path:config.Workspace.base_path
+             persisted
+         with
+         | Ok meta -> Ok (Some meta), Some persisted
+         | Error err -> Error err, Some persisted)
+  in
+  match effective_meta with
+  | Error err ->
+      Some
+        (keeper_list_error_row_json
+           ~persisted_meta
+           ~runtime_class
+           config
+           name
+           err)
   | Ok None -> None
   | Ok (Some (meta : keeper_meta)) ->
       let now_ts = Time_compat.now () in

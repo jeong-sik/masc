@@ -14144,9 +14144,9 @@ let keeper_detail_target_matches state keeper_name =
 let apply_keeper_schedules_read state request result =
   let current = finish_detail_read state request in
   if current && server_authority_ready state
-     && (match state.view with
-         | Keepers Keeper_message -> state.msg_target_keeper_name = Some request.drr_keeper
-         | _ -> keeper_detail_target_matches state request.drr_keeper) then
+     && (if view_is_chat state.view then
+         state.msg_target_keeper_name = Some request.drr_keeper
+       else keeper_detail_target_matches state request.drr_keeper) then
     match result with
     | Ok snapshot ->
         state.keeper_schedules <- Some (request.drr_keeper, snapshot);

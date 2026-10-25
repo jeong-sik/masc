@@ -317,6 +317,23 @@ let check_interrupted_write_stage
   | None -> failf "%s omitted the interrupted write primary" label
 ;;
 
+let check_cancellation_cleanup_stages
+      ~label
+      ~expected_cleanup_stages
+      (cancellation : Fs_compat.capability_write_cancellation)
+  =
+  let cleanup_stages =
+    List.map
+      (function
+        | Fs_compat.Write_cleanup_failure failure -> failure.stage
+        | Fs_compat.Recovery_cleanup_failure failure ->
+          fail (Fs_compat.capability_recovery_failure_to_string failure))
+      cancellation.cleanup_failures
+  in
+  check bool (label ^ " preserves exact cleanup failures") true
+    (cleanup_stages = expected_cleanup_stages)
+;;
+
 let check_direct_cleanup_cancellation
       ~label
       ~reason
@@ -343,16 +360,7 @@ let check_direct_cleanup_cancellation
     ~label
     ~expected_stage:expected_primary_stage
     cancellation;
-  let cleanup_stages =
-    List.map
-      (function
-        | Fs_compat.Write_cleanup_failure failure -> failure.stage
-        | Fs_compat.Recovery_cleanup_failure failure ->
-          fail (Fs_compat.capability_recovery_failure_to_string failure))
-      cancellation.cleanup_failures
-  in
-  check bool (label ^ " preserves exact cleanup failures") true
-    (cleanup_stages = expected_cleanup_stages)
+  check_cancellation_cleanup_stages ~label ~expected_cleanup_stages cancellation
 ;;
 
 let test_replace_direct_cleanup_cancellation_preserves_authority ~fs () =
@@ -492,6 +500,56 @@ let test_replace_cleanup_cancellation_retains_earlier_cleanup_failure ~fs () =
     (read_file target);
   let stage = only_entry_except directory [ "target" ] in
   check string "failed unlink leaves staging payload observable" ""
+    (read_file (Filename.concat (Filename.concat directory stage) "payload"))
+;;
+
+let test_cancelled_replace_retains_cleanup_facts_on_second_cancellation ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  write_file target "old";
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  let label = "cancelled replacement with cancelled cleanup" in
+  let reason = Failure "original payload cancellation" in
+  let cleanup_reason = Failure "later cleanup cancellation" in
+  let backtrace = Printexc.get_callstack 32 in
+  let observed_reason, cancellation, observed_backtrace =
+    require_capability_write_cancellation ~label (fun () ->
+      ignore
+        (replace_capability_file_for_testing
+           ~before_stage:(function
+             | Fs_compat.Write_payload ->
+               Printexc.raise_with_backtrace
+                 (Eio.Cancel.Cancelled reason)
+                 backtrace
+             | Fs_compat.Cleanup_unlink -> raise Exit
+             | Fs_compat.Cleanup_close_staging_directory ->
+               raise (Eio.Cancel.Cancelled cleanup_reason)
+             | _ -> ())
+           ~recovery
+           ~allowed_root_path:directory
+           ~parent
+           ~leaf:"target"
+           ~permissions:0o640
+           "new"
+         : (unit, Fs_compat.capability_write_error) result))
+  in
+  check bool (label ^ " preserves initial reason") true
+    (observed_reason == reason);
+  check_preserved_backtrace ~label backtrace observed_backtrace;
+  check bool (label ^ " preserves operation") true
+    (cancellation.operation = Fs_compat.Atomic_replace_operation);
+  check bool (label ^ " preserves target effect") true
+    (cancellation.target_effect = Fs_compat.Target_unchanged);
+  check bool (label ^ " has no invented write primary") true
+    (Option.is_none cancellation.interrupted_primary_failure);
+  check bool (label ^ " has no invented recovery interruption") true
+    (Option.is_none cancellation.interrupted_recovery);
+  check_cancellation_cleanup_stages ~label
+    ~expected_cleanup_stages:[ Fs_compat.Cleanup_unlink ] cancellation;
+  check string "original cancellation retains old payload" "old"
+    (read_file target);
+  let stage = only_entry_except directory [ "target" ] in
+  check string "cancelled cleanup retains staging payload" ""
     (read_file (Filename.concat (Filename.concat directory stage) "payload"))
 ;;
 
@@ -2295,6 +2353,10 @@ let () =
             "cleanup cancellation retains earlier staging unlink failure"
             `Quick
             (test_replace_cleanup_cancellation_retains_earlier_cleanup_failure ~fs)
+        ; test_case
+            "cancelled replacement retains cleanup facts after second cancellation"
+            `Quick
+            (test_cancelled_replace_retains_cleanup_facts_on_second_cancellation ~fs)
         ; test_case "create cleanup cancellation preserves authority" `Quick
             (test_create_direct_cleanup_cancellation_preserves_authority ~fs)
         ; test_case "recovery cancellation preserves authority" `Quick

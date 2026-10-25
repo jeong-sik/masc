@@ -12,10 +12,28 @@ let of_effective_meta (meta : Keeper_meta_contract.keeper_meta) =
 ;;
 
 let read config name =
-  match Keeper_meta_store.read_effective_meta config name with
-  | Ok (Some meta) -> of_effective_meta meta
-  | Ok None -> Unavailable Metadata_absent
-  | Error _ -> Unavailable Effective_metadata_unread
+  let requested_name = String.trim name in
+  if requested_name = ""
+  then Unavailable Metadata_absent
+  else
+    let meta_path =
+      Filename.concat
+        (Workspace.keepers_runtime_dir config)
+        (Keeper_runtime_root_entry.keeper_basename
+           ~keeper_name:requested_name
+           Keeper_runtime_root_entry.Metadata)
+    in
+    match Keeper_meta_store.read_meta_file_path meta_path with
+    | Error _ -> Unavailable Effective_metadata_unread
+    | Ok None -> Unavailable Metadata_absent
+    | Ok (Some meta) ->
+      (match
+         Keeper_meta_contract.effective_meta_result
+           ~base_path:config.Workspace.base_path
+           meta
+       with
+       | Ok meta -> of_effective_meta meta
+       | Error _ -> Unavailable Effective_metadata_unread)
 ;;
 
 let to_yojson = function

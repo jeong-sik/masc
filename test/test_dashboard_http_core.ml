@@ -3845,6 +3845,13 @@ crown = %d
     (Yojson.Safe.Util.member "portrait" first
      = Yojson.Safe.Util.member "portrait" purchased);
   let purchased_view = Candle_observe.read ~now:Time_compat.now ~base_path in
+  let purchased_reader = Candle_observe.account_revision_reader purchased_view in
+  check (option string) "batch revision reader matches single-keeper revision for purchaser"
+    (Candle_observe.account_revision purchased_view ~keeper)
+    (purchased_reader ~keeper);
+  check (option string) "batch revision reader matches single-keeper revision for bystander"
+    (Candle_observe.account_revision purchased_view ~keeper:"bystander-keeper")
+    (purchased_reader ~keeper:"bystander-keeper");
   let snapshot = `Assoc ["keepers", `List [`Assoc ["name", `String keeper]]] in
   let project read = Dashboard_projection_cache.For_test.with_current_keeper_observations
     ~read ~config snapshot in

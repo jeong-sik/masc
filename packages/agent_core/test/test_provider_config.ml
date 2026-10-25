@@ -2803,9 +2803,10 @@ let test_catalog_policy_native_and_proxy () =
       check_bool (label ^ " policy presence") expected
         (Option.is_some (Provider_config.anthropic_thinking_control config));
       let body = Backend_anthropic.build_request ~config ~messages:[] () in
-      (* A catalog policy does not itself request a wire toggle. In particular,
-         always-adaptive Claude intentionally omits the thinking field. *)
-      check_bool (label ^ " default request omits thinking toggle") false
+      (* Catalog authority does not imply an explicit request override. This
+         config leaves [enable_thinking] unset; the always-adaptive native
+         policy and an unknown proxy both omit a [thinking] control field. *)
+      check_bool (label ^ " unset thinking override stays absent") false
         (List.mem_assoc "thinking" (Yojson.Safe.Util.to_assoc (Yojson.Safe.from_string body)))
     in
     check "declared native" true (config ~provider_id:"claude" ());

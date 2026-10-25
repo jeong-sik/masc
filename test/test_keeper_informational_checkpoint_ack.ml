@@ -71,11 +71,11 @@ let informational_sources () =
   let composition : Q.composition_completion =
     { cc_request_id = "composition-26165"; cc_tool = "keeper_compose_memory-proof"
     ; cc_terminal = Q.Composition_failed "composition-result-26165" } in
-  [ { Q.post_id = Q.fusion_completion_post_id fusion; urgency = Q.High
+  [ { Q.post_id = Q.fusion_completion_post_id fusion; urgency = Q.Normal
       ; arrived_at = 1.; payload = Q.Fusion_completed fusion }
-  ; { Q.post_id = Q.delegate_completion_post_id delegate; urgency = Q.High
+  ; { Q.post_id = Q.delegate_completion_post_id delegate; urgency = Q.Normal
       ; arrived_at = 2.; payload = Q.Delegate_completed delegate }
-  ; { Q.post_id = Q.composition_completion_post_id composition; urgency = Q.High
+  ; { Q.post_id = Q.composition_completion_post_id composition; urgency = Q.Normal
       ; arrived_at = 3.; payload = Q.Composition_completed composition } ]
 let evidence config source =
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue source in

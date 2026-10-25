@@ -44,11 +44,15 @@ scope; their presence is not a passing execution.
 
 Changed OCaml parses with `ocamlc -stop-after parsing`; committed diff whitespace
 passes. Independent adversarial SOURCE PASS at the candidate; response review is
-underway. These are source checks, not type-check/build/runtime results.
+completed at that historical head. These are source checks, not type-check/build/runtime results.
 
 [Explicit run40185754758](https://github.com/jeong-sik/masc/actions/runs/40185754758)
 requests only `test/test_keeper_informational_checkpoint_ack` and
 `test/test_keeper_failed_selection_disposition`. Non-minimal preparation supplies
-Docker; selecting these two targets is not a full regression. No execution result
-is attributed yet. No local Dune/build/typecheck was run. #26165 remains open
+Docker; selecting these two targets is not a full regression. That run actually FAILED before either selected test executed: the test named
+nonexistent `Q.High`. The complete diagnostic was read; the failed receipt is
+retained in failed-run40185754758.txt. Both prior source verdicts at2c295963
+are invalidated by this compile evidence. Current correction uses the actual
+`Keeper_event_queue.Normal` constructor at all three sites; it does not change
+any production urgency or ACK policy. Corrected execution is requested separately. No local Dune/build/typecheck was run. #26165 remains open
 until its current acceptance is actually verified.

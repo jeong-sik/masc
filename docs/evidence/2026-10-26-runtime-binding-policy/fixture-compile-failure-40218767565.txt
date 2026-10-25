@@ -1,0 +1,5 @@
+Raw workflow log SHA256: c58f92ff0bbd400ab6e449e17d8b49d53037e74664db7c21346e3905894b62b0
+Source: https://github.com/jeong-sik/masc/actions/runs/40218767565
+
+test suite	Checkout	2026-10-25T17:55:30.3816670Z HEAD is now at 322b4a7d test(core): require runtime projections to honor frozen capability absence
+test suite	Test	2026-10-25T17:57:07.9528023Z Error: Unbound value Llm_provider.Complete_common.resolve_capabilities_for_config

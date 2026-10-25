@@ -69,3 +69,9 @@ do not establish real-model autonomy, long-job lifecycle, GitHub authentication,
 visible native TUI behavior, release installation, production deployment or full
 readiness. Private workspace files and auth tokens are excluded from the public
 evidence; the copied files were checked against the actual private token bytes.
+
+Large model/checkpoint/ledger/health/log/stream transcripts are losslessly gzipped
+to keep the review diff readable. `transcript-storage.json` binds each original
+filename, byte length and uncompressed SHA256; decompressed bytes are identical
+to the original public output files. Other receipts and tool results remain plain
+JSON/text. `SHA256SUMS` covers the complete retained directory except itself.

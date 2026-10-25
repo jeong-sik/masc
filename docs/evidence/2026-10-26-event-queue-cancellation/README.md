@@ -57,3 +57,11 @@ the direct dependency. This repository disables implicit transitive dependencies
 The stanza now explicitly names `masc.fs_compat`, `masc.masc_eio_context` and `eio`,
 matching the modules actually used. This compile failure does not establish any
 behavioral result; corrected execution and fresh-head source review are pending.
+
+Dispatch [40231799995](https://github.com/jeong-sik/masc/actions/runs/40231799995)
+at `dc0650043c9b03e1f1af5c9108e4e5315ae9d8da` also failed before tests:
+the test used a nonexistent `pending_selection.source_incarnation` field.
+The current contract stores that authority as `admitted_revision`; existing
+source-terminal callers use that field. The fixture now uses the same field.
+Prior source reviews missed this typing error; executable behavior remains
+unverified. Changelog section/citation validation is also corrected.

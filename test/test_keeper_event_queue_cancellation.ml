@@ -163,7 +163,7 @@ let test_terminal_ack_preserves_wal_outbox_and_projects_once_after_restart () =
   Ledger.record_event_queue_stimulus ~base_path ~keeper_name selected.source;
   let source_terminal : Persistence.accepted_source_terminal =
     { source = selected.source
-    ; source_incarnation = selected.source_incarnation
+    ; source_incarnation = selected.admitted_revision
     ; operator_operation_id = "completed-operation"
     ; source_receipt = State.Turn_completed
     }

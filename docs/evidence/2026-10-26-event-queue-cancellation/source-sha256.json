@@ -5,6 +5,6 @@
   "lib/core/cross_context_mutex.mli": "79b9b7fcf8042960307fccb1843a71dbebdcef28587d172eee395ba4cfda2d64",
   "lib/keeper/keeper_reaction_ledger.ml": "d3e57e5181ad7d281232757c68a276119a3a053bfc4116ae0235f1c94051b48d",
   "lib/keeper/keeper_reaction_ledger.mli": "ef21e836eda723007daeaac4bc7b6325c53811f37e79c9593fa1d01cae1a865c",
-  "test/test_keeper_event_queue_cancellation.ml": "7cbbeedab2fbd1f9118fecd95e8d4e11fa89fbc29fdd2a39babd1801e99071f2",
+  "test/test_keeper_event_queue_cancellation.ml": "35e910e863543bcdd3d6c55bd735aafdcaa7425f9ecaa397d517c181e849ca70",
   "test/dune": "7c25a7dbf2296b2c02187100743ecea8ad062b93da0456afe539e557fa18e6dd"
 }

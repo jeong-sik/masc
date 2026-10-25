@@ -256,6 +256,11 @@ val read_original_execution : store:Lane_addon_store.t -> declaration_id:string 
 (** Read the original host call evidence under the caller's original Store,
     request, schema and one-based attempt identity. Missing proof remains
     unproven; malformed, conflicting and unreadable evidence returns [Error].
+    Package-only answers use the declared value schema; consumer-schema
+    answers use the same partial shape guard as {!validate_answer}. The
+    original request and canonical schema remain bound to the proof. This
+    read does not establish full consumer-dialect compliance or replace the
+    fresh package baseline and consumer authority checks before delivery.
     A complete proof may precede final publication. This read never claims,
     writes, resolves a route, delivers to a worker or calls a provider. It grants
     no Memory, queue-consumption or new execution authority. Proof identity
@@ -280,7 +285,9 @@ val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
 (** Read only the original host Exact record under the caller's workspace
     authority. Strictly check the complete canonical envelope, declaration and
     request ID, original request/digest, attempt outcomes and terminal against
-    the caller's original schema. Missing/malformed/conflicting records remain
+    the caller's original schema, using the package value contract or original
+    consumer partial shape contract as in {!read_original_execution}.
+    Missing/malformed/conflicting records remain
     distinct. A started attempt without a final is [Retained_open], since this
     read cannot determine whether its provider is still running. It does not
     claim, write, resolve a route, call a provider or synthesize Outcome_unknown.

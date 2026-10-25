@@ -7,7 +7,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0439", "lane-addon-v0"]
-implementation_prs: ["#38733", "#38730", "#38815", "#39168", "#45971"]
+implementation_prs: ["#38733", "#38730", "#39168", "#45971"]
 ---
 
 # RFC — 기계 화면은 Lane 라우트 하나로 본다
@@ -77,6 +77,9 @@ implementation_prs: ["#38733", "#38730", "#38815", "#39168", "#45971"]
   모양이 바뀌어 기존 checkpoint 와 `msx-observer` 가 깨진다. 축·조이스틱이 필요한 기계가
   생기면 그때 Linux evdev(`EV_KEY`·`EV_ABS`·`EV_REL`) 모양을 따른다.
 - **관측 화면 보관 정책.** 관측이 화면을 얼마나 남길지는 패키지가 정한다.
+
+> **역사적 시도 보존.** #38815(2026-09-25 CLOSED, 미병합)는 3단계 TUI 화면 관찰 시도였다.
+> 구현 목록에서는 제외했으나 이력으로 남긴다 — 목록은 `merged=true` 인 구현만 가리킨다.
 
 ## 4. 열린 항목
 

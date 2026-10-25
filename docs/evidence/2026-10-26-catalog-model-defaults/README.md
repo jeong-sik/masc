@@ -19,3 +19,7 @@ Changed OCaml syntax parsing and whitespace checks pass. Source hashes and selec
 Two independent reviewers gave SOURCE PASS at935349f22b821d6f23e2212ad787876cfad00e91/basefc7092b8a97b3d825ebe78d5ec0d15f7b7b1ea2b/diff74ee5c5b88fccca5ec4825e153d9b88f93f503e7429e36071d4f07b3e35f4204 after the P2 blank-config repair. These are source assessments, not formal GitHub approvals. PR45993 depends on45987. Native stack submission reports repository disabled and REST stack:null; do not infer native membership from the branch chain.
 
 The original #27898 hard-cut checklist remains open: immutable catalog/registry/manifest consolidation and complete one-time binding across remaining callers are not established by this bounded high-level repair.
+
+## Actual final execution
+
+[Final run40206871608](https://github.com/jeong-sik/masc/actions/runs/40206871608) completed SUCCESS at exact935349f22b821d6f23e2212ad787876cfad00e91: **19 actual cases PASS** (15 model-label binding +4 runtime-binding auth). New blank/whitespace explicit-configuration controls, incomplete/blank pair rejection and all explicit call-option preservation assertions were reached. This supersedes the earlier pending observation; intermediate19 is not added to final19. The evidence-only follow-up preserves all14 source hashes. Retained log lines have trailing whitespace removed; their digest/byte count describes the complete original raw log.

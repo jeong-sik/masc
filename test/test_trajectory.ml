@@ -364,6 +364,47 @@ let test_hourly_with_errors () =
   let b = List.hd timeline in
   Alcotest.(check int) "error count" 1 b.Trajectory.error_count
 
+(* The tool-stats route reads persisted rows once and derives both views.
+   Reject-without-error must survive that same window and hour projection. *)
+let test_persisted_hourly_rejections_match_tool_failures () =
+  with_tmpdir (fun masc_root ->
+    let keeper_name = "hourly-rejection-keeper" in
+    let old = mk_entry ~ts:1. ~gate:(Trajectory.Reject "old refusal")
+        "tool_execute" 0 "1970-01-01T00:00:01Z" in
+    let passed = mk_entry ~ts:7201. "tool_execute" 10 "1970-01-01T02:00:01Z" in
+    let rejected = { (mk_entry ~ts:7202. ~gate:(Trajectory.Reject "denied")
+        "tool_execute" 0 "1970-01-01T02:00:02Z") with result = None } in
+    let errored = mk_entry ~ts:7203. ~error:(Some "process failure")
+        "tool_execute" 10 "1970-01-01T02:00:03Z" in
+    let both = { rejected with ts = 7204.; ts_iso = "1970-01-01T02:00:04Z";
+                               error = Some "denied detail" } in
+    let later = mk_entry ~ts:10801. "tool_execute" 10 "1970-01-01T03:00:01Z" in
+    List.iter (Trajectory.append_entry ~masc_root ~keeper_name ~trace_id:"first")
+      [old; passed];
+    List.iter (Trajectory.append_entry ~masc_root ~keeper_name ~trace_id:"second")
+      [later; both; errored; rejected];
+    let entries = Trajectory.read_entries_since ~masc_root ~keeper_name ~since:7200. in
+    Alcotest.(check int) "window excludes only the old refusal" 5 (List.length entries);
+    let timeline = Trajectory.hourly_timeline entries in
+    (match timeline with
+     | [first; second] ->
+       Alcotest.(check string) "first hour" "1970-01-01T02:00:00Z" first.hour;
+       Alcotest.(check int) "first hour calls" 4 first.call_count;
+       Alcotest.(check int) "rejection, error and both each count once" 3 first.error_count;
+       Alcotest.(check string) "second hour" "1970-01-01T03:00:00Z" second.hour;
+       Alcotest.(check int) "second hour calls" 1 second.call_count;
+       Alcotest.(check int) "successful hour remains clean" 0 second.error_count;
+       let wire = Trajectory.hourly_bucket_to_json first in
+       Alcotest.(check int) "public hourly error_count includes rejection" 3
+         Yojson.Safe.Util.(wire |> member "error_count" |> to_int)
+     | buckets -> Alcotest.failf "expected two hours, got %d" (List.length buckets));
+    match Trajectory.aggregate_tool_stats entries with
+    | [tool] ->
+      Alcotest.(check int) "tool calls share the same window" 5 tool.call_count;
+      Alcotest.(check int) "tool failures agree with hourly total" 3 tool.failure_count;
+      Alcotest.(check int) "tool successes retain both successful calls" 2 tool.success_count
+    | tools -> Alcotest.failf "expected one tool, got %d" (List.length tools))
+
 let test_hourly_empty () =
   let timeline = Trajectory.hourly_timeline [] in
   Alcotest.(check int) "empty" 0 (List.length timeline)
@@ -988,6 +1029,8 @@ let () =
     ("hourly_timeline", [
       Alcotest.test_case "single bucket" `Quick test_hourly_single_bucket;
       Alcotest.test_case "with errors" `Quick test_hourly_with_errors;
+      Alcotest.test_case "persisted hourly rejections match tool failures" `Quick
+        test_persisted_hourly_rejections_match_tool_failures;
       Alcotest.test_case "empty input" `Quick test_hourly_empty;
     ]);
     ("json_serialization", [

@@ -640,7 +640,7 @@ let perform_task_transition
                     (try
                        (Atomic.get Workspace_hooks.verification_submitted_fn)
                          config
-                         ~task:{ task with task_status = new_status }
+                         ~task:backlog_update.transitioned_task
                          ~assignee
                          ~verification_id
                      with

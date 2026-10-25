@@ -1,6 +1,6 @@
 {
-  "recorded_at": "2026-10-25T00:14:25.909123+00:00",
-  "scope": "All current published cohort, operator, artifact-update and UI files; excludes this manifest. Raw provider responses/thinking and credentials remain private.",
+  "recorded_at": "2026-10-25T00:20:31.069813+00:00",
+  "scope": "Published cohort, operator, artifact/registered-state and UI files; excludes this manifest. No raw provider thinking or credentials.",
   "files": [
     {
       "path": "README.md",
@@ -66,6 +66,11 @@
       "path": "main-health-read-timeouts.json",
       "bytes": 427,
       "sha256": "c8c0b2495cbf10ce5064cb3e661e1850b3ffab4cb74869a2f66745975dcf2211"
+    },
+    {
+      "path": "main-registered-state-read.json",
+      "bytes": 1089,
+      "sha256": "4cfee8bd60221e4000c5253d9236a736495ce568b124d43d7a6825c411ba3a1c"
     },
     {
       "path": "operator/approval-intent.json",

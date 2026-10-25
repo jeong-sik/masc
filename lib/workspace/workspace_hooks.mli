@@ -205,7 +205,9 @@ val verification_notify_submit_fn :
    unit) Atomic.t
 
 (** Notify the system LLM completion-authority lane after the task status and
-    verification request have both committed. The callback must not be a
+    verification request have both committed. [task] is the same immutable
+    submission snapshot used for preparation, commit and producer notification.
+    The callback must not be a
     Keeper wake-up or a Keeper task action; it only schedules the typed
     out-of-band authority review. *)
 val verification_submitted_fn :

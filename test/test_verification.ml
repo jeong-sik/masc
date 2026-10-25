@@ -2773,7 +2773,11 @@ let test_rejected_submission_captures_current_handoff_on_first_retry () =
       real_submit_request config ~task ~assignee ~verification_id ~claim) @@ fun () ->
   with_scoped_hook Workspace_hooks.verification_delete_request_fn real_delete_request @@ fun () ->
   with_scoped_hook Workspace_hooks.verification_submitted_fn
-    (fun _ ~task:_ ~assignee:_ ~verification_id:_ -> ()) @@ fun () ->
+    (fun config ~task ~assignee:_ ~verification_id ->
+      Alcotest.(check bool) "capture and authority scheduling share one immutable Task"
+        true (List.assoc verification_id !prepared == task);
+      Alcotest.(check bool) "scheduled Task includes the committed handoff"
+        true (task = receipt_task config)) @@ fun () ->
   with_scoped_hook Workspace_hooks.verification_notify_submit_fn
     (fun config ~task ~assignee ~verification_id ~claim:_ ->
       let captured = List.assoc verification_id !prepared in

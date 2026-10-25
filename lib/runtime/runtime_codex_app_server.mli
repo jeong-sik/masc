@@ -193,9 +193,21 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; input_schema : Yojson.Safe.t
   ; loading : Runtime_official_client_tool.loading
   ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
+
+type undelivered_tool_result =
+  { thread_id : string
+  ; turn_id : string
+  ; call_id : string
+  ; tool_name : string
+  ; arguments : Yojson.Safe.t
+  ; response : Yojson.Safe.t
+  }
+(** A settled host result whose vendor turn ended before delivery. The
+    response retains success/failure and the exact projected content. *)
 
 type elicitation_mode = Form | Openai_form | Url
 
@@ -238,6 +250,7 @@ type stream_event =
       ; arguments : Yojson.Safe.t
       }
   | Dynamic_tool_finished of { call_id : string }
+  | Tool_delivery_closed of { pending_tool_calls : int }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.finished
   | Native_tool_progress of { item_id : string; progress : Runtime_native_tools.progress }
@@ -490,6 +503,10 @@ val run_turn :
      dynamic-tool result, including before the first tool. Input is not consumed
      and the client still completes naturally. *)
   ?dynamic_tools:dynamic_tool list ->
+  ?on_undelivered_tool_result:(undelivered_tool_result -> (unit, string) result) ->
+  (* Persist before returning the ended turn. A persistence failure fails the
+     attempt; a Keeper must replay the retained receipt into its next input,
+     never replay the already executed tool or wait on an old exec cell. *)
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
   ?thread_mode:thread_mode ->
   mgr:_ Eio.Process.mgr ->

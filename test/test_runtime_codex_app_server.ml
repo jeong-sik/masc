@@ -178,7 +178,7 @@ let warm_fresh_executable path =
     wait ()
 ;;
 
-let fixture_script ?(close_before_turn = false) ?(close_after_injection = false) ?(inject_items = false) ?(model_pages = []) ?(model_pages_before_thread = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let fixture_script ?(await_dynamic_tools = true) ?(close_before_turn = false) ?(close_after_injection = false) ?(inject_items = false) ?(model_pages = []) ?(model_pages_before_thread = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) ?(line_delays = []) ?before_final_stdin_drain_s
     ?pipe_holder_s ?break_raw_trace_path lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
@@ -272,7 +272,12 @@ let fixture_script ?(close_before_turn = false) ?(close_after_injection = false)
            (fun seconds ->
               output_string output (Printf.sprintf "sleep %.3f\n" seconds))
            terminal_line_delay_s;
-       output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
+       output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n");
+       if await_dynamic_tools then
+         match (try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None) with
+         | Some (`Assoc fields) when List.assoc_opt "method" fields = Some (`String "item/tool/call") ->
+           output_string output "IFS= read -r tool_result || exit 98\n"
+         | Some _ | None -> ())
     remaining_lines;
   Option.iter
     (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
@@ -284,10 +289,11 @@ let fixture_script ?(close_before_turn = false) ?(close_after_injection = false)
   path
 ;;
 
-let with_fixture ?close_before_turn ?close_after_injection ?inject_items ?model_pages ?model_pages_before_thread ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
+let with_fixture ?await_dynamic_tools ?close_before_turn ?close_after_injection ?inject_items ?model_pages ?model_pages_before_thread ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?terminal_line_delay_start_index ?line_delays ?before_final_stdin_drain_s ?pipe_holder_s ?break_raw_trace_path lines f =
   let path =
     fixture_script
+      ?await_dynamic_tools
       ?close_before_turn
       ?close_after_injection
       ?inject_items
@@ -345,7 +351,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
     ?(developer_context = []) ?developer_instructions ?context_window ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
-    ?on_prompt_sent ?on_context_submission ?on_context_submission_delay_s ?on_reasoning_effort_resolved ?await_handoff ?(prompt = "Return the fixture marker")
+    ?on_prompt_sent ?on_context_submission ?on_context_submission_delay_s ?on_reasoning_effort_resolved ?await_handoff ?on_undelivered_tool_result ?(prompt = "Return the fixture marker")
     ?(images = []) ?output_schema ?(native = Runtime_native_tools.codex_default) path =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let previous_pool = Domain_pool_ref.get () in
@@ -387,6 +393,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ~clock
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / cwd)
       ~dynamic_tools
+      ?on_undelivered_tool_result
       ?reasoning_effort
       ?thread_mode
       ~history
@@ -403,6 +410,173 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       config
       ~prompt
       ~images))
+;;
+
+let dispatch_request index step =
+  Yojson.Safe.to_string (`Assoc ["id", `String ("request-" ^ string_of_int index);
+    "method", `String "item/tool/call"; "params", `Assoc
+      ["threadId", `String "thread-1"; "turnId", `String "turn-1";
+       "callId", `String ("call-" ^ string_of_int index); "tool", `String "masc_probe";
+       "arguments", `Assoc ["step", `Int step]]])
+;;
+
+let dispatch_tool ~execution_mode ~call_effect call : Runtime_codex_app_server.dynamic_tool =
+  {name = "masc_probe"; description = "Dispatch fixture";
+   input_schema = `Assoc ["type", `String "object"];
+   loading = Runtime_official_client_tool.Upfront;
+   result_bound = Runtime_official_client_tool.Unbounded;
+   execution_mode; call_effect; call}
+;;
+
+let tool_response content : Runtime_codex_app_server.dynamic_tool_result =
+  {success = true; content; content_blocks = None; abort_turn = None}
+;;
+
+let before_fixture_terminal path requests =
+  let original = In_channel.with_open_bin path In_channel.input_all in
+  let terminal = "printf '%s\\n' " ^ shell_quote item_completed in
+  let reads = List.init requests (fun _ -> "IFS= read -r result || exit 98") in
+  Out_channel.with_open_bin path (fun output ->
+    output_string output (original |> String.split_on_char '\n'
+      |> List.concat_map (fun line -> if line = terminal then reads @ [line] else [line])
+      |> String.concat "\n"))
+;;
+
+let test_concurrent_tool_does_not_block_status () =
+  let status, signal_status = Eio.Promise.create () in
+  let order = ref [] in
+  let tool = dispatch_tool
+    ~execution_mode:(fun _ -> Agent_core.Tool_contract.Concurrent)
+    ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
+    (fun ~call_id _ ->
+      if call_id = "call-1" then Eio.Promise.await status
+      else Eio.Promise.resolve signal_status ();
+      order := call_id :: !order;
+      tool_response call_id) in
+  with_fixture ~await_dynamic_tools:false
+    [init_result; account_chatgpt; thread_result; turn_result;
+     dispatch_request 1 1; dispatch_request 2 2; item_completed; turn_completed]
+    (fun path ->
+      before_fixture_terminal path 2;
+      match run_fixture ~dynamic_tools:[tool] path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok result ->
+        check int "both calls settled" 2 result.dynamic_tool_calls;
+        check (list string) "status releases the pending read" ["call-2"; "call-1"]
+          (List.rev !order))
+;;
+
+let test_serial_tool_fences_concurrent_calls () =
+  let started, signal_started = Eio.Promise.create () in
+  let release, signal_release = Eio.Promise.create () in
+  let order = ref [] in
+  let tool = dispatch_tool
+    ~execution_mode:(fun input ->
+      if Yojson.Safe.Util.(input |> member "step" |> to_int) = 2
+      then Agent_core.Tool_contract.Serial else Concurrent)
+    ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
+    (fun ~call_id _ ->
+      if call_id = "call-1" then begin
+        Eio.Promise.resolve signal_started ();
+        Eio.Promise.await release
+      end;
+      order := call_id :: !order;
+      tool_response call_id) in
+  with_fixture ~await_dynamic_tools:false
+    [init_result; account_chatgpt; thread_result; turn_result;
+     dispatch_request 1 1; dispatch_request 2 2; dispatch_request 3 3;
+     agent_message_delta; item_completed; turn_completed]
+    (fun path ->
+      before_fixture_terminal path 3;
+      let on_stream_event = function
+        | Runtime_codex_app_server.Text_delta _ ->
+          Eio.Promise.await started;
+          check (list string) "no successor has run before the first settles" [] !order;
+          Eio.Promise.resolve signal_release ()
+        | _ -> () in
+      match run_fixture ~dynamic_tools:[tool] ~on_stream_event path with
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> check (list string) "serial fence orders both sides"
+          ["call-1"; "call-2"; "call-3"] (List.rev !order))
+;;
+
+let run_undelivered_fixture ?(queued_effect = false) ?(provider_error = false) ?(retry_progress = false) ~eof ~retain () =
+  let started, signal_started = Eio.Promise.create () in
+  let closed, signal_closed = Eio.Promise.create () in
+  let effects = ref 0 in
+  let tool = dispatch_tool
+    ~execution_mode:(fun input ->
+      if Yojson.Safe.Util.(input |> member "step" |> to_int) = 2
+      then Agent_core.Tool_contract.Serial else Concurrent)
+    ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
+    (fun ~call_id _ ->
+      check string "queued effect cannot enter its handler" "call-1" call_id;
+      Eio.Promise.resolve signal_started ();
+      Eio.Promise.await closed;
+      incr effects;
+      tool_response "persisted-effect-receipt") in
+  with_fixture ~await_dynamic_tools:false
+    ([init_result; account_chatgpt; thread_result; turn_result; dispatch_request 1 1]
+      @ (if queued_effect then [dispatch_request 2 2] else [])
+      @ (if retry_progress then
+          [{|{"method":"error","params":{"willRetry":true,"error":{"message":"upstream retry"}}}|}] else [])
+      @ [agent_message_delta]
+      @ (if eof then [] else if provider_error then [usage_limit_terminal]
+         else [item_completed; turn_completed]))
+    (fun path ->
+      if eof then begin
+        let original = In_channel.with_open_bin path In_channel.input_all in
+        Out_channel.with_open_bin path (fun output ->
+          output_string output (original |> String.split_on_char '\n'
+            |> List.map (fun line -> if line = "while IFS= read -r ignored; do :; done"
+              then "exit 0" else line) |> String.concat "\n"))
+      end;
+      let on_stream_event = function
+        | Runtime_codex_app_server.Text_delta _ -> Eio.Promise.await started
+        | Runtime_codex_app_server.Tool_delivery_closed _ -> Eio.Promise.resolve signal_closed ()
+        | _ -> () in
+      let result = run_fixture ~dynamic_tools:[tool] ~on_stream_event
+        ~on_undelivered_tool_result:retain path in
+      check int "effect is executed once" 1 !effects;
+      match eof, provider_error, result with
+      | false, false, Ok _ -> ()
+      | true, _, Error (Runtime_codex_app_server.Process_exited _) -> ()
+      | false, true, Error _ -> ()
+      | _, _, Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | _, _, Ok _ -> fail "provider termination cannot claim a successful vendor turn")
+;;
+
+let test_ended_turn_retains_tool_result ~eof () =
+  let retained = ref [] in
+  run_undelivered_fixture ~eof
+    ~retain:(fun receipt -> retained := receipt :: !retained; Ok ()) ();
+  match !retained with
+  | [receipt] ->
+    check string "original call identity" "call-1" receipt.Runtime_codex_app_server.call_id;
+    let text = Yojson.Safe.Util.(receipt.response |> member "result" |> member "contentItems"
+      |> to_list |> List.hd |> member "text" |> to_string) in
+    check string "completed receipt survives the ended turn" "persisted-effect-receipt" text
+  | _ -> fail "ended vendor turn lost or duplicated its tool receipt"
+;;
+
+let test_provider_error_settles_tools_and_retry_progress_does_not_close () =
+  List.iter (fun provider_error ->
+    let retained = ref [] in
+    run_undelivered_fixture ~provider_error ~retry_progress:(not provider_error) ~eof:false
+      ~retain:(fun receipt -> retained := receipt :: !retained; Ok ()) ();
+    check int "pending result survives provider terminal after progress" 1 (List.length !retained))
+    [true; false]
+;;
+
+let test_queued_effect_is_not_started_after_vendor_terminal () =
+  let retained = ref [] in
+  run_undelivered_fixture ~queued_effect:true ~eof:false
+    ~retain:(fun receipt -> retained := receipt :: !retained; Ok ()) ();
+  check int "both executed and unattempted receipts survive" 2 (List.length !retained);
+  let queued = List.find (fun (receipt : Runtime_codex_app_server.undelivered_tool_result) ->
+    receipt.call_id = "call-2") !retained in
+  check bool "queued effect is explicitly not executed" false
+    Yojson.Safe.Util.(queued.response |> member "result" |> member "success" |> to_bool)
 ;;
 
 let test_dispatch_validation_is_process_free () =
@@ -463,6 +637,7 @@ let test_dynamic_tool_callback ?(worker_pool = false) () =
           ]
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:id input ->
@@ -684,6 +859,7 @@ let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false)
         ; input_schema = `Assoc ["type", `String "object"]
         ; loading = Runtime_official_client_tool.On_demand
         ; result_bound = Runtime_official_client_tool.Unbounded
+        ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
         ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
         ; call = (fun ~call_id:_ _ -> incr calls;
             if !calls = 1 then (Eio.Promise.resolve signal (); Eio.Fiber.yield ());
@@ -701,7 +877,7 @@ let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false)
         | Some true -> Some {|{"id":6,"result":{"turnId":"turn-1"}}|}
         | Some false -> Some {|{"id":6,"error":{"code":-32600,"message":"turn no longer steerable"}}|}
         | None -> None in
-      with_fixture ([init_result; account_chatgpt; thread_result; turn_result;
+      with_fixture ~await_dynamic_tools:false ([init_result; account_chatgpt; thread_result; turn_result;
         tool_call_request; second_tool]
         @ (if terminal_second then [third_tool] else [])
         @ [agent_message_delta] @ Option.to_list reply @ [item_completed; turn_completed]) (fun path ->
@@ -843,6 +1019,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -876,6 +1053,7 @@ let test_context_error_records_prior_tool_effect () =
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -920,6 +1098,7 @@ let test_read_only_overflow_contract () =
         ; input_schema = `Assoc [ "type", `String "object" ]
         ; loading = Runtime_official_client_tool.On_demand
         ; result_bound = Runtime_official_client_tool.Unbounded
+        ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
         ; call_effect = (fun _ -> call_effect)
         ; call = (fun ~call_id:_ _ ->
             { success = true; content = "observed"; content_blocks = None; abort_turn = None })
@@ -945,6 +1124,7 @@ let test_native_effect_before_overflow () =
     ; input_schema = `Assoc ["type", `String "object"]
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
     ; call_effect = (fun _ -> Agent_core.Tool.Read_only)
     ; call = (fun ~call_id:_ _ ->
         {success = true; content = "read"; content_blocks = None; abort_turn = None}) }
@@ -1545,6 +1725,7 @@ let test_content_free_context_submission () =
     ; input_schema=`Assoc ["type",`String "object";"description",`String escaped]
     ; loading=Runtime_official_client_tool.On_demand
     ; result_bound=Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
     ; call_effect=(fun _ -> Agent_core.Tool.Effect_possible)
     ; call=(fun ~call_id:_ _ -> fail "fragment fixture does not request a tool call") } in
   List.iter (fun thread_mode ->
@@ -2333,6 +2514,7 @@ let test_thread_resume_sends_dynamic_tools () =
          ; input_schema = `Assoc [ "type", `String "object" ]
          ; loading = Runtime_official_client_tool.On_demand
          ; result_bound = Runtime_official_client_tool.Unbounded
+         ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
          ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
              (fun ~call_id:_ _ ->
@@ -2393,6 +2575,7 @@ let test_dynamic_tools_clear_what_the_server_needs_to_defer () =
          ; input_schema = `Assoc [ "type", `String "object" ]
          ; loading
          ; result_bound = Runtime_official_client_tool.Unbounded
+         ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
          ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
              (fun ~call_id:_ _ ->
@@ -2612,6 +2795,7 @@ let test_elicitation_cancel_then_dynamic_tool () =
           input_schema = `Assoc ["type", `String "object"];
           loading = Runtime_official_client_tool.On_demand;
           result_bound = Runtime_official_client_tool.Unbounded;
+          execution_mode = (fun _ -> Agent_core.Tool_contract.Serial);
           call_effect = (fun _ -> Agent_core.Tool.Effect_possible);
           call = (fun ~call_id:_ _ -> incr calls;
             { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None }) } in
@@ -2782,7 +2966,7 @@ let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn
     | Runtime_codex_app_server.Usage_reported
         { frame = Runtime_codex_app_server.Context_window_filled _; _ } ->
       fail "a counted frame was read as a fill"
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _ | Tool_delivery_closed _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
     | Usage_windows_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
@@ -2938,6 +3122,7 @@ let test_dynamic_tool_bytes_counts_name_description_and_schema () =
     ; input_schema = schema
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -3490,12 +3675,14 @@ let test_no_deadline_keeps_turn_started_callback_bounded () =
 ;;
 
 let test_no_deadline_keeps_post_accept_writes_bounded () =
+  let retained = ref [] in
   let tool : Runtime_codex_app_server.dynamic_tool =
     { name = "masc_probe"
     ; description = "Return enough data to fill an unread transport pipe"
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
     ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
         (fun ~call_id:_ _ ->
@@ -3506,12 +3693,16 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
     }
   in
   with_fixture
+    ~await_dynamic_tools:false
     ~before_final_stdin_drain_s:0.75
     [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request ]
     (fun path ->
        match
          run_fixture
            ~dynamic_tools:[ tool ]
+           ~on_undelivered_tool_result:(fun receipt ->
+             retained := receipt :: !retained;
+             Ok ())
            ~admission_timeout_s:0.3
            ~no_turn_deadline:true
            path
@@ -3519,7 +3710,8 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
        | Error
            (Runtime_codex_app_server.Timeout
               { seconds; turn_accepted = true }) ->
-         check (float 0.001) "post-accept write timeout" 0.3 seconds
+         check (float 0.001) "post-accept write timeout" 0.3 seconds;
+         check int "the unwritten result has a durable owner" 1 (List.length !retained)
        | Error
            (Runtime_codex_app_server.Timeout
               { turn_accepted = false; _ }) ->
@@ -3635,7 +3827,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
   let reports = ref [] in
   let on_stream_event = function
     | Runtime_codex_app_server.Usage_windows_reported report -> reports := report :: !reports
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _ | Tool_delivery_closed _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
     | Usage_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
@@ -4214,6 +4406,11 @@ let run_production_keeper_turn_as ~input_speaker ~turn_kind ~write_cost_ledger ~
                 Eio.Switch.run (fun sw ->
                   Fs_compat.set_fs (Eio.Stdenv.fs env);
                   Eio_context.set_env env;
+                  (match Runtime_agent_execution_runtime.initialize
+                     ~sw ~domain_mgr:env#domain_mgr ~domain_count:1 with
+                   | Ok () -> ()
+                   | Error error ->
+                     fail (Runtime_agent_execution_runtime.initialization_error_to_string error));
                   Eio_context.with_test_env
                     ~net:(Eio.Stdenv.net env)
                     ~clock:(Eio.Stdenv.clock env)
@@ -4942,6 +5139,8 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
        with_runtime_config ~model cli_path (fun runtime_path ->
          Eio_main.run (fun env ->
            Eio.Switch.run (fun sw ->
+             Fs_compat.set_fs (Eio.Stdenv.fs env);
+             Eio.Switch.on_release sw Fs_compat.clear_fs;
              Eio_context.set_env env;
              Eio_context.with_test_env
                ~net:(Eio.Stdenv.net env)
@@ -4994,6 +5193,66 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ()
                     |> Result.map (fun selected ->
                       selected.Keeper_turn_driver.run_result))))))
+;;
+
+let test_tool_outbox_reaches_the_next_keeper_turn ?(refuse_input = false) ~refuse_dispatch () =
+  let base_path = temp_workspace "codex-tool-outbox-" in
+  let capture_path = Filename.concat base_path "next-client.jsonl" in
+  let keeper_name = "outbox-fixture" in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    run_undelivered_fixture ~eof:false
+      ~retain:(Keeper_codex_tool_outbox.retain ~base_path ~keeper_name) ();
+    let pending = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name) in
+    check int "one retained context batch" 1
+      (List.length (Keeper_codex_tool_outbox.developer_context pending));
+    with_fixture ~capture_path ~inject_items:true ~close_after_injection:refuse_dispatch
+      ([init_result; account_chatgpt; thread_result; {|{"id":4,"result":{}}|};
+       {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}]
+       @ (if refuse_input then
+           [{|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"input context rejected","codexErrorInfo":"contextWindowExceeded"}}}}|}]
+          else [item_completed; turn_completed]))
+      (fun cli_path ->
+        let result = run_keeper_turn ~base_path ~keeper_name ~cli_path ~model:"gpt-fixture" () in
+        (match (refuse_dispatch || refuse_input), result with
+         | false, Ok _ | true, Error _ -> ()
+         | false, Error error -> fail (Agent_core.Error.to_string error)
+         | true, Ok _ -> fail "a refused input cannot acknowledge receipt delivery");
+        let pending = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name) in
+        check int "ACK follows successful dispatch only" (if refuse_dispatch || refuse_input then 1 else 0)
+          (List.length (Keeper_codex_tool_outbox.developer_context pending));
+        let frames = In_channel.with_open_bin capture_path In_channel.input_lines
+          |> List.map Yojson.Safe.from_string in
+        let open Yojson.Safe.Util in
+        let injected = List.find (fun json -> member "method" json = `String "thread/inject_items") frames in
+        let text = injected |> member "params" |> member "items" |> to_list |> List.hd
+          |> member "content" |> to_list |> List.hd |> member "text" |> to_string in
+        check bool "new client receives the completed result" true
+          (String_util.contains_substring text "persisted-effect-receipt")))
+;;
+
+let test_tool_outbox_acknowledges_only_its_snapshot () =
+  let base_path = temp_workspace "codex-tool-outbox-identity-" in
+  let keeper_name = "outbox-fixture" in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  let first : Runtime_codex_app_server.undelivered_tool_result =
+    {thread_id = "thread-1"; turn_id = "turn-1"; call_id = "call-1";
+     tool_name = "probe"; arguments = `Null; response = `String "first-result"} in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    get (Keeper_codex_tool_outbox.retain ~base_path ~keeper_name first);
+    let session_path = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
+    let staging = Filename.concat (Filename.dirname session_path) ".undelivered-tools-staging" in
+    Fs_compat.save_file (Filename.concat staging "interrupted-write.tmp") "{partial";
+    let original = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name) in
+    get (Keeper_codex_tool_outbox.retain ~base_path ~keeper_name
+      {first with turn_id = "turn-2"; response = `String "later-result"});
+    get (Keeper_codex_tool_outbox.acknowledge original);
+    let remaining = get (Keeper_codex_tool_outbox.load ~base_path ~keeper_name)
+      |> Keeper_codex_tool_outbox.developer_context in
+    match remaining with
+    | [text] -> check bool "same call id in a newer turn remains pending" true
+        (String_util.contains_substring text "later-result")
+    | _ -> fail "ACK deleted a receipt outside its original snapshot")
 ;;
 
 let test_blank_completion_rejected_without_losing_session () =
@@ -6608,7 +6867,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture ~capture_path
+       with_fixture ~await_dynamic_tools:false ~capture_path
          [ init_result
          ; account_chatgpt
          ; thread_result
@@ -7394,22 +7653,15 @@ let test_keeper_resume_sends_changed_working_state_once () =
          (String_util.contains_substring fifth "WORKING_STATE_VERSION_TWO"))
 ;;
 
-(* Every request carries the frozen Librarian unread observation, ahead of the
-   per-turn context. The first request of a fixture with no snapshot or Memory
-   reader yet sends the "unavailable" observation; once the readers answer with
-   nothing unread, the next request sends the empty one. *)
+(* A new frozen Librarian unread observation precedes the per-turn context.
+   This fixture provides real filesystem readers: absent files yield available
+   empty lists. A resumed thread already holds that unchanged observation. *)
 let unread_envelope ~snapshot ~memory =
   let unread = Keeper_librarian_request_unread.of_results ~snapshot ~memory in
   match Keeper_librarian_request_unread.attach ~include_empty:true
       ~role:Agent_core.Types.System unread [] with
   | [carrier] -> Keeper_official_client_host.encode_history_message carrier
   | [] | _ :: _ :: _ -> failwith "an unread observation must have one carrier"
-;;
-
-let unavailable_unread_envelope =
-  unread_envelope
-    ~snapshot:(Error "fixture has no snapshot reader")
-    ~memory:(Error "fixture has no Memory reader")
 ;;
 
 let empty_unread_envelope = unread_envelope ~snapshot:(Ok []) ~memory:(Ok [])
@@ -7550,7 +7802,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        in
        check string "start config includes current context"
          (String.concat "\n\n"
-            [ system_prompt; posture_note; unavailable_unread_envelope; envelope dynamic_context ])
+            [ system_prompt; posture_note; empty_unread_envelope; envelope dynamic_context ])
          start_instructions;
        (* The thread holds the conversation, so the resumed instructions name
           only the current system prompt; the per-turn context rides in front
@@ -7600,8 +7852,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        check string "start prompt stays exact" goal (turn_prompt start_capture);
        check string "resume prompt carries the current context in front of the goal"
          (String.concat "\n\n"
-            [ "SYSTEM:\n" ^ empty_unread_envelope
-            ; "SYSTEM:\n" ^ envelope "UPDATED_CONTEXT"
+            [ "SYSTEM:\n" ^ envelope "UPDATED_CONTEXT"
             ; goal
             ])
          (turn_prompt resume_capture))
@@ -8690,6 +8941,7 @@ let test_live_dynamic_tool_subscription () =
           `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
       ; loading = Runtime_official_client_tool.On_demand
       ; result_bound = Runtime_official_client_tool.Unbounded
+      ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
       ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
           (fun ~call_id:_ _ ->
@@ -9294,6 +9546,26 @@ let () =
             test_scheduling_handoff_waiter_released_at_terminal
         ; test_case "dynamic tool callback" `Quick
             (fun () -> test_dynamic_tool_callback ())
+        ; test_case "concurrent status releases a pending read" `Quick
+            test_concurrent_tool_does_not_block_status
+        ; test_case "serial tool fences concurrent calls" `Quick
+            test_serial_tool_fences_concurrent_calls
+        ; test_case "completed vendor turn retains pending tool receipt" `Quick
+            (test_ended_turn_retains_tool_result ~eof:false)
+        ; test_case "provider terminal drains tools and retry progress stays live" `Quick
+            test_provider_error_settles_tools_and_retry_progress_does_not_close
+        ; test_case "queued effect is not started after vendor terminal" `Quick
+            test_queued_effect_is_not_started_after_vendor_terminal
+        ; test_case "vendor EOF retains pending tool receipt" `Quick
+            (test_ended_turn_retains_tool_result ~eof:true)
+        ; test_case "retained tool receipt reaches next Keeper client" `Quick
+            (test_tool_outbox_reaches_the_next_keeper_turn ~refuse_dispatch:false)
+        ; test_case "input overflow retains receipt after complete input write" `Quick
+            (test_tool_outbox_reaches_the_next_keeper_turn ~refuse_input:true ~refuse_dispatch:false)
+        ; test_case "failed dispatch retains tool receipt" `Quick
+            (test_tool_outbox_reaches_the_next_keeper_turn ~refuse_dispatch:true)
+        ; test_case "tool receipt ACK preserves newer snapshot entries" `Quick
+            test_tool_outbox_acknowledges_only_its_snapshot
         ; test_case "worker encoded dynamic tool callback" `Quick
             (fun () -> test_dynamic_tool_callback ~worker_pool:true ())
         ; test_case

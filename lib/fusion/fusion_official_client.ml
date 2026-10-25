@@ -679,6 +679,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          | Runtime_codex_app_server.Text_completed _ | Runtime_codex_app_server.Thinking_completed _
          | Runtime_codex_app_server.Dynamic_tool_started _
          | Runtime_codex_app_server.Dynamic_tool_finished _
+         | Runtime_codex_app_server.Tool_delivery_closed _
          | Runtime_codex_app_server.Native_tool_started _
          | Runtime_codex_app_server.Native_tool_finished _
          | Runtime_codex_app_server.Native_tool_progress _

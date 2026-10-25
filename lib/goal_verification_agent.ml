@@ -86,21 +86,6 @@ let deferral_detail = function
 
 let pending_work_same_goal left right = String.equal left.goal_id right.goal_id
 
-(* Preserve first-goal order for deterministic worker admission. *)
-let group_pending_by_goal work =
-  let groups = Hashtbl.create (List.length work) in
-  let goal_order = ref [] in
-  List.iter
-    (fun item ->
-       match Hashtbl.find_opt groups item.goal_id with
-       | Some existing -> Hashtbl.replace groups item.goal_id (existing @ [ item ])
-       | None ->
-         goal_order := item.goal_id :: !goal_order;
-         Hashtbl.add groups item.goal_id [ item ])
-    work;
-  List.rev_map (fun goal_id -> Hashtbl.find groups goal_id) !goal_order
-;;
-
 (* {1 Scan}
 
    List candidate Goals, then revalidate every transition under the Goal lock
@@ -550,11 +535,12 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
 
 (* {1 Daemon}
 
-   Mirrors {!Completion_authority_agent}: a condition-variable wake installed
-   as {!Workspace_hooks.goal_verification_pending_fn} and bounded concurrency
-   via a semaphore. A committed verdict requests another scan; a deferral
-   stays durable. Transient evaluator failures arm a request-scoped retry.
-   Other deferrals wait for an explicit wake. No wall-clock expiry. *)
+   A condition-variable wake installed as
+   {!Workspace_hooks.goal_verification_pending_fn} requests discovery. The
+   observed Goal queue is distinct from active reviews: returning capacity
+   serves its remaining entries without rediscovering failed Goals. Transient
+   evaluator failures arm a request-scoped retry. Other deferrals wait for an
+   explicit wake. No wall-clock expiry. *)
 
 (* One claimed review. [requested] retains a wake that arrived while the
    review ran. [abandon] is resolved when the Goal leaves [Verifying] through
@@ -569,6 +555,14 @@ type claim =
   ; abandon : unit Eio.Promise.u
   }
 
+(* A queued identity is not a stored request or an execution grant. Keep its
+   removal and claim admission in one atomic state so a nested scan cannot
+   admit the same Goal while an earlier batch is being forked. *)
+type scheduling =
+  { ready : pending_work list
+  ; in_flight : claim list
+  }
+
 type runtime =
   { config : Workspace_utils_backend_setup.config
   ; sw : Eio.Switch.t
@@ -576,22 +570,35 @@ type runtime =
   ; retries : (string * string * string) list Atomic.t
   ; wake : Eio.Condition.t
   ; pending : bool Atomic.t
-  ; in_flight : claim list Atomic.t
+  ; scheduling : scheduling Atomic.t
   }
 
 let active_runtime : runtime option Atomic.t = Atomic.make None
 let max_concurrent_reviews = 4
 
-let claim_review (runtime : runtime) work =
+let reserve_review (runtime : runtime) =
+  (* The promises are allocated once, outside the pure CAS retry. They become
+     observable only when their claim is installed. *)
   let abandoned, abandon = Eio.Promise.create () in
-  let claim = { work; requested = false; abandoned; abandon } in
   let rec loop () =
-    let current = Atomic.get runtime.in_flight in
-    if List.exists (fun candidate -> pending_work_same_goal work candidate.work) current
+    let current = Atomic.get runtime.scheduling in
+    if List.length current.in_flight >= max_concurrent_reviews
     then None
-    else if Atomic.compare_and_set runtime.in_flight current (claim :: current)
-    then Some claim
-    else loop ()
+    else match current.ready with
+      | [] -> None
+      | work :: ready ->
+        let unavailable =
+          List.exists (fun candidate -> pending_work_same_goal work candidate.work) current.in_flight
+          || List.exists (fun (id, _, _) -> String.equal work.goal_id id)
+               (Atomic.get runtime.retries) in
+        if unavailable then (
+          ignore (Atomic.compare_and_set runtime.scheduling current {current with ready});
+          loop ())
+        else
+          let claim = { work; requested = false; abandoned; abandon } in
+          let next = {ready; in_flight=claim :: current.in_flight} in
+          if Atomic.compare_and_set runtime.scheduling current next
+          then Some claim else loop ()
   in
   loop ()
 ;;
@@ -601,22 +608,25 @@ let claim_review (runtime : runtime) work =
    and is handled by the ordinary scan. No interval exists where both miss it. *)
 let retain_active_wake (runtime : runtime) ~goal_id =
   let rec loop () =
-    let current = Atomic.get runtime.in_flight in
-    let next = List.map (fun claim ->
+    let current = Atomic.get runtime.scheduling in
+    let in_flight = List.map (fun claim ->
       { claim with requested = claim.requested || String.equal claim.work.goal_id goal_id })
-      current in
-    if Atomic.compare_and_set runtime.in_flight current next then () else loop ()
+      current.in_flight in
+    if Atomic.compare_and_set runtime.scheduling current {current with in_flight}
+    then () else loop ()
   in loop ()
 ;;
 
-let release_review (runtime : runtime) work =
+let same_claim left right = left.abandoned == right.abandoned
+
+let release_review (runtime : runtime) claim =
   let rec loop () =
-    let current = Atomic.get runtime.in_flight in
+    let current = Atomic.get runtime.scheduling in
     let retained = List.exists (fun candidate ->
-      pending_work_same_goal candidate.work work && candidate.requested) current in
-    let next = List.filter (fun candidate ->
-      not (pending_work_same_goal candidate.work work)) current in
-    if Atomic.compare_and_set runtime.in_flight current next then retained else loop ()
+      same_claim candidate claim && candidate.requested) current.in_flight in
+    let in_flight = List.filter (fun candidate -> not (same_claim candidate claim)) current.in_flight in
+    if Atomic.compare_and_set runtime.scheduling current {current with in_flight}
+    then retained else loop ()
   in loop ()
 ;;
 
@@ -641,7 +651,7 @@ let clear_retries (runtime : runtime) ~goal_id =
 
 let schedule_retry (runtime : runtime) ~goal_id ~request_id deferral =
   if List.exists (fun claim -> String.equal claim.work.goal_id goal_id && claim.requested)
-       (Atomic.get runtime.in_flight)
+       (Atomic.get runtime.scheduling).in_flight
   then Verification_protocol.No_retry_armed
   else match deferral with
   | Not_reviewed {retryable_runtimes = _ :: _ as runtimes; _} ->
@@ -679,7 +689,7 @@ let schedule_retry (runtime : runtime) ~goal_id ~request_id deferral =
    A Goal with no claimed review has nothing to cancel. *)
 let abandon_review (runtime : runtime) ~goal_id =
   clear_retries runtime ~goal_id;
-  Atomic.get runtime.in_flight
+  (Atomic.get runtime.scheduling).in_flight
   |> List.iter (fun claim ->
     if String.equal claim.work.goal_id goal_id
     then (
@@ -690,108 +700,123 @@ let abandon_review (runtime : runtime) ~goal_id =
           goal_id))
 ;;
 
-(* A completed review or an armed retry frees capacity for other Goals.
-   Waiting retries are excluded from scans until their own timer or an explicit
-   request wakes them. Permanent deferrals do not request another scan. *)
-let process_goal_work (runtime : runtime) (claim : claim) work =
-  match work with
-  | [] -> ()
-  | representative :: _ ->
-    let committed_any =
-      Eio.Switch.run (fun release_sw ->
-        Eio.Switch.on_release release_sw (fun () ->
-          if release_review runtime representative then request_scan runtime);
-        (* The review runs in its own switch inside the first branch, so an
-           abandon cancels the review and every fiber it forked before the
-           claim is released. The cancelled review records Review_cancelled
-           on the run registry; any verdict it would have delivered is
-           refused by the commit, since the Goal is no longer verifying. *)
-        Eio.Fiber.first
-          (fun () ->
-             Eio.Switch.run (fun work_sw ->
-               Cancel_safe.protect
-                 ~on_exn:(fun exn ->
-                   Log.Misc.error
-                     "goal verifier isolated unexpected worker failure goal_id=%s detail=%s"
-                     representative.goal_id
-                     (Printexc.to_string exn);
-                   false)
-                 (fun () ->
-                    let rec loop committed = function
-                      | [] -> committed
-                      | item :: rest ->
-                        (match
-                           process_pending_work
-                             ~sw:(Some work_sw)
-                             ~schedule_retry:(schedule_retry runtime)
-                             runtime.config
-                             item
-                         with
-                         | Committed | Superseded -> loop true rest
-                         | Deferred (Not_reviewed {retryable_runtimes = _ :: _; _}) -> true
-                         | Deferred (Review_not_bound _) | Deferred (Proof_lookup_unavailable _)
-                         | Deferred (Not_reviewed _) | Deferred (Verdict_without_reason)
-                         | Deferred (Commit_refused _) -> committed)
-                    in
-                    loop false work)))
-          (fun () ->
-             Eio.Promise.await claim.abandoned;
-             false))
-    in
-    if committed_any then request_scan runtime
+(* Every settlement returns capacity to work already observed. Only a wake
+   explicitly retained by this claim requests another discovery; a failure
+   does not automatically put itself back in the ready queue. *)
+let process_goal_work (runtime : runtime) (claim : claim) =
+  Eio.Switch.run (fun release_sw ->
+    Eio.Switch.on_release release_sw (fun () ->
+      if release_review runtime claim then request_scan runtime
+      else Eio.Condition.broadcast runtime.wake);
+    (* Install cleanup before yielding. The caller has already reserved the
+       full batch, so nested scans see every admitted Goal before any work. *)
+    Eio.Fiber.yield ();
+    (* An abandon cancels the review and its children before the claim is
+       released. The original commit still revalidates the Goal's authority. *)
+    Eio.Fiber.first
+      (fun () ->
+        Eio.Switch.run (fun work_sw ->
+          Cancel_safe.observe
+            ~on_exn:(fun exn ->
+              Log.Misc.error
+                "goal verifier isolated unexpected worker failure goal_id=%s detail=%s"
+                claim.work.goal_id
+                (Printexc.to_string exn))
+            (fun () ->
+              ignore (process_pending_work
+                ~sw:(Some work_sw)
+                ~schedule_retry:(schedule_retry runtime)
+                runtime.config claim.work))))
+      (fun () -> Eio.Promise.await claim.abandoned))
 ;;
 
-let take_items limit items =
-  let rec loop remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | item :: rest -> loop (remaining - 1) (item :: acc) rest
-  in
-  loop limit [] items
+let enqueue_pending (runtime : runtime) work =
+  let rec loop () =
+    let current = Atomic.get runtime.scheduling in
+    let retries = Atomic.get runtime.retries in
+    let fresh = List.fold_left (fun added item ->
+      if List.exists (pending_work_same_goal item) current.ready
+         || List.exists (pending_work_same_goal item) added
+         || List.exists (fun claim -> pending_work_same_goal item claim.work) current.in_flight
+         || List.exists (fun (id, _, _) -> String.equal item.goal_id id) retries
+      then added else item :: added) [] work in
+    let next = {current with ready=current.ready @ List.rev fresh} in
+    if Atomic.compare_and_set runtime.scheduling current next then () else loop ()
+  in loop ()
 ;;
 
-let process_pending (runtime : runtime) =
+let discover_pending (runtime : runtime) =
+  Eio.Switch.check runtime.sw;
   match collect_pending runtime.config with
   | Error (Scan_skipped unavailable) -> skip_scan unavailable
   | Ok { collected = work; unreconciled } ->
     publish_unreconciled unreconciled;
     let work = retained_recovery_work runtime.config work in
-    let active = Atomic.get runtime.in_flight in
-    let available = max 0 (max_concurrent_reviews - List.length active) in
-    let eligible =
-      group_pending_by_goal work
-      |> List.filter (function
-        | [] -> false
-        | representative :: _ ->
-          not (List.exists (fun candidate -> pending_work_same_goal representative candidate.work) active)
-          && not (List.exists (fun (id, _, _) -> String.equal id representative.goal_id)
-                    (Atomic.get runtime.retries)))
-    in
-    let selected = take_items available eligible in
-    List.iter
-      (function
-        | [] -> ()
-        | representative :: _ as goal_work ->
-          match claim_review runtime representative with
-          | Some claim ->
-            Eio.Fiber.fork ~sw:runtime.sw (fun () ->
-              process_goal_work runtime claim goal_work)
-          | None -> ())
-      selected
+    Eio.Switch.check runtime.sw;
+    enqueue_pending runtime work
+;;
+
+let requeue_unstarted (runtime : runtime) claims =
+  let rec loop () =
+    let current = Atomic.get runtime.scheduling in
+    let still_owned = List.filter (fun claim ->
+      List.exists (same_claim claim) current.in_flight) claims in
+    let in_flight = List.filter (fun claim ->
+      not (List.exists (same_claim claim) still_owned)) current.in_flight in
+    let ready = List.map (fun claim -> claim.work) still_owned @ current.ready in
+    if Atomic.compare_and_set runtime.scheduling current {ready; in_flight}
+    then Eio.Condition.broadcast runtime.wake else loop ()
+  in loop ()
+;;
+
+let dispatch_ready (runtime : runtime) =
+  let rec reserve claims =
+    match Eio.Switch.check runtime.sw; reserve_review runtime with
+    | None -> List.rev claims
+    | Some claim -> reserve (claim :: claims)
+    | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      requeue_unstarted runtime (List.rev claims);
+      Printexc.raise_with_backtrace exn bt
+  in
+  let rec launch = function
+    | [] -> ()
+    | claim :: rest ->
+      let entered = ref false in
+      (match
+         Eio.Switch.check runtime.sw;
+         Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+           entered := true;
+           process_goal_work runtime claim);
+         (* Eio's fork may return without entering its callback if the switch
+            was cancelled. A returned reservation is not an execution. *)
+         Eio.Switch.check runtime.sw
+       with
+       | () -> launch rest
+       | exception exn ->
+         let bt = Printexc.get_raw_backtrace () in
+         requeue_unstarted runtime (if !entered then rest else claim :: rest);
+         Printexc.raise_with_backtrace exn bt)
+  in
+  launch (reserve [])
+;;
+
+let process_pending (runtime : runtime) =
+  discover_pending runtime;
+  dispatch_ready runtime
 ;;
 
 let run (runtime : runtime) : [ `Stop_daemon ] =
   Eio.Condition.loop_no_mutex runtime.wake (fun () ->
-    if Atomic.exchange runtime.pending false
-    then (
-      Cancel_safe.observe
-        ~on_exn:(fun exn ->
-          Log.Misc.error
-            "goal verifier isolated unexpected scan failure detail=%s"
-            (Printexc.to_string exn))
-        (fun () -> process_pending runtime);
-      None)
-    else None)
+    Cancel_safe.observe
+      ~on_exn:(fun exn ->
+        Log.Misc.error
+          "goal verifier isolated unexpected scan failure detail=%s"
+          (Printexc.to_string exn))
+      (fun () ->
+        if Atomic.exchange runtime.pending false then discover_pending runtime;
+        dispatch_ready runtime);
+    None)
 ;;
 
 let install_callback (runtime : runtime) =
@@ -828,7 +853,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     ; retries = Atomic.make []
     ; wake = Eio.Condition.create ()
     ; pending = Atomic.make true
-    ; in_flight = Atomic.make []
+    ; scheduling = Atomic.make {ready=[]; in_flight=[]}
     }
   in
   let owner = Some runtime in
@@ -861,6 +886,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
       if Atomic.compare_and_set active_runtime owner None
       then (
         (* No scan runs after this, so its last list would read as current. *)
+        Atomic.set runtime.scheduling {ready=[]; in_flight=[]};
         Atomic.set last_unreconciled [];
         Atomic.set
           Workspace_hooks.goal_verification_pending_fn

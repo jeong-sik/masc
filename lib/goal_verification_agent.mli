@@ -16,7 +16,14 @@
     reuses the original; unknown dispatch never replays. Boot restores saved
     judgments/commits before lookup preparation, including phase-moved Goals.
     Other deferrals need an explicit wake.
-    A pending row is never consumed on failure and has no wall-clock expiry. *)
+    A pending row is never consumed on failure and has no wall-clock expiry.
+
+    The daemon retains discovered, not-yet-admitted Goal identities in a
+    process-local queue. Returning a review slot drains that queue even when
+    the review failed; it does not rediscover and retry failed Goals. Explicit
+    Goal wakes and provider retry timers request fresh discovery. Queued work
+    is an observation only: the current request and original authority are
+    revalidated by the worker, and restart reconstructs work from the owners. *)
 
 val start :
   sw:Eio.Switch.t ->
@@ -38,8 +45,10 @@ val unreconciled_to_yojson : Goal_store.goal -> Yojson.Safe.t
 module For_testing : sig
   val retry_pending : goal_id:string -> bool
   val scan_active_once : unit -> bool
-  (** Consume one pending scan on the real active runtime for deterministic
-      wake/ownership race tests. False means no runtime is active. *)
+  (** Consume one discovery scan and drain available queued work on the real
+      active runtime for deterministic wake/ownership race tests. Existing
+      claims and queued work keep their ownership. False means no runtime is
+      active. *)
   type pending_work = { goal_id : string }
 
   (** Why a review ended without a verdict. *)

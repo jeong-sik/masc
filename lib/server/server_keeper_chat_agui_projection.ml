@@ -16,6 +16,7 @@ type custom_event_name =
   | Content_block_stop
   | Model_content_activity
   | Thinking_delta
+  | Thinking_snapshot
   | Thinking_signature_delta
   | Media_delta
   | Stream_protocol_error
@@ -60,6 +61,7 @@ let custom_event_name_to_string = function
   | Content_block_stop -> "KEEPER_CONTENT_BLOCK_STOP"
   | Model_content_activity -> "KEEPER_MODEL_CONTENT_ACTIVITY"
   | Thinking_delta -> "KEEPER_THINKING_DELTA"
+  | Thinking_snapshot -> "KEEPER_THINKING_SNAPSHOT"
   | Thinking_signature_delta -> "KEEPER_THINKING_SIGNATURE_DELTA"
   | Media_delta -> "KEEPER_MEDIA_DELTA"
   | Stream_protocol_error -> "KEEPER_STREAM_PROTOCOL_ERROR"
@@ -210,6 +212,10 @@ let project ~timestamp ~redact_text state event =
   | Agent_core_content_block_stop { index } ->
       state, Some (custom ~timestamp state Content_block_stop
                      (`Assoc [ "index", `Int index ]))
+  | Agent_core_thinking_snapshot {index;snapshot;response} ->
+      state,Some(custom ~timestamp state Thinking_snapshot
+        (`Assoc(["index",`Int index;"snapshot",`String snapshot
+           ;"response",response_identity_to_json response])))
   | Agent_core_thinking_delta { index; delta; response } ->
       state, Some (custom ~timestamp state Thinking_delta
                      (`Assoc ([ "index", `Int index; "delta", `String delta ]
@@ -359,7 +365,7 @@ let is_terminal = function
   | Keeper_chat_events.Agent_core_stream_message_stop _
   | Keeper_chat_events.Agent_core_content_block_start _
   | Keeper_chat_events.Agent_core_content_block_stop _ | Keeper_chat_events.Model_content_activity _
-  | Keeper_chat_events.Agent_core_thinking_delta _
+  | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
   | Keeper_chat_events.Agent_core_thinking_signature_delta _
   | Keeper_chat_events.Agent_core_media_delta _
   | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _

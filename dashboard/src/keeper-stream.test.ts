@@ -193,6 +193,22 @@ describe('Keeper operation stream projection', () => {
 
   })
 
+  it('replaces one response reasoning block across interleaved siblings', () => {
+    assistantEntry()
+    const response = { content_generation: 1, stream_scope: 0 }
+    const apply = (event: KeeperChatStreamEvent) => applyKeeperStreamEvent('sangsu', 'reply-1', event)
+    apply({ type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: 'summary', response } })
+    apply({ type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 1, delta: 'sibling', response } })
+    apply({ type: 'CUSTOM', name: 'KEEPER_THINKING_SNAPSHOT', value: { index: 0, snapshot: 'full thought', response } })
+    _flushPendingKeeperStreamDeltasForTests()
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).traceSteps).toMatchObject([
+      { kind: 'think', text: 'full thought', agentCoreBlockIndex: 0 },
+      { kind: 'think', text: 'sibling', agentCoreBlockIndex: 1 },
+    ])
+    const invalid = parseSSEMessage({ type: 'CUSTOM', name: 'KEEPER_THINKING_SNAPSHOT', value: { index: 0, snapshot: 'unbound' } })
+    expect(invalid).toBeNull()
+  })
+
   it('deduplicates sequenced reasoning across transport replay and restores its prefix', () => {
     assistantEntry()
     const thinking = (delta: string): KeeperChatStreamEvent => ({

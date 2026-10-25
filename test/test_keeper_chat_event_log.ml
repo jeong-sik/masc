@@ -108,6 +108,7 @@ let all_events : E.keeper_chat_event list =
       content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_ended}
   ; E.Agent_core_content_block_stop { index = 0 }
   ; E.Agent_core_thinking_delta {response=None; index = 3; delta = "pondering" }
+  ; E.Agent_core_thinking_snapshot {response={response_generation=1;response_scope=7};index=3;snapshot="full reasoning"}
   ; E.Agent_core_thinking_signature_delta { index = 3; signature_bytes = 42 }
   ; E.Agent_core_media_delta
       { index = 4
@@ -1458,7 +1459,7 @@ let test_native_content_cannot_become_assistant_text () =
       let rejected = Bridge.translate ~redact_text:Fun.id ~base_dir:"." ~stream_scope:0 state
           (Agent_core.Types.ContentBlockDelta {index=2; delta}) in
       Alcotest.(check bool) "native index never becomes assistant text or reasoning" false
-        (List.exists (function E.Text_delta _ | E.Agent_core_thinking_delta _ -> true | _ -> false) rejected.chat_events);
+        (List.exists (function E.Text_delta _ | (E.Agent_core_thinking_delta _ | E.Agent_core_thinking_snapshot _) -> true | _ -> false) rejected.chat_events);
       Alcotest.(check bool) "native channel conflict is observable" true
         (List.exists (function E.Agent_core_stream_protocol_error {kind=E.Tool_delta_invalid_kind;_} -> true | _ -> false) rejected.chat_events))
       [Agent_core.Types.TextDelta "native output"; Agent_core.Types.ThinkingDelta "native output"])
@@ -1486,7 +1487,7 @@ let test_autonomous_turn_journal_is_live_and_replayable () =
       let path = L.turn_journal_path ~base_dir ~keeper_name:"k" ~turn_ref in
       let during = read_ok (L.read_journal_path_result path) in
       Alcotest.(check bool) "thinking is readable while turn runs" true
-        (List.exists (fun (entry:L.journaled_event) -> match entry.event with E.Agent_core_thinking_delta _ -> true | _ -> false) during);
+        (List.exists (fun (entry:L.journaled_event) -> match entry.event with (E.Agent_core_thinking_delta _ | E.Agent_core_thinking_snapshot _) -> true | _ -> false) during);
       Alcotest.(check bool) "native tool activity is readable while turn runs" true
         (List.exists (fun (entry:L.journaled_event) -> match entry.event with E.Native_tool_start _ -> true | _ -> false) during);
       Alcotest.(check bool) "active stream has no invented terminal" false

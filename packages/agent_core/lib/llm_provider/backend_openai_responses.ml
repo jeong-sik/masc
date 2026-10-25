@@ -588,8 +588,9 @@ let content_blocks_of_output_message item =
 
 let content_blocks_of_reasoning_item item =
   Result.map (function
-    | Responses_reasoning.Absent -> []
-    | Plaintext content -> [ Thinking {signature=None;content} ]
+    | Responses_reasoning.Plaintext channels ->
+      (match Responses_reasoning.selected channels with
+       | None -> [] | Some(_,content) -> [ Thinking {signature=None;content} ])
     | Opaque item -> [ RedactedThinking (Yojson.Safe.to_string item) ])
     (Responses_reasoning.decode item)
 ;;

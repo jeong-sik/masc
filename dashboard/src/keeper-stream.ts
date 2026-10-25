@@ -1421,6 +1421,19 @@ export function applyKeeperStreamEvent(
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         return null
       }
+      if (event.name === 'KEEPER_THINKING_SNAPSHOT') {
+        const response = admitStreamEvent(keeperName, assistantEntryId, event)
+        if (!response.accepted) return null
+        // Commit old buffered deltas before replacing their exact block.
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
+        setAssistantThinkingSnapshot(keeperName, assistantEntryId, event.value.snapshot, {
+          agentCoreBlockIndex: event.value.index,
+          responseOwner: event.value.response && response.state.kind === 'known'
+            ? response.state.current ?? undefined : undefined,
+        })
+        persistActiveAssistantDraft(keeperName, assistantEntryId)
+        return null
+      }
       if (event.name === 'KEEPER_THINKING_DELTA') {
         const response = admitStreamEvent(keeperName, assistantEntryId, event)
         if (!response.accepted) return null

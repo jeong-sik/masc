@@ -113,6 +113,16 @@ let late_plaintext () = let s=start()in done_item s 0(reasoning ~encrypted:"toke
   delta s `Full "late";omitted s;fails s
 let wrong_identity () = let s=start()in delta ~id:"first" s `Full "text";
   terminal s[reasoning ~full:["text"]"other"];fails s
+let invalid_snapshot_target signed =
+  let acc=Acc.create_stream_acc() in
+  let events=[MessageStart{id="guard";model="fixture";usage=None}
+    ;ContentBlockStart{index=0;content_type=(if signed then "thinking" else "text");tool_id=None;tool_name=None}]
+    @ (if signed then [ContentBlockDelta{index=0;delta=ThinkingSignatureDelta "signature"}] else [])
+    @ [ContentBlockDelta{index=0;delta=ThinkingSnapshot "replacement"}
+       ;MessageDelta{stop_reason=Some EndTurn;usage=None};MessageStop] in
+  List.iter(Acc.accumulate_event acc)events;
+  match Acc.finalize_stream_acc acc with Error _->()|Ok _->Alcotest.fail "snapshot rewrote an ineligible block"
+
 let () = Alcotest.run "responses_reasoning_stream"
   ["public SSE",List.map(fun(name,fn)->Alcotest.test_case name `Quick fn)
    ["full history",full_history;"summary then full",summary_then_full;"full then summary",full_then_summary
@@ -121,5 +131,7 @@ let () = Alcotest.run "responses_reasoning_stream"
    ;"conflict",contradictory;"truncation",truncated;"explicit empty",explicit_empty;"missing item",missing_item
    ;"omitted channel",omitted_channel;"whitespace then full",whitespace_first;"Unicode chunks",unicode_fragments
    ;"multiple native items",multiple_items;"opaque transition",opaque_transition;"opaque conflict",opaque_changed
-   ;"late plaintext",late_plaintext;"item identity",wrong_identity]]
+   ;"late plaintext",late_plaintext;"item identity",wrong_identity
+   ;"signed thinking guard",(fun()->invalid_snapshot_target true)
+   ;"wrong block guard",(fun()->invalid_snapshot_target false)]]
 

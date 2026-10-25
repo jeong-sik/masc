@@ -559,7 +559,7 @@ let complete_stream_http
         | Types.ContentBlockStart _ -> `Substrate
         | Types.ContentBlockDelta { delta = TextDelta _ | TextSnapshot _; _ } -> `Answer
         | Types.ContentBlockDelta { delta = MediaDelta _; _ } -> `Answer
-        | Types.ContentBlockDelta { delta = ThinkingDelta _; _ } -> `Thinking
+        | Types.ContentBlockDelta { delta = (ThinkingDelta _ | ThinkingSnapshot _); _ } -> `Thinking
         | Types.ContentBlockDelta { delta = ReasoningDetailsDelta _; _ } -> `Thinking
         | Types.ContentBlockDelta { delta = ThinkingSignatureDelta _; _ } -> `Substrate
         | Types.ContentBlockDelta { delta = RedactedThinkingSnapshot _; _ } -> `Substrate

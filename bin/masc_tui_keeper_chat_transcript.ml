@@ -607,6 +607,25 @@ let trail_thinking ~now t ~block text =
        Buffer.add_string buffer text;
        t.reversed_trail <- Node_thinking (fresh_stretch t, now, buffer, block) :: t.reversed_trail)
 
+let replace_thinking ~now t ~block text =
+  let matched=ref false in
+  let ordered=List.rev t.reversed_trail |> List.filter_map(function
+    | Node_thinking(id,at,buffer,previous) when same_thinking_block previous block ->
+      if !matched then None else begin
+        matched:=true;Buffer.clear buffer;Buffer.add_string buffer text;
+        Some(Node_thinking(id,at,buffer,previous))
+      end
+    | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_thinking _
+       | Node_media _ | Node_tool _ | Node_superseded _) as node -> Some node) in
+  t.reversed_trail<-List.rev ordered;
+  if not !matched then trail_thinking ~now t ~block text;
+  Buffer.clear t.thinking_buffer;
+  List.rev t.reversed_trail |> List.iter(function
+    | Node_thinking(_,_,buffer,previous) when previous.block_response=block.block_response ->
+      Buffer.add_buffer t.thinking_buffer buffer
+    | Node_thinking _ | Node_segment_boundary | Node_response_boundary | Node_text _ | Node_media _
+    | Node_tool _ | Node_superseded _ -> ())
+
 let trail_text ~now t text =
   (match t.reversed_trail with
    | Node_text (_, _, buffer, scope) :: _ when scope = t.current_stream_scope -> Buffer.add_string buffer text
@@ -1891,6 +1910,15 @@ let apply_delta ~now t (delta : Live.delta) =
         | Some previous when previous=media -> ()
         | Some _ -> note_unreadable t "generated media conflicts with its original response block"
       end
+  | Live.Thinking_snapshot {text;index;response} ->
+      let closed=response_is_closed t (response.response_generation,response.response_scope) in
+      let admitted=not closed && admit_response_identity t
+        (Some response.response_generation)(Some response.response_scope) in
+      let terminal=match t.phase with Stream_ended|Stream_failed _->true|Waiting|Working->false in
+      if not terminal && admitted then begin
+        if text<>"" then t.model_signal<-Some(Reasoning_at now);
+        replace_thinking ~now t ~block:{block_index=index;block_response=Some response} text
+      end
   | Live.Thinking {text;index;response} ->
       let generation, stream_scope = match response with
         | None -> None, None
@@ -2110,7 +2138,7 @@ let apply ~now t delta =
    | Live.Run_started | Live.Batch_bound _ | Live.Accepted _ -> ()
    | Live.Runtime_attempt_started _ | Live.Provider_retry_observed _
    | Live.Stream_model_started _ | Live.Model_content_activity _ | Live.Stream_model_stopped _
-   | Live.Stream_details _ | Live.Text _ | Live.Media _ | Live.Thinking _
+   | Live.Stream_details _ | Live.Text _ | Live.Media _ | (Live.Thinking _ | Live.Thinking_snapshot _)
    | Live.Native_tool_started _ | Live.Native_tool_progress _ | Live.Native_tool_ended _
    | Live.Tool_started _ | Live.Tool_admitted _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
    | Live.Stream_protocol_error _ | Live.Approval_requested _ | Live.Approval_settled _

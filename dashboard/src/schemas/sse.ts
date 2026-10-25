@@ -642,6 +642,7 @@ function validateKeeperCustomPayload(
       'generation', 'stream_scope', 'block_index', 'provider_message_id', 'channel', 'state',
     ],
     KEEPER_THINKING_DELTA: ['index', 'delta', 'response'],
+    KEEPER_THINKING_SNAPSHOT: ['index', 'snapshot', 'response'],
     KEEPER_THINKING_SIGNATURE_DELTA: ['index', 'signature_bytes'],
     KEEPER_MEDIA_DELTA: ['index', 'media_type', 'source_type', 'media_ref', 'response'],
     KEEPER_STREAM_PROTOCOL_ERROR: [
@@ -842,6 +843,12 @@ function validateKeeperCustomPayload(
       const runtimeId = optionalString(value, 'runtime_id')
       if (!runtimeId.success) return runtimeId
       return value.attempt_index === undefined ? ok(true) : requiredInteger(value, 'attempt_index', 0)
+    }
+    case 'KEEPER_THINKING_SNAPSHOT': {
+      const owner = validateResponseOwner(value.response)
+      if (!owner.success) return owner
+      const index = requiredInteger(value, 'index')
+      return index.success ? requiredString(value, 'snapshot', true) : index
     }
     case 'KEEPER_THINKING_DELTA': {
       if (value.response !== undefined) {

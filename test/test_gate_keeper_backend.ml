@@ -1155,7 +1155,7 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
                     "agent_core_block_start"
                 | Keeper_chat_events.Agent_core_content_block_stop _ ->
                     "agent_core_block_stop"
-                | Keeper_chat_events.Agent_core_thinking_delta _ -> "agent_core_thinking"
+                | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _) -> "agent_core_thinking"
                 | Keeper_chat_events.Tool_call_start _ -> "tool_start"
                 | Keeper_chat_events.Tool_call_admitted _ -> "tool_admitted"
                 | Keeper_chat_events.Tool_call_args _ -> "tool_args"
@@ -1195,7 +1195,7 @@ let test_keeper_stream_bridge_projects_reasoning_details_delta () =
         (String.concat ", "
            (List.map
               (function
-                | Keeper_chat_events.Agent_core_thinking_delta _ -> "agent_core_thinking"
+                | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _) -> "agent_core_thinking"
                 | Keeper_chat_events.Text_delta _ -> "text"
                 | Keeper_chat_events.Event_error _ -> "error"
                 | _ -> "other")
@@ -1264,7 +1264,7 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
                     "agent_core_block_start"
                 | Keeper_chat_events.Agent_core_content_block_stop _ ->
                     "agent_core_block_stop"
-                | Keeper_chat_events.Agent_core_thinking_delta _ -> "agent_core_thinking"
+                | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _) -> "agent_core_thinking"
                 | Keeper_chat_events.Tool_call_start _ -> "tool_start"
                 | Keeper_chat_events.Tool_call_admitted _ -> "tool_admitted"
                 | Keeper_chat_events.Tool_call_args _ -> "tool_args"

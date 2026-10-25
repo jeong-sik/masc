@@ -836,7 +836,7 @@ let event_channel_conflicts state = function
   | Agent_core.Types.ContentBlockDelta {index; delta} ->
     let incoming = match delta with
       | Agent_core.Types.TextDelta _ | TextSnapshot _ -> Some Public_text
-      | ThinkingDelta _ | ReasoningDetailsDelta _ | RedactedThinkingSnapshot _
+      | (ThinkingDelta _ | ThinkingSnapshot _) | ReasoningDetailsDelta _ | RedactedThinkingSnapshot _
       | ThinkingSignatureDelta _ -> Some Provider_reasoning
       | InputJsonDelta _ | InputJsonSnapshot _ | MediaDelta _ -> None in
     (match stream_block_for_index state index, incoming with
@@ -1082,6 +1082,15 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
         let text = redact_text text in
         observe_model_content bridge_state ~stream_scope ~index ~channel:Public_text
           text [Text_delta {text; response=Observed_response {response_generation=bridge_state.content_generation;response_scope=stream_scope}}])
+  | ContentBlockDelta {index;delta=ThinkingSnapshot text} ->
+      (match reject_non_input_tool_delta ~stream_scope ~index ~delta_kind:"thinking-snapshot" bridge_state with
+       | Some rejected -> rejected
+       | None ->
+         let bridge_state=occupy_non_tool_index ~channel:Provider_reasoning bridge_state index in
+         let text=redact_text text in
+         observe_model_content bridge_state ~stream_scope ~index ~channel:Provider_reasoning text
+           [Agent_core_thinking_snapshot{index;snapshot=text;response=
+             {response_generation=bridge_state.content_generation;response_scope=stream_scope}}])
   | ContentBlockDelta { index; delta = ThinkingDelta text } ->
       (match
          reject_non_input_tool_delta ~stream_scope ~index ~delta_kind:"thinking"

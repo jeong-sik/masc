@@ -590,7 +590,7 @@ let test_response_step_ends_preserve_content_identity () =
               | ContentBlockStart {index; content_type="native_tool_use"; _} -> Some (`Tool index)
               | ContentBlockStop {index} -> Some (`Stop index)
               | MessageStop -> Some `Turn_stop
-              | ContentBlockDelta {delta=ThinkingDelta _; _} -> fail "provider supplied no thinking text"
+              | ContentBlockDelta {delta=(ThinkingDelta _ | ThinkingSnapshot _); _} -> fail "provider supplied no thinking text"
               | _ -> None) projected in
             check bool "model and native closures never alias another open response" true
               (relevant=[`Text (0,"first"); `Tool 1; `Text (2,"\n\nsecond");

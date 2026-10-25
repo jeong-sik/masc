@@ -1179,13 +1179,18 @@ function writeAssistantThinkingText(
   meta: { agentCoreBlockIndex?: number; responseOwner?: KeeperResponseOwner } = {},
   mode: 'append' | 'snapshot',
 ): void {
-  if (text.length === 0) return
+  if (text.length === 0 && mode === 'append') return
   const responseOwner = meta.responseOwner === undefined ? undefined : ownerFromUnknown(meta.responseOwner)
   if (responseOwner === null) return
   const agentCoreBlockIndex = meta.agentCoreBlockIndex
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
-    const last = existing[existing.length - 1]
+    const matches = (step: ChatTraceStep): boolean => step.kind === 'think'
+      && sameKeeperResponseOwner(step.responseOwner, responseOwner)
+      && step.agentCoreBlockIndex === agentCoreBlockIndex
+    const snapshotIndex = mode === 'snapshot' && agentCoreBlockIndex !== undefined && responseOwner !== undefined
+      ? existing.findIndex(matches) : -1
+    const last = snapshotIndex >= 0 ? existing[snapshotIndex] : existing[existing.length - 1]
     const sameThinkingBlock =
       last?.kind === 'think'
       && sameKeeperResponseOwner(last.responseOwner, responseOwner)
@@ -1203,7 +1208,11 @@ function writeAssistantThinkingText(
           : text
         : text
     const traceSteps: ChatTraceStep[] =
-      sameThinkingBlock
+      snapshotIndex >= 0 && last?.kind === 'think'
+        ? existing.flatMap((step, index) => index === snapshotIndex
+          ? [{ ...last, text }]
+          : matches(step) ? [] : [step])
+        : sameThinkingBlock
         ? [
             ...existing.slice(0, -1),
             withoutUndefined({

@@ -3066,9 +3066,18 @@ let test_admitted_name_cannot_cross_occurrences () =
   check bool "conflict remains explicit" true (Transcript.unreadable t <> None)
 ;;
 
+let test_thinking_snapshot_replaces_exact_block () =
+  let t=fresh() in
+  let response : Masc.Keeper_chat_events.response_identity={response_generation=1;response_scope=0} in
+  feed t [Live.Thinking{text="summary";index=0;response=Some response}
+    ;Live.Thinking{text="other";index=1;response=Some response}
+    ;Live.Thinking_snapshot{text="full";index=0;response}];
+  check string "stored reasoning replaces exact block and preserves sibling" "fullother" (Transcript.thinking t)
+
 let () =
   run "tui_keeper_chat_transcript"
-    [ ("admitted tool identity", [
+    [ ("thinking replacement",[test_case "exact response block" `Quick test_thinking_snapshot_replaces_exact_block]);
+      ("admitted tool identity", [
         test_case "skill retains one occurrence" `Quick test_admitted_skill_uses_one_original_occurrence;
         test_case "reused provider IDs never select another occurrence" `Quick test_admitted_name_cannot_cross_occurrences])
     ; ( "provider retry ownership", [test_case "retry progress requires current runtime attempt" `Quick test_provider_retry_progress_owner] )

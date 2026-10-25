@@ -11,6 +11,7 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_CONTENT_BLOCK_STOP',
   'KEEPER_MODEL_CONTENT_ACTIVITY',
   'KEEPER_THINKING_DELTA',
+  'KEEPER_THINKING_SNAPSHOT',
   'KEEPER_THINKING_SIGNATURE_DELTA',
   'KEEPER_MEDIA_DELTA',
   'KEEPER_STREAM_PROTOCOL_ERROR',
@@ -265,6 +266,10 @@ type KeeperChatCustomEvent =
       type: 'CUSTOM'
       name: 'KEEPER_THINKING_DELTA'
       value: { index?: number; delta?: string; response?: { content_generation: number; stream_scope: number } }
+    }  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_THINKING_SNAPSHOT'
+      value: { index: number; snapshot: string; response: { content_generation: number; stream_scope: number } }
     }
   | {
       type: 'CUSTOM'

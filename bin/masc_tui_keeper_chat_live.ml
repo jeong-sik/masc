@@ -55,6 +55,11 @@ type delta =
       ; index : int
       ; response : Masc.Keeper_chat_events.response_identity option
       }
+  | Thinking_snapshot of
+      { text : string
+      ; index : int
+      ; response : Masc.Keeper_chat_events.response_identity
+      }
   | Media of Masc.Keeper_chat_events.generated_media
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
@@ -267,6 +272,23 @@ let custom_deltas_unvalidated fields =
            match Masc.Keeper_chat_events.generated_media_of_json value with
            | Ok media -> [Media media]
            | Error detail -> [Undecodable detail])
+  | Some "KEEPER_THINKING_SNAPSHOT" -> (
+      match object_field fields "value" with
+      | None -> [ Undecodable "KEEPER_THINKING_SNAPSHOT value is not an object" ]
+      | Some value ->
+          (match Masc.Keeper_chat_events.optional_response_identity_of_fields value with
+           | Error detail -> [Undecodable detail]
+           | Ok None -> [Undecodable "thinking snapshot requires response identity"]
+           | Ok (Some owner) ->
+               let response=owner in
+               (* The content block index is what tells two adjacent reasoning
+                  blocks of one response apart (#37717). It is only compared for
+                  equality, so any integer the journal accepts is accepted. *)
+               (match List.assoc_opt "index" value with
+                | Some (`Int index) ->
+                    required ~event:"KEEPER_THINKING_SNAPSHOT" ~field:"snapshot" value
+                      (fun text -> Thinking_snapshot {text;index;response})
+                | Some _ | None -> [ Undecodable "KEEPER_THINKING_SNAPSHOT has no integer index" ])))
   | Some "KEEPER_THINKING_DELTA" -> (
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_THINKING_DELTA value is not an object" ]

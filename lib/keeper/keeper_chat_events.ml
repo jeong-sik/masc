@@ -134,6 +134,7 @@ type keeper_chat_event =
   | Agent_core_content_block_stop of { index : int }
   | Model_content_activity of model_content_activity
   | Agent_core_thinking_delta of { index : int; delta : string; response : response_identity option }
+  | Agent_core_thinking_snapshot of { index : int; snapshot : string; response : response_identity }
   | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
   | Agent_core_media_delta of generated_media
   | Agent_core_stream_protocol_error of stream_protocol_error
@@ -218,6 +219,8 @@ let map_content ~public_errors ~redact_text = function
   | Reply_details event -> Reply_details {event with reply=redact_text event.reply}
   | Continuation_checkpoint event ->
       Continuation_checkpoint {event with message=redact_text event.message}
+  | Agent_core_thinking_snapshot event ->
+      Agent_core_thinking_snapshot {event with snapshot=redact_text event.snapshot}
   | Agent_core_thinking_delta event ->
       Agent_core_thinking_delta {event with delta=redact_text event.delta}
   | Agent_core_media_delta event ->

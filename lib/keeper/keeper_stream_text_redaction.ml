@@ -213,6 +213,13 @@ let on_event t (event : Agent_core.Types.sse_event) =
   match event with
   | ContentBlockDelta { index; delta = TextDelta text } -> feed t ~index Text text
   | ContentBlockDelta { index; delta = ThinkingDelta text } -> feed t ~index Thinking text
+  | ContentBlockDelta {index;delta=ThinkingSnapshot text} ->
+    (* A selected channel can still end inside a secret. Clear the superseded
+       view, then re-stream the replacement through a fresh redaction owner;
+       never publish its incomplete tail via whole-value redaction. *)
+    let cleared=replace_snapshot t ~index Thinking
+      (ContentBlockDelta{index;delta=ThinkingSnapshot ""}) in
+    cleared @ feed t ~index Thinking text
   | ContentBlockDelta
       { index; delta = ReasoningDetailsDelta { reasoning_content; details } } ->
     feed t ~index Thinking (reasoning_details_text ~reasoning_content ~details)

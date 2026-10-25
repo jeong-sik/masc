@@ -387,7 +387,7 @@ let terminal_event_failure reason state =
 let delta_kind_name = function
   | Types.TextDelta _ -> "text"
   | Types.TextSnapshot _ -> "text_snapshot"
-  | Types.ThinkingDelta _ -> "thinking"
+  | (Types.ThinkingDelta _ | Types.ThinkingSnapshot _) -> "thinking"
   | Types.ThinkingSignatureDelta _ -> "thinking_signature"
   | Types.RedactedThinkingSnapshot _ -> "redacted_thinking_snapshot"
   | Types.ReasoningDetailsDelta _ -> "reasoning_details"
@@ -414,7 +414,7 @@ let block_kind_accepts_delta kind delta =
   match kind, delta with
   | Text_block, (Types.TextDelta _ | Types.TextSnapshot _)
   | Tool_result_block _, (Types.TextDelta _ | Types.TextSnapshot _)
-  | Thinking_block, Types.ThinkingDelta _
+  | Thinking_block, (Types.ThinkingDelta _ | Types.ThinkingSnapshot _)
   | Thinking_block, Types.ThinkingSignatureDelta _
   | Thinking_block, Types.RedactedThinkingSnapshot _
   | Reasoning_details_block, Types.ReasoningDetailsDelta _
@@ -426,7 +426,7 @@ let block_kind_accepts_delta kind delta =
   | ( Redacted_thinking_block | Unknown_block _ )
   , ( Types.TextDelta _
       | Types.TextSnapshot _
-      | Types.ThinkingDelta _
+      | (Types.ThinkingDelta _ | Types.ThinkingSnapshot _)
       | Types.ThinkingSignatureDelta _
       | Types.RedactedThinkingSnapshot _
       | Types.ReasoningDetailsDelta _
@@ -434,7 +434,7 @@ let block_kind_accepts_delta kind delta =
       | Types.InputJsonSnapshot _
       | Types.MediaDelta _ )
   | (Text_block | Tool_result_block _)
-  , ( Types.ThinkingDelta _
+  , ( (Types.ThinkingDelta _ | Types.ThinkingSnapshot _)
       | Types.ThinkingSignatureDelta _
       | Types.RedactedThinkingSnapshot _
       | Types.ReasoningDetailsDelta _
@@ -451,7 +451,7 @@ let block_kind_accepts_delta kind delta =
   | Reasoning_details_block
   , ( Types.TextDelta _
       | Types.TextSnapshot _
-      | Types.ThinkingDelta _
+      | (Types.ThinkingDelta _ | Types.ThinkingSnapshot _)
       | Types.ThinkingSignatureDelta _
       | Types.RedactedThinkingSnapshot _
       | Types.InputJsonDelta _
@@ -460,7 +460,7 @@ let block_kind_accepts_delta kind delta =
   | Tool_use_block
   , ( Types.TextDelta _
       | Types.TextSnapshot _
-      | Types.ThinkingDelta _
+      | (Types.ThinkingDelta _ | Types.ThinkingSnapshot _)
       | Types.ThinkingSignatureDelta _
       | Types.RedactedThinkingSnapshot _
       | Types.ReasoningDetailsDelta _
@@ -468,7 +468,7 @@ let block_kind_accepts_delta kind delta =
   | (Image_block | Document_block | Audio_block)
   , ( Types.TextDelta _
       | Types.TextSnapshot _
-      | Types.ThinkingDelta _
+      | (Types.ThinkingDelta _ | Types.ThinkingSnapshot _)
       | Types.ThinkingSignatureDelta _
       | Types.RedactedThinkingSnapshot _
       | Types.ReasoningDetailsDelta _
@@ -493,6 +493,12 @@ let normalize_text_snapshot ~accumulated snapshot =
 
 let normalize_event state event =
   match event with
+  | Types.ContentBlockDelta {index;delta=Types.ThinkingSnapshot _} ->
+    (match Blocks.find_opt index state.blocks with
+     | Some {header=Announced{kind=Thinking_block;_};lifecycle=Open;signature_chunks_rev=[];_} ->
+       Ok(Some event)
+     | Some _ | None -> Error(Types.Stream_parse_failed
+         {reason="thinking_snapshot_requires_unsigned_open_block";raw=""}))
   | Types.ContentBlockDelta { index; delta = Types.TextSnapshot snapshot } ->
     (match Blocks.find_opt index state.blocks with
      | Some
@@ -739,7 +745,7 @@ let transition_open state = function
      | ( Some { header = Announced _; lifecycle = Open; _ }
        , ( Types.TextDelta _
          | Types.TextSnapshot _
-         | Types.ThinkingDelta _
+         | (Types.ThinkingDelta _ | Types.ThinkingSnapshot _)
          | Types.ThinkingSignatureDelta _
          | Types.RedactedThinkingSnapshot _
          | Types.ReasoningDetailsDelta _
@@ -755,6 +761,7 @@ let transition_open state = function
               the distinct [TextSnapshot] constructor, so repeated tokens are
               never guessed to be transport replays. *)
            { block with text_chunks_rev = text :: block.text_chunks_rev }
+         | Types.ThinkingSnapshot text -> {block with text_chunks_rev=[text]}
          | Types.TextSnapshot text ->
            (* Valid snapshots are normalized to [TextDelta] before transition.
               Retain totality for any future internal caller. *)

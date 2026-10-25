@@ -2906,7 +2906,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
           | Keeper_chat_events.Agent_core_content_block_start _
           | Keeper_chat_events.Agent_core_content_block_stop _
           | Keeper_chat_events.Model_content_activity _
-          | Keeper_chat_events.Agent_core_thinking_delta _
+          | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
           | Keeper_chat_events.Agent_core_thinking_signature_delta _
           | Keeper_chat_events.Agent_core_media_delta _
           | Keeper_chat_events.Agent_core_stream_protocol_error _
@@ -3367,7 +3367,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                       | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_start _)
                       | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_stop _)
                       | Keeper_chat_events.Next (Keeper_chat_events.Model_content_activity _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_delta _)
+                      | Keeper_chat_events.Next ((Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _))
                       | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_signature_delta _)
                       | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_media_delta _)
                       | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_protocol_error _)
@@ -3446,7 +3446,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                    | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_start _)
                    | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_stop _)
                    | Keeper_chat_events.Next (Keeper_chat_events.Model_content_activity _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_delta _)
+                   | Keeper_chat_events.Next ((Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _))
                    | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_signature_delta _)
                    | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_media_delta _)
                    | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_protocol_error _)

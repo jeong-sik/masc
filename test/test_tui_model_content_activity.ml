@@ -497,7 +497,7 @@ let test_owned_thinking_protocol () =
   let translated = B.translate ~redact_text:Fun.id ~base_dir:"/unused" ~stream_scope:0
     (B.empty_state ~generation:7 ())
     (Agent_core.Types.ContentBlockDelta {index=0;delta=ThinkingDelta "reason"}) in
-  let event = match List.find_opt (function E.Agent_core_thinking_delta _ -> true | _ -> false)
+  let event = match List.find_opt (function (E.Agent_core_thinking_delta _ | E.Agent_core_thinking_snapshot _) -> true | _ -> false)
       translated.chat_events with
     | Some (E.Agent_core_thinking_delta {response=Some owner;_} as event) ->
       check int "thinking bridge captures generation" 7 owner.response_generation;

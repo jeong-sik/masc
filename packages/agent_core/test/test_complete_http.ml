@@ -3340,7 +3340,7 @@ let test_complete_stream_long_thinking_is_not_cut_off () =
     let config = make_config url in
     let mock_now = ref 0.0 in
     let on_event = function
-      | Types.ContentBlockDelta { delta = Types.ThinkingDelta _; _ } ->
+      | Types.ContentBlockDelta { delta = (Types.ThinkingDelta _ | Types.ThinkingSnapshot _); _ } ->
         mock_now := !mock_now +. 6.0;
         Eio_mock.Clock.set_time mock_clock !mock_now
       | _ -> ()

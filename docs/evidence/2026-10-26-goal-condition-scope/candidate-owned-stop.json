@@ -1,0 +1,21 @@
+{
+  "schema": "masc.goal.condition-scope.owned-stop.v1",
+  "observed_at_utc": "2026-10-25T18:18:18.209087+00:00",
+  "processes": [
+    {
+      "record": "server-process-private.json",
+      "pid": 76294,
+      "original_identity_verified": true,
+      "signal": "SIGTERM",
+      "process_absence_verified": true
+    },
+    {
+      "record": "proxy-process-private.json",
+      "pid": 76286,
+      "original_identity_verified": true,
+      "signal": "SIGTERM",
+      "process_absence_verified": true
+    }
+  ],
+  "scope": "Only the two exact owned processes; no primary or descendant/fleet claim."
+}

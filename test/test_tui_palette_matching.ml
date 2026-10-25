@@ -534,7 +534,7 @@ let test_an_installation_that_asked_has_one_results_row () =
       | _, Palette_addon_results id -> Some id
       | _, ( Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
            | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _
-           | Palette_goto _ | Palette_usage_scope _ | Palette_config _
+           | Palette_goto _ | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _
            | Palette_gate_mode _ | Palette_chat _ | Palette_task _ | Palette_task_creation _
            | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
            | Palette_code_file _ | Palette_code_location _ ) -> None)
@@ -561,6 +561,30 @@ let test_retained_history_is_available_without_current_configuration () =
       (List.exists (fun (_,action) -> action=Palette_lane_history lane)
         (palette_matches state)))
     [Lane_run_identity.Workspace_curator; Lane_run_identity.Verifier]
+;;
+
+let test_korean_aliases_and_ui_language_entries () =
+  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  state.palette_query <- "모델";
+  check_bool "Korean model query reaches Config_models" true
+    (List.exists (fun (_, action) -> action = Palette_config Config_models)
+       (palette_matches state));
+  state.palette_query <- "파라미터";
+  check_bool "Korean params query reaches Config_params" true
+    (List.exists (fun (_, action) -> action = Palette_config Config_params)
+       (palette_matches state));
+  state.palette_query <- "대시보드";
+  check_bool "Korean dashboard query reaches Overview" true
+    (List.exists (fun (_, action) -> action = Palette_goto Overview)
+       (palette_matches state));
+  state.palette_query <- "한글";
+  check_bool "Korean language query offers Lang_ko" true
+    (List.exists (fun (_, action) -> action = Palette_ui_language Lang_ko)
+       (palette_matches state));
+  state.palette_query <- "영문";
+  check_bool "English language query offers Lang_en" true
+    (List.exists (fun (_, action) -> action = Palette_ui_language Lang_en)
+       (palette_matches state))
 ;;
 
 let () =
@@ -607,6 +631,8 @@ let () =
             test_an_installation_that_asked_has_one_results_row
         ; Alcotest.test_case "every surface and Config pane has a row" `Quick
             test_every_surface_and_config_pane_has_a_row
+        ; Alcotest.test_case "Korean aliases and UI language entries" `Quick
+            test_korean_aliases_and_ui_language_entries
         ] )
     ]
 ;;

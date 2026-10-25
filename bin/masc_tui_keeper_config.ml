@@ -731,11 +731,11 @@ let view_lines ~sanitize json =
       (styled Masc_tui_theme.Sgr.cyan editable_glyph)
       (styled Masc_tui_theme.Sgr.dim read_only_glyph)
   ; ""
-  ; section "edit here" "$EDITOR JSON form"
+  ; section "1. 편집 안내 (edit here)" "$EDITOR JSON form"
   ; "   Press e. Save and close the editor to apply; exit non-zero to cancel."
   ; "   Only changed fields are sent. The server validates before persisting."
   ; ""
-  ; section "effective settings" (Printf.sprintf "e opens %d fields" editable_count)
+  ; section "2. 적용 중인 설정 (effective settings)" (Printf.sprintf "e opens %d fields" editable_count)
   ; editable_value_row "Runtime"
       (fun () -> string_value (at [ "execution"; "selected_runtime_id" ]))
   ; editable_value_row "Activation" (fun () -> string_value (at [ "activation_mode" ]))
@@ -768,13 +768,13 @@ let view_lines ~sanitize json =
   ; editable_value_row "Skills"
       (fun () -> skill_selection_value (at [ "skills"; "names" ]))
   ; ""
-  ; section "derived" "read-only"
+  ; section "3. 파생 상태 · 리비전 (derived)" "read-only"
   ; read_only_value_row "Config revision"
       (fun () -> config_revision_value (at [ "config_revision" ]))
   ; read_only_value_row "Sandbox roots"
       (fun () -> string_list_value (at [ "sandbox_roots" ]))
   ; ""
-  ; section "provenance" "read-only"
+  ; section "4. 설정 출처 · 우선순위 (provenance)" "read-only"
   ; read_only_value_row "Live override"
       (fun () -> bool_value (source [ "has_live_override" ]))
   ; read_only_value_row "Override fields"
@@ -786,12 +786,12 @@ let view_lines ~sanitize json =
   ; read_only_value_row "Live metadata"
       (fun () -> string_value (source [ "live_meta_path" ]))
   ; ""
-  ; marked_section editable_glyph Masc_tui_theme.Sgr.cyan "instructions"
+  ; marked_section editable_glyph Masc_tui_theme.Sgr.cyan "5. 키퍼 지침 (instructions)"
       (Printf.sprintf "editable \xc2\xb7 %s" (counted instructions))
   ]
   @ instructions
   @ [ ""
-    ; marked_section read_only_glyph Masc_tui_theme.Sgr.dim "effective system prompt"
+    ; marked_section read_only_glyph Masc_tui_theme.Sgr.dim "6. 유효 시스템 프롬프트 (effective system prompt)"
         (Printf.sprintf "read-only \xc2\xb7 %s" effective_prompt_summary)
     ]
   @ effective_prompt
@@ -803,12 +803,12 @@ let view_lines ~sanitize json =
           and dropping the rest would quietly narrow what the operator can
           see. *)
        ""
-       :: marked_section read_only_glyph Masc_tui_theme.Sgr.dim "sources" "read-only \xc2\xb7 raw"
+       :: marked_section read_only_glyph Masc_tui_theme.Sgr.dim "7. 원본 출처 JSON (sources)" "read-only \xc2\xb7 raw"
        :: (Yojson.Safe.pretty_to_string value
            |> String.split_on_char '\n'
            |> List.map (fun line -> "   " ^ sanitize line)))
   @ [ ""
-    ; section "field rules" ""
+    ; section "8. 필드 편집 규칙 (field rules)" ""
     ; "   Skills: {} selects all; {\"names\":[]} selects none; names select exactly."
     ; "   Deleting a field means unchanged. null clears context/wake overrides."
     ]

@@ -778,7 +778,7 @@ let surface_strip (state : state) ~cols =
   (* A count rides the entry it belongs to, so pending work is visible from
      every surface without a spare row. Zero draws nothing -- an always-on
      badge would be texture, not information. *)
-  let badge surface =
+  let badge_of_surface surface =
     match (surface : surface) with
     | Planning ->
         (match state.verification with
@@ -789,9 +789,20 @@ let surface_strip (state : state) ~cols =
     | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
     | Config | Resources | Tools | System_logs | Keepers _ -> ""
   in
+  let badge =
+    Agenda.waiting_label ~cells:(cols / 2) (Masc_tui_types.agenda state)
+  in
+  let badge_reserved =
+    if badge = "" then 0
+    else Message_layout.display_width badge + waiting_badge_gap_cells
+  in
+  let budget = max 8 (cols - 1 - badge_reserved) in
+  let bilingual = state.ui_language = Lang_ko && budget >= 112 in
   let label i =
     let surface, name = ring.(i) in
-    name ^ badge surface
+    Masc_tui_types.surface_ring_display_label ~lang:state.ui_language
+      ~bilingual surface name
+    ^ badge_of_surface surface
   in
   (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
   let entry_width ~lo i =
@@ -807,14 +818,6 @@ let surface_strip (state : state) ~cols =
     in
     sum lo 0
   in
-  let badge =
-    Agenda.waiting_label ~cells:(cols / 2) (Masc_tui_types.agenda state)
-  in
-  let badge_reserved =
-    if badge = "" then 0
-    else Message_layout.display_width badge + waiting_badge_gap_cells
-  in
-  let budget = max 8 (cols - 1 - badge_reserved) in
   let lo, hi =
     if window_width 0 (n - 1) <= budget then (0, n - 1)
     else begin
@@ -3360,8 +3363,37 @@ let path_from_root ~root path =
 
 let config_pane_tabs (state : state) =
   List.map
-    (fun (pane, label) -> (label, state.config_pane = pane, pane))
+    (fun (pane, label) ->
+      ( Masc_tui_types.config_pane_display_label ~lang:state.ui_language pane
+          label
+      , state.config_pane = pane
+      , pane ))
     config_panes
+
+let system_subnav_row (state : state) =
+  let item surface ko en =
+    pressable (Press_surface surface) (Masc_tui_types.ui_text state ~ko ~en)
+  in
+  let lang_chip =
+    pressable Press_ui_language
+      (Masc_tui_types.ui_text state
+         ~ko:("[언어:" ^ Masc_tui_types.ui_language_code state.ui_language ^ " 전환]")
+         ~en:("[Lang:" ^ Masc_tui_types.ui_language_code state.ui_language ^ " toggle]"))
+  in
+  "  "
+  ^ Masc_tui_types.ui_text state ~ko:"시스템 메뉴:" ~en:"System views:"
+  ^ " "
+  ^ item Runtime "9:런타임" "9:Runtime"
+  ^ " · "
+  ^ item Resources "s:리소스" "s:Resources"
+  ^ " · "
+  ^ item Tools "t:도구·스킬" "t:Tools&Skills"
+  ^ " · "
+  ^ item Acting "A:활동" "A:Activity"
+  ^ " · "
+  ^ item System_logs "L:로그" "L:Logs"
+  ^ "   "
+  ^ lang_chip
 
 let config_pane_strip ~cols ~before ~after (state : state) =
   Ansi.dim ^ config_pane_keys ^ Ansi.reset

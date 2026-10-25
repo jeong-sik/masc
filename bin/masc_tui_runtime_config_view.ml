@@ -232,13 +232,21 @@ let detail_lines metadata =
             (match issue.severity with Error_issue -> Bad | Warning_issue -> Warning),
             Printf.sprintf "%s · %s: %s" issue.key (issue_kind_label issue.kind) issue.detail) report.issues
   in
-  (revision_row metadata.source_revision :: verdict_rows metadata)
-  @ [ (if metadata.routing_requires_restart then Warning else Neutral),
+  let key_rows =
+    keys "Pending restart" Warning metadata.pending_keys
+    @ keys "Preempted by environment" Warning metadata.preempted_keys
+    @ keys "Applied" Neutral metadata.applied_keys
+  in
+  [ Neutral, "[ 1. 설정 출처 · 유효성 및 스키마 검증 (Source & Schema Validation) ]" ]
+  @ (revision_row metadata.source_revision :: verdict_rows metadata)
+  @ validation
+  @ [ Neutral, "[ 2. 라우팅 · 키퍼 적용 상태 (Routing & Keeper Application) ]";
+      (if metadata.routing_requires_restart then Warning else Neutral),
       "Routing restart: " ^ (if metadata.routing_requires_restart then "required" else "not required");
       (if metadata.keeper_requires_restart then Warning else Neutral),
-      "Keeper restart: " ^ (if metadata.keeper_requires_restart then "required" else "not required") ]
-  @ [Neutral, Printf.sprintf "Keeper settings configured: %d" metadata.configured_count]
-  @ keys "Pending restart" Warning metadata.pending_keys
-  @ keys "Preempted by environment" Warning metadata.preempted_keys
-  @ validation
-  @ keys "Applied" Neutral metadata.applied_keys
+      "Keeper restart: " ^ (if metadata.keeper_requires_restart then "required" else "not required");
+      Neutral, Printf.sprintf "Keeper settings configured: %d" metadata.configured_count ]
+  @ (if key_rows = [] then []
+     else
+       (Neutral, "[ 3. 키퍼 설정 키 · 재시작 대기 및 환경변수 우선 (Pending / Preempted / Applied Keys) ]")
+       :: key_rows)

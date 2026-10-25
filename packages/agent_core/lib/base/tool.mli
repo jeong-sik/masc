@@ -233,6 +233,11 @@ val wire_bytes_of_schema : Types.tool_schema -> int
 (** Compact byte length of {!wire_json_of_schema}: what this one tool costs
     every request that carries it.
 
+    The shared weak cache retains the measured length alongside the JSON.
+    Repeated measurements reuse that integer without retaining a serialized
+    string. Concurrent first measurements may serialize independently before
+    publishing the same length; serialization runs outside the cache mutex.
+
     Named here so a caller measuring the tool surface has a right answer
     within reach. Measuring {!Types.tool_schema_to_yojson} instead counts
     ["parameters"] too — the derived validation view that no provider

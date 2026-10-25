@@ -63,7 +63,7 @@ let bytes_of_tool_schema_json (tools : Agent_core.Tool.t list) : int =
   List.fold_left
     (fun acc t ->
       acc
-      + String.length (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json t)))
+      + Agent_core.Tool.wire_bytes_of_schema t.Agent_core.Tool.schema)
     0 tools
 
 (** Count role occurrences across [history_messages], then add [+1] to

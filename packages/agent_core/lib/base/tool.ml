@@ -255,7 +255,14 @@ end
 
 module Wire_schema_cache = Ephemeron.K1.Make (Wire_schema_key)
 
-let wire_schema_cache : Yojson.Safe.t Wire_schema_cache.t = Wire_schema_cache.create 0
+type wire_schema_entry =
+  | Json_only of Yojson.Safe.t
+  | Json_with_byte_count of
+      { json : Yojson.Safe.t
+      ; byte_count : int
+      }
+
+let wire_schema_cache : wire_schema_entry Wire_schema_cache.t = Wire_schema_cache.create 0
 let wire_schema_cache_mutex = Stdlib.Mutex.create ()
 
 (** Schema to JSON *)
@@ -277,16 +284,21 @@ let wire_json_of_schema_uncached (schema : Types.tool_schema) =
      | None -> [])
 ;;
 
+let wire_schema_entry_locked schema =
+  match Wire_schema_cache.find_opt wire_schema_cache schema with
+  | Some entry -> entry
+  | None ->
+    (* [add] cleans dead bindings while resizing. Avoid sweeping all live
+       buckets on each miss under the shared mutex. *)
+    let entry = Json_only (wire_json_of_schema_uncached schema) in
+    Wire_schema_cache.add wire_schema_cache schema entry;
+    entry
+;;
+
 let wire_json_of_schema schema =
   Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
-    match Wire_schema_cache.find_opt wire_schema_cache schema with
-    | Some cached -> cached
-    | None ->
-      (* [add] cleans dead bindings during automatic resizing. Sweeping here
-         would rebuild every live bucket on each miss under the mutex. *)
-      let json = wire_json_of_schema_uncached schema in
-      Wire_schema_cache.add wire_schema_cache schema json;
-      json)
+    match wire_schema_entry_locked schema with
+    | Json_only json | Json_with_byte_count { json; _ } -> json)
 ;;
 ;;
 
@@ -296,7 +308,24 @@ let wire_json_of_schema schema =
    provider receives, which put masc's Execute at 10,396 bytes against the
    7,239 it sends. *)
 let wire_bytes_of_schema schema =
-  String.length (Yojson.Safe.to_string (wire_json_of_schema schema))
+  let entry =
+    Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
+      wire_schema_entry_locked schema)
+  in
+  match entry with
+  | Json_with_byte_count { byte_count; _ } -> byte_count
+  | Json_only json ->
+    (* Keep encoding out of the shared critical section. A concurrent reader
+       may publish first; retain its entry and the original JSON identity.
+       Only the integer survives, not the temporary compact string. *)
+    let byte_count = String.length (Yojson.Safe.to_string json) in
+    Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
+      match wire_schema_entry_locked schema with
+      | Json_with_byte_count { byte_count; _ } -> byte_count
+      | Json_only json ->
+        Wire_schema_cache.replace
+          wire_schema_cache schema (Json_with_byte_count { json; byte_count });
+        byte_count)
 ;;
 
 let schema_to_json tool = wire_json_of_schema tool.schema

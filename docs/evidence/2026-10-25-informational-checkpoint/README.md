@@ -77,10 +77,28 @@ The existing failure-disposition suite passed16 cases in each of the last
 three runs; those results do not establish the new joined scenario. Its later
 queue/durable-ACK/child assertions were not reached in the failed runs.
 
-## Current validation
+## Actual corrected execution
 
-Three changed OCaml source/interfaces parse; fragment and full committed
-whitespace checks pass. No local Dune/build/typecheck or full regression.
-Corrected joined execution is requested separately; no corrected PASS is
-claimed here. #26165 remains OPEN, including the stronger resumed-model and
-provider/session-specific continuity caveats above.
+[Run40189510056](https://github.com/jeong-sik/masc/actions/runs/40189510056)
+checked out exactly `4c947b3f97874478641f4ebfa21ab46ca17a0820`, compiled the
+selected executable and completed SUCCESS: **one joined scenario in0.316s**.
+The actual checkpoint phase reports one provider round, three informational
+ACKs and later work retained. Fresh process PID30701 reopens journal,
+TurnRecord, canonical checkpoint and strict delivery/ACK evidence; actual next
+intake reports zero redelivered completions and later Bootstrap admitted.
+The public-source checks described above all precede those success receipts.
+
+`run-40189510056.txt` retains actual checkout/checkpoint/child-intake/result
+lines and full raw-log SHA. `source-sha256.txt` binds the three changed source
+and fixture files. Later evidence-only commits are not new execution heads.
+The run selected only this joined test; earlier16 disposition passes remain
+separate. Three changed OCaml source/interfaces parse; fragment and full
+committed whitespace pass. No local Dune/build/typecheck or full regression.
+
+The complete production diff against base8d872e is explanatory comments in the
+heartbeat .ml/.mli only; no runtime expression or ACK policy changes. The actual
+fixture therefore exercises the existing main delivery path, but does not
+establish an installed binary or live fleet result. Stronger model-level
+answer reconstruction, official-client session continuity and the other
+untested boundaries above remain unproved. Issue disposition is recorded
+separately after current-scope review; this run alone does not close it.

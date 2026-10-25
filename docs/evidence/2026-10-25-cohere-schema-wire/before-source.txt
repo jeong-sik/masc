@@ -41,4 +41,3 @@ let response_format_of_config (config : Provider_config.t) =
     response_format_to_openai_json Types.JsonMode
   | None -> None
 ;;
-

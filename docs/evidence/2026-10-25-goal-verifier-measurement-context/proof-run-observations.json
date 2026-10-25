@@ -1,0 +1,212 @@
+{
+  "schema": "masc.goal-verifier-measurement.public-projection.v1",
+  "source_hash": [
+    {
+      "source_label": "proof_access/tool-observations.json",
+      "sha256": "c3973daafda12a15a7e2431f8a24d9dfc297be09e6a48d9cd426e38e64adf121"
+    },
+    {
+      "source_label": "proof_access/exact-run-typed-records.json",
+      "sha256": "c5c492cae4c8daa4faa3816ad3896a434bea71b1881a44bd0af855935bf7b2bc"
+    },
+    {
+      "source_label": "proof_access/review.json",
+      "sha256": "8481a0d534ed18ae56e5eba230fc2a875b1d6edb7e8aea434e6988cbd92407eb"
+    },
+    {
+      "source_label": "proof_access/README.md",
+      "sha256": "0333eec18a6cc953a2c7343b1515228025f24d0deb70c75e816093fb7b1b7996"
+    }
+  ],
+  "publication_scope": {
+    "included": [
+      "one exact proof run identity",
+      "register/reviewed/committed publication relation",
+      "ten allowlisted tool outcomes",
+      "missing-file diagnostic without host path",
+      "two public CI URLs and audited statuses",
+      "APPROVE enum only"
+    ],
+    "excluded": [
+      "verdict reason",
+      "complete input previews",
+      "complete output excerpts",
+      "model transcript",
+      "private absolute paths",
+      "HTTP bodies and headers"
+    ],
+    "limits": [
+      "Reviewed and committed publications retain the same ten tools; this is one model review, not two.",
+      "output_truncated describes registry excerpt retention, not the model-facing response size.",
+      "No actual absolute temporary-directory read, out-of-root denial or explicit permission rejection was observed.",
+      "Failure/Success page status is not independently verified detailed suite coverage.",
+      "Configured runtime alias does not prove model-weight independence."
+    ]
+  },
+  "goal_id": "goal-outcome-driven-work-20261024",
+  "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+  "run_id": "01a170b2-8083-7000-a7de-ce0fc1eee0b2",
+  "request_id": "b0792fb9b86e66445ccd673bc6463ce2",
+  "configured_evaluator_runtime": "glm-coding.glm-5.3-flash",
+  "model_review_count": 1,
+  "publication_records": [
+    {
+      "journal_line": 131,
+      "event": "register",
+      "review_kind": "proof",
+      "authority_actor": "verifier_exact"
+    },
+    {
+      "journal_line": 132,
+      "event": "complete",
+      "kind": "review",
+      "publication_outcome": "reviewed",
+      "evaluated_decision": "approved",
+      "tool_observation_count": 10
+    },
+    {
+      "journal_line": 133,
+      "event": "complete",
+      "kind": "review",
+      "publication_outcome": "committed",
+      "evaluated_decision": "approved",
+      "tool_observation_count": 10
+    }
+  ],
+  "reviewed_committed_same_tool_observations": true,
+  "counts": {
+    "read_completed": 2,
+    "read_failed": 5,
+    "web_completed": 2,
+    "verdict_completed": 1
+  },
+  "tools": [
+    {
+      "ordinal": 0,
+      "tool_name": "tool_read_file",
+      "disposition": "completed",
+      "finished_at": 1792892114.613275,
+      "output_truncated": true,
+      "input": {
+        "file_path": "codex-mcp-client/goal-outcomes-20261024/acceptance.json"
+      }
+    },
+    {
+      "ordinal": 1,
+      "tool_name": "tool_read_file",
+      "disposition": "completed",
+      "finished_at": 1792892122.402831,
+      "output_truncated": true,
+      "input": {
+        "file_path": "codex-mcp-client/goal-outcomes-20261024/acceptance.json",
+        "offset": 302
+      }
+    },
+    {
+      "ordinal": 2,
+      "tool_name": "tool_read_file",
+      "disposition": "failed",
+      "finished_at": 1792892167.789507,
+      "output_truncated": false,
+      "input": {
+        "file_path": "codex-mcp-client/docs/evidence/2026-10-25-goal-continuation-glm/README.md"
+      },
+      "failure": {
+        "ok": false,
+        "error": "owned file is missing"
+      }
+    },
+    {
+      "ordinal": 3,
+      "tool_name": "masc_web_fetch",
+      "disposition": "completed",
+      "finished_at": 1792892168.393674,
+      "output_truncated": true,
+      "input": {
+        "url": "https://github.com/jeong-sik/masc/actions/runs/40078581651",
+        "maxChars": 8000
+      },
+      "public_page_status_observed_by_audit": "Failure",
+      "status_scope": "Failure/Success as recorded by the proof-access audit; detailed suite counts not independently verified here."
+    },
+    {
+      "ordinal": 4,
+      "tool_name": "tool_read_file",
+      "disposition": "failed",
+      "finished_at": 1792892263.637077,
+      "output_truncated": false,
+      "input": {
+        "file_path": "codex-mcp-client/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/diagnosis.json"
+      },
+      "failure": {
+        "ok": false,
+        "error": "owned file is missing"
+      }
+    },
+    {
+      "ordinal": 5,
+      "tool_name": "tool_read_file",
+      "disposition": "failed",
+      "finished_at": 1792892263.637362,
+      "output_truncated": false,
+      "input": {
+        "file_path": "codex-mcp-client/docs/evidence/2026-10-24-coding-boundary/README.md"
+      },
+      "failure": {
+        "ok": false,
+        "error": "owned file is missing"
+      }
+    },
+    {
+      "ordinal": 6,
+      "tool_name": "tool_read_file",
+      "disposition": "failed",
+      "finished_at": 1792892298.140239,
+      "output_truncated": false,
+      "input": {
+        "file_path": "codex-mcp-client/goal-outcomes-20261024/docs/evidence/2026-10-24-coding-boundary/README.md"
+      },
+      "failure": {
+        "ok": false,
+        "error": "owned file is missing"
+      }
+    },
+    {
+      "ordinal": 7,
+      "tool_name": "tool_read_file",
+      "disposition": "failed",
+      "finished_at": 1792892298.140747,
+      "output_truncated": false,
+      "input": {
+        "file_path": "reliable-change-evidence/docs/evidence/2026-10-24-coding-boundary/README.md"
+      },
+      "failure": {
+        "ok": false,
+        "error": "owned file is missing"
+      }
+    },
+    {
+      "ordinal": 8,
+      "tool_name": "masc_web_fetch",
+      "disposition": "completed",
+      "finished_at": 1792892339.514711,
+      "output_truncated": true,
+      "input": {
+        "url": "https://github.com/jeong-sik/masc/actions/runs/40082520098",
+        "maxChars": 6000
+      },
+      "public_page_status_observed_by_audit": "Success",
+      "status_scope": "Failure/Success as recorded by the proof-access audit; detailed suite counts not independently verified here."
+    },
+    {
+      "ordinal": 9,
+      "tool_name": "report_review_verdict",
+      "disposition": "completed",
+      "finished_at": 1792892436.875108,
+      "output_truncated": false,
+      "input": {
+        "verdict": "APPROVE"
+      }
+    }
+  ]
+}

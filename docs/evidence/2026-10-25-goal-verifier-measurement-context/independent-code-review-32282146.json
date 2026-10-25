@@ -1,0 +1,124 @@
+{
+  "verdict": "PASS",
+  "first_line": "verdict: PASS head: 32282146ed980d48baa661aa7db0ce99376d3c2a by: codex-repair-eval-metrics",
+  "reviewer": "/root/repair_eval_metrics",
+  "review_scope": "Independent adversarial exact-source review of layer20 only. Reviewer did not write/change candidate files or author the commit. No GitHub formal approval.",
+  "reviewed_at_utc": "2026-10-25T09:26:19.376801+00:00",
+  "head": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "base": "fe6785bb3cbd881cc642b673b24328f7e19dbcd5",
+  "direct_parent_verified": true,
+  "canonical_complete_diff_sha256": "598dae52d1c7ba51612bbcba560d0987c429af74c7306504a75510e05a022c8c",
+  "full_binary_patch_sha256": "8d38ab157da48f8ba82101d69e349b3b90a1fd7011e11950b5f5727e7044e7ef",
+  "changed_files": 10,
+  "changed_OCaml_files": 9,
+  "diff_statistics": {
+    "insertions": 291,
+    "deletions": 19
+  },
+  "findings_P0_P1_P2": [],
+  "source_findings": [
+    {
+      "topic": "Goal identity and criterion revision",
+      "verdict": "PASS",
+      "evidence": [
+        "goal_verification.ml:516–539 binds an authoritative Verifying Goal and exact Proof_pending criterion in Goal_store transaction.",
+        "verification_authority_tools.ml:825–829 passes that bound Goal to existing Goal_measurement.latest_for_goal over the measured source.",
+        "goal_measurement.ml:142–149 selects by both exact goal_id and criterion_revision. Other Goals and stale revisions cannot fill a missing current report."
+      ]
+    },
+    {
+      "topic": "Reported/absent/unavailable semantics",
+      "verdict": "PASS",
+      "evidence": [
+        "Result-valued observation preserves Error(reason), Ok None, Ok(Some row). Source read errors are not folded into missing or failed attainment.",
+        "goal_measurement.ml:151–163 extracts existing projection serializer without changing wire states/fields; existing projection delegates to the same serializer.",
+        "No extra measurement store, mutable mirror, success counter or numeric comparison introduced."
+      ]
+    },
+    {
+      "topic": "Lookup authority and immutable Original identity",
+      "verdict": "PASS",
+      "evidence": [
+        "verification_authority_tools.ml:833–845 leaves lookup binding projection fields unchanged; measurement is context only.",
+        "goal_verifier_original.ml:72–83 retains exact subject/request/criterion/workspace/lookup schemas/submitted evidence matching; measurement refresh cannot revoke an existing Original.",
+        "Original schema remains goal_verifier_original/v1. Full rendered measurement JSON is stored in existing prompt; to_json/of_json/digest remain unchanged and complete Original canonical digest authenticates prompt bytes.",
+        "Submitted source capture and allowed read-only tool roots/schemas are unchanged. Reporting a Board/Fusion reference or arbitrary host path grants no corresponding read authority."
+      ]
+    },
+    {
+      "topic": "Actual production preparation/recovery/reviewer path",
+      "verdict": "PASS",
+      "evidence": [
+        "goal_verification_agent.ml:412–423 selects retained frontier first; only a new Original calls create_goal_review then Original.prepare then Worker.retain.",
+        "goal_verification_agent.ml:426–435 uses restored receipt without rerendering; otherwise constructs authority and executes Worker.run.",
+        "goal_verifier_worker.ml:435–459 preserves receipt recovery and exact Original authority/output-contract checks before dispatch.",
+        "goal_verifier_worker.ml:505–511 passes retained original prompt and system instructions directly to AR.run_retained.",
+        "Goal_verifier_original is the only production goal_verification.proof template renderer; changed prompt-section test supplies the added variable."
+      ]
+    },
+    {
+      "topic": "Untrusted reported measurement and criterion/source interpretation",
+      "verdict": "PASS",
+      "evidence": [
+        "Canonical prompt includes complete reported record as JSON, labeled user-controlled observation, not independent proof.",
+        "Prompt instructs source read using existing tools, prohibits guessing host paths outside read roots and distinguishes not_recorded from unavailable.",
+        "Scope/units/time/comparison direction are still judged against declared metric and target by the verifier. No deterministic APPROVE keyword/value gate or cumulative budget added."
+      ]
+    },
+    {
+      "topic": "Native fixture failure detection",
+      "verdict": "PASS_SOURCE_ONLY",
+      "evidence": [
+        "Original tests cover current report, another Goal, changed criterion, store unavailability, retained v1 restoration, authority binding/digest invariance.",
+        "Worker fixture records actual reviewer prompt/system/workspace and actual tool dispatch result. It compares independently constructed expected first report JSON, rejects updated-report replacement, checks exact one entry and actual completed source read.",
+        "Callback contains collection and actual lookup/on_tool_result, while all material assertions execute outside it after Worker.run. Caught callback errors cannot pass: the fixture requires exact Approve result and tool observation.",
+        "Store reopening must preserve complete original bytes/receipt; changed and unreadable report sources must not invoke reviewer again; Goal remains Verifying and same Proof_pending request.",
+        "Native fixture is authored, not executed in this review."
+      ]
+    }
+  ],
+  "checks": {
+    "independent_diff_check": {
+      "exit": 0,
+      "output": ""
+    },
+    "independent_actual_OCaml_parse": {
+      "compiler": "OCaml5.5.1",
+      "files": 9,
+      "all_exit_zero": true,
+      "receipt": "identity-and-checks.json"
+    },
+    "typing": "UNRUN",
+    "native_suites": "UNRUN in reviewer scope",
+    "actual_HTTP_or_vendor_model_verifier": "UNRUN",
+    "CI_queries": "NONE"
+  },
+  "explicit_limits": [
+    {
+      "limit": "Fresh Original only",
+      "meaning": "Existing retained originals and successor retries keep their earlier immutable prompts. Re-running an already retained main proof is not evidence the new measurement locator reached a model. A fresh request/new Original is needed to demonstrate new preparation."
+    },
+    {
+      "limit": "Delivery is not semantic correctness",
+      "meaning": "This fixes a specific input omission. It does not prove an actual verifier will open source evidence or stop source-blind approvals. Semantic F1 remains unproven until matched real-model observation."
+    },
+    {
+      "limit": "No new authority",
+      "meaning": "An evidence URL is untrusted locator data, not a read-root grant. File roots, submitted-evidence authority and proof/human confirmation boundaries remain unchanged."
+    },
+    {
+      "limit": "Whole stack/current deployment separate",
+      "meaning": "The prior19-layer current review census had1/19 valid formal approvals and no merged/install proof. Source PASS here does not approve the stack or claim installed runtime change."
+    }
+  ],
+  "actions_not_taken": [
+    "No candidate edits",
+    "No local Dune or native builds/tests",
+    "No CI dispatch/watch/wait",
+    "No runtime or main Goal/Task mutation",
+    "No GitHub review/approval/messages/merge",
+    "No author guard repeat/override"
+  ],
+  "publication_scope": "Source review projection; local artifact paths excluded; original private review retained.",
+  "source_review_sha256": "d04906a14ea4191e0af866c5765eb98384923e1a39a7fd82de1a5705231a77f9"
+}

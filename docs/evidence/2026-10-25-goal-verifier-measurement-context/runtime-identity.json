@@ -1,0 +1,54 @@
+{
+  "schema": "masc.goal-verifier-measurement.public-projection.v1",
+  "source_hash": [
+    {
+      "source_label": "live_alignment/health-identity-projection.json",
+      "sha256": "ecc0b985900e90fea7ff837efbed1c1004dd834e9f49ae1ecc750933bb79b24c"
+    },
+    {
+      "source_label": "live_alignment/source-comparison.json",
+      "sha256": "b6168492db92c14ed09026a9f6a5d08e42f2141833bb871fdcbfb2ed482c8361"
+    }
+  ],
+  "publication_scope": {
+    "included": [
+      "captured health identity",
+      "readiness",
+      "source commit comparison identities"
+    ],
+    "excluded": [
+      "HTTP bodies and headers",
+      "authentication material",
+      "private absolute paths"
+    ],
+    "limits": [
+      "Parent-supplied historical health capture, not a new HTTP observation.",
+      "Readiness is not Goal behavior correctness, installed candidate proof or all-Keeper liveness.",
+      "Published19 is the historical local object; no current REST stack membership or approval inferred."
+    ]
+  },
+  "observed_at": "2026-10-25T08:54:21.862121+00:00",
+  "health_status": 200,
+  "service_status": "ok",
+  "overall_status": "degraded",
+  "ready": {
+    "http_status": 200,
+    "ready": true,
+    "phase": "ready"
+  },
+  "build": {
+    "release_version": "0.64.0",
+    "binary_version": "0.64.0",
+    "binary_commit": "c75ee3febdb834225ff905020add4cecd2e5264b",
+    "commit_source": "embedded",
+    "executable_sha256": "a58b0091d0fb781a502b0875797aa67773ced353a70c6c586fb638d6571fd8c0",
+    "runtime_instance_id": "01a170b1-e030-7000-b4b0-249d23aa580a",
+    "started_at": "2026-10-25T01:34:27Z"
+  },
+  "source_commits": {
+    "installed": "c75ee3febdb834225ff905020add4cecd2e5264b",
+    "published_stack19": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+    "checkout": "3cce9a517b25863c00b48cfb3dd79b994ebc1044"
+  },
+  "parent_health_capture_sha256": "a52fb9088b17eeaefd84f415aa31e67d10b74307bb54b0392634e3d8d3967268"
+}

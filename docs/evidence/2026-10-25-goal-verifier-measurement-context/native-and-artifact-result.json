@@ -1,0 +1,283 @@
+{
+  "schema": "masc.goal-measurement.public-native-artifact-result.v1",
+  "source_hash": [
+    {
+      "source_label": "native-result-32282146.json",
+      "bytes": 16773,
+      "sha256": "4b63304e75bed01f1c4ce0b2987e5237b27be15c5b539ffc148e1627e3f4d884"
+    },
+    {
+      "source_label": "ci-dispatch-32282146.json",
+      "bytes": 1400,
+      "sha256": "2013d4394c9223950584b87e055e091df7cfa43b4406bbfd14b38ec7057f9c9e"
+    },
+    {
+      "source_label": "run-boundary-32282146.json",
+      "bytes": 2445,
+      "sha256": "931692044f73724eafc2bbb403c71947a2331264a75e771f0282bcf56e70fe85"
+    },
+    {
+      "source_label": "artifact/verification.json",
+      "bytes": 6366,
+      "sha256": "97403f284cc5ad4c3ee15b75d6d2c3a127129ecf217b89d29507764982dec162"
+    },
+    {
+      "source_label": "artifact/artifact-source.json",
+      "bytes": 766,
+      "sha256": "41476ec674509a2f145e6af217df7b829391ca2b2f84f23d61c7d8cf9adcf8e9"
+    },
+    {
+      "source_label": "artifact/checksum-receipt.json",
+      "bytes": 6530,
+      "sha256": "436846f039e2fa08a02665e2a1c76dd8fd061857028aab936cce4755082880bf"
+    },
+    {
+      "source_label": "artifact/support-loader-audit.json",
+      "bytes": 20633,
+      "sha256": "deb925bc13111bde9f5d6b29367dfadcaffdfd05ff41359c6336962ccd61234a"
+    },
+    {
+      "source_label": "artifact/support-files.json",
+      "bytes": 1030259,
+      "sha256": "78349ba0bb04f80e38bf3990b709fc2c0f3d310541abfd94e08768d2a01011aa"
+    },
+    {
+      "source_label": "artifact/embedded-identity.json",
+      "bytes": 569,
+      "sha256": "ecf4327a94301ab28baa206b01b59f7030ddfa80b8541c6ecf93cf223a4b64f5"
+    },
+    {
+      "source_label": "artifact/candidate-python-lock.json",
+      "bytes": 1808,
+      "sha256": "ef23835db9dd696ff83fe453415c4cd40ebc993f03a18145364d073d0b75441d"
+    },
+    {
+      "source_label": "native-32282146.log",
+      "bytes": 221703,
+      "sha256": "d756aea27bb7124fd2f7098ee520bb4a9b205715f4e743f3c9c503672b195ec6",
+      "publication": "hash-only; raw log excluded"
+    }
+  ],
+  "publication_scope": {
+    "included": [
+      "selected native summary and suite anchors",
+      "dispatch selection and workflow-file hashes",
+      "run/job/artifact identities",
+      "candidate source/tree versus workflow-event heads",
+      "binary and companion hashes",
+      "bundle integrity counts and receipt validation booleans"
+    ],
+    "excluded": [
+      "raw logs",
+      "signed URLs",
+      "HTTP headers and credentials",
+      "private absolute paths",
+      "live canary observations"
+    ],
+    "limits": [
+      "An allowlisted projection of existing receipts; no CI query, model call, binary execution, installation or runtime mutation performed here.",
+      "Native82PASS is four selected suites, not full regression or all-stack approval.",
+      "The artifact workflow event head differs from the selected candidate; source/tree are separately bound by the inner probe and checksum receipts.",
+      "Selection SHA comes from the dispatch receipt, not a claimed SHA line in the raw log.",
+      "Workflow-file hashes are dispatch receipt values; not asserted to be independently recovered from executed workflow bytes.",
+      "Artifact identity/integrity verification is not release, production installation or actual-provider behavior proof."
+    ]
+  },
+  "candidate": {
+    "source_commit": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+    "source_base": "fe6785bb3cbd881cc642b673b24328f7e19dbcd5",
+    "source_tree": "c4e6714d3213f02bfe4b2e66e72db1b374eba2c2"
+  },
+  "native": {
+    "run_id": 40180462120,
+    "job_id": 121130227859,
+    "workflow_event_head": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+    "workflow_event_head_is_candidate": true,
+    "run_status": "completed",
+    "run_conclusion": "success",
+    "observed_at": "2026-10-25T09:33:29.805668+00:00",
+    "selection_sha256": "a132cc0b197189bcd65eaa8f5850f2c135fbae47128d8fdcf17599ff93df0d72",
+    "selection_sha256_basis": "ci-dispatch-32282146.json",
+    "workflow_file_hashes_from_dispatch": {
+      ".github/workflows/test.yml": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191",
+      ".github/workflows/linux-x64-probe.yml": "2fe204542f5145c494ed785c681fb24e48daa376eef2144a10f95afebf6135bb",
+      "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72"
+    },
+    "raw_log": {
+      "bytes": 221703,
+      "sha256": "d756aea27bb7124fd2f7098ee520bb4a9b205715f4e743f3c9c503672b195ec6"
+    },
+    "summary": {
+      "suites": 4,
+      "passed_suites": 4,
+      "passed": 82,
+      "failed": 0,
+      "timeout_suites": 0
+    },
+    "suites": [
+      {
+        "target": "test/test_goal_verifier_original",
+        "tests_run": 6,
+        "result": "pass",
+        "elapsed_s": 0.153,
+        "start_log_line": 776,
+        "summary_log_line": 841,
+        "finish_log_line": 843
+      },
+      {
+        "target": "test/test_goal_verifier_worker",
+        "tests_run": 17,
+        "result": "pass",
+        "elapsed_s": 1.53,
+        "start_log_line": 845,
+        "summary_log_line": 1203,
+        "finish_log_line": 1205
+      },
+      {
+        "target": "test/test_review_prompt_sections_reach_the_model",
+        "tests_run": 9,
+        "result": "pass",
+        "elapsed_s": 0.035,
+        "start_log_line": 1207,
+        "summary_log_line": 1258,
+        "finish_log_line": 1260
+      },
+      {
+        "target": "test/test_goal_verification_gate",
+        "tests_run": 50,
+        "result": "pass",
+        "elapsed_s": 1.314,
+        "start_log_line": 1262,
+        "summary_log_line": 2017,
+        "finish_log_line": 2019
+      }
+    ],
+    "selection_matches_result_targets": true
+  },
+  "artifact": {
+    "verification_verdict": "PASS_ARTIFACT_IDENTITY_AND_COMPLETE_BUNDLE_INTEGRITY",
+    "verification_at": "2026-10-25T09:43:46.956968+00:00",
+    "artifact_id": 12593812561,
+    "artifact_name": "macos-arm64-probe-32282146ed980d48baa661aa7db0ce99376d3c2a-attempt-1",
+    "run_id": 40180463894,
+    "run_attempt": 1,
+    "build_job": {
+      "id": 121130234036,
+      "name": "Build manual macOS arm64 runtime probe",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    "other_skipped_job_count": 7,
+    "run_conclusion": "success",
+    "workflow_event_head": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+    "workflow_event_head_is_candidate": false,
+    "platform": "macos-arm64",
+    "zip": {
+      "bytes": 176731443,
+      "sha256": "45e3926c5c848cba515f163ffab41731470e577efe1d4c91866dfd30f0ba32a8",
+      "member_count": 13
+    },
+    "outer_manifest": {
+      "checked_file_count": 12,
+      "manifest_sha256": "a7f6931152f029c27534a7da4a9989aa91b4edb8f6090c4ee852bc8e42ac031d"
+    },
+    "binary": {
+      "name": "masc",
+      "bytes": 105916064,
+      "sha256": "c1ec353779d5fff6a9da9ec4290667ab9b5e158c28c34a7094a691d5d08277a4",
+      "matches_verified_distribution": true
+    },
+    "companions": [
+      {
+        "name": "masc-tui",
+        "bytes": 103181680,
+        "sha256": "51fd5d7fd01d5193e98ac72d961425aebe36b365bdf7366a08232dde8910bd24",
+        "matches_verified_distribution": true
+      },
+      {
+        "name": "masc-browser-host",
+        "bytes": 44034368,
+        "sha256": "32d0e597ce0289ae40d85ee3ce5453de993087e19cb48d4b0452a2f179c84278",
+        "matches_verified_distribution": true
+      },
+      {
+        "name": "masc-deployment-preflight-helper",
+        "bytes": 103699936,
+        "sha256": "95fdc3d268a4343b93cfd953f5f7d1ac793d61c6de14912259e5ad06028d1962",
+        "matches_verified_distribution": true
+      },
+      {
+        "name": "masc-check-runtime-deployment-preflight",
+        "bytes": 17019,
+        "sha256": "af7b33ec59d5e73c2998323a1a89afe4e6f3dbc7448fb7765d2c00b481c829d5",
+        "matches_verified_distribution": true
+      }
+    ],
+    "support_archive": {
+      "bytes": 57196197,
+      "sha256": "1c59838aa2a07d5681dcfef568b06fe39d9298256c681fa9462fbb5acf3f783b"
+    },
+    "support_regular_member_count": 4776,
+    "macho_count": 20,
+    "native_libraries": [
+      {
+        "name": "libcrypto.3.dylib",
+        "bytes": 4853136,
+        "final_relocated_sha256": "7d9422a02bff88f27af94a129740bf39768c4565e72fd9c1df8928bdec81259b",
+        "upstream_input_sha256": "c853c9fefb6d391ab52d8db288b21c106db98e22efd148f2812cb7c27531cd41"
+      },
+      {
+        "name": "libgmp.10.dylib",
+        "bytes": 452816,
+        "final_relocated_sha256": "e7bc574f0e15f6d085c87986941d01507f560e49325f19f100ed26e0de7523c0",
+        "upstream_input_sha256": "03091509d91b059bb22432c77b5aabecf918d32eb3b66b90b0c0c78f74c177b9"
+      },
+      {
+        "name": "libssl.3.dylib",
+        "bytes": 900736,
+        "final_relocated_sha256": "9d45d4d26429c3faec633e9d8d3e31021b12ee2863661e489a80375f3c4f1686",
+        "upstream_input_sha256": "4a466b82b563ce7bcf90062811ca36c8d57ce5f7fca22333dd68b2f7f41ee7ba"
+      },
+      {
+        "name": "libzstd.1.5.7.dylib",
+        "bytes": 670240,
+        "final_relocated_sha256": "33754b103ba91fe54165a8673c7ed98e1f75030a29a6942d4174e34af24da5ec",
+        "upstream_input_sha256": "34c960d7a0c76409111fa77423cf61b6177da9b30901b4d588b190cb351fd1e8"
+      }
+    ],
+    "native_library_hash_semantics": "Upstream input hashes describe pre-relocation library bytes; final hashes independently describe manifest-bound relocated files. They are not expected to match.",
+    "portable_python": {
+      "name": "cpython-3.13.15+20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "release": "20260901",
+      "digest": "sha256:d3904bd6a072246e07aa0bdadee9a14e80521e42a943c0848059feb16a2816dc",
+      "size": 25147663,
+      "upstream": "astral-sh/python-build-standalone"
+    },
+    "validation": {
+      "artifact_digest_matches": true,
+      "zip_crc_all_pass": true,
+      "outer_sha256sums_all_pass": true,
+      "outer_sha256sums_complete_coverage": true,
+      "source_tree_matches": true,
+      "support_all_regular_unique_safe": true,
+      "all_macho_arm64": true,
+      "all_codesign_verify_pass": true,
+      "all_portable_dependencies_resolve_inside_runtime_or_system": true,
+      "provenance_native_library_names_match": true,
+      "all_binary_companions_match_distribution": true,
+      "embedded_build_commit_matches": true,
+      "outer_and_inner_provenance_bytes_identical": true,
+      "portable_python_lock_exact_candidate_match": true,
+      "tui_recorded_embedded_commit_matches": true,
+      "tui_server_recorded_versions_equal": true,
+      "support_gzip_crc_pass": true
+    },
+    "old_bundle_reused": false,
+    "release_verified": false,
+    "published": false
+  },
+  "canary": {
+    "included": false,
+    "result": "not_in_scope"
+  }
+}

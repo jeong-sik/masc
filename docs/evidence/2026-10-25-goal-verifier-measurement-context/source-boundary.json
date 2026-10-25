@@ -1,0 +1,644 @@
+{
+  "schema": "masc.goal-verifier-measurement.public-projection.v1",
+  "source_hash": [
+    {
+      "source_label": "live_alignment/source-comparison.json",
+      "sha256": "b6168492db92c14ed09026a9f6a5d08e42f2141833bb871fdcbfb2ed482c8361"
+    },
+    {
+      "source_label": "proof_access/source-comparison.json",
+      "sha256": "7e6c866be6db3eca9e60ccaa8d41bc190c7ae0540933094522fd856ad7e8b83d"
+    }
+  ],
+  "publication_scope": {
+    "included": [
+      "historical exact source hashes and repo-relative paths",
+      "active prompt content identity without host path"
+    ],
+    "excluded": [
+      "private repo roots",
+      "source file bodies",
+      "production configuration contents"
+    ],
+    "limits": [
+      "Different selected files serve different boundaries: live Goal measurement/context repairs differ; proof access/approval boundary files were unchanged.",
+      "Published19 is the historical46d object, not later restacked fe678 or candidate32282146.",
+      "No compile, native pass, deployment, current stack approval or model behavior follows from blob equality alone."
+    ]
+  },
+  "historical_commits": {
+    "installed": "c75ee3febdb834225ff905020add4cecd2e5264b",
+    "published_stack19": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+    "checkout": "3cce9a517b25863c00b48cfb3dd79b994ebc1044"
+  },
+  "live_alignment_source_files": [
+    {
+      "file": "config/prompts/keeper.md",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 57854,
+          "sha256": "c7ab1625007aa521686f6eac87fcfe4c0aea082c445ae23fec3656af51694595"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 60074,
+          "sha256": "1ace6a7d5dc178e1fdfb3b1bff7f07e01ab3fd986cac67f21b9f96735930cf72"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 57854,
+          "sha256": "c7ab1625007aa521686f6eac87fcfe4c0aea082c445ae23fec3656af51694595"
+        }
+      }
+    },
+    {
+      "file": "config/tools/keeper_task_create.toml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 1351,
+          "sha256": "2b4689f85dc51484f29b9c5de60aaf3e788b7431bf40f124b1302db604cf98ec"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 1613,
+          "sha256": "577c294b48700e9d33b01f922d8c082445e115f36a40a25bbd6b58d97f937c5d"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 1351,
+          "sha256": "2b4689f85dc51484f29b9c5de60aaf3e788b7431bf40f124b1302db604cf98ec"
+        }
+      }
+    },
+    {
+      "file": "config/tools/masc_goal_measure.toml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 799,
+          "sha256": "2bfaa366623cda10baaee81a22cfb08c3e68a69e3b14bd8c3976773adab500f1"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 1122,
+          "sha256": "c2f5f172b147a62b4fc6f9b971941ca0df2eb95a47dd5791dbceeb473b02daa9"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 799,
+          "sha256": "2bfaa366623cda10baaee81a22cfb08c3e68a69e3b14bd8c3976773adab500f1"
+        }
+      }
+    },
+    {
+      "file": "config/tools/keeper_tasks_list.toml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 4215,
+          "sha256": "855e23efa910194eedf257b39fc5cb67057bacfeedffb5fa3e830706a480731b"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 4909,
+          "sha256": "118a671d25c7b5efed760397ae2985c8b491f37a1d9485bf29715a5c4f3d8261"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 4215,
+          "sha256": "855e23efa910194eedf257b39fc5cb67057bacfeedffb5fa3e830706a480731b"
+        }
+      }
+    },
+    {
+      "file": "lib/keeper/keeper_unified_prompt.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 95693,
+          "sha256": "021fb94b467d9833bf5ad3403efab025e3ec6b6e3b8ab5fb1cc43f7dac4d77ab"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 96752,
+          "sha256": "16602609a130792ef1123bd9b65a35bd1d442cc9d9ec306080a97e7c4fa224af"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 95693,
+          "sha256": "021fb94b467d9833bf5ad3403efab025e3ec6b6e3b8ab5fb1cc43f7dac4d77ab"
+        }
+      }
+    },
+    {
+      "file": "lib/keeper/keeper_turn.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 58604,
+          "sha256": "65bc1f20c30e5b11a141e5b70743a5a571a2458d0951bb27ec7b9bd38df14404"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 59035,
+          "sha256": "4af792ecac8c0ba76d03432b1740e69e54cc2e16430175ad86f6b15945927738"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 58604,
+          "sha256": "65bc1f20c30e5b11a141e5b70743a5a571a2458d0951bb27ec7b9bd38df14404"
+        }
+      }
+    },
+    {
+      "file": "lib/keeper/keeper_run_prompt.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 6718,
+          "sha256": "7915d0da252808adace468cc6bfc58aa75c486c6c41789b306e3f1f1e6a990f7"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 9267,
+          "sha256": "54229d2bce98cbe1406952f4f6655524e5366e0b9ad1a6c8426071894a8334a0"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 6718,
+          "sha256": "7915d0da252808adace468cc6bfc58aa75c486c6c41789b306e3f1f1e6a990f7"
+        }
+      }
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools_hooks.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 69746,
+          "sha256": "66e8fc22af6816a7063833c4abf60d41ba5ca60cf107b1595101090b16c897c8"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 69866,
+          "sha256": "daf07438d848856718bfd665682d86045705ec9c39efc8df8bc68346ad857aff"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 69746,
+          "sha256": "66e8fc22af6816a7063833c4abf60d41ba5ca60cf107b1595101090b16c897c8"
+        }
+      }
+    },
+    {
+      "file": "lib/keeper/keeper_context_assembly.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 5211,
+          "sha256": "7798517ba1baa8a2c42b12530a9800b8ffb55fc5d576fa94739419f0a0544c34"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 7180,
+          "sha256": "2452346ee72de6c3e6ca29dacc316ee401bcfa152e36ed96846c1e0cde8cf336"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 5211,
+          "sha256": "7798517ba1baa8a2c42b12530a9800b8ffb55fc5d576fa94739419f0a0544c34"
+        }
+      }
+    },
+    {
+      "file": "lib/keeper/keeper_tool_task_runtime.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 52544,
+          "sha256": "c8ff32e34dbfef8e5a7f93b1d87672f4c95c7b1e612e8381136f2c1562cfd81b"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 50774,
+          "sha256": "dc0bea014d5a1ebfd5b42cba8705d342a0f655e88df3ce525acf7585e6cb08da"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 52544,
+          "sha256": "c8ff32e34dbfef8e5a7f93b1d87672f4c95c7b1e612e8381136f2c1562cfd81b"
+        }
+      }
+    },
+    {
+      "file": "lib/keeper/keeper_tasks_list_query.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 2697,
+          "sha256": "e7eef60b99988e9bbfbb0d17131b765f08287292731eacd57175070f0c3174eb"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 5857,
+          "sha256": "ca5de6749cfc1553588dc91f62a985f77e4177cf3ef86eac4afaa81c814a3713"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 2697,
+          "sha256": "e7eef60b99988e9bbfbb0d17131b765f08287292731eacd57175070f0c3174eb"
+        }
+      }
+    },
+    {
+      "file": "lib/keeper/keeper_tasks_list_cursor.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 3925,
+          "sha256": "c8ceb619c72f4fd1109ca3171351b7c78268c1077a4dfc402fe9fe0d4c44f1fa"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 3606,
+          "sha256": "e83d4bb60a2d6c966a90f8f3620bf90cfd43b435c7193d5b23e62685e1debae4"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 3925,
+          "sha256": "c8ceb619c72f4fd1109ca3171351b7c78268c1077a4dfc402fe9fe0d4c44f1fa"
+        }
+      }
+    },
+    {
+      "file": "lib/goal/goal_measurement.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 9739,
+          "sha256": "cefc986e5f2c0c5ba27dfb0eb930d71faff93c6305059cd2155897ee8ac1a469"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 10256,
+          "sha256": "172f5002dcecd7faa2eeabbbf9e2aab0da0e9178cbe4e0ffbd133769a05e6d13"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 9739,
+          "sha256": "cefc986e5f2c0c5ba27dfb0eb930d71faff93c6305059cd2155897ee8ac1a469"
+        }
+      }
+    },
+    {
+      "file": "lib/workspace_goals.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 57097,
+          "sha256": "f3a746ae3a7d755e7422cd39143b5eef7ea819443ebf32a464040cb179a85ac6"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 57019,
+          "sha256": "22fe90c86c08fd8549ea437f4f582c21ccfab52ec3f2d16a9b04b97cfb367bd5"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 57097,
+          "sha256": "f3a746ae3a7d755e7422cd39143b5eef7ea819443ebf32a464040cb179a85ac6"
+        }
+      }
+    },
+    {
+      "file": "lib/server/server_routes_http_routes_dashboard.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 191203,
+          "sha256": "5bc0005578b10992ba86f76bd4815e9e820a94e9118752de5857975ee488f1c1"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 191187,
+          "sha256": "d88df0328be749b351bda5aeba04315e2132e03a303cb6f6c81d5fe69b35b84d"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 191203,
+          "sha256": "5bc0005578b10992ba86f76bd4815e9e820a94e9118752de5857975ee488f1c1"
+        }
+      }
+    },
+    {
+      "file": "lib/workspace/workspace_task_transitions.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 58191,
+          "sha256": "ae4308df2f4ad92a8add56ac4b7a4d63496ef2e3b5a94f64746b58e2d555d3a1"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 58281,
+          "sha256": "4f66ec9447b4d5aacebe01281d5e6cf01a6d7962bd0b7988cedaacead210ddaa"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 58191,
+          "sha256": "ae4308df2f4ad92a8add56ac4b7a4d63496ef2e3b5a94f64746b58e2d555d3a1"
+        }
+      }
+    },
+    {
+      "file": "lib/workspace/workspace_task_verification.ml",
+      "versions": {
+        "installed": {
+          "exists": true,
+          "bytes": 1603,
+          "sha256": "bf536c0c5b765a6e8e20263f205eeacc0d933eb4115e10ec676731d7002a99e5"
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 1500,
+          "sha256": "6e1b4ba489590b24a1cdd7ad3e82c455563aa380c23a1626aa25af21a33906a6"
+        },
+        "checkout": {
+          "exists": true,
+          "bytes": 1603,
+          "sha256": "bf536c0c5b765a6e8e20263f205eeacc0d933eb4115e10ec676731d7002a99e5"
+        }
+      }
+    },
+    {
+      "file": "lib/types/runtime_response_identity.ml",
+      "versions": {
+        "installed": {
+          "exists": false,
+          "bytes": null,
+          "sha256": null
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 5623,
+          "sha256": "e008f7c6b24d543c7d6f0b5aaca8c52459d79640bd6ab915fef38f89072f4c3e"
+        },
+        "checkout": {
+          "exists": false,
+          "bytes": null,
+          "sha256": null
+        }
+      }
+    },
+    {
+      "file": "lib/runtime/runtime_response_identity_scope.ml",
+      "versions": {
+        "installed": {
+          "exists": false,
+          "bytes": null,
+          "sha256": null
+        },
+        "published_stack19": {
+          "exists": true,
+          "bytes": 4544,
+          "sha256": "8ed6d674f8b2be83f4555c91d9bc90954ab4c333699abfbc2417988fdbe2fc07"
+        },
+        "checkout": {
+          "exists": false,
+          "bytes": null,
+          "sha256": null
+        }
+      }
+    }
+  ],
+  "proof_access_source_files": [
+    {
+      "file": "lib/goal_verification_agent.ml",
+      "identical_all_three": true,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "bab2de3604da240846d7823d6b3e586eb3fe585889621b38a61fe8082b7dc388"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "bab2de3604da240846d7823d6b3e586eb3fe585889621b38a61fe8082b7dc388"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "bab2de3604da240846d7823d6b3e586eb3fe585889621b38a61fe8082b7dc388"
+        }
+      ]
+    },
+    {
+      "file": "lib/verification_authority_tools.ml",
+      "identical_all_three": true,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "d513b417a55cfba75fd9372777164c9996ccc10e78d5a043a9ed00888d130900"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "d513b417a55cfba75fd9372777164c9996ccc10e78d5a043a9ed00888d130900"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "d513b417a55cfba75fd9372777164c9996ccc10e78d5a043a9ed00888d130900"
+        }
+      ]
+    },
+    {
+      "file": "lib/keeper/goal_verifier_worker.ml",
+      "identical_all_three": true,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "7875e0d0b57a5ab9be7f182166f04b3e156be2280150c8faabe2db788cb55873"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "7875e0d0b57a5ab9be7f182166f04b3e156be2280150c8faabe2db788cb55873"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "7875e0d0b57a5ab9be7f182166f04b3e156be2280150c8faabe2db788cb55873"
+        }
+      ]
+    },
+    {
+      "file": "lib/keeper/goal_verifier_original.ml",
+      "identical_all_three": true,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "d01ce5030f4646a5ec309372678a52ae98c0458a130dfc19861d3d1ee0aee1f7"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "d01ce5030f4646a5ec309372678a52ae98c0458a130dfc19861d3d1ee0aee1f7"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "d01ce5030f4646a5ec309372678a52ae98c0458a130dfc19861d3d1ee0aee1f7"
+        }
+      ]
+    },
+    {
+      "file": "lib/keeper/goal_verifier_host.ml",
+      "identical_all_three": true,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "6dedc8ed5f1f299fde7124a9658824362ce4955e29f60d02d12c79152ac793f5"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "6dedc8ed5f1f299fde7124a9658824362ce4955e29f60d02d12c79152ac793f5"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "6dedc8ed5f1f299fde7124a9658824362ce4955e29f60d02d12c79152ac793f5"
+        }
+      ]
+    },
+    {
+      "file": "lib/goal_verification_run_registry.ml",
+      "identical_all_three": true,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "fc12cea892194ccd982b8dd5eeb9138092cdf7beb3e436be31db252e79f76840"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "fc12cea892194ccd982b8dd5eeb9138092cdf7beb3e436be31db252e79f76840"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "fc12cea892194ccd982b8dd5eeb9138092cdf7beb3e436be31db252e79f76840"
+        }
+      ]
+    },
+    {
+      "file": "lib/verification_run_registry.ml",
+      "identical_all_three": true,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "9864c29f2d5b49c3bd26abb18acad4d50bf9fc66492c2e82da2760499d8bd281"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "9864c29f2d5b49c3bd26abb18acad4d50bf9fc66492c2e82da2760499d8bd281"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "9864c29f2d5b49c3bd26abb18acad4d50bf9fc66492c2e82da2760499d8bd281"
+        }
+      ]
+    },
+    {
+      "file": "config/prompts/goal_verification.md",
+      "identical_all_three": true,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "a046502c30c462e1d497f931486ff945b25a4587db24051bee19b8e2088827db"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "a046502c30c462e1d497f931486ff945b25a4587db24051bee19b8e2088827db"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "a046502c30c462e1d497f931486ff945b25a4587db24051bee19b8e2088827db"
+        }
+      ]
+    },
+    {
+      "file": "lib/goal/goal_verification.ml",
+      "identical_all_three": true,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "63328a6c3fc500fccc4ab48f2b500dc9188d88ca91fc28363290036f37652395"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "63328a6c3fc500fccc4ab48f2b500dc9188d88ca91fc28363290036f37652395"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "63328a6c3fc500fccc4ab48f2b500dc9188d88ca91fc28363290036f37652395"
+        }
+      ]
+    },
+    {
+      "file": "lib/keeper/keeper_tool_filesystem_runtime.ml",
+      "identical_all_three": true,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "7ae33186ecf1adb318e3632f377e61c3dcd5064cd1018d3f0ba4847616e92adb"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "7ae33186ecf1adb318e3632f377e61c3dcd5064cd1018d3f0ba4847616e92adb"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "7ae33186ecf1adb318e3632f377e61c3dcd5064cd1018d3f0ba4847616e92adb"
+        }
+      ]
+    },
+    {
+      "file": "lib/task/anti_rationalization.ml",
+      "identical_all_three": false,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "01fed2223dcac3ed108cfe756951993aeabacf0dca7fd441091edd02235032ee"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "01fed2223dcac3ed108cfe756951993aeabacf0dca7fd441091edd02235032ee"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "8c17413e6d952ec176bcd4f3c998fa6d02396a0e9ffdd0265be8f4ff8aa14dd9"
+        }
+      ]
+    },
+    {
+      "file": "lib/workspace_goals.ml",
+      "identical_all_three": false,
+      "versions": [
+        {
+          "source": "c75ee3febdb834225ff905020add4cecd2e5264b",
+          "sha256": "f3a746ae3a7d755e7422cd39143b5eef7ea819443ebf32a464040cb179a85ac6"
+        },
+        {
+          "source": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+          "sha256": "f3a746ae3a7d755e7422cd39143b5eef7ea819443ebf32a464040cb179a85ac6"
+        },
+        {
+          "source": "46d71034a3bef033f438a85c9720c33a53a59ef5",
+          "sha256": "22fe90c86c08fd8549ea437f4f582c21ccfab52ec3f2d16a9b04b97cfb367bd5"
+        }
+      ]
+    }
+  ],
+  "active_keeper_prompt": {
+    "repo_relative_template": "config/prompts/keeper.md",
+    "bytes": 57854,
+    "sha256": "c7ab1625007aa521686f6eac87fcfe4c0aea082c445ae23fec3656af51694595"
+  },
+  "proof_access_boundaries": [
+    "Goal file tools read producer-owned shared-playground files. Relative repository evidence locators were missing there; broad host access was not tested or authorized.",
+    "The proof request had no submitted sources, and the observed original prompt path did not carry the latest measurement record.",
+    "Retained tool outcomes are not an independent authority that proves coverage of required originals."
+  ]
+}

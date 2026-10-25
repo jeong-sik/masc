@@ -46,6 +46,19 @@ type verification_request = {
   created_at: float;
 }
 
+let producer_execution (request : verification_request) =
+  match request.output with
+  | `Assoc fields ->
+    (match List.filter (fun (name, _) -> String.equal name "producer_execution") fields with
+     | [] -> Ok None
+     | [ _, `Null ] -> Ok None
+     | [ _, json ] ->
+       let* identity = Runtime_response_identity.of_yojson json in
+       if String.equal identity.actor request.worker then Ok (Some identity)
+       else Error "verification producer execution does not belong to its worker"
+     | _ -> Error "verification request has duplicate producer execution fields")
+  | _ -> Ok None
+
 (** What one pass over the request directory found, each readable request
     as the reader keeps it.
 

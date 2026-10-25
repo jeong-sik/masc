@@ -6,7 +6,7 @@ let check message predicate = incr checked; if not predicate then failwith messa
 let identity ?(runtime = "runtime-a") ?(model = "model-a") suffix =
   match Identity.make ~execution_id:("run-" ^ suffix) ~actor:"worker" ~runtime_id:runtime
     ~response_id:("response-" ^ suffix) ~provider_id:"provider-a" ~model_id:model
-    ~tool_use_id:("tool-" ^ suffix) ~provider_turn:1 with
+    ~tool_use_id:("tool-" ^ suffix) ~provider_turn:1 ~source_tool_use_ordinal:1 with
   | Ok value -> value
   | Error detail -> failwith detail
 
@@ -17,10 +17,19 @@ let () =
     | Ok value -> Identity.to_yojson value = json | Error _ -> false);
   check "empty model refused" (match Identity.make ~execution_id:"run" ~actor:"worker"
     ~runtime_id:"runtime" ~response_id:"response" ~provider_id:"provider" ~model_id:""
-    ~tool_use_id:"tool" ~provider_turn:1 with Error _ -> true | Ok _ -> false);
+    ~tool_use_id:"tool" ~provider_turn:1 ~source_tool_use_ordinal:0 with Error _ -> true | Ok _ -> false);
   check "negative ordinal refused" (match Identity.make ~execution_id:"run" ~actor:"worker"
     ~runtime_id:"runtime" ~response_id:"response" ~provider_id:"provider" ~model_id:"model"
-    ~tool_use_id:"tool" ~provider_turn:(-1) with Error _ -> true | Ok _ -> false);
+    ~tool_use_id:"tool" ~provider_turn:(-1) ~source_tool_use_ordinal:0 with Error _ -> true | Ok _ -> false);
+  check "negative original source ordinal refused" (match Identity.make ~execution_id:"run" ~actor:"worker"
+    ~runtime_id:"runtime" ~response_id:"response" ~provider_id:"provider" ~model_id:"model"
+    ~tool_use_id:"tool" ~provider_turn:1 ~source_tool_use_ordinal:(-1) with Error _ -> true | Ok _ -> false);
+  check "original source ordinal survives readback" (match Identity.of_yojson json with
+    | Ok value -> value.source_tool_use_ordinal=1 | Error _ -> false);
+  check "absent original ordinal is not invented" (match json with
+    | `Assoc fields -> (match Identity.of_yojson (`Assoc (List.remove_assoc "source_tool_use_ordinal" fields)) with
+        | Error _ -> true | Ok _ -> false)
+    | _ -> false);
   check "duplicate field refused" (match json with
     | `Assoc fields -> (match Identity.of_yojson (`Assoc (("model_id", `String "forged") :: fields)) with
         | Error _ -> true | Ok _ -> false)

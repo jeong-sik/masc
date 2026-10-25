@@ -39,7 +39,7 @@ let submitted_verifications = ref []
 let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
   reviewer_calls := !reviewer_response :: !reviewer_calls;
   match !reviewer_response with
-  | Reviewer_verdict verdict -> Ok {AR.selected_runtime_id=evaluator_runtime;verdict=Some verdict}
+  | Reviewer_verdict verdict -> Ok {AR.selected_runtime_id=evaluator_runtime; evaluator_execution = None;verdict=Some verdict}
   | Reviewer_unavailable ->
     Error (Agent_core.Error.Internal "test evaluator unavailable")
 ;;
@@ -471,7 +471,7 @@ let test_rendered_image_reaches_verifier_http_request () =
               () in
           (match (Llm_provider.Complete.complete ~sw ~net ~config:provider
                    ~messages:[Agent_core.Types.user_msg_blocks blocks] ()).Llm_provider.Completion_outcome.result with
-           | Ok _ -> Ok {AR.selected_runtime_id=evaluator_runtime;verdict=Some (AR.Approve "synthetic image delivery receipt only")}
+           | Ok _ -> Ok {AR.selected_runtime_id=evaluator_runtime;evaluator_execution=None;verdict=Some (AR.Approve "synthetic image delivery receipt only")}
            | Error _ -> Error (Agent_core.Error.Internal "fixture HTTP request failed"))
       in
       Fun.protect ~finally:(fun () -> Atomic.set AR.run_llm_reviewer_fn previous)
@@ -768,7 +768,7 @@ let test_late_verdict_respects_actual_terminal_authority () =
               | `Done -> commit Masc_domain.Verdict_approved
               | `Rejected -> commit (Masc_domain.Verdict_rejected {reason="operator requests repair"}) in
             (match acted with Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error));
-            Ok {AR.selected_runtime_id=evaluator_runtime; verdict=Some (AR.Approve "late model approval")} in
+            Ok {AR.selected_runtime_id=evaluator_runtime; evaluator_execution = None; verdict=Some (AR.Approve "late model approval")} in
           Fun.protect ~finally:(fun () -> Atomic.set AR.run_llm_reviewer_fn previous) (fun () ->
             Atomic.set AR.run_llm_reviewer_fn racing_reviewer;
             check bool "actual review and outcome consumer returned" true
@@ -792,6 +792,7 @@ let test_late_verdict_respects_actual_terminal_authority () =
            | Conflicted _ -> ()
            | _ -> fail "competing authority must leave an exact retained commit conflict");
           (match Masc.Verifier_review_owner.pending_commits
+             ~selection:Masc.Verifier_review_owner.All_verifications
              ~terminal_pending:Masc.Verifier_review_publication.needs_publication
              ~store ~installation_id ~package_id with
            | Ok [] -> ()

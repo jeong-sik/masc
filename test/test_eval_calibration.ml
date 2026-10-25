@@ -36,9 +36,9 @@ let make_req ?(title = "Fix auth bug") ?(desc = "Fix the login issue")
     evidence_images = [] }
 
 let make_result ?(verdict = AR.Approve "") ?(runtime = "verifier")
-    ?gen_runtime ?(gate = AR.Structured_tool) ?fallback_reason () : AR.review_result =
+    ?gen_runtime ?evaluator_execution ?(gate = AR.Structured_tool) ?fallback_reason () : AR.review_result =
   { verdict = Some verdict; evaluator_runtime = runtime;
-    generator_runtime = gen_runtime; gate; fallback_reason;
+    generator_runtime = gen_runtime; evaluator_execution; gate; fallback_reason;
       retryable_runtimes = []; model_absent_runtimes = [] }
 
 (* ================================================================ *)
@@ -398,10 +398,10 @@ let test_calibration_stats () =
   check bool "an unmeasured rate is null" true
     Yojson.Safe.Util.((stats |> member "distinct_runtime_rate") = `Null);
   let observation = Yojson.Safe.Util.member "model_identity_observation" stats in
-  check string "model identities are unobserved" "unobserved"
-    Yojson.Safe.Util.(observation |> member "kind" |> to_string);
+  check int "no complete model pair was observed" 0
+    Yojson.Safe.Util.(observation |> member "observed_verdict_count" |> to_int);
   check int "all verdicts lack bound model identities" 3
-    Yojson.Safe.Util.(observation |> member "verdict_count" |> to_int);
+    Yojson.Safe.Util.(observation |> member "unobserved_verdict_count" |> to_int);
   check bool "the misleading model-rate field is absent" false
     (List.mem_assoc "cross_model_rate" (Yojson.Safe.Util.to_assoc stats));
   Cal.For_testing.reset_store ()
@@ -445,10 +445,53 @@ let test_calibration_stats_runtime_aliases_do_not_establish_model_independence (
   check int "two runtime pairs use distinct aliases" 2 distinct_count;
   check (float 1e-3) "the runtime-only rate is two thirds" (2.0 /. 3.0) distinct_rate;
   let observation = Yojson.Safe.Util.member "model_identity_observation" stats in
-  check string "aliases leave model identities unobserved" "unobserved"
-    Yojson.Safe.Util.(observation |> member "kind" |> to_string);
+  check int "aliases prove no complete model pair" 0
+    Yojson.Safe.Util.(observation |> member "observed_verdict_count" |> to_int);
   check int "all four verdicts lack model identity evidence" 4
-    Yojson.Safe.Util.(observation |> member "verdict_count" |> to_int)
+    Yojson.Safe.Util.(observation |> member "unobserved_verdict_count" |> to_int)
+
+let test_actual_response_pairs_and_unknown_coverage () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  Cal.For_testing.set_store ~base_path:dir;
+  Fun.protect ~finally:Cal.For_testing.reset_store @@ fun () ->
+  let identity ~actor ~runtime_id ~model_id suffix =
+    match Runtime_response_identity.make ~execution_id:("execution-" ^ suffix)
+      ~actor ~runtime_id ~response_id:("response-" ^ suffix) ~provider_id:"provider"
+      ~model_id ~tool_use_id:("call-" ^ suffix) ~provider_turn:1 ~source_tool_use_ordinal:0 with
+    | Ok identity -> identity
+    | Error detail -> fail detail in
+  let producer = identity ~actor:"alice" ~runtime_id:"producer-alias" ~model_id:"model-a" "producer" in
+  let same = identity ~actor:"judge" ~runtime_id:"other-alias" ~model_id:"model-a" "same" in
+  let changed = identity ~actor:"judge" ~runtime_id:"producer-alias" ~model_id:"model-b" "changed" in
+  let fallback = identity ~actor:"judge" ~runtime_id:"fallback-winner" ~model_id:"model-b" "fallback" in
+  let record id ?producer_execution ?evaluator_execution runtime =
+    Cal.record_verdict ?producer_execution ~task_id:id
+      ~req:(make_req ~title:id ())
+      ~result:(make_result ~runtime ?evaluator_execution ()) () in
+  record "same-model-two-aliases" ~producer_execution:producer ~evaluator_execution:same "other-alias";
+  record "same-alias-changed-model" ~producer_execution:producer ~evaluator_execution:changed "producer-alias";
+  record "actual-fallback-winner" ~producer_execution:producer ~evaluator_execution:fallback "fallback-winner";
+  record "producer-missing" ~evaluator_execution:same "other-alias";
+  record "judge-missing" ~producer_execution:producer "other-alias";
+  record "both-missing" "other-alias";
+  let observation = Yojson.Safe.Util.member "model_identity_observation" (Cal.calibration_stats ()) in
+  let number name = Yojson.Safe.Util.(observation |> member name |> to_int) in
+  check int "three pairs have actual response identities" 3 (number "observed_verdict_count");
+  check int "each unproven pair remains unknown" 3 (number "unobserved_verdict_count");
+  check int "different aliases still identify the same model" 1 (number "same_model_identity_count");
+  check int "actual changed model and fallback winner are distinct" 2 (number "distinct_model_identity_count");
+  check (float 1e-6) "only observed pairs enter the rate" (2. /. 3.)
+    Yojson.Safe.Util.(observation |> member "distinct_model_identity_rate" |> to_number);
+  let causes = Yojson.Safe.Util.member "unobserved_causes" observation in
+  List.iter (fun name -> check int (name ^ " capture gap") 1
+    Yojson.Safe.Util.(causes |> member name |> to_int)) ["producer"; "evaluator"; "both"];
+  let rows = Dated_jsonl.read_recent (Cal.get_store ()) 20 in
+  let original = List.find (fun row -> Yojson.Safe.Util.(row |> member "task_id" |> to_string) = "same-alias-changed-model") rows in
+  match Runtime_response_identity.of_yojson (Yojson.Safe.Util.member "producer_execution" original) with
+  | Ok identity -> check string "the ledger retains the original producer model" "model-a" identity.model_id
+  | Error detail -> fail detail
 
 (* ================================================================ *)
 (* AGENT_CORE Harness.verdict conversion tests (#3165)                      *)
@@ -498,5 +541,7 @@ let () =
       test_case "counts" `Quick test_calibration_stats;
       test_case "runtime aliases do not establish model independence" `Quick
         test_calibration_stats_runtime_aliases_do_not_establish_model_independence;
+      test_case "actual response pairs retain unknown coverage" `Quick
+        test_actual_response_pairs_and_unknown_coverage;
     ];
               ]

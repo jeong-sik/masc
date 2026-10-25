@@ -31,6 +31,8 @@ type verdict_record = {
   gate : Task.Anti_rationalization.gate;
   evaluator_runtime : string;
   generator_runtime : string option;
+  producer_execution : Runtime_response_identity.t option;
+  evaluator_execution : Runtime_response_identity.t option;
   fallback_reason : string option;
   timestamp : float;
 }
@@ -77,13 +79,16 @@ val notes_hash : task_title:string -> notes:string -> string
 (** {1 Recording} *)
 
 val record_verdict :
+  ?producer_execution:Runtime_response_identity.t ->
   task_id:string ->
   req:Task.Anti_rationalization.review_request ->
   result:Task.Anti_rationalization.review_result ->
   unit ->
   unit
 (** Append a verdict record to the JSONL store. A result without a verdict is
-    a no-op: nobody judged, so there is nothing to remember. *)
+    a no-op: nobody judged, so there is nothing to remember.
+    [producer_execution] identifies the submitting tool response only, not
+    every earlier model or collaborator that authored the artifact. *)
 
 val record_human_label :
   notes_hash:string ->
@@ -117,6 +122,10 @@ val calibration_stats :
 (** Compute summary statistics: verdict counts, gate distribution,
     false positive/negative rates, agreement rate. [distinct_runtime_rate]
     compares recorded runtime identifiers and is [null] when no pair was
-    recorded. It does not establish distinct models: current verdict rows
-    carry no submission-bound producer and judge model identities, so
-    [model_identity_observation] reports unobserved verdict coverage. *)
+    recorded. [model_identity_observation] separately compares the captured
+    submitting-response/verdict-response provider and reported-model
+    identities, retaining observed
+    and unobserved coverage and causes. Its rate is [null] without a complete
+    pair. Submission identity does not identify every model or collaborator
+    that authored an artifact; identity diversity does not establish weight
+    differences or statistical independence. *)

@@ -55,7 +55,7 @@ let authority ?(worker=producer) ?(items=[]) config =
   get (A.create_task_review ~config ~verification_id ~task_id ~producer:worker ~evidence_access)
 
 let original ?(question=question) authority attempt =
-  get (V.prepare ~verification_id ~attempt ~question
+  get (V.prepare ~generator_runtime:None ~verification_id ~attempt ~question
     ~lookup_root:(A.task_review_root authority)
     ~lookup_binding:(A.task_review_binding authority)
     ~lookup_schemas:(List.map (fun (s:Types_core.tool_schema) -> s.name)
@@ -78,6 +78,7 @@ let run ?(package=package_id) store authority attempt =
 
 let pending ~store ~installation_id ~package_id =
   O.pending_commits ~terminal_pending:Publication.needs_publication
+    ~selection:O.All_verifications
     ~store ~installation_id ~package_id
 
 let execution_observer ~clock ~started_at ~before ~original result =
@@ -128,6 +129,10 @@ let test_frozen_prompt_media_and_lookup () = with_workspace (fun config store ->
       ~base_path:(Store.project_root_of_base_path config.Workspace.base_path) ~agent_name:producer in
     Fs_compat.mkdir_p root;
     Out_channel.with_open_bin (Filename.concat root "receipt.txt") (fun out -> output_string out "retained evidence");
+    let identity = get (Masc.Runtime_response_identity.make ~execution_id:"retained-execution"
+      ~actor:"reviewer" ~runtime_id:"fixture-reviewer" ~response_id:"accepted-response"
+      ~provider_id:"fixture-provider" ~model_id:"fixture-model" ~tool_use_id:"verdict-call"
+      ~provider_turn:2 ~source_tool_use_ordinal:0) in
     let calls = ref 0 in
     with_reviewer (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
         ?system_prompt ?goal_blocks ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
@@ -144,9 +149,16 @@ let test_frozen_prompt_media_and_lookup () = with_workspace (fun config store ->
          Alcotest.(check bool) "successful owned lookup retains shared evidence projection" true
            (Yojson.Safe.Util.member "evidence_lookup_succeeded" payload.data = `Bool true)
        | Tool_result.Failed _ | Tool_result.Deferred _ -> Alcotest.fail "owned evidence read failed");
-      Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "checked")})
+      Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=Some identity;verdict=Some (AR.Approve "checked")})
       (fun () -> match run store a 0 with
-       | Ok {AR.verdict=Some (Approve "checked");_} -> Alcotest.(check int) "one actual reviewer dispatch" 1 !calls
+       | Ok {AR.verdict=Some (Approve "checked");evaluator_execution;_} ->
+         Alcotest.(check bool) "actual winning response identity survives fresh review" true
+           (evaluator_execution=Some identity);
+         (match run store a 0 with
+          | Ok result -> Alcotest.(check bool) "retained result preserves exact winning response" true
+              (result.evaluator_execution=Some identity)
+          | Error _ -> Alcotest.fail "retained winner did not restore");
+         Alcotest.(check int) "restore does not replay provider" 1 !calls
        | Ok _ | Error _ -> Alcotest.fail "retained review did not return the structured verdict")))
 
 let test_refusals_dispatch_nothing () = with_workspace (fun config store ->
@@ -187,7 +199,7 @@ let test_known_retry_preserves_frozen_original () = with_workspace (fun config s
         {retry_after=None;message="definite complete HTTP refusal"}) in
       on_runtime_attempt_error ~runtime_id:"fixture-reviewer" ~attempt:0
         ~dispatch:Runtime_attempt_dispatch.Dispatched error; Error error)
-    else Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "retry checked")}) (fun () ->
+    else Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;verdict=Some (AR.Approve "retry checked")}) (fun () ->
     (match run store a 0 with Ok {AR.verdict=None;retryable_runtimes=_::_;_} -> ()
      | Ok _ | Error _ -> Alcotest.fail "known transient did not retain retry authority");
     let retry=next () in
@@ -256,7 +268,7 @@ let test_actual_host_commit_restart () = with_workspace_runtime (fun config stor
   let calls=ref 0 in
   with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-    incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "checked")}) (fun () ->
+    incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;verdict=Some (AR.Approve "checked")}) (fun () ->
     let result=loaded (run_observed ~clock ~task ~store ~installation_id ~package_id first a) in
     let notes=domain_notes result in
     get (Masc.Completion_authority_agent.For_testing.commit_original ~config ~task ~store ~attempt:0
@@ -278,7 +290,7 @@ let test_actual_host_commit_cancel_after_domain_write () =
   let calls=ref 0 in
   with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-    incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "checked")}) (fun () ->
+    incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;verdict=Some (AR.Approve "checked")}) (fun () ->
     let result=loaded (run_observed ~clock ~task ~store ~installation_id ~package_id first a) in
     let notes=domain_notes result in
     let hook=Atomic.get Workspace_hooks.task_terminal_committed_fn in
@@ -326,7 +338,7 @@ let test_judgment_recovery_precedes_actual_preparation () =
       let calls=ref 0 in
       with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
           ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-        incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "checked")}) (fun () ->
+        incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;verdict=Some (AR.Approve "checked")}) (fun () ->
         let result=loaded (run_observed ~clock ~task ~store ~installation_id ~package_id first a) in
         let saved=loaded (O.load_retained ~store ~verification_id ~attempt:0 ~installation_id ~package_id) in
         (match Masc.Lane_addon_request_progress.phase (O.progress saved) with
@@ -352,7 +364,7 @@ let test_commit_unknown_recovers_exact_original () = with_workspace (fun config 
   let calls=ref 0 in
   with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-    incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Reject "repair")}) (fun () ->
+    incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;verdict=Some (AR.Reject "repair")}) (fun () ->
     let result=loaded (run store a 0) in
     let digest=get (V.digest first) in
     let before=`Assoc ["verification_id",`String verification_id;"phase",`String "awaiting"] in
@@ -394,7 +406,7 @@ let test_actual_inner_walk_respects_retained_disposition () =
           calls:=runtime_id::!calls;
           let result=if idx=0 then Error (Agent_core.Error.Api (Agent_core.Error.Retry.NetworkError
             {message="lost after dispatch";kind=Llm_provider.Http_client.Connection_reset}))
-          else Ok {AR.selected_runtime_id=runtime_id;verdict=Some (AR.Approve "checked")} in
+          else Ok {AR.selected_runtime_id=runtime_id;evaluator_execution=None;verdict=Some (AR.Approve "checked")} in
           result,None,Masc.Keeper_provider_attempt_effect.No_effect_observed,
           Masc.Keeper_attempt_dispatch.Dispatched)
         ["first-provider";"second-provider"]) (fun () ->
@@ -423,7 +435,7 @@ let test_pre_admission_configuration_reenters_same_original () = with_workspace 
       ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     incr calls;
     Alcotest.(check string) "re-admission preserves original prompt" (V.system_prompt_text first) prompt;
-    Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "admitted")}) (fun () ->
+    Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;verdict=Some (AR.Approve "admitted")}) (fun () ->
     Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
       (fun () -> Error "fixture typed slot admission is unavailable");
     (match run store a 0 with Ok {AR.verdict=None;_} -> ()
@@ -463,7 +475,7 @@ let with_observed_host f = with_workspace_runtime (fun config store clock ->
     with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-      incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";verdict=Some (AR.Approve "checked")})
+      incr calls;Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;verdict=Some (AR.Approve "checked")})
       (fun () -> f ~config ~store ~clock ~sw ~task ~first ~authority:a ~calls)))
 
 let load_host store = loaded (O.load_retained ~store ~verification_id ~attempt:0
@@ -746,7 +758,7 @@ let test_one_unpublishable_original_does_not_starve_boot () = with_observed_host
     (* This deliberately unpublishable owned journal has no execution receipt.
        It is a negative recovery control, never claimed as actual Task proof. *)
     let bad_id="unpublishable-control-1" in
-    let bad=get (V.prepare ~verification_id:bad_id ~attempt:0 ~question
+    let bad=get (V.prepare ~generator_runtime:None ~verification_id:bad_id ~attempt:0 ~question
       ~lookup_root:(A.task_review_root authority)
       ~lookup_binding:(A.task_review_binding authority)
       ~lookup_schemas:(List.map (fun (schema:Types_core.tool_schema) -> schema.name)

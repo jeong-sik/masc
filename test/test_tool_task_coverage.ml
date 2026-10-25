@@ -78,7 +78,7 @@ let install_test_hooks () =
     (fun () -> Ok (List.map (fun id -> id, Types_core.Catalog_slot) [ "test-evaluator-runtime" ]));
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-       Ok {Task.Anti_rationalization.selected_runtime_id="test-evaluator-runtime";verdict=Some (Task.Anti_rationalization.Approve "")})
+       Ok {Task.Anti_rationalization.selected_runtime_id="test-evaluator-runtime";evaluator_execution=None;verdict=Some (Task.Anti_rationalization.Approve "")})
 
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
@@ -1520,7 +1520,7 @@ let () = test "handle_transition_force_is_not_a_done_action" (fun () ->
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
        reviewer_called := true;
-       Ok {Task.Anti_rationalization.selected_runtime_id="test-evaluator-runtime";verdict=Some (Task.Anti_rationalization.Approve "")});
+       Ok {Task.Anti_rationalization.selected_runtime_id="test-evaluator-runtime"; evaluator_execution = None;verdict=Some (Task.Anti_rationalization.Approve "")});
   let result =
     Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc

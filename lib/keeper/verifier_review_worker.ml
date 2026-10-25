@@ -110,7 +110,7 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
        | Ok saved -> current := saved);
       Option.iter (fun callback -> callback result) on_verdict in
     try
-      let result = AR.review_rendered ~system_prompt:(V.system_instructions original) ~on_execution ~on_verdict:retain_result
+      let result = AR.review_rendered ~generator_runtime:(V.generator_runtime original) ~system_prompt:(V.system_instructions original) ~on_execution ~on_verdict:retain_result
         ?on_tool_result ?sw ~prompt:(V.system_prompt_text original)
         ~lookup ~provider_rest ~base_path:(Authority.task_review_base_path authority) req in
       if !unknown then Error (Execution_pending "reviewer outcome unknown; exact original retained")

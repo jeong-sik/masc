@@ -125,6 +125,9 @@ type config = Runtime_agent_context.config = {
   runtime_id : string option;
       (** Typed catalog identity used by runtime logic. [None] means the caller
           did not supply a catalog identity, so [name] is used. *)
+  execution_actor : string option;
+      (** Host-owned actor of tool invocations, independent of [name].
+          Missing actor evidence stays unobserved. *)
   initial_messages : Agent_core.Types.message list;
   model_input_projection : Agent_core.Agent.model_input_projection option;
   serialization_executor : Agent_core.Agent.serialization_executor option;

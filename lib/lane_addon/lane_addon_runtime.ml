@@ -1377,7 +1377,10 @@ let run ~sw ~read_browser_document backend m e =
                     let result=match Eio.Lazy.force allocation with
                       | Error Lane_addon_companion_allocation.Unavailable -> Ok ()
                       | Error Cleanup_unconfirmed -> Error "private companion startup cleanup unconfirmed"
-                      | Ok owned -> Lane_addon_companion_allocation.cleanup owned in
+                      | Ok owned ->
+                          (match Lane_addon_companion_allocation.cleanup owned with
+                           | Ok (Paths_retained _) -> Ok ()
+                           | Error detail -> Error detail) in
                     match result with
                     | Ok () -> ()
                     | Error _ -> Log.Misc.warn "Original companion settlement remains unconfirmed after provider exit"))

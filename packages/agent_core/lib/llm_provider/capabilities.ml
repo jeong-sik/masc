@@ -1310,7 +1310,7 @@ let%test "apply_manifest_entry applies thinking_control_format (Agent Core contr
   match
     Capability_manifest.of_json
       (Yojson.Safe.from_string
-         {|{"schema_version":1,"models":[{"id_prefix":"m","thinking_control_format":"chat_template_kwargs"}]}|})
+         {|{"schema_version":2,"models":[{"model_id":"m","thinking_control_format":"chat_template_kwargs"}]}|})
   |> Result.map Capability_manifest.entries
   with
   | Ok [ entry ] ->
@@ -1321,7 +1321,7 @@ let%test "apply_manifest_entry applies thinking_control_format (Agent Core contr
 let%test "apply_manifest_entry without thinking_control_format keeps base format" =
   match
     Capability_manifest.of_json
-      (Yojson.Safe.from_string {|{"schema_version":1,"models":[{"id_prefix":"m"}]}|})
+      (Yojson.Safe.from_string {|{"schema_version":2,"models":[{"model_id":"m"}]}|})
   |> Result.map Capability_manifest.entries
   with
   | Ok [ entry ] ->
@@ -1333,7 +1333,7 @@ let%test "apply_manifest_entry applies reasoning_replay preserve_always" =
   match
     Capability_manifest.of_json
       (Yojson.Safe.from_string
-         {|{"schema_version":1,"models":[{"id_prefix":"m","reasoning_replay":"preserve_always"}]}|})
+         {|{"schema_version":2,"models":[{"model_id":"m","reasoning_replay":"preserve_always"}]}|})
   |> Result.map Capability_manifest.entries
   with
   | Ok [ entry ] ->
@@ -1345,7 +1345,7 @@ let%test "apply_manifest_entry applies assistant_tool_content_format" =
   match
     Capability_manifest.of_json
       (Yojson.Safe.from_string
-         {|{"schema_version":1,"models":[{"id_prefix":"m","assistant_tool_content_format":"empty_string"}]}|})
+         {|{"schema_version":2,"models":[{"model_id":"m","assistant_tool_content_format":"empty_string"}]}|})
   |> Result.map Capability_manifest.entries
   with
   | Ok [ entry ] ->
@@ -1357,7 +1357,7 @@ let%test "apply_manifest_entry applies assistant_tool_content_format" =
 let%test "apply_manifest_entry without reasoning_replay keeps base default" =
   match
     Capability_manifest.of_json
-      (Yojson.Safe.from_string {|{"schema_version":1,"models":[{"id_prefix":"m"}]}|})
+      (Yojson.Safe.from_string {|{"schema_version":2,"models":[{"model_id":"m"}]}|})
   |> Result.map Capability_manifest.entries
   with
   | Ok [ entry ] ->
@@ -2050,7 +2050,7 @@ let%test "Anthropic thinking policy resolves from the model catalog declaration"
 let%test "Anthropic thinking policy falls back to manifest when catalog has no row" =
   Model_catalog.set_global Model_catalog.empty;
   let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
-    {|{"schema_version":1,"models":[{"id_prefix":"manifest-anthropic-model","anthropic_thinking_control":"adaptive_disabled_through_high"}]}|})
+    {|{"schema_version":2,"models":[{"model_id":"manifest-anthropic-model","anthropic_thinking_control":"adaptive_disabled_through_high"}]}|})
     |> Result.get_ok in
   Capability_manifest.set_global manifest;
   Fun.protect

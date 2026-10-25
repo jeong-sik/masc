@@ -1,0 +1,1 @@
+Capability manifests now declare exact model_id identities in schema version 2. Unknown variants do not inherit capabilities, declaration order cannot change lookup, and missing/null model lists are rejected.

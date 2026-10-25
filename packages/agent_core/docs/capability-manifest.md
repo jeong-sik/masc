@@ -21,7 +21,7 @@ catalog row for the same model prefix.
 ```
 Explicit model catalog override or embedded agent_core model catalog row (prefix match)
     ↓ miss
-Explicitly installed manifest entry (prefix match)
+Explicitly installed manifest entry (exact model ID, ASCII case-insensitive)
     ↓ miss
 No declaration (`Capabilities.for_model_id` returns `None`)
 ```
@@ -32,10 +32,10 @@ Create `~/.config/agent_core/caps.json` (or any path):
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "models": [
     {
-      "id_prefix": "my-llama-q4",
+      "model_id": "my-llama-q4",
       "base": "openai_chat",
       "max_context_tokens": 131072,
       "supports_tools": true,
@@ -58,7 +58,7 @@ Capability_manifest.set_global manifest
 ```
 
 Any model whose ID starts with `my-llama-q4` (case-insensitive) will now use
-these capabilities when no model catalog row matches that model prefix.
+these capabilities when no model catalog row matches the requested model.
 
 ## Schema Reference
 
@@ -69,14 +69,14 @@ and `lib/llm_provider/capability_manifest.mli` for the authoritative schema cont
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `schema_version` | integer (must be `1`) | ✅ | Version discriminator. |
-| `models` | array of entries | ✅ | Ordered list; earlier entries win on prefix collision. |
+| `schema_version` | integer (must be `2`) | ✅ | Version discriminator. |
+| `models` | array of entries | ✅ | Explicit declarations; duplicate normalized IDs are rejected and order does not affect lookup. |
 
 ### Model entry
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `id_prefix` | string | — | **Required.** Case-insensitive prefix matched against the model ID. |
+| `model_id` | string | — | **Required.** Exact model ID; ASCII case-insensitive equality, with no family or separator fallback. |
 | `base` | string | `default_capabilities` | Provider preset. See [Base presets](#base-presets) below. |
 | `max_context_tokens` | integer | from base | Context window size in tokens. |
 | `max_output_tokens` | integer | from base | Maximum output tokens. |
@@ -145,7 +145,7 @@ are rejected when the manifest is parsed.
 let manifest = Capability_manifest.load_file "caps.json" |> Result.get_ok
 
 (* Look up a specific model *)
-let caps = Capabilities.for_model_id_with_manifest manifest "my-llama-q4-k4"
+let caps = Capabilities.for_model_id_with_manifest manifest "my-llama-q4"
 ```
 
 ### Process-wide manifest
@@ -155,7 +155,7 @@ let manifest = Capability_manifest.load_file "caps.json" |> Result.get_ok in
 Capability_manifest.set_global manifest;
 
 (* for_model_id checks the embedded/explicit model catalog first, then this manifest *)
-let caps = Capabilities.for_model_id "my-llama-q4-k4"
+let caps = Capabilities.for_model_id "my-llama-q4"
 ```
 
 ### Apply a manifest entry directly
@@ -168,7 +168,7 @@ let base_label =
 in
 
 let entry : Capability_manifest.entry =
-  { id_prefix = Model_identifiers.Id_prefix.of_string_exn "my-model"
+  { model_id = Model_identifiers.Model_id.of_string_exn "my-model"
   ; base_label = Some base_label
   ; max_context_tokens = Some 65536
   ; supports_tools = Some true
@@ -196,10 +196,13 @@ Capability_manifest.set_global manifest
 
 ## Notes
 
-- Prefix matching is **first-match-wins**.  The manifest is scanned in order
-  and the first entry whose `id_prefix` is a prefix of the requested model ID
-  is used.  If you need priority control (e.g. a general prefix and a more
-  specific one), place the more-specific entry earlier in the list.
+- Schema version 2 requires `model_id` on every entry and an explicit `models`
+  list at the root. `models: []` deliberately declares no overrides. Older
+  versions and `id_prefix` fields are rejected rather than converted.
+- Lookup uses the exact model ID with ASCII case-insensitive equality. Unknown
+  variants do not inherit a declaration. Every served quantization or release
+  ID needs its own entry. Duplicate normalized IDs are rejected; declaration
+  order cannot change which entry an exact model receives.
 - agent_core never discovers a manifest from the process environment. File selection,
   reload policy, and error handling belong to the embedding application.
 - `load_file` returns an explicit `Result`; install only a successfully parsed

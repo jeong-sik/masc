@@ -498,7 +498,7 @@ let test_openai_reasoning_dialect_uses_reasoning_effort () =
 
 let test_openai_reasoning_request_uses_reasoning_effort () =
   with_manifest
-    {|{"schema_version":1,"models":[{"id_prefix":"openai-reasoning-test-9fx","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low","medium","high"]}]}|}
+    {|{"schema_version":2,"models":[{"model_id":"openai-reasoning-test-9fx","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low","medium","high"]}]}|}
     (fun () ->
        let config =
          PC.make
@@ -525,7 +525,7 @@ let test_openai_reasoning_request_uses_reasoning_effort () =
 
 let test_openai_reasoning_request_renders_explicit_disable_as_none () =
   with_manifest
-    {|{"schema_version":1,"models":[{"id_prefix":"openai-reasoning-off-test-2kq","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low","high"]}]}|}
+    {|{"schema_version":2,"models":[{"model_id":"openai-reasoning-off-test-2kq","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low","high"]}]}|}
     (fun () ->
        let config ~enable_thinking =
          PC.make
@@ -562,7 +562,7 @@ let test_openai_reasoning_request_renders_explicit_disable_as_none () =
 
 let test_openai_reasoning_request_rejects_disable_outside_ladder () =
   with_manifest
-    {|{"schema_version":1,"models":[{"id_prefix":"openai-reasoning-no-off-test-7pd","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low","high"]}]}|}
+    {|{"schema_version":2,"models":[{"model_id":"openai-reasoning-no-off-test-7pd","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low","high"]}]}|}
     (fun () ->
        let config =
          PC.make
@@ -954,7 +954,7 @@ let test_declared_reasoning_content_accumulates_as_typed_thinking () =
 ;;
 
 let keep_all_axis_manifest =
-  {|{"schema_version":1,"models":[{"id_prefix":"keep-all-axis-test","base":"openai_chat","supports_reasoning":true,"thinking_control_format":"thinking_object_only","preserve_thinking_control_format":"thinking_object_keep_all"}]}|}
+  {|{"schema_version":2,"models":[{"model_id":"keep-all-axis-test","base":"openai_chat","supports_reasoning":true,"thinking_control_format":"thinking_object_only","preserve_thinking_control_format":"thinking_object_keep_all"}]}|}
 ;;
 
 let test_thinking_object_keep_all_axis_uses_keep_all () =

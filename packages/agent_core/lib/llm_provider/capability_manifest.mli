@@ -8,10 +8,10 @@
 
     {[
       {
-        "schema_version": 1,
+        "schema_version": 2,
         "models": [
           {
-            "id_prefix": "my-local-llama",
+            "model_id": "my-local-llama",
             "base": "openai_chat",
             "max_context_tokens": 131072,
             "supports_tools": true,
@@ -29,7 +29,7 @@
 
     Priority (highest first):
     + 1. Model catalog row matching by [id_prefix] (case-insensitive prefix)
-    + 2. Manifest entry matching by [id_prefix] (case-insensitive prefix)
+    + 2. Manifest entry matching an exact [model_id] (ASCII case-insensitive)
     + 3. [None] when neither source declares the model
 
     @since 0.188.0 *)
@@ -45,9 +45,9 @@ val base_label_to_string : base_label -> string
 
 (** One entry in the capability manifest.
 
-    [id_prefix] is an exact non-empty declaration without leading or trailing
-    whitespace, matched as a case-insensitive prefix against the model ID being
-    looked up.  [base] names a provider preset from
+    [model_id] is an exact non-empty model identity without leading or trailing
+    whitespace. ASCII case is folded for equality; no suffix, family, separator
+    or provider-name transformation is applied.  [base] names a provider preset from
     {!Capabilities.capabilities_for_provider_label} (e.g.
     ["openai_chat"], ["anthropic"]); when absent, the built-in
     [default_capabilities] is used.  Unrecognised labels are rejected
@@ -56,7 +56,7 @@ val base_label_to_string : base_label -> string
     All other fields are optional overrides: a [None] value means
     "inherit from the base", a [Some v] value replaces the base value. *)
 type entry =
-  { id_prefix : Model_identifiers.Id_prefix.t
+  { model_id : Model_identifiers.Model_id.t
   ; base_label : base_label option
     (** Provider preset label, e.g. ["openai_chat"] or ["anthropic"]. *)
   ; max_context_tokens : int option (** [None] = inherit from base. *)
@@ -136,7 +136,7 @@ type entry =
 
 (** A validated immutable capability manifest. Only the strict parser and
     {!empty} construct this value; raw entry lists cannot bypass admission.
-    Declaration order is retained for distinct prefixes. *)
+    Declaration order is retained for distinct model IDs; it does not affect lookup. *)
 type t
 
 val empty : t
@@ -148,10 +148,11 @@ val entries : t -> entry list
 
 (** [of_json json] parses a manifest from a [Yojson.Safe.t] value.
 
-    Returns [Error msg] when [schema_version] is missing or not 1, a closed
+    Returns [Error msg] when [schema_version] is missing or not 2, a closed
     root or entry object contains an unknown or duplicate field, an optional
     field has the wrong JSON type, an integer literal is outside the native
-    [int] range, [id_prefix] is missing, empty, or padded with whitespace,
+    [int] range, [model_id] is missing, empty, or padded with whitespace,
+    [models] is absent or is not an explicit list,
     [base] or another closed-vocabulary field (e.g. [modality_priority]) names
     an unknown value, or [supported_models] is empty or holds a blank, padded,
     or duplicate id. Duplicate model declarations are rejected by the same
@@ -163,9 +164,8 @@ val of_json : Yojson.Safe.t -> (t, string) result
     path.  Returns [Error msg] on I/O or JSON parse errors. *)
 val load_file : string -> (t, string) result
 
-(** [lookup t model_id] returns the first entry whose [id_prefix] is a
-    case-insensitive prefix of [model_id] ({!Model_identifiers.Model_id.starts_with}).
-    Returns [None] when no entry matches. *)
+(** [lookup t model_id] returns the entry with that exact model identity, using
+    {!Model_identifiers.Model_id.equal}. Returns [None] for an undeclared model. *)
 val lookup : t -> Model_identifiers.Model_id.t -> entry option
 
 (** The currently active manifest.

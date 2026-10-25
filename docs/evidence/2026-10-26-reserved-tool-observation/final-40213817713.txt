@@ -1,0 +1,25 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40213817713
+Complete raw log SHA256: 6de28b5810a9e75cb11e2749e0ac8a847aeb0e4f9cc5996a414b89d1324b9a46
+Complete raw log bytes: 126137
+Selected checkout, both new controls and full suite summary; repeated assertions intentionally retained to show both controls reached them.
+
+test suite	Checkout	2026-10-25T16:53:32.6682761Z HEAD is now at 1ede23a6 test(execution): exercise reserved projection interruption and cursor replay
+test suite	Test	2026-10-25T16:55:16.5104201Z ASSERT reserved publication interruption escapes to caller
+test suite	Test	2026-10-25T16:55:16.5105250Z ASSERT receiver accepted first occurrence before interruption
+test suite	Test	2026-10-25T16:55:16.5106200Z ASSERT retry delivers called and completed
+test suite	Test	2026-10-25T16:55:16.5107160Z ASSERT retry retains the accepted unacknowledged event identity
+test suite	Test	2026-10-25T16:55:16.5108441Z ASSERT retry matches exact canonical observations in source order
+test suite	Test	2026-10-25T16:55:16.5109533Z ASSERT acknowledged source observations do not repeat
+test suite	Test	2026-10-25T16:55:16.5110477Z ASSERT reserved publication retry never repeats effect
+test suite	Test	2026-10-25T16:55:16.5111685Z ASSERT reserved publication failure leaves canonical events and cursor unchanged
+test suite	Test	2026-10-25T16:55:16.5112867Z ASSERT committed success is not relabelled by reserved publication
+test suite	Test	2026-10-25T16:55:16.5304293Z ASSERT reserved publication interruption escapes to caller
+test suite	Test	2026-10-25T16:55:16.5305205Z ASSERT receiver accepted first occurrence before interruption
+test suite	Test	2026-10-25T16:55:16.5306317Z ASSERT retry delivers called and completed
+test suite	Test	2026-10-25T16:55:16.5307080Z ASSERT retry retains the accepted unacknowledged event identity
+test suite	Test	2026-10-25T16:55:16.5308481Z ASSERT retry matches exact canonical observations in source order
+test suite	Test	2026-10-25T16:55:16.5309858Z ASSERT acknowledged source observations do not repeat
+test suite	Test	2026-10-25T16:55:16.5310858Z ASSERT reserved publication retry never repeats effect
+test suite	Test	2026-10-25T16:55:16.5312055Z ASSERT reserved publication failure leaves canonical events and cursor unchanged
+test suite	Test	2026-10-25T16:55:16.5312892Z ASSERT committed success is not relabelled by reserved publication
+test suite	Test	2026-10-25T16:55:16.6982233Z Test Successful in 0.273s. 8 tests run.

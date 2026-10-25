@@ -3130,7 +3130,7 @@ let read_rate_limits ~mgr ~clock ~cwd config =
   probe_metadata ~mgr ~clock ~cwd config rate_limits_read_protocol
 ;;
 
-let run_turn ?await_handoff ?(on_undelivered_tool_result = fun _ -> Error "No durable owner is configured for the undelivered tool result") ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
+let run_turn ?await_handoff ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error "No durable owner is configured for the undelivered tool result") ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
     ?(history = [])
     ?(developer_context = [])
     ?(on_context_submission = fun _ -> ())

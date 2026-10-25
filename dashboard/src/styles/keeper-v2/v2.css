@@ -278,6 +278,12 @@
 .nav-spacer { flex: 1; }
 .nav-div { height: 1px; margin: 8px 10px; background: var(--border-soft); flex: none; }
 
+@media (min-width: 901px) {
+  .v2-nav { min-height: 0; overflow-y: auto; }
+  .v2-nav > .nav-brand,
+  .v2-nav > .nav-item { flex-shrink: 0; }
+}
+
 /* avatar fallback (keeper without a portrait) */
 .is-fallback {
   display: flex; align-items: center; justify-content: center;

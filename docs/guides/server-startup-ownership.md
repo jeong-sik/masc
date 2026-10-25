@@ -1,8 +1,8 @@
 # Server startup ownership
 
 `masc start --base-path <dir>` acquires the workspace's BasePath lease and
-binds the configured HTTP address and port. The listening socket owns the
-port. A busy port causes startup to fail; startup does not terminate its
+attempts to bind an HTTP listening socket. The socket owns the endpoint.
+An occupied endpoint causes startup to fail; startup does not terminate its
 holder or retry the bind with a delay.
 
 The BasePath lease separately prevents HTTP and stdio processes from owning

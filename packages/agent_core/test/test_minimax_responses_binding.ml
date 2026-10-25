@@ -3,25 +3,23 @@ open Llm_provider
 open Types
 open Yojson.Safe.Util
 
-type family = Always_on | Toggle_only | Effort_depth
-let models =
-  [ "MiniMax-M2",Always_on; "MiniMax-M2.1",Always_on; "MiniMax-M2.1-highspeed",Always_on
-  ; "MiniMax-M2.5",Always_on; "MiniMax-M2.5-highspeed",Always_on; "MiniMax-M2.7",Always_on
-  ; "MiniMax-M2.7-highspeed",Always_on; "MiniMax-M3",Toggle_only; "MiniMax-M3.1-Flash",Effort_depth ]
+type family = Toggle_only | Effort_depth
+let models = ["MiniMax-M3",Toggle_only;"MiniMax-M3.1-Flash",Effort_depth]
 
 let part kind text = `Assoc ["type",`String kind;"text",`String text]
 let thought = `Assoc ["type",`String "reasoning";"id",`String "r1";
   "summary",`List [part "summary_text" "short"];"content",`List [part "reasoning_text" "full thought"]]
 let call = `Assoc ["type",`String "function_call";"id",`String "item-call";
   "call_id",`String "call";"name",`String "lookup";"arguments",`String "{}"]
-let tools = [`Assoc ["type",`String "function";"function",`Assoc [
-  "name",`String "lookup";"parameters",`Assoc ["type",`String "object";"properties",`Assoc []]]]]
+let tools = [`Assoc ["name",`String "lookup";"description",`String "Lookup a receipt";
+  "input_schema",`Assoc ["type",`String "object";"properties",`Assoc []]]]
 let response_json model = `Assoc ["id",`String "response";"model",`String model;
   "status",`String "completed";"output",`List [thought;call]]
 let config model =
   let entry = match Provider_registry.find (Provider_registry.default ()) "minimax_responses" with
     | Some entry -> entry
     | None -> Alcotest.fail "shipped MiniMax Responses provider is absent" in
+  Alcotest.(check bool) "native provider requires explicit credentials" true entry.defaults.requires_api_key;
   Alcotest.(check string) "declared native endpoint" "https://api.minimax.io" entry.defaults.base_url;
   Alcotest.(check string) "declared Responses route" "/v1/responses" entry.defaults.request_path;
   Provider_config.make ~kind:entry.defaults.kind ~provider_id:entry.name ~model_id:model
@@ -51,8 +49,10 @@ let stream model =
   feed "response.completed" (`Assoc ["response",response_json model]);
   match Complete_stream_acc.finalize_stream_acc acc with
   | Ok response -> response | Error _ -> Alcotest.fail "native Responses stream failed"
-let request config messages = Backend_openai_responses.build_request ~config ~messages ~tools ()
-  |> Yojson.Safe.from_string
+let request config messages =
+  match Complete_common.serialize_http_request ~stream:false ~config ~messages ~tools with
+  | Ok serialized -> Yojson.Safe.from_string serialized.Complete_common.body
+  | Error _ -> Alcotest.fail "native registry binding failed final HTTP serialization"
 let native_replay model family =
   let config = config model in
   let caps = match Provider_config.capabilities_for_config_model config with
@@ -93,19 +93,17 @@ let native_replay model family =
   List.iter (fun effort ->
     let config = {config with reasoning_effort=Some effort} in
     match family with
-    | Always_on -> Alcotest.(check bool) "M2 has no invented effort control" true
-        (Result.is_error (Provider_config.validate_reasoning_effort_request_typed config))
     | Toggle_only | Effort_depth ->
       let request = request config [] in
       Alcotest.(check string) "documented effort stays in Responses reasoning object"
         (Reasoning_effort.to_string effort) (request |> member "reasoning" |> member "effort" |> to_string))
     [Reasoning_effort.Low;Medium;High;XHigh;Max];
   List.iter (fun effort ->
-    let accepted = match family with Toggle_only -> true | Always_on | Effort_depth -> false in
+    let accepted = match family with Toggle_only -> true | Effort_depth -> false in
     Alcotest.(check bool) "model-specific effort boundary" accepted
       (Result.is_ok (Provider_config.validate_reasoning_effort_request_typed
         {config with reasoning_effort=Some effort}))) [Reasoning_effort.None_;Minimal];
-  let can_disable = match family with Toggle_only -> true | Always_on | Effort_depth -> false in
+  let can_disable = match family with Toggle_only -> true | Effort_depth -> false in
   Alcotest.(check bool) "explicit disable follows the declared control semantics" can_disable
     (Complete_common.thinking_control_request_rejection ~caps {config with enable_thinking=Some false}=None)
 

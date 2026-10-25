@@ -14,6 +14,7 @@ import base64
 import fcntl
 import functools
 import hashlib
+from http.client import HTTPException
 import json
 import math
 import os
@@ -30,6 +31,9 @@ from urllib import error, parse, request
 SCOPES = "brokered-credentials:request-access brokered-credentials:read"
 WEB_ORIGIN = "https://my.1password.com"
 API_ORIGIN = "https://api.1password.com"
+# Request-local socket inactivity limit while OAuth holds the connection lock.
+# This does not set a total request, user approval, or Keeper task deadline.
+OAUTH_SOCKET_TIMEOUT_S = 30.0
 
 
 class ConnectionError(Exception):
@@ -355,13 +359,13 @@ def post(path: str, fields: dict, configuration: Configuration) -> dict:
                                    "Content-Type": "application/x-www-form-urlencoded"},
                           method="POST")
     try:
-        with request.build_opener(NoRedirect).open(req) as response:
+        with request.build_opener(NoRedirect).open(req, timeout=OAUTH_SOCKET_TIMEOUT_S) as response:
             body = response.read()
         value = json.loads(body)
     except error.HTTPError as failure:
         failure.close()
         raise ConnectionError("oauth_http_failure") from None
-    except (error.URLError, OSError, ValueError, UnicodeError):
+    except (error.URLError, HTTPException, OSError, ValueError, UnicodeError):
         raise ConnectionError("oauth_transport_or_response_failure") from None
     if not isinstance(value, dict):
         raise ConnectionError("invalid_token_response")

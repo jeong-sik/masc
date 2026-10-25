@@ -324,6 +324,7 @@ let check_direct_cleanup_cancellation
       ~expected_operation
       ~expected_target_effect
       ~expected_primary_stage
+      ~expected_cleanup_stages
       operation
   =
   let observed_reason, cancellation, observed_backtrace =
@@ -341,7 +342,17 @@ let check_direct_cleanup_cancellation
   check_interrupted_write_stage
     ~label
     ~expected_stage:expected_primary_stage
-    cancellation
+    cancellation;
+  let cleanup_stages =
+    List.map
+      (function
+        | Fs_compat.Write_cleanup_failure failure -> failure.stage
+        | Fs_compat.Recovery_cleanup_failure failure ->
+          fail (Fs_compat.capability_recovery_failure_to_string failure))
+      cancellation.cleanup_failures
+  in
+  check bool (label ^ " preserves exact cleanup failures") true
+    (cleanup_stages = expected_cleanup_stages)
 ;;
 
 let test_replace_direct_cleanup_cancellation_preserves_authority ~fs () =
@@ -364,6 +375,7 @@ let test_replace_direct_cleanup_cancellation_preserves_authority ~fs () =
       ~expected_operation:Fs_compat.Atomic_replace_operation
       ~expected_target_effect
       ~expected_primary_stage:primary_stage
+      ~expected_cleanup_stages:[]
       (fun () ->
          ignore
            (replace_capability_file_for_testing
@@ -413,6 +425,7 @@ let test_create_direct_cleanup_cancellation_preserves_authority ~fs () =
       ~expected_operation:Fs_compat.Create_exclusive_operation
       ~expected_target_effect
       ~expected_primary_stage:primary_stage
+      ~expected_cleanup_stages:[]
       (fun () ->
          ignore
            (Capability_write_test.create_capability_file_exclusive
@@ -440,6 +453,46 @@ let test_create_direct_cleanup_cancellation_preserves_authority ~fs () =
     ~primary_stage:Fs_compat.Sync_parent
     ~cleanup_stage:Fs_compat.Cleanup_sync_parent
     ~expected_target_effect:Fs_compat.Target_created
+;;
+
+let test_replace_cleanup_cancellation_retains_earlier_cleanup_failure ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  write_file target "old";
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  let label = "replace cancellation after failed staging unlink" in
+  let reason = Failure label in
+  let backtrace = Printexc.get_callstack 32 in
+  check_direct_cleanup_cancellation
+    ~label
+    ~reason
+    ~backtrace
+    ~expected_operation:Fs_compat.Atomic_replace_operation
+    ~expected_target_effect:Fs_compat.Target_unchanged
+    ~expected_primary_stage:Fs_compat.Write_payload
+    ~expected_cleanup_stages:[ Fs_compat.Cleanup_unlink ]
+    (fun () ->
+       ignore
+         (replace_capability_file_for_testing
+            ~before_stage:(function
+              | Fs_compat.Write_payload | Fs_compat.Cleanup_unlink -> raise Exit
+              | Fs_compat.Cleanup_close_staging_directory ->
+                Printexc.raise_with_backtrace
+                  (Eio.Cancel.Cancelled reason)
+                  backtrace
+              | _ -> ())
+            ~recovery
+            ~allowed_root_path:directory
+            ~parent
+            ~leaf:"target"
+            ~permissions:0o640
+            "new"
+          : (unit, Fs_compat.capability_write_error) result));
+  check string "cancelled replacement leaves original payload" "old"
+    (read_file target);
+  let stage = only_entry_except directory [ "target" ] in
+  check string "failed unlink leaves staging payload observable" ""
+    (read_file (Filename.concat (Filename.concat directory stage) "payload"))
 ;;
 
 let test_recovery_cancellation_preserves_authority_and_backtrace ~fs () =
@@ -477,12 +530,23 @@ let test_recovery_cancellation_preserves_authority_and_backtrace ~fs () =
     (cancellation.target_effect = Fs_compat.Target_replaced);
   check bool "recovery cancellation has no write primary" true
     (Option.is_none cancellation.interrupted_primary_failure);
+  check bool "recovery cancellation preserves operation" true
+    (cancellation.operation = Fs_compat.Atomic_replace_operation);
+  check bool "recovery cancellation has no invented cleanup failures" true
+    (cancellation.cleanup_failures = []);
+  check string "recovery cancellation retains published payload" "new"
+    (read_file target);
+  check (list string) "recovery cancellation has removed staging" [ "target" ]
+    (directory_entries directory);
   (match cancellation.interrupted_recovery with
    | None -> fail "recovery cancellation omitted interruption authority"
    | Some interruption ->
      check bool "recovery cancellation preserves exact phase" true
        (Fs_compat.capability_recovery_failure_phase interruption
-        = Fs_compat.Recovery_discharge_bound))
+        = Fs_compat.Recovery_discharge_bound);
+     check bool "pre-discharge cancellation records no record mutation" true
+       (Fs_compat.capability_recovery_failure_effect interruption
+        = Fs_compat.Recovery_no_record_change))
 ;;
 
 let test_atomic_replace_preserves_requested_mode ~fs () =
@@ -2227,6 +2291,10 @@ let () =
             (test_cleanup_fatal_exception_preserves_backtrace ~fs)
         ; test_case "replace cleanup cancellation preserves authority" `Quick
             (test_replace_direct_cleanup_cancellation_preserves_authority ~fs)
+        ; test_case
+            "cleanup cancellation retains earlier staging unlink failure"
+            `Quick
+            (test_replace_cleanup_cancellation_retains_earlier_cleanup_failure ~fs)
         ; test_case "create cleanup cancellation preserves authority" `Quick
             (test_create_direct_cleanup_cancellation_preserves_authority ~fs)
         ; test_case "recovery cancellation preserves authority" `Quick

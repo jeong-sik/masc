@@ -54,3 +54,5 @@ Goal 상태 기계는 측정3/3만으로 Completed가 되지 않는다. 이번 �
 메인8935의 /health와 MCP 읽기가 응답하지 않았다. experiment-owned acceptance 파일은11/11로 갱신했지만, 마지막 등록된 main Goal 측정은9/11이고 task-2620은 InProgress다. isolated canary의 Verifying을 main Goal 상태로 바꿔 적지 않았다. main Goal의 API 갱신·완료 증명·사람 확인은 남아 있다.
 
 후속 소스는 기존16개 Native Stack을 다른 세션이 재배치하는 동안 별도 exact candidate로 보존한다. source review, 최소 native 검사, 실제328 runtime, UI, 현재 원격 PR head/base와 전체 스택 승인은 각각 따로 확인해야 한다. microVM grader·실제 Official vendor 세션·전체 회귀·운영 설치·배포·병합·최종 사람 Goal 확인은 이 감사의 성공 주장에 포함되지 않는다.
+
+후속 PR: [현재 제출 snapshot 수리 #45861](https://github.com/jeong-sik/masc/pull/45861), [native/콜백 검사 수리 #45867](https://github.com/jeong-sik/masc/pull/45867). 최소 native 실행 결과는 PR 본문의 frozen candidate/run 결속을 따르며, 이 문서의 원래328 실패 기록을 덮어쓰지 않는다.

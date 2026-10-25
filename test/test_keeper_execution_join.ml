@@ -825,7 +825,7 @@ let run_real_tool_bridge ~durable inspect =
     Option.iter (fun invocation->
       hook_invocation:=Some invocation;
       let execution_id=Masc.Keeper_tool_call_log.invocation_execution_id ~invocation
-          |> Masc.Ids.Execution_id.to_string in
+          |> Ids.Execution_id.to_string in
       expected_id:=Some execution_id;
       Join.record ~invocation ~execution_id) (Core.Hooks.invocation_of_event event);
     Core.Hooks.Continue)} in

@@ -13,7 +13,12 @@ An OCaml `getUpdates` loop replaces `sidecars/telegram-bot/` (Python
 python-telegram-bot). The third and simplest instance of the move
 [[RFC-0203]] made for Discord and [[RFC-0317]] made for Slack.
 
-> **Status.** Proposed. Two PRs, not four — see §PR split.
+> **Status.** Implementation is in Native Stack #45832: custody #45819,
+> native Keeper integration #45831 and external poller removal #45834, with
+> dashboard cleanup above them. These are source changes under review, not deployed
+> cutover or live Telegram proof. Public structured blocks are rendered as HTML;
+> private media upload and automatic partial-send resume remain open acceptance.
+> See [connector configuration](../CONNECTOR-CONFIG-SCHEMA.md) for the source contract.
 
 ## Why
 

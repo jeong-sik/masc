@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 <worktree>/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  31 passed (31)
+   Start at  01:40:54
+   Duration  1.55s (environment 46%, setup 40%, transform 11%, worker 1%, tests 1%, import 1%)
+
+    Isolate  2 workers spawned · ~432ms startup each (spawn + environment, per file)
+             at least ~432ms faster with isolate: false — reuses workers across files instead of one per file
+

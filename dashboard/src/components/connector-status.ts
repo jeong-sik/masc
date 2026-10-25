@@ -31,7 +31,6 @@ import {
   IN_PROCESS_CONNECTOR_ACTIVATION,
   isInProcessConnector,
   CONNECTOR_DISPLAY_NAMES,
-  sidecarCommands,
   connectorAccentStyle,
   channelIcon,
   type KnownConnectorId,
@@ -44,11 +43,10 @@ export {
   IN_PROCESS_CONNECTOR_ACTIVATION,
   isInProcessConnector,
   CONNECTOR_DISPLAY_NAMES,
-  sidecarCommands,
   connectorAccentStyle,
   channelIcon,
 } from './connector-constants'
-export type { KnownConnectorId, InProcessConnectorId, SidecarCommands } from './connector-constants'
+export type { KnownConnectorId, InProcessConnectorId } from './connector-constants'
 import {
   connectorStateLabel,
   connectorCardBorderClass,
@@ -70,14 +68,11 @@ import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { StatusChip } from './common/status-chip'
 import { showToast } from './common/toast'
-import { CopyableCode } from './common/copyable-code'
 import { SetupGuideCard } from './setup-guide-card'
 import { ConnectorOnboardingGrid } from './connector-onboarding'
 import { SurfaceCard, surfaceCardClassName } from './common/card'
-import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
 import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
-import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
-import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidecar-startup-watch'
+import { ConnectorReadinessRail, deriveRail, getRailInflight } from './connector-readiness-rail'
 import { showConnectorActionError } from './connector-action-error'
 import { QuickBindForm } from './connector-quick-bind'
 import { ConnectorFlowSection } from './connector-flow'
@@ -108,14 +103,7 @@ function activeConnectorFilter(): string | null {
   return KNOWN_CONNECTOR_IDS.includes(connector as KnownConnectorId) ? connector : null
 }
 
-// Per-connector lifecycle hints. The two external sidecars
-// (imessage/telegram) ship a run.sh wrapper — see
-// sidecars/<id>-bot/run.sh. Discord (RFC-0203 §Phase 3) and Slack
-// (RFC-0317) run in-process under Server_{discord,slack}_in_process_gateway;
-// no sidecar process, no lifecycle command panel — see
-// {@link IN_PROCESS_CONNECTOR_IDS}.
-// Source of truth: docs/CONNECTOR-CONFIG-SCHEMA.md.
-// Connector vocabulary (KNOWN_CONNECTOR_IDS, display names, sidecar commands,
+
 // accent styles, channel icons) lives in ./connector-constants and is imported
 // at the top of this file; re-exported there for back-compat.
 
@@ -496,41 +484,6 @@ function ConnectorSourceHealthStrip({ connector }: { connector: GateConnectorInf
   `
 }
 
-// Native lifecycle hits the new /api/v1/sidecar/{start,stop} endpoints
-// (see lib/server/server_routes_http_routes_sidecar.ml). The endpoints
-// shell out to the same ./run.sh wrapper the operator would otherwise
-// run by hand, so the dashboard button and the copy-paste command are
-// behaviourally identical — only convenience differs.
-export async function startSidecar(connectorId: string) {
-  patchConnectorUiState(connectorId, { actionLoading: true })
-  markStartAttempt(connectorId)
-  try {
-    await post(`/api/v1/sidecar/start?name=${encodeURIComponent(connectorId)}`, {})
-    showToast(`${connectorId} sidecar 시작 요청됨`, 'success')
-    await refresh()
-  } catch (err) {
-    showConnectorActionError(`${connectorId} sidecar 시작 실패`, err)
-  } finally {
-    patchConnectorUiState(connectorId, { actionLoading: false })
-  }
-}
-
-export async function stopSidecar(connectorId: string) {
-  patchConnectorUiState(connectorId, { actionLoading: true })
-  // Stop is the operator's signal that the previous start attempt is no
-  // longer relevant — the startup-warning would just be misleading.
-  clearStartAttempt(connectorId)
-  try {
-    await post(`/api/v1/sidecar/stop?name=${encodeURIComponent(connectorId)}`, {})
-    showToast(`${connectorId} sidecar에 SIGTERM 전송`, 'success')
-    await refresh()
-  } catch (err) {
-    showConnectorActionError(`${connectorId} sidecar 중지 실패`, err)
-  } finally {
-    patchConnectorUiState(connectorId, { actionLoading: false })
-  }
-}
-
 /** Returns true only when the bind POST succeeded. Errors are surfaced
     here (toast + 상세 dialog) and swallowed, so this promise never
     rejects — callers must branch on the boolean, not try/catch. */
@@ -587,10 +540,6 @@ type KeeperGroup = {
 
 const EMPTY_CONFIGURED_BINDINGS: DiscordConfiguredBinding[] = []
 
-/** "Next:" line of the connector warning panel. An API failure points at
-    the dashboard/server pair; an in-process gateway has no status file, so
-    its remediation is the gateway state plus the env var that starts it;
-    an external sidecar is inspected through its status file. */
 function connectorWarningNextHint(
   connectorError: string | null,
   connector: GateConnectorInfo | null,
@@ -600,10 +549,7 @@ function connectorWarningNextHint(
   if (connectorError) {
     return html`refresh the dashboard or check <${Tk}>/api/v1/gate/connectors<//> on ${connector?.gate_base_url || 'the Gate server'}.`
   }
-  if (isInProcessConnector(connectorId)) {
-    return html`check the server log for the ${connectorName} gateway (<${Tk}>gw ${connector?.gateway_state || 'unknown'}<//>) and <${Tk}>${IN_PROCESS_CONNECTOR_ACTIVATION[connectorId as InProcessConnectorId]}<//>.`
-  }
-  return html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`
+  return html`check the server log for the ${connectorName} gateway and <${Tk}>${IN_PROCESS_CONNECTOR_ACTIVATION[connectorId as InProcessConnectorId] ?? 'connector configuration'}<//>.`
 }
 
 function ConnectorLivePanel({
@@ -697,76 +643,16 @@ function ConnectorLivePanel({
     detail: connectorError ? 'gate fetch failed' : 'live',
     hint: connectorError ? `${connector?.gate_base_url || DEFAULT_MASC_ORIGIN} 에서 서버 확인` : '',
   }
-  const serverDot: LivenessDot = (() => {
-    if (!connector?.available) {
-      return {
-        label: 'Server → Sidecar',
-        state: 'down',
-        detail: '아직 status.json 없음',
-        hint: `sidecars/${connectorId}-bot/ 에서 ./run.sh 실행`,
-      }
-    }
-    if (connector.stale) {
-      return {
-        label: 'Server → Sidecar',
-        state: 'warn',
-        detail: `stale · last heartbeat ${timeAgo(connector.updated_at)}`,
-        hint: 'Sidecar heartbeat 중단 — 로그 확인',
-      }
-    }
-    return {
-      label: 'Server → Sidecar',
-      state: 'ok',
-      detail: `heartbeat ${timeAgo(connector.updated_at)}`,
-      hint: '',
-    }
-  })()
-  const sidecarDot: LivenessDot = (() => {
-    if (!connector?.available) {
-      return {
-        label: `Sidecar → ${connectorName}`,
-        state: 'unknown',
-        detail: 'sidecar 오프라인',
-        hint: '',
-      }
-    }
-    const advertised = connectorStateLabel(connector)
-    if (advertised === 'connected') {
-      return {
-        label: `Sidecar → ${connectorName}`,
-        state: 'ok',
-        detail: connector.bot_user_name ? `as ${connector.bot_user_name}` : 'linked',
-        hint: '',
-      }
-    }
-    if (advertised === 'stale') {
-      return {
-        label: `Sidecar → ${connectorName}`,
-        state: 'warn',
-        detail: 'heartbeat stale',
-        hint: 'Sidecar 프로세스 중단 가능성',
-      }
-    }
-    return {
-      label: `Sidecar → ${connectorName}`,
-      state: 'warn',
-      detail: 'gateway link 미수립',
-      hint: '토큰 및 네트워크 도달성 확인',
-    }
-  })()
-  const livenessDots: LivenessDot[] = [browserDot, serverDot, sidecarDot]
+  const gatewayDot: LivenessDot = {
+    label: `Server → ${connectorName}`,
+    state: connector?.connected ? 'ok' : 'down',
+    detail: connector?.connected ? 'linked' : connector?.error || 'gateway unavailable',
+    hint: connector?.connected ? '' : '서버 로그와 채널 연결 설정 확인',
+  }
+  const livenessDots: LivenessDot[] = [browserDot, gatewayDot]
 
   const showNoKeeperEmpty =
     configuredBindings.length === 0 && !connector?.available && keepers.length === 0 && !keeperDirectoryError
-  // RFC-0203 §Phase 3: in-process connectors (Discord, Slack)
-  // have no sidecar process and therefore no "사이드카 미시작" Start
-  // affordance. Render the in-process info hint instead — see
-  // showInProcessUnavailableHint below.
-  const showSidecarOffEmpty =
-    !showNoKeeperEmpty
-    && configuredBindings.length === 0
-    && !connector?.available
-    && !isInProcessConnector(connectorId)
   const showInProcessUnavailableHint =
     !showNoKeeperEmpty
     && !connector?.available
@@ -798,20 +684,6 @@ function ConnectorLivePanel({
           ? html`<${MutedSpan}><span aria-hidden="true">· </span>self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</${MutedSpan}>`
           : null}
         <span class="ml-auto flex items-center gap-2">
-          ${connector?.available && !isInProcessConnector(connectorId)
-            ? html`
-                <button
-                  type="button"
-                  class="cursor-pointer rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
-                  disabled=${isActionLoading}
-                  aria-label=${`stop ${connectorName} sidecar`}
-                  onClick=${() => { void stopSidecar(connectorId) }}
-                >${isActionLoading ? '…' : 'Stop'}</button>
-              `
-            : null}
-          ${!isInProcessConnector(connectorId)
-            ? html`<${SidecarLogToggle} connectorId=${connectorId} />`
-            : null}
           <${ConnectorConfigToggle} connectorId=${connectorId} />
           <button
             type="button"
@@ -825,26 +697,13 @@ function ConnectorLivePanel({
       <${ConnectorReadinessRail}
         pills=${deriveRail(
           {
-            sidecarUp: connector?.available === true,
-            hasSidecarProcess: !isInProcessConnector(connectorId),
+            gatewayAvailable: connector?.available === true,
             gateHealthy: connector?.gate_healthy ?? null,
             bindingCount: configuredBindings.length,
             keeperCount: keepers.length,
           },
           {
             openConfig: () => openConnectorConfig(connectorId),
-            toggleProcess: () => {
-              // RFC-0203 §Phase 3: in-process gateways have no
-              // sidecar process to toggle. The readiness rail still
-              // gets a callback to keep the type stable, but it's a
-              // no-op for these connectors — the operator manages
-              // them via env var + server restart.
-              if (isInProcessConnector(connectorId)) return
-              const isUp = connector?.available === true
-              void withRailInflight(connectorId, 'process', () =>
-                isUp ? stopSidecar(connectorId) : startSidecar(connectorId),
-              )
-            },
             expandHeader: () => { patchConnectorUiState(connectorId, { headerExpanded: true }) },
             scrollToBindings: () => {
               const el = document.getElementById(`keepers-${connectorId}`)
@@ -856,7 +715,6 @@ function ConnectorLivePanel({
       />
       <${ConnectorSourceHealthStrip} connector=${connector} />
 
-      <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
 
       ${connector?.available === true && keepers.length > 0
         ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} listing=${keeperListing} />`
@@ -897,7 +755,7 @@ function ConnectorLivePanel({
         ? html`
             <${SurfaceCard} class="mt-3 !border-[var(--warn-20)] !bg-[var(--warn-10)] !px-3 !py-2 text-2xs text-[var(--color-status-warn)]" data-connector-warning-panel>
               <div class="font-semibold text-[var(--color-fg-primary)]">
-                ${connectorError ? 'Connector API 사용 불가' : 'Sidecar 상태 경고'}
+                ${connectorError ? 'Connector API 사용 불가' : 'Gateway 상태 경고'}
               </div>
               <div class="mt-1">
                 <${BoldLabel}>Cause: </${BoldLabel}> ${connectorError ?? connector?.error}
@@ -910,9 +768,6 @@ function ConnectorLivePanel({
           `
         : null}
 
-      ${!isInProcessConnector(connectorId)
-        ? html`<${SidecarLogViewer} connectorId=${connectorId} />`
-        : null}
       <${ConnectorConfigForm} connectorId=${connectorId} />
 
       ${keeperDirectoryError
@@ -965,103 +820,8 @@ function ConnectorLivePanel({
           `
         : null}
 
-      ${showSidecarOffEmpty
-        ? (() => {
-            const cmds = sidecarCommands(connectorId)
-            const copyLabels = {
-              start: `Copy ${connectorName} sidecar start command`,
-              tail: `Copy ${connectorName} sidecar tail logs command`,
-              status: `Copy ${connectorName} sidecar status command`,
-              stop: `Copy ${connectorName} sidecar stop command`,
-            }
-            // Informational amber tone (Railway / Vercel idle-service
-            // convention): "needs action, not broken". Earlier this
-            // panel inherited the connector accent gradient (iMessage =
-            // green), which visually read as "success" on a card that
-            // wasn't running. Amber overrides the accent bleed-through
-            // with an explicit "please click Start" signal. The left
-            // stripe matches the Portainer status-border pattern used
-            // on the outer card for vertical scannability.
-            return html`
-              <${SurfaceCard}
-                class="mt-3 !border-dashed !border-[var(--warn-20)] !border-l-4 !border-l-[var(--color-warn)] !bg-[var(--warn-10)] !px-3 !py-3 text-xs"
-                data-sidecar-not-started-panel
-              >
-                <div class="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span
-                      class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
-                      aria-label="사이드카 프로세스 상태: 실행 중 아님"
-                      data-sidecar-status-chip
-                    >
-                      <span aria-hidden="true">⊘</span>
-                      <span>실행 중 아님</span>
-                    </span>
-                    <span class="font-medium text-[var(--color-fg-primary)]">사이드카 미시작</span>
-                    ${connector?.updated_at
-                      ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">last seen ${timeAgo(connector.updated_at)}</span>`
-                      : null}
-                  </div>
-                  <div class="flex flex-wrap items-center gap-2 sm:justify-end">
-                    <${ActionButton}
-                      variant="primary"
-                      size="sm"
-                      disabled=${isActionLoading}
-                      onClick=${() => { void startSidecar(connectorId) }}
-                    >${isActionLoading ? '...' : 'Start'}<//>
-                    <span class="text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">${connectorName}</span>
-                  </div>
-                </div>
-                <div class="text-2xs text-[var(--color-status-warn)]/80">
-                  사이드카 status 파일이 <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//> 에서 관찰되지 않았습니다.
-                </div>
-                <div class="mt-2 grid grid-cols-1 gap-1.5">
-                  <${CopyableCode}
-                    label="start"
-                    command=${cmds.start}
-                    ariaLabel=${copyLabels.start}
-                    variant="primary"
-                  />
-                </div>
-                <div class="mt-2">
-                  <div class="mb-1 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">
-                    Or for diagnostics
-                  </div>
-                  <div class="grid grid-cols-1 gap-1.5" data-sidecar-secondary-cmds>
-                    <${CopyableCode}
-                      label="tail logs"
-                      command=${cmds.tail}
-                      ariaLabel=${copyLabels.tail}
-                      variant="secondary"
-                    />
-                    <${CopyableCode}
-                      label="status"
-                      command=${cmds.status}
-                      ariaLabel=${copyLabels.status}
-                      variant="secondary"
-                    />
-                    <${CopyableCode}
-                      label="stop"
-                      command=${cmds.stop}
-                      ariaLabel=${copyLabels.stop}
-                      variant="secondary"
-                    />
-                  </div>
-                </div>
-                <${SetupGuideCard} connectorId=${connectorId} />
-              </${SurfaceCard}>
-            `
-          })()
-        : null}
-
       ${showInProcessUnavailableHint
         ? (() => {
-            // RFC-0203 §Phase 3: in-process gateways (Discord, Slack,
-            // iMessage) have no sidecar process to start, so the operator sees
-            // this hint instead of the "Start sidecar" panel. Same amber tone
-            // as the sidecar panel — "needs action, not broken" — but the
-            // remediation is a credential or a permission plus a restart, not
-            // a CLI command.
             const activation = IN_PROCESS_CONNECTOR_ACTIVATION[connectorId as InProcessConnectorId]
             return html`
               <${SurfaceCard}
@@ -1083,7 +843,7 @@ function ConnectorLivePanel({
                     : null}
                 </div>
                 <div class="text-2xs text-[var(--color-status-warn)]/80">
-                  ${connectorName} 게이트웨이가 서버 프로세스 내부에서 동작합니다. 별도 사이드카 프로세스가 없으므로 Start/Stop 버튼이 없습니다. <${Tk}>${activation}<//>을 갖춘 뒤 서버를 재기동하면 자동으로 ${connectorName} 게이트웨이에 연결됩니다.
+                  ${connectorName} 게이트웨이가 서버 프로세스 내부에서 동작합니다. <${Tk}>${activation}<//>을 갖춘 뒤 서버를 재기동하면 자동으로 ${connectorName} 게이트웨이에 연결됩니다.
                 </div>
                 <${SetupGuideCard} connectorId=${connectorId} />
               </${SurfaceCard}>
@@ -1578,7 +1338,7 @@ function ConnectorsSurfaceHeader({
         </div>
         <div class="mt-2 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-testid="connector-reality-notice">
           <${StatusChip} tone="info" uppercase=${false}>혼합 연결<//>
-          <span>Discord는 서버 내장 gateway, iMessage/Slack/Telegram은 sidecar 관측 기반입니다.</span>
+          <span>Discord, iMessage, Slack, Telegram은 서버 내장 gateway 상태를 표시합니다.</span>
         </div>
       </div>
       <div class="cn-surf-actions" style=${{ display: 'flex', gap: 8, alignItems: 'center' }}>

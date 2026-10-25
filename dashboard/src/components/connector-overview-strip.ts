@@ -13,11 +13,10 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import type { GateConnectorInfo } from '../api/gate'
 import { SurfaceCard } from './common/card'
-import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
-import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, isInProcessConnector, connectorAccentStyle, connectorStateLabel, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
+import { ConnectorReadinessRail, deriveRail, getRailInflight } from './connector-readiness-rail'
+import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, connectorStateLabel, type KnownConnectorId } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
 import { formatElapsedCompact } from '../lib/format-time'
-import { ActionButton } from './common/button'
 import { HeartbeatStrip } from './common/heartbeat-strip'
 import { HeartbeatStreakChip } from './common/heartbeat-streak-chip'
 import { HeartbeatUptimeChip } from './common/heartbeat-uptime-chip'
@@ -69,11 +68,10 @@ function deriveHeartbeatState(
   connector: GateConnectorInfo | null,
 ): HeartbeatState {
   if (connector === null) return 'unknown'
-  if (connector.available === true) return 'up'
+  if (connector.connected === true) return 'up'
   return 'down'
 }
 
-const bulkInflight = signal<{ start: boolean; stop: boolean }>({ start: false, stop: false })
 
 /** Pure: derive a compact "up X" string from the sidecar's last_ready_at
     timestamp. Returns null when the timestamp is empty/invalid/in the
@@ -129,35 +127,6 @@ export function detectRecentDrops(
     dropped.push(id)
   }
   return dropped
-}
-
-/** The connectors this strip can actually start and stop. discord and slack
-    run inside the server process: /api/v1/sidecar/{start,stop} answers 400
-    "unknown sidecar id" for them (#29513), so offering the button spends the
-    operator's click on a toast. Before that, slack did launch a second Python
-    bot on the same token (#29456). connector-status and connector-onboarding
-    already branch on this; the strip did not. */
-const SIDECAR_CONNECTOR_IDS = KNOWN_CONNECTOR_IDS.filter(id => !isInProcessConnector(id))
-
-async function runBulk(
-  kind: 'start' | 'stop',
-  predicate: (c: GateConnectorInfo | null) => boolean,
-  connectors: GateConnectorInfo[],
-) {
-  if (bulkInflight.value[kind]) return
-  bulkInflight.value = { ...bulkInflight.value, [kind]: true }
-  try {
-    const targets = SIDECAR_CONNECTOR_IDS.filter(id => predicate(findConnector(connectors, id)))
-    // Per-connector pulse (the same withRailInflight that single-pill uses) so
-    // each tile's Process pill shows progress; runs in parallel.
-    await Promise.allSettled(
-      targets.map(id =>
-        withRailInflight(id, 'process', () => kind === 'start' ? startSidecar(id) : stopSidecar(id)),
-      ),
-    )
-  } finally {
-    bulkInflight.value = { ...bulkInflight.value, [kind]: false }
-  }
 }
 
 interface OverviewProps {
@@ -230,7 +199,7 @@ export function summarizeOverviewTile(
       detail: stateLabel === 'stale'
         ? 'heartbeat가 stale 상태입니다 · 로그와 gate 상태를 확인하세요'
         : stateLabel === 'disconnected'
-          ? 'sidecar는 실행 중이지만 채널 연결이 비정상입니다'
+          ? '게이트웨이 설정은 있으나 채널 연결이 비정상입니다'
           : 'gate health가 비정상입니다 · 상세 카드에서 원인을 확인하세요',
     }
   }
@@ -261,27 +230,21 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
   onOpenConfig?: (connectorId: KnownConnectorId) => void
   detailTargetId: string
 }) {
-  const sidecarUp = connector?.available === true
-  const uptimeLabel = sidecarUp ? formatConnectorUptime(connector?.last_ready_at, Date.now()) : null
+  const gatewayAvailable = connector?.available === true
+  const uptimeLabel = gatewayAvailable ? formatConnectorUptime(connector?.last_ready_at, Date.now()) : null
   const selectConnector = (scroll: boolean = true) => {
     onSelectConnector?.(id)
     if (scroll) scrollToDetail(detailTargetId)
   }
   const pills = deriveRail(
     {
-      sidecarUp,
-      hasSidecarProcess: !isInProcessConnector(id),
+      gatewayAvailable: gatewayAvailable,
       gateHealthy: connector?.gate_healthy ?? null,
       bindingCount: connector?.configured_bindings?.length ?? 0,
       keeperCount,
     },
     {
       openConfig: () => openConnectorConfig(id),
-      toggleProcess: () => {
-        void withRailInflight(id, 'process', () =>
-          sidecarUp ? stopSidecar(id) : startSidecar(id),
-        )
-      },
       expandHeader: () => selectConnector(true),
       scrollToBindings: () => selectConnector(true),
     },
@@ -356,7 +319,6 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
       <span class=${`text-3xs uppercase tracking-4 ${selected ? 'text-[var(--accent-1)]' : 'text-[var(--color-fg-disabled)]'}`}>
         ${selected ? 'Selected' : 'View Details'}
       </span>
-      <${TilePrimaryAction} id=${id} sidecarUp=${sidecarUp} />
       <${TileErrorNotice} connector=${connector} />
       <${TileHeartbeatStrip} id=${id} />
     </${SurfaceCard}>
@@ -384,76 +346,6 @@ export function formatTileIdentityLine(
     parts.push(`${guilds} ${guilds === 1 ? 'guild' : 'guilds'}`)
   }
   return parts.length === 0 ? null : parts.join(' · ')
-}
-
-/** Pure: derive the primary-action button label/tone from the sidecar
-    state + inflight flag. Exposed so tests pin the four combinations
-    without mounting the component. */
-interface TilePrimaryActionView {
-  label: string
-  tone: 'start' | 'stop'
-  busy: boolean
-}
-export function tilePrimaryActionView(
-  sidecarUp: boolean,
-  inflight: boolean,
-  hasSidecarProcess: boolean,
-): TilePrimaryActionView | null {
-  // No process to start or stop, so no button: the tile's primary action for
-  // an in-process connector is opening its card, which the tile body already
-  // does.
-  if (!hasSidecarProcess) return null
-  if (sidecarUp) {
-    return {
-      label: inflight ? '정지 중...' : '■ Stop',
-      tone: 'stop',
-      busy: inflight,
-    }
-  }
-  return {
-    label: inflight ? '시작 중...' : '▶ Start',
-    tone: 'start',
-    busy: inflight,
-  }
-}
-
-const TILE_ACTION_TONE_CLASS: Record<'start' | 'stop', string> = {
-  // Emerald tokens match BulkActions "Start All" — one color vocabulary
-  // across per-tile + bulk controls. The per-tile button is deliberately
-  // block-width and text-xs so it reads as the primary action of the
-  // tile, distinct from the smaller pill row above.
-  start: 'border-[var(--ok-border)] bg-[var(--ok-10)] text-[var(--color-status-ok)] hover:bg-[var(--ok-10)]',
-  stop: 'border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-10)]',
-}
-
-/** The prominent per-tile Start/Stop button. Reference UIs (Vercel
-    service card, Railway deployment card, Uptime Kuma monitor row):
-    the tile's primary action should live as a full-width button near
-    the tile footer, not buried inside a process/readiness pill. The
-    readiness rail pills above still toggle process state for
-    keyboard-forward operators, but a new operator scanning the page
-    reads "Start" as the obvious next step. */
-function TilePrimaryAction({ id, sidecarUp }: { id: KnownConnectorId; sidecarUp: boolean }) {
-  const inflight = getRailInflight(id).process === true
-  const view = tilePrimaryActionView(sidecarUp, inflight, !isInProcessConnector(id))
-  if (view === null) return null
-  const tone = TILE_ACTION_TONE_CLASS[view.tone]
-  return html`
-    <button
-      type="button"
-      class=${`w-full cursor-pointer rounded-[var(--r-1)] border px-2 py-1.5 text-xs font-semibold tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${tone}`}
-      disabled=${view.busy}
-      aria-busy=${view.busy ? 'true' : 'false'}
-      aria-label=${sidecarUp ? `${id} sidecar 정지` : `${id} sidecar 시작`}
-      onClick=${() => {
-        void withRailInflight(id, 'process', () =>
-          sidecarUp ? stopSidecar(id) : startSidecar(id),
-        )
-      }}
-      data-tile-primary-action=${id}
-      data-tile-primary-action-tone=${view.tone}
-    >${view.label}</button>
-  `
 }
 
 /** Pure: derive a single notice view from the connector runtime state.
@@ -586,54 +478,12 @@ function deriveTrendColor(series: readonly number[]): string {
   return 'var(--rose-light)'
 }
 
-/** Standalone export of the bulk Start All / Stop All buttons so the
-    cold-start onboarding view can mount the same controls without
-    having to render the full overview strip. */
-export function ConnectorBulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
-  return BulkActions({ connectors })
-}
-
-function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
-  const downCount = SIDECAR_CONNECTOR_IDS.filter(id => findConnector(connectors, id)?.available !== true).length
-  const upCount = SIDECAR_CONNECTOR_IDS.length - downCount
-  const startBusy = bulkInflight.value.start
-  const stopBusy = bulkInflight.value.stop
-  return html`
-    <div class="flex items-center gap-2 text-2xs text-[var(--color-fg-disabled)]">
-      <${ActionButton}
-        variant="ok"
-        size="sm"
-        disabled=${startBusy || downCount === 0}
-        title=${downCount === 0 ? '모두 이미 실행 중' : `${downCount} 개 sidecar 시작`}
-        ariaLabel=${`모든 sidecar 시작 (${downCount}개)`}
-        ariaBusy=${startBusy}
-        testId="bulk-action-start"
-        onClick=${() => { void runBulk('start', c => c?.available !== true, connectors) }}
-      >
-        ${startBusy ? '시작 중...' : `▶ Start All (${downCount})`}
-      <//>
-      <${ActionButton}
-        variant="danger"
-        size="sm"
-        disabled=${stopBusy || upCount === 0}
-        title=${upCount === 0 ? '실행 중인 sidecar 없음' : `${upCount} 개 sidecar 정지`}
-        ariaLabel=${`모든 sidecar 정지 (${upCount}개)`}
-        ariaBusy=${stopBusy}
-        testId="bulk-action-stop"
-        onClick=${() => { void runBulk('stop', c => c?.available === true, connectors) }}
-      >
-        ${stopBusy ? '정지 중...' : `■ Stop All (${upCount})`}
-      <//>
-    </div>
-  `
-}
-
-export function countConnectedSidecars(connectors: GateConnectorInfo[]): number {
+export function countConfiguredConnectors(connectors: GateConnectorInfo[]): number {
   return KNOWN_CONNECTOR_IDS.filter(id => findConnector(connectors, id)?.available === true).length
 }
 
 interface ConnectorStripSummary {
-  runningCount: number
+  configuredCount: number
   healthyCount: number
   connectorTotal: number
   bindingCount: number
@@ -652,7 +502,7 @@ export function summarizeConnectorStrip(
   connectors: GateConnectorInfo[],
   _keeperCount: number,
 ): ConnectorStripSummary {
-  const runningCount = countConnectedSidecars(connectors)
+  const configuredCount = countConfiguredConnectors(connectors)
   const healthyCount = KNOWN_CONNECTOR_IDS.filter(id => {
     const connector = findConnector(connectors, id)
     return connector !== null
@@ -665,7 +515,7 @@ export function summarizeConnectorStrip(
     return acc + (c?.configured_bindings?.length ?? 0)
   }, 0)
   return {
-    runningCount,
+    configuredCount,
     healthyCount,
     connectorTotal: KNOWN_CONNECTOR_IDS.length,
     bindingCount,
@@ -727,8 +577,8 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
         testId="overview-strip-live"
       />
       <span>
-        <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-running>${summary.runningCount}/${summary.connectorTotal}</span>
-        <span> running</span>
+        <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-configured>${summary.configuredCount}/${summary.connectorTotal}</span>
+        <span> configured</span>
         ${offlineLabel !== null
           ? html`<span
               class="ml-1 text-[var(--bad-light)]/80"
@@ -812,8 +662,7 @@ export function ConnectorOverviewStrip({
             : null
           }
         </div>
-        <${BulkActions} connectors=${connectors} />
-      </div>
+        </div>
       <div class="cn-grid">
         ${KNOWN_CONNECTOR_IDS
           .filter(id => tileMatchesQuery(id, findConnector(connectors, id), filterQuery))
@@ -831,10 +680,6 @@ export function ConnectorOverviewStrip({
       </div>
     </${SurfaceCard}>
   `
-}
-
-export function _testResetBulkInflight() {
-  bulkInflight.value = { start: false, stop: false }
 }
 
 export function _testResetStripMemory() {

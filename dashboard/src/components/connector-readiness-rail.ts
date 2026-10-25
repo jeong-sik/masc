@@ -186,13 +186,8 @@ export function ConnectorReadinessRail({ pills }: { pills: RailPill[] }) {
  * the helper stays unit-testable without the full Gate API shape.
  */
 interface RailInputs {
-  /** Sidecar process is up and reachable. */
-  sidecarUp: boolean
-  /** This connector runs as a separate sidecar process that can be started
-      and stopped. discord and slack run inside the server process, so there
-      is nothing to send to /api/v1/sidecar/{start,stop} and the Process pill
-      must not offer it. */
-  hasSidecarProcess: boolean
+  /** The gateway has readable connection configuration. */
+  gatewayAvailable: boolean
   /** Channel Gate /health responded healthy. null = unknown. */
   gateHealthy: boolean | null
   /** Number of channel↔keeper bindings configured. */
@@ -203,7 +198,6 @@ interface RailInputs {
 
 export interface RailHandlers {
   openConfig: () => void
-  toggleProcess: () => void
   expandHeader: () => void
   scrollToBindings: () => void
 }
@@ -213,20 +207,13 @@ export function deriveRail(
   on: RailHandlers,
   inflight: Partial<Record<RailKey, boolean>> = {},
 ): RailPill[] {
-  // Token: inferred — if the sidecar is running, the operator has set
-  // a valid token (the bridge would have crashed at startup otherwise).
-  // If it's down we can't know, so we suggest setting one.
-  const tokenState: RailState = input.sidecarUp ? 'ok' : 'bad'
-  const tokenDetail = input.sidecarUp ? '설정됨 (sidecar 부팅 통과)' : '필요 — ⚙ Config 에서 입력'
+  const tokenState: RailState = input.gatewayAvailable ? 'ok' : 'bad'
+  const tokenDetail = input.gatewayAvailable ? '게이트웨이 설정됨' : '필요 — ⚙ Config 에서 입력'
 
   // Process
-  const processState: RailState = input.sidecarUp ? 'ok' : 'bad'
-  const processDetail = input.hasSidecarProcess
-    ? (input.sidecarUp ? '🟢 실행 중' : '⊘ 정지')
-    : (input.sidecarUp ? '🟢 게이트웨이 실행 중 (서버 프로세스 안)' : '⊘ 게이트웨이 미기동 (서버 프로세스 안)')
-  const processHint = input.hasSidecarProcess
-    ? (processState === 'bad' ? '클릭하면 sidecar Start' : '클릭하면 sidecar Stop')
-    : '서버가 직접 띄우는 게이트웨이라 따로 시작·정지하지 않습니다 — 클릭하면 상세 카드'
+  const processState: RailState = input.gatewayAvailable ? 'ok' : 'bad'
+  const processDetail = input.gatewayAvailable ? '게이트웨이 설정됨' : '게이트웨이 설정 필요'
+  const processHint = '클릭하면 서버 게이트웨이 상세 카드'
 
   // Gate
   let gateState: RailState
@@ -272,7 +259,7 @@ export function deriveRail(
       label: '프로세스',
       detail: processDetail,
       hint: processHint,
-      onClick: input.hasSidecarProcess ? on.toggleProcess : on.expandHeader,
+      onClick: on.expandHeader,
       inflight: inflight.process === true,
     },
     {

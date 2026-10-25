@@ -1,30 +1,9 @@
-// Connector vocabulary SSOT.
-//
-// Pure, side-effect-free constants and accessors for the connector surface,
-// extracted from the 2458-LOC connector-status.ts so lightweight consumers
-// (overview skeleton, onboarding) import them from one small module instead of
-// pulling a reference to the whole ConnectorStatusPanel body. connector-status.ts
-// re-exports every symbol here for back-compat.
-//
-// Scope note: only the pure connector *vocabulary* lives here. State-label
-// classification (connectorStateLabel / connectorCardBorderClass) stays in
-// connector-status.ts because it shares the file-local exhaustiveness helper,
-// and the sidecar actions (start/stop/bind) stay there because they close over
-// the panel's signal-backed UI state. The connector-status import cycle is
-// therefore NOT addressed here (tracked separately — backlog Slice 8).
+import { KNOWN_CONNECTOR_IDS, type KnownConnectorId } from '../config/connector-ids'
 
-// Known connectors shown in the dashboard (status panels, accent colours,
-// channel icons). Includes the external sidecars and the in-process Discord
-// and Slack gateways. Source of truth: the sidecars under /sidecars/, the
-// in-process gateways under lib/server/server_{discord,slack}_in_process_gateway.{ml,mli},
-// and config/navigation.ts.
-export const KNOWN_CONNECTOR_IDS = ['discord', 'imessage', 'slack', 'telegram'] as const
-export type KnownConnectorId = (typeof KNOWN_CONNECTOR_IDS)[number]
+export { KNOWN_CONNECTOR_IDS, type KnownConnectorId } from '../config/connector-ids'
 
-// Subset of {@link KNOWN_CONNECTOR_IDS} that run inside the server process. For
-// these the sidecar Start/Stop/tail affordances are suppressed (no sidecar
-// process — the operator sets an env var and restarts). RFC-0203 §Phase 3.
-export const IN_PROCESS_CONNECTOR_IDS = ['discord', 'imessage', 'slack'] as const
+// Every registered connector runs in the MASC server.
+export const IN_PROCESS_CONNECTOR_IDS = KNOWN_CONNECTOR_IDS
 export type InProcessConnectorId = (typeof IN_PROCESS_CONNECTOR_IDS)[number]
 
 export function isInProcessConnector(connectorId: string): boolean {
@@ -42,6 +21,7 @@ export const IN_PROCESS_CONNECTOR_ACTIVATION: Record<InProcessConnectorId, strin
   discord: 'DISCORD_BOT_TOKEN 환경변수',
   imessage: 'Messages.app 전체 디스크 접근 권한',
   slack: 'SLACK_APP_TOKEN 환경변수',
+  telegram: 'TELEGRAM_BOT_TOKEN 환경변수',
 }
 
 export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
@@ -49,30 +29,6 @@ export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
   imessage: 'iMessage',
   slack: 'Slack',
   telegram: 'Telegram',
-}
-
-export interface SidecarCommands {
-  start: string
-  tail: string
-  status: string
-  stop: string
-}
-
-// Sidecar directories — only for connectors that run as external sidecar
-// processes. Discord (RFC-0203 §Phase 3), Slack (RFC-0317) and iMessage run
-// in-process and have no directory here.
-const SIDECAR_DIRS: Record<string, string> = {
-  telegram: 'sidecars/telegram-bot',
-}
-
-export function sidecarCommands(connectorId: string): SidecarCommands {
-  const dir = SIDECAR_DIRS[connectorId] ?? `sidecars/${connectorId}-bot`
-  return {
-    start: `cd ${dir} && ./run.sh`,
-    tail: `cd ${dir} && ./run.sh tail`,
-    status: `cd ${dir} && ./run.sh status`,
-    stop: `cd ${dir} && ./run.sh stop`,
-  }
 }
 
 // Brand accent RGB triplets per connector, biased toward dark-theme legibility.

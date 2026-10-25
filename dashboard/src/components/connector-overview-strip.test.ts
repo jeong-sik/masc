@@ -4,22 +4,19 @@ import { render } from 'preact'
 import { html } from 'htm/preact'
 import {
   ConnectorOverviewStrip,
-  _testResetBulkInflight,
   _testResetStripMemory,
   _testSetStripMemory,
-  countConnectedSidecars,
+  countConfiguredConnectors,
   formatConnectorUptime,
   updateStripMemory,
   detectRecentDrops,
   summarizeConnectorStrip,
   summarizeOverviewTile,
-  tilePrimaryActionView,
   formatTileIdentityLine,
   offlineConnectorNames,
   formatOfflineConnectorLabel,
   deriveTileNotice,
 } from './connector-overview-strip'
-import { KNOWN_CONNECTOR_IDS, IN_PROCESS_CONNECTOR_IDS, isInProcessConnector } from './connector-constants'
 import type { GateConnectorInfo } from '../api/gate'
 
 const mkConnector = (overrides: Partial<GateConnectorInfo> = {}): GateConnectorInfo => ({
@@ -83,55 +80,6 @@ describe('ConnectorOverviewStrip', () => {
       container,
     )
     expect(container.textContent).toContain('trigger: mention_or_thread')
-  })
-
-  it('Start All button counts only sidecars currently down', () => {
-    _testResetBulkInflight()
-    render(
-      html`<${ConnectorOverviewStrip}
-        connectors=${[
-          mkConnector({ connector_id: 'telegram', available: true }),
-          mkConnector({ connector_id: 'imessage', available: true }),
-          mkConnector({ connector_id: 'discord', available: true }),
-          mkConnector({ connector_id: 'slack', available: true }),
-        ]}
-        keeperCount=${0}
-      />`,
-      container,
-    )
-    const startBtn = container.querySelector('[data-testid="bulk-action-start"]') as HTMLButtonElement
-    const stopBtn = container.querySelector('[data-testid="bulk-action-stop"]') as HTMLButtonElement
-    // Three of the four connectors run in the server process and have no
-    // sidecar to count, so the bulk buttons see telegram only: it is up, so
-    // nothing is startable and it is the one thing stoppable. discord, slack
-    // and imessage are up and are in neither total.
-    expect(startBtn.textContent).toContain('(0)')
-    expect(stopBtn.textContent).toContain('(1)')
-  })
-
-  it('Start All disabled when all sidecars are already up', () => {
-    _testResetBulkInflight()
-    const allUp = ['discord', 'imessage', 'slack', 'telegram'].map(id =>
-      mkConnector({ connector_id: id, available: true }),
-    )
-    render(
-      html`<${ConnectorOverviewStrip} connectors=${allUp} keeperCount=${0} />`,
-      container,
-    )
-    const startBtn = container.querySelector('[data-testid="bulk-action-start"]') as HTMLButtonElement
-    expect(startBtn.disabled).toBe(true)
-    expect(startBtn.title).toContain('이미 실행')
-  })
-
-  it('Stop All disabled when nothing is up', () => {
-    _testResetBulkInflight()
-    render(
-      html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
-      container,
-    )
-    const stopBtn = container.querySelector('[data-testid="bulk-action-stop"]') as HTMLButtonElement
-    expect(stopBtn.disabled).toBe(true)
-    expect(stopBtn.title).toContain('실행 중인 sidecar 없음')
   })
 
   it('marks the selected tile and exposes a detail CTA', () => {
@@ -201,14 +149,12 @@ describe('ConnectorOverviewStrip', () => {
   })
 
   it('does not render the old celebration banner even when all 4 sidecars are up', () => {
-    _testResetBulkInflight()
     const allUp = ['discord', 'imessage', 'slack', 'telegram'].map(id => mkConnector({ connector_id: id, available: true }))
     render(html`<${ConnectorOverviewStrip} connectors=${allUp} keeperCount=${0} />`, container)
     expect(container.querySelector('[data-celebration]')).toBeNull()
   })
 
   it('uptime chip renders inside tile when sidecar is up and last_ready_at is recent', () => {
-    _testResetBulkInflight()
     const readyAt = new Date(Date.now() - 65 * 1000).toISOString()
     render(
       html`<${ConnectorOverviewStrip}
@@ -224,7 +170,6 @@ describe('ConnectorOverviewStrip', () => {
   })
 
   it('uptime chip absent when sidecar is down, even with a stale last_ready_at', () => {
-    _testResetBulkInflight()
     const readyAt = new Date(Date.now() - 60 * 1000).toISOString()
     render(
       html`<${ConnectorOverviewStrip}
@@ -238,7 +183,6 @@ describe('ConnectorOverviewStrip', () => {
   })
 
   it('uptime chip absent when last_ready_at is missing/empty', () => {
-    _testResetBulkInflight()
     render(
       html`<${ConnectorOverviewStrip}
         connectors=${[mkConnector({ connector_id: 'discord', available: true, last_ready_at: '' })]}
@@ -286,7 +230,7 @@ describe('formatConnectorUptime', () => {
 describe('summarizeConnectorStrip', () => {
   it('returns zeros for empty input', () => {
     expect(summarizeConnectorStrip([], 0)).toEqual({
-      runningCount: 0,
+      configuredCount: 0,
       healthyCount: 0,
       connectorTotal: 4,
       bindingCount: 0,
@@ -300,7 +244,7 @@ describe('summarizeConnectorStrip', () => {
       mkConnector({ connector_id: 'unknown-bridge', available: true, configured_bindings: ['x', 'y', 'z'] as any }),
     ]
     const s = summarizeConnectorStrip(list, 5)
-    expect(s.runningCount).toBe(2)
+    expect(s.configuredCount).toBe(2)
     expect(s.healthyCount).toBe(2)
     expect(s.connectorTotal).toBe(4)
     expect(s.bindingCount).toBe(3) // unknown-bridge's 3 excluded
@@ -332,9 +276,16 @@ describe('summarizeOverviewTile', () => {
   })
 })
 
-describe('countConnectedSidecars', () => {
+describe('countConfiguredConnectors', () => {
+  it('counts configured but disconnected Telegram separately from connectivity', () => {
+    const disconnected = mkConnector({connector_id:'telegram', available:true, connected:false, gate_healthy:false})
+    const summary = summarizeConnectorStrip([disconnected],0)
+    expect(summary.configuredCount).toBe(1)
+    expect(summary.healthyCount).toBe(0)
+  })
+
   it('returns 0 for empty list', () => {
-    expect(countConnectedSidecars([])).toBe(0)
+    expect(countConfiguredConnectors([])).toBe(0)
   })
 
   it('counts only available=true known sidecars', () => {
@@ -343,7 +294,7 @@ describe('countConnectedSidecars', () => {
       mkConnector({ connector_id: 'slack', available: false }),
       mkConnector({ connector_id: 'unknown-bridge', available: true }),
     ]
-    expect(countConnectedSidecars(list)).toBe(1)
+    expect(countConfiguredConnectors(list)).toBe(1)
   })
 })
 
@@ -394,122 +345,6 @@ describe('stripMemory pure helpers', () => {
       60_000,
     )
     expect(dropped).toEqual([])
-  })
-})
-
-describe('tilePrimaryActionView (pure)', () => {
-  it('sidecar down, not inflight → Start (emerald), not busy', () => {
-    expect(tilePrimaryActionView(false, false, true)).toEqual({
-      label: '▶ Start', tone: 'start', busy: false,
-    })
-  })
-
-  it('sidecar down, inflight → 시작 중... (start tone, busy)', () => {
-    expect(tilePrimaryActionView(false, true, true)).toEqual({
-      label: '시작 중...', tone: 'start', busy: true,
-    })
-  })
-
-  it('sidecar up, not inflight → Stop (rose), not busy', () => {
-    expect(tilePrimaryActionView(true, false, true)).toEqual({
-      label: '■ Stop', tone: 'stop', busy: false,
-    })
-  })
-
-  it('sidecar up, inflight → 정지 중... (stop tone, busy)', () => {
-    expect(tilePrimaryActionView(true, true, true)).toEqual({
-      label: '정지 중...', tone: 'stop', busy: true,
-    })
-  })
-})
-
-describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)', () => {
-  let container: HTMLElement
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    _testResetBulkInflight()
-    _testResetStripMemory()
-  })
-  afterEach(() => {
-    render(null, container)
-    document.body.removeChild(container)
-  })
-
-  it('renders a Start button (emerald) for a down sidecar', () => {
-    render(
-      html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'telegram', available: false })]}
-        keeperCount=${0}
-      />`,
-      container,
-    )
-    const btn = container.querySelector('[data-tile-primary-action="telegram"]') as HTMLButtonElement
-    expect(btn).toBeTruthy()
-    expect(btn.getAttribute('data-tile-primary-action-tone')).toBe('start')
-    expect(btn.textContent?.trim()).toBe('▶ Start')
-    expect(btn.className).toContain('var(--color-status-ok)')
-  })
-
-  it('renders a Stop button (bad) for an up sidecar', () => {
-    render(
-      html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'telegram', available: true })]}
-        keeperCount=${0}
-      />`,
-      container,
-    )
-    const btn = container.querySelector('[data-tile-primary-action="telegram"]') as HTMLButtonElement
-    expect(btn.getAttribute('data-tile-primary-action-tone')).toBe('stop')
-    expect(btn.textContent?.trim()).toBe('■ Stop')
-    expect(btn.className).toContain('var(--bad-light)')
-  })
-
-  it('aria-label names the connector + action (screen-reader parity)', () => {
-    render(
-      html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'telegram', available: false })]}
-        keeperCount=${0}
-      />`,
-      container,
-    )
-    const btn = container.querySelector('[data-tile-primary-action="telegram"]')!
-    expect(btn.getAttribute('aria-label')).toBe('telegram sidecar 시작')
-  })
-
-  it('every sidecar tile gets a primary action button, and no in-process tile does', () => {
-    // Adding a fifth bridge must not leave some sidecar tiles with buttons
-    // and others without. The in-process tiles are the deliberate absence:
-    // /api/v1/sidecar/{start,stop} answers 400 for them (#29513), so a
-    // button there spends the operator's click on a toast.
-    render(
-      html`<${ConnectorOverviewStrip}
-        connectors=${[]}
-        keeperCount=${0}
-      />`,
-      container,
-    )
-    const withButton = Array.from(
-      container.querySelectorAll('[data-tile-primary-action]'),
-    ).map(el => el.getAttribute('data-tile-primary-action'))
-    const expected = KNOWN_CONNECTOR_IDS.filter(id => !isInProcessConnector(id))
-    expect(withButton.sort()).toEqual([...expected].sort())
-    for (const id of IN_PROCESS_CONNECTOR_IDS) {
-      expect(container.querySelector(`[data-tile-primary-action="${id}"]`)).toBeNull()
-    }
-  })
-
-  it('an in-process tile keeps its process pill but it does not call the sidecar route', () => {
-    render(
-      html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'discord', available: true })]}
-        keeperCount=${0}
-      />`,
-      container,
-    )
-    const pill = container.querySelector('[data-rail-pill="process"]')
-    expect(pill).toBeTruthy()
-    expect(pill?.getAttribute('title')).toContain('따로 시작·정지하지 않습니다')
   })
 })
 
@@ -566,7 +401,6 @@ describe('Tile identity line (rendered inside ConnectorOverviewStrip)', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    _testResetBulkInflight()
     _testResetStripMemory()
   })
   afterEach(() => {
@@ -669,7 +503,6 @@ describe('StatusSummaryLine offline annotation (rendered inside ConnectorOvervie
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    _testResetBulkInflight()
     _testResetStripMemory()
   })
   afterEach(() => {
@@ -779,7 +612,6 @@ describe('TileErrorNotice component (rendered inside ConnectorOverviewStrip)', (
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    _testResetBulkInflight()
     _testResetStripMemory()
   })
   afterEach(() => {

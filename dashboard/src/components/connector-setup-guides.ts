@@ -73,17 +73,15 @@ export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
   },
   telegram: {
     title: 'Telegram BotFather',
-    intro: '@BotFather 한 명만 거치면 됩니다. Admin user IDs는 옵션.',
+    intro: '@BotFather 한 명만 거치면 됩니다. 토큰을 MASC 서버에 설정합니다.',
     steps: [
       {
         text: 'Telegram에서 @BotFather에게 /newbot 전송 → 이름과 username 입력 → 출력된 토큰을 TELEGRAM_BOT_TOKEN에.',
         link: { href: 'https://t.me/BotFather', label: '@BotFather' },
       },
       { text: '(옵션) /setprivacy → Disable로 두면 봇이 그룹의 모든 메시지를 받음. 기본은 mention-only.' },
-      {
-        text: '(옵션) @userinfobot에게 본인 계정으로 /start → 출력된 user ID를 TELEGRAM_ADMIN_USER_IDS에 콤마 구분으로 추가.',
-        link: { href: 'https://t.me/userinfobot', label: '@userinfobot' },
-      },
+      { text: 'TELEGRAM_BOT_TOKEN을 서버 환경변수 또는 runtime.toml에 설정한 뒤 MASC 서버를 재기동하세요.' },
+      { text: '대시보드에서 숫자 chat ID를 Keeper에 바인딩하세요. 그룹 ID는 음수일 수 있습니다.' },
     ],
     references: [
       { href: 'https://core.telegram.org/bots', label: 'Telegram Bot API' },

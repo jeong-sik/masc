@@ -1863,7 +1863,7 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
       (List.length tail.events)
 ;;
 
-let test_durable_tool_bus_uses_canonical_facts () =
+let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) () =
   with_execution_test_dir "agent_core-tool-observation-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let bus=Event_bus.create () in
@@ -1890,12 +1890,41 @@ let test_durable_tool_bus_uses_canonical_facts () =
         provider_config=Some (Provider_mock.to_provider_config ())} () in
   let store=Agent.execution_store ~runtime ~dir
       ~on_scope_ready:(fun value ->locator:=Some value;Ok ()) () in
-  (match Agent.run ~sw ~execution_store:store agent "observe the effect" with
-   | Ok _ -> () | Error error -> Alcotest.fail (Error.to_string error));
+  let run () =
+    if not delivery_fault then Agent.run ~sw ~execution_store:store agent "observe the effect"
+    else
+      let internal_runtime=match Internal_runtime.create ~sw
+          ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~domain_count:1 with
+        | Ok runtime->runtime |Error error->Alcotest.fail (Internal_runtime.create_error_to_string error) in
+      match Internal_writer.run ~codec:(Internal_codec.of_runtime internal_runtime) ~dir
+        (fun ~sw:_ writer ->
+          let scope=match Internal_scope.start ~writer ~agent_name:"canonical-bus" with
+            | Ok scope->scope |Error error->Alcotest.fail (Internal_scope.error_to_string error) in
+          locator:=Some (match Agent.execution_locator_of_yojson
+              (Internal_scope.scope_locator_to_yojson (Internal_scope.scope_locator scope)) with
+            | Ok locator->locator |Error detail->Alcotest.fail detail);
+          let first=ref true in
+          let observer=Internal.Agent_tool_observer.create ~publish:(fun bus event ->
+            Event_bus.publish bus event;
+            if !first then (first:=false;raise (Failure "accepted delivery without acknowledgement"))) scope in
+          observer.register ~run_id:(Internal_scope.scope_locator_run_id (Internal_scope.scope_locator scope))
+            ~event_bus:(Some bus);
+          let result=Internal.Execution_context.with_tool_observer observer (fun () ->
+            Internal.Execution_context.with_agent_scope scope (fun () -> Agent.run ~sw agent "observe the effect")) in
+          (match Internal_scope.finish scope Internal.Execution_event.Succeeded with
+           | Ok ()->() |Error error->Alcotest.fail (Internal_scope.error_to_string error));
+          result) with
+      | Ok result->result |Error error->Alcotest.fail (Internal_writer.scope_failure_to_string error) in
+  (match run () with Ok _ -> () | Error error -> Alcotest.fail (Error.to_string error));
   Alcotest.(check int) "tool effect once" 1 !tool_calls;
   Alcotest.(check int) "called observation arrives before effect" 1 (List.length !during);
-  let observations= !during @ Event_bus.drain sub in
-  Alcotest.(check int) "one called and one completed observation" 2 (List.length observations);
+  let deliveries= !during @ Event_bus.drain sub in
+  Alcotest.(check int) "partial delivery retries only the unacknowledged occurrence"
+    (if delivery_fault then 3 else 2) (List.length deliveries);
+  let observations=List.fold_left (fun acc (event:Event_bus.event) ->
+    if List.exists (fun (existing:Event_bus.event)->existing.meta.event_id=event.meta.event_id) acc
+    then acc else acc@[event]) [] deliveries in
+  Alcotest.(check int) "one canonical called and completed identity" 2 (List.length observations);
   let locator=match !locator with Some locator->locator |None->Alcotest.fail "missing locator" in
   let projection=match Agent.open_execution_projection ~runtime ~dir locator with
     | Ok projection->projection |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
@@ -1910,7 +1939,10 @@ let test_durable_tool_bus_uses_canonical_facts () =
   List.iter (fun (observation:Event_bus.event)->
     let is_called=match observation.payload with
       | ToolCalled _->true |ToolCompleted _->false
-      | _->Alcotest.fail "non-tool observation escaped filter" in
+      | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+      | TurnStarted _ | TurnReady _ | TurnCompleted _ | HandoffRequested _ | HandoffCompleted _
+      | ElicitationCompleted _ | ToolApprovalCompleted _ | InferenceTelemetry _ | Custom _ ->
+        Alcotest.fail "non-tool observation escaped filter" in
     let source=fact is_called in
     Alcotest.(check (option int)) "bus occurrence uses canonical sequence" (Some source.seq) observation.meta.seq;
     Alcotest.(check string) "bus occurrence uses canonical event id"
@@ -1922,7 +1954,34 @@ let test_durable_tool_bus_uses_canonical_facts () =
     Alcotest.(check (option string)) "canonical parent event is preserved"
       (Option.map Agent.Execution_projection.Event_id.to_string source.parent_event_id) observation.meta.parent_event_id;
     Alcotest.(check (option string)) "no synthetic lifecycle causation replaces source facts" None observation.meta.caused_by)
-    observations
+    observations;
+  let read_tools projection after limit = match Agent.Execution_projection.read_tool_observations projection
+      ~after ~through:page.high_watermark ~limit () with
+    | Ok page->page |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let empty_pages=ref 0 in
+  let rec catch_up after acc =
+    let next=read_tools projection after 1 in
+    if next.observations=[] then incr empty_pages;
+    let acc=List.rev_append next.observations acc in
+    if next.has_more then catch_up next.next_cursor acc else List.rev acc in
+  let catch_up=catch_up (Agent.Execution_projection.beginning_cursor projection) [] in
+  Alcotest.(check bool) "filtered empty pages still advance source cursor" true (!empty_pages>0);
+  Alcotest.(check bool) "public cursor catch-up matches live canonical observations" true
+    (List.map (fun (o:Agent.Execution_projection.tool_observation)->o.event) catch_up=observations);
+  match catch_up with
+  | [first;second] ->
+    (* The receiver accepted the first occurrence and failed before accepting
+       the second. Persisted source acknowledgement must not skip the second. *)
+    let acknowledgement=first.Agent.Execution_projection.through in
+    let reopened=match Agent.open_execution_projection ~runtime ~dir locator with
+      | Ok projection->projection |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+    let retry=read_tools reopened acknowledgement 1024 in
+    Alcotest.(check bool) "reopened cursor retries the identical undelivered event" true
+      (match retry.observations with [observation]->observation.event=second.event
+       | [] | _::_::_ ->false);
+    let drained=read_tools reopened retry.next_cursor 1024 in
+    Alcotest.(check int) "acknowledged catch-up has no repeat" 0 (List.length drained.observations)
+  | [] | [_] | _::_::_::_ ->Alcotest.fail "expected two canonical tool observations"
 ;;
 
 let test_terminal_disposition_observes_cancellation () =
@@ -4576,7 +4635,11 @@ let () =
         ; Alcotest.test_case
             "durable tool bus uses canonical committed facts"
             `Quick
-            test_durable_tool_bus_uses_canonical_facts
+            (test_durable_tool_bus_uses_canonical_facts ~delivery_fault:false)
+        ; Alcotest.test_case
+            "durable tool partial delivery retains source cursor"
+            `Quick
+            (test_durable_tool_bus_uses_canonical_facts ~delivery_fault:true)
         ; Alcotest.test_case
             "terminal disposition observes cancellation"
             `Quick

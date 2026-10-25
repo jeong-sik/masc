@@ -1,0 +1,86 @@
+{
+  "recorded_at": "2026-10-25T01:26:43.936229+00:00",
+  "scope": "This directory excluding this manifest. Historical receipts remain original bytes.",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 4804,
+      "sha256": "028e5a0a85dd7d2ebc8fffe720d4fe06f86440b81387c2e9acc2cd275d8bfae5"
+    },
+    {
+      "path": "candidate-ledger.json",
+      "bytes": 1330,
+      "sha256": "20333cb384f94c597e2cbeabb6d585915e831304b77b8ff3be0f94bcf06fe4ef"
+    },
+    {
+      "path": "claude-author-repair.json",
+      "bytes": 1266,
+      "sha256": "a2bbf29809144c40650bfedd8102488c71330589c4f1bd5cb403b723e7e717c0"
+    },
+    {
+      "path": "claude-fixture-protocol.json",
+      "bytes": 2941,
+      "sha256": "5c907eac436a5aa80a24193c21de74452d7bfe1206babb19f92bb7c425a364e5"
+    },
+    {
+      "path": "followup-17583b00-dispatch.json",
+      "bytes": 911,
+      "sha256": "ec4fc2e331ae33c2a8282c2123b26b78e903b1290e6c0efef1ec5dc6d28095ee"
+    },
+    {
+      "path": "followup-17583b00-native-result.json",
+      "bytes": 48429,
+      "sha256": "5771a66e2c037b90d04e717a38b7e23ff57e58ff1dcea3ec732d3f4553d3053d"
+    },
+    {
+      "path": "followup-17583b00-selected-native-log.json",
+      "bytes": 2263,
+      "sha256": "6b3503eec6f53d20fce0897edaa75fbb043b353ce825c0b6bb82b6391b9f5bd8"
+    },
+    {
+      "path": "independent-audit-docs-review.json",
+      "bytes": 11026,
+      "sha256": "fcd9fbb8148b6f609978021131869b252bab93b77cd83eaf80b7bb22c2d6dc38"
+    },
+    {
+      "path": "independent-code-17583b00-review.json",
+      "bytes": 10354,
+      "sha256": "bec7eb93e2799d9f368525c4b2c48b32f884d83c0257fea51351453f03e26da9"
+    },
+    {
+      "path": "independent-full-pr-ce4-review.json",
+      "bytes": 19087,
+      "sha256": "34637e09665210d458bf3e231b1d8de7a130ce4e7dbb8f052ca5f919d63bb831"
+    },
+    {
+      "path": "local-parse-links.json",
+      "bytes": 928,
+      "sha256": "1f6c165e900d3adc1771a3a8346024ece80380e83d330393adfb8c575d687503"
+    },
+    {
+      "path": "parent-be9a-dispatch.json",
+      "bytes": 955,
+      "sha256": "f0e942a4ea1adfeae7f183ce27f41753582948e8d1afa13b7e9989588bfb1656"
+    },
+    {
+      "path": "parent-be9a-native-result.json",
+      "bytes": 3704,
+      "sha256": "85b861053f34f05fee83b49818ba245db2e7858a2bf38db8d323de564858741f"
+    },
+    {
+      "path": "parent-be9a-selected-native-log.json",
+      "bytes": 11573,
+      "sha256": "4304c7c951edc6faa46874f892d22ef8fd8ae112dd844e1f5ce72836ac1b52a7"
+    },
+    {
+      "path": "previous-glm-publication-manifest.json",
+      "bytes": 8765,
+      "sha256": "4925b6fdd9f7a9519fb29949419ed98a0b5a69e226dc4fd3ff1a5afc0c18e019"
+    },
+    {
+      "path": "registry-rejection-author-validation.json",
+      "bytes": 5301,
+      "sha256": "fd0518f7ad5c2f4c79532ea254adad941ff5f3dbf71143b072b37b51290a8f61"
+    }
+  ]
+}

@@ -1,0 +1,1739 @@
+{
+  "observed_at": "2026-10-25T01:24:11.136285+00:00",
+  "run_id": 40149490208,
+  "job_id": 121037803035,
+  "source_sha": "17583b006eaf0823587ba07a27ad50889ef8d498",
+  "conclusion": "success",
+  "raw_log_sha256": "83151550e227bcca966c8750454453bd3a33c9d57be5451596b004c97df84ed7",
+  "raw_log_bytes": 577506,
+  "run_status": "completed",
+  "run_conclusion": "success",
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/40149490208",
+  "scope": "Three selected actual native suites at frozen code17583. Later PR commits only add docs/evidence/changelog; not a full regression, live vendor session, installation or Goal proof.",
+  "summary": {
+    "suites": 3,
+    "passed_suites": 3,
+    "tests_run": 239,
+    "passed_tests": 239,
+    "failed_tests": 0,
+    "timeout_suites": 0
+  },
+  "suites": [
+    {
+      "target": "test/test_verification",
+      "start_log_line": 776,
+      "case_statuses": [
+        {
+          "status": "OK",
+          "group": "verification_evidence wire",
+          "index": 0,
+          "title_from_log": "roundtrip.",
+          "log_line": 784
+        },
+        {
+          "status": "OK",
+          "group": "verification_evidence wire",
+          "index": 1,
+          "title_from_log": "spliced fields are th...",
+          "log_line": 786
+        },
+        {
+          "status": "OK",
+          "group": "verification_evidence wire",
+          "index": 2,
+          "title_from_log": "decode requires both ...",
+          "log_line": 787
+        },
+        {
+          "status": "OK",
+          "group": "verdict question",
+          "index": 0,
+          "title_from_log": "the request asks the ...",
+          "log_line": 792
+        },
+        {
+          "status": "OK",
+          "group": "verdict question",
+          "index": 1,
+          "title_from_log": "a record without comp...",
+          "log_line": 793
+        },
+        {
+          "status": "OK",
+          "group": "criterion",
+          "index": 0,
+          "title_from_log": "roundtrip.",
+          "log_line": 796
+        },
+        {
+          "status": "OK",
+          "group": "criterion",
+          "index": 1,
+          "title_from_log": "of_yojson errors.",
+          "log_line": 797
+        },
+        {
+          "status": "OK",
+          "group": "criterion",
+          "index": 2,
+          "title_from_log": "request parser is str...",
+          "log_line": 799
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 0,
+          "title_from_log": "system LLM helpers ke...",
+          "log_line": 801
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 1,
+          "title_from_log": "system LLM retry disp...",
+          "log_line": 803
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 2,
+          "title_from_log": "a retry waits out a r...",
+          "log_line": 810
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 3,
+          "title_from_log": "system LLM stop and r...",
+          "log_line": 852
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 4,
+          "title_from_log": "only a reviewed stop ...",
+          "log_line": 858
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 5,
+          "title_from_log": "announce_stall logs o...",
+          "log_line": 913
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 6,
+          "title_from_log": "announce_stall keeps ...",
+          "log_line": 925
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 7,
+          "title_from_log": "announce_stall does n...",
+          "log_line": 931
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 8,
+          "title_from_log": "joining a running ret...",
+          "log_line": 934
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 9,
+          "title_from_log": "concurrent verificati...",
+          "log_line": 945
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 10,
+          "title_from_log": "named retries retain ...",
+          "log_line": 958
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 11,
+          "title_from_log": "arrivals during retry...",
+          "log_line": 966
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 12,
+          "title_from_log": "cancelled retries do ...",
+          "log_line": 971
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 13,
+          "title_from_log": "admission reads the s...",
+          "log_line": 974
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 14,
+          "title_from_log": "scan scope limits a s...",
+          "log_line": 979
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 15,
+          "title_from_log": "system LLM notes keep...",
+          "log_line": 996
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 16,
+          "title_from_log": "unreadable evidence u...",
+          "log_line": 1000
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 17,
+          "title_from_log": "historical unreadable...",
+          "log_line": 1015
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 18,
+          "title_from_log": "invalid reference rej...",
+          "log_line": 1018
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 19,
+          "title_from_log": "system LLM rejection ...",
+          "log_line": 1030
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 20,
+          "title_from_log": "system LLM rejection ...",
+          "log_line": 1042
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 21,
+          "title_from_log": "system LLM rejection ...",
+          "log_line": 1052
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 22,
+          "title_from_log": "boot recovery commits...",
+          "log_line": 1076
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 23,
+          "title_from_log": "system LLM invalid co...",
+          "log_line": 1090
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 24,
+          "title_from_log": "system LLM uses persi...",
+          "log_line": 1143
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 25,
+          "title_from_log": "rejected verdict audi...",
+          "log_line": 1160
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 26,
+          "title_from_log": "verdict audit names t...",
+          "log_line": 1173
+        },
+        {
+          "status": "OK",
+          "group": "completion_authority",
+          "index": 27,
+          "title_from_log": "judgements share the ...",
+          "log_line": 1176
+        },
+        {
+          "status": "OK",
+          "group": "workspace_boundary",
+          "index": 0,
+          "title_from_log": "raw submit notifies o...",
+          "log_line": 1196
+        },
+        {
+          "status": "OK",
+          "group": "workspace_boundary",
+          "index": 1,
+          "title_from_log": "committed resubmissio...",
+          "log_line": 1226
+        },
+        {
+          "status": "OK",
+          "group": "workspace_boundary",
+          "index": 2,
+          "title_from_log": "rejected submission c...",
+          "log_line": 1272
+        },
+        {
+          "status": "OK",
+          "group": "workspace_boundary",
+          "index": 3,
+          "title_from_log": "precommit failure com...",
+          "log_line": 1294
+        },
+        {
+          "status": "OK",
+          "group": "workspace_boundary",
+          "index": 4,
+          "title_from_log": "late raised cancellat...",
+          "log_line": 1314
+        },
+        {
+          "status": "OK",
+          "group": "id_generation",
+          "index": 0,
+          "title_from_log": "vrf- prefix.",
+          "log_line": 1316
+        },
+        {
+          "status": "OK",
+          "group": "id_generation",
+          "index": 1,
+          "title_from_log": "10k ids collision-free.",
+          "log_line": 1318
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 0,
+          "title_from_log": "verdict keeps typed a...",
+          "log_line": 1323
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 1,
+          "title_from_log": "rejected verdict keep...",
+          "log_line": 1326
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 2,
+          "title_from_log": "stalled projection na...",
+          "log_line": 1336
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 3,
+          "title_from_log": "stalled projection sa...",
+          "log_line": 1346
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 4,
+          "title_from_log": "stalled projection na...",
+          "log_line": 1356
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 5,
+          "title_from_log": "stalled projection na...",
+          "log_line": 1361
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 6,
+          "title_from_log": "stalled metadata keep...",
+          "log_line": 1369
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 7,
+          "title_from_log": "stall disposition met...",
+          "log_line": 1373
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 8,
+          "title_from_log": "the same stall is pos...",
+          "log_line": 1376
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 9,
+          "title_from_log": "a different stall sti...",
+          "log_line": 1379
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 10,
+          "title_from_log": "a disposition change ...",
+          "log_line": 1382
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 11,
+          "title_from_log": "returning to an earli...",
+          "log_line": 1385
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 12,
+          "title_from_log": "a changed detail unde...",
+          "log_line": 1388
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 13,
+          "title_from_log": "goal stalled projecti...",
+          "log_line": 1398
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 14,
+          "title_from_log": "goal stalled metadata...",
+          "log_line": 1405
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 15,
+          "title_from_log": "the same goal stall i...",
+          "log_line": 1409
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 16,
+          "title_from_log": "a task stall does not...",
+          "log_line": 1413
+        },
+        {
+          "status": "OK",
+          "group": "notifications",
+          "index": 17,
+          "title_from_log": "the Verify title name...",
+          "log_line": 1421
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 0,
+          "title_from_log": "create and load.",
+          "log_line": 1427
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 1,
+          "title_from_log": "submitting response i...",
+          "log_line": 1438
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 2,
+          "title_from_log": "create rejects blank ...",
+          "log_line": 1442
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 3,
+          "title_from_log": "delete request (idemp...",
+          "log_line": 1446
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 4,
+          "title_from_log": "scan requests.",
+          "log_line": 1450
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 5,
+          "title_from_log": "scan missing dir stay...",
+          "log_line": 1455
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 6,
+          "title_from_log": "verifications dir res...",
+          "log_line": 1458
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 7,
+          "title_from_log": "request path uses cur...",
+          "log_line": 1461
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 8,
+          "title_from_log": "scan isolates bad ent...",
+          "log_line": 1470
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 9,
+          "title_from_log": "scan reports every un...",
+          "log_line": 1479
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 10,
+          "title_from_log": "scan rereads current ...",
+          "log_line": 1487
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 11,
+          "title_from_log": "scan runs on the doma...",
+          "log_line": 1493
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 12,
+          "title_from_log": "submitted evidence au...",
+          "log_line": 1496
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 13,
+          "title_from_log": "submit snapshot resol...",
+          "log_line": 1504
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 14,
+          "title_from_log": "submit snapshot is im...",
+          "log_line": 1511
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 15,
+          "title_from_log": "submit snapshot rejec...",
+          "log_line": 1518
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 16,
+          "title_from_log": "submit snapshot rejec...",
+          "log_line": 1521
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 17,
+          "title_from_log": "submitted evidence re...",
+          "log_line": 1523
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 18,
+          "title_from_log": "submitted evidence bo...",
+          "log_line": 1528
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 19,
+          "title_from_log": "transport projection ...",
+          "log_line": 1538
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 20,
+          "title_from_log": "transport projection ...",
+          "log_line": 1553
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 21,
+          "title_from_log": "transport projection ...",
+          "log_line": 1561
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 22,
+          "title_from_log": "truncated snapshot it...",
+          "log_line": 1565
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 23,
+          "title_from_log": "submitted evidence re...",
+          "log_line": 1568
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 24,
+          "title_from_log": "submitted evidence re...",
+          "log_line": 1570
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 25,
+          "title_from_log": "submitted evidence re...",
+          "log_line": 1572
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 26,
+          "title_from_log": "submitted evidence ra...",
+          "log_line": 1574
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 27,
+          "title_from_log": "submitted evidence re...",
+          "log_line": 1579
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 28,
+          "title_from_log": "keeper task projectio...",
+          "log_line": 1591
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 29,
+          "title_from_log": "an unreadable artifac...",
+          "log_line": 1593
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 30,
+          "title_from_log": "an undeclared produce...",
+          "log_line": 1596
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 31,
+          "title_from_log": "a checkout-relative a...",
+          "log_line": 1610
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 32,
+          "title_from_log": "an injected artifact ...",
+          "log_line": 1616
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 33,
+          "title_from_log": "the reader routes by ...",
+          "log_line": 1625
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 34,
+          "title_from_log": "the submit snapshot r...",
+          "log_line": 1638
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 35,
+          "title_from_log": "an artifact submit is...",
+          "log_line": 1647
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 36,
+          "title_from_log": "an injected reader an...",
+          "log_line": 1653
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 37,
+          "title_from_log": "large binary snapshot...",
+          "log_line": 1671
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 38,
+          "title_from_log": "a binary payload is a...",
+          "log_line": 1679
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 39,
+          "title_from_log": "a filed body reads ba...",
+          "log_line": 1687
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 40,
+          "title_from_log": "changed filed bodies ...",
+          "log_line": 1697
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 41,
+          "title_from_log": "filed binary symlinks...",
+          "log_line": 1699
+        },
+        {
+          "status": "OK",
+          "group": "storage",
+          "index": 42,
+          "title_from_log": "an unreadable image b...",
+          "log_line": 1704
+        }
+      ],
+      "tests_run": 104,
+      "elapsed_s": 1.066,
+      "summary_log_line": 1706,
+      "result": "pass",
+      "finish_log_line": 1708,
+      "runner_result": "2026-10-25T01:13:23.1463356Z [targeted] test/test_verification: OK in 1s"
+    },
+    {
+      "target": "test/test_completion_repair_delivery",
+      "start_log_line": 1710,
+      "case_statuses": [
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 0,
+          "title_from_log": "system commit survives ...",
+          "log_line": 1745
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 1,
+          "title_from_log": "human commit survives m...",
+          "log_line": 1775
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 2,
+          "title_from_log": "a rejection with no Kee...",
+          "log_line": 1810
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 3,
+          "title_from_log": "a task that moved on is...",
+          "log_line": 1826
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 4,
+          "title_from_log": "a task held by someone ...",
+          "log_line": 1840
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 5,
+          "title_from_log": "a conflicting claimed t...",
+          "log_line": 1855
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 6,
+          "title_from_log": "an operator verdict rel...",
+          "log_line": 1870
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 7,
+          "title_from_log": "a queue that appears be...",
+          "log_line": 1880
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 8,
+          "title_from_log": "an unread route under t...",
+          "log_line": 1891
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 9,
+          "title_from_log": "an undecodable meta bef...",
+          "log_line": 1908
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 10,
+          "title_from_log": "a failed release keeps ...",
+          "log_line": 1927
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 11,
+          "title_from_log": "a release that can neve...",
+          "log_line": 1941
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 12,
+          "title_from_log": "a missing task preserve...",
+          "log_line": 1955
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 13,
+          "title_from_log": "release before acknowle...",
+          "log_line": 1971
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 14,
+          "title_from_log": "an undecodable producer...",
+          "log_line": 1996
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 15,
+          "title_from_log": "daemon startup recovers...",
+          "log_line": 2012
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 16,
+          "title_from_log": "running daemon receives...",
+          "log_line": 2038
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 17,
+          "title_from_log": "queue failure retains a...",
+          "log_line": 2062
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 18,
+          "title_from_log": "enqueue before acknowle...",
+          "log_line": 2085
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 19,
+          "title_from_log": "approval boot recovery.",
+          "log_line": 2102
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 20,
+          "title_from_log": "approval live commit wake.",
+          "log_line": 2123
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 21,
+          "title_from_log": "approval survives proje...",
+          "log_line": 2147
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 22,
+          "title_from_log": "approval queue failure ...",
+          "log_line": 2171
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 23,
+          "title_from_log": "approval enqueue before...",
+          "log_line": 2194
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 24,
+          "title_from_log": "unroutable approval rem...",
+          "log_line": 2209
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 25,
+          "title_from_log": "approval codec fails cl...",
+          "log_line": 2224
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 26,
+          "title_from_log": "approval creates no rep...",
+          "log_line": 2245
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 27,
+          "title_from_log": "resubmission and stale ...",
+          "log_line": 2269
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 28,
+          "title_from_log": "old snapshot cannot enq...",
+          "log_line": 2285
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 29,
+          "title_from_log": "delivered authority ret...",
+          "log_line": 2318
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 30,
+          "title_from_log": "old release cannot reti...",
+          "log_line": 2332
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 31,
+          "title_from_log": "corrupt primary preserv...",
+          "log_line": 2356
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 32,
+          "title_from_log": "absent delivered observ...",
+          "log_line": 2371
+        },
+        {
+          "status": "OK",
+          "group": "durable verdict delivery",
+          "index": 33,
+          "title_from_log": "corrupt outbox fails cl...",
+          "log_line": 2382
+        }
+      ],
+      "tests_run": 34,
+      "elapsed_s": 1.043,
+      "summary_log_line": 2384,
+      "result": "pass",
+      "finish_log_line": 2386,
+      "runner_result": "2026-10-25T01:13:24.3406195Z [targeted] test/test_completion_repair_delivery: OK in 1s"
+    },
+    {
+      "target": "test/test_keeper_claude_code_runtime",
+      "start_log_line": 2388,
+      "case_statuses": [
+        {
+          "status": "OK",
+          "group": "native action",
+          "index": 0,
+          "title_from_log": "partial content boundary identity.",
+          "log_line": 2407
+        },
+        {
+          "status": "OK",
+          "group": "native action",
+          "index": 1,
+          "title_from_log": "exact provider identity.",
+          "log_line": 2409
+        },
+        {
+          "status": "OK",
+          "group": "usage scope",
+          "index": 0,
+          "title_from_log": "result-only usage keeps client-tur...",
+          "log_line": 2429
+        },
+        {
+          "status": "OK",
+          "group": "usage scope",
+          "index": 1,
+          "title_from_log": "refused turn reports its spend to ...",
+          "log_line": 2443
+        },
+        {
+          "status": "OK",
+          "group": "usage scope",
+          "index": 2,
+          "title_from_log": "real two-request turn routes spend...",
+          "log_line": 2466
+        },
+        {
+          "status": "OK",
+          "group": "usage scope",
+          "index": 3,
+          "title_from_log": "assistant usage without result usa...",
+          "log_line": 2484
+        },
+        {
+          "status": "OK",
+          "group": "usage scope",
+          "index": 4,
+          "title_from_log": "child tool metadata does not repla...",
+          "log_line": 2502
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 0,
+          "title_from_log": "actual Start authority User and la...",
+          "log_line": 2549
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 1,
+          "title_from_log": "actual argument Start and held Res...",
+          "log_line": 2588
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 2,
+          "title_from_log": "settles and resumes.",
+          "log_line": 2647
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 3,
+          "title_from_log": "blank completion rejects progress ...",
+          "log_line": 2705
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 4,
+          "title_from_log": "resume prompt carries the task ref...",
+          "log_line": 2708
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 5,
+          "title_from_log": "resume prompt sends only changed b...",
+          "log_line": 2714
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 6,
+          "title_from_log": "a whole carrier supersedes held bl...",
+          "log_line": 2717
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 7,
+          "title_from_log": "Agent Core checkpoint starts offic...",
+          "log_line": 2739
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 8,
+          "title_from_log": "native Gate resume refused as full...",
+          "log_line": 2786
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 9,
+          "title_from_log": "shrinks history after the CLI's bl...",
+          "log_line": 2818
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 10,
+          "title_from_log": "shrinks history after the CLI's ra...",
+          "log_line": 2850
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 11,
+          "title_from_log": "projects typed tool history and li...",
+          "log_line": 2872
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 12,
+          "title_from_log": "projects MASC tool.",
+          "log_line": 2890
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 13,
+          "title_from_log": "checkpointless repeated reads cros...",
+          "log_line": 2936
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 14,
+          "title_from_log": "distinguishes native and MASC tool...",
+          "log_line": 2956
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 15,
+          "title_from_log": "streams text and tool events.",
+          "log_line": 2971
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 16,
+          "title_from_log": "two Claude responses stream apart.",
+          "log_line": 2987
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 17,
+          "title_from_log": "thinking stays ahead of tools and ...",
+          "log_line": 3002
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 18,
+          "title_from_log": "native completion through adapter,...",
+          "log_line": 3069
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 19,
+          "title_from_log": "root heartbeat through receiver, s...",
+          "log_line": 3146
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 20,
+          "title_from_log": "root Agent retry through adapter, ...",
+          "log_line": 3243
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 21,
+          "title_from_log": "no break across a MASC tool row.",
+          "log_line": 3260
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 22,
+          "title_from_log": "tools-support false omits MCP bridge.",
+          "log_line": 3276
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 23,
+          "title_from_log": "post-effect transport enters recov...",
+          "log_line": 3292
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 24,
+          "title_from_log": "operator interruption preserves pr...",
+          "log_line": 3318
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 25,
+          "title_from_log": "does not retry context error after...",
+          "log_line": 3333
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 26,
+          "title_from_log": "context overflow maps to input-rej...",
+          "log_line": 3338
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 27,
+          "title_from_log": "Gate resume overflow is session-full.",
+          "log_line": 3343
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 28,
+          "title_from_log": "pre-effect provider rejection keep...",
+          "log_line": 3358
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 29,
+          "title_from_log": "quota enters recovery.",
+          "log_line": 3375
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 30,
+          "title_from_log": "access refusal preserves structure...",
+          "log_line": 3420
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 31,
+          "title_from_log": "access refusal after native tool r...",
+          "log_line": 3435
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 32,
+          "title_from_log": "quota after tool effect remains fe...",
+          "log_line": 3451
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 33,
+          "title_from_log": "quota after native tool remains fe...",
+          "log_line": 3465
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 34,
+          "title_from_log": "spawn failure fences the claim for...",
+          "log_line": 3476
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 35,
+          "title_from_log": "subscription spawn failure is pre-...",
+          "log_line": 3479
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 36,
+          "title_from_log": "truncated auth probe keeps cli std...",
+          "log_line": 3489
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 37,
+          "title_from_log": "cut auth probe is retried once.",
+          "log_line": 3506
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 38,
+          "title_from_log": "cut auth probe reports stdout bytes.",
+          "log_line": 3515
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 39,
+          "title_from_log": "truncated auth probe without stder...",
+          "log_line": 3525
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 40,
+          "title_from_log": "truncated auth probe truncates lon...",
+          "log_line": 3534
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 41,
+          "title_from_log": "blank auth stderr keeps detail bare.",
+          "log_line": 3543
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 42,
+          "title_from_log": "turn spawn failure is pre-dispatch...",
+          "log_line": 3549
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 43,
+          "title_from_log": "unbounded turn keeps subscription ...",
+          "log_line": 3551
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 44,
+          "title_from_log": "memory reprojection reaches the re...",
+          "log_line": 3582
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 45,
+          "title_from_log": "unshrinkable blocking_limit report...",
+          "log_line": 3590
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 46,
+          "title_from_log": "unshrinkable rapid_refill_breaker ...",
+          "log_line": 3598
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 47,
+          "title_from_log": "blank system prompt is refused not...",
+          "log_line": 3601
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 48,
+          "title_from_log": "explicit provider terminal follows...",
+          "log_line": 3612
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 49,
+          "title_from_log": "typed terminal stop records pre-re...",
+          "log_line": 3623
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 50,
+          "title_from_log": "post-tool hook failure survives pr...",
+          "log_line": 3634
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 51,
+          "title_from_log": "every posture names the schema loo...",
+          "log_line": 3638
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 52,
+          "title_from_log": "task input and routed dispatch ret...",
+          "log_line": 3703
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 53,
+          "title_from_log": "Child read closed codec and exact ...",
+          "log_line": 3747
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 54,
+          "title_from_log": "Child hints never certify same-tai...",
+          "log_line": 3783
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 55,
+          "title_from_log": "Child discovery retains bound empt...",
+          "log_line": 3816
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 56,
+          "title_from_log": "child durable driver receipts reda...",
+          "log_line": 3863
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 57,
+          "title_from_log": "child concurrent exact replay has ...",
+          "log_line": 3896
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 58,
+          "title_from_log": "child durable uncertain commit and...",
+          "log_line": 3930
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 59,
+          "title_from_log": "child durable suffix still audits ...",
+          "log_line": 3961
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 60,
+          "title_from_log": "received child persists through re...",
+          "log_line": 4000
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 61,
+          "title_from_log": "child persistence failure cannot m...",
+          "log_line": 4032
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 62,
+          "title_from_log": "native task journal retains author...",
+          "log_line": 4069
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 63,
+          "title_from_log": "native task journal serializes wri...",
+          "log_line": 4093
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 64,
+          "title_from_log": "native task production read consum...",
+          "log_line": 4130
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 65,
+          "title_from_log": "Child HTTP reads actual Driver sna...",
+          "log_line": 4179
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 66,
+          "title_from_log": "task persistence callback failure ...",
+          "log_line": 4199
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 67,
+          "title_from_log": "autonomous task journal outlives i...",
+          "log_line": 4225
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 68,
+          "title_from_log": "task journal wait does not hold ro...",
+          "log_line": 4248
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 69,
+          "title_from_log": "SQLite validation scope and incarn...",
+          "log_line": 4272
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 70,
+          "title_from_log": "unchecked change hints retain full...",
+          "log_line": 4299
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 71,
+          "title_from_log": "unchecked hints preserve directory...",
+          "log_line": 4319
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 72,
+          "title_from_log": "SQLite commit cleanup and known pr...",
+          "log_line": 4347
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 73,
+          "title_from_log": "non-SQLite read and observe remain...",
+          "log_line": 4368
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 74,
+          "title_from_log": "SQLite discovery checks empty dire...",
+          "log_line": 4390
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 75,
+          "title_from_log": "SQLite discovery preserves bound d...",
+          "log_line": 4412
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 76,
+          "title_from_log": "later command witness cannot adopt...",
+          "log_line": 4431
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 77,
+          "title_from_log": "task metadata retains closed nativ...",
+          "log_line": 4510
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 78,
+          "title_from_log": "complete child callback keeps orig...",
+          "log_line": 4621
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 79,
+          "title_from_log": "child/task callbacks share failed-...",
+          "log_line": 4674
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 80,
+          "title_from_log": "a closed client connection is typed.",
+          "log_line": 4678
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 81,
+          "title_from_log": "incomplete user write timeout fenc...",
+          "log_line": 4686
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 82,
+          "title_from_log": "a process exit before turn admissi...",
+          "log_line": 4730
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 83,
+          "title_from_log": "an unhandled runtime exception is ...",
+          "log_line": 4734
+        },
+        {
+          "status": "OK",
+          "group": "lifecycle",
+          "index": 84,
+          "title_from_log": "an unhandled runtime exception rec...",
+          "log_line": 4736
+        },
+        {
+          "status": "OK",
+          "group": "start seed",
+          "index": 0,
+          "title_from_log": "a start seed begins at the carried...",
+          "log_line": 4743
+        },
+        {
+          "status": "OK",
+          "group": "start seed",
+          "index": 1,
+          "title_from_log": "the declared ceiling wins when it ...",
+          "log_line": 4753
+        },
+        {
+          "status": "OK",
+          "group": "start seed",
+          "index": 2,
+          "title_from_log": "a cold start with no completed tur...",
+          "log_line": 4759
+        },
+        {
+          "status": "OK",
+          "group": "start seed",
+          "index": 3,
+          "title_from_log": "a cold start begins at the turn st...",
+          "log_line": 4766
+        },
+        {
+          "status": "OK",
+          "group": "start seed",
+          "index": 4,
+          "title_from_log": "the Librarian front reaches the li...",
+          "log_line": 4777
+        },
+        {
+          "status": "OK",
+          "group": "start seed",
+          "index": 5,
+          "title_from_log": "a working state that would displac...",
+          "log_line": 4800
+        },
+        {
+          "status": "OK",
+          "group": "start seed",
+          "index": 6,
+          "title_from_log": "a working state that displaces not...",
+          "log_line": 4807
+        },
+        {
+          "status": "OK",
+          "group": "start seed",
+          "index": 7,
+          "title_from_log": "a working state beside the turn ca...",
+          "log_line": 4813
+        },
+        {
+          "status": "OK",
+          "group": "start seed",
+          "index": 8,
+          "title_from_log": "a range the ceiling fits goes as cut.",
+          "log_line": 4829
+        }
+      ],
+      "tests_run": 101,
+      "elapsed_s": 204.967,
+      "summary_log_line": 4831,
+      "result": "pass",
+      "finish_log_line": 4833,
+      "runner_result": "2026-10-25T01:16:49.4356270Z [targeted] test/test_keeper_claude_code_runtime: OK in 205s"
+    }
+  ],
+  "previous_failed_run": {
+    "id": 40147287888,
+    "source": "be9a9d9da9d426c8babb691a9ebc4620ca4a517c",
+    "passed": 247,
+    "failed": 4,
+    "scope": "five selected suites; unchanged original failed evidence"
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "run_id": 40147287888,
+  "source_sha": "be9a9d9da9d426c8babb691a9ebc4620ca4a517c",
+  "scope": "Original completed remote native run; no followup-repair PASS or model acceptance claim",
+  "raw_job_log": {
+    "path": "/tmp/masc-native-integrity-be9a9d9d-job.log",
+    "sha256": "421e39925afa2c5498899a58edba05eed7ae9be821310059b32c36706bafcde0",
+    "bytes": 593320
+  },
+  "summary": {
+    "suites": 5,
+    "completed_pass_suites": 2,
+    "completed_failed_suites": 3,
+    "tests_run": 251,
+    "passed_tests": 247,
+    "failed_tests": 4,
+    "timeout_suites": 0,
+    "compile_completed": true
+  },
+  "suites": [
+    {
+      "target": "test/test_verification",
+      "start_log_line": 771,
+      "passed_cases": 102,
+      "failure_cases": [
+        {
+          "group": "completion_authority",
+          "index": 22,
+          "title_from_log": "boot recovery commits...",
+          "log_line": 1070
+        },
+        {
+          "group": "completion_authority",
+          "index": 24,
+          "title_from_log": "system LLM uses persi...",
+          "log_line": 1119
+        }
+      ],
+      "tests_run": 104,
+      "result": "fail",
+      "finish_log_line": 1749,
+      "runner_result": "2026-10-25T00:39:28.6484906Z [targeted] test/test_verification: FAIL exit 1 in 11s"
+    },
+    {
+      "target": "test/test_completion_repair_delivery",
+      "start_log_line": 1751,
+      "passed_cases": 33,
+      "failure_cases": [
+        {
+          "group": "durable verdict delivery",
+          "index": 2,
+          "title_from_log": "a rejection with no Kee...",
+          "log_line": 1835
+        }
+      ],
+      "tests_run": 34,
+      "result": "fail",
+      "finish_log_line": 2440,
+      "runner_result": "2026-10-25T00:39:29.4337540Z [targeted] test/test_completion_repair_delivery: FAIL exit 1 in 1s"
+    },
+    {
+      "target": "test/test_workspace_handoff_boundary",
+      "start_log_line": 2442,
+      "passed_cases": 8,
+      "failure_cases": [],
+      "tests_run": 8,
+      "result": "pass",
+      "finish_log_line": 2476,
+      "runner_result": "2026-10-25T00:39:29.5407732Z [targeted] test/test_workspace_handoff_boundary: OK in 0s"
+    },
+    {
+      "target": "test/test_workspace_task_verification_phase_e",
+      "start_log_line": 2478,
+      "passed_cases": 5,
+      "failure_cases": [],
+      "tests_run": 5,
+      "result": "pass",
+      "finish_log_line": 2499,
+      "runner_result": "2026-10-25T00:39:29.6145676Z [targeted] test/test_workspace_task_verification_phase_e: OK in 0s"
+    },
+    {
+      "target": "test/test_keeper_claude_code_runtime",
+      "start_log_line": 2501,
+      "passed_cases": 99,
+      "failure_cases": [
+        {
+          "group": "lifecycle",
+          "index": 49,
+          "title_from_log": "post-tool hook failure survives pr...",
+          "log_line": 3736
+        }
+      ],
+      "tests_run": 100,
+      "result": "fail",
+      "finish_log_line": 4954,
+      "runner_result": "2026-10-25T00:42:52.0295645Z [targeted] test/test_keeper_claude_code_runtime: FAIL exit 1 in 203s"
+    }
+  ],
+  "claude_failure": {
+    "lifecycle_index": 49,
+    "original_expectation": "terminal hook detail survives",
+    "expected": true,
+    "received": false,
+    "protocol_error": "Claude Code protocol error during result message: no measured assistant model",
+    "protocol_error_log_line": 3734,
+    "post_tool_hook_errors_logged_before_protocol_error": 3,
+    "native_previous_repaired_cases": [
+      0,
+      8,
+      13,
+      37,
+      48
+    ],
+    "native_previous_repaired_cases_result": "pass"
+  },
+  "unrepaired_other_failure_scope": "test_verification cases22/24 and test_completion_repair_delivery case2 are owned by another repair unit"
+}

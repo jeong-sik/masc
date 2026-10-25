@@ -1,0 +1,9 @@
+{
+  "at": "2026-10-25T00:41:14.140131+00:00",
+  "arguments": {
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "observed_value": "11/11 fixed acceptance cases within explicit source/runtime scopes; latest328 configured GLM-5.3 G2/G3 scopedPASS, no not_measured case. Older G1/G4/A1–A7 scopes and historical failures retained; not all tests at one head.",
+    "evidence": "note:Canonical host .masc/playground/codex-mcp-client/goal-outcomes-20261024/acceptance.json SHA256 4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e; frozen case snapshot at2026-10-24T18:31:26Z. Actual GLM Read→1/3 measure→Edit/Read→3/3 measure→Task2Awaiting→GoalVerifying/proof_pending, operator proxy1 Gate/1 Task approval. Public source/evidence https://github.com/jeong-sik/masc/blob/be9a9d9da9d426c8babb691a9ebc4620ca4a517c/docs/evidence/2026-10-25-goal-continuation-glm/README.md . Frozen artifact bookkeeping at write time and this later registered measurement are separate. No production installation, Goal proof or human confirmation inferred."
+  }
+}

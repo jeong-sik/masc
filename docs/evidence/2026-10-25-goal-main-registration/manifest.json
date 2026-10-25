@@ -1,0 +1,61 @@
+{
+  "recorded_at": "2026-10-25T01:26:43.939356+00:00",
+  "scope": "This directory excluding this manifest. Historical receipts remain original bytes.",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 3135,
+      "sha256": "7bca539091951e23f3002cbaa64b275c50518ff10b0850f50f8b156db2cf6b4f"
+    },
+    {
+      "path": "final-primary-state.json",
+      "bytes": 11287,
+      "sha256": "0be58c48d1a1b95e1eafc65d5cf4a851d43c8356b46a5916f2ba65853a73c56b"
+    },
+    {
+      "path": "goal-proof-request/intent.json",
+      "bytes": 2323,
+      "sha256": "ac7113bb8bd531008ec6768fc0da40b30db93a773719322ec07fadfa9a642635"
+    },
+    {
+      "path": "goal-proof-request/receipt.json",
+      "bytes": 8635,
+      "sha256": "71b010616347d5936a310e36ce1759418edcec760351734e0a600774e9fc0d10"
+    },
+    {
+      "path": "health-read-011038.json",
+      "bytes": 219,
+      "sha256": "771c45caeb6343790e413926c8bea274960a1cbecac130d16d9ec3b43e16a789"
+    },
+    {
+      "path": "measurement11/intent.json",
+      "bytes": 1130,
+      "sha256": "e5063af7fdfe8d520be4b8450b29a072c93117be53da8c0cff8cb58821a987de"
+    },
+    {
+      "path": "measurement11/receipt.json",
+      "bytes": 4623,
+      "sha256": "b07743c04704205c1a2eeea9319252730715c47a422299dde85afcf10316579c"
+    },
+    {
+      "path": "primary-state-010145.json",
+      "bytes": 6913,
+      "sha256": "febcba3ab4a2bee1f0deea738190fc4993e197bda78f872b6dc16adb62456611"
+    },
+    {
+      "path": "primary-state-011046.json",
+      "bytes": 4259,
+      "sha256": "da2ef3ffdc8cd6cbd8681e934a2bfde7a4c331d39e8257fb647e7e50aa305122"
+    },
+    {
+      "path": "task2620-submission/intent.json",
+      "bytes": 3802,
+      "sha256": "a9a490c77a0dfce57f0e31ef1ccfa15155705b17f3a4bd376e6015f48c833b2b"
+    },
+    {
+      "path": "task2620-submission/receipt.json",
+      "bytes": 1327,
+      "sha256": "0682a5c27d3ab537f40f07dd8a89b95e934f4866fee60ae0351f6c85998e80fc"
+    }
+  ]
+}

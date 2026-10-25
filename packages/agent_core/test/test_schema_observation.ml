@@ -357,6 +357,22 @@ let test_strict_decoder () =
         (update "byte_count" (fun _ -> `Int (-1))) report
     ] in
   List.iter (fun (label, report) -> expect_invalid label report) malformed;
+  let first_finish = List.find (fun event -> kind event = `String "span_finished") (events report) in
+  let started_ns = field "started_ns" (field "measurement" (payload first_finish)) in
+  let future_origin = match started_ns with
+    | `String value -> `String (Int64.to_string (Int64.succ (Int64.of_string value)))
+    | _ -> Alcotest.fail "expected canonical monotonic timestamp" in
+  expect_invalid "span predates original observer"
+    (update "clock_origin_ns" (fun _ -> future_origin) report);
+  let measured = Eio_main.run (fun _ ->
+    let owner = Observation.create ~mode:Identity_only in
+    Observation.within owner (fun () ->
+      ignore (Observation.measure ~site:Worker_work (fun () -> 1)));
+    report_json owner) in
+  expect_valid "original measured operation without schema" measured;
+  expect_invalid "measured completion invents schema identity"
+    (first_payload "span_finished"
+       (update "schema_id" (fun _ -> `String "9223372036854775807")) measured);
   let disabled = report_json (Observation.create ~mode:Disabled) in
   expect_invalid "disabled claims bookkeeping"
     (update "bookkeeping" (update "calls" (fun _ -> `Int 1)) disabled)

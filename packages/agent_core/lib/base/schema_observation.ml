@@ -651,7 +651,7 @@ let validate_scope failures identities (scope : scope) =
   | Some definition -> bind_identity identities definition.descriptor_id
       (`Assoc ["kind", `String "definition"; "value", definition_json definition])
 ;;
-let validate_events observer mode failures events =
+let validate_events observer mode failures origin events =
   let rec loop sequence open_spans seen identities = function
     | [] -> Ok (Span_map.cardinal open_spans)
     | (event : event) :: rest ->
@@ -672,10 +672,15 @@ let validate_events observer mode failures events =
            | None -> Error "span completion has no original entry"
            | Some (original_kind, original_site, original_schema, original_scope) ->
              if original_kind <> operation_kind || original_site <> site || original_scope <> event.scope then Error "span ownership changed"
-             else if Option.is_some original_schema && original_schema <> schema_id then Error "span schema identity changed"
+             else if operation_kind <> Constructor && original_schema <> schema_id then Error "span schema identity changed"
              else if mode <> Timed && Option.is_some measurement then Error "untimed observer claims timing"
              else if failures = 0 && mode = Timed && Option.is_none measurement then
                Error "complete timed span has no measurement"
+             else if (match origin, measurement with
+               | Some origin, Some measurement ->
+                 Int64.unsigned_compare measurement.started_ns origin < 0
+               | None, None | None, Some _ | Some _, None -> false) then
+               Error "span predates its observer clock"
              else if failures = 0 && operation_kind = Constructor && completion = Returned
                      && Option.is_none schema_id then Error "complete constructor has no returned schema"
              else loop (sequence + 1) (Span_map.remove span_id open_spans) seen identities rest)
@@ -701,7 +706,7 @@ let report_of_json json =
   let* probe_calls = integer (get "probe_calls" f) in
   let* bookkeeping = bookkeeping_of_json (get "bookkeeping" f) in
   let* events = list event_of_json (get "events" f) in
-  let* actual_active = validate_events report_observer_id report_mode failures events in
+  let* actual_active = validate_events report_observer_id report_mode failures clock_origin_ns events in
   let expected_coverage = if failures = 0 && active_spans = 0 then "complete" else "incomplete" in
   if get "clock_domain" f <> `String "process_monotonic_ns"
      || get "allocation_scope" f <> `String allocation_scope

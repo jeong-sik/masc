@@ -51,3 +51,10 @@ diagrams within the response. Source mode and literal search retain the text
 reading. Terminals without inline placement support keep the text diagram and
 can use the existing standalone preview. Rendering failures remain visible;
 `r` rereads the resource and retries from the newly admitted response.
+
+On Kitty graphics terminals with measured cell geometry, the standalone
+preview accepts `+`/`-` to zoom, arrow keys or `h`/`j`/`k`/`l` to pan, and `0`
+to fit the full image. Wheel input pans vertically. The original PNG stays in
+the terminal; pan/zoom sends source-pixel crop coordinates. `v` returns to the
+resource's original source, while `Esc` or `q` returns to its document.
+These preview keys are consumed by the image and never reach the composer.

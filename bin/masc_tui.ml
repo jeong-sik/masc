@@ -10325,7 +10325,8 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   if state.image_open then begin
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
-    state.image_open <- false
+    state.image_open <- false;
+    state.image_inspection <- None
   end;
   observe_msx_frame ~clear_notice:true state ~mailbox;
   observe_msx_carts state ~mailbox;
@@ -10345,7 +10346,8 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
   if state.image_open then begin
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
-    state.image_open <- false
+    state.image_open <- false;
+    state.image_inspection <- None
   end;
   state.machine_source <- Masc.Machine_lane.Msx;
   state.msx_open <- true;
@@ -10369,7 +10371,8 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
   if state.image_open then begin
     Masc_tui_msx.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
-    state.image_open <- false
+    state.image_open <- false;
+    state.image_inspection <- None
   end;
   state.machine_source <- Masc.Machine_lane.Dos;
   state.msx_open <- true;
@@ -10564,10 +10567,37 @@ let clamp_planning_cursor state =
    about why -- the picture that never arrives looks exactly like the picture
    that did. The sniff is the composer's, so both surfaces read bytes by one
    rule. *)
-let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~title data =
+let draw_inspected_image ?(fresh=true) state (title,data,viewport) =
+  match !active_graphics_protocol, !image_cell_pixels with
+  | Masc_tui_graphics.Kitty_protocol, Some cell_pixels ->
+    let rows,columns = Masc_tui_ansi.get_terminal_size () in
+    let window = Masc_tui_image_viewport.window ~cell_pixels
+      ~columns:(max 1 (columns-2)) ~rows:(max 1 (rows-3)) viewport in
+    let title = Keeper_chat.terminal_safe_text ~preserve_newlines:false title in
+    let footer = Printf.sprintf "  +/− zoom · arrows/hjkl pan · 0 fit · %sEsc back · %.0f%%"
+      (if state.view=Resources then "v source · " else "")
+      (100.*.Masc_tui_image_viewport.zoom viewport) in
+    Masc_tui_msx.invalidate ();
+    let image = if fresh then Masc_tui_graphics.place_viewport ~data window
+      else Masc_tui_graphics.put_viewport window in
+    let retire = if fresh then Ansi.clear ^ Masc_tui_graphics.delete_all
+      else Masc_tui_graphics.delete_placement
+        ~image_id:(Masc_tui_graphics.image_id Image_inspection) ~placement_id:1 in
+    write_to_terminal (retire
+      ^ "\027[1;1H\027[2K" ^ Message_layout.fit_width title (max 1 (columns-1))
+      ^ "\027[2;1H" ^ image
+      ^ Printf.sprintf "\027[%d;1H\027[2K%s" rows
+          (Message_layout.fit_width footer (max 1 (columns-1))));
+    state.image_inspection <- Some (title,data,viewport);
+    state.image_open <- true
+  | (Masc_tui_graphics.Kitty_protocol | ITerm2_protocol | Unsupported_protocol),
+    (Some _ | None) -> ()
+
+let draw_image state ?(inspect=false) ?(caption = []) ?(footer = "  any key: back") ~refuse ~title data =
   if state.msx_open then refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
   else begin
   state.browser_viewport <- None;
+  state.image_inspection <- None;
   browser_image_region := None;
   browser_pointer_press := None;
   match Masc.Keeper_vision_tool.sniff_image_media_type data with
@@ -10609,6 +10639,14 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
            browser_image_region := Some {top=header_rows+1;left=1;height_cells;
              width_cells=height_cells *. ch *. iw /. ih /. cw}
        | _ -> ());
+      let inspection = match inspect, !active_graphics_protocol, !image_cell_pixels, image_pixels with
+       | true, Masc_tui_graphics.Kitty_protocol, Some _, Some (width,height) ->
+           Masc_tui_image_viewport.create ~width ~height
+       | (true | false), (Masc_tui_graphics.Kitty_protocol | ITerm2_protocol | Unsupported_protocol),
+         (Some _ | None), (Some _ | None) -> None in
+      (match inspection with
+       | Some viewport -> draw_inspected_image state (title,data,viewport)
+       | None ->
       let img_escape =
         match !active_graphics_protocol with
         | Masc_tui_graphics.ITerm2_protocol ->
@@ -10636,7 +10674,7 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
         ^ img_escape
         ^ Printf.sprintf "\x1b[%d;1H%s" rows
             (Message_layout.fit_width footer (max 1 (columns - 1))));
-      state.image_open <- true
+      state.image_open <- true)
   end
 
 let character_images_available () =
@@ -10646,7 +10684,7 @@ let character_images_available () =
      | Ansi16 | Unknown -> false
 
 let draw_prepared_image state ~refuse ~title = function
-  | Masc_tui_image_cache.Png png -> draw_image state ~refuse ~title png
+  | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ~refuse ~title png
   | Rgba {columns=image_columns;pixel_rows;bytes} ->
     let rows, columns = Masc_tui_ansi.get_terminal_size () in
     if state.msx_open then
@@ -11267,6 +11305,7 @@ let close_image state =
   browser_pointer_press := None;
   browser_image_region := None;
   state.browser_viewport <- None;
+  state.image_inspection <- None;
   match state.image_open with
   | false -> ()
   | true ->
@@ -25039,7 +25078,9 @@ and is loaded on demand through keeper_skill.
            end;
            (match state.browser_viewport with
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
-            | None -> ())
+            | None -> ());
+           if state.image_open && not state.msx_open then
+             Option.iter (draw_inspected_image state) state.image_inspection
        | Render_schedule.Terminal_size_cache.Unchanged _ -> ());
       reconcile_chat_focus ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
@@ -25140,6 +25181,36 @@ and is loaded on demand through keeper_skill.
             | Key _ | Pasted _ | Graphics_reply _ -> ())
        | _ -> ());
       let input = if viewport_owned_input then None else input in
+      let inspection_owned_input = state.image_open && Option.is_some state.image_inspection
+        && Option.is_some input in
+      (match state.image_inspection, input, !image_cell_pixels with
+       | Some (title,data,viewport), Some event, Some cell_pixels
+           when state.image_open && not state.msx_open ->
+         let close () = close_image state;
+           invalidate_frame_for_resize frame_presenter render_schedule in
+         let action = match event with
+           | Key ("+" | "=") -> Some Masc_tui_image_viewport.Zoom_in
+           | Key "-" -> Some Zoom_out
+           | Key "0" -> Some Fit
+           | Key ("h" | "left") -> Some Left
+           | Key ("l" | "right") -> Some Right
+           | Key ("k" | "up") | Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_up,_,_) -> Some Up
+           | Key ("j" | "down") | Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_down,_,_) -> Some Down
+           | Key ("esc" | "q") -> close (); None
+           | Key "v" when state.view=Resources ->
+               state.resource_presentation <- Masc_tui_resource_catalog.Source;
+               state.resource_scroll <- Masc_tui_scroll.Position.first;
+               state.resource_search_position <- Masc_tui_resource_reading.first;
+               close (); None
+           | Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
+           | Mouse_left_drag _ | Mouse_left_release _ -> None in
+         Option.iter (fun action ->
+           let rows,columns = Masc_tui_ansi.get_terminal_size () in
+           let viewport = Masc_tui_image_viewport.apply ~cell_pixels
+             ~columns:(max 1 (columns-2)) ~rows:(max 1 (rows-3)) action viewport in
+           draw_inspected_image ~fresh:false state (title,data,viewport)) action
+       | (Some _ | None), (Some _ | None), (Some _ | None) -> ());
+      let input = if inspection_owned_input then None else input in
       let dismissed_image =
         state.image_open && Option.is_some input
       in

@@ -217,7 +217,37 @@ let test_crlf_diagram_association () =
       (Option.is_some (Diagrams.image_for_display ~source prepared))
   | [] | _ :: _ -> fail "full document lost its diagram"
 
+let test_source_pixel_viewport () =
+  let module Viewport = Masc_tui_image_viewport in
+  let create width height = match Viewport.create ~width ~height with
+    | Some viewport -> viewport | None -> fail "valid source dimensions refused" in
+  let apply = Viewport.apply ~cell_pixels:(10,20) ~columns:80 ~rows:20 in
+  let window = Viewport.window ~cell_pixels:(10,20) ~columns:80 ~rows:20 in
+  let original = create 1600 800 in
+  let fitted = window original in
+  check (pair int int) "fit retains full original source" (1600,800) (fitted.width,fitted.height);
+  let enlarged = apply Zoom_in original in
+  let cropped = window enlarged in
+  check (pair int int) "zoom sends a smaller source rectangle" (800,400) (cropped.width,cropped.height);
+  let moved = window (apply Right enlarged) in
+  check bool "horizontal input changes the source offset" true (moved.x > cropped.x);
+  let bounds viewport =
+    let view = window viewport in
+    check bool "crop stays inside original pixels" true
+      (view.x >= 0 && view.y >= 0 && view.width > 0 && view.height > 0
+       && view.x+view.width <= 1600 && view.y+view.height <= 800
+       && view.columns <= 80 && view.rows <= 20) in
+  List.iter (fun action ->
+    let rec exercise remaining viewport =
+      bounds viewport;
+      if remaining > 0 then exercise (remaining-1) (apply action viewport) in
+    exercise 1600 enlarged) [Left;Right;Up;Down;Zoom_in;Zoom_out];
+  let reset = window (apply Fit (apply Down enlarged)) in
+  check (pair int int) "fit restores full source after pan" (1600,800) (reset.width,reset.height);
+  check bool "nonpositive source is refused" true (Option.is_none (Viewport.create ~width:0 ~height:10))
+
 let () = run "resource image sources" ["source decisions", [
+  test_case "zoom and pan remain inside original source pixels" `Quick test_source_pixel_viewport;
   test_case "CRLF document retains diagram association" `Quick test_crlf_diagram_association;
   test_case "diagram preparation owns response and request" `Quick test_diagram_preparation_ownership;
   test_case "Markdown diagrams retain source and part ownership" `Quick test_markdown_diagrams;

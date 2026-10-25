@@ -1298,7 +1298,7 @@ let test_glm_capabilities () =
 ;;
 
 let test_for_model_id_claude_opus_5_5 () =
-  match Capabilities.for_model_id "claude-opus-5-5-20260101" with
+  match Capabilities.for_model_id "claude-opus-5-5" with
   | Some c ->
     Alcotest.(check (option int)) "1M context" (Some 1_000_000) c.max_context_tokens;
     Alcotest.(check (option int)) "128K output" (Some 128_000) c.max_output_tokens
@@ -1306,7 +1306,7 @@ let test_for_model_id_claude_opus_5_5 () =
 ;;
 
 let test_for_model_id_claude_sonnet_5 () =
-  match Capabilities.for_model_id "claude-sonnet-5-latest" with
+  match Capabilities.for_model_id "claude-sonnet-5" with
   | Some c ->
     Alcotest.(check (option int)) "1M context" (Some 1_000_000) c.max_context_tokens;
     Alcotest.(check (option int)) "128K output" (Some 128_000) c.max_output_tokens
@@ -1314,34 +1314,34 @@ let test_for_model_id_claude_sonnet_5 () =
 ;;
 
 let test_for_model_id_gpt5 () =
-  match Capabilities.for_model_id "gpt-5-latest" with
+  match Capabilities.for_model_id "gpt-5" with
   | Some c ->
     Alcotest.(check (option int)) "1050K context" (Some 1_050_000) c.max_context_tokens
   | None -> Alcotest.fail "expected Some for gpt-5"
 ;;
 
 let test_for_model_id_gpt41 () =
-  match Capabilities.for_model_id "gpt-4.1-mini" with
+  match Capabilities.for_model_id "gpt-4.1" with
   | Some c ->
     Alcotest.(check (option int)) "1M context" (Some 1_000_000) c.max_context_tokens
   | None -> Alcotest.fail "expected Some for gpt-4.1"
 ;;
 
 let test_for_model_id_gpt4o () =
-  match Capabilities.for_model_id "gpt-latest" with
+  match Capabilities.for_model_id "gpt" with
   | Some c ->
     Alcotest.(check (option int)) "128K context" (Some 128_000) c.max_context_tokens
   | None -> Alcotest.fail "expected Some for gpt"
 ;;
 
 let test_for_model_id_gemini3 () =
-  match Capabilities.for_model_id "gemini-3-pro" with
+  match Capabilities.for_model_id "gemini-3" with
   | Some _ -> ()
   | None -> Alcotest.fail "expected Some for gemini-3"
 ;;
 
 let test_for_model_id_qwen3 () =
-  match Capabilities.for_model_id "qwen3.5-35b" with
+  match Capabilities.for_model_id "qwen3" with
   | Some c ->
     Alcotest.(check bool) "tools" true c.supports_tools;
     Alcotest.(check bool) "reasoning" true c.supports_reasoning;
@@ -1351,7 +1351,7 @@ let test_for_model_id_qwen3 () =
 ;;
 
 let test_for_model_id_llama4 () =
-  match Capabilities.for_model_id "llama-4-scout" with
+  match Capabilities.for_model_id "llama-4" with
   | Some c ->
     Alcotest.(check (option int)) "1M context" (Some 1_000_000) c.max_context_tokens;
     Alcotest.(check bool) "multimodal" true c.supports_multimodal_inputs
@@ -1359,7 +1359,7 @@ let test_for_model_id_llama4 () =
 ;;
 
 let test_for_model_id_llama4_alt () =
-  match Capabilities.for_model_id "llama4-maverick" with
+  match Capabilities.for_model_id "llama4" with
   | Some _ -> ()
   | None -> Alcotest.fail "expected Some for llama4"
 ;;
@@ -1456,7 +1456,7 @@ let test_for_model_id_unknown () =
 ;;
 
 let test_for_model_id_case_insensitive () =
-  match Capabilities.for_model_id "Claude-Opus-5-5-Latest" with
+  match Capabilities.for_model_id "Claude-Opus-5-5" with
   | Some _ -> ()
   | None -> Alcotest.fail "expected case-insensitive match"
 ;;

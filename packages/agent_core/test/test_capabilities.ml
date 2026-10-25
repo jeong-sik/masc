@@ -446,26 +446,8 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
          "no_replay"
          (Reasoning_dialect.replay_policy_to_string dialect.replay_policy)
      | None -> fail "should match Kimi K2.5 native route");
-    (match Capabilities.for_model_id "kimi-k2.7-code-highspeed" with
-     | Some highspeed ->
-       check_thinking_control
-         "Kimi K2.7 highspeed inherits latest no-toggle behavior"
-         Capabilities.No_thinking_control
-         highspeed.thinking_control_format;
-       check
-         bool
-         "Kimi K2.7 highspeed always preserves reasoning"
-         true
-         (highspeed.preserve_thinking_control_format
-          = Capabilities.Always_preserved_thinking);
-       check
-         (list string)
-         "Kimi K2.7 highspeed ignores fixed sampling"
-         [ "temperature"; "top_p" ]
-         (List.map
-            Capabilities.sampling_parameter_to_string
-            highspeed.ignored_sampling_parameters)
-     | None -> fail "should match Kimi K2.7 highspeed route");
+    check bool "undeclared Kimi highspeed variant has no catalog row" true
+      (Option.is_none (Capabilities.for_model_id "kimi-k2.7-code-highspeed"));
     (match
        Capabilities.for_provider_model_id
          ~wire:(Some Provider_kind.OpenAI_compat)
@@ -2925,7 +2907,7 @@ reasoning_replay = "preserve_always"
          Fun.protect ~finally:restore (fun () ->
            Model_catalog.set_global catalog;
            let catalog_caps =
-             match Capabilities.for_model_id_catalog "parity-model-v1" with
+             match Capabilities.for_model_id_catalog "parity-model" with
              | Some caps -> caps
              | None -> Alcotest.fail "expected parity model catalog lookup"
            in

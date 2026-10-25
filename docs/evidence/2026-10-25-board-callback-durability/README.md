@@ -39,9 +39,23 @@ Other #25860 faults and original feature requirements remain independent.
 
 ## Validation
 
-All three changed OCaml source/interfaces parse; full committed whitespace
-passes. Two independent source reviews at the initial candidate/base found no
-P0–P2, including public type/callers and actual flow/peer assertions. This is not
-compilation or execution evidence. Selected CI is requested only for the Board
-exact-flow and worker suites; no local Dune/build/typecheck or full regression.
-The execution result is not yet observed. #25860 stays OPEN.
+[Selected run 40188028211](https://github.com/jeong-sik/masc/actions/runs/40188028211)
+actually checked out exactly `15a61e9a588894123af61d6d1b6fac9ab881cb33`, compiled
+the two selected executables and completed SUCCESS: exact-flow **47 cases** in
+0.407s and worker **71 cases** in0.509s, **118 total**. The three new callback
+durability cases passed as part of those47, not as an extra count.
+
+Actual assertions show binding/failed-anchor/selected-successor persisted before
+the injected outcome, retained exact Blocked progress, no owner delivery and
+first/successor peer counts. The passed cases also enforce candidate quarantine
+and ordinary same-process next invocation Idle. The confirmed control reached
+both peers. `run-40188028211.txt` preserves actual checkout/assertion/summary
+lines and the full raw-log SHA; `source-sha256.txt` binds the three code/test files.
+Later evidence-only commits do not re-label this run as a new execution.
+
+Three changed OCaml source/interfaces parse; full committed whitespace and
+changelog checks pass. Two independent source reviews at the executed head/base
+found no P0–P2. No local Dune/build/typecheck or full regression was run. This is
+actual selected execution with semantic injected outcomes; the physical-fsync,
+process-restart, live/deployment and other umbrella limits above remain.
+#25860 stays OPEN.

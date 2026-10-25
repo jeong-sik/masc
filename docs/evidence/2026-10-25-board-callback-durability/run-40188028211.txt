@@ -1,0 +1,37 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40188028211
+Head: 15a61e9a588894123af61d6d1b6fac9ab881cb33
+Full log SHA256: 1c774cd90b6a954951bf13155fb4ed8165daf684e9a246a5ada2663673c78ea4
+Excerpt (trailing whitespace normalized):
+test suite	Checkout	2026-10-25T11:14:37.3492111Z   ref: 15a61e9a588894123af61d6d1b6fac9ab881cb33
+test suite	Checkout	2026-10-25T11:14:46.0030802Z [command]/usr/bin/git rev-parse --verify --quiet 15a61e9a588894123af61d6d1b6fac9ab881cb33^{object}
+test suite	Test	2026-10-25T11:19:11.8664662Z ASSERT binding persisted before outcome fault
+test suite	Test	2026-10-25T11:19:11.8666435Z [2026-10-25 11:19:11] [INFO] [Keeper/alpha] board_attention exact_flow.execute terminal candidate_id=19c3bad6a6ce109c8a710626edc3f8422205f44c141e3f14f52dc8c477da8149 outcome=before_dispatch_persistence_failure jev=off
+test suite	Test	2026-10-25T11:19:11.8677593Z ASSERT blocked progress survives storage
+test suite	Test	2026-10-25T11:19:11.8678718Z ASSERT blocked binding is exact
+test suite	Test	2026-10-25T11:19:11.8679249Z ASSERT only selected callback fault injected
+test suite	Test	2026-10-25T11:19:11.8679833Z ASSERT no owner delivery after uncertainty
+test suite	Test	2026-10-25T11:19:11.8684336Z ASSERT actual first peer request count
+test suite	Test	2026-10-25T11:19:11.8684684Z ASSERT actual successor peer request count
+test suite	Test	2026-10-25T11:19:11.8692019Z   [OK]          callback durability          0   unconfirmed bind sends no HT...
+test suite	Test	2026-10-25T11:19:11.8758917Z [2026-10-25 11:19:11] [INFO] [Keeper] registry: registering keeper name=alpha base_path=/tmp/board-attention-callback-durability8d9066 phase=offline
+test suite	Test	2026-10-25T11:19:11.8804044Z ASSERT failed binding retained
+test suite	Test	2026-10-25T11:19:11.8804398Z ASSERT selected successor persisted
+test suite	Test	2026-10-25T11:19:11.8805335Z [2026-10-25 11:19:11] [INFO] [Keeper/alpha] board_attention exact_flow.execute terminal candidate_id=19c3bad6a6ce109c8a710626edc3f8422205f44c141e3f14f52dc8c477da8149 outcome=before_advance_persistence_failure jev=off
+test suite	Test	2026-10-25T11:19:11.8816021Z ASSERT blocked progress survives storage
+test suite	Test	2026-10-25T11:19:11.8816437Z ASSERT blocked advance is exact
+test suite	Test	2026-10-25T11:19:11.8816728Z ASSERT only selected callback fault injected
+test suite	Test	2026-10-25T11:19:11.8818765Z ASSERT no owner delivery after uncertainty
+test suite	Test	2026-10-25T11:19:11.8823078Z ASSERT actual first peer request count
+test suite	Test	2026-10-25T11:19:11.8825596Z ASSERT actual successor peer request count
+test suite	Test	2026-10-25T11:19:11.8830672Z   [OK]          callback durability          1   unconfirmed advance never di...
+test suite	Test	2026-10-25T11:19:11.8891658Z [2026-10-25 11:19:11] [INFO] [Keeper] registry: registering keeper name=alpha base_path=/tmp/board-attention-callback-durability686759 phase=offline
+test suite	Test	2026-10-25T11:19:11.8941734Z [llm_provider] [WARN] [backend_openai] clamping max_tokens 4096 to the output ceiling 1024 (declared capability override) for model masc-exact-fixture-model-1: the request asked above what the capability record admits, and the ceiling is what reaches the wire.
+test suite	Test	2026-10-25T11:19:11.8949956Z [2026-10-25 11:19:11] [INFO] [Keeper/alpha] board_attention exact_flow.execute terminal candidate_id=19c3bad6a6ce109c8a710626edc3f8422205f44c141e3f14f52dc8c477da8149 outcome=judgment_completed jev=off
+test suite	Test	2026-10-25T11:19:11.8955924Z ASSERT control injects no fault
+test suite	Test	2026-10-25T11:19:11.8956371Z ASSERT actual first peer request count
+test suite	Test	2026-10-25T11:19:11.8956728Z ASSERT actual successor peer request count
+test suite	Test	2026-10-25T11:19:11.8963490Z   [OK]          callback durability          2   confirmed callbacks reach th...
+test suite	Test	2026-10-25T11:19:12.2377308Z Test Successful in 0.407s. 47 tests run.
+test suite	Test	2026-10-25T11:19:12.2437771Z [targeted] test/test_keeper_board_attention_exact_flow: OK in 1s
+test suite	Test	2026-10-25T11:19:12.9244754Z Test Successful in 0.509s. 71 tests run.
+test suite	Test	2026-10-25T11:19:12.9301705Z [targeted] test/test_keeper_board_attention_worker: OK in 0s

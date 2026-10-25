@@ -82,7 +82,7 @@ from a previous source.
 - An unset declared environment variable or unavailable credential is surfaced
   before dispatch; configure the server's environment rather than changing the
   provider identity to bypass authentication.
-- Unsupported effort, reasoning disable, required tool choice or named tool
+- Unsupported effort, disabling M3.1 reasoning, required tool choice or named tool
   choice is a contract/admission refusal. Do not add capability overrides to
   make the unsupported request appear valid.
 - A vendor HTTP refusal or uncertain dispatched outcome remains an observed

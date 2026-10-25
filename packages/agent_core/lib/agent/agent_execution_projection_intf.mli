@@ -275,4 +275,26 @@ module type S = sig
     -> limit:int
     -> unit
     -> (page, error) result
+  type tool_observation =
+    { run_id : Run_id.t
+    ; event : Event_bus.event
+    ; through : cursor
+    }
+  type tool_observation_page = private
+    { observations : tool_observation list
+    ; next_cursor : cursor
+    ; high_watermark : cursor
+    ; has_more : bool
+    }
+  (** Committed attempt admission and result facts from the whole journal, in
+      source sequence order, matching [read_page]. [run] selects one exact
+      Agent run in that journal; omission includes its one top-level run and
+      all nested runs. The locator must identify the top-level run.
+      Empty filtered pages still advance their source cursor. A receiver may
+      persist [through] only after accepting that observation; delivery is at
+      least once, and queue admission is not subscriber acknowledgement. *)
+  val read_tool_observations :
+    t -> ?run:Run_id.t -> after:cursor -> ?through:cursor -> limit:int -> unit ->
+    (tool_observation_page, error) result
+
 end

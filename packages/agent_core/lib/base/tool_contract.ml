@@ -124,18 +124,38 @@ type schedule =
   ; execution_mode : execution_mode
   }
 
+module Occurrence = struct
+  type t = {run_id:string;node_id:string}
+  type error = Empty_run_id | Empty_node_id | Padded_run_id | Padded_node_id
+  let of_strings ~run_id ~node_id =
+    if run_id="" then Error Empty_run_id
+    else if node_id="" then Error Empty_node_id
+    else if run_id<>String.trim run_id then Error Padded_run_id
+    else if node_id<>String.trim node_id then Error Padded_node_id
+    else Ok {run_id;node_id}
+  let run_id t=t.run_id
+  let node_id t=t.node_id
+  let compare a b=match String.compare a.run_id b.run_id with
+    | 0->String.compare a.node_id b.node_id |order->order
+  let equal a b=compare a b=0
+end
+
 module Invocation = struct
   type t =
     { tool_use_id : string
     ; turn : int
     ; schedule : schedule
     ; completion : completion
+    ; occurrence : Occurrence.t option
     }
 
   let create ~tool_use_id ~turn ~schedule ~completion =
-    { tool_use_id; turn; schedule; completion }
+    { tool_use_id; turn; schedule; completion;occurrence=None }
   ;;
 
+  let of_occurrence occurrence ~tool_use_id ~turn ~schedule ~completion =
+    {tool_use_id;turn;schedule;completion;occurrence=Some occurrence}
+  let occurrence t=t.occurrence
   let tool_use_id t = t.tool_use_id
   let turn t = t.turn
   let schedule t = t.schedule

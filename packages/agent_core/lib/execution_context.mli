@@ -16,3 +16,13 @@ val with_provider_attempt : Execution_agent_scope.provider_attempt -> (unit -> '
 val provider_attempt : unit -> Execution_agent_scope.provider_attempt option
 val with_resume_once : (unit -> 'a) -> 'a
 val take_resume_once : unit -> bool
+
+type tool_observer =
+  { register : run_id:Execution_event.Run_id.t -> event_bus:Event_bus.t option -> unit
+  ; settled_observers : Tool_contract.Occurrence.t -> unit
+  ; flush : unit -> unit
+  }
+val with_tool_observer : tool_observer -> (unit -> 'a) -> 'a
+val tool_observer : unit -> tool_observer option
+val flush_tool_observations : unit -> unit
+val settle_tool_observers : Tool_contract.Invocation.t -> unit

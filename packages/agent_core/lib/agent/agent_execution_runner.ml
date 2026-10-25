@@ -258,14 +258,20 @@ let settle_success_after_run scope on_terminal_disposition value =
     abort_after_exception scope on_terminal_disposition exn backtrace
 ;;
 
-let with_scope ?on_terminal_disposition scope run =
-  Execution_context.with_agent_scope scope (fun () ->
-    match run () with
-    | Ok value -> settle_success_after_run scope on_terminal_disposition value
-    | Error detailed -> abort_error scope on_terminal_disposition detailed
-    | exception exn ->
-      let backtrace = Printexc.get_raw_backtrace () in
-      abort_after_exception scope on_terminal_disposition exn backtrace)
+let with_scope ?on_terminal_disposition ~event_bus scope run =
+  let observer=match Execution_context.tool_observer () with
+    | Some observer -> observer
+    | None -> Agent_tool_observer.create ~publish:Event_bus.publish scope in
+  observer.register ~run_id:(Execution_agent_scope.scope_locator_run_id
+      (Execution_agent_scope.scope_locator scope)) ~event_bus;
+  Execution_context.with_tool_observer observer (fun () ->
+    Execution_context.with_agent_scope scope (fun () ->
+      match (let result=run () in observer.flush ();result) with
+      | Ok value -> settle_success_after_run scope on_terminal_disposition value
+      | Error detailed -> abort_error scope on_terminal_disposition detailed
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        abort_after_exception scope on_terminal_disposition exn backtrace))
 ;;
 
 let prepare_scope store on_terminal_disposition scope =
@@ -368,7 +374,7 @@ let with_fresh store agent run = with_writer_lifetime @@ fun caller_sw ->
            on_terminal_disposition
            (execution_failure ("scope locator sink failed: " ^ detail))
        | Ok () ->
-         with_scope ?on_terminal_disposition scope (fun () ->
+         with_scope ?on_terminal_disposition ~event_bus:agent.Agent_types.options.event_bus scope (fun () ->
            in_caller_switch ~sw:caller_sw (fun sw -> run ~sw scope))))
 ;;
 
@@ -399,7 +405,7 @@ let with_resumed store locator agent run = with_writer_lifetime @@ fun caller_sw
               (execution_failure ("scope locator sink failed: " ^ detail))
           | Ok () ->
             Execution_context.with_resume_once (fun () ->
-              with_scope ?on_terminal_disposition scope (fun () ->
+              with_scope ?on_terminal_disposition ~event_bus:agent.Agent_types.options.event_bus scope (fun () ->
                 in_caller_switch ~sw:caller_sw (fun sw -> run ~sw scope))))))
 ;;
 

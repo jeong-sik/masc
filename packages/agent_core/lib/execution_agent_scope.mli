@@ -63,6 +63,7 @@ type error =
   | Invocation_locator_mismatch
   | Resume_topology_mismatch of string
   | Invalid_tool_result
+  | Tool_observation_failed of Execution_tool_observation.error
   | Settlement_failed of Execution_tool_settlement.error
 
 val error_to_string : error -> string
@@ -231,6 +232,7 @@ val provider_settled_invocations
 (** Stable opaque coordinates for rebinding after the writer is reopened.
     The locator contains no copied Tool name, input, turn, or schedule; those
     values are reconstructed from the journal's exact durable topology. *)
+val bound_invocation : invocation -> Tool_contract.Invocation.t
 val invocation_locator : invocation -> invocation_locator
 
 val invocation_locator_to_yojson : invocation_locator -> Yojson.Safe.t
@@ -273,3 +275,21 @@ val abort : t -> abort_reason -> (unit, error) result
     with an admitted attempt and no settled ToolResult cannot be retried
     automatically because its external effect may already have happened. *)
 val terminal_recovery_action : t -> (recovery_action, error) result
+
+(** Read-only committed Tool attempt/result observations, across the complete
+    recursive journal. Each observation includes its exact source cursor. *)
+type tool_observation =
+  { run_id : Execution_event.Run_id.t
+  ; event : Event_bus.event
+  ; through : Execution_journal.cursor
+  }
+type tool_observation_page =
+  { observations : tool_observation list
+  ; next_cursor : Execution_journal.cursor
+  ; high_watermark : Execution_journal.cursor
+  ; has_more : bool
+  }
+val tool_observation_cursor : t -> (Execution_journal.cursor, error) result
+val read_tool_observations :
+  t -> after:Execution_journal.cursor -> limit:int ->
+  (tool_observation_page, error) result

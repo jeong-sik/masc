@@ -59,6 +59,18 @@ type schedule =
     cohort; later coordinates do not impose an unrelated peer-completion
     barrier. They grant no effect, replay or permission authority. *)
 
+module Occurrence : sig
+  (** Exact canonical citation, never an effect/approval/replay capability.
+      Construction wraps already-selected journal identities without minting. *)
+  type t
+  type error = Empty_run_id | Empty_node_id | Padded_run_id | Padded_node_id
+  val of_strings : run_id:string -> node_id:string -> (t,error) result
+  val run_id : t -> string
+  val node_id : t -> string
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
+end
+
 module Invocation : sig
   type t
 
@@ -69,6 +81,10 @@ module Invocation : sig
     -> completion:completion
     -> t
 
+  val of_occurrence : Occurrence.t -> tool_use_id:string -> turn:int ->
+    schedule:schedule -> completion:completion -> t
+  val occurrence : t -> Occurrence.t option
+  (** [None] is an explicitly non-journalled invocation. *)
   val tool_use_id : t -> string
   val turn : t -> int
   val schedule : t -> schedule

@@ -1290,6 +1290,7 @@ type page =
   ; next_cursor : cursor
   ; high_watermark : cursor
   ; has_more : bool
+  ; snapshot : snapshot
   }
 
 let read_page journal ~after ?through ~limit () =
@@ -1331,6 +1332,7 @@ let read_page journal ~after ?through ~limit () =
       ; next_cursor = make_cursor journal.scope_id page_last_seq
       ; high_watermark = make_cursor journal.scope_id high_watermark
       ; has_more = page_last_seq < high_watermark
+      ; snapshot = {reducer=state.reducer}
       }))
 ;;
 

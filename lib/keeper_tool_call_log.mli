@@ -14,9 +14,10 @@ val max_output_len : int
 
 val invocation_execution_id :
   invocation:Agent_core.Tool_contract.Invocation.t -> Ids.Execution_id.t
-(** One physical execution identity per exact opaque SDK invocation. Repeated
-    access shares the identity; repeated provider ids on distinct invocations
-    do not. Weak ownership releases cancelled or completed invocations. *)
+(** Journalled invocations use the canonical Core node identity, including
+    after reader reconstruction. Non-journalled invocations mint one weakly
+    owned product identity per exact live SDK invocation. Provider ids alone
+    never join occurrences. *)
 
 val set_truncation_info :
   invocation:Agent_core.Tool_contract.Invocation.t ->

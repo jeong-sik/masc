@@ -1,38 +1,24 @@
-(** In-flight join table from an exact Agent Core invocation to the
-    [execution_id] minted at the masc dispatch boundary (RFC-0233 PR-2).
-
-    The keeper [post_tool_use] hook records the pair synchronously inside
-    AGENT_CORE tool execution, strictly before AGENT_CORE publishes the matching
-    [ToolCompleted] bus event; the event bridge only sees events after
-    publish, so a [take] at serialization time is deterministic:
-    insert happens-before publish happens-before drain.
-
-    Invocation keys are weak and physically identified. The hook and event bus
-    carry the same immutable invocation value, while a cancelled publication
-    cannot leave the invocation alive through this table. Blank or repeated
-    provider tool-use ids therefore remain distinct occurrences.
-
-    A missing entry is not an error — bus events from non-keeper agents
-    (workers, evals) never get an entry because only keeper hooks mint
-    execution ids. *)
+(** Product identity for tool observations. Durable invocations cite the exact
+    canonical node directly and need no live object-reference join. Explicit
+    non-journalled invocations retain a weak, in-flight product association.
+    These values never authorize execution or recovery. *)
 
 val record :
   invocation:Agent_core.Tool_contract.Invocation.t -> execution_id:string -> unit
-(** Register the exact invocation/execution pair. *)
+(** Record a non-journalled invocation/execution pair; canonical identity is already fixed. *)
 
 val discard : invocation:Agent_core.Tool_contract.Invocation.t -> unit
 (** Remove the exact invocation without publishing its execution identity.
-    The hook calls this when the durable tool-call row did not commit, including
-    cancellation, so a later completion observer cannot stamp a phantom join.
-    A missing entry is ignored. *)
+    Canonical occurrence identity is an immutable fact and is not withdrawn
+    when a product projection fails. A missing transient entry is ignored. *)
 
 val peek : invocation:Agent_core.Tool_contract.Invocation.t -> string option
 (** Read without consuming, inside the post-tool hook after the log commits
     and before ToolCompleted is published. *)
 
 val take : invocation:Agent_core.Tool_contract.Invocation.t -> string option
-(** Look up and remove the pair. [None] means the event does not belong
-    to a keeper execution (or the entry was already consumed). *)
+(** Return the canonical node identity, or consume the transient pair.
+    [None] means a non-journalled event has no retained product association. *)
 
 module For_testing : sig
   val size : unit -> int

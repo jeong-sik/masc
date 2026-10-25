@@ -98,6 +98,7 @@ type error =
   | Invocation_locator_mismatch
   | Resume_topology_mismatch of string
   | Invalid_tool_result
+  | Tool_observation_failed of Execution_tool_observation.error
   | Settlement_failed of Settlement.error
 
 let settlement_error_to_string = function
@@ -128,6 +129,7 @@ let error_to_string = function
   | Invocation_locator_mismatch ->
     "execution invocation locator does not match durable topology"
   | Resume_topology_mismatch detail -> "execution resume topology mismatch: " ^ detail
+  | Tool_observation_failed error -> Execution_tool_observation.error_to_string error
   | Invalid_tool_result -> "execution settlement returned an invalid ToolResult"
   | Settlement_failed error -> settlement_error_to_string error
 ;;
@@ -443,6 +445,7 @@ let open_invocation provider ~invocation ~tool_name ~input =
     |> Result.map_error (fun error -> Settlement_failed error)
 ;;
 
+let bound_invocation invocation = invocation.durable.invocation
 let invocation_locator invocation = invocation.locator
 
 let rebind_invocation scope locator =
@@ -914,3 +917,34 @@ let provider_response provider =
     Error
       (Resume_topology_mismatch "provider attempt has an incompatible materialized state")
 ;;
+
+type tool_observation = {run_id:Event.Run_id.t;event:Event_bus.event;through:Journal.cursor}
+type tool_observation_page =
+  { observations:tool_observation list
+  ; next_cursor:Journal.cursor
+  ; high_watermark:Journal.cursor
+  ; has_more:bool
+  }
+let tool_observation_cursor scope =
+  Writer.current_cursor scope.writer |> Result.map_error (fun error -> Scope_unavailable error)
+
+let read_tool_observations scope ~after ~limit =
+  let open Result_syntax in
+  let* page=Writer.read_page scope.writer ~after ~limit ()
+      |> Result.map_error (fun error -> Scope_unavailable error) in
+  let rec project acc = function
+    | [] -> Ok (List.rev acc)
+    | source::rest ->
+      let* observation=Execution_tool_observation.project
+          ~find_node:(Journal.snapshot_find_node page.snapshot) source
+          |> Result.map_error (fun error -> Tool_observation_failed error) in
+      (match observation with
+       | None -> project acc rest
+       | Some event ->
+         let* through=Execution_event_store.make_cursor
+             ~scope_id:(Execution_event_store.cursor_scope_id page.next_cursor)
+             ~seq:(Event.seq source)
+             |> Result.map_error (fun detail -> Resume_topology_mismatch detail) in
+         project ({run_id=Event.run_id source;event;through}::acc) rest) in
+  let+ observations=project [] page.events in
+  {observations;next_cursor=page.next_cursor;high_watermark=page.high_watermark;has_more=page.has_more}

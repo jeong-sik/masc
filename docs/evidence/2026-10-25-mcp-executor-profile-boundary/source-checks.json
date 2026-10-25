@@ -1,0 +1,18 @@
+{
+  "base": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+  "source_sha256": {
+    "lib/mcp_server_eio_execute.mli": "91725c2d17456299e61c6a86b0250798fd17c27f389ad0d29db302ab3c0a31f6",
+    "lib/mcp_server_eio_execute.ml": "c23e7ac5167bad6db0f6cd93f54b13144ff5a282ff5360eecddcddfff333c478",
+    "test/test_mcp_server_eio_tool_dispatch.ml": "644a3040ecd88bb9aa0345241374b250f74baa44c421547a1717826482c2f219"
+  },
+  "parse": "PASS",
+  "whitespace": "PASS",
+  "local_dune": "NOT_RUN",
+  "typecheck": "NOT_RUN",
+  "execution": "NOT_RUN",
+  "requested_suites": [
+    "test/test_mcp_server_eio_tool_dispatch",
+    "test/test_mcp_seat_profile"
+  ],
+  "full_regression": "NOT_RUN"
+}

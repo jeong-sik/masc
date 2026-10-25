@@ -1,0 +1,11 @@
+# MCP executor profile membership
+
+Scope: #25930 and absorbed #22179's existing profile contract, base main `3cce9a517b25863c00b48cfb3dd79b994ebc1044`.
+
+The upper MCP protocol checks `tool_allowed_in_profile` before handling built-in tools. The inner executor previously used this predicate for choosing restricted identity authority but did not reject a denied profile: a denied Operator/Seat call fell back to catalog policy and could execute a direct-callable tool. gRPC's actual production callback enters the executor directly with its existing Full default, bypassing the upper protocol's full inventory/visibility check.
+
+The executor now captures the existing profile decision once, retains caller resolution/non-public audit, and rejects with Policy_rejection/Proven_pre_effect before tool authorization, dispatch hooks or tool effects. It neither selects a new gRPC profile nor grants identity. Existing HTTP/WS early admission remains for its method-not-found wire envelope. The internal-runtime flag requires bearer proof for identity and does not bypass membership; stale contrary interface prose is corrected.
+
+The defined feature case calls the actual executor with a real admin token. Operator_remote and Seat refuse the actual help tool; Full refuses an unregistered name. Each refusal is tested with the internal-runtime flag false and true and must never enter a real dispatch pre-hook. The same Full help call executes its actual handler and reaches that hook once. The fixture uses the existing auth-disabled state helper; the token alone is not proof of role-auth enforcement. It does not exercise actual gRPC network ToolCall, bearer/session propagation, an inactive registered Full tool, live installed code, or GitHub command policy. Those are separate unresolved acceptance.
+
+Three changed OCaml interface/source files parse and whitespace passes; hashes are in source-checks.json. No local Dune/typecheck/new execution. Selected suites are existing tool dispatch and seat profile suites. Full regression is unrun. No before-fix test execution or live exploit is claimed. This is an existing declared permission enforcement repair, not a new credential, role or destructive-command policy. #25930 stays open; original #22179's undecided gRPC profile/auth choices and #23306's broader GitHub issues are not resolved here.

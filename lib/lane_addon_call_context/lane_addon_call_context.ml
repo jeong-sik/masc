@@ -1,18 +1,24 @@
 type principal = Keeper of string | Authenticated_agent of string | Host_actor of string | Operator | Anonymous
-type companion = {socket_path:string;invocation_id:string;max_message_bytes:int}
+type companion = {socket_path:string;invocation_id:string;max_message_bytes:int;publication_id:string option}
 type t = { tool : string; arguments : Yojson.Safe.t; principal : principal;
   controller : Machine_controller_contract.admission option;companion:companion option }
 let companion_to_json value=`Assoc ["socket_path",`String value.socket_path;
-  "invocation_id",`String value.invocation_id;"max_message_bytes",`Int value.max_message_bytes]
+  "invocation_id",`String value.invocation_id;"max_message_bytes",`Int value.max_message_bytes;
+  "publication_id",(match value.publication_id with None -> `Null | Some id -> `String id)]
 let companion_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)
-      =["invocation_id";"max_message_bytes";"socket_path"] ->
+      =["invocation_id";"max_message_bytes";"publication_id";"socket_path"] ->
       (match List.assoc "socket_path" fields,List.assoc "invocation_id" fields,List.assoc "max_message_bytes" fields with
        | `String socket_path,`String invocation_id,`Int max_message_bytes
           when not (Filename.is_relative socket_path) && not (String.contains socket_path '\000')
             && String.length invocation_id=64 && max_message_bytes>0
             && String.for_all (fun c -> (c>='0' && c<='9') || (c>='a' && c<='f')) invocation_id ->
-          Ok {socket_path;invocation_id;max_message_bytes}
+          (match List.assoc "publication_id" fields with
+           | `Null -> Ok {socket_path;invocation_id;max_message_bytes;publication_id=None}
+           | `String id when String.length id=64 && String.for_all
+               (fun c -> (c>='0' && c<='9') || (c>='a' && c<='f')) id ->
+               Ok {socket_path;invocation_id;max_message_bytes;publication_id=Some id}
+           | _ -> Error "invalid private publication context")
        | _ -> Error "invalid private companion context")
   | _ -> Error "invalid private companion context"
 let tool_name = "lane_call"
@@ -70,9 +76,10 @@ let input_schema = `Assoc [
     "caller", `Assoc ["type", `String "object"];
     "controller", Machine_controller_contract.admission_schema;
     "companion",`Assoc ["type",`String "object";"additionalProperties",`Bool false;
-      "required",`List [`String "socket_path";`String "invocation_id";`String "max_message_bytes"];
+      "required",`List [`String "socket_path";`String "invocation_id";`String "max_message_bytes";`String "publication_id"];
       "properties",`Assoc ["socket_path",`Assoc ["type",`String "string"];
-        "invocation_id",`Assoc ["type",`String "string"];"max_message_bytes",`Assoc ["type",`String "integer"]]]]]
+        "invocation_id",`Assoc ["type",`String "string"];
+        "publication_id",`Assoc ["type",`List [`String "string";`String "null"]];"max_message_bytes",`Assoc ["type",`String "integer"]]]]]
 
 let actor_label = function
   | Keeper name -> "keeper/" ^ name

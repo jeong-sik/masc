@@ -46,7 +46,7 @@ class LoginToolTests(unittest.TestCase):
         self.addCleanup(self.service_factory.stop)
         self.worker = server.Worker(self.root / "configuration.json")
         self.addCleanup(self.worker.close)
-        self.worker.handshake({"version": 2})
+        self.worker.handshake({"version": 3})
 
     def call(self, tool, arguments=None, *, caller=CALLER, companion=None):
         envelope = {"tool": tool, "arguments": arguments or {}, "caller": caller}
@@ -131,7 +131,7 @@ class LoginToolTests(unittest.TestCase):
         self.assertFalse(self.worker.status()["browser_login_available"])
         with self.assertRaises(server.InvalidInput):
             self.start()
-        self.worker.handshake({"version": 2})
+        self.worker.handshake({"version": 3})
         self.settings = replace(self.settings, extension=None)
         self.worker._settings_value = None
         self.assertFalse(self.worker.status()["browser_login_available"])
@@ -207,7 +207,7 @@ class SettingsRetirementTests(unittest.TestCase):
                              Logins(c, journal, extension, bridge=lambda descriptor: bridge, clock=lambda: now[0])), \
                          patch.object(server, "Service", side_effect=lambda engine: Service(engine, clock=lambda: now[0])):
                         worker = server.Worker(configuration)
-                        worker.handshake({"version": 2})
+                        worker.handshake({"version": 3})
 
                         def call(tool, arguments):
                             return worker.admitted({"tool": tool, "arguments": arguments, "caller": CALLER})
@@ -304,7 +304,7 @@ class SettingsRetirementTests(unittest.TestCase):
                      Logins(c, journal, extension, clock=lambda: 1000.)), \
                  patch.object(server, "Service", side_effect=lambda engine: Service(engine, clock=lambda: 1000.)):
                 worker = server.Worker(configuration)
-                worker.handshake({"version": 2})
+                worker.handshake({"version": 3})
                 reader = closer = None
                 try:
                     operation = worker.admitted({"tool": "onepassword_login", "arguments": {

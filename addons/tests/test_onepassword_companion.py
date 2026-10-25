@@ -34,7 +34,7 @@ class Host:
         self.listener.listen(1)
         self.listener.settimeout(2)
         self.descriptor = {"socket_path": self.path, "invocation_id": "a" * 64,
-                           "max_message_bytes": maximum}
+                           "max_message_bytes": maximum, "publication_id": None}
         self.messages, self.errors = [], []
         self.connections = 0
 
@@ -220,7 +220,7 @@ class CompanionTests(unittest.TestCase):
                 listener.listen(1)
                 listener.setblocking(False)
                 client = bridge.Companion({"socket_path": path, "invocation_id": "c" * 64,
-                                           "max_message_bytes": 4096})
+                                           "max_message_bytes": 4096, "publication_id": None})
                 self.addCleanup(client.cancel)
                 client.cancel()
                 for _ in range(2):
@@ -393,7 +393,7 @@ class CompanionTests(unittest.TestCase):
                 listener.listen(1)
                 listener.setblocking(False)
                 client = bridge.Companion({"socket_path": path, "invocation_id": "d" * 64,
-                                           "max_message_bytes": 4096})
+                                           "max_message_bytes": 4096, "publication_id": None})
                 self.addCleanup(client.close)
                 entered, proceed = threading.Event(), threading.Event()
                 cancel_original = client.interrupt
@@ -527,7 +527,7 @@ class CompanionTests(unittest.TestCase):
             path = str(Path(directory).resolve() / "s")
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
                 listener.bind(path)
-                descriptor = {"socket_path": path, "invocation_id": "b" * 64, "max_message_bytes": 4096}
+                descriptor = {"socket_path": path, "invocation_id": "b" * 64, "max_message_bytes": 4096, "publication_id": None}
                 endpoint = bridge.Endpoint.decode(descriptor)
                 self.assertNotIn("b" * 64, repr(endpoint))
                 os.chmod(directory, 0o755)

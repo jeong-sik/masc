@@ -55,11 +55,11 @@ class WorkerTests(unittest.TestCase):
         self.assertTrue((PACKAGE / "skills" / "onepassword" / "SKILL.md").is_file())
 
     def test_private_companion_negotiation_grants_only_login_start(self):
-        responses = self.call([self.rpc("lane_companion", {"version": 2}),
+        responses = self.call([self.rpc("lane_companion", {"version": 3}),
                                self.rpc("lane_companion", {"token": "MUST_NOT_LEAK"}, 2),
                                self.rpc("lane_call", {"tool": "lane_companion", "arguments": {},
                                                        "caller": {"kind": "operator"}}, 3)])
-        self.assertEqual(responses[0]["result"], {"content": [], "structuredContent": {"version": 2, "tools": ["onepassword_login"]},
+        self.assertEqual(responses[0]["result"], {"content": [], "structuredContent": {"version": 3, "tools": ["onepassword_login"]},
                                                 "isError": False})
         self.assertTrue(responses[1]["result"]["isError"])
         self.assertTrue(responses[2]["result"]["isError"])
@@ -67,7 +67,7 @@ class WorkerTests(unittest.TestCase):
 
     def test_deferred_bind_requires_exact_host_protocol_version(self):
         responses = self.call([self.rpc("lane_companion", arguments, index) for index, arguments in
-                               enumerate([{}, {"version": 1}, {"version": 3}, {"version": 2.0}], 1)])
+                               enumerate([{}, {"version": 1}, {"version": 2}, {"version": 3.0}], 1)])
         self.assertTrue(all(response["result"]["isError"] for response in responses))
 
     def test_status_requires_host_context_and_cannot_select_oauth_controls(self):

@@ -115,7 +115,12 @@ let call ~continuation ~principal ~config ~access ~reserved ~(export : Lane_addo
   let events = event_batch ~principal ~name in
   let on_result result = Option.iter (fun batch -> Machine_addon_events.record batch result) events in
   let on_complete () = Option.iter Machine_addon_events.ready events in
-  let result = Lane_addon_runtime.call_exported_tool_with_authority ~continuation ~on_complete ~on_result ~authorize
+  let companion_publish=match continuation,Fs_compat.get_fs_opt () with
+    | Some (Ok _),Some fs -> Some (fun ~origin ~output_schema ~event ->
+        Keeper_addon_publication.deliver ~fs ~config ~origin ~output_schema ~event
+        |> Result.map_error (fun _ -> ()))
+    | (Some (Ok _)|Some (Error _)|None),(Some _|None) -> None in
+  let result = Lane_addon_runtime.call_exported_tool_with_authority ~companion_publish ~continuation ~on_complete ~on_result ~authorize
     ~principal:(Some principal) ~config ~access ~reserved ~export ~arguments in
   Machine_addon_events.drain ();
   result
@@ -153,7 +158,7 @@ let release_shared_controller ~events ~config ~holder ~by ~reason =
            | None -> Ok None)
       | Some export ->
           let authorize ~release_controller ~snapshot:_ ~invoke:_ = release_controller ~holder ~reason in
-          Lane_addon_runtime.call_exported_tool_with_authority ~continuation:None ~on_complete:(fun () -> ())
+          Lane_addon_runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None ~on_complete:(fun () -> ())
             ~on_result:(Machine_addon_events.record events)
             ~authorize:(Some authorize)
             ~principal:(Some (Lane_addon_call_context.Host_actor by))

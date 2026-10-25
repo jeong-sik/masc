@@ -1,13 +1,13 @@
 # Original Keeper continuation for companion operations
 
 Implementation and design for the remaining continuation work in
-[#45736](https://github.com/jeong-sik/masc/issues/45736). The current version-2
-companion and public login tools do not implement private progress delivery.
+[#45736](https://github.com/jeong-sik/masc/issues/45736). The version-3 companion now has a private publication channel.
+The worker Service does not yet drain its outbox into that channel.
 Original source capture and first-writer retention are source implementation
 in `Lane_addon_companion_origin`, before companion grant issuance. Canonical
 publication retention, a durable Keeper queue producer and source-checked
-observation intake are now implemented on the host. The current worker
-transport does not call that producer yet. A preparing
+observation intake are now implemented on the host. The original private broker can now call that producer through a
+host-injected callback; the worker Service does not call its Publisher yet. A preparing
 receipt or a private worker's completed fill does not prove the Keeper resumed.
 
 ## Ownership before dispatch (source implementation)
@@ -39,10 +39,10 @@ is an intent retained before dispatch, not a receipt that a grant, login request
 fill or wake happened. Private publication and owner-loss records must preserve
 that distinction when the delivery path is connected.
 
-## A private publication control (remaining implementation)
+## A private publication control (source implementation)
 
-Use the existing independent companion socket, with a new negotiated protocol
-version, for progress publication. Do not send asynchronous work through the
+The existing independent companion socket negotiates version 3 for progress
+publication with a separate private capability. Do not send asynchronous work through the
 worker's serialized public MCP request. The worker supplies only an original
 invocation capability, publication ID, typed publication kind and public output.
 It cannot supply a Keeper, task, source, conversation or wake destination.
@@ -50,7 +50,10 @@ It cannot supply a Keeper, task, source, conversation or wake destination.
 The host captures the export's output schema with its original invocation and
 validates every worker publication against it before retention or delivery.
 Discard raw worker text, metadata and exception prose at the same boundary as
-ordinary companion tool replies. For 1Password this output contains only the
+ordinary companion tool replies. Machine_addon_host injects the Keeper
+admission callback; Lane_addon_runtime captures the exact origin and output
+schema, and rechecks the original provider, caller and configuration on each
+delivery. It never requires Browser authority for publication. For 1Password this output contains only the
 operation ID, closed phase, submitted-fill fact and false website-verification
 claim. The package remains responsible for its public projection.
 
@@ -58,8 +61,9 @@ Browser command authority and progress delivery have different lifetimes. A
 released or withdrawn Browser grant permits no more Browser input. A separate
 publication binding may still deliver the final committed result of that same
 invocation, then end explicitly. It cannot bind another Browser or adopt another
-provider connection. Provider retirement closes publication admission; the host
-records loss of that original owner rather than accepting a successor's claim.
+provider connection. Provider retirement closes and joins publication admission. A separate durable
+host owner-loss notice remains to be implemented; no successor may claim the
+original private authority.
 No elapsed-time expiry or replacement operation is introduced.
 
 ## Commit, deliver and acknowledge
@@ -76,8 +80,8 @@ binding or executing anything. The private `acknowledge_publication` requires
 the exact original caller and complete, type-correct envelope. A duplicate ACK
 does not rewrite its record. Its `host_accepted` marker means durable host
 admission only; it does not claim queue consumption or Keeper resumption. Neither
-method is a public MCP tool, and actual host publication/ACK transport is still
-unconnected. The private journal uses version 2 with strict closed decoding.
+method is a public MCP tool, and the private transport is implemented but the Service-owned delivery pump is
+still unconnected. The private journal uses version 2 with strict closed decoding.
 
 After an uncertain journal write the original engine fences admission, further
 writes and private sockets. It cannot overwrite a possibly committed publication
@@ -101,9 +105,10 @@ is copied into this record.
 `Addon_operation_changed` stimulus before its optional wake hint or successful
 return. The queue carries original source/channel and immutable pointers; output
 stays in the canonical host record. Retries consult the existing queue and its
-strict reaction-ledger consumption evidence. Source capture and this internal
-producer are not publisher authentication; the remaining private broker caller
-must retain its exact original provider/caller scope throughout delivery.
+strict reaction-ledger consumption evidence. Source capture and this internal producer are not publisher authentication.
+The private broker retains its separate original invocation capability and
+provider/caller scope through the callback; no queue path accepts a package
+supplied route.
 
 Keeper intake strictly rereads both the origin and publication before rendering
 public output into the prompt. A different Task, Keeper or route cannot borrow

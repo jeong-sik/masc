@@ -60,8 +60,8 @@ for line in sys.stdin:
         if len(sys.argv) > 1:
             with open(sys.argv[1],"a") as output: output.write(params["name"]+"\n")
         if params["name"] == "lane_companion":
-            assert params["arguments"] == {"version":2}
-            value = {"version":3 if mode=="companion-version" else 2,"tools":["increment"]}
+            assert params["arguments"] == {"version":3}
+            value = {"version":2 if mode=="companion-version" else 3,"tools":["increment"]}
             print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":{"content":[],"structuredContent":value}}),flush=True)
             continue
         if params["name"] == "lane_controller_snapshot" and mode == "companion-controller-error":
@@ -85,6 +85,7 @@ for line in sys.stdin:
                 assert arguments["caller"] == {"kind":"keeper","name":"receipt-finalizer"}
                 if companion:
                     assert arguments["companion"]["invocation_id"] == "a"*64
+                    assert arguments["companion"]["publication_id"] == "b"*64
                     assert "companion" not in arguments["arguments"]
                 arguments = arguments["arguments"]
             value = {"value":arguments["value"]+1}
@@ -106,7 +107,8 @@ for line in sys.stdin:
 let require = function Ok value -> value | Error _ -> fail "protocol operation failed"
 let companion_context () =
   Lane_addon_call_context.companion_of_json (`Assoc ["socket_path",`String "/private/companion/s";
-    "invocation_id",`String (String.make 64 'a');"max_message_bytes",`Int 4096]) |> require
+    "invocation_id",`String (String.make 64 'a');"max_message_bytes",`Int 4096;
+    "publication_id",`String (String.make 64 'b')]) |> require
 
 let negotiated_companion mode () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let calls=Filename.temp_file "companion-protocol-" ".calls" in

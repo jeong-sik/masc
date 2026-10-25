@@ -114,6 +114,34 @@ let custom_model_error_to_string = function
   | Invalid_endpoint -> "custom model requires an absolute HTTP(S) endpoint"
 ;;
 
+(* Uri's public grammar consumes a numeric port even when its int conversion
+   overflows to None. Check that protocol component against the raw authority
+   so an explicit port can never silently become a scheme-default destination.
+   Full URI syntax is validated by Uri.Parser before this check. *)
+let endpoint_port_is_lossless url uri =
+  match String.index_opt url ':' with
+  | None -> false
+  | Some scheme_end ->
+    let start = scheme_end + 3 in
+    let rec authority_end offset =
+      if offset = String.length url then offset
+      else match url.[offset] with
+        | '/' | '?' | '#' -> offset
+        | _ -> authority_end (offset + 1)
+    in
+    let authority = String.sub url start (authority_end start - start) in
+    let after marker offset = match String.rindex_opt authority marker with
+      | None -> true | Some marker_offset -> offset > marker_offset in
+    match String.rindex_opt authority ':' with
+    | Some offset when after '@' offset && after ']' offset ->
+      let raw = String.sub authority (offset + 1) (String.length authority - offset - 1) in
+      if raw = "" then Uri.port uri = None
+      else (match int_of_string_opt raw, Uri.port uri with
+        | Some requested, Some parsed -> requested = parsed && parsed >= 1 && parsed <= 65535
+        | _ -> false)
+    | Some _ | None -> Uri.port uri = None
+;;
+
 let parse_custom_model selection =
   match String.index_opt selection '@' with
   | None -> Error Missing_endpoint
@@ -127,7 +155,8 @@ let parse_custom_model selection =
       | Error _ -> Error Invalid_endpoint
       | Ok uri ->
         (match Uri.scheme uri, Uri.host uri with
-         | Some ("http" | "https"), Some host when host <> "" -> Ok (model, url)
+         | Some ("http" | "https"), Some host
+           when host <> "" && endpoint_port_is_lossless url uri -> Ok (model, url)
          | _ -> Error Invalid_endpoint)
       | exception Invalid_argument _ -> Error Invalid_endpoint
 ;;

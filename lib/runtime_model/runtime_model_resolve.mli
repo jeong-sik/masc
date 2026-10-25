@@ -46,6 +46,8 @@ val custom_model_error_to_string : custom_model_error -> string
 
 (** Parse an explicit [model@url] custom HTTP model selection.
     Both model and an absolute HTTP(S) endpoint are required. No process
-    environment or discovery state supplies an omitted endpoint. The model
+    environment or discovery state supplies an omitted endpoint. An explicit
+    numeric port must survive parsing and lie within the TCP port range 1–65535.
+    The model
     and URL are trimmed at the boundary; URL path/query bytes are preserved. *)
 val parse_custom_model : string -> (string * string, custom_model_error) result

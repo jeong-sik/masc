@@ -12,6 +12,73 @@ let fetch ~config (descriptor : Keeper_peer_artifact_ref.t) =
   | Some bytes when String.length bytes = reference.bytes -> Ok bytes
   | Some _ -> Error "Exported artifact size differs from its reference"
 
+let materialize ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch ~read ~write =
+  let carried_data = function None -> [] | Some data -> ["write_result", data] in
+  let failure ?metadata ?write_result ?file_change_evidence ?(retained_artifacts = []) ~effect_disposition detail =
+    Keeper_tool_execution.failure_data ~class_:Tool_result.Runtime_failure
+      ~effect_disposition ?metadata ~message:detail
+      (`Assoc (["path", `String path;
+                "artifact", Keeper_peer_artifact_ref.to_json artifact] @ carried_data write_result
+        @ (match file_change_evidence with
+           | None -> []
+           | Some evidence -> ["write_evidence", Keeper_file_change_evidence.to_yojson evidence])))
+    |> Keeper_tool_execution.with_retained_artifacts (artifact.blob :: retained_artifacts)
+  in
+  match fetch () with
+  | Error detail -> failure ~effect_disposition:Tool_result.Proven_pre_effect detail
+  | Ok expected ->
+    (* Read one byte past the expected length: a matching prefix is not proof
+       that the recipient has exactly this artifact. The fetched string, not
+       an untrusted descriptor size, bounds the allocation. *)
+    let observe () = read ~max_bytes:(String.length expected + 1) in
+    let receipt ?metadata ?write_result ?(retained_artifacts = []) ~recovered () =
+      Keeper_tool_execution.success_data ?metadata
+        (`Assoc (["ok", `Bool true; "path", `String path;
+                 "mode", `String "overwrite"; "bytes", `Int (String.length expected);
+                 "write_attempted", `Bool recovered;
+                 "verified", `Bool true; "recovered", `Bool recovered;
+                 "artifact", Keeper_peer_artifact_ref.to_json artifact] @ carried_data write_result))
+      |> Keeper_tool_execution.with_retained_artifacts (artifact.blob :: retained_artifacts)
+    in
+    let after_write result =
+      match result.Keeper_tool_execution.disposition with
+      | Tool_result.Deferred _
+      | Tool_result.Failed (Tool_result.Policy_rejection | Tool_result.Workflow_rejection
+                         | Tool_result.Dependency_unavailable | Tool_result.Operator_cancelled) -> result
+      | Tool_result.Failed Tool_result.Runtime_failure ->
+        (match result.failure_effect_disposition with
+         | Tool_result.Proven_pre_effect -> result
+         | Tool_result.Effect_outcome_unknown | Tool_result.Proven_post_effect ->
+           (match observe () with
+            | Ok actual when String.equal actual expected ->
+              receipt ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
+                ~recovered:true ()
+            | Ok _ | Error _ -> result))
+      | Tool_result.Completed () ->
+        (match observe () with
+         | Ok actual when String.equal actual expected -> result
+         | Ok _ ->
+           failure ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
+             ?file_change_evidence:result.file_change_evidence
+             ~effect_disposition:Tool_result.Proven_post_effect
+             "Artifact write completed, but recipient bytes differ. Inspect the recipient; do not blindly repeat the write."
+         | Error error ->
+           failure ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
+             ?file_change_evidence:result.file_change_evidence
+             ~effect_disposition:Tool_result.Proven_post_effect
+             ("Artifact write completed, but recipient verification failed: "
+              ^ Keeper_sandbox_read_backend.read_error_to_string error))
+    in
+    match observe () with
+    | Ok actual when String.equal actual expected -> receipt ~recovered:false ()
+    | Ok _ | Error (Keeper_sandbox_read_backend.Missing_file _) -> after_write (write ())
+    | Error (Keeper_sandbox_read_backend.Not_a_file detail
+            | Keeper_sandbox_read_backend.Read_refused detail) ->
+      Keeper_tool_execution.failure ~class_:Tool_result.Workflow_rejection
+        ~effect_disposition:Tool_result.Proven_pre_effect detail
+    | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
+      failure ~effect_disposition:Tool_result.Proven_pre_effect detail
+
 let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
   let fail class_ detail = Keeper_tool_execution.failure ~class_ detail in
   match Keeper_peer_artifact_request.of_json args with
@@ -65,5 +132,10 @@ let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
                   data)
         with Sys_error detail -> fail Tool_result.Runtime_failure detail))
   | Ok (Keeper_peer_artifact_request.Materialize { path; artifact }) ->
-    write (`Assoc ["path", `String path; "mode", `String "overwrite";
-                  "content_artifact", Tool_output.normalized_artifact_ref_to_json artifact.blob])
+    materialize ~artifact ~path ~fetch:(fun () -> fetch ~config artifact)
+      ~read:(fun ~max_bytes ->
+        Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ?turn_sandbox_factory
+          ~config ~meta ~path ~max_bytes ())
+      ~write:(fun () ->
+        write (`Assoc ["path", `String path; "mode", `String "overwrite";
+                      "content_artifact", Tool_output.normalized_artifact_ref_to_json artifact.blob]))

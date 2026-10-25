@@ -159,6 +159,14 @@ binaries and archive digest were verified. This is a real-browser probe with
 a scripted model and synthetic loopback website, not an actual Keeper model
 turn, 1Password extension, account sign-in or production installation.
 
+The same four Browser binaries were also exercised locally with Chrome for
+Testing `156.0.8078.47`. The private profile passed `act` and screenshot, but
+replacement-browser close returned unconfirmed shutdown. The persistent
+profile's initial open failed, followed by SingletonLock refusals. That local
+run failed; the CI profile results do not establish local teardown/startup
+reliability. No matching test-owned Browser process remained after the driver
+exited, and the original profile/state was preserved for diagnosis.
+
 ## Earlier status installation
 
 On 2026-10-24, candidate `dc3e8ed35ff065c4cff859a8473531b4561373db`

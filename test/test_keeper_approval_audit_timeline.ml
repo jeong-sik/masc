@@ -237,10 +237,138 @@ let test_unknown_authorization_source_is_none () =
     (Option.is_none (Q.authorization_source_of_string "always_allowed"))
 ;;
 
+let with_audit_workspace f =
+  let base_path = Filename.temp_file "approval-owner-latest-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_store ();
+      Fs_compat.remove_tree base_path)
+    (fun () -> f base_path)
+;;
+
+let audit_location ~base_path =
+  Dated_jsonl.Store.(at (root_of_base_path ~base_path) Root.Audit_approvals)
+;;
+
+let append_audit ~base_path ~keeper_name id =
+  let receipt =
+    Audit.record ~base_path ~event_type:Audit.Gate_allowed ~id ~keeper_name
+      ~tool_name:"external-effect" ()
+  in
+  match receipt.write_result, receipt.cleanup_failure with
+  | Ok (), None -> ()
+  | Error _, _ | Ok (), Some _ -> fail "actual audit append did not settle cleanly"
+;;
+
+let recent_ids ~base_path ?keeper_name n =
+  match Audit.read_recent ~base_path ?keeper_name ~n () with
+  | Error error -> fail (Audit.read_error_to_string error)
+  | Ok rows ->
+    List.map
+      (fun row ->
+        match field "id" row with
+        | Some id -> id
+        | None -> fail "selected record has no ID")
+      rows
+;;
+
+let test_sparse_owner_history () =
+  with_audit_workspace @@ fun base_path ->
+  append_audit ~base_path ~keeper_name:"target" "older";
+  (* Move an actual writer-produced row to yesterday's canonical file so the
+     lookup has to cross both a busy day and a physical day boundary. *)
+  let location = audit_location ~base_path in
+  let today = Dated_jsonl.Store.dated_path_now location in
+  let yesterday =
+    Dated_jsonl.Store.dated_path location ~ts:(Unix.gettimeofday () -. 86400.)
+  in
+  Fs_compat.mkdir_p (Filename.dirname yesterday.path);
+  Sys.rename today.path yesterday.path;
+  for idx = 1 to 650 do
+    append_audit ~base_path ~keeper_name:"busy" (string_of_int idx)
+  done;
+  append_audit ~base_path ~keeper_name:"target" "newer";
+  check (list string) "unrelated rows cannot hide older target"
+    [ "newer"; "older" ] (recent_ids ~base_path ~keeper_name:"target" 2);
+  append_audit ~base_path ~keeper_name:"target" "fresh";
+  check (list string) "immediate append is visible without resetting store"
+    [ "fresh"; "newer" ] (recent_ids ~base_path ~keeper_name:"target" 2);
+  check (list string) "EOF returns every available target"
+    [ "fresh"; "newer"; "older" ] (recent_ids ~base_path ~keeper_name:"target" 8);
+  check (list string) "global latest preserves order"
+    [ "fresh"; "newer"; "650" ] (recent_ids ~base_path 3);
+  with_audit_workspace @@ fun other ->
+  append_audit ~base_path:other ~keeper_name:"target" "other-workspace";
+  check (list string) "same Keeper in another workspace stays separate"
+    [ "other-workspace" ] (recent_ids ~base_path:other ~keeper_name:"target" 2);
+  check (list string) "original workspace remains unchanged"
+    [ "fresh"; "newer" ] (recent_ids ~base_path ~keeper_name:"target" 2)
+;;
+
+let append_raw_audit ~base_path line =
+  let path = Dated_jsonl.Store.dated_path_now (audit_location ~base_path) in
+  Fs_compat.mkdir_p (Filename.dirname path.path);
+  let channel = open_out_gen [ Open_wronly; Open_append; Open_creat ] 0o600 path.path in
+  Fun.protect ~finally:(fun () -> close_out channel)
+    (fun () -> output_string channel (line ^ "\n"))
+;;
+
+let expect_recent_error ~base_path =
+  match Audit.read_recent ~base_path ~keeper_name:"target" ~n:2 () with
+  | Ok _ -> fail "uncertain ownership or unreadable audit became an exact result"
+  | Error error ->
+    check bool "typed read stage" true (error.stage = Audit.Read_recent);
+    check bool "error retains detail" true (String.length error.detail > 0)
+;;
+
+let test_scoped_corruption_boundary () =
+  with_audit_workspace @@ fun base_path ->
+  append_audit ~base_path ~keeper_name:"target" "older";
+  append_raw_audit ~base_path "{broken";
+  append_audit ~base_path ~keeper_name:"target" "newer";
+  check (list string) "complete newest suffix does not visit older corruption"
+    [ "newer" ] (recent_ids ~base_path ~keeper_name:"target" 1);
+  expect_recent_error ~base_path
+;;
+
+let test_unidentified_owner_is_not_skipped () =
+  List.iter
+    (fun invalid ->
+      with_audit_workspace @@ fun base_path ->
+      append_audit ~base_path ~keeper_name:"target" "older";
+      append_raw_audit ~base_path invalid;
+      append_audit ~base_path ~keeper_name:"target" "newer";
+      expect_recent_error ~base_path)
+    [ "{}"; "{\"keeper\":3}";
+      "{\"keeper\":\"busy\",\"keeper\":\"target\"}" ]
+;;
+
+let test_empty_and_unreadable_audit () =
+  with_audit_workspace @@ fun base_path ->
+  check (list string) "missing store is empty" []
+    (recent_ids ~base_path ~keeper_name:"target" 2);
+  let directory = Dated_jsonl.Store.dir (audit_location ~base_path) in
+  (* Replace the empty store with a file: absence and invalid layout differ. *)
+  if Sys.file_exists directory then Fs_compat.remove_tree directory;
+  Fs_compat.mkdir_p (Filename.dirname directory);
+  Out_channel.with_open_text directory (fun out -> output_string out "not a directory");
+  expect_recent_error ~base_path;
+  check (list string) "zero limit performs no I/O" []
+    (recent_ids ~base_path ~keeper_name:"target" 0)
+;;
+
 let () =
   Alcotest.run
     "Keeper approval audit timeline"
-    [ ( "vocabulary"
+    [ ( "exact owner history"
+      , [ test_case "sparse history across days and fresh append" `Quick test_sparse_owner_history
+        ; test_case "corruption is bounded by selected suffix" `Quick test_scoped_corruption_boundary
+        ; test_case "unknown ownership is explicit" `Quick test_unidentified_owner_is_not_skipped
+        ; test_case "absence differs from unreadable store" `Quick test_empty_and_unreadable_audit
+        ] )
+    ; ( "vocabulary"
       , [ test_case "every event round-trips" `Quick test_round_trip
         ; test_case
             "no writer event renders as unrecognized"

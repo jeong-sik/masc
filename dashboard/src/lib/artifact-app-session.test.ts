@@ -1,0 +1,102 @@
+import { beforeEach,afterEach,expect,it,vi } from 'vitest'
+import { waitFor } from '@testing-library/preact'
+import { appRequest,readAppState,writeAppState,type AppState,type AppRequest } from '../api/artifact-app-data'
+import { ArtifactAppSession } from './artifact-app-session'
+import { appInputRecoveries,discardAppInput,retainAppInput } from './artifact-app-recovery'
+vi.mock('../api/artifact-app-data',async original=>({...await original<typeof import('../api/artifact-app-data')>(),readAppState:vi.fn(),writeAppState:vi.fn()}))
+const workspace={basePath:'/app-session',mascRoot:'/app-session/.masc'},target={artifact_id:`artifact-${'f'.repeat(32)}`,revision:1}
+const initial:AppState={schema:'masc.artifact_app_data.v1',target,actor:'human',version:0,data:{forms:{},app:{}},receipts:[]}
+const inputs=(memo:string)=>({forms:{field:{kind:'value' as const,type:'textarea',value:memo}},app:{}})
+const saved=(request:AppRequest,base:AppState=initial):AppState=>({...base,version:request.expected_version+1,data:request.data,
+  receipts:[...base.receipts,{id:request.id,expected_version:request.expected_version,data_sha256:'a'.repeat(64),at:'now'}]})
+function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(ok=>{resolve=ok});return {promise,resolve}}
+function open(base:AppState=initial){
+  let owner=true
+  const result=vi.fn(),restore=vi.fn(),changed=vi.fn()
+  const session=new ArtifactAppSession({initial:base,workspace,current:()=>owner,result,restore,changed})
+  return {session,result,restore,loseOwner:()=>{owner=false}}
+}
+beforeEach(()=>{vi.mocked(readAppState).mockReset();vi.mocked(writeAppState).mockReset()})
+afterEach(()=>{vi.unstubAllGlobals();for(const copy of appInputRecoveries(workspace,initial))discardAppInput(copy);localStorage.clear()})
+it('keeps typing locally, commits on change and clears only acknowledged inputs',async()=>{
+  vi.mocked(writeAppState).mockImplementation(async request=>saved(request))
+  const {session,result}=open()
+  session.input(inputs('입력 중'),1,false)
+  expect(writeAppState).not.toHaveBeenCalled();expect(session.snapshot().recovery?.persisted).toBe(true)
+  session.input(inputs('저장할 입력'),2,true)
+  await waitFor(()=>expect(session.snapshot().mode).toBe('ready'))
+  expect(writeAppState).toHaveBeenCalledTimes(1);expect(session.snapshot().pending).toBe(false)
+  expect(appInputRecoveries(workspace,initial)).toHaveLength(0);expect(result).toHaveBeenLastCalledWith(2,'saved')
+})
+it('reconciles a lost committed response with GET only and preserves newer typing',async()=>{
+  vi.mocked(writeAppState).mockRejectedValue(new Error('ACK lost'))
+  const {session}=open();session.input(inputs('committed'),1,true)
+  await waitFor(()=>expect(session.snapshot().mode).toBe('unknown'))
+  const request=vi.mocked(writeAppState).mock.calls[0]![0]
+  session.input(inputs('newer unsent input'),2,false)
+  vi.mocked(readAppState).mockResolvedValue(saved(request))
+  await session.check()
+  expect(writeAppState).toHaveBeenCalledTimes(1);expect(session.snapshot().mode).toBe('ready')
+  expect(session.snapshot().data).toEqual(inputs('newer unsent input'));expect(session.snapshot().pending).toBe(true)
+  vi.mocked(writeAppState).mockImplementation(async next=>saved(next,saved(request)))
+  await session.save();expect(session.snapshot().pending).toBe(false)
+  expect(vi.mocked(writeAppState).mock.calls[1]![0].expected_version).toBe(1)
+})
+it('retains the exact failed request for one explicit retry, without sending newer data under its id',async()=>{
+  vi.mocked(writeAppState).mockRejectedValueOnce(new Error('not committed'))
+  const {session}=open();session.input(inputs('frozen'),1,true)
+  await waitFor(()=>expect(session.snapshot().mode).toBe('unknown'))
+  const request=vi.mocked(writeAppState).mock.calls[0]![0]
+  session.input(inputs('later'),2,false);vi.mocked(readAppState).mockResolvedValue(initial)
+  await session.check();expect(session.snapshot().mode).toBe('retry')
+  vi.mocked(writeAppState).mockImplementation(async next=>saved(next))
+  await session.retry()
+  expect(vi.mocked(writeAppState).mock.calls[1]![0]).toEqual(request)
+  expect(session.snapshot().data).toEqual(inputs('later'));expect(session.snapshot().pending).toBe(true)
+})
+it('requires a deliberate conflict choice and keeps the other-tab copy after a save',async()=>{
+  const remote=saved(appRequest(initial,inputs('other window')))
+  vi.mocked(writeAppState).mockRejectedValueOnce(new Error('409 conflict'))
+  const {session}=open();session.input(inputs('my window'),1,true)
+  await waitFor(()=>expect(session.snapshot().mode).toBe('unknown'))
+  vi.mocked(readAppState).mockResolvedValue(remote);await session.check()
+  expect(session.snapshot().mode).toBe('conflict')
+  session.input(inputs('my later input'),2,true);expect(writeAppState).toHaveBeenCalledTimes(1)
+  const other=retainAppInput('another-tab',workspace,initial,inputs('separate recovery'),null)
+  vi.mocked(writeAppState).mockImplementation(async request=>saved(request,remote))
+  await session.overwrite();expect(session.snapshot().pending).toBe(false)
+  expect(vi.mocked(writeAppState).mock.calls[1]![0].expected_version).toBe(1)
+  expect(appInputRecoveries(workspace,initial)).toEqual([other])
+})
+it('does not clear recovery or notify a new owner when an old response arrives',async()=>{
+  const pending=deferred<AppState>();vi.mocked(writeAppState).mockReturnValue(pending.promise)
+  const first=open();first.session.input(inputs('old owner'),1,true)
+  const request=vi.mocked(writeAppState).mock.calls[0]![0]
+  first.loseOwner();first.session.stop();pending.resolve(saved(request));await Promise.resolve()
+  expect(first.result).not.toHaveBeenCalled()
+  const copy=appInputRecoveries(workspace,initial)[0]!;expect(copy.request).toEqual(request)
+  const second=open(saved(request));second.session.restore(copy)
+  expect(writeAppState).toHaveBeenCalledTimes(1);expect(second.session.snapshot().mode).toBe('unknown')
+  vi.mocked(readAppState).mockResolvedValue(saved(request));await second.session.check()
+  expect(second.session.snapshot().pending).toBe(false);expect(appInputRecoveries(workspace,initial)).toHaveLength(0)
+})
+it('keeps the latest in-page input and old durable fallback under quota, then cleans only its own copies',async()=>{
+  const {session}=open();session.input(inputs('durable'),1,false)
+  const storage=localStorage
+  vi.stubGlobal('localStorage',{get length(){return storage.length},key:storage.key.bind(storage),getItem:storage.getItem.bind(storage),removeItem:storage.removeItem.bind(storage),setItem(){throw new DOMException('full','QuotaExceededError')}})
+  session.input(inputs('memory only'),2,false)
+  expect(session.snapshot().recovery?.persisted).toBe(false);expect(appInputRecoveries(workspace,initial)).toHaveLength(1)
+  expect(session.snapshot().data).toEqual(inputs('memory only'));expect(storage.length).toBe(1)
+  vi.unstubAllGlobals();vi.mocked(writeAppState).mockImplementation(async request=>saved(request))
+  await session.save();expect(storage.length).toBe(0)
+})
+it('blocks writes during a reconciliation read and keeps edits made while it is pending',async()=>{
+  const {session}=open();session.input(inputs('unsent'),1,false)
+  const read=deferred<AppState>();vi.mocked(readAppState).mockReturnValue(read.promise)
+  const check=session.check();session.input(inputs('edited during GET'),2,true)
+  expect(writeAppState).not.toHaveBeenCalled();expect(session.snapshot().mode).toBe('checking')
+  read.resolve(initial);await check
+  expect(session.snapshot().data).toEqual(inputs('edited during GET'));expect(session.snapshot().mode).toBe('conflict')
+  session.useServer();expect(session.snapshot().data).toEqual(initial.data)
+  expect(session.snapshot().pending).toBe(false)
+})

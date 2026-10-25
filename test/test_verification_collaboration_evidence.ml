@@ -49,8 +49,8 @@ let invalid_input surface name args =
     check bool "input rejection explains the error" true
       (String.trim (Tool_result.message result) <> "")
   | _ -> fail "malformed source input unexpectedly succeeded"
-let post ~author ~visibility ?origin ?meta_json content =
-  match Board_dispatch.create_post ~author ~content ~post_kind:Board.System_post
+let post ~author ~visibility ?origin ?meta_json ?(post_kind=Board.System_post) content =
+  match Board_dispatch.create_post ~author ~content ~post_kind
     ~visibility ~ttl_hours:0 ?origin ?meta_json () with
   | Ok post -> post
   | Error error -> failf "post: %s" (Board_tool.board_error_to_string error)
@@ -108,8 +108,12 @@ let task_args id = `Assoc ["task_ids", `List [`String id]]
 let test_task_sources_preserve_committed_state () = with_fixture (fun config ->
   let open Yojson.Safe.Util in
   let prior = new_task config ~title:"Prior approval" ~description:"Produce the first increment" in
-  List.iter (fun action -> ignore (Workspace.transition_task_r config ~agent_name:"producer"
-    ~task_id:prior.id ~action ~notes:"First increment evidence" () |> require "prior transition"))
+  List.iter (fun action -> match Workspace.transition_task_r config ~agent_name:"producer"
+    ~task_id:prior.id ~action ~notes:"First increment evidence"
+    ~prepare_verification_request:(Verification_protocol.create_submit_request ~config) () with
+    | Ok _ -> ()
+    | Error error -> failf "prior %s: %s" (Masc_domain.task_action_to_string action)
+        (Masc_error.to_string error))
     [Masc_domain.Claim; Masc_domain.Start; Masc_domain.Submit_for_verification];
   let pending = Workspace.read_backlog_r config |> require "pending primary" in
   let row = List.find (fun (task : Masc_domain.task) -> task.id = prior.id) pending.tasks in
@@ -268,7 +272,7 @@ let test_submission_freezes_sources () = with_fixture (fun config ->
   denied empty "masc_board_post_get" (post_args p) "verification_source_access_denied")
 
 let test_capture_failures_and_corruption () = with_fixture (fun config ->
-  let p = post ~author:"producer" ~visibility:Board.Direct "@recipient Private original" in
+  let p = post ~author:"producer" ~visibility:Board.Direct ~post_kind:Board.Human_post "@recipient Private original" in
   let require_error label = function Error _ -> () | Ok _ -> fail label in
   Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[board_ref p]
     |> require_error "Goal captured private source";
@@ -480,7 +484,7 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
         `Assoc ["source", `String "task"; "backlog_version", `Int primary.version;
           "backlog_last_updated", `String primary.last_updated; "task", Masc_domain.task_to_yojson task_row]])
     [task; goal];
-  let private_post = post ~author:"producer" ~visibility:Board.Direct ~meta_json:metadata "@peer Private source" in
+  let private_post = post ~author:"producer" ~visibility:Board.Direct ~post_kind:Board.Human_post ~meta_json:metadata "@peer Private source" in
   let task_private = VAT.create ~config ~producer:"producer"
     ~submitted_evidence:(capture config (Evidence.Task_producer "producer") [board_ref private_post])
     |> require "private snapshot" in

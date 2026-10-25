@@ -30,7 +30,11 @@ let restored_assistant response =
   let message = match assistant_message_of_response response with
     | Ok message -> message | Error error -> Alcotest.fail (show_assistant_message_error error) in
   let bytes = Agent_core.Checkpoint.message_to_json message |> Yojson.Safe.to_string in
-  match Agent_core.Checkpoint.message_of_json (Yojson.Safe.from_string bytes) with
+  let path = Filename.temp_file "responses-reasoning-history-" ".json" in
+  let restored = Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun channel -> output_string channel bytes);
+    In_channel.with_open_bin path In_channel.input_all) in
+  match Agent_core.Checkpoint.message_of_json (Yojson.Safe.from_string restored) with
   | Ok message -> message | Error _ -> Alcotest.fail "actual checkpoint message codec rejected history"
 let input message trailing = Codec.build_request ~config ~messages:(message :: trailing) ()
   |> Yojson.Safe.from_string |> member "input" |> to_list
@@ -96,6 +100,30 @@ let multiple_items () =
   Alcotest.(check (list string)) "native item order after persistence" ["reasoning";"function_call";"reasoning";"message"]
     (List.map(fun row->member "type" row |> to_string)rows)
 
+let blank_encrypted () =
+  let response=parse [reasoning "r" ~encrypted:" "
+    ~content:[text_part "reasoning_text" "plaintext without opaque carrier"];answer] in
+  check_reasoning "blank encrypted content is not opaque" ["plaintext without opaque carrier"] response
+let unknown_content_part () =
+  let response=parse [reasoning "r" ~content:[text_part "future_part" "extension"
+    ;text_part "reasoning_text" "recognized reasoning"];answer] in
+  check_reasoning "extensible parts do not discard recognized text" ["recognized reasoning"] response
+let malformed_content () =
+  let malformed = `Assoc ["type",`String "reasoning_text";"text",`Int 7] in
+  let json = `Assoc ["id",`String "malformed";"status",`String "completed"
+    ;"output",`List [reasoning "r" ~content:[malformed];answer]] in
+  match Codec.parse_response_result (Yojson.Safe.to_string json) with
+  | Error error -> Alcotest.(check string) "malformed recognized text fails closed"
+      "malformed_responses_reasoning:text" error
+  | Ok _ -> Alcotest.fail "malformed recognized text silently disappeared"
+let malformed_carrier () =
+  let json=`Assoc ["id",`String "malformed";"status",`String "completed"
+    ;"output",`List [`Assoc["type",`String "reasoning";"content",`Int 7];answer]] in
+  match Codec.parse_response_result (Yojson.Safe.to_string json) with
+  | Error error -> Alcotest.(check string) "malformed content carrier fails closed"
+      "malformed_responses_reasoning:content" error
+  | Ok _ -> Alcotest.fail "malformed content carrier silently disappeared"
+
 let () = Alcotest.run "responses_reasoning_content"
   ["public history",List.map(fun(name,fn)->Alcotest.test_case name `Quick fn)
     ["full content through tool and later turn",full_tool_history
@@ -103,4 +131,8 @@ let () = Alcotest.run "responses_reasoning_content"
     ;"existing summary control",summary_control
     ;"blank full content fallback",blank_full_falls_back
     ;"opaque carrier control",encrypted_control
-    ;"multiple native reasoning items",multiple_items]]
+    ;"multiple native reasoning items",multiple_items
+    ;"blank encrypted content",blank_encrypted
+    ;"unknown content extensions",unknown_content_part
+    ;"malformed recognized text",malformed_content
+    ;"malformed content carrier",malformed_carrier]]

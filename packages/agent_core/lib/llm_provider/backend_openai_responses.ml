@@ -593,31 +593,12 @@ let content_blocks_of_output_message item =
   | None -> []
 ;;
 
-let reasoning_text_of_summary_item = function
-  | `Assoc fields ->
-    (match List.assoc_opt "type" fields, List.assoc_opt "text" fields with
-     | Some (`String ("summary_text" | "text")), Some (`String text) -> Some text
-     | _, _ -> None)
-  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
-;;
-
 let content_blocks_of_reasoning_item item =
-  match opt_bind (json_assoc_opt "encrypted_content" item) non_blank_json_string with
-  | Some _ -> [ RedactedThinking (Yojson.Safe.to_string item) ]
-  | None ->
-    (match json_assoc_opt "summary" item with
-     | Some (`List summary) ->
-       let content =
-         summary |> List.filter_map reasoning_text_of_summary_item |> String.concat "\n"
-       in
-       if Api_common.string_is_blank content
-       then []
-       else [ Thinking { signature = None; content } ]
-     | Some (`String text) when not (Api_common.string_is_blank text) ->
-       [ Thinking { signature = None; content = text } ]
-     | Some (`String _)
-     | Some (`Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
-     | None -> [])
+  Result.map (function
+    | Responses_reasoning.Absent -> []
+    | Plaintext content -> [ Thinking {signature=None;content} ]
+    | Opaque item -> [ RedactedThinking (Yojson.Safe.to_string item) ])
+    (Responses_reasoning.decode item)
 ;;
 
 let content_block_of_function_call item =
@@ -629,7 +610,7 @@ let content_block_of_function_call item =
 let content_blocks_of_output_item ~drop_function_call item =
   match opt_bind (json_assoc_opt "type" item) json_string_opt with
   | Some "message" -> Ok (content_blocks_of_output_message item)
-  | Some "reasoning" -> Ok (content_blocks_of_reasoning_item item)
+  | Some "reasoning" -> content_blocks_of_reasoning_item item
   | Some "function_call" when drop_function_call -> Ok []
   | Some "function_call" ->
     let* block = content_block_of_function_call item in

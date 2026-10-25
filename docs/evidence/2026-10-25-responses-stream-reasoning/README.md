@@ -29,3 +29,7 @@ The 22 current SSE cases include sync/cache/message conversion, canonical Checkp
 No local Dune build, full regression, shipped MiniMax Responses declaration, live HTTP acceptance, installation, deployment or whole-issue completion is claimed. `gh stack submit` reports Native Stacks disabled for the repository; REST PR stack metadata is null. The PR therefore retains the exact parent branch as base.
 
 All changed OCaml files were parsed with `ocamlc -stop-after parsing`; this is syntax evidence only. Full source SHA256 values bind the implementation/fixtures independently of later evidence-only commits. No typecheck or local build was performed.
+
+## Observed strict TUI execution
+
+[40195465261](https://github.com/jeong-sik/masc/actions/runs/40195465261) checked out exactly `1e665df9993b1a64848808a5adc1afaf24eacb5b` and completed SUCCESS: **50 actual strict-projection cases**. The all-current-events fixture with owned empty snapshot and the unowned-snapshot rejection both passed. The retained excerpt carries the raw-log SHA256. This selected suite does not compile the separate log/types consumers that failed at60e and were fixed at46f; its success cannot certify them or the seven-suite run. The projection source/fixture is unchanged at46f and later evidence-only heads.

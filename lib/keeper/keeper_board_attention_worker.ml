@@ -876,6 +876,18 @@ let signal_completion ~base_path = function
          { candidate_id = completed.candidate_id; owner_wake })
 ;;
 
+type exact_callback = Before_dispatch | Before_advance
+
+let unchanged_write_outcome _ outcome = outcome
+
+let map_transition_write_outcome map_write_outcome callback result =
+  Result.map
+    (fun (transition : Partition.exact_transition) ->
+       { transition with
+         write_outcome = map_write_outcome callback transition.write_outcome })
+    result
+;;
+
 let confirm_exact_transition latest_partition operation = function
   | Error detail -> Error (operation ^ " failed: " ^ detail)
   | Ok transition ->
@@ -887,6 +899,7 @@ let confirm_exact_transition latest_partition operation = function
 ;;
 
 let before_dispatch
+      ~map_write_outcome
       ~worker_epoch
       ~base_path
       latest_partition
@@ -898,10 +911,12 @@ let before_dispatch
     ~base_path
     ~partition:!latest_partition
     ~provenance
+  |> map_transition_write_outcome map_write_outcome Before_dispatch
   |> confirm_exact_transition latest_partition "exact before-dispatch bind"
 ;;
 
 let before_advance
+      ~map_write_outcome
       ~worker_epoch
       ~base_path
       latest_partition
@@ -916,6 +931,7 @@ let before_advance
     ~partition:!latest_partition
     ~source
     ~next
+  |> map_transition_write_outcome map_write_outcome Before_advance
   |> confirm_exact_transition latest_partition "exact before-advance record"
 ;;
 
@@ -1041,6 +1057,7 @@ let deferred_step ~worker_epoch ~base_path latest_partition ~detail =
 ;;
 
 let process_pending
+      ~map_write_outcome
       ~now
       ~worker_epoch
       ~base_path
@@ -1051,9 +1068,9 @@ let process_pending
   match
     execute
       ~before_dispatch:
-        (before_dispatch ~worker_epoch ~base_path latest_partition)
+        (before_dispatch ~map_write_outcome ~worker_epoch ~base_path latest_partition)
       ~before_advance:
-        (before_advance ~worker_epoch ~base_path latest_partition)
+        (before_advance ~map_write_outcome ~worker_epoch ~base_path latest_partition)
       prepared
   with
   | Error error ->
@@ -1080,6 +1097,7 @@ let process_pending
 ;;
 
 let process_claimed
+      ~map_write_outcome
       ~now
       ~worker_epoch
       ~base_path
@@ -1116,6 +1134,7 @@ let process_claimed
            | Some (candidate_id, prepared)
              when String.equal candidate_id candidate.candidate_id ->
              process_pending
+               ~map_write_outcome
                ~now
                ~worker_epoch
                ~base_path
@@ -1629,6 +1648,7 @@ let prunes_and_read ~base_path ~keeper_name ?hook ?before_receipt_prune () =
 ;;
 
 let process_next_with_claim_ready_exact_current
+      ~map_write_outcome
       ~claim_ready_exact
       ~now
       ~worker_epoch
@@ -1666,6 +1686,7 @@ let process_next_with_claim_ready_exact_current
         Candidate.load_candidates ~base_path ~keeper_name
       in
       process_claimed
+        ~map_write_outcome
         ~now
         ~worker_epoch
         ~base_path
@@ -1739,6 +1760,7 @@ let process_next_with_claim_ready_exact
       ~execute
   =
   process_next_with_claim_ready_exact_current
+    ~map_write_outcome:unchanged_write_outcome
     ~claim_ready_exact
     ~now
     ~worker_epoch
@@ -1757,6 +1779,7 @@ let process_next_current
       ~execute
   =
   process_next_with_claim_ready_exact_current
+    ~map_write_outcome:unchanged_write_outcome
     ~claim_ready_exact:Partition.claim_ready_exact
     ~now
     ~worker_epoch
@@ -1789,6 +1812,16 @@ let execute_exact ~clock ~before_dispatch ~before_advance prepared =
     ~before_dispatch
     ~before_advance
     prepared
+;;
+
+let process_next_exact_with_write_outcome
+      ~map_write_outcome ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
+  process_next_with_claim_ready_exact_current
+    ~map_write_outcome
+    ~claim_ready_exact:Partition.claim_ready_exact
+    ~now ~worker_epoch ~base_path ~keeper_name
+    ~prepare:(prepare_exact ~base_path ~keeper_name ~net)
+    ~execute:(execute_exact ~clock)
 ;;
 
 let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
@@ -2209,6 +2242,8 @@ let run
 ;;
 
 module For_testing = struct
+  type nonrec exact_callback = exact_callback = Before_dispatch | Before_advance
+  let process_next_exact_with_write_outcome = process_next_exact_with_write_outcome
   type nonrec rearm_scheduler = rearm_scheduler
   type nonrec deferred_rearm_scheduler = deferred_rearm_scheduler
 

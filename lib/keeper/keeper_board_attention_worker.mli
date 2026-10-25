@@ -160,6 +160,25 @@ val settle_completed_snapshot :
     Production passes no hooks. *)
 
 module For_testing : sig
+  type exact_callback = Before_dispatch | Before_advance
+
+  val process_next_exact_with_write_outcome :
+    map_write_outcome:
+      (exact_callback -> Keeper_board_attention_partition.exact_write_outcome ->
+       Keeper_board_attention_partition.exact_write_outcome) ->
+    clock:_ Eio.Time.clock ->
+    net:Eio_context.eio_net option ->
+    now:(unit -> float) ->
+    worker_epoch:Keeper_board_attention_partition.Worker_epoch.t ->
+    base_path:string ->
+    keeper_name:string ->
+    (step, string) result
+  (** Runs the production worker and exact flow. Only the successful partition
+      write's durability outcome at the named callback boundary is replaced;
+      partition selection, validation, persistence, error classification and
+      AGENT_CORE dispatch remain real. This is semantic fault injection, not a
+      physical fsync failure. Production leaves write outcomes unchanged. *)
+
   type rearm_scheduler
   type deferred_rearm_scheduler
 

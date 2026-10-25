@@ -609,7 +609,7 @@ let test_responses_wire_states_reach_structured () =
     ; response ~status:"completed" ~output:[text] [], None ];
   (* Both refusal event families must survive even when the terminal snapshot
      has no refusal item. JSON text already emitted must not become success. *)
-  List.iter (fun refusal_event ->
+  List.iter (fun (refusal_event, refusal_fields) ->
     let state = Wire_stream.create_openai_stream_state () in
     let acc = Wire_acc.create_stream_acc () in
     let feed kind fields =
@@ -619,10 +619,11 @@ let test_responses_wire_states_reach_structured () =
     feed "response.created" ["response", response ~status:"in_progress" ~output:[] []];
     feed "response.output_text.delta" ["output_index", `Int 0; "content_index", `Int 0;
       "delta", `String "{}"];
-    feed refusal_event ["delta", `String "declined"; "refusal", `String "declined"];
+    feed refusal_event refusal_fields;
     feed "response.completed" ["response", response ~status:"completed" ~output:[] []];
     check_response_state (Error.Refused_response Policy_refusal) (finalized_wire_response acc))
-    ["response.refusal.delta"; "response.refusal.done"]
+    ["response.refusal.delta", ["delta", `String "declined"];
+     "response.refusal.done", ["refusal", `String "declined"]]
 ;;
 
 let test_gemini_wire_states_reach_structured () =

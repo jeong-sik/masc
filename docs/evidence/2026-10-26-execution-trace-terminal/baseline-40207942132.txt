@@ -1,0 +1,382 @@
+run: https://github.com/jeong-sik/masc/actions/runs/40207942132
+raw_sha256: 8c0a972a19206d903f415e1853c0da46f3215979b6c5c077a217187b4673b55b
+raw_bytes: 162424
+selected_lines: 376
+ANSI and trailing whitespace removed from selected lines.
+
+test suite	Checkout	2026-10-25T15:39:23.1102255Z HEAD is now at 86d40fd7 test(agent): expose trace failure after committed execution
+test suite	Test	2026-10-25T15:40:20.8373159Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+test suite	Test	2026-10-25T15:40:20.8391934Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: start 2026-10-25T15:40:20Z (dune alias)
+test suite	Test	2026-10-25T15:40:45.9952452Z ^[[0m^[[33mASSERT^[[0m stop_reason
+test suite	Test	2026-10-25T15:40:45.9952606Z ^[[33mASSERT^[[0m text content
+test suite	Test	2026-10-25T15:40:45.9952836Z   ^[[32m[OK]^[[0m          ^[[36mmock_responses^[[0m               0   text response.
+test suite	Test	2026-10-25T15:40:45.9953049Z ^[[33mASSERT^[[0m stop_reason
+test suite	Test	2026-10-25T15:40:45.9953196Z ^[[33mASSERT^[[0m tool names
+test suite	Test	2026-10-25T15:40:45.9953405Z   ^[[32m[OK]^[[0m          ^[[36mmock_responses^[[0m               1   tool use response.
+test suite	Test	2026-10-25T15:40:45.9953789Z ^[[33mASSERT^[[0m first is tool_use
+test suite	Test	2026-10-25T15:40:45.9953945Z ^[[33mASSERT^[[0m final text
+test suite	Test	2026-10-25T15:40:45.9954088Z ^[[33mASSERT^[[0m call count
+test suite	Test	2026-10-25T15:40:45.9954287Z   ^[[32m[OK]^[[0m          ^[[36mmock_responses^[[0m               2   tool then text.
+test suite	Test	2026-10-25T15:40:45.9954667Z ^[[33mASSERT^[[0m count after 1
+test suite	Test	2026-10-25T15:40:45.9954909Z ^[[33mASSERT^[[0m count after reset
+test suite	Test	2026-10-25T15:40:45.9955234Z ^[[33mASSERT^[[0m reset replays from start
+test suite	Test	2026-10-25T15:40:45.9955620Z   ^[[32m[OK]^[[0m          ^[[36mmock_responses^[[0m               3   reset.
+test suite	Test	2026-10-25T15:40:45.9955953Z ^[[33mASSERT^[[0m count after 3 calls
+test suite	Test	2026-10-25T15:40:45.9956252Z ^[[33mASSERT^[[0m wrapped
+test suite	Test	2026-10-25T15:40:45.9956582Z   ^[[32m[OK]^[[0m          ^[[36mmock_responses^[[0m               4   cycle wraps.
+test suite	Test	2026-10-25T15:40:45.9956902Z ^[[33mASSERT^[[0m mentions empty
+test suite	Test	2026-10-25T15:40:45.9957255Z   ^[[32m[OK]^[[0m          ^[[36mmock_responses^[[0m               5   empty responses.
+test suite	Test	2026-10-25T15:40:45.9957584Z ^[[33mASSERT^[[0m has thinking
+test suite	Test	2026-10-25T15:40:45.9957835Z ^[[33mASSERT^[[0m has text
+test suite	Test	2026-10-25T15:40:45.9958152Z   ^[[32m[OK]^[[0m          ^[[36mmock_responses^[[0m               6   thinking response.
+test suite	Test	2026-10-25T15:40:45.9958474Z ^[[33mASSERT^[[0m model_id
+test suite	Test	2026-10-25T15:40:45.9958687Z ^[[33mASSERT^[[0m provider_id
+test suite	Test	2026-10-25T15:40:45.9958901Z ^[[33mASSERT^[[0m base_url
+test suite	Test	2026-10-25T15:40:45.9959097Z ^[[33mASSERT^[[0m request_path
+test suite	Test	2026-10-25T15:40:45.9959308Z   ^[[32m[OK]^[[0m          ^[[36mmock_responses^[[0m               7   to_provider_config.
+test suite	Test	2026-10-25T15:40:45.9959686Z ^[[33mASSERT^[[0m unexecuted agent has no invented source
+test suite	Test	2026-10-25T15:40:46.0112564Z ^[[33mASSERT^[[0m text-only state records actual collected source
+test suite	Test	2026-10-25T15:40:46.0112952Z ^[[33mASSERT^[[0m checkpoint retains actual source
+test suite	Test	2026-10-25T15:40:46.0113168Z ^[[33mASSERT^[[0m clone retains producer
+test suite	Test	2026-10-25T15:40:46.0113430Z ^[[33mASSERT^[[0m turn sink sees producer
+test suite	Test	2026-10-25T15:40:46.0113932Z   ^[[32m[OK]^[[0m          ^[[36magent_state^[[0m                  0   text-only actual provider bi...
+test suite	Test	2026-10-25T15:40:46.0116258Z ^[[33mASSERT^[[0m initial turn_count
+test suite	Test	2026-10-25T15:40:46.0116528Z ^[[33mASSERT^[[0m initial api_calls
+test suite	Test	2026-10-25T15:40:46.0116708Z ^[[33mASSERT^[[0m initial messages
+test suite	Test	2026-10-25T15:40:46.0116920Z   ^[[32m[OK]^[[0m          ^[[36magent_state^[[0m                  1   initial state.
+test suite	Test	2026-10-25T15:40:46.0118537Z ^[[33mASSERT^[[0m tool count
+test suite	Test	2026-10-25T15:40:46.0118807Z ^[[33mASSERT^[[0m tool name
+test suite	Test	2026-10-25T15:40:46.0119247Z   ^[[32m[OK]^[[0m          ^[[36magent_state^[[0m                  2   tools registered.
+test suite	Test	2026-10-25T15:40:46.0127045Z ^[[33mASSERT^[[0m total_input_tokens 0
+test suite	Test	2026-10-25T15:40:46.0127328Z ^[[33mASSERT^[[0m total_output_tokens 0
+test suite	Test	2026-10-25T15:40:46.0127579Z ^[[33mASSERT^[[0m api_calls 0
+test suite	Test	2026-10-25T15:40:46.0127918Z   ^[[32m[OK]^[[0m          ^[[36magent_state^[[0m                  3   initial usage.
+test suite	Test	2026-10-25T15:40:46.0128376Z ^[[33mASSERT^[[0m 0 tools
+test suite	Test	2026-10-25T15:40:46.0128761Z   ^[[32m[OK]^[[0m          ^[[36magent_state^[[0m                  4   empty tools.
+test suite	Test	2026-10-25T15:40:46.0135526Z ^[[33mASSERT^[[0m 3 tools
+test suite	Test	2026-10-25T15:40:46.0135907Z   ^[[32m[OK]^[[0m          ^[[36magent_state^[[0m                  5   multiple tools.
+test suite	Test	2026-10-25T15:40:46.0136289Z ^[[33mASSERT^[[0m 2 tools in json
+test suite	Test	2026-10-25T15:40:46.0136730Z ^[[33mASSERT^[[0m 1 message
+test suite	Test	2026-10-25T15:40:46.0137004Z ^[[33mASSERT^[[0m visible_tool_names matches
+test suite	Test	2026-10-25T15:40:46.0137406Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m               0   turn preparation.
+test suite	Test	2026-10-25T15:40:46.0137768Z ^[[33mASSERT^[[0m 1 message
+test suite	Test	2026-10-25T15:40:46.0138029Z ^[[33mASSERT^[[0m empty visible_tool_names
+test suite	Test	2026-10-25T15:40:46.0138415Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m               1   no tools prep.
+test suite	Test	2026-10-25T15:40:46.0138768Z ^[[33mASSERT^[[0m 3 messages
+test suite	Test	2026-10-25T15:40:46.0140902Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m               2   preserves messages.
+test suite	Test	2026-10-25T15:40:46.0142520Z ^[[33mASSERT^[[0m completed
+test suite	Test	2026-10-25T15:40:46.0142884Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m               3   output completes on end turn.
+test suite	Test	2026-10-25T15:40:46.0144565Z ^[[33mASSERT^[[0m provider receives exact caller tool schemas
+test suite	Test	2026-10-25T15:40:46.0145022Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m               4   provider receives exact supp...
+test suite	Test	2026-10-25T15:40:46.0160353Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0160754Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0162441Z ^[[33mASSERT^[[0m Anthropic previous request stays an unchanged prefix
+test suite	Test	2026-10-25T15:40:46.0164118Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0164505Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0166174Z ^[[33mASSERT^[[0m other-provider continuation keeps its existing transcript
+test suite	Test	2026-10-25T15:40:46.0167788Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0168141Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0169858Z ^[[33mASSERT^[[0m other-provider continuation keeps its existing transcript
+test suite	Test	2026-10-25T15:40:46.0171601Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0171954Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0173523Z ^[[33mASSERT^[[0m other-provider continuation keeps its existing transcript
+test suite	Test	2026-10-25T15:40:46.0175258Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0175600Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0177218Z ^[[33mASSERT^[[0m other-provider continuation keeps its existing transcript
+test suite	Test	2026-10-25T15:40:46.0182723Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0183070Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0184680Z ^[[33mASSERT^[[0m other-provider continuation keeps its existing transcript
+test suite	Test	2026-10-25T15:40:46.0186280Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0186623Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0188176Z ^[[33mASSERT^[[0m other-provider continuation keeps its existing transcript
+test suite	Test	2026-10-25T15:40:46.0193863Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0194203Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0195796Z ^[[33mASSERT^[[0m other-provider continuation keeps its existing transcript
+test suite	Test	2026-10-25T15:40:46.0197406Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0197752Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0203047Z ^[[33mASSERT^[[0m Anthropic previous request stays an unchanged prefix
+test suite	Test	2026-10-25T15:40:46.0206826Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0207223Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0213097Z ^[[33mASSERT^[[0m Anthropic previous request stays an unchanged prefix
+test suite	Test	2026-10-25T15:40:46.0215163Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0215661Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0218793Z ^[[33mASSERT^[[0m Anthropic previous request stays an unchanged prefix
+test suite	Test	2026-10-25T15:40:46.0219865Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0220172Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0223389Z ^[[33mASSERT^[[0m Anthropic previous request stays an unchanged prefix
+test suite	Test	2026-10-25T15:40:46.0225188Z ^[[33mASSERT^[[0m retention follows the producing provider
+test suite	Test	2026-10-25T15:40:46.0225448Z ^[[33mASSERT^[[0m only Anthropic adds durable context
+test suite	Test	2026-10-25T15:40:46.0228219Z ^[[33mASSERT^[[0m Anthropic previous request stays an unchanged prefix
+test suite	Test	2026-10-25T15:40:46.0228508Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m               5   provider context retention s...
+test suite	Test	2026-10-25T15:40:46.0228738Z ^[[33mASSERT^[[0m wire model
+test suite	Test	2026-10-25T15:40:46.0228892Z ^[[33mASSERT^[[0m lifecycle resolved model
+test suite	Test	2026-10-25T15:40:46.0229072Z ^[[33mASSERT^[[0m effective model pricing applied
+test suite	Test	2026-10-25T15:40:46.0229247Z ^[[33mASSERT^[[0m no pricing gap
+test suite	Test	2026-10-25T15:40:46.0229479Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m               6   effective provider config dr...
+test suite	Test	2026-10-25T15:40:46.0233570Z ^[[33mASSERT^[[0m terminal response
+test suite	Test	2026-10-25T15:40:46.0233733Z ^[[33mASSERT^[[0m BeforeTurn identity
+test suite	Test	2026-10-25T15:40:46.0233896Z ^[[33mASSERT^[[0m AfterTurn identity
+test suite	Test	2026-10-25T15:40:46.0234055Z ^[[33mASSERT^[[0m TurnStarted identity
+test suite	Test	2026-10-25T15:40:46.0234253Z ^[[33mASSERT^[[0m TurnReady identity
+test suite	Test	2026-10-25T15:40:46.0234457Z ^[[33mASSERT^[[0m TurnCompleted identity
+test suite	Test	2026-10-25T15:40:46.0234618Z ^[[33mASSERT^[[0m PreToolUse identity
+test suite	Test	2026-10-25T15:40:46.0234777Z ^[[33mASSERT^[[0m tool handler identity
+test suite	Test	2026-10-25T15:40:46.0234948Z ^[[33mASSERT^[[0m public tool event identity
+test suite	Test	2026-10-25T15:40:46.0235298Z ^[[33mASSERT^[[0m state advances after two provider turns
+test suite	Test	2026-10-25T15:40:46.0235566Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m               7   provider turn identity spans...
+test suite	Test	2026-10-25T15:40:46.0236759Z ^[[33mASSERT^[[0m AfterTurn ordinal
+test suite	Test	2026-10-25T15:40:46.0237104Z ^[[33mASSERT^[[0m agent core emits exactly one turn record, at DEBUG, on the hook's turn
+test suite	Test	2026-10-25T15:40:46.0237402Z ^[[33mASSERT^[[0m agent_turn span opens under the hook's turn
+test suite	Test	2026-10-25T15:40:46.0237705Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m               8   one turn: no INFO turn recor...
+test suite	Test	2026-10-25T15:40:46.0242028Z ^[[33mASSERT^[[0m unknown reason
+test suite	Test	2026-10-25T15:40:46.0242259Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m               9   output rejects unknown termi...
+test suite	Test	2026-10-25T15:40:46.0243961Z ^[[33mASSERT^[[0m documented provider terminal reason is preserved
+test suite	Test	2026-10-25T15:40:46.0244411Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m              10   output completes repetition ...
+test suite	Test	2026-10-25T15:40:46.0245696Z ^[[33mASSERT^[[0m tool stop rejection
+test suite	Test	2026-10-25T15:40:46.0246571Z ^[[33mASSERT^[[0m tool stop rejection
+test suite	Test	2026-10-25T15:40:46.0246809Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m              11   output rejects tool stop wit...
+test suite	Test	2026-10-25T15:40:46.0252655Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m              12   text tool intent remains text.
+test suite	Test	2026-10-25T15:40:46.0255951Z ^[[33mASSERT^[[0m provider calls
+test suite	Test	2026-10-25T15:40:46.0256115Z ^[[33mASSERT^[[0m tool handler not executed
+test suite	Test	2026-10-25T15:40:46.0256310Z ^[[33mASSERT^[[0m provider controls terminal response
+test suite	Test	2026-10-25T15:40:46.0256492Z ^[[33mASSERT^[[0m provider final text
+test suite	Test	2026-10-25T15:40:46.0256730Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m              13   repeated validation error wi...
+test suite	Test	2026-10-25T15:40:46.0263725Z ^[[33mASSERT^[[0m transport capture identity
+test suite	Test	2026-10-25T15:40:46.0264125Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m              14   stream route carries exact r...
+test suite	Test	2026-10-25T15:40:46.0264507Z ^[[33mASSERT^[[0m 2 messages (original + context)
+test suite	Test	2026-10-25T15:40:46.0264879Z ^[[33mASSERT^[[0m injected context at tail
+test suite	Test	2026-10-25T15:40:46.0265245Z   ^[[32m[OK]^[[0m          ^[[36mturn_mechanics^[[0m              15   extra system context.
+test suite	Test	2026-10-25T15:40:46.0265570Z ^[[33mASSERT^[[0m 2 tool results
+test suite	Test	2026-10-25T15:40:46.0265755Z ^[[33mASSERT^[[0m not error
+test suite	Test	2026-10-25T15:40:46.0265966Z ^[[33mASSERT^[[0m not error
+test suite	Test	2026-10-25T15:40:46.0266259Z   ^[[32m[OK]^[[0m          ^[[36mtool_results^[[0m                 0   make ok.
+test suite	Test	2026-10-25T15:40:46.0266570Z ^[[33mASSERT^[[0m 1 tool result
+test suite	Test	2026-10-25T15:40:46.0266810Z ^[[33mASSERT^[[0m error content
+test suite	Test	2026-10-25T15:40:46.0267188Z   ^[[32m[OK]^[[0m          ^[[36mtool_results^[[0m                 1   make error.
+test suite	Test	2026-10-25T15:40:46.0267567Z ^[[33mASSERT^[[0m 2 results
+test suite	Test	2026-10-25T15:40:46.0267862Z   ^[[32m[OK]^[[0m          ^[[36mtool_results^[[0m                 2   make mixed.
+test suite	Test	2026-10-25T15:40:46.0268166Z ^[[33mASSERT^[[0m input tokens
+test suite	Test	2026-10-25T15:40:46.0268406Z ^[[33mASSERT^[[0m output tokens
+test suite	Test	2026-10-25T15:40:46.0268637Z ^[[33mASSERT^[[0m api_calls
+test suite	Test	2026-10-25T15:40:46.0268959Z   ^[[32m[OK]^[[0m          ^[[36maccumulate_usage^[[0m             0   with response.
+test suite	Test	2026-10-25T15:40:46.0269295Z ^[[33mASSERT^[[0m api_calls incremented
+test suite	Test	2026-10-25T15:40:46.0269659Z ^[[33mASSERT^[[0m input tokens preserved
+test suite	Test	2026-10-25T15:40:46.0269893Z ^[[33mASSERT^[[0m output tokens preserved
+test suite	Test	2026-10-25T15:40:46.0270227Z   ^[[32m[OK]^[[0m          ^[[36maccumulate_usage^[[0m             1   no response.
+test suite	Test	2026-10-25T15:40:46.0270517Z ^[[33mASSERT^[[0m cumulative input
+test suite	Test	2026-10-25T15:40:46.0270679Z ^[[33mASSERT^[[0m cumulative output
+test suite	Test	2026-10-25T15:40:46.0270833Z ^[[33mASSERT^[[0m cumulative calls
+test suite	Test	2026-10-25T15:40:46.0271129Z   ^[[32m[OK]^[[0m          ^[[36maccumulate_usage^[[0m             2   cumulative.
+test suite	Test	2026-10-25T15:40:46.0271317Z ^[[33mASSERT^[[0m reason
+test suite	Test	2026-10-25T15:40:46.0271513Z   ^[[32m[OK]^[[0m          ^[[36merror_domain^[[0m                 0   of_core_error.
+test suite	Test	2026-10-25T15:40:46.0271706Z ^[[33mASSERT^[[0m roundtrip
+test suite	Test	2026-10-25T15:40:46.0271895Z   ^[[32m[OK]^[[0m          ^[[36merror_domain^[[0m                 1   roundtrip.
+test suite	Test	2026-10-25T15:40:46.0272092Z ^[[33mASSERT^[[0m contains stage
+test suite	Test	2026-10-25T15:40:46.0272244Z ^[[33mASSERT^[[0m has route prefix
+test suite	Test	2026-10-25T15:40:46.0272473Z   ^[[32m[OK]^[[0m          ^[[36merror_domain^[[0m                 2   with_stage.
+test suite	Test	2026-10-25T15:40:46.0272777Z ^[[33mASSERT^[[0m rate limited is retryable
+test suite	Test	2026-10-25T15:40:46.0273015Z ^[[33mASSERT^[[0m internal not retryable
+test suite	Test	2026-10-25T15:40:46.0273182Z ^[[33mASSERT^[[0m network error retryable
+test suite	Test	2026-10-25T15:40:46.0273394Z   ^[[32m[OK]^[[0m          ^[[36merror_domain^[[0m                 3   is_retryable.
+test suite	Test	2026-10-25T15:40:46.0273588Z ^[[33mASSERT^[[0m has string
+test suite	Test	2026-10-25T15:40:46.0273727Z ^[[33mASSERT^[[0m has string
+test suite	Test	2026-10-25T15:40:46.0273867Z ^[[33mASSERT^[[0m has string
+test suite	Test	2026-10-25T15:40:46.0274004Z ^[[33mASSERT^[[0m has string
+test suite	Test	2026-10-25T15:40:46.0274225Z ^[[33mASSERT^[[0m has string
+test suite	Test	2026-10-25T15:40:46.0274428Z   ^[[32m[OK]^[[0m          ^[[36merror_domain^[[0m                 4   provider errors.
+test suite	Test	2026-10-25T15:40:46.0274630Z ^[[33mASSERT^[[0m has tool use
+test suite	Test	2026-10-25T15:40:46.0274920Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m          0   multi tool response.
+test suite	Test	2026-10-25T15:40:46.0953402Z ^[[33mASSERT^[[0m locator contains durable run identity
+test suite	Test	2026-10-25T15:40:46.1112227Z ^[[33mASSERT^[[0m completion reports success
+test suite	Test	2026-10-25T15:40:46.1112914Z ^[[33mASSERT^[[0m terminal response
+test suite	Test	2026-10-25T15:40:46.1113264Z ^[[33mASSERT^[[0m tool effect executes once
+test suite	Test	2026-10-25T15:40:46.1113604Z ^[[33mASSERT^[[0m locator is durable before tool effect
+test suite	Test	2026-10-25T15:40:46.1114033Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.1114195Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.1114400Z ^[[33mASSERT^[[0m completion observes the final durable cursor
+test suite	Test	2026-10-25T15:40:46.1114678Z ^[[33mASSERT^[[0m durable authority preserves public ToolCalled and ToolCompleted
+test suite	Test	2026-10-25T15:40:46.1133240Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m          1   Agent.run uses durable tool ...
+test suite	Test	2026-10-25T15:40:46.1320225Z ^[[33mASSERT^[[0m terminal response
+test suite	Test	2026-10-25T15:40:46.1320720Z ^[[33mASSERT^[[0m settled tool handler is not rerun
+test suite	Test	2026-10-25T15:40:46.1321095Z ^[[33mASSERT^[[0m settled pre-tool hook is not rerun
+test suite	Test	2026-10-25T15:40:46.1321453Z ^[[33mASSERT^[[0m settled post-tool hook is not rerun
+test suite	Test	2026-10-25T15:40:46.1321788Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.1322090Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.1336945Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m          2   Agent.run resumes settled to...
+test suite	Test	2026-10-25T15:40:46.1411983Z ^[[33mASSERT^[[0m typed approval runs once
+test suite	Test	2026-10-25T15:40:46.1412288Z ^[[33mASSERT^[[0m denied legacy effect stays closed
+test suite	Test	2026-10-25T15:40:46.1412575Z ^[[33mASSERT^[[0m typed denial opens no durable effect attempt
+test suite	Test	2026-10-25T15:40:46.1603550Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m          3   unattempted legacy invocatio...
+test suite	Test	2026-10-25T15:40:46.1785577Z ^[[33mASSERT^[[0m terminal response
+test suite	Test	2026-10-25T15:40:46.1785866Z ^[[33mASSERT^[[0m settled tool handler is not rerun
+test suite	Test	2026-10-25T15:40:46.1786209Z ^[[33mASSERT^[[0m settled pre-tool hook is not rerun
+test suite	Test	2026-10-25T15:40:46.1786558Z ^[[33mASSERT^[[0m settled post-tool hook is not rerun
+test suite	Test	2026-10-25T15:40:46.1786822Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.1786982Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.1803725Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m          4   Agent.run resume matches ori...
+test suite	Test	2026-10-25T15:40:46.1889433Z ^[[33mASSERT^[[0m rejected resume does not run tool handler
+test suite	Test	2026-10-25T15:40:46.1904118Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m          5   Agent.run resume rejects mis...
+test suite	Test	2026-10-25T15:40:46.2084732Z ^[[33mASSERT^[[0m settled turn resumes and completes
+test suite	Test	2026-10-25T15:40:46.2085083Z ^[[33mASSERT^[[0m settled tool handler is not rerun
+test suite	Test	2026-10-25T15:40:46.2085475Z ^[[33mASSERT^[[0m provider count follows persisted completion
+test suite	Test	2026-10-25T15:40:46.2085728Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.2085894Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.2103340Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m          6   Agent.run resumes settled tu...
+test suite	Test	2026-10-25T15:40:46.2334667Z ^[[33mASSERT^[[0m settled turn resumes and completes
+test suite	Test	2026-10-25T15:40:46.2335025Z ^[[33mASSERT^[[0m settled tool handler is not rerun
+test suite	Test	2026-10-25T15:40:46.2335298Z ^[[33mASSERT^[[0m provider count follows persisted completion
+test suite	Test	2026-10-25T15:40:46.2335599Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.2335759Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.2350450Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m          7   Agent.run resumes settled tu...
+test suite	Test	2026-10-25T15:40:46.2442807Z ^[[33mASSERT^[[0m replay returns the original nonzero provider ordinal
+test suite	Test	2026-10-25T15:40:46.2452917Z ^[[33mASSERT^[[0m persisted response identity, content and usage remain exact
+test suite	Test	2026-10-25T15:40:46.2453238Z ^[[33mASSERT^[[0m settled terminal replay makes no provider call
+test suite	Test	2026-10-25T15:40:46.2453490Z ^[[33mASSERT^[[0m settled terminal replay invokes no new AfterTurn
+test suite	Test	2026-10-25T15:40:46.2453766Z ^[[33mASSERT^[[0m restored turn count stays distinct and is not advanced again
+test suite	Test	2026-10-25T15:40:46.2465425Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m          8   Advanced settled terminal re...
+test suite	Test	2026-10-25T15:40:46.2594297Z ^[[33mASSERT^[[0m persisted terminal response provenance is exact
+test suite	Test	2026-10-25T15:40:46.2594550Z ^[[33mASSERT^[[0m settled tool handler is not rerun
+test suite	Test	2026-10-25T15:40:46.2594784Z ^[[33mASSERT^[[0m provider count follows persisted completion
+test suite	Test	2026-10-25T15:40:46.2595126Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.2595290Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.2606412Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m          9   terminal resume ignores curr...
+test suite	Test	2026-10-25T15:40:46.3004991Z ^[[33mASSERT^[[0m persisted terminal response provenance is exact
+test suite	Test	2026-10-25T15:40:46.3005330Z ^[[33mASSERT^[[0m settled tool handler is not rerun
+test suite	Test	2026-10-25T15:40:46.3005590Z ^[[33mASSERT^[[0m provider count follows persisted completion
+test suite	Test	2026-10-25T15:40:46.3005905Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.3006206Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.3015192Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         10   terminal resume survives cur...
+test suite	Test	2026-10-25T15:40:46.3828806Z ^[[33mASSERT^[[0m active-zero-invocation-response-drift: mismatch executes no tool effect
+test suite	Test	2026-10-25T15:40:46.3898493Z ^[[33mASSERT^[[0m settled-zero-invocation-response-drift: mismatch executes no tool effect
+test suite	Test	2026-10-25T15:40:46.4288728Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         11   malformed terminal resume do...
+test suite	Test	2026-10-25T15:40:46.4379213Z ^[[33mASSERT^[[0m exact invocation
+test suite	Test	2026-10-25T15:40:46.4379418Z ^[[33mASSERT^[[0m exact invocation turn
+test suite	Test	2026-10-25T15:40:46.4379771Z ^[[33mASSERT^[[0m exact planned index
+test suite	Test	2026-10-25T15:40:46.4379952Z ^[[33mASSERT^[[0m exact batch index
+test suite	Test	2026-10-25T15:40:46.4381979Z ^[[33mASSERT^[[0m exact batch size
+test suite	Test	2026-10-25T15:40:46.4382236Z ^[[33mASSERT^[[0m exact serial schedule
+test suite	Test	2026-10-25T15:40:46.4382515Z ^[[33mASSERT^[[0m exact closed effect disposition
+test suite	Test	2026-10-25T15:40:46.4382791Z ^[[33mASSERT^[[0m exact durability detail
+test suite	Test	2026-10-25T15:40:46.4383000Z ^[[33mASSERT^[[0m terminal durability failure is not retryable
+test suite	Test	2026-10-25T15:40:46.4383200Z ^[[33mASSERT^[[0m provider called once
+test suite	Test	2026-10-25T15:40:46.4383369Z ^[[33mASSERT^[[0m terminal effect ran once
+test suite	Test	2026-10-25T15:40:46.4390737Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         12   terminal durability failure ...
+test suite	Test	2026-10-25T15:40:46.4498722Z ^[[33mASSERT^[[0m initial provider call
+test suite	Test	2026-10-25T15:40:46.4499011Z ^[[33mASSERT^[[0m initial effect settled once
+test suite	Test	2026-10-25T15:40:46.4537438Z ^[[33mASSERT^[[0m removed retains persisted terminal completion
+test suite	Test	2026-10-25T15:40:46.4537810Z ^[[33mASSERT^[[0m removed total provider calls
+test suite	Test	2026-10-25T15:40:46.4538206Z ^[[33mASSERT^[[0m removed empty injection preserves the tool-result recovery boundary
+test suite	Test	2026-10-25T15:40:46.4539418Z ^[[33mASSERT^[[0m removed current handler never runs
+test suite	Test	2026-10-25T15:40:46.4813736Z ^[[33mASSERT^[[0m initial provider call
+test suite	Test	2026-10-25T15:40:46.4814081Z ^[[33mASSERT^[[0m initial effect settled once
+test suite	Test	2026-10-25T15:40:46.4852025Z ^[[33mASSERT^[[0m drifted retains persisted terminal completion
+test suite	Test	2026-10-25T15:40:46.4852370Z ^[[33mASSERT^[[0m drifted total provider calls
+test suite	Test	2026-10-25T15:40:46.4852797Z ^[[33mASSERT^[[0m drifted empty injection preserves the tool-result recovery boundary
+test suite	Test	2026-10-25T15:40:46.4853063Z ^[[33mASSERT^[[0m drifted current handler never runs
+test suite	Test	2026-10-25T15:40:46.4866702Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         13   terminal pre-checkpoint sett...
+test suite	Test	2026-10-25T15:40:46.4991284Z ^[[33mASSERT^[[0m settled tool handler is not rerun
+test suite	Test	2026-10-25T15:40:46.4991656Z ^[[33mASSERT^[[0m provider count follows persisted completion
+test suite	Test	2026-10-25T15:40:46.5006096Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         14   Agent.run rejects a closed-F...
+test suite	Test	2026-10-25T15:40:46.5215110Z ^[[33mASSERT^[[0m all-blocked settled turn resumes and completes
+test suite	Test	2026-10-25T15:40:46.5215564Z ^[[33mASSERT^[[0m blocked turn runs no tool effect on resume
+test suite	Test	2026-10-25T15:40:46.5215920Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.5216176Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.5229904Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         15   Agent.run resumes an all-blo...
+test suite	Test	2026-10-25T15:40:46.5733833Z ^[[33mASSERT^[[0m resume completes
+test suite	Test	2026-10-25T15:40:46.5734063Z ^[[33mASSERT^[[0m tool executes once on resume
+test suite	Test	2026-10-25T15:40:46.5734457Z ^[[33mASSERT^[[0m on_yield fires on the resume turn (fresh/resume parity)
+test suite	Test	2026-10-25T15:40:46.5735097Z ^[[33mASSERT^[[0m replayed turn 0 then fresh turn 1 in the turn log
+test suite	Test	2026-10-25T15:40:46.5735425Z ^[[33mASSERT^[[0m agent_turn spans open under the replayed then fresh ordinal
+test suite	Test	2026-10-25T15:40:46.5749322Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         16   Agent.run fires on_yield on ...
+test suite	Test	2026-10-25T15:40:46.5912127Z ^[[33mASSERT^[[0m locator persisted
+test suite	Test	2026-10-25T15:40:46.5912419Z ^[[33mASSERT^[[0m checkpoint persisted
+test suite	Test	2026-10-25T15:40:46.5912678Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.5913014Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.5926309Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         17   terminal disposition retires...
+test suite	Test	2026-10-25T15:40:46.6023922Z ^[[33mASSERT^[[0m settled tool handler is not rerun
+test suite	Test	2026-10-25T15:40:46.6024280Z ^[[33mASSERT^[[0m settled pre-tool hook is not rerun
+test suite	Test	2026-10-25T15:40:46.6024601Z ^[[33mASSERT^[[0m settled post-tool hook is not rerun
+test suite	Test	2026-10-25T15:40:46.6024905Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.6025110Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.6034208Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         18   terminal disposition require...
+test suite	Test	2026-10-25T15:40:46.6128713Z ^[[33mASSERT^[[0m terminal sink called once
+test suite	Test	2026-10-25T15:40:46.6129936Z ^[[33mASSERT^[[0m terminal journal committed before sink failure
+test suite	Test	2026-10-25T15:40:46.6139323Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         19   terminal disposition sink fa...
+test suite	Test	2026-10-25T15:40:46.6326799Z ^[[33mASSERT^[[0m canonical success committed before trace fault
+test suite	Test	2026-10-25T15:40:46.6342979Z ^[[33mASSERT^[[0m external effect executed once
+test suite	Test	2026-10-25T15:40:46.6343378Z ^[[33mASSERT^[[0m fault occurs after canonical terminal observation
+test suite	Test	2026-10-25T15:40:46.6357650Z ^[[33mASSERT^[[0m observer relabeled committed success: File append failed on /tmp/build_0a2b62_dune/agent_core-terminal-observer-1d88df.jsonl: /tmp/build_0a2b62_dune/agent_core-terminal-observer-1d88df.jsonl: Is a directory
+test suite	Test	2026-10-25T15:40:46.6358272Z   ^[[31m[FAIL]^[[0m        ^[[36mprovider_mock_extra^[[0m         20   trace failure preserves comm...
+test suite	Test	2026-10-25T15:40:46.6416082Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.6416396Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.6423936Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         21   terminal disposition observe...
+test suite	Test	2026-10-25T15:40:46.6469579Z ^[[33mASSERT^[[0m provider retains the caller's fiber binding
+test suite	Test	2026-10-25T15:40:46.6469937Z ^[[33mASSERT^[[0m provider retains its native scope
+test suite	Test	2026-10-25T15:40:46.6628799Z ^[[33mASSERT^[[0m terminal callback runs exactly once
+test suite	Test	2026-10-25T15:40:46.6629140Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.6629423Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.6629867Z ^[[33mASSERT^[[0m provider dispatch follows admission
+test suite	Test	2026-10-25T15:40:46.6630191Z ^[[33mASSERT^[[0m tool effect is never repeated
+test suite	Test	2026-10-25T15:40:46.6635064Z ^[[33mASSERT^[[0m callback agrees with canonical terminal evidence
+test suite	Test	2026-10-25T15:40:46.6635421Z ^[[33mASSERT^[[0m unknown effect keeps its admitted tool attempt
+test suite	Test	2026-10-25T15:40:46.6635667Z ^[[33mASSERT^[[0m cancellation invents no settled tool result
+test suite	Test	2026-10-25T15:40:46.6643914Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         22   parent switch cancellation c...
+test suite	Test	2026-10-25T15:40:46.6681799Z ^[[33mASSERT^[[0m terminal callback runs exactly once
+test suite	Test	2026-10-25T15:40:46.6682244Z ^[[33mASSERT^[[0m locator publication finishes before cancelled callback admission
+test suite	Test	2026-10-25T15:40:46.6682487Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.6682660Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.6682852Z ^[[33mASSERT^[[0m provider dispatch follows admission
+test suite	Test	2026-10-25T15:40:46.6683054Z ^[[33mASSERT^[[0m tool effect is never repeated
+test suite	Test	2026-10-25T15:40:46.6685220Z ^[[33mASSERT^[[0m callback agrees with canonical terminal evidence
+test suite	Test	2026-10-25T15:40:46.6685519Z ^[[33mASSERT^[[0m unknown effect keeps its admitted tool attempt
+test suite	Test	2026-10-25T15:40:46.6685762Z ^[[33mASSERT^[[0m cancellation invents no settled tool result
+test suite	Test	2026-10-25T15:40:46.6697177Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         23   cancellation before fresh ca...
+test suite	Test	2026-10-25T15:40:46.6737394Z ^[[33mASSERT^[[0m terminal callback runs exactly once
+test suite	Test	2026-10-25T15:40:46.6737812Z ^[[33mASSERT^[[0m locator publication finishes before cancelled callback admission
+test suite	Test	2026-10-25T15:40:46.6738048Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.6738215Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.6738436Z ^[[33mASSERT^[[0m provider dispatch follows admission
+test suite	Test	2026-10-25T15:40:46.6738934Z ^[[33mASSERT^[[0m tool effect is never repeated
+test suite	Test	2026-10-25T15:40:46.6739139Z ^[[33mASSERT^[[0m resume preserves the admitted locator
+test suite	Test	2026-10-25T15:40:46.6748588Z ^[[33mASSERT^[[0m callback agrees with canonical terminal evidence
+test suite	Test	2026-10-25T15:40:46.6749035Z ^[[33mASSERT^[[0m unknown effect keeps its admitted tool attempt
+test suite	Test	2026-10-25T15:40:46.6749434Z ^[[33mASSERT^[[0m cancellation invents no settled tool result
+test suite	Test	2026-10-25T15:40:46.6781243Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         24   cancellation before resumed ...
+test suite	Test	2026-10-25T15:40:46.6826577Z ^[[33mASSERT^[[0m provider retains the caller's fiber binding
+test suite	Test	2026-10-25T15:40:46.6826938Z ^[[33mASSERT^[[0m provider retains its native scope
+test suite	Test	2026-10-25T15:40:46.6838102Z ^[[33mASSERT^[[0m terminal callback runs exactly once
+test suite	Test	2026-10-25T15:40:46.6838389Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.6838646Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.6838940Z ^[[33mASSERT^[[0m provider dispatch follows admission
+test suite	Test	2026-10-25T15:40:46.6839257Z ^[[33mASSERT^[[0m tool effect is never repeated
+test suite	Test	2026-10-25T15:40:46.6845360Z ^[[33mASSERT^[[0m callback agrees with canonical terminal evidence
+test suite	Test	2026-10-25T15:40:46.6845971Z ^[[33mASSERT^[[0m unknown effect keeps its admitted tool attempt
+test suite	Test	2026-10-25T15:40:46.6846315Z ^[[33mASSERT^[[0m cancellation invents no settled tool result
+test suite	Test	2026-10-25T15:40:46.6853575Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         25   nested cancellation retains ...
+test suite	Test	2026-10-25T15:40:46.6901473Z ^[[33mASSERT^[[0m provider retains the caller's fiber binding
+test suite	Test	2026-10-25T15:40:46.6901866Z ^[[33mASSERT^[[0m provider retains its native scope
+test suite	Test	2026-10-25T15:40:46.6913391Z ^[[33mASSERT^[[0m terminal callback runs exactly once
+test suite	Test	2026-10-25T15:40:46.6913703Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.6913950Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.6914145Z ^[[33mASSERT^[[0m provider dispatch follows admission
+test suite	Test	2026-10-25T15:40:46.6914348Z ^[[33mASSERT^[[0m tool effect is never repeated
+test suite	Test	2026-10-25T15:40:46.6918757Z ^[[33mASSERT^[[0m callback agrees with canonical terminal evidence
+test suite	Test	2026-10-25T15:40:46.6919154Z ^[[33mASSERT^[[0m unknown effect keeps its admitted tool attempt
+test suite	Test	2026-10-25T15:40:46.6919633Z ^[[33mASSERT^[[0m cancellation invents no settled tool result
+test suite	Test	2026-10-25T15:40:46.6931390Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         26   losing provider race commits...
+test suite	Test	2026-10-25T15:40:46.6975208Z ^[[33mASSERT^[[0m provider retains the caller's fiber binding
+test suite	Test	2026-10-25T15:40:46.6975468Z ^[[33mASSERT^[[0m provider retains its native scope
+test suite	Test	2026-10-25T15:40:46.7016410Z ^[[33mASSERT^[[0m tool retains the caller's fiber binding
+test suite	Test	2026-10-25T15:40:46.7016789Z ^[[33mASSERT^[[0m tool retains its child execution authority
+test suite	Test	2026-10-25T15:40:46.7027691Z ^[[33mASSERT^[[0m terminal callback runs exactly once
+test suite	Test	2026-10-25T15:40:46.7028040Z ^[[33mASSERT^[[0m terminal outcome
+test suite	Test	2026-10-25T15:40:46.7028218Z ^[[33mASSERT^[[0m terminal recovery action
+test suite	Test	2026-10-25T15:40:46.7028407Z ^[[33mASSERT^[[0m provider dispatch follows admission
+test suite	Test	2026-10-25T15:40:46.7028618Z ^[[33mASSERT^[[0m tool effect is never repeated
+test suite	Test	2026-10-25T15:40:46.7037148Z ^[[33mASSERT^[[0m callback agrees with canonical terminal evidence
+test suite	Test	2026-10-25T15:40:46.7037559Z ^[[33mASSERT^[[0m unknown effect keeps its admitted tool attempt
+test suite	Test	2026-10-25T15:40:46.7037930Z ^[[33mASSERT^[[0m cancellation invents no settled tool result
+test suite	Test	2026-10-25T15:40:46.7048146Z   ^[[32m[OK]^[[0m          ^[[36mprovider_mock_extra^[[0m         27   parent cancellation preserve...
+test suite	Test	2026-10-25T15:40:46.7049062Z ^[[2m│ ^[[0m^[[31m[FAIL]^[[0m        ^[[36mprovider_mock_extra^[[0m         20   trace failure preserves c...^[[2m  │^[[0m
+test suite	Test	2026-10-25T15:40:46.7057085Z ^[[31m1 failure!^[[0m in 0.710s. 69 tests run.
+test suite	Test	2026-10-25T15:40:46.7259317Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: FAIL exit 1 in 26s

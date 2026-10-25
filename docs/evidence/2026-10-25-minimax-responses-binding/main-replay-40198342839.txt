@@ -1,0 +1,5 @@
+Raw workflow log SHA256: 2619225a3b27d7f35f093508fbb63eeb1e36920b5a4faef672d904fcdb8b8050
+Source: https://github.com/jeong-sik/masc/actions/runs/40198342839
+
+test suite	Checkout	2026-10-25T13:36:16.3772551Z HEAD is now at 3d22830d docs(minimax): ground Responses replay gaps in official schema (#45926)
+test suite	Test	2026-10-25T13:37:54.4696774Z ^[[32mTest Successful^[[0m in 0.077s. 57 tests run.

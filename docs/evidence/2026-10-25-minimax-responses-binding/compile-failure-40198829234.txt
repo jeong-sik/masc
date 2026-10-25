@@ -1,0 +1,5 @@
+Raw workflow log SHA256: 829edd86d405258acb57a4260e7af51e8475a7de3a9cdbe0e719e981c737ec66
+Source: https://github.com/jeong-sik/masc/actions/runs/40198829234
+
+test suite	Checkout	2026-10-25T13:42:40.2753436Z HEAD is now at 3dc43c1e test(minimax): exercise native Responses binding and declared wire controls
+test suite	Test	2026-10-25T13:44:06.5951475Z Error: Unbound value Reasoning_dialect.stable_dialect_for_provider_config

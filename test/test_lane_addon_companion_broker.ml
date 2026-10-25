@@ -216,7 +216,8 @@ let publication_survives_browser_withdrawal_before_acceptance () = with_broker (
     (Eio.Promise.await_exn reply=`Assoc ["accepted",`Bool true]);
   let duplicate,reader=connect env sw grant in send duplicate (publish_frame grant public_event);
   check bool "same event may reconcile original host admission" true (receive reader=`Assoc ["accepted",`Bool true]);
-  check bool "reconciliation preserves the complete envelope" true (!events=[public_event;public_event]);
+  let expected=Lane_addon_action.canonical public_event |> ok in
+  check bool "reconciliation preserves the complete canonical envelope" true (!events=[expected;expected]);
   check int "publication never binds another Browser" 0 !binds;
   let forged,reader=connect env sw grant in
   send forged (`Assoc ["publication_id",field "invocation_id" (B.descriptor grant);"event",public_event]);

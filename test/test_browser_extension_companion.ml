@@ -19,7 +19,7 @@ let operation_id="0b000000-0000-4000-8000-000000000019"
 let extension_id=String.make 32 'a'
 let url="https://example.org/login"
 let page=`Assoc ["page_id",`String "cdp-page-9";"url",`String url]
-let scenario () = Eio_mock.Backend.run_full (fun env -> Eio.Switch.run (fun sw ->
+let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let transport=ref None and sent=ref [] and private_calls=ref 0 and summaries=ref 0 in
   let get ()=match !transport with Some cdp -> cdp | None -> fail "CDP not created" in
   let send frame =
@@ -52,9 +52,9 @@ let scenario () = Eio_mock.Backend.run_full (fun env -> Eio.Switch.run (fun sw -
           `Assoc ["result",`Assoc ["value",result]]
       | _ -> fail "unexpected private Chrome command" in
     C.receive (get ()) (Yojson.Safe.to_string (`Assoc ["id",field "id";"result",result])) in
-  let cdp=C.create ~send ~close:ignore ~clock:env#clock ~command_deadline_s:5. ~on_event:ignore in
+  let cdp=C.create ~send ~close:ignore ~clock:(Eio.Stdenv.clock env) ~command_deadline_s:5. ~on_event:ignore in
   transport:=Some cdp;
-  let backend=B.create ~sw ~clock:env#clock ~open_session:(fun ~sw:_ ~headless:_ ~log:_ ->
+  let backend=B.create ~sw ~clock:(Eio.Stdenv.clock env) ~open_session:(fun ~sw:_ ~headless:_ ~log:_ ->
       Ok (cdp,`Assoc ["pages",`List [page]]))
     ~call:(fun _ -> function
       | W.Context_pages -> Ok (`List [page])

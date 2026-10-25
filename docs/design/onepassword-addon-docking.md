@@ -12,11 +12,11 @@ retained observations or logs. A status-only tool does not satisfy that outcome.
 - `addons/onepassword/oauth.py`: code + S256 PKCE, backend-only token/key storage,
   configuration identity, connection generation, serialized rotating refresh,
   expiration-aware revoke and explicit uncertain-operation recovery states.
-- `addons/onepassword/lane.toml`: normal native MCP package, host-context status
-  export, packaged skill and declared connection readings. It does not declare
+- `addons/onepassword/lane.toml`: normal native MCP package, seven host-context
+  tool exports, packaged skill and declared connection readings. It does not declare
   another Browser service.
-- `onepassword_status`: safe account projection, with
-  `browser_login_available = false` while browser docking remains unfinished.
+- `onepassword_status`: safe account projection. `browser_login_available`
+  describes configured admission and does not certify a website login.
 - Private operator connection source: discovered `lane_operator`, admin-only
   host ingress, original-incarnation/connection authority, the generic Dashboard
   connection panel, callback fragment capture and transaction-pinned cancel.
@@ -33,10 +33,51 @@ retained observations or logs. A status-only tool does not satisfy that outcome.
   whole-browser agentic mode, request/status and credential fill with exact tab
   checks, entry-ID grant selection and private error projections. Eight Node
   fixtures execute these actual programs with a fake extension API and passed.
-  The Python-to-host private broker still needs to invoke this source path.
-- Focused Python checks: 29 OAuth, 10 operator-boundary and 6 native-style MCP
-  subprocess scenarios. Dashboard transport and popup/workspace/credential
-  admission have 10 focused checks. These use fabricated credentials and fixtures.
+  The original private host broker and Python client invoke that source path.
+- A separate Service-owned Publisher drains immutable journal envelopes through
+  the version-3 private broker. The host retains canonical notices, durably
+  admits the original Keeper source and rereads it at intake. Grouping preserves
+  the original invocation, Task and conversation. These are source boundaries;
+  their presence does not prove website authentication or resumed task work.
+- The focused Python suite passed 131 checks at source
+  `969148a6a7d1ebbda3355ae99c89f4eddf5c023e`, including actual Service, journal,
+  socket and MCP subprocess scenarios with fabricated credential/Browser edges.
+
+## Observed native candidate
+
+On 2026-10-25, [run 40147809672](https://github.com/jeong-sik/masc/actions/runs/40147809672)
+built source `6e6491e9cec86347b6664d26821cba95eda080f7`. Five original-source
+and five publication fixtures passed, along with the allocation and protocol
+suites. The extension and broker fixtures still had two failures repaired by
+the later candidate. Build success did not make that run successful.
+
+The retained server and 1Password package from that same source were run in a
+separate temporary workspace. The executable's embedded commit and effective
+runtime roots were checked. The declaration API attached its native worker,
+and an initialized MCP client discovered all seven exports. An actual Keeper
+model turn invoked `onepassword_status` once and returned `not_configured`,
+`connected = false`, `browser_login_available = false`.
+
+The retained tool execution and completed operation both identify
+`trace-1792891063051-00000#1`. Private receipts preserve that join. The smoke
+observer initially expected lowercase terminal states and timed out despite the
+operation's recorded `Succeeded`; a separate retained-execution check established
+the status-call result. This was an isolated candidate, not a production upgrade,
+real account connection, Browser fill or original-task continuation.
+
+The same native source also exercised the actual 1Password package with
+fabricated local account state and a nonexistent Browser selection. Its first
+Keeper turn received `preparing`; the real worker Publisher delivered the later
+`outcome_unknown` through the host broker and durable queue. The queue's actual
+terminal receipt and the second model input preserved the original invocation.
+With explicit instructions to use `keeper_surface_post`, that second real turn
+posted the same operation ID and phase to the original Dashboard conversation;
+the assistant row was persisted. The original Task was null, and no actual
+1Password account, extension fill or website authentication was exercised.
+The [continuation contract](lane-addon-keeper-continuation.md#observed-isolated-failure-continuation)
+records the evidence scope.
+
+## Earlier status installation
 
 On 2026-10-24, candidate `dc3e8ed35ff065c4cff859a8473531b4561373db`
 was copied as an explicit development package and installed through the served
@@ -59,30 +100,32 @@ published account-authentication evidence.
 
 ## Remaining work
 
-1. Install and exercise the implemented private connect/callback/cancel path on
-   a host built from this stack. Extend it with approval/disconnect controls and
+1. Exercise the implemented private connect/callback/cancel and login approval
+   controls on a host built from this stack. Extend them with confirmed disconnect and
    explicit remote reconciliation for an interrupted exchange or rotation.
 2. Install and exercise the supported extension through the implemented loader
-   on the existing owned Chromium backend, then connect its private transport to
-   the Python connector. The companion uses the original Browser owner, CDP
+   on the existing owned Chromium backend and verify its connected private transport
+   through the Python connector. The companion uses the original Browser owner, CDP
    connection and page-operation serializer.
-3. Run request/status/fill through a private typed exchange. Pin connector
-   connection generation, Browser worker incarnation, original session/tab and
-   host principal to each login operation. Never follow a replacement owner.
-4. Keep reads/screenshots excluded until the original fill is known settled.
-   Cancellation must not merely release the existing semaphore while the
-   extension continues. An unknown result fences observation and cannot replay
-   fill; safe retirement/reconciliation of the original browser is separate.
-5. Export login operations and bind durable results to the original Keeper
-   continuation. Generic Lane Ask stores question text and does not itself
-   resume a Keeper, so it must not carry an opaque approval link.
+3. Verify actual request/status/fill and the implemented account, Browser,
+   session/tab and principal pins. Exercise the read/screenshot exclusion and
+   original-owner cancellation fences while a real extension call is in flight.
+   A lost fill cannot authorize replay or adoption of another Browser.
+4. Add a host-owned unknown notice for detected original-provider loss. An
+   origin record alone is pre-dispatch intent and cannot prove execution.
+5. Verify worker publication, durable intake and the original Keeper's resumed
+   turn through the connected path. Generic Lane Ask stores question text and
+   does not itself resume a Keeper; it must not carry opaque approval links.
 6. Verify install, model-visible discovery and actual Keeper invocation, real
    user approval, website-level authenticated readback and resumed task work.
    Exercise denial, stale owner, concurrent observation, cancellation, unknown
    result, multi-page login/OTP and disconnect using the same candidate.
 
-Provider setup requires partner preview access, OAuth client registration and a
-production HTTPS callback. The required test account and extension/app build
+Provider setup requires developer integration access, OAuth client registration
+and a production HTTPS callback. The [personal offering](https://1password.com/personal-ai-agent-integrations)
+includes Individual/Family accounts; the [documented developer registration](https://docs.browserbase.com/integrations/1password/agentic-autofill)
+uses a separate Business account. Missing OAuth Application access requires
+activation by a 1Password contact. The required test account and extension/app build
 must be confirmed with 1Password. No personal account is connected by the
 development status installation above.
 

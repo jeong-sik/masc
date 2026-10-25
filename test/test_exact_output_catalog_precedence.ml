@@ -410,15 +410,8 @@ let test_registry_preserves_admitted_slots_without_resolving_credentials () =
     ]
     |> String.concat "\n"
   in
-  let getenv = function
-    | "AVAILABLE_FIXTURE_KEY" -> Ok (Some "frozen-secret")
-    | "INVALID_FIXTURE_KEY" -> Ok (Some "invalid\nsecret")
-    | "READ_FAILED_FIXTURE_KEY" -> Error ()
-    | "MISSING_FIXTURE_KEY" | _ -> Ok None
-  in
   let snapshot =
     load_snapshot
-      ~getenv
       (Exact_output.Full_replacement
          { source = "registry credential outcomes"; contents })
   in

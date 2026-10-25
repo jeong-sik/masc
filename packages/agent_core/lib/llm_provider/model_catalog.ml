@@ -75,7 +75,6 @@ type provider_entry = Model_provider_catalog.entry =
   ; default_model : string option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
-  ; identity_hosts : string list
   ; supports_parallel_tool_suppression : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
@@ -1026,19 +1025,6 @@ let lookup_for_provider t ~provider_name ~model_id =
     | Some kind -> Anonymous_wire kind
     | None -> Declared_provider provider_name in
   lookup_for_provider_reference t ~provider ~model_id
-;;
-
-let provider_label_for_base_url ?getenv t ~kind ~base_url =
-  Model_provider_catalog.provider_label_for_base_url ?getenv t.providers ~kind ~base_url
-;;
-
-let provider_label_for_endpoint ?getenv t ~kind ~base_url ~request_path =
-  Model_provider_catalog.provider_label_for_endpoint
-    ?getenv
-    t.providers
-    ~kind
-    ~base_url
-    ~request_path
 ;;
 
 type default_cache =

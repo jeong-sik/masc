@@ -67,10 +67,9 @@ let resolver_snapshot ~base_url ~system_prompt =
       F.fixture_post_connect_timeout_seconds
       F.fixture_wait_seconds
   in
-  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   match
     EO.load_resolver_snapshot
-      ~io
       ~catalog:(EO.Full_replacement { source = "stagehand model test"; contents })
       ()
   with

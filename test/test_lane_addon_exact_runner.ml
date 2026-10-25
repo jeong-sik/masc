@@ -637,7 +637,6 @@ let test_http_flow_preserves_host_admission_class ?(revoke_while_queued=false) a
        credential=Agent_core.Exact_output.Credential_resolved binding.api_key;
        body_timeout_s=Some F.fixture_post_body_timeout_seconds} in
     let snapshot=match Agent_core.Exact_output.load_resolver_snapshot
-        ~io:{getenv=(fun _ -> Ok None)}
         ~catalog:(Agent_core.Exact_output.Embedded_with_targets [target]) () with
       | Ok snapshot -> snapshot | Error _ -> fail "actual admission fixture target did not load" in
     ignore (F.publish_registry ~lane_id ~slot_ids:[target.target_ref] snapshot);

@@ -205,7 +205,6 @@ let injected_slot ~sw ~net ~timeout_s ~primary_id =
     "[[providers]]\nid = \"probe-injected\"\nkind = \"openai_compat\"\nbase_url = \"http://127.0.0.1:%d\"\nrequest_path = \"/v1/chat/completions\"\nauth = \"none\"\n\n[[models]]\nmodel_id = \"probe-model\"\nprovider_name = \"probe-injected\"\nmax_context_tokens = 65536\nmax_output_tokens = 4096\nsupports_response_format_json = true\nsupports_structured_output = true\nsupports_system_prompt = true\n\n[[targets]]\nid = %S\nprovider_ref = \"probe-injected\"\nmodel_id = \"probe-model\"\nconnect_timeout_s = %g\nbody_timeout_s = %g\n"
     port primary_id timeout_s timeout_s in
   let snapshot = match Exact.load_resolver_snapshot
-      ~io:{getenv = (fun _ -> Ok None)}
       ~catalog:(Exact.Full_replacement {source = "manual probe injection"; contents}) () with
     | Ok snapshot -> snapshot | Error _ -> reject Injection_catalog_rejected
   in

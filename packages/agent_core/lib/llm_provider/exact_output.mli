@@ -54,7 +54,6 @@ type flow_candidate
 type flow_snapshot
 type flow_attempt
 type flow_success
-type resolver_io = { getenv : string -> (string option, unit) result }
 
 type catalog_document =
   { source : string
@@ -157,7 +156,6 @@ type resolver_snapshot_error =
       { target_ref : string
       ; cause : resolver_endpoint_error
       }
-  | Environment_read_failed of { environment_variable : string }
 
 type minimum_guarantee =
   | Json_syntax
@@ -480,9 +478,8 @@ val snapshot_flow
     map. The default input is the embedded AGENT_CORE catalog, whose rows are
     the only place a provider or model fact is written. A full replacement,
     supplied as owned bytes or a file path, suppresses every embedded row.
-    [io.getenv] is observed exactly once per referenced environment name during
-    this call and is never retained. Invalid paths, syntax, collisions,
-    base-URL environment reads, and endpoint declarations fail closed.
+    Provider endpoints and credentials come from the declared target binding.
+    Invalid paths, syntax, collisions, and endpoint declarations fail closed.
     [Require_all_target_bindings] also rejects the snapshot when any target has
     no exact provider/model join. [Exclude_unbound_targets] instead records and
     excludes only those targets; callers must inspect
@@ -491,8 +488,7 @@ val snapshot_flow
     frozen as per-target outcomes for [resolve_target]. No source falls back to
     the embedded catalog. *)
 val load_resolver_snapshot
-  :  io:resolver_io
-  -> ?target_binding_policy:target_binding_policy
+  :  ?target_binding_policy:target_binding_policy
   -> ?catalog:resolver_catalog_input
   -> unit
   -> (resolver_snapshot, resolver_snapshot_error) result

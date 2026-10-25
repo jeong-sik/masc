@@ -225,7 +225,6 @@ let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
   in
   let snapshot =
     Exact_output.load_resolver_snapshot
-      ~io:{ getenv = (fun _ -> Ok None) }
       ~catalog:
         (Exact_output.Embedded_with_targets
            [ declared "missing-first"; declared "missing-last" ])

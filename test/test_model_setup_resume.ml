@@ -37,7 +37,6 @@ let test_deferred_owner_activation () =
 let test_stale_authority_is_withdrawn () =
   let module Exact = Agent_core.Exact_output in
   let snapshot = match Exact.load_resolver_snapshot
-    ~io:{getenv=(fun _ -> Ok None)}
     ~target_binding_policy:Exact.Exclude_unbound_targets
     ~catalog:Exact.Embedded_default () with
     | Ok snapshot -> snapshot | Error _ -> Alcotest.fail "embedded resolver unavailable" in

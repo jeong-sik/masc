@@ -1710,19 +1710,7 @@ let test_openai_chat_catalog_endpoint_identity () =
     check_string "registered Chat base" "https://api.openai.com/v1" registered.defaults.base_url;
     check_bool "registered Chat requires credentials" true registered.defaults.requires_api_key;
     check_bool "registered Chat uses the declared codec" true
-      (registered.defaults.kind = OpenAI_compat);
-    List.iter (fun (base_url, request_path, expected) ->
-      Alcotest.(check (option string)) "endpoint keeps its declared provider" (Some expected)
-        (Model_catalog.provider_label_for_endpoint catalog ~kind:OpenAI_compat ~base_url ~request_path))
-      [ "https://api.openai.com/v1", "/chat/completions", "openai"
-      ; "https://api.openai.com/v1", "/images/generations", "openai-image"
-      ; "https://api.openai.com/v1", "/audio/speech", "openai-speech"
-      ; "https://api.openai.com", "/v1/responses", "openai-responses"
-      ];
-    Alcotest.(check (option string)) "base-only legacy identity winner is preserved"
-      (Some "openai-image")
-      (Model_catalog.provider_label_for_base_url catalog ~kind:OpenAI_compat
-         ~base_url:"https://api.openai.com/v1"))
+      (registered.defaults.kind = OpenAI_compat))
 ;;
 
 (* xAI documents the effort ladder per model, not per provider: grok-4.3

@@ -826,7 +826,6 @@ let test_hitl_flow_takes_a_freed_permit_ahead_of_a_standard_request () =
        let snapshot =
          match
            EO.load_resolver_snapshot
-             ~io:{ getenv = (fun _ -> Ok None) }
              ~catalog:
                (EO.Embedded_with_targets
                   [ { EO.target_ref = "hitl-priority"
@@ -1281,10 +1280,9 @@ let prompt_only_snapshot base_url =
       base_url
       F.fixture_post_body_timeout_seconds
   in
-  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   match
     EO.load_resolver_snapshot
-      ~io
       ~catalog:(EO.Full_replacement { source = "hitl-incapable"; contents })
       ()
   with

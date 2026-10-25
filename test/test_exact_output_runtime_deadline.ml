@@ -72,7 +72,6 @@ let declared_target ~connect ~body : EO.declared_target =
 let admitted_declared_target (target : EO.declared_target) =
   let snapshot =
     EO.load_resolver_snapshot
-      ~io:{ getenv = (fun name -> Ok (Sys.getenv_opt name)) }
       ~target_binding_policy:EO.Exclude_unbound_targets
       ~catalog:(EO.Embedded_with_targets [ target ]) ()
     |> require_ok "expected declared target snapshot"

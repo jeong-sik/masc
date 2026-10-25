@@ -12,7 +12,6 @@ type projection_target = private
   ; model_admitted : bool
   }
 
-type resolver_io = { getenv : string -> (string option, unit) result }
 
 type catalog_document =
   { source : string
@@ -119,7 +118,6 @@ type resolver_snapshot_error =
       { target_ref : string
       ; cause : resolver_endpoint_error
       }
-  | Environment_read_failed of { environment_variable : string }
 
 type selected_target = private
   { config : Provider_config.t
@@ -196,16 +194,14 @@ val hash_parts : string list -> string
 val option_float : float option -> string
 
 val load_resolver_snapshot
-  :  io:resolver_io
-  -> ?target_binding_policy:target_binding_policy
+  :  ?target_binding_policy:target_binding_policy
   -> ?catalog:resolver_catalog_input
   -> unit
   -> (resolver_snapshot, resolver_snapshot_error) result
 (** Read, parse, and freeze the target catalog in one step: every later stage
     resolves against this snapshot, so a run cannot mix catalog generations.
-    Reads go through [io] (never the environment directly — an unread
-    variable surfaces as {!Environment_read_failed}), and every declared
-    target is bound and endpoint-checked under [target_binding_policy]:
+    Endpoints and credentials come from the supplied target binding. Every
+    declared target is bound and endpoint-checked under [target_binding_policy]:
     [Require_all_target_bindings] (the default) rejects the snapshot with
     {!Target_binding_missing} when a component is unbound, while
     [Exclude_unbound_targets] drops it and reports it via

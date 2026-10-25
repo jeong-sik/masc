@@ -2470,7 +2470,6 @@ base_url = "https://api.deepseek.com"
 request_path = "/chat/completions"
 auth = "api-key"
 capabilities_base = "openai_chat"
-identity_hosts = ["api.deepseek.com"]
 
 [[providers]]
 id = "kimi"
@@ -2482,7 +2481,6 @@ base_url = "https://api.kimi.com/coding"
 request_path = "/v1/messages"
 auth = "api-key"
 capabilities_base = "kimi"
-identity_hosts = ["api.kimi.com"]
 
 [[providers]]
 id = "ollama_cloud"
@@ -2493,7 +2491,6 @@ base_url = "https://ollama.com"
 request_path = "/api/chat"
 auth = "api-key"
 capabilities_base = "ollama_cloud"
-identity_hosts = ["ollama.com"]
 
 # Kimi's coding-plan endpoint. Separate row from [id = "kimi"]: a different
 # base URL, a different key, and an OpenAI-compatible wire rather than Kimi's
@@ -2514,15 +2511,8 @@ base_url = "https://api.z.ai/api/paas/v4"
 request_path = "/chat/completions"
 auth = "api-key"
 capabilities_base = "glm"
-identity_hosts = ["api.z.ai"]
 
-# zai-image shares (kind, base_url) with the earlier "glm" entry — the two
-# services sit behind one endpoint prefix and differ only by request_path.
-# provider_label_for_base_url therefore resolves this endpoint to "glm"
-# (declaration order); consumers needing this row's identity must resolve via
-# provider_label_for_endpoint (request_path-qualified) or an explicit
-# provider_id. Capability rows for image models are provider-qualified under
-# "zai-image".
+# Image models use the explicit provider identity "zai-image".
 [[providers]]
 id = "zai-image"
 kind = "glm"
@@ -2541,12 +2531,7 @@ auth = "api-key"
 capabilities_base = "openai_chat_extended"
 default_model = "gpt-image-2"
 
-# gemini-image shares (kind, base_url) with the earlier "gemini" entry — one
-# endpoint prefix, distinguished only by request_path. provider_label_for_base_url
-# resolves this endpoint to "gemini" (declaration order); consumers needing this
-# row's identity must resolve via provider_label_for_endpoint or an explicit
-# provider_id. Capability rows for image models are provider-qualified under
-# "gemini-image".
+# Image models use the explicit provider identity "gemini-image".
 [[providers]]
 id = "gemini-image"
 kind = "gemini"
@@ -2642,7 +2627,6 @@ auth = "api-key"
 # The effort ladder is declared per grok row, not here: xAI documents it per
 # model (grok-4.3 accepts "none", grok-4.5 and later do not).
 capabilities_base = "xai"
-identity_hosts = ["api.x.ai"]
 
 [[providers]]
 id = "mistral"
@@ -2651,7 +2635,6 @@ base_url = "https://api.mistral.ai/v1"
 request_path = "/chat/completions"
 auth = "api-key"
 capabilities_base = "mistral"
-identity_hosts = ["api.mistral.ai"]
 
 [[providers]]
 id = "cohere"
@@ -2660,7 +2643,6 @@ base_url = "https://api.cohere.com/compatibility/v1"
 request_path = "/chat/completions"
 auth = "api-key"
 capabilities_base = "cohere"
-identity_hosts = ["api.cohere.com"]
 
 # Xiaomi MiMo V2.5 capability specs.
 # Token Plan and the regular API expose the same vendor model capabilities for
@@ -2677,12 +2659,6 @@ request_path = "/chat/completions"
 auth = "api-key"
 default_model = "mimo-v2.5-pro"
 capabilities_base = "mimo"
-identity_hosts = [
-  "api.xiaomimimo.com",
-  "token-plan-cn.xiaomimimo.com",
-  "token-plan-sgp.xiaomimimo.com",
-  "token-plan-ams.xiaomimimo.com",
-]
 
 [[models]]
 model_id = "mimo-v2.5-pro"

@@ -1,0 +1,19 @@
+Run https://github.com/jeong-sik/masc/actions/runs/40150288619
+Actual checkout8b1230612ebe447d1d61ac48825508f647d60b6b; overallFAILURE beforeselectedsuites.
+
+test suite	Checkout	2026-10-25T01:21:30.5017368Z
+test suite	Checkout	2026-10-25T01:21:30.5017484Z Turn off this advice by setting config variable advice.detachedHead to false
+test suite	Checkout	2026-10-25T01:21:30.5017661Z
+test suite	Checkout	2026-10-25T01:21:30.5017796Z HEAD is now at 8b123061 docs: record explicit provider identity scope and parent execution
+test suite	Test	2026-10-25T01:22:57.7111744Z File "packages/agent_core/lib/llm_provider/exact_output_resolver.ml", line 760, characters 6-12:
+test suite	Test	2026-10-25T01:22:57.7112105Z 760 |   let getenv name =
+test suite	Test	2026-10-25T01:22:57.7112260Z             ^^^^^^
+test suite	Test	2026-10-25T01:22:57.7112423Z Error (warning 26 [unused-var]): unused variable getenv.
+test suite	Test	2026-10-25T01:23:11.2260266Z File "packages/agent_core/lib/llm_provider/exact_output_resolver.ml", line 760, characters 6-12:
+test suite	Test	2026-10-25T01:23:11.2260650Z 760 |   let getenv name =
+test suite	Test	2026-10-25T01:23:11.2260788Z             ^^^^^^
+test suite	Test	2026-10-25T01:23:11.2260946Z Error (warning 26 [unused-var]): unused variable getenv.
+test suite	Test	2026-10-25T01:23:19.3792975Z File "packages/agent_core/lib/llm_provider/exact_output_resolver.ml", line 760, characters 6-12:
+test suite	Test	2026-10-25T01:23:19.3815274Z 760 |   let getenv name =
+test suite	Test	2026-10-25T01:23:19.3845250Z             ^^^^^^
+test suite	Test	2026-10-25T01:23:19.3875307Z Error (warning 26 [unused-var]): unused variable getenv.

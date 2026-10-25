@@ -532,22 +532,47 @@ let cancelled_finalizer () = with_finalizer_fixture ~hooks:[] ~invocation:Lane_a
     check int "cancelled finalization keeps the one raw reply" 1 !raw;
     check string "cancelled effect is never replayed" "increment\n" (calls ()))
 
-let actual_onepassword_package () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-  let directory=match List.find_opt (fun path -> Sys.file_exists (Filename.concat path "lane.toml"))
+let actual_onepassword_package () = Eio_main.run (fun env ->
+  let fixture_root=Filename.temp_dir "actual-onepassword-package-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree fixture_root) (fun () ->
+  Eio.Switch.run (fun sw ->
+  let source_directory=match List.find_opt (fun path -> Sys.file_exists (Filename.concat path "lane.toml"))
       [Filename.concat (Sys.getcwd ()) "../addons/onepassword";
        Filename.concat (Sys.getcwd ()) "addons/onepassword"] with
     | Some path -> path | None -> fail "actual 1Password package dependency is missing" in
+  let directory=Filename.concat fixture_root "onepassword" in
+  let copy source destination =
+    Fs_compat.mkdir_p (Filename.dirname destination);
+    let bytes=In_channel.with_open_bin source In_channel.input_all in
+    Out_channel.with_open_bin destination (fun channel -> output_string channel bytes) in
+  let copy_package relative = copy (Filename.concat source_directory relative)
+      (Filename.concat directory relative) in
+  (* Copy public package inputs, never a source checkout's private JSON config
+     or environment. The fixture owns the interpreter and its absent config. *)
+  Array.iter (fun name -> if Filename.check_suffix name ".py" then copy_package name)
+    (Sys.readdir source_directory);
+  List.iter copy_package ["lane.toml";"requirements.txt";"skills/onepassword/SKILL.md"];
+  copy (Filename.concat (Filename.dirname source_directory) "protocol.py")
+    (Filename.concat fixture_root "protocol.py");
+  Eio.Process.run (Eio.Stdenv.process_mgr env)
+    ["python3";"-m";"venv";"--without-pip";Filename.concat directory ".venv"];
   let package=Lane_addon_manifest.load ~path:(Filename.concat directory "lane.toml") |> require in
+  let executable,arguments=match package.command with
+    | executable::arguments -> executable,arguments
+    | [] -> fail "actual package manifest command is empty" in
+  check bool "manifest selects an owned package executable" true
+    (Filename.is_relative executable && String.contains executable '/'
+     && Sys.file_exists (Filename.concat package.directory executable));
+  check bool "actual manifest executable passes production discovery" true
+    (Native_addon_program.command_ready ~package_directory:package.directory executable);
   let maximum=Lane_addon_types.max_reply_bytes package in
   let contract=Protocol.contract ~host_requests:false ~action_tool:package.action_tool
       ~tool_invocation:package.tool_invocation ~exported_tools:package.exported_tools
       ~tool_hooks:package.tool_hooks ~max_reply_bytes:maximum |> require in
   let protocol=Protocol.create ~instance_id:"actual-onepassword-package" ~contract () in
-  let script=Filename.concat package.directory "server.py" in
-  let configuration=Filename.temp_file "unconfigured-onepassword-" ".json" in
-  Sys.remove configuration;
   let client=Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
-      ~command:"python3" ~args:[script;"--config";configuration]
+      ~command:executable ~args:arguments
+      ~cwd:Eio.Path.(Eio.Stdenv.fs env / package.directory)
       ~max_response_bytes:maximum () |> require in
   Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Protocol.close protocol)) (fun () ->
     require (Protocol.initialize protocol client);
@@ -561,7 +586,7 @@ let actual_onepassword_package () = Eio_main.run (fun env -> Eio.Switch.run (fun
         ~name:"onepassword_status" ~arguments:(`Assoc []) |> require in
     check bool "actual status traverses host input and output validators" true
       (status.structured_content=Some (`Assoc ["phase",`String "not_configured";
-        "connected",`Bool false;"browser_login_available",`Bool false])))))
+        "connected",`Bool false;"browser_login_available",`Bool false]))))))
 
 let () = run "Addon engine-independent MCP admission"
   ["protocol",[test_case "actual 1Password package initializes through host validators" `Quick actual_onepassword_package;

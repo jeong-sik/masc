@@ -1,0 +1,14 @@
+{
+  "production_baseline": "c288253aeb969ce4395693c0eaa946718c737192",
+  "checks": [
+    "ocamlc -stop-after parsing",
+    "git diff --check"
+  ],
+  "typecheck": false,
+  "executed_tests": false,
+  "test_sha256": "716235dbd2b6c6b92d053b6f14182e5fd09eac0a25ab0bd9c0556e0335a75e1a",
+  "requested_suites": [
+    "test/test_keeper_held_session_restore"
+  ],
+  "full_regression": "not run on this candidate"
+}

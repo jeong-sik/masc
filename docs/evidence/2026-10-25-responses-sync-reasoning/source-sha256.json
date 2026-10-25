@@ -1,0 +1,22 @@
+[
+  {
+    "path": "packages/agent_core/lib/llm_provider/backend_openai_responses.ml",
+    "sha256": "a17ef1214b56fe875a61df224804ef9224a27a33a0c7f778ef7a0ee0dcbee6e8"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/backend_openai_responses.mli",
+    "sha256": "2a9a5e3e10df979c939f31d7b537fdba11edbb504a530b4630a9efd952ded6de"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/responses_reasoning.ml",
+    "sha256": "a927d96b5e4c2283abef5b4601349f8f4c28000b4cf24d4cadeec6739e5c4fff"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/responses_reasoning.mli",
+    "sha256": "da33725f60006a06f187b87af14d2004b3a8c4091f023fd731890afd473267b5"
+  },
+  {
+    "path": "packages/agent_core/test/test_responses_reasoning_content.ml",
+    "sha256": "5b7ce97413149b539ae2fa53313a70d3ac27587e74b37e306634ea74d7db8aac"
+  }
+]

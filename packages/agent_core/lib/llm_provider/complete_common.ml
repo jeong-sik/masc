@@ -29,6 +29,9 @@ let resolve_capabilities_for_config (config : Provider_config.t) =
   | None -> base_capabilities_for_kind config.kind, Provider_default_capability
 ;;
 
+let effective_capabilities config = fst (resolve_capabilities_for_config config)
+;;
+
 let warn_on_drift_observation source = function
   | Capabilities.Thinking_returned_but_declared_unsupported ->
     (match source with

@@ -229,23 +229,26 @@ let test_endpoint_only_config_does_not_select_catalog_facts () =
       caps.supports_reasoning)
 ;;
 
-let test_explicit_provider_id_selects_catalog_capabilities () =
+let test_explicit_provider_id_requires_selected_catalog_capabilities () =
   with_provider_catalog catalog_json (fun () ->
-    let cfg =
-      Llm_provider.Provider_config.make
-        ~kind:Llm_provider.Provider_config.OpenAI_compat
-        ~provider_id:"subscriber-local"
-        ~model_id:"unlisted-local-model"
-        ~base_url:"https://deliberately-different.example/v9"
-        ~request_path:"/not-the-catalog-path"
-        ()
-    in
-    let caps = Provider_runtime_binding.capabilities_for_provider_config cfg in
-    Alcotest.(check bool) "catalog supports tools" true caps.supports_tools;
-    Alcotest.(check bool)
-      "explicit id selects catalog reasoning capability"
-      true
-      caps.supports_reasoning)
+    let config = Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat ~provider_id:"subscriber-local"
+      ~model_id:"unlisted-local-model"
+      ~base_url:"https://deliberately-different.example/v9"
+      ~request_path:"/not-the-catalog-path" () in
+    let caps = Provider_runtime_binding.capabilities_for_provider_config config in
+    Alcotest.(check bool) "raw provider id does not reopen overlay capability policy" false
+      caps.supports_reasoning;
+    Alcotest.(check bool) "runtime capability agrees with completion admission" true
+      (caps = Llm_provider.Complete_common.effective_capabilities config);
+    let binding = expect_binding "subscriber-local" in
+    let selected = expect_ok (Provider_runtime_binding.to_provider_config
+      ~model:"unlisted-local-model" binding) in
+    let caps = Provider_runtime_binding.capabilities_for_provider_config selected in
+    Alcotest.(check bool) "selected catalog declaration retains reasoning" true
+      caps.supports_reasoning;
+    Alcotest.(check bool) "selected declaration agrees with completion admission" true
+      (caps = Llm_provider.Complete_common.effective_capabilities selected))
 ;;
 
 (* A model no catalog row names is the deployment's own, and its capability
@@ -1027,7 +1030,7 @@ let () =
         ; Alcotest.test_case
             "explicit provider id selects catalog capabilities"
             `Quick
-            test_explicit_provider_id_selects_catalog_capabilities
+            test_explicit_provider_id_requires_selected_catalog_capabilities
         ; Alcotest.test_case
             "an uncatalogued model keeps its three tool-choice flags apart"
             `Quick

@@ -54,10 +54,10 @@ val binding_for_provider_config : Llm_provider.Provider_config.t -> t option
     kind. Endpoint URLs, request paths, and model ids are never interpreted. *)
 val provider_id_of_provider_config : Llm_provider.Provider_config.t -> string
 
-(** Resolve AGENT_CORE-owned provider capabilities for a concrete provider config.
-    Explicit provider identity selects provider facts; otherwise only the typed
-    wire kind is used. Exact provider/model or provider-independent model rows
-    then override provider-level facts. No endpoint inference occurs. *)
+(** Project the config-owned capabilities used by completion admission.
+    Selected bindings carry provider facts into the config at construction;
+    this read never re-resolves provider aliases or consults the current
+    registry as a fallback. Frozen absence uses the typed wire default. *)
 val capabilities_for_provider_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Capabilities.capabilities

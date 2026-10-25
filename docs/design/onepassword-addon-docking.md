@@ -21,6 +21,11 @@ retained observations or logs. A status-only tool does not satisfy that outcome.
   host ingress, original-incarnation/connection authority, the generic Dashboard
   connection panel, callback fragment capture and transaction-pinned cancel.
   See [operator control contract](lane-addon-operator-controls.md).
+- Browser private-session source: original backend/session pin, existing page
+  serializer, public-extension settlement checks and unknown/cancel fences.
+  CDP/private Unix errors discard raw payload/exception text at their first
+  boundary. The [companion session contract](browser-private-companion-session.md)
+  records the still-unconnected provider broker and Browser owner/wire ports.
 - Focused Python checks: 29 OAuth, 10 operator-boundary and 6 native-style MCP
   subprocess scenarios. Dashboard transport and popup/workspace/credential
   admission have 10 focused checks. These use fabricated credentials and fixtures.

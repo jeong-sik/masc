@@ -19,6 +19,7 @@ and call_failure =
   | Detached
   | Connection_gone of string
   | Abandoned_call_pending
+  | Delivery_unsettled
   | Not_delivered of string
   | Rejected of Wire.rpc_error
   | Lost of string
@@ -71,6 +72,10 @@ type call_state =
          cancels a model answer still being computed for it. *)
   | Abandoned of { id : int; outgoing : outgoing; since : float }
       (* [since] is when the caller left, the start of [abandoned_answer_s]. *)
+  | Unsettled_delivery
+      (* Delivery may have started input before failing. No late response or
+         abandoned-call deadline proves the receiver has stopped; only the
+         owner retiring this exact browser ends this barrier. *)
 
 type t =
   { sw : Eio.Switch.t
@@ -87,6 +92,12 @@ type t =
   ; mutable link : link_state
   ; mutable calls : call_state
   }
+
+let quiescent t = match t.link, t.calls with
+  | Attached link, Idle -> Option.is_none (Browser_cdp.lost_reason link.cdp)
+  | Attached _, (In_flight _ | Abandoned _ | Unsettled_delivery)
+  | (Unattached | Attaching | Initialising _ | Worker_gone | Ended _),
+    (Idle | In_flight _ | Abandoned _ | Unsettled_delivery) -> false
 
 (* The service worker is looked for this often after the extension loads; it
    appeared within half a second in the runs of 2026-09-24. *)
@@ -145,12 +156,12 @@ let deliver link message =
          ; "returnByValue", `Bool true
          ])
   with
-  | Error (Browser_cdp.Command_rejected { message; _ }) -> Error (Refused_delivery ("Runtime.evaluate rejected: " ^ message))
+  | Error (Browser_cdp.Command_rejected _) -> Error (Refused_delivery "Runtime.evaluate rejected")
   | Error (Browser_cdp.Connection_lost reason) -> Error (Delivery_unknown reason)
   | Ok evaluated ->
     (match field "exceptionDetails" evaluated with
      | None -> Ok ()
-     | Some details -> Error (Delivery_unknown ("the extension's receiver threw: " ^ exception_text details)))
+     | Some _ -> Error (Delivery_unknown "the extension's receiver threw"))
 ;;
 
 (* The extension waits for every answer to its requests, and the call that
@@ -225,13 +236,15 @@ let answer_model t id params =
       in
       match outcome, t.calls with
       | `Answered result, In_flight { id = current; _ } when current = owner -> send_reply t id result
-      | `Answered _, (Idle | In_flight _ | Abandoned _) | `Call_over, (Idle | In_flight _ | Abandoned _) ->
+      | `Answered _, (Idle | In_flight _ | Abandoned _ | Unsettled_delivery)
+      | `Call_over, (Idle | In_flight _ | Abandoned _ | Unsettled_delivery) ->
         refuse_model t id "the call that asked for the model is over"
-      | `Timed_out, (Idle | In_flight _ | Abandoned _) ->
+      | `Timed_out, (Idle | In_flight _ | Abandoned _ | Unsettled_delivery) ->
         refuse_model t id "the call that asked for the model reached its deadline")
   | In_flight _ -> refuse_model t id "the call in flight does not use the model"
   | Idle -> refuse_model t id "no call is in flight"
   | Abandoned _ -> refuse_model t id "the call that asked for the model was abandoned"
+  | Unsettled_delivery -> refuse_model t id "the call's delivery is unsettled"
 ;;
 
 let settle t id result =
@@ -239,6 +252,7 @@ let settle t id result =
   | Abandoned { id = abandoned; outgoing; since = _ } when abandoned = id ->
     t.calls <- Idle;
     t.log (Abandoned_call_ended { method_ = method_name outgoing; rejected = Result.is_error result })
+  | Unsettled_delivery -> t.log (Unexpected_response { id })
   | Abandoned _ | Idle | In_flight _ ->
     (match Hashtbl.find_opt t.pending id with
      | Some resolver ->
@@ -321,13 +335,13 @@ let send t link outgoing =
      for the reply. *)
   match Eio.Cancel.protect (fun () -> deliver link (encode ~id outgoing)) with
   | exception exn ->
-    over Idle;
+    over Unsettled_delivery;
     raise exn
   | Error (Refused_delivery detail) ->
     over Idle;
     Error (Not_delivered detail)
   | Error (Delivery_unknown detail) ->
-    over Idle;
+    over Unsettled_delivery;
     Error (Lost detail)
   | Ok () ->
     (match Eio.Promise.await reply with
@@ -370,9 +384,10 @@ let give_up_on_abandoned t outgoing ~since =
 let call t call =
   with_slot t (fun () ->
     match t.link, t.calls with
-    | (Unattached | Attaching | Initialising _), (Idle | In_flight _ | Abandoned _) -> Error Not_attached
-    | Worker_gone, (Idle | In_flight _ | Abandoned _) -> Error Detached
-    | Ended reason, (Idle | In_flight _ | Abandoned _) -> Error (Connection_gone reason)
+    | (Unattached | Attaching | Initialising _), (Idle | In_flight _ | Abandoned _ | Unsettled_delivery) -> Error Not_attached
+    | Worker_gone, (Idle | In_flight _ | Abandoned _ | Unsettled_delivery) -> Error Detached
+    | Ended reason, (Idle | In_flight _ | Abandoned _ | Unsettled_delivery) -> Error (Connection_gone reason)
+    | Attached _, Unsettled_delivery -> Error Delivery_unsettled
     | Attached _, Abandoned { outgoing; since; id = _ } when t.now () -. since >= t.abandoned_answer_s ->
       give_up_on_abandoned t outgoing ~since
     (* Behind the slot, a call still in flight is one whose caller left. *)
@@ -384,6 +399,7 @@ let send_init t link init =
   with_slot t (fun () ->
     match t.calls with
     | Idle -> send t link (Init init)
+    | Unsettled_delivery -> Error Delivery_unsettled
     | In_flight _ | Abandoned _ -> Error Abandoned_call_pending)
 ;;
 

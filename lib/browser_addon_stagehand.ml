@@ -332,6 +332,7 @@ let run ~env ~owner ~directory work =
           let backend=Browser_stagehand_backend.create ~sw ~clock:(Eio.Stdenv.clock env)
             ~open_session:(open_session ~env ~owner ~directory ~configuration:c ~model)
             ~call:(fun opened -> Session.call opened.session)
+            ~private_ready:(fun opened -> Session.quiescent opened.session)
             ~shutdown:(fun opened -> opened.shutdown ()) ~pid:(fun opened -> opened.child_pid) ~log in
           backend_settlement := (fun () -> Browser_stagehand_backend.settlement backend);
           let cleanup () =

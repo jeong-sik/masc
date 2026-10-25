@@ -171,7 +171,10 @@ val task_terminal_committed_fn :
    task_terminal_delivery) Atomic.t
 
 (** Persists the immutable verification request used by the system LLM
-    completion-authority lane. The default returns an explicit not-installed
+    completion-authority lane. [task] is the current transitioned snapshot,
+    including its submission handoff; the same value is committed and passed
+    to [verification_notify_submit_fn]. [claim] owns the submitted references.
+    The default returns an explicit not-installed
     error until the runtime fills it at boot. *)
 val verification_submit_request_fn :
   (Workspace_utils_backend_setup.config ->
@@ -190,8 +193,9 @@ val verification_delete_request_fn :
    verification_id:string ->
    (unit, string) result) Atomic.t
 
-(** Publishes the submitted-verification notification after persistence. A
-    missing runtime adapter is logged explicitly by the default. *)
+(** Publishes the submitted-verification notification after persistence.
+    [task] is the same immutable value used for preparation and the commit.
+    A missing runtime adapter is logged explicitly by the default. *)
 val verification_notify_submit_fn :
   (Workspace_utils_backend_setup.config ->
    task:Masc_domain.task ->
@@ -201,7 +205,9 @@ val verification_notify_submit_fn :
    unit) Atomic.t
 
 (** Notify the system LLM completion-authority lane after the task status and
-    verification request have both committed. The callback must not be a
+    verification request have both committed. [task] is the same immutable
+    submission snapshot used for preparation, commit and producer notification.
+    The callback must not be a
     Keeper wake-up or a Keeper task action; it only schedules the typed
     out-of-band authority review. *)
 val verification_submitted_fn :

@@ -481,7 +481,7 @@ let release_unroutable_rejected_task_r
               ; next_step = Some "Any agent may claim this task and answer the rejection"
               ; failure_mode = None
               ; reclaim_policy = Some Masc_domain.Allow_reclaim
-              ; evidence_refs = [ verification_id ]
+              ; evidence_refs = []
               ; updated_at = Some (Masc_domain.now_iso ())
               ; updated_by = Some actor
               }

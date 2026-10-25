@@ -1,0 +1,12 @@
+{
+  "pid": 68316,
+  "validated_command": "node node_modules/vite/bin/vite.js --config /tmp/masc-glm-ui-observer-20261025/vite.config.mts",
+  "validated_cwd": "/private/tmp/masc-authority-round-integration-20261025/dashboard",
+  "signal": "SIGTERM",
+  "signal_sent": true,
+  "observer_frontend_only": true,
+  "backend_and_model_proxy_touched": false,
+  "observed_at": "2026-10-25T00:08:44.434715+00:00",
+  "exec_session_exit": 143,
+  "pid_absent_after_stop": true
+}

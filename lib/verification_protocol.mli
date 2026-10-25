@@ -12,7 +12,10 @@ val create_submit_request :
   claim:Masc_domain.verification_claim ->
   (unit, string) result
 (** [create_submit_request ~config ~task ~assignee ~verification_id ~claim]
-    persists the request record the completion authority reads. Returns
+    persists the request record the completion authority reads.
+    The Task FSM caller passes the already-transitioned snapshot whose status
+    and handoff it will commit. [claim] contains the current producer evidence;
+    the protocol does not merge another handoff into it. Returns
     [Error _] when persistence fails, and when an [artifact:] reference is
     submitted but the producer's keeper meta cannot be read: the snapshot
     cannot know where the producer's sandbox keeps the artifact, and the host

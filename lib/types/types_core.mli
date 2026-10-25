@@ -207,6 +207,9 @@ type task_handoff_context =
   ; updated_by : string option [@default None]
   }
 [@@deriving show, yojson { strict = false }, eq]
+(** [evidence_refs] contains evidence-reference wire values, not Task or
+    verification correlation IDs. Rejected verification identity belongs to
+    the typed verdict/outbox/event records. *)
 
 (** The "why" behind a transition that stopped work, from whichever argument
     carried it. [transition_task_r] takes an explicit [reason];

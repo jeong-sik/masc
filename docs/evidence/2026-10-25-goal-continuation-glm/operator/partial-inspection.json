@@ -1,0 +1,95 @@
+{
+  "at": "2026-10-24T18:16:04.473079+00:00",
+  "task": {
+    "id": "task-001",
+    "title": "workspace/acceptance.json의 alpha를 true로 변경한다",
+    "description": "Goal goal-canary-three-results의 미달 항목 중 alpha를 진전시킨다. workspace/acceptance.json의 alpha를 false에서 true로 바꾸되, beta와 gamma는 false로 유지한다. 완료 조건: (1) 파일이 유효한 JSON으로 남아 있다 (2) 재독 결과 alpha=true, beta=false, gamma=false가 확인된다. 증거는 artifact:workspace/acceptance.json으로 검증에 제출한다. 첫 Task가 승인되기 전까지 beta/gamma는 수정하지 않는다.",
+    "priority": 2,
+    "files": [],
+    "created_at": "2026-10-24T18:02:32Z",
+    "created_by": "goal-canary",
+    "contract": {
+      "strict": true,
+      "completion_contract": [
+        "workspace/acceptance.json에서 alpha=true, beta=false, gamma=false가 실제 파일 재독으로 확인된다",
+        "파일이 유효한 JSON으로 유지된다"
+      ],
+      "required_evidence": [
+        "artifact:workspace/acceptance.json"
+      ]
+    },
+    "handoff_context": {
+      "summary": "workspace/acceptance.json의 alpha를 false에서 true로 변경했다(유일한 수정). 변경 후 파일을 다시 읽어 alpha=true, beta=false, gamma=false임을 확인했다. beta와 gamma는 false를 유지했고 파일은 유효한 JSON(55바이트)으로 남아 있다.",
+      "evidence_refs": [
+        "artifact:workspace/acceptance.json"
+      ],
+      "updated_at": "2026-10-24T18:04:28Z",
+      "updated_by": "goal-canary"
+    },
+    "status": "awaiting_verification",
+    "assignee": "goal-canary",
+    "started_at": "2026-10-24T18:02:36Z",
+    "submitted_at": "2026-10-24T18:04:29Z",
+    "verification_id": "vrf-9990ff88de3eb7953ce427f8e3a0ad07"
+  },
+  "goal_links": {
+    "version": 1,
+    "last_updated": "2026-10-24T18:02:32Z",
+    "links": [
+      {
+        "goal_id": "goal-canary-three-results",
+        "task_ids": [
+          "task-001"
+        ]
+      }
+    ]
+  },
+  "artifact_value": {
+    "alpha": true,
+    "beta": false,
+    "gamma": false
+  },
+  "artifact_sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc",
+  "artifact_bytes": 55,
+  "operator_evidence": {
+    "ok": true,
+    "result": {
+      "task_id": "task-001",
+      "verification_id": "vrf-9990ff88de3eb7953ce427f8e3a0ad07",
+      "producer": "goal-canary",
+      "authority_kind": "human_operator",
+      "authority_actor": "goal-canary-operator",
+      "evidence": {
+        "access": "available",
+        "request": {
+          "id": "vrf-9990ff88de3eb7953ce427f8e3a0ad07",
+          "task_id": "task-001",
+          "worker": "goal-canary",
+          "created_at": 1792865069.121427
+        },
+        "items": [
+          {
+            "kind": "artifact",
+            "reference": "artifact:workspace/acceptance.json",
+            "content": "{\n  \"alpha\": true,\n  \"beta\": false,\n  \"gamma\": false\n}\n",
+            "bytes": 55,
+            "truncated": false
+          },
+          {
+            "kind": "note",
+            "content": "workspace/acceptance.json의 alpha를 false에서 true로 변경했다(유일한 수정). 변경 후 파일을 다시 읽어 alpha=true, beta=false, gamma=false임을 확인했다. beta와 gamma는 false를 유지했고 파일은 유효한 JSON(55바이트)으로 남아 있다."
+          },
+          {
+            "kind": "note",
+            "content": "workspace/acceptance.json의 alpha를 false에서 true로 변경했다. 변경 후 파일을 다시 읽어 {\"alpha\": true, \"beta\": false, \"gamma\": true가 아니라 false, \"gamma\": false} — 정확히는 alpha=true, beta=false, gamma=false임을 확인했다. beta와 gamma는 계획대로 false를 유지했고 파일은 유효한 JSON(55바이트)으로 남아 있다."
+          },
+          {
+            "kind": "note",
+            "content": "재제출 사유: 이전 검증 vrf-129a96c60da5d4de218eea5094a0e244가 evaluator_unavailable(evaluator registry 미게시)로 중단되어, verification 게시글이 안내한 대로 담당자 재제출로 대체합니다. 파일 상태는 그대로입니다: alpha=true, beta=false, gamma=false (재독 확인, 2026-10-24T18:02:5xZ)."
+          }
+        ]
+      }
+    }
+  },
+  "provenance": "controlled operator_proxy, not independent LLM or human Goal confirmation"
+}

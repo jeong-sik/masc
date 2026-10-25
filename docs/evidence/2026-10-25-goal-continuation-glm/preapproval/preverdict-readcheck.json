@@ -1,0 +1,44 @@
+{
+  "scope": "read-only current Task/immutable/current artifact check at a bounded point; Root must revalidate its own exact verdict binding",
+  "observed_at_utc": "2026-10-24T18:16:19.404633+00:00",
+  "task_status": "awaiting_verification",
+  "verification_id": "vrf-9990ff88de3eb7953ce427f8e3a0ad07",
+  "backlog_unchanged_during_read": true,
+  "backlog_sha256": "201bb7b07fe0baf2c1629e339236c588158548f82c5c37ee802ea6cda2cd7130",
+  "verification_source": "/tmp/masc-goal-canary-32805eb7-glm53/.masc/verifications/vrf-9990ff88de3eb7953ce427f8e3a0ad07.json",
+  "verification_sha256": "ebb9679eecb481911d3cf224ab65634f14a5dbd6707713eef03796e47dc3a431",
+  "capture_diagnostic_items": [],
+  "artifact_count": 1,
+  "artifact_bytes": 55,
+  "current_bytes": 55,
+  "current_sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc",
+  "current_value": {
+    "alpha": true,
+    "beta": false,
+    "gamma": false
+  },
+  "current_equals_immutable": true,
+  "authoritative_links": {
+    "version": 1,
+    "last_updated": "2026-10-24T18:02:32Z",
+    "links": [
+      {
+        "goal_id": "goal-canary-three-results",
+        "task_ids": [
+          "task-001"
+        ]
+      }
+    ]
+  },
+  "producer_execution": {
+    "execution_id": "evt-ede73aa59b34542d30748dbc0fcb49a4",
+    "actor": "goal-canary",
+    "runtime_id": "glm-coding.glm-5-3",
+    "response_id": "20261025020414da547d15e7e446e0",
+    "provider_id": "glm-coding",
+    "model_id": "glm-5.3",
+    "tool_use_id": "call_edba2a1675a94c96aa19d535",
+    "provider_turn": 11,
+    "source_tool_use_ordinal": 0
+  }
+}

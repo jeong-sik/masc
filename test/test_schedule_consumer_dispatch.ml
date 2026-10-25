@@ -1364,13 +1364,12 @@ let test_cancelled_schedule_enqueued_wake_is_removed_at_cancel_boundary () =
   (* Cancel propagation: the queue-evidence projection must now report the
      cancelled schedule with no pending remainder — the enqueued utterance
      left the durable queue at the cancel boundary. *)
-  check string "cancelled schedule wake is withdrawn at cancel"
-    "withdrawn_at_cancel"
+  check string "cancelled schedule wake has durable cancellation evidence"
+    "matched_terminal_cancelled"
     (queue_evidence |> member "projection_status" |> to_string);
   check string "retained classification names the schedule status" "cancelled"
     (queue_evidence |> member "schedule_status" |> to_string);
-  (* No pending match means no match fields: the utterance is withdrawn, and
-     [matched_bucket]/[matched_schedule_id] are absent rather than null. *)
+  (* The exact retired receipt remains visible after pending removal. *)
   check int "retained wake no longer counts in pending" 0
     (queue_evidence |> member "pending_count" |> to_int);
   (* Disposition at the cancel boundary (task-1198): the in-flight wake row
@@ -1452,6 +1451,173 @@ let test_schedule_cancel_tool_withdraws_the_queued_wake_and_stores_the_cancellat
        check string "the stored canceller kind" "human_operator"
          (Schedule_domain.actor_kind_to_string cancellation.cancelled_by.kind);
        check string "the stored reason" reason cancellation.reason)
+;;
+
+type dashboard_drain_transition = Completed | Failed | Cancelled | Transferred
+
+let test_dashboard_drain_committed_before_projection transition () =
+  with_workspace @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let request = create_keeper_wake_schedule config in
+  let occurrence_id = tick_ok config ~now:201.0 |> single_occurrence_id in
+  let selection = pending_selection_exn ~base_path ~keeper_name in
+  let label, pending_status, projected_status = match transition with
+    | Completed -> "completed", "terminal_projection_pending", "matched_terminal_completed"
+    | Failed -> "failed", "terminal_projection_pending", "matched_terminal_failed"
+    | Cancelled -> "cancelled", "terminal_projection_pending", "matched_terminal_cancelled"
+    | Transferred -> "transferred", "transfer_projection_pending", "matched_pending"
+  in
+  let page_row () =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+    |> fun page -> dashboard_schedule_row_exn page ~schedule_id:request.schedule_id
+  in
+  let open Yojson.Safe.Util in
+  let assert_page ~stage ~status row =
+    let queue = row |> member "keeper_queue_evidence" in
+    check string (stage ^ " exact durable status") status
+      (queue |> member "projection_status" |> to_string);
+    check string (stage ^ " retains exact source") occurrence_id
+      (queue |> member "post_id" |> to_string);
+    (* These are actual page rows, emitted for the cross-language verification
+       receipt. Frontend evidence is not manufactured by an OCaml fixture. *)
+    Printf.printf "SCHEDULE_DRAIN_PAGE %s %s %s\n%!"
+      label stage (Yojson.Safe.to_string row)
+  in
+  let callback_called = ref false in
+  let after_commit _ =
+    callback_called := true;
+    let row = page_row () in
+    assert_page ~stage:"committed" ~status:pending_status row;
+    check string "read-only page does not invent a reaction projection" "matched_stimulus"
+      (row |> member "keeper_reaction_evidence" |> member "projection_status" |> to_string)
+  in
+  let require_transition = function
+    | Error detail -> fail detail
+    | Ok (Keeper_event_queue_persistence.Transition_applied receipt) -> receipt
+    | Ok (Keeper_event_queue_persistence.Transition_already_applied _) -> fail "fresh transition replayed"
+    | Ok (Keeper_event_queue_persistence.Transition_committed_followup_failed { detail; _ }) -> fail detail
+  in
+  let require_terminal = function
+    | Error detail -> fail detail
+    | Ok Keeper_event_queue_persistence.Turn_selection_withdrawn -> fail "source withdrawn before terminal"
+    | Ok (Keeper_event_queue_persistence.Turn_terminal_committed result) -> require_transition (Ok result)
+  in
+  let receipt = match transition with
+    | Completed ->
+      Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
+        ~after_commit ~base_path ~keeper_name ~applied_at:202.0 ~selection () |> require_terminal
+    | Failed ->
+      Keeper_event_queue_persistence.terminalize_pending_turn_attempt_result
+        ~after_commit ~base_path ~keeper_name ~applied_at:202.0 ~selection
+        ~detail:"controlled failed attempt" () |> require_terminal
+    | Cancelled ->
+      let cancellation : Keeper_event_queue_persistence.accepted_cancellation =
+        { source = selection.source; source_incarnation = selection.admitted_revision
+        ; operator_operation_id = "dashboard-cancel-before-projection"
+        ; reason = "operator cancellation before ledger projection" }
+      in
+      Keeper_event_queue_persistence.cancel_pending_accepted_result
+        ~after_commit ~base_path ~keeper_name ~applied_at:202.0 ~cancellation () |> require_transition
+    | Transferred ->
+      let target = persist_keeper_meta config "drain-target" in
+      let transfer : Keeper_event_queue_persistence.accepted_transfer =
+        { source = selection.source; source_incarnation = selection.admitted_revision
+        ; operator_operation_id = "dashboard-transfer-before-projection"
+        ; from_keeper = keeper_name; to_keeper = "drain-target"
+        ; target_trace_id = target.runtime.trace_id }
+      in
+      Keeper_event_queue_persistence.transfer_pending_accepted_result
+        ~after_commit ~base_path ~keeper_name ~applied_at:202.0 ~transfer () |> require_transition
+  in
+  check bool "actual owner-lock callback ran" true !callback_called;
+  let still_committed = page_row () in
+  assert_page ~stage:"unprojected" ~status:pending_status still_committed;
+  (match transition with
+   | Transferred ->
+     (match Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name with
+      | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+      | Ok _ -> fail "transfer did not converge"
+      | Error error -> fail (Keeper_event_queue_recovery.projection_error_to_string error))
+   | Completed | Failed | Cancelled ->
+     (match Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+         ~base_path ~keeper_name ~expected_transition_id:receipt.transition_id with
+      | Ok () -> () | Error detail -> fail detail));
+  let projected = page_row () in
+  assert_page ~stage:"projected" ~status:projected_status projected;
+  if transition = Completed then (
+    (* Retire this completed schedule's hot witness with a real later terminal.
+       Resolution must then use its exact-id compact receipt, not a ledger scan. *)
+    let later : Keeper_event_queue.stimulus =
+      { post_id = "later-bootstrap"; urgency = Normal; arrived_at = 203.0; payload = Bootstrap }
+    in
+    (match Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+        ~base_path ~keeper_name later with Ok _ -> () | Error detail -> fail detail);
+    let later_selection = pending_selection_exn ~base_path ~keeper_name in
+    let later_receipt =
+      Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
+        ~base_path ~keeper_name ~applied_at:204.0 ~selection:later_selection () |> require_terminal
+    in
+    (match Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+        ~base_path ~keeper_name ~expected_transition_id:later_receipt.transition_id with
+     | Ok () -> () | Error detail -> fail detail);
+    assert_page ~stage:"retired" ~status:projected_status (page_row ());
+    let path = Keeper_reaction_ledger.For_testing.schedule_occurrence_receipt_path
+        ~base_path ~keeper_name ~occurrence_id in
+    let bytes = In_channel.with_open_bin path In_channel.input_all in
+    Fun.protect ~finally:(fun () -> write_file path bytes) (fun () ->
+        write_file path "{";
+        assert_page ~stage:"unreadable_receipt" ~status:"read_error" (page_row ())));
+  if transition = Transferred then
+    check string "projection follows the actual target owner" "drain-target"
+      (projected |> member "keeper_queue_evidence" |> member "resolved_owner" |> to_string)
+;;
+
+let test_dashboard_resolver_refreshes_target_observed_before_transfer () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_name = "schedule-keeper" in
+  let target_name = "drain-target" in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let target_meta = persist_keeper_meta config target_name in
+  ignore (create_keeper_wake_schedule config : Schedule_domain.schedule_request);
+  let occurrence_id = tick_ok config ~now:201.0 |> single_occurrence_id in
+  let selection = pending_selection_exn ~base_path ~keeper_name in
+  let target_reads = ref 0 in
+  let moved = ref false in
+  let read_state ~base_path owner =
+    if String.equal owner target_name then incr target_reads;
+    if String.equal owner keeper_name && not !moved then (
+      let transfer : Keeper_event_queue_persistence.accepted_transfer =
+        { source = selection.source; source_incarnation = selection.admitted_revision
+        ; operator_operation_id = "transfer-between-owner-observations"
+        ; from_keeper = keeper_name; to_keeper = target_name
+        ; target_trace_id = target_meta.runtime.trace_id }
+      in
+      (match Keeper_event_queue_persistence.transfer_pending_accepted_result
+          ~base_path ~keeper_name ~applied_at:202.0 ~transfer () with
+       | Ok (Keeper_event_queue_persistence.Transition_applied _) -> ()
+       | Ok _ -> fail "fresh transfer did not commit"
+       | Error detail -> fail detail);
+      (match Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name with
+       | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+       | Ok _ -> fail "interleaved transfer did not converge"
+       | Error error -> fail (Keeper_event_queue_recovery.projection_error_to_string error));
+      moved := true);
+    Keeper_event_queue_persistence.observe_state_result ~base_path ~keeper_name:owner
+    |> Result.map_error (fun errors -> Printf.sprintf "owner observation failed: %d" (List.length errors))
+  in
+  let observed = Server_schedule_consumers.resolve_keeper_wake_occurrences_with
+      ~read_state ~base_path [target_name, occurrence_id; keeper_name, occurrence_id] in
+  (match observed with
+   | [ (_, _, Ok (Server_schedule_consumers.Absent_at initially_absent));
+       (_, _, Ok (Server_schedule_consumers.Pending_at (owner, Full_source source))) ] ->
+     check string "target really was observed empty before transfer" target_name initially_absent;
+     check string "source follows committed transfer to fresh target" target_name owner;
+     check bool "transfer preserves complete exact source" true (source = selection.source)
+   | _ -> fail "stale target absence escaped transfer refresh");
+  check int "cached target absence triggers a second fresh observation" 2 !target_reads
 ;;
 
 (* The cancel may run inside the turn the schedule woke: a Keeper cancelling
@@ -4300,6 +4466,16 @@ let () =
             `Quick (test_interval_wake_retries_acceptance_commit ~complete_before_retry:true)
         ; test_case "due wake bypasses proactive policy" `Quick
             test_due_schedule_wakes_live_keeper_with_proactive_disabled
+        ; test_case "dashboard resolver refreshes target observed before transfer" `Quick
+            test_dashboard_resolver_refreshes_target_observed_before_transfer
+        ; test_case "dashboard observes committed completion before projection" `Quick
+            (test_dashboard_drain_committed_before_projection Completed)
+        ; test_case "dashboard observes committed failure before projection" `Quick
+            (test_dashboard_drain_committed_before_projection Failed)
+        ; test_case "dashboard observes committed cancellation before projection" `Quick
+            (test_dashboard_drain_committed_before_projection Cancelled)
+        ; test_case "dashboard observes committed transfer before projection" `Quick
+            (test_dashboard_drain_committed_before_projection Transferred)
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
             test_keeper_wake_queue_evidence_rejects_stale_occurrence
         ; test_case "dashboard live supported non-terminal evidence matches supported request"

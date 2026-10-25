@@ -26,6 +26,13 @@ val scheduled_automation_dashboard_json :
     Reads the schedule ledger from disk, so callers on an Eio fiber wrap this
     in [Domain_pool_ref.submit_io_or_inline].
 
+    Keeper queue evidence includes pending, committed terminal/transfer
+    projection and exact retired receipts. It reuses the dispatch resolver's
+    latest-incarnation, conflict and transfer semantics, with complete lock-free
+    owner observations captured before reaction ledger reads. Compact source
+    receipts are verified against the exact occurrence's dispatch source hash.
+    Per-owner coherence does not imply a global cross-store transaction.
+
     Keeper queue evidence uses a lock-free, non-compacting durable observer,
     and reaction evidence is indexed once per Keeper for the bounded request
     rows. A GET therefore never enters the queue-owner transaction boundary

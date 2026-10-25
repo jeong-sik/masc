@@ -441,7 +441,16 @@ function queueEvidenceTone(
   evidence: DashboardScheduledAutomationKeeperQueueEvidence | null | undefined,
 ): StatusChipTone {
   if (!evidence) return 'neutral'
-  if (evidence.projection_status === 'matched_pending') return 'ok'
+  switch (evidence.projection_status) {
+    case 'matched_pending':
+    case 'matched_terminal_completed': return 'ok'
+    case 'terminal_projection_pending':
+    case 'transfer_projection_pending': return 'info'
+    case 'matched_terminal_failed':
+    case 'matched_terminal_cancelled':
+    case 'retained_terminal_wake':
+    case 'withdrawn_at_cancel': return 'warn'
+  }
   if (evidence.projection_status === 'not_found' || evidence.projection_status === 'read_error') return 'warn'
   return 'bad'
 }
@@ -462,6 +471,11 @@ function queueEvidenceRows(
     { label: 'schedule', value: evidence.schedule_id },
     { label: 'post_id', value: evidence.post_id },
     { label: 'pending_count', value: evidence.pending_count },
+    { label: 'resolved_owner', value: evidence.resolved_owner },
+    { label: 'transfer_target', value: evidence.transfer_target },
+    { label: 'transition_id', value: evidence.transition_id },
+    { label: 'terminal_outcome', value: evidence.terminal_outcome },
+    { label: 'terminal_reason', value: evidence.terminal_reason },
     { label: 'matched_bucket', value: evidence.matched_bucket },
     { label: 'matched_payload_kind', value: evidence.matched_payload_kind },
     { label: 'matched_post_id', value: evidence.matched_post_id },

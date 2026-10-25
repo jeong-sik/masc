@@ -671,7 +671,7 @@ let accept_with_recorded_stimulus
 
 type resolved_occurrence_disposition =
   | Pending_at of string * Keeper_event_queue_state.schedule_occurrence_source
-  | Transfer_projecting_at of string * string
+  | Transfer_projecting_at of string * string * Keeper_event_queue_state.schedule_occurrence_source
   | Terminal_completed_at of
       string
       * Keeper_event_queue_state.schedule_occurrence_source
@@ -816,7 +816,7 @@ let rec resolve_durable_occurrence
         (* A cached target snapshot may predate the transfer commit. *)
         Hashtbl.remove cache target;
         resolve_target ()
-      | (Pending_at (_, _) | Transfer_projecting_at (_, _) | Terminal_completed_at (_, _, _) | Terminal_failed_at (_, _, _, _) | Terminal_cancelled_at (_, _, _, _) | Absent_at _) as disposition -> Ok disposition
+      | (Pending_at (_, _) | Transfer_projecting_at (_, _, _) | Terminal_completed_at (_, _, _) | Terminal_failed_at (_, _, _, _) | Terminal_cancelled_at (_, _, _, _) | Absent_at _) as disposition -> Ok disposition
     in
     let disposition_of_occurrence
           (occurrence : Keeper_event_queue_state.schedule_occurrence)
@@ -835,7 +835,7 @@ let rec resolve_durable_occurrence
         (* The source outbox is the sole durable authority until projection
            retires it. Reading or activating the target here would turn a valid
            pre-commit absence into either false loss or a speculative wake. *)
-        Ok (Transfer_projecting_at (keeper_name, target))
+        Ok (Transfer_projecting_at (keeper_name, target, source))
       | Keeper_event_queue_state.Occurrence_transferred_to target ->
         resolve_transfer target
     in
@@ -866,7 +866,7 @@ let resolved_occurrence_owner = function
   | Terminal_failed_at (owner, _, _, _)
   | Terminal_cancelled_at (owner, _, _, _)
   | Absent_at owner -> owner
-  | Transfer_projecting_at (source, _) -> source
+  | Transfer_projecting_at (source, _, _) -> source
 ;;
 
 let resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id =
@@ -877,6 +877,16 @@ let resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id =
     ~occurrence_id:stimulus_id
     ~visited:[]
     keeper_name
+;;
+
+let resolve_keeper_wake_occurrences_with ~read_state ~base_path occurrences =
+  let cache = Hashtbl.create 4 in
+  List.map
+    (fun (keeper_name, stimulus_id) ->
+       keeper_name, stimulus_id,
+       resolve_durable_occurrence cache ~read_state ~base_path
+         ~occurrence_id:stimulus_id ~visited:[] keeper_name)
+    occurrences
 ;;
 
 let accept_keeper_wake_occurrence
@@ -951,7 +961,7 @@ let accept_keeper_wake_occurrence
          "scheduled keeper wake owner changed while acquiring intake fence expected=%s actual=%s"
          expected_owner
          (resolved_occurrence_owner disposition))
-  | Ok (Transfer_projecting_at (source, target)) ->
+  | Ok (Transfer_projecting_at (source, target, _)) ->
     retryable_dispatch_failure
       (Printf.sprintf
          "scheduled keeper wake transfer projection pending source=%s target=%s"
@@ -1040,53 +1050,62 @@ let accept_keeper_wake_occurrence
           retryable_dispatch_failure detail))
 ;;
 
+let keeper_wake_stimulus_for_occurrence
+      ~(request : Schedule_domain.schedule_request)
+      ~occurrence_id ~due_at ~arrived_at
+  =
+  let* kind, payload =
+    Schedule_payload_projection.dispatch_view_detailed request
+    |> Result.map_error Schedule_payload_projection.dispatch_rejection_message
+  in
+  let* () = match kind with
+    | Schedule_payload_projection.Keeper_wake -> Ok ()
+    | Schedule_payload_projection.Lane_act -> Error "schedule is not a keeper wake"
+  in
+  let* keeper_name = body_keeper_name payload in
+  let* message = Schedule_payload_projection.body_required_string payload "message" in
+  let* title = Schedule_payload_projection.body_optional_string payload "title" in
+  let* result_delivery = Schedule_payload_projection.body_result_delivery payload in
+  let* urgency = body_keeper_wake_urgency payload in
+  (* DET-OK: absent schema-v1 urgency uses the dispatch contract default;
+     invalid urgency was rejected by the shared decoder above. *)
+  let urgency = urgency
+    |> Option.value ~default:Schedule_supported_kinds.default_keeper_wake_urgency
+    |> keeper_queue_urgency_of_schedule_urgency
+  in
+  let wake : Keeper_event_queue.scheduled_wake =
+    { occurrence_id
+    ; schedule_instance_id = request.schedule_instance_id
+    ; schedule_id = request.schedule_id
+    ; due_at
+    ; payload_digest = Schedule_domain.payload_digest request.payload
+    ; title; message; result_delivery
+    }
+  in
+  Ok (keeper_name,
+      { Keeper_event_queue.post_id = occurrence_id; urgency; arrived_at
+      ; payload = Keeper_event_queue.Schedule_due wake })
+;;
+
 let dispatch_keeper_wake
       config
       ~now
       (signal : Schedule_runner.wake_signal)
       (request : Schedule_domain.schedule_request)
       ~commit_acceptance
-      payload
+      _payload
   =
-  let* keeper_name = terminal_dispatch_result (body_keeper_name payload) in
   let base_path = config.Workspace_utils.base_path in
-  let* message =
+  let* keeper_name, stimulus =
     terminal_dispatch_result
-      (Schedule_payload_projection.body_required_string payload "message")
+      (keeper_wake_stimulus_for_occurrence ~request
+         ~occurrence_id:(Schedule_occurrence_id.to_string signal.occurrence_id)
+         ~due_at:request.due_at ~arrived_at:now)
   in
-  let* title =
-    terminal_dispatch_result
-      (Schedule_payload_projection.body_optional_string payload "title")
-  in
-  let* result_delivery =
-    terminal_dispatch_result
-      (Schedule_payload_projection.body_result_delivery payload)
-  in
-  let* urgency = terminal_dispatch_result (body_keeper_wake_urgency payload) in
-  let urgency =
-    urgency
-    (* DET-OK: absent masc.keeper_wake urgency is the schema-v1 default;
-       invalid or unknown urgency strings are rejected above. *)
-    |> Option.value ~default:Schedule_supported_kinds.default_keeper_wake_urgency
-    |> keeper_queue_urgency_of_schedule_urgency
-  in
-  let wake : Keeper_event_queue.scheduled_wake =
-    { occurrence_id = Schedule_occurrence_id.to_string signal.occurrence_id
-    ; schedule_instance_id = request.Schedule_domain.schedule_instance_id
-    ; schedule_id = request.Schedule_domain.schedule_id
-    ; due_at = request.due_at
-    ; payload_digest = Schedule_domain.payload_digest request.payload
-    ; title
-    ; message
-    ; result_delivery
-    }
-  in
-  let stimulus : Keeper_event_queue.stimulus =
-    { post_id = Schedule_occurrence_id.to_string signal.occurrence_id
-    ; urgency
-    ; arrived_at = now
-    ; payload = Keeper_event_queue.Schedule_due wake
-    }
+  let* wake =
+    match Keeper_event_queue.scheduled_wake stimulus with
+    | Some wake -> Ok wake
+    | None -> terminal_dispatch_result (Error "decoded keeper wake has no scheduled source")
   in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
   let* initial_disposition =
@@ -1178,11 +1197,11 @@ let dispatch_keeper_wake
          ; "keeper_name", `String keeper_name
          ; "schedule_instance_id", `String request.schedule_instance_id
          ; "schedule_id", `String request.schedule_id
-         ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
+         ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
          ; "post_id", `String stimulus.post_id
          ; ( "result_delivery_policy"
            , `String
-               (match result_delivery with
+               (match wake.result_delivery with
                 | None -> "none"
                 | Some _ -> "reply_to_origin") )
          ; ( "occurrence_status"

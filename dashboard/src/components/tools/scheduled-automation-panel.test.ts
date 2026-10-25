@@ -414,6 +414,26 @@ describe('ScheduledAutomationPanel', () => {
     container.remove()
   })
 
+  it.each(['terminal_projection_pending', 'transfer_projection_pending'] as const)(
+    'keeps %s visible with its durable identity and unmodified reaction evidence', (projection_status) => {
+      const auto = automation([request({
+        schedule_id: 'durable-terminal', status: 'succeeded',
+        last_wake: { schedule_id: 'durable-terminal', status: 'succeeded' },
+        keeper_queue_evidence: {
+          projection_status, post_id: 'exact-occurrence',
+          transition_id: 'actual-transition', resolved_owner: 'source-owner',
+          transfer_target: 'target-owner', terminal_outcome: 'completed',
+        },
+        keeper_reaction_evidence: { projection_status: 'matched_stimulus', stimulus_seen: true },
+      })])
+      render(html`<${ScheduledAutomationPanel} automation=${auto} />`, container)
+      expect(container.querySelector(`[data-schedule-keeper-queue-evidence="${projection_status}"]`)).not.toBeNull()
+      expect(container.querySelector('[data-keeper-queue-evidence-row="transition_id"]')?.textContent).toContain('actual-transition')
+      expect(container.querySelector('[data-keeper-queue-evidence-row="resolved_owner"]')?.textContent).toContain('source-owner')
+      expect(container.querySelector('[data-schedule-keeper-reaction-evidence="matched_stimulus"]')).not.toBeNull()
+    },
+  )
+
   it('renders scheduled requests as read-only cards with a wake signal feed', () => {
     render(html`<${ScheduledAutomationPanel} automation=${sampleAutomation()} />`, container)
 

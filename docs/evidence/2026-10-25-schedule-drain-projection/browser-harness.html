@@ -1,0 +1,26 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><title>Schedule durable drain — actual producer row replay</title>
+<link rel="stylesheet" href="/src/styles/ds-theme-tokens.css?direct">
+<link rel="stylesheet" href="/src/styles/global.css?direct">
+<link rel="stylesheet" href="/src/styles/tokens.css?direct">
+<link rel="stylesheet" href="/src/styles/keeper-v2/colors_and_type.css?direct">
+<link rel="stylesheet" href="/src/styles/keeper-v2/v2.css?direct">
+<link rel="stylesheet" href="/src/styles/keeper-v2/surfaces.css?direct">
+<link rel="stylesheet" href="/src/styles/keeper-v2/schedule.css?direct"><link rel="stylesheet" href="/src/styles/keeper-v2/lanes.css?direct"><body data-theme="dark-fantasy" data-skin="v2" style="margin:0;background:var(--bg-deep);color:var(--text-primary);font-family:system-ui"><header style="padding:16px"><h1>Actual backend page row → candidate Schedule surface</h1><p>Controlled HTTP envelope · original producer identity and timestamps preserved · not installed runtime</p><nav id="cases" style="display:flex;flex-wrap:wrap;gap:6px"></nav><p id="case-status" style="overflow-wrap:anywhere">Loading exact fixture</p></header><div id="root" class="ov-scroll"></div>
+<script type="module">
+import {html} from 'htm/preact';import {render} from 'preact';
+import {ScheduleSurface} from './src/components/schedule/schedule-surface.ts';
+import {queueDrainStatusOf,countQueueDrainMisses} from './src/components/schedule/queue-drain-status.ts';
+import {fetchDashboardScheduledAutomation} from './src/api/dashboard-scheduled-automation.ts';
+const key=new URL(location.href).searchParams.get('case');
+const index=await fetch('/api/test/cases').then(r=>{if(!r.ok)throw new Error('Actual producer evidence unavailable');return r.json()});
+for(const scenario of index.cases){const a=document.createElement('a');a.textContent=scenario;a.href='?case='+encodeURIComponent(scenario)+'#/schedule';a.style.marginRight='14px';document.querySelector('#cases').append(a)}
+const projection=await fetchDashboardScheduledAutomation();
+if(projection.state!=='available')throw new Error(projection.reason);
+const [row]=projection.data.requests;
+const status=queueDrainStatusOf(row);
+const observed={case:key,scheduleId:row.schedule_id,postId:row.keeper_queue_evidence?.post_id,queue:row.keeper_queue_evidence?.projection_status,reaction:row.keeper_reaction_evidence?.projection_status,state:status?.state,misses:countQueueDrainMisses(projection.data.requests)};
+document.querySelector('#case-status').textContent=JSON.stringify(observed);
+document.querySelector('#case-status').dataset.state=status?.state??'none';
+window.__scheduleProducedRow=observed;
+render(html`<${ScheduleSurface}/>`,document.querySelector('#root'));
+</script></body></html>

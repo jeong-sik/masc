@@ -31,6 +31,40 @@ function req(
 }
 
 describe('queueDrainStatusOf', () => {
+  it.each([
+    ['terminal_projection_pending', 'settling'],
+    ['transfer_projection_pending', 'settling'],
+    ['matched_terminal_completed', 'drained'],
+    ['matched_terminal_failed', 'failed'],
+    ['matched_terminal_cancelled', 'cancelled'],
+    ['evidence_invalid', 'evidence_invalid'],
+  ] as const)('uses durable %s independently of a dispatch-only ledger', (queue, expected) => {
+    const row = req(queue, 'matched_stimulus')
+    expect(queueDrainStatusOf(row)?.state).toBe(expected)
+    expect(countQueueDrainMisses([row])).toBe(0)
+    if (expected === 'settling' || expected === 'failed') {
+      expect(isCalendarVisible(queueDrainStatusOf(row)!)).toBe(true)
+    }
+    expect(row.keeper_reaction_evidence?.projection_status).toBe('matched_stimulus')
+  })
+
+  it.each([
+    'terminal_projection_pending', 'transfer_projection_pending',
+    'matched_terminal_completed', 'matched_terminal_failed', 'matched_terminal_cancelled',
+  ] as const)('keeps an explicit ledger contradiction visible for %s', (status) => {
+    const row = req(status, 'conflicting_terminal_evidence')
+    expect(queueDrainStatusOf(row)?.state).toBe('evidence_invalid')
+    expect(countQueueDrainMisses([row])).toBe(0)
+  })
+
+  it('keeps true absence distinct from a committed but unprojected terminal', () => {
+    const committed = req('terminal_projection_pending', 'matched_stimulus')
+    const dropped = req('not_found', 'matched_stimulus')
+    const unreadable = req('read_error', 'matched_stimulus')
+    expect(countQueueDrainMisses([committed, dropped, unreadable])).toBe(1)
+    expect(queueDrainStatusOf(unreadable)?.state).toBe('read_error')
+  })
+
   it('returns null when the request carries no keeper-wake queue evidence', () => {
     expect(queueDrainStatusOf(req(null))).toBeNull()
   })

@@ -4,8 +4,8 @@
 // one operator question the list view already answers per row: did a scheduled
 // keeper wake actually flow through the keeper_event_queue drain?
 //
-// Two backend evidence axes must be combined — neither is sufficient alone
-// (see the derivation in server_dashboard_http_runtime_info.ml):
+// Durable terminal/transfer receipts are authoritative before their ledger
+// projection. Only a healthy exact queue absence needs ledger correlation:
 //
 //   · keeper_queue_evidence  — is the last execution's wake in the durable
 //     event-queue snapshot right now? matched_pending means "yes, awaiting
@@ -37,7 +37,9 @@ import type { StatusChipTone } from '../common/status-chip'
 
 export type QueueDrainState =
   | 'pending' // in the pending queue — awaiting drain
-  | 'drained' // left the queue AND the keeper reacted — healthy completion
+  | 'settling' // durable transition committed, reaction projection still pending
+  | 'failed' // exact durable occurrence ended in a failed attempt
+  | 'drained' // durable completion or recorded keeper reaction
   | 'cancelled' // left the queue through an accepted cancellation — no turn ran
   | 'missed' // left the queue with no keeper reaction — dispatched then lost
   | 'read_error' // queue snapshot unreadable — drain state indeterminate (I/O)
@@ -67,10 +69,20 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
     tone: 'info',
     title: 'wake가 keeper_event_queue pending에 있음 — 드레인 대기 중',
   },
+  settling: {
+    label: '처리 반영 중',
+    tone: 'info',
+    title: 'durable 종결 또는 이관은 커밋됐고 반응 기록 반영이 대기 중',
+  },
+  failed: {
+    label: '실행 실패',
+    tone: 'warn',
+    title: '해당 occurrence의 durable 실패 종결이 기록됨',
+  },
   drained: {
     label: '완료',
     tone: 'neutral',
-    title: '큐에서 빠졌고 keeper 반응이 기록됨 (consumed_ack / turn_finished / turn_started)',
+    title: 'durable 완료 종결 또는 keeper 반응이 기록됨',
   },
   cancelled: {
     label: '취소됨',
@@ -89,9 +101,9 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
     title: '큐 스냅샷 또는 reaction ledger 읽기 실패 — 드레인 상태 확인 불가',
   },
   evidence_invalid: {
-    label: '증거 격리',
+    label: '증거 확인 불가',
     tone: 'warn',
-    title: '해당 occurrence의 reaction ledger 행이 격리되어 정확한 드레인 판정 불가',
+    title: '해당 occurrence의 durable 증거 또는 reaction ledger를 정확히 검증할 수 없음',
   },
   indeterminate: {
     label: '확인 불가',
@@ -100,11 +112,27 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
   },
 }
 
-function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState | null {
-  const queue = request.keeper_queue_evidence
-  // No keeper-wake dispatch/execution yet (or a board post) — nothing to show.
+export function queueDrainStateOfEvidence(
+  queue: string | null | undefined,
+  reaction: string | null | undefined,
+): QueueDrainState | null {
   if (queue == null) return null
-  switch (queue.projection_status) {
+  if (queue !== 'read_error' && reaction === 'conflicting_terminal_evidence') return 'evidence_invalid'
+  switch (queue) {
+    case 'terminal_projection_pending':
+    case 'transfer_projection_pending':
+      return 'settling'
+    case 'matched_terminal_completed':
+      return 'drained'
+    case 'matched_terminal_failed':
+      return 'failed'
+    case 'matched_terminal_cancelled':
+    case 'withdrawn_at_cancel':
+      return 'cancelled'
+    case 'retained_terminal_wake':
+      return 'cancelled'
+    case 'evidence_invalid':
+      return 'evidence_invalid'
     case 'matched_pending':
       return 'pending'
     case 'read_error':
@@ -112,7 +140,6 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
     case 'unrecognized_receipt':
       return 'indeterminate'
     case 'not_found': {
-      const reaction = request.keeper_reaction_evidence?.projection_status
       if (reaction != null && REACTED.has(reaction)) return 'drained'
       if (reaction === 'matched_terminal_cancelled') return 'cancelled'
       // Ack and cancellation both recorded for one occurrence: the ledger
@@ -137,6 +164,13 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
   }
 }
 
+function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState | null {
+  return queueDrainStateOfEvidence(
+    request.keeper_queue_evidence?.projection_status,
+    request.keeper_reaction_evidence?.projection_status,
+  )
+}
+
 /** Combined queue-drain status for a request's last execution, or null when the
  * request has no keeper-wake queue evidence (board posts, or nothing dispatched
  * yet). */
@@ -153,6 +187,8 @@ export function queueDrainStatusOf(
 // are not actionable, and a chip on every recurring row would be noise.
 const CALENDAR_VISIBLE: ReadonlySet<QueueDrainState> = new Set<QueueDrainState>([
   'pending',
+  'settling',
+  'failed',
   'cancelled',
   'missed',
   'read_error',

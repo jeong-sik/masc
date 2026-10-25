@@ -1680,6 +1680,7 @@ let%test "for_model_id glm-4.5-flash has GLM-4.5 thinking limits" =
 
    Fixtures are strict TOML snapshots, parsed through the same constructor as
    deployment catalogs; they are not auto-synced with [models.toml]. *)
+let%test_module "catalog fixtures" = (module struct
 let test_catalog_of_toml contents =
   Model_catalog.of_toml_string ~source:"capabilities inline fixture" contents
   |> Result.get_ok
@@ -2160,7 +2161,7 @@ max_output_tokens = 32000
 
 (* Installs [test_catalog] as the runtime override for the duration of [f],
    then clears the override so subsequent lookups use the embedded catalog. *)
-let[@warning "-32"] with_test_catalog f =
+let with_test_catalog f =
   Model_catalog.set_global test_catalog;
   Fun.protect ~finally:Model_catalog.clear_global f
 ;;
@@ -2523,6 +2524,9 @@ let%test "undeclared model variants do not inherit catalog policies" =
       let raw = Model_identifiers.Model_id.to_string entry.model_id in
       List.for_all (fun variant -> Option.is_none (for_model_id_catalog variant))
         [raw ^ ".undeclared"; "undeclared-provider/" ^ raw]) (Model_catalog.model_entries test_catalog))
+;;
+
+end)
 ;;
 
 (* ── Capability drift detection ────────────────────────── *)

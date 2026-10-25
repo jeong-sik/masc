@@ -193,6 +193,7 @@ it('does not acknowledge a late capture after the original component is unmounte
   let finish!: (value: typeof done) => void
   api.invokeAddonOperator.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
   await act(() => returned(callbackUrl()))
+  await waitFor(() => expect(api.invokeAddonOperator).toHaveBeenCalledTimes(2))
   expect(popup.postMessage).toHaveBeenCalledTimes(1)
   screen.unmount()
   await act(() => finish(done))
@@ -264,4 +265,41 @@ it('keeps the manual Finish connection return through failure and clears it only
   expect(popup.close).not.toHaveBeenCalled()
   expect(screen.queryByLabelText('Returned connection URL')).toBeNull()
   browserFixture.setURL(previousUrl)
+})
+
+it.each(['closed', 'cleared-lost'] as const)('allows the next operator window after capture when the original page is %s', async mode => {
+  const screen = await begin()
+  let finish!: (value: unknown) => void
+  api.invokeAddonOperator.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  await act(() => returned(callbackUrl()))
+  popup.postMessage = mode === 'closed' ? vi.fn(() => { throw new Error('PRIVATE_CLOSED_POPUP') }) : vi.fn()
+  const approval = { id: 'login_approval', label: 'Open original approval',
+    arguments: { operation_id: 'original' }, fields: [], opens_window: true }
+  await act(() => finish({ ...done, actions: [approval] }))
+  expect(popup.close).not.toHaveBeenCalled()
+  expect(screen.container.textContent).not.toContain('PRIVATE_CLOSED_POPUP')
+  const next = { location: { replace: vi.fn() }, close: vi.fn(), postMessage: vi.fn() } as unknown as Window
+  vi.mocked(window.open).mockReturnValueOnce(next)
+  api.invokeAddonOperator.mockResolvedValueOnce({ ...done, actions: [approval], open_url: 'onepassword://grant-brokered-access?PRIVATE_LINK' })
+  await fireEvent.click(await screen.findByRole('button', { name: approval.label }))
+  await waitFor(() => expect(next.location.replace).toHaveBeenCalledWith('onepassword://grant-brokered-access?PRIVATE_LINK'))
+  expect(api.invokeAddonOperator).toHaveBeenLastCalledWith(
+    { instance_id: 'original', expected_incarnation: 'original' }, 'login_approval', { operation_id: 'original' })
+  expect(popup.close).not.toHaveBeenCalled()
+})
+
+it('does not auto-dispatch a queued return after exact cancel removes its pending authorization', async () => {
+  const cancel = { id: 'cancel', label: 'Cancel original attempt', arguments: pending.callback.arguments, fields: [] }
+  api.invokeAddonOperator.mockReset().mockResolvedValueOnce({ ...pending, actions: [cancel] })
+  const screen = await begin()
+  let finish!: (value: typeof initial) => void
+  api.invokeAddonOperator.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  await fireEvent.click(screen.getByRole('button', { name: cancel.label }))
+  await act(() => returned(callbackUrl()))
+  expect(api.invokeAddonOperator).toHaveBeenCalledTimes(2)
+  await act(() => finish(initial))
+  expect(api.invokeAddonOperator).toHaveBeenCalledTimes(2)
+  expect(popup.postMessage).toHaveBeenCalledTimes(1)
+  expect(popup.close).not.toHaveBeenCalled()
+  expect(screen.queryByRole('button', { name: 'Retry original connection return' })).not.toBeNull()
 })

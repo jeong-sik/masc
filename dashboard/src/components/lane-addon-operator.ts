@@ -67,10 +67,15 @@ export function LaneAddonOperator({ instance, authority }: {
   function sendCaptureAck() {
     const held = pendingReturn.current
     if (held === null || held.source === null || held.delivery !== 'captured' || !active(held.credentialRevision)) return
-    held.source.postMessage({ kind: 'masc-addon-oauth-pending', state: held.state,
-      connection_id: held.connectionId }, window.location.origin)
-    held.source.postMessage({ kind: 'masc-addon-oauth-captured', state: held.state,
-      connection_id: held.connectionId, receipt_kind: held.receiptKind }, window.location.origin)
+    try {
+      held.source.postMessage({ kind: 'masc-addon-oauth-pending', state: held.state,
+        connection_id: held.connectionId }, window.location.origin)
+      held.source.postMessage({ kind: 'masc-addon-oauth-captured', state: held.state,
+        connection_id: held.connectionId, receipt_kind: held.receiptKind }, window.location.origin)
+    } catch {
+      // The backend receipt remains true if the original page closed. Its
+      // history/clear state is unobserved; no provider action is replayed.
+    }
   }
   function acknowledgeCapture(result: AddonOperatorView | null) {
     const held = pendingReturn.current
@@ -94,9 +99,11 @@ export function LaneAddonOperator({ instance, authority }: {
   function submit(action: AddonOperatorAction, values: Record<string, string>) {
     const pending = callback.current
     if (pending !== undefined && action.id === pending.action
-      && action.arguments.state === pending.arguments.state
-      && action.arguments.connection_id === pending.arguments.connection_id
       && typeof values[pending.field] === 'string') {
+      if (action.arguments.state !== pending.arguments.state
+        || action.arguments.connection_id !== pending.arguments.connection_id) {
+        setError('The connection form does not match the original pending attempt.'); return
+      }
       if (pendingReturn.current !== null) { deliverReturn(); return }
       let returned: URL
       try { returned = new URL(values[pending.field]!) } catch {
@@ -142,8 +149,13 @@ export function LaneAddonOperator({ instance, authority }: {
   async function invoke(action: AddonOperatorAction, values: Record<string, string>, returnedUrl?: string) {
     if (!active() || inFlight.current) return
     if (returnedUrl === undefined && action.opens_window === true && pendingReturn.current !== null) {
-      setError('Keep the original connection return open until its capture is confirmed.')
-      return
+      if (pendingReturn.current.delivery !== 'captured') {
+        setError('Keep the original connection return open until its capture is confirmed.')
+        return
+      }
+      // Confirmed storage releases the original return's dispatch ownership.
+      // A missing page-cleared notification cannot block a later operation.
+      pendingReturn.current = null
     }
     const credentialRevision = currentStoredTokenRevision()
     inFlight.current = true; setBusy(true); setError(null)
@@ -154,7 +166,7 @@ export function LaneAddonOperator({ instance, authority }: {
     const nextPopup = returnedUrl === undefined && action.opens_window === true
       ? window.open('about:blank', '_blank', 'popup') : null
     if (nextPopup !== null) {
-      if (pendingReturn.current === null) popup.current?.close()
+      if (!popupNavigated.current) popup.current?.close()
       popup.current = nextPopup
       popupNavigated.current = false
     }
@@ -162,9 +174,17 @@ export function LaneAddonOperator({ instance, authority }: {
       const result = await invokeAddonOperator(owner, action.id, { ...action.arguments, ...values })
       if (!active(credentialRevision)) { nextPopup?.close(); return }
       setView(result); callback.current = result.callback
-      if (returnedUrl !== undefined && !acknowledgeCapture(result)) {
+      const acknowledged = acknowledgeCapture(result)
+      if (returnedUrl !== undefined && !acknowledged) {
         if (pendingReturn.current !== null) pendingReturn.current.delivery = 'retry'
         setError('The connection return is not confirmed. Keep its window open, inspect the connection, or retry this same return.')
+      } else if (!acknowledged) {
+        const held = pendingReturn.current
+        if (held !== null && held.delivery === 'queued' && (result.callback?.state !== held.state
+          || result.callback.arguments.connection_id !== held.connectionId)) {
+          held.delivery = 'retry'
+          setError('The original connection return is still unconfirmed. Its window keeps the original return; it cannot be applied to another attempt.')
+        }
       }
       if (result.open_url !== undefined && nextPopup !== null) {
         nextPopup.location.replace(result.open_url)

@@ -110,6 +110,15 @@ val recent_resolved_default_window_minutes : int
 val recent_resolved_min_window_minutes : int
 val recent_resolved_max_window_minutes : int
 
+(** Newest [n] rows in physical append order (newest first). A Keeper-scoped
+    read counts matching rows, scanning backward until [n] matches or EOF;
+    unrelated traffic cannot truncate the result. No row window or cached view
+    determines membership. A sparse query may scan the full store.
+    Visited malformed JSON, layout and I/O failures return [Read_recent] errors.
+    For a scoped read each visited JSON row must name exactly one string Keeper;
+    ambiguous or missing ownership is an error, never an omitted row.
+    Errors older than the selected suffix are outside this read's scope.
+    [n <= 0] returns [Ok []] without opening the store. *)
 val read_recent :
   base_path:string ->
   ?keeper_name:string ->

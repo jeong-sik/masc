@@ -43,13 +43,6 @@ let audit_io_mutex = Cross_context_mutex.create ()
 let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 
 let recent_resolved_history_limit = 20
-let audit_wide_scan_min_rows = 500
-let audit_wide_scan_multiplier = 64
-
-let wide_audit_scan_window n =
-  max audit_wide_scan_min_rows (max n 1 * audit_wide_scan_multiplier)
-;;
-
 (* Resolved-history bounds. The wall-clock window is what an operator reasons
    about ("the last day"); the row cap is what keeps one dashboard poll from
    parsing the whole audit store. The two are independent because the store
@@ -62,13 +55,14 @@ let recent_resolved_min_window_minutes = 5
 let recent_resolved_max_window_minutes = 10_080
 let resolved_history_scan_min_rows = 2_000
 let resolved_history_scan_max_rows = 20_000
+let resolved_history_scan_multiplier = 64
 
 let resolved_history_scan_rows limit =
   max
     resolved_history_scan_min_rows
     (min
        resolved_history_scan_max_rows
-       (max limit 1 * audit_wide_scan_multiplier))
+       (max limit 1 * resolved_history_scan_multiplier))
 ;;
 
 (* A page of resolved decisions plus the evidence needed to tell "this is
@@ -99,16 +93,6 @@ let parsed_rows ~stage entries =
           : read_error)
   in
   collect [] entries
-;;
-
-let read_recent_audit_raw store limit =
-  match Dated_jsonl.read_recent_result store limit with
-  | Error error ->
-    Error
-      { stage = Read_recent
-      ; detail = Dated_jsonl.read_error_to_string error
-      }
-  | Ok entries -> parsed_rows ~stage:Read_recent entries
 ;;
 
 (* The vocabulary of the [event] field in the approval audit log. Every writer
@@ -537,17 +521,6 @@ let record_rule_deleted ~base_path ~deleted_by (rule : approval_rule) =
   record_rule ~base_path ~event_type:Rule_deleted ~actor:deleted_by rule
 ;;
 
-let audit_scan_window ?keeper_name n =
-  match keeper_name with
-  | None -> max n 1
-  | Some _ ->
-    (* Approval audit is global, but runtime trust asks for per-keeper
-         "latest" records. Scan a bounded wider window before filtering so a
-         busy fleet cannot hide the target keeper behind unrelated events. *)
-    wide_audit_scan_window n
-;;
-
-
 let read_recent ~base_path ?keeper_name ?(n = 20) ()
   : (Yojson.Safe.t list, read_error) result
   =
@@ -557,18 +530,50 @@ let read_recent ~base_path ?keeper_name ?(n = 20) ()
     match get_audit_store ~base_path () with
     | Error detail -> Error ({ stage = Read_recent; detail } : read_error)
     | Ok store ->
-      (match read_recent_audit_raw store (audit_scan_window ?keeper_name n) with
-       | Error _ as error -> error
-       | Ok raw ->
-         let filtered =
-           match keeper_name with
-           | None -> raw
-           | Some name ->
-             raw
-             |> List.filter (fun json ->
-               String.equal name (Safe_ops.json_string ~default:"" "keeper" json))
-         in
-         Ok (filtered |> List.rev |> List.filteri (fun idx _ -> idx < n))))
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        let rows = ref [] in
+        let count = ref 0 in
+        let select = function
+          | Dated_jsonl.Malformed_json _ as entry ->
+            (* Reuse the strict reader's location-bearing error. *)
+            (match parsed_rows ~stage:Read_recent [ entry ] with
+             | Error error -> Some (Error error)
+             | Ok _ -> None)
+          | Dated_jsonl.Parsed row ->
+            let matches =
+              match keeper_name with
+              | None -> Ok true
+              | Some name ->
+                let owners =
+                  match row with
+                  | `Assoc fields ->
+                    List.filter (fun (key, _) -> String.equal key "keeper") fields
+                  | _ -> []
+                in
+                (match owners with
+                 | [ (_, `String owner) ] -> Ok (String.equal name owner)
+                 | _ ->
+                   Error
+                     ({ stage = Read_recent
+                      ; detail = "audit row must contain exactly one string keeper"
+                      } : read_error))
+            in
+            (match matches with
+             | Error error -> Some (Error error)
+             | Ok false -> None
+             | Ok true ->
+               rows := row :: !rows;
+               incr count;
+               if !count = n then Some (Ok (List.rev !rows)) else None)
+        in
+        match Dated_jsonl.find_latest_entry_result store select with
+        | Error error ->
+          Error
+            { stage = Read_recent
+            ; detail = Dated_jsonl.read_error_to_string error
+            }
+        | Ok (Some result) -> result
+        | Ok None -> Ok (List.rev !rows)))
 ;;
 
 let resolved_history_event json =

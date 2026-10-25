@@ -50,7 +50,7 @@ def main():
         argv = ["/bin/sh", "-c", 'printf "%s" "$SSH_ARTIFACT_MARKER"']
         request = dict(v=3, argv=list(map(encode, argv)), env=[],
                        cwd=encode(str(workspace)), remote_root=encode(str(workspace)),
-                       timeout_sec=0.0, stdin_len=0, mode="effect")
+                       timeout_sec=10.0, stdin_len=0, mode="effect")
         body = json.dumps(request).encode()
         # Hold stdin open until settlement, matching the real SSH transport.
         # File-backed captures let wait() reap without pipe-buffer deadlocks.
@@ -60,8 +60,11 @@ def main():
                 try:
                     process.stdin.write(struct.pack(">Q", len(body)) + body)
                     process.stdin.flush()
-                    status = process.wait()
+                    status = process.wait(timeout=60)
                 finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
                     process.stdin.close()
                 stdout.seek(0)
                 stderr.seek(0)

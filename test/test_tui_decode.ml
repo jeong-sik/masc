@@ -1414,9 +1414,22 @@ let test_planning_goal_carries_the_verifier_unreconciled_reason () =
   match goal.Tui_decode.pg_verifier_unreconciled with
   | Some { Tui_decode.vu_step = Goal_reconcile_step.Rearm_proof; vu_detail } ->
     Alcotest.(check string) "the reason is decoded" "criterion already proven" vu_detail
-  | Some { Tui_decode.vu_step = Goal_reconcile_step.Reconcile_proof; _ } ->
+  | Some { Tui_decode.vu_step = (Goal_reconcile_step.Reconcile_proof | Goal_reconcile_step.Read_original); _ } ->
     Alcotest.fail "the step was decoded as the wrong one"
   | None -> Alcotest.fail "the unreconciled reason was dropped"
+;;
+
+let test_planning_goal_carries_original_read_failure () =
+  let detail = "retained request body does not match its digest" in
+  let goal = decoded_proof
+      ~extra:["verifier_unreconciled",
+        `Assoc ["step", `String "read_original"; "detail", `String detail]] () in
+  match goal.Tui_decode.pg_verifier_unreconciled with
+  | Some { Tui_decode.vu_step = Goal_reconcile_step.Read_original; vu_detail } ->
+    Alcotest.(check string) "original failure reaches the planning consumer" detail vu_detail
+  | Some { Tui_decode.vu_step = (Goal_reconcile_step.Reconcile_proof | Goal_reconcile_step.Rearm_proof); _ } ->
+    Alcotest.fail "original read failure was mislabeled as a proof write"
+  | None -> Alcotest.fail "original read failure was dropped"
 ;;
 
 let test_planning_goal_without_the_verifier_field_is_refused () =
@@ -13895,6 +13908,8 @@ let () =
           test_planning_goal_separates_unreadable_from_unreviewed;
         Alcotest.test_case "carries the verifier unreconciled reason" `Quick
           test_planning_goal_carries_the_verifier_unreconciled_reason;
+        Alcotest.test_case "carries the original read failure" `Quick
+          test_planning_goal_carries_original_read_failure;
         Alcotest.test_case "refuses a goal without the verifier field" `Quick
           test_planning_goal_without_the_verifier_field_is_refused;
         Alcotest.test_case "keeps the last review note" `Quick

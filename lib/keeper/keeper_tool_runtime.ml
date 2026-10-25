@@ -413,6 +413,7 @@ let handle_in_process ctx descriptor args =
       (Keeper_tool_in_process_runtime.handle_surface_post_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
+         ?turn_ref:ctx.turn_ref
          ?continuation_channel:ctx.continuation_channel
          ?gate_context:ctx.gate_context
          ?gate_grant:ctx.gate_grant

@@ -33,3 +33,9 @@ No local Dune build or typecheck was run. Changed OCaml parses and full whitespa
 [40196874006](https://github.com/jeong-sik/masc/actions/runs/40196874006) checked out exactly `abb125d4e13994e74d5490c71cf26407be61b82a` and completed SUCCESS: **109 actual cases**. The joined production collector→redactor/bridge→durable journal→TUI replay assertions passed, including retained replacement position, unaffected answer, readable projection, fresh same-process journal reader and sequence deduplication. The owned/anonymous append control passed too.
 
 This is intermediate source before the independently found earlier-response aggregate correction. It does not certify that later correction or its added control. The current110-case request40197182110 remains distinct and pending inspection. The actual109 success is retained even though the earlier-response concern remained outside that fixture's coverage. Neither this109 nor Dashboard139 is a rendered UI or OS restart result.
+
+## Observed final corrected execution
+
+[40197182110](https://github.com/jeong-sik/masc/actions/runs/40197182110) checked out exactly `c0f2f3032b0cb998bb66b74b29433c242d63df34` and completed SUCCESS: **110 actual cases**. Earlier-response preservation through append and snapshot, exclusion of superseded-attempt totals, the joined production redactor/real journal/TUI replay, unaffected answer, fresh same-process reader and deduplication assertions all passed. The raw digest, actual checkout, key assertions and suite result are retained together.
+
+All five recorded source/fixture hashes match this source and later evidence-only heads. The earlier109 result remains historical and is not added to110. Dashboard139 is a separate state test result. No full regression, whole executable/release build, OS restart, rendered screen, provider parsing/HTTP, native activation, installed runtime, deployment or whole-issue closure is claimed.

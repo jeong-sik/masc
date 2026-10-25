@@ -1,16 +1,16 @@
 {
-  "recorded_at": "2026-10-25T01:17:23.647178+00:00",
+  "recorded_at": "2026-10-25T01:26:43.936229+00:00",
   "scope": "This directory excluding this manifest. Historical receipts remain original bytes.",
   "files": [
     {
       "path": "README.md",
-      "bytes": 4202,
-      "sha256": "aec047f6bc942dd5d246f17ed55d5e23992bd321fd58f6060bec2176d8222a8e"
+      "bytes": 4804,
+      "sha256": "028e5a0a85dd7d2ebc8fffe720d4fe06f86440b81387c2e9acc2cd275d8bfae5"
     },
     {
       "path": "candidate-ledger.json",
-      "bytes": 995,
-      "sha256": "6432d77d262be2ed89cc85d54fae9fd80906f11235af8cd5d5ffdc3ece27c7fc"
+      "bytes": 1330,
+      "sha256": "20333cb384f94c597e2cbeabb6d585915e831304b77b8ff3be0f94bcf06fe4ef"
     },
     {
       "path": "claude-author-repair.json",
@@ -28,6 +28,16 @@
       "sha256": "ec4fc2e331ae33c2a8282c2123b26b78e903b1290e6c0efef1ec5dc6d28095ee"
     },
     {
+      "path": "followup-17583b00-native-result.json",
+      "bytes": 48429,
+      "sha256": "5771a66e2c037b90d04e717a38b7e23ff57e58ff1dcea3ec732d3f4553d3053d"
+    },
+    {
+      "path": "followup-17583b00-selected-native-log.json",
+      "bytes": 2263,
+      "sha256": "6b3503eec6f53d20fce0897edaa75fbb043b353ce825c0b6bb82b6391b9f5bd8"
+    },
+    {
       "path": "independent-audit-docs-review.json",
       "bytes": 11026,
       "sha256": "fcd9fbb8148b6f609978021131869b252bab93b77cd83eaf80b7bb22c2d6dc38"
@@ -36,6 +46,11 @@
       "path": "independent-code-17583b00-review.json",
       "bytes": 10354,
       "sha256": "bec7eb93e2799d9f368525c4b2c48b32f884d83c0257fea51351453f03e26da9"
+    },
+    {
+      "path": "independent-full-pr-ce4-review.json",
+      "bytes": 19087,
+      "sha256": "34637e09665210d458bf3e231b1d8de7a130ce4e7dbb8f052ca5f919d63bb831"
     },
     {
       "path": "local-parse-links.json",

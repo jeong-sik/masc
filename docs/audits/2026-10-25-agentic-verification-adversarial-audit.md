@@ -60,7 +60,7 @@ Goal 상태 기계는 측정3/3만으로 Completed가 되지 않는다. 이번 �
 
 메인8935가 응답하지 않던 기록 이후 서비스가 복구됐다. 2026-10-25 00:41:14 UTC에 main Goal 측정11/11이 reported_only로 등록됐고, 00:44:50에 task-2620은 AwaitingVerification으로 제출됐다. 00:45:12에 main Goal의 검증 요청이 수락돼 Verifying/proof_pending이 됐다. [원본 API 영수증과 01:01:45의 별도 저장소 재조회](../evidence/2026-10-25-goal-main-registration/README.md)를 보존한다. 이후 읽기에서 ConnectionRefused도 관측했으므로 서비스 가용성 회복을 지속 보장했다고 부르지 않는다. Goal 증명·사람 확인은 아직 없다.
 
-be9a 후보의 [최소 native 실행](../evidence/2026-10-25-native-verification-followup/README.md)은 5개 suite, 251건 중247 PASS/4 FAIL로 끝났으며 suite timeout은 없었다. 두 suite만 전체 통과했다. 남은 실패는 volatile Registry를 쓴 fixture 2건, bare verification ID를 증거로 기대한 fixture 1건, measured assistant 없는 Claude terminal fixture 1건이었다. 제품의 durable publication·model identity 검사는 유지하고 fixture를 수리했다. 변경한 세 suite의 후속 실행과 원본 실패를 구분한다.
+be9a 후보의 [최소 native 실행](../evidence/2026-10-25-native-verification-followup/README.md)은 5개 suite, 251건 중247 PASS/4 FAIL로 끝났으며 suite timeout은 없었다. 두 suite만 전체 통과했다. 남은 실패는 volatile Registry를 쓴 fixture 2건, bare verification ID를 증거로 기대한 fixture 1건, measured assistant 없는 Claude terminal fixture 1건이었다. 제품의 durable publication·model identity 검사는 유지하고 fixture를 수리했다. 후속 고정 코드17583의 실행40149490208에서는 변경한 세 suite **239건 전부 통과**했다. 이것과 원본 실패, 이전 두 suite의 통과 범위를 각각 보존한다. 전체 회귀 결과로 합산하지 않는다.
 
 후속 소스는 기존16개 Native Stack을 다른 세션이 재배치하는 동안 별도 exact candidate로 보존한다. source review, 최소 native 검사, 실제328 runtime, UI, 현재 원격 PR head/base와 전체 스택 승인은 각각 따로 확인해야 한다. microVM grader·실제 Official vendor 세션·전체 회귀·운영 설치·배포·병합·최종 사람 Goal 확인은 이 감사의 성공 주장에 포함되지 않는다.
 

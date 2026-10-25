@@ -58,6 +58,7 @@ let receipt
       ?(keeper = keeper_overlay)
       ?(exact = exact_output_registry ())
       ?(warnings = `List [])
+      ?(ignored_legacy_keys = `List [])
       ()
   =
   `Assoc
@@ -70,6 +71,7 @@ let receipt
           ; "durability", `String "durable"
           ; "durability_detail", `Null
           ; "warnings", warnings
+          ; "ignored_legacy_keys", ignored_legacy_keys
           ] )
     ; ( "application"
       , `Assoc
@@ -122,6 +124,28 @@ let test_valid_receipt_preserves_typed_outcomes () =
 let test_rejects_causal_mismatches () =
   rejected (receipt ~skills:(published ~input_source_revision:"source-6" ()) ());
   rejected (receipt ~skills:(superseded ~commit_order:"6" ()) ())
+;;
+
+(* main 8e85e45ecc serializes [commit.ignored_legacy_keys] whenever a commit
+   lands (lib/runtime/runtime_config_projection.ml:146-147); the dashboard
+   save route emits that receipt verbatim. A TUI decoder that exact-matches
+   only the old five commit fields rejects every real save response — the
+   #46017 integration defect this regression pins. *)
+let test_accepts_ignored_legacy_keys_and_retains_them () =
+  let with_keys =
+    decoded
+      (receipt
+         ~ignored_legacy_keys:(`List [ `String "max-prompt-bytes" ])
+         ())
+  in
+  check (list string) "ignored legacy keys are retained"
+    [ "max-prompt-bytes" ] with_keys.ignored_legacy_keys;
+  let empty = decoded (receipt ()) in
+  check (list string) "empty ignored legacy keys are fine" [] empty.ignored_legacy_keys
+;;
+
+let test_rejects_non_string_ignored_legacy_keys () =
+  rejected (receipt ~ignored_legacy_keys:(`List [ `Int 7 ]) ())
 ;;
 
 let test_rejects_open_or_incomplete_skill_variants () =
@@ -368,6 +392,10 @@ let () =
             test_valid_receipt_preserves_typed_outcomes
         ; test_case "causal mismatches are rejected" `Quick
             test_rejects_causal_mismatches
+        ; test_case "ignored legacy keys are accepted and retained" `Quick
+            test_accepts_ignored_legacy_keys_and_retains_them
+        ; test_case "non-string ignored legacy keys are rejected" `Quick
+            test_rejects_non_string_ignored_legacy_keys
         ; test_case "Skill variants are closed and complete" `Quick
             test_rejects_open_or_incomplete_skill_variants
         ; test_case "application evidence is required" `Quick

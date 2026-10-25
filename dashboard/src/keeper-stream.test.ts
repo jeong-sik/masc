@@ -209,6 +209,26 @@ describe('Keeper operation stream projection', () => {
     expect(invalid).toBeNull()
   })
 
+  it('retains an owned replacement prefix across redactor clears and later flushes', () => {
+    assistantEntry()
+    const response = { content_generation: 1, stream_scope: 0 }
+    const apply = (event: KeeperChatStreamEvent) => applyKeeperStreamEvent('sangsu', 'reply-1', event)
+    const think = (index: number, delta: string) => apply({ type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index, delta, response } })
+    think(0, 'summary')
+    think(1, 'sibling')
+    apply({ type: 'CUSTOM', name: 'KEEPER_THINKING_SNAPSHOT', value: { index: 0, snapshot: '', response } })
+    think(0, 'replacement [REDACTED]')
+    _flushPendingKeeperStreamDeltasForTests()
+    // Reconstruct the in-memory batcher from the persisted entry between chunks.
+    _resetKeeperStreamBuffersForTests()
+    think(0, ' complete')
+    _flushPendingKeeperStreamDeltasForTests()
+    expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).traceSteps).toMatchObject([
+      { kind: 'think', text: 'replacement [REDACTED] complete', agentCoreBlockIndex: 0 },
+      { kind: 'think', text: 'sibling', agentCoreBlockIndex: 1 },
+    ])
+  })
+
   it('deduplicates sequenced reasoning across transport replay and restores its prefix', () => {
     assistantEntry()
     const thinking = (delta: string): KeeperChatStreamEvent => ({

@@ -3074,9 +3074,107 @@ let test_thinking_snapshot_replaces_exact_block () =
     ;Live.Thinking_snapshot{text="full";index=0;response}];
   check string "stored reasoning replaces exact block and preserves sibling" "fullother" (Transcript.thinking t)
 
+let test_owned_and_anonymous_thinking_append_identity () =
+  let response : Masc.Keeper_chat_events.response_identity =
+    {response_generation=1;response_scope=0} in
+  let observe owner =
+    let transcript=fresh () in
+    feed transcript [Live.Thinking {text="A";index=0;response=owner};
+      Live.Thinking {text="B";index=1;response=owner};
+      Live.Thinking {text="C";index=0;response=owner}];
+    Transcript.thinking transcript in
+  check string "owned fragments retain canonical block position" "ACB" (observe (Some response));
+  check string "anonymous observations retain arrival order" "ABC" (observe None)
+
+let test_owned_thinking_rebuild_preserves_response_history () =
+  let transcript = fresh () in
+  let owner scope : Masc.Keeper_chat_events.response_identity =
+    {response_generation=1;response_scope=scope} in
+  let think scope index text = Live.Thinking {text;index;response=Some(owner scope)} in
+  feed transcript [think 0 0 "A";think 1 0 "B";think 1 1 "C";think 1 0 "D"];
+  check string "owned append preserves the preceding response" "ABDC" (Transcript.thinking transcript);
+  feed transcript [Live.Thinking_snapshot {text="E";index=0;response=owner 1}];
+  check string "snapshot preserves the preceding response" "AEC" (Transcript.thinking transcript);
+  feed transcript [Live.Runtime_attempt_started {runtime_id=Some "next";attempt_index=Some 1};
+    think 2 0 "F";think 2 1 "G";think 2 0 "H"];
+  check string "superseded attempt stays outside current totals" "FHG" (Transcript.thinking transcript)
+
+(* Exercise the production collector, durable journal and actual TUI replay
+   fold together. No row/layout or rendered-screen assertions. *)
+let test_owned_replacement_survives_redaction_and_journal_replay () =
+  let module Stream = Masc.Keeper_autonomous_stream in
+  let module Journal = Masc.Keeper_chat_event_log in
+  let module Secret = Masc.Keeper_secret_redaction in
+  let base_dir = Filename.temp_file "thinking-delivery-" "" in
+  Unix.unlink base_dir;
+  Unix.mkdir base_dir 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_dir) (fun () ->
+    let keeper_name = "joined-thinking" in
+    let secret = "snapshot-secret-7788" in
+    let secret_path = Secret.ssh_remote_token_file ~base_path:base_dir ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname secret_path);
+    Fs_compat.save_file secret_path (secret ^ "\n");
+    Eio_main.run (fun _ ->
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"joined-thinking" ~absolute_turn:1 in
+      let source = Log.Autonomous_turn turn_ref in
+      let stream = Stream.create ~base_path:base_dir ~keeper_name ~turn_ref in
+      Fun.protect ~finally:(fun () -> Stream.finish stream Stream.Cancelled) (fun () ->
+        let transcript = Transcript.create_for_source ~keeper_name ~source ~started_at:origin in
+        let log = Log.create_for_source ~keeper_name ~source ~started_at:origin in
+        let path = Journal.turn_journal_path ~base_dir ~keeper_name ~turn_ref in
+        let read () = match Journal.read_journal_path_result path with
+          | Ok entries -> entries
+          | Error failure -> fail (match failure with
+              | Journal.Journal_missing -> "joined journal missing"
+              | Journal.Journal_unreadable detail | Journal.Journal_corrupt detail -> detail
+              | Journal.Journal_unsupported_version version -> Journal.version_mismatch_to_string version) in
+        let replay entries =
+          Log.add_journaled log entries |> List.iter (fun (entry, delta) ->
+            Transcript.apply ~now:entry.Journal.ts transcript delta) in
+        let send event = Stream.on_event stream event in
+        let thinking index text = Agent_core.Types.ContentBlockDelta
+            {index; delta=ThinkingDelta text} in
+        send (Agent_core.Types.MessageStart {id="native-response";model="fixture";usage=None});
+        send (thinking 0 "condensed summary\n");
+        send (thinking 1 "sibling\n");
+        send (Agent_core.Types.ContentBlockDelta {index=2;delta=TextDelta "answer\n"});
+        replay (read ());
+        check string "original owned blocks reached persisted TUI state"
+          "condensed summary\nsibling\n" (Transcript.thinking transcript);
+        send (Agent_core.Types.ContentBlockDelta
+          {index=0;delta=ThinkingSnapshot "replacement snapshot-"});
+        send (thinking 0 "secret-7788 complete\n");
+        send Agent_core.Types.MessageStop;
+        Stream.finish stream (Stream.Completed
+          {reply="answer\n";turn_outcome=Masc.Keeper_turn_outcome.Visible_reply});
+        let sealed = read () in
+        check bool "public journal never contains the exact secret" false
+          (List.exists (fun entry -> String_util.contains_substring
+             (Journal.journaled_event_to_string entry) secret) sealed);
+        check bool "production journal carries an owned clear for the replaced block" true
+          (List.exists (fun (entry:Journal.journaled_event) -> match entry.event with
+             | Masc.Keeper_chat_events.Agent_core_thinking_snapshot {index=0;snapshot="";response} ->
+                 response.response_generation=0 && response.response_scope=0
+             | _ -> false) sealed);
+        replay sealed;
+        let expected = "replacement [REDACTED] complete\nsibling\n" in
+        check string "redacted replacement retains its exact block position"
+          expected (Transcript.thinking transcript);
+        check string "unrelated answer survives replacement" "answer\n" (Transcript.text transcript);
+        check bool "joined projection remains readable" true (Transcript.unreadable transcript=None);
+        let cold = Transcript.create_for_source ~keeper_name ~source ~started_at:origin in
+        let cold_log = Log.create_for_source ~keeper_name ~source ~started_at:origin in
+        Log.add_journaled cold_log (read ()) |> List.iter (fun (entry,delta) ->
+          Transcript.apply ~now:entry.Journal.ts cold delta);
+        check string "fresh journal reader reconstructs identical reasoning"
+          expected (Transcript.thinking cold);
+        check int "replayed rows cannot be applied twice" 0
+          (List.length (Log.add_journaled log sealed)))))
+
 let () =
   run "tui_keeper_chat_transcript"
-    [ ("thinking replacement",[test_case "exact response block" `Quick test_thinking_snapshot_replaces_exact_block]);
+    [ ("thinking delivery",[test_case "response history survives rebuild" `Quick test_owned_thinking_rebuild_preserves_response_history;test_case "owned and anonymous append identity" `Quick test_owned_and_anonymous_thinking_append_identity;test_case "redaction journal and cold replay" `Quick test_owned_replacement_survives_redaction_and_journal_replay]);
+      ("thinking replacement",[test_case "exact response block" `Quick test_thinking_snapshot_replaces_exact_block]);
       ("admitted tool identity", [
         test_case "skill retains one occurrence" `Quick test_admitted_skill_uses_one_original_occurrence;
         test_case "reused provider IDs never select another occurrence" `Quick test_admitted_name_cannot_cross_occurrences])

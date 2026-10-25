@@ -207,7 +207,9 @@ type thinking_block =
 let same_thinking_block a b =
   a.block_index = b.block_index && a.block_response = b.block_response
 
-(* One stretch of the turn as it arrived. The three accumulators above answer
+(* Anonymous thinking follows arrival stretches; an explicitly owned block
+   keeps its first position while subsequent fragments update that block.
+   The three accumulators above answer
    "what did the turn say / think / call" as totals; the trail answers "in what
    order". A tool-call round interleaves them -- reasoning, then a call, then
    more reasoning -- and flattening that into three blocks is what made a long
@@ -598,14 +600,46 @@ let begin_response t =
   t.response_first_stretch <- t.next_stretch_id;
   t.reversed_trail <- Node_response_boundary :: t.reversed_trail
 
+type thinking_append = Tail_append | Existing_block_append
+
 let trail_thinking ~now t ~block text =
-  (match t.reversed_trail with
-   | Node_thinking (_, _, buffer, open_block) :: _ when same_thinking_block open_block block ->
-       Buffer.add_string buffer text
-   | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_thinking _ | Node_media _ | Node_tool _ | Node_superseded _) :: _ | [] ->
-       let buffer = Buffer.create 256 in
-       Buffer.add_string buffer text;
-       t.reversed_trail <- Node_thinking (fresh_stretch t, now, buffer, block) :: t.reversed_trail)
+  let new_stretch () =
+    let buffer = Buffer.create 256 in
+    Buffer.add_string buffer text;
+    t.reversed_trail <- Node_thinking (fresh_stretch t, now, buffer, block) :: t.reversed_trail;
+    Tail_append in
+  match t.reversed_trail with
+  | Node_thinking (_, _, buffer, previous) :: _ when same_thinking_block previous block ->
+      Buffer.add_string buffer text;
+      Tail_append
+  | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_thinking _
+     | Node_media _ | Node_tool _ | Node_superseded _) :: _ | [] ->
+      (* Owned blocks have a canonical address. Safe deltas following a
+         redactor's clear still belong at that block's retained position.
+         Anonymous observations retain chronological arrival stretches. *)
+      (match block.block_response with
+       | None -> new_stretch ()
+       | Some _ ->
+         match List.find_map (function
+           | Node_thinking (_, _, buffer, previous) when same_thinking_block previous block -> Some buffer
+           | Node_thinking _ | Node_segment_boundary | Node_response_boundary | Node_text _
+           | Node_media _ | Node_tool _ | Node_superseded _ -> None) t.reversed_trail with
+         | None -> new_stretch ()
+         | Some buffer ->
+             Buffer.add_string buffer text;
+             Existing_block_append)
+
+let refresh_thinking_buffer t =
+  (* Response changes retain earlier reasoning in this attempt. Continuation
+     segments and superseded attempts are the boundaries that reset totals. *)
+  let rec current_buffers ordered = function
+    | [] | Node_segment_boundary :: _ | Node_superseded _ :: _ -> ordered
+    | Node_thinking (_, _, buffer, _) :: rest -> current_buffers (buffer :: ordered) rest
+    | (Node_response_boundary | Node_text _ | Node_media _ | Node_tool _) :: rest ->
+        current_buffers ordered rest in
+  let buffers = current_buffers [] t.reversed_trail in
+  Buffer.clear t.thinking_buffer;
+  List.iter (Buffer.add_buffer t.thinking_buffer) buffers
 
 let replace_thinking ~now t ~block text =
   let matched=ref false in
@@ -618,13 +652,8 @@ let replace_thinking ~now t ~block text =
     | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_thinking _
        | Node_media _ | Node_tool _ | Node_superseded _) as node -> Some node) in
   t.reversed_trail<-List.rev ordered;
-  if not !matched then trail_thinking ~now t ~block text;
-  Buffer.clear t.thinking_buffer;
-  List.rev t.reversed_trail |> List.iter(function
-    | Node_thinking(_,_,buffer,previous) when previous.block_response=block.block_response ->
-      Buffer.add_buffer t.thinking_buffer buffer
-    | Node_thinking _ | Node_segment_boundary | Node_response_boundary | Node_text _ | Node_media _
-    | Node_tool _ | Node_superseded _ -> ())
+  if not !matched then ignore (trail_thinking ~now t ~block text);
+  refresh_thinking_buffer t
 
 let trail_text ~now t text =
   (match t.reversed_trail with
@@ -1931,8 +1960,9 @@ let apply_delta ~now t (delta : Live.delta) =
       if not terminal && (response=None || admitted) then begin
         if text <> "" then begin
           if admitted then t.model_signal <- Some (Reasoning_at now);
-          Buffer.add_string t.thinking_buffer text;
-          trail_thinking ~now t ~block:{ block_index = index; block_response = response } text
+          (match trail_thinking ~now t ~block:{ block_index = index; block_response = response } text with
+           | Tail_append -> Buffer.add_string t.thinking_buffer text
+           | Existing_block_append -> refresh_thinking_buffer t)
         end
       end
   | Live.Tool_started { occurrence; tool_name } ->

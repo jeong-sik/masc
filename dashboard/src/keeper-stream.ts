@@ -322,9 +322,13 @@ function enqueueThinkingDelta(
   }
   if (!pending) {
     const entry = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
-    const last = entry?.traceSteps?.at(-1)
-    const prefix = last?.kind === 'think' && sameKeeperResponseOwner(last.responseOwner, meta.responseOwner)
-      && sameAgentCoreBlockIndex(last.agentCoreBlockIndex, meta.agentCoreBlockIndex) ? last.text : ''
+    const previous = meta.responseOwner !== undefined && meta.agentCoreBlockIndex !== undefined
+      ? entry?.traceSteps?.find(step => step.kind === 'think'
+        && sameKeeperResponseOwner(step.responseOwner, meta.responseOwner)
+        && sameAgentCoreBlockIndex(step.agentCoreBlockIndex, meta.agentCoreBlockIndex))
+      : entry?.traceSteps?.at(-1)
+    const prefix = previous?.kind === 'think' && sameKeeperResponseOwner(previous.responseOwner, meta.responseOwner)
+      && sameAgentCoreBlockIndex(previous.agentCoreBlockIndex, meta.agentCoreBlockIndex) ? previous.text : ''
     const text = `${prefix}${delta}`
     pending = {
       responseOwner: meta.responseOwner,

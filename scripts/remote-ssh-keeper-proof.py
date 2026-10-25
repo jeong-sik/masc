@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Installed Keeper -> scripted model -> real pinned SSH -> durable file evidence.
 
-Requires a provisioned, empty remote Keeper workspace. Does not build, bootstrap,
+Requires a provisioned workspace, empty unless initial file hashes are declared.
+Does not build, bootstrap,
 log in to GitHub, delete endpoints, or modify production configuration.
 Keep output private: .workspace contains the isolated server's admin token.
 """
@@ -43,6 +44,37 @@ def transport_refusal(content):
             or payload.get('shim_execution_evidence') != expected):
         raise smoke.SmokeError('pin replacement lacks typed transport_unavailable Execute evidence')
     return payload
+
+
+def preserved_file_manifest(pairs):
+    manifest = {}
+    for name, digest in pairs:
+        if (not name or name in ('.', '..') or '\0' in name
+                or PurePosixPath(name).name != name):
+            raise smoke.SmokeError('preserved files must name workspace-root regular files')
+        if (len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest)
+                or name in manifest):
+            raise smoke.SmokeError('preserved files require unique names and lowercase SHA256 digests')
+        manifest[name] = digest
+    return manifest
+
+
+def initial_workspace_inspection():
+    return ('import hashlib,json,os,socket,sys; from pathlib import Path; '
+            'p=Path(sys.argv[1]); names=json.loads(sys.argv[2]); '
+            'print(json.dumps({"cwd":str(p),"hostname":socket.gethostname(),'
+            '"uid":p.stat().st_uid,"files":sorted(os.listdir(p)),'
+            '"preserved_files":{n:hashlib.sha256((p/n).read_bytes()).hexdigest() '
+            'if (p/n).is_file() and not (p/n).is_symlink() else None for n in names}}))')
+
+
+def validate_initial_workspace(snapshot, manifest):
+    files = snapshot.get('files')
+    if (type(snapshot.get('uid')) is not int or snapshot['uid'] <= 0
+            or type(files) is not list or any(type(name) is not str for name in files)
+            or len(files) != len(set(files)) or set(files) != set(manifest)
+            or snapshot.get('preserved_files') != manifest):
+        raise smoke.SmokeError('expected a nonroot-owned workspace with exactly the declared initial file hashes')
 
 
 class FilesFixture(smoke.ModelFixture):
@@ -315,13 +347,11 @@ def run(args):
         if commit != args.expected_commit:
             raise smoke.SmokeError('installed binary commit does not match --expected-commit')
         remote = str(PurePosixPath(args.remote_root) / args.keeper)
-        inspection = ('import json,os,socket,sys; p=sys.argv[1]; '
-                      'print(json.dumps({"cwd":p,"hostname":socket.gethostname(),'
-                      '"uid":os.stat(p).st_uid,"files":os.listdir(p)}))')
-        before = json.loads(ssh(args, ['python3', '-c', inspection, remote]))
+        preserved = preserved_file_manifest(getattr(args, 'preserved_file_sha256', []))
+        before = json.loads(ssh(args, ['python3', '-c', initial_workspace_inspection(),
+                                       remote, json.dumps(list(preserved))]))
         (output / 'endpoint-before.json').write_text(json.dumps(before, indent=2))
-        if before['uid'] == 0 or before['files']:
-            raise smoke.SmokeError('expected a nonroot-owned empty provisioned Keeper workspace')
+        validate_initial_workspace(before, preserved)
         smoke.command([binary, 'init', '--base-path', str(base)], env)
         # Mutate only the test workspace's private copy for rotation probes.
         # The operator's original trust file is read-only throughout this run.
@@ -413,13 +443,18 @@ def run(args):
                       'print(json.dumps({"cwd":str(p),"hostname":socket.gethostname(),'
                       '"notes":b.decode(),"sha256":hashlib.sha256(b).hexdigest(),'
                       '"denied_effect_exists":(p/"pin-rotation-must-not-exist").exists(),'
+                      '"preserved_files":{n:hashlib.sha256((p/n).read_bytes()).hexdigest() '
+                      'if (p/n).is_file() and not (p/n).is_symlink() else None '
+                      'for n in json.loads(sys.argv[2])},'
                       + shell_io_fields +
                       '"initial":json.loads((p/"ssh-proof.json").read_text())}))')
-            actual = json.loads(ssh(args, ['python3', '-c', reread, remote]))
+            reread_argv = ['python3', '-c', reread, remote, json.dumps(list(preserved))]
+            actual = json.loads(ssh(args, reread_argv))
             (output / 'endpoint-after.json').write_text(json.dumps(actual, indent=2))
             if (actual['denied_effect_exists'] is not False or actual['notes'] != 'after\n'
                     or actual['hostname'] != before['hostname']
-                    or actual['initial']['marker'] != marker or actual['sha256'] != fixture.proof['sha256']):
+                    or actual['initial']['marker'] != marker or actual['sha256'] != fixture.proof['sha256']
+                    or actual.get('preserved_files') != preserved):
                 raise smoke.SmokeError('endpoint bytes or identity differ from Keeper ToolResult')
             if args.exercise_shell_io:
                 if actual.get('shell_io') != SHELL_IO_FILES:
@@ -427,7 +462,7 @@ def run(args):
                 if any((Path(fixture.proof['cwd']) / name).exists() for name in SHELL_IO_FILES):
                     raise smoke.SmokeError('a remote redirect also exists in the projected host cwd')
             smoke.stop_server(server)
-            after_stop = json.loads(ssh(args, ['python3', '-c', reread, remote]))
+            after_stop = json.loads(ssh(args, reread_argv))
             if after_stop != actual:
                 raise smoke.SmokeError('endpoint bytes changed after server shutdown')
             (output / 'endpoint-after-stop.json').write_text(json.dumps(after_stop, indent=2))
@@ -452,6 +487,10 @@ def run(args):
             checkpoint, data = smoke.wait_until('canonical resumed SSH checkpoint',
                 lambda: smoke.checkpoint_proof(base, fixture), server)
             (output / 'checkpoint-after-restart.json').write_text(json.dumps(data, indent=2))
+            after_restart = json.loads(ssh(args, reread_argv))
+            if after_restart != after_stop:
+                raise smoke.SmokeError('endpoint bytes or declared initial hashes changed after restart/resume')
+            (output / 'endpoint-after-restart.json').write_text(json.dumps(after_restart, indent=2))
             ledger_proof(base, args.keeper, fixture, output)
             receipt.update(result='PASS', model_requests=len(fixture.requests), tool_calls=len(fixture.results),
                 runtime_instances=[initial_instance, resumed_instance],
@@ -464,6 +503,9 @@ def run(args):
                         'canonical ledger records completed SSH tools'])
             if args.exercise_pin_rotation:
                 receipt['claims'].append('same-path pin replacement denied Execute; explicit restoration recovered')
+            if preserved:
+                receipt['preserved_file_sha256'] = preserved
+                receipt['claims'].append('declared preexisting regular-file hashes survive workflow, shutdown and restart')
             if args.exercise_shell_io:
                 receipt['claims'].append('public command form performed remote stdin, truncate, append and split output redirects')
                 receipt['not_measured'].remove('redirects and long jobs')
@@ -491,6 +533,9 @@ def main():
     parser.add_argument('--port', type=int, default=22)
     parser.add_argument('--exercise-pin-rotation', action='store_true')
     parser.add_argument('--exercise-shell-io', action='store_true')
+    parser.add_argument('--preserved-file-sha256', action='append', nargs=2, default=[],
+                        metavar=('NAME', 'SHA256'),
+                        help='Declare a preexisting workspace-root regular file and its exact hash; repeat per file.')
     args = parser.parse_args()
     if not args.keeper or any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for c in args.keeper):
         parser.error('--keeper must be a lowercase safe Keeper name')

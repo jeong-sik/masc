@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "onepassword"))
-from login import Extension, Journal, LoginError, Logins
+from login import Extension, Journal, LoginError, Logins, Phase
 from oauth import ConnectionError
 from service import Service
 from test_onepassword_companion import Host
@@ -165,3 +165,30 @@ class DeliveryTests(unittest.TestCase):
         self.phase(operation, "cancelled")
         self.assertEqual(host.connections, 0)
         self.assertTrue(self.engine.pending_publications(operation, CALLER))
+
+    def test_terminal_commit_after_empty_snapshot_keeps_its_original_publisher(self):
+        empty, resume = threading.Event(), threading.Event()
+        gated = threading.Event()
+        original = self.engine.publication_snapshot
+        def snapshot(operation, caller):
+            value = original(operation, caller)
+            if value.phase is Phase.APPROVAL_READY and not value.pending and not gated.is_set():
+                gated.set()
+                empty.set()
+                self.assertTrue(resume.wait(2))
+            return value
+        def handler(host, connection, reader):
+            host.read(reader)
+            host.write(connection, {"accepted": True})
+        host = self.host(handler, max_connections=2)
+        with patch.object(self.engine, "publication_snapshot", side_effect=snapshot):
+            operation = self.start(host)
+            try:
+                self.assertTrue(empty.wait(2))
+                self.service.cancel(operation, CALLER)
+                self.phase(operation, "cancelled")
+            finally:
+                resume.set()
+            self.wait(lambda: not self.engine.pending_publications(operation, CALLER))
+        self.assertEqual([message["event"]["output"]["phase"] for message in host.messages],
+                         ["approval_ready", "cancelled"])

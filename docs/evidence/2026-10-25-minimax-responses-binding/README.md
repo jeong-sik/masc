@@ -21,7 +21,7 @@ Each model's public fixture resolves the shipped registry, checks its route/auth
 - Run40198829234 at3dc43c1ed9e4d1687aa131c03b89c72d32012d03 failed compilation: the fixture named a private dialect helper. No cases ran. It now uses the public replay capability and source stamp.
 - Run40198894805 at5dd2109449ae8439896d77e8fd803c0c333eefe8 compiled and ran9 cases; all9 failed at the absent shipped provider. Later replay/control assertions were unreached. These nine fixtures reflected the initial identity proposal and do not certify nine vendor models.
 - Run40199106856 at0178e767ff2131c9956923bd0fda99e4ce4d2c99 compiled and ran9 native cases, all failing because the fixture supplied a wrapped wire tool instead of the normalized public tool definition. Registry/scoped declaration checks were reached; later assertions were not. Generic sync16 and SSE22 separately passed in that failed workflow. The fixture now uses name/description/input_schema and the final Common serializer.
-- Corrected run40199608144 targets `fe5060711754abcb42188d6c7188eec33074d283`:2 native plus generic16+22 requested; result pending inspection. The changed count reflects the documentation correction, not nine repaired native passes.
+- Corrected run40199608144 targets `fe5060711754abcb42188d6c7188eec33074d283`:2 native plus generic16+22 requested; its actual corrected result is recorded below. The changed count reflects the documentation correction, not nine repaired native passes.
 
 No initial failure is relabeled PASS. OCaml syntax, Python TOML/duplicate checks and whitespace are not OCaml parser/behavior execution.
 
@@ -33,4 +33,10 @@ The corrected selection run40198342839 checked out main3d22830d3992e6eec7011f65b
 
 ## Limits and next action
 
-Read the exact corrected result at a substantive work boundary. Native HTTP, exact M2 Responses availability, current-main combination, whole Agent restart, rendered UI, installation/deployment, full regression and whole issue completion remain unverified. No local Dune/typecheck/build. Native Stack submit reports repository disabled; REST membership is inspected separately. #27924 remains OPEN.
+Native HTTP, exact M2 Responses availability, current-main combination, whole Agent restart, rendered UI, installation/deployment, full regression and whole issue completion remain unverified. No local Dune/typecheck/build. Native Stack submit reports repository disabled; REST membership is inspected separately. #27924 remains OPEN.
+
+## Actual corrected execution
+
+[Run40199608144](https://github.com/jeong-sik/masc/actions/runs/40199608144) checked out exactly `fe5060711754abcb42188d6c7188eec33074d283` and completed SUCCESS: native binding2 + generic sync16 + generic SSE22 = **40 actual cases**. Both documented models reached all public registry/source-contract, sync/SSE/cache/message-file/replay/final-serializer, tool-choice, effort and disable assertions. The retained checkout/assertions/summaries and raw digest identify that execution.
+
+The three source/fixture hashes are unchanged in later evidence-only heads. The earlier nine-case failures remain distinct; this is a corrected two-model fixture, not certification of nine Responses identities. M2 availability remains open. No live HTTP or whole-issue closure follows from40 selected cases.

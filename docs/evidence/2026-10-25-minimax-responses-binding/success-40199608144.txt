@@ -1,0 +1,69 @@
+Raw workflow log SHA256: 9ccea8703a0a9f7234ffc3353a7f9d49ee84b6a53c94ddccee012ec2d1d411c1
+Source: https://github.com/jeong-sik/masc/actions/runs/40199608144
+
+test suite	Checkout	2026-10-25T13:52:44.4126962Z HEAD is now at fe506071 fix(minimax): bind documented Responses models through final request serialization
+test suite	Test	2026-10-25T13:53:57.4472860Z ASSERT native producer and consumer contract agree
+test suite	Test	2026-10-25T13:53:57.4478967Z ASSERT sync full reasoning reaches documented summary input
+test suite	Test	2026-10-25T13:53:57.4483986Z ASSERT SSE full reasoning reaches documented summary input
+test suite	Test	2026-10-25T13:53:57.4490153Z ASSERT undocumented forcing rejected before HTTP
+test suite	Test	2026-10-25T13:53:57.4490694Z ASSERT undocumented forcing rejected before HTTP
+test suite	Test	2026-10-25T13:53:57.4491933Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T13:53:57.4492352Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T13:53:57.4492761Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T13:53:57.4493164Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T13:53:57.4493680Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T13:53:57.4495597Z ASSERT explicit disable follows the declared control semantics
+test suite	Test	2026-10-25T13:53:57.4496546Z   [OK]          native models          0   MiniMax-M3.
+test suite	Test	2026-10-25T13:53:57.4499526Z ASSERT native producer and consumer contract agree
+test suite	Test	2026-10-25T13:53:57.4503155Z ASSERT sync full reasoning reaches documented summary input
+test suite	Test	2026-10-25T13:53:57.4507817Z ASSERT SSE full reasoning reaches documented summary input
+test suite	Test	2026-10-25T13:53:57.4510699Z ASSERT undocumented forcing rejected before HTTP
+test suite	Test	2026-10-25T13:53:57.4511259Z ASSERT undocumented forcing rejected before HTTP
+test suite	Test	2026-10-25T13:53:57.4512536Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T13:53:57.4513233Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T13:53:57.4513889Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T13:53:57.4514371Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T13:53:57.4514817Z ASSERT documented effort stays in Responses reasoning object
+test suite	Test	2026-10-25T13:53:57.4515838Z ASSERT explicit disable follows the declared control semantics
+test suite	Test	2026-10-25T13:53:57.4516245Z   [OK]          native models          1   MiniMax-M3.1-Flash.
+test suite	Test	2026-10-25T13:53:57.4516748Z Test Successful in 0.027s. 2 tests run.
+test suite	Test	2026-10-25T13:53:57.5091986Z   [OK]          public history          0   full content through tool and lat...
+test suite	Test	2026-10-25T13:53:57.5097113Z   [OK]          public history          1   full text precedes summary.
+test suite	Test	2026-10-25T13:53:57.5103897Z   [OK]          public history          2   existing summary control.
+test suite	Test	2026-10-25T13:53:57.5105179Z   [OK]          public history          3   blank full content fallback.
+test suite	Test	2026-10-25T13:53:57.5113991Z   [OK]          public history          4   opaque carrier control.
+test suite	Test	2026-10-25T13:53:57.5119103Z   [OK]          public history          5   multiple native reasoning items.
+test suite	Test	2026-10-25T13:53:57.5120139Z   [OK]          public history          6   blank encrypted content.
+test suite	Test	2026-10-25T13:53:57.5120942Z   [OK]          public history          7   unknown content extensions.
+test suite	Test	2026-10-25T13:53:57.5121667Z   [OK]          public history          8   malformed recognized text.
+test suite	Test	2026-10-25T13:53:57.5122385Z   [OK]          public history          9   malformed content carrier.
+test suite	Test	2026-10-25T13:53:57.5373969Z   [OK]          public history         10   OpenAI opaque policy control.
+test suite	Test	2026-10-25T13:53:57.5375439Z   [OK]          public history         11   producer consumer contract identity.
+test suite	Test	2026-10-25T13:53:57.5377728Z   [OK]          public history         12   other protocol default controls.
+test suite	Test	2026-10-25T13:53:57.5378706Z   [OK]          public history         13   Chat override cannot activate Res...
+test suite	Test	2026-10-25T13:53:57.5379882Z   [OK]          public history         14   public manifest declaration.
+test suite	Test	2026-10-25T13:53:57.5387097Z   [OK]          public history         15   opaque endpoint binding.
+test suite	Test	2026-10-25T13:53:57.5387670Z Test Successful in 0.031s. 16 tests run.
+test suite	Test	2026-10-25T13:53:57.5948654Z   [OK]          public SSE          0   full history.
+test suite	Test	2026-10-25T13:53:57.5953494Z   [OK]          public SSE          1   summary then full.
+test suite	Test	2026-10-25T13:53:57.5954092Z   [OK]          public SSE          2   full then summary.
+test suite	Test	2026-10-25T13:53:57.5960780Z   [OK]          public SSE          3   summary-only control.
+test suite	Test	2026-10-25T13:53:57.5961596Z   [OK]          public SSE          4   part ordering.
+test suite	Test	2026-10-25T13:53:57.5962181Z   [OK]          public SSE          5   repeated boundaries.
+test suite	Test	2026-10-25T13:53:57.5962788Z   [OK]          public SSE          6   item done without output.
+test suite	Test	2026-10-25T13:53:57.5963416Z   [OK]          public SSE          7   delta without output.
+test suite	Test	2026-10-25T13:53:57.5963763Z   [OK]          public SSE          8   conflict.
+test suite	Test	2026-10-25T13:53:57.5964113Z   [OK]          public SSE          9   truncation.
+test suite	Test	2026-10-25T13:53:57.5964636Z   [OK]          public SSE         10   explicit empty.
+test suite	Test	2026-10-25T13:53:57.5965177Z   [OK]          public SSE         11   missing item.
+test suite	Test	2026-10-25T13:53:57.5966417Z   [OK]          public SSE         12   omitted channel.
+test suite	Test	2026-10-25T13:53:57.5967026Z   [OK]          public SSE         13   whitespace then full.
+test suite	Test	2026-10-25T13:53:57.5967600Z   [OK]          public SSE         14   Unicode chunks.
+test suite	Test	2026-10-25T13:53:57.5968247Z   [OK]          public SSE         15   multiple native items.
+test suite	Test	2026-10-25T13:53:57.5968895Z   [OK]          public SSE         16   opaque transition.
+test suite	Test	2026-10-25T13:53:57.5969541Z   [OK]          public SSE         17   opaque conflict.
+test suite	Test	2026-10-25T13:53:57.5969878Z   [OK]          public SSE         18   late plaintext.
+test suite	Test	2026-10-25T13:53:57.5970195Z   [OK]          public SSE         19   item identity.
+test suite	Test	2026-10-25T13:53:57.5970523Z   [OK]          public SSE         20   signed thinking guard.
+test suite	Test	2026-10-25T13:53:57.5970892Z   [OK]          public SSE         21   wrong block guard.
+test suite	Test	2026-10-25T13:53:57.5971221Z Test Successful in 0.002s. 22 tests run.

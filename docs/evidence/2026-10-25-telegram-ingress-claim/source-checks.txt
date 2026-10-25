@@ -1,0 +1,11 @@
+No local Dune build or execution claimed.
+Source base: 4e5157beba106381a417a4f64ce273875c4623b8
+Command: ocamlc -stop-after parsing -c <file>
+
+PARSE PASS lib/keeper/keeper_telegram_ingress_claim.mli sha256=9aac5eb350baabc7eade3883a1ef85363548f8269f0efd41429a4b0ee92d9bcf
+PARSE PASS lib/keeper/keeper_telegram_ingress_claim.ml sha256=e841e50b1d09cde1882194e2cf380f18b0969936ec90cb1b3894f495176042e0
+PARSE PASS lib/server/server_telegram_in_process_gateway.mli sha256=f40e4d427c155c96a37774aa05c00f5086f142854cd8f8419980859f149c96be
+PARSE PASS lib/server/server_telegram_in_process_gateway.ml sha256=aa63dba15e8e3ab9f9db29ebf6db20cc247d808206ac58153dead52d5d47dbd6
+PARSE PASS test/test_keeper_owner.ml sha256=a7e5bd2e6dbb2c8fd3ab61655af70dff7248fe446e0bad440e3b4cba968e32bf
+PARSE PASS test/test_telegram_native_gateway.ml sha256=0491ac234157d00124b12a1cc394b600c394a176f03b83ce78b29480bddfef3d
+git diff --check PASS

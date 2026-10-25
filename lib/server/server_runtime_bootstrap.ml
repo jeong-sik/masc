@@ -1827,6 +1827,9 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
       boot_stage "imessage_gateway.begin";
       Server_imessage_in_process_gateway.start ~sw ~env ~state;
       boot_stage "imessage_gateway.end";
+      boot_stage "telegram_gateway.begin";
+      Server_telegram_in_process_gateway.start ~sw ~env ~state;
+      boot_stage "telegram_gateway.end";
       boot_stage "listening_banner.begin";
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;

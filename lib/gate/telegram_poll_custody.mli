@@ -15,14 +15,14 @@ val pp_error : Format.formatter -> error -> unit
 val open_cursor :
   ?post:Telegram_rest_client.post ->
   ?clock:[> float Eio.Time.clock_ty] Eio.Resource.t ->
-  client:Telegram_rest_client.t -> path:string -> unit -> (t, error) result
+  client:Telegram_rest_client.t -> path:(bot_user_id:int64 -> string) -> unit -> (t, error) result
 (** Calls getMe and binds the cursor to its actual bot identity. A cursor from
     another bot or malformed/unreadable persisted state refuses construction.
     Missing state starts with no offset, preserving the unconfirmed queue. *)
 
 val bot_user_id : t -> int64
 
-type ignored_reason = Unbound_chat | Bot_message | Unsupported_update | Empty_message
+type ignored_reason = Unbound_chat | Bot_message | Unsupported_update | Empty_message | Oversized_message
 
 type disposition =
   | Accepted of Gate_protocol.outbound_message

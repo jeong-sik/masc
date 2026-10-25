@@ -3290,6 +3290,28 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                 ends. That is the Keeper arm's shape rather than the Discord
                 and Slack ones, which is why iMessage has no
                 [Keeper_chat_*] adapter module beside theirs. *)
+             | Keeper_continuation_channel.Telegram {bot_user_id;chat_id;message_thread_id;direct_messages_topic_id;reply_to_message_id;_} ->
+               fork_adapter (fun () ->
+                 let load_blocks turn_ref =
+                   let select (row:Keeper_chat_store.chat_message) =
+                     row.role = Keeper_chat_store.Role.Assistant
+                     && Option.fold ~none:false ~some:(Ids.Turn_ref.equal turn_ref) row.turn_ref in
+                   Keeper_chat_store.load_captured_result ~select
+                     ~base_dir:(Mcp_server.workspace_config state).base_path ~keeper_name
+                   |> Result.map_error Keeper_chat_store.strict_decode_error_to_string
+                   |> fun result -> Result.bind result (fun rows ->
+                     match List.map Keeper_chat_store.captured_row_message rows with
+                     | [row] when Option.fold ~none:false
+                         ~some:(Keeper_telegram_coordinates.matches_surface ~bot_user_id ~chat_id
+                           ~message_thread_id ~direct_messages_topic_id ~reply_to_message_id) row.surface
+                         && row.conversation_id = operation_payload.source.conversation_id -> Ok row.blocks
+                     | [_] -> Error "Telegram terminal assistant destination differs from operation"
+                     | [] -> Error "Telegram terminal assistant row is not persisted"
+                     | _::_ -> Error "Telegram terminal assistant row is ambiguous") in
+                 settle_delivery (Keeper_chat_telegram.deliver ~events ~load_blocks ~send:(fun messages ->
+                   Channel_gate_telegram_state.send_message ~clock ~bot_user_id ~chat_id
+                     ~message_thread_id ~direct_messages_topic_id ~reply_to_message_id ~html:true ~messages ()
+                   |> Result.map_error (Format.asprintf "%a" Channel_gate_telegram_state.pp_send_error))))
              | Keeper_continuation_channel.Imessage { chat_guid; _ } ->
                (match Channel_gate_imessage_state.reply_target ~chat_guid with
                 | Error detail ->

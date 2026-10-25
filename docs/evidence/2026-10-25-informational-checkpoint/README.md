@@ -66,7 +66,21 @@ its application switch and Eio domain manager, using the same public capability
 as server bootstrap and existing native integration fixtures. Scope release
 cleans up that capability; the fresh-process reader only reads checkpoint and
 queue state and needs no native execution runtime. No production code or ACK
-assertion was weakened. Execution after this correction is pending.
+assertion was weakened. Run40187045370 atfc7a223d709164c55a7e5e896374a294e489609a subsequently
+compiled both executables and reached actual provider/tool execution and an
+Operation_queued checkpoint. The assertions for ACK disposition, stop reason,
+one provider request and all three markers in that request passed before the
+fixture failed reading its checkpoint: it supplied the Keeper name to
+`keeper_session_dir`, whose public argument is the trace ID. The recorded
+checkpoint_save rows and original failure are retained in
+failed-run40187045370.txt. Existing disposition16 passed again.
+
+The fixture reader now derives one trace ID from effective metadata and uses
+it for both session directory and checkpoint ID, matching the production session
+layout. It still requires checkpoint content, persisted ACKs, later-work queue
+and fresh-process intake assertions; those later assertions were not reached
+in the failed run. No production writer/path policy changed. Corrected execution
+is pending.
 
 No local Dune/build/typecheck was run. #26165 remains open until its current
 acceptance is actually verified.

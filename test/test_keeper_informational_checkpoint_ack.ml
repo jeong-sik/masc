@@ -89,9 +89,10 @@ let check_sources_visible text =
     ("model input or checkpoint omitted " ^ marker))
     [ "fusion-result-26165"; "delegate-result-26165"; "composition-result-26165" ]
 let check_checkpoint config meta =
+  let trace_id = Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id in
   let checkpoint = Keeper_checkpoint_store.load_agent_core
-    ~session_dir:(Keeper_types_support.keeper_session_dir config keeper_name)
-    ~session_id:(Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id)
+    ~session_dir:(Keeper_types_support.keeper_session_dir config trace_id)
+    ~session_id:trace_id
     |> get Keeper_checkpoint_store.checkpoint_load_error_to_string in
   check_sources_visible (Agent_core.Checkpoint.to_string checkpoint)
 let queue_chat config =

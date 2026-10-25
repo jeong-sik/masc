@@ -545,6 +545,105 @@ let openai_text_response text =
     encoded_content
 ;;
 
+type callback_durability_fault = Dispatch_unconfirmed | Advance_unconfirmed | No_fault
+
+let test_worker_callback_durability_blocks_http fault () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      with_temp_base "board-attention-callback-durability" @@ fun base_path ->
+      let candidate = candidate "board-attention-callback-durability" in
+      (match Candidate.record ~base_path candidate with
+       | Candidate.Recorded _ -> ()
+       | Candidate.Duplicate _ -> Alcotest.fail "fresh candidate duplicated"
+       | Candidate.Record_error detail -> Alcotest.fail detail);
+      let meta = Masc_test_deps.meta_of_json_fixture
+          (`Assoc ["name", `String candidate.keeper_name;
+                   "trace_id", `String "trace-callback-durability"])
+        |> Result.get_ok in
+      ignore (Keeper_registry.register_offline ~base_path candidate.keeper_name meta);
+      let first = Fixture.start_server ~sw ~net ~clock
+          (Fixture.Reply (openai_text_response "not json")) in
+      let successor = Fixture.start_server ~sw ~net ~clock
+          (Fixture.Reply (Fixture.openai_response
+             (judgment_output ~candidate_id:candidate.candidate_id))) in
+      let first_target = target "durability-first" first.base_url in
+      let next_target = target "durability-successor" successor.base_url in
+      publish_lane [first_target; next_target];
+      let injected = ref 0 in
+      let map_write_outcome callback outcome =
+        (match outcome with
+         | Partition.Fsync_completed -> ()
+         | Partition.Visible_sync_unconfirmed detail -> Alcotest.fail detail);
+        let inject = match fault, callback with
+          | Dispatch_unconfirmed, Worker.For_testing.Before_dispatch
+          | Advance_unconfirmed, Worker.For_testing.Before_advance -> true
+          | Dispatch_unconfirmed, Worker.For_testing.Before_advance
+          | Advance_unconfirmed, Worker.For_testing.Before_dispatch
+          | No_fault, Worker.For_testing.Before_dispatch
+          | No_fault, Worker.For_testing.Before_advance -> false in
+        if inject then (
+          incr injected;
+          (* The write and selected provenance are real. Only the outcome
+             observed by the callback consumer is a semantic fault. *)
+          let history = partition_history ~base_path ~keeper_name:candidate.keeper_name in
+          (match List.rev history, callback with
+           | {Partition.state=Partition.Running {progress=Partition.Bound bound; _}; _}::_,
+             Worker.For_testing.Before_dispatch ->
+             Alcotest.(check string) "binding persisted before outcome fault"
+               first_target.id bound.slot_id
+           | {Partition.state=Partition.Running
+                {progress=Partition.Advancing {next; execution_anchor=Some anchor; _}; _}; _}::_,
+             Worker.For_testing.Before_advance ->
+             Alcotest.(check string) "failed binding retained" first_target.id anchor.slot_id;
+             Alcotest.(check string) "selected successor persisted" next_target.id next.slot_id
+           | _ -> Alcotest.fail "outcome injection preceded its actual partition write");
+          Partition.Visible_sync_unconfirmed "injected callback durability uncertainty")
+        else outcome
+      in
+      let result = Worker.For_testing.process_next_exact_with_write_outcome
+          ~map_write_outcome ~clock ~net:(Some net) ~now:(fun () -> 3.)
+          ~worker_epoch:(Partition.Worker_epoch.generate ())
+          ~base_path ~keeper_name:candidate.keeper_name in
+      let history = partition_history ~base_path ~keeper_name:candidate.keeper_name in
+      (match fault, result, List.rev history with
+       | No_fault, Ok (Worker.Judgment_completed _),
+         {Partition.state=Partition.Completed _; _}::_ ->
+         Alcotest.(check int) "control injects no fault" 0 !injected
+       | (Dispatch_unconfirmed | Advance_unconfirmed),
+         Ok (Worker.Partition_blocked {reason=Partition.Exact_execution_quarantined progress; _}),
+         {Partition.state=Partition.Blocked
+            {reason=Partition.Exact_execution_quarantined persisted; _}; _}::_ ->
+         Alcotest.(check bool) "blocked progress survives storage" true (progress=persisted);
+         (match fault, progress with
+          | Dispatch_unconfirmed, Partition.Bound bound ->
+            Alcotest.(check string) "blocked binding is exact" first_target.id bound.slot_id
+          | Advance_unconfirmed, Partition.Advancing {next; _} ->
+            Alcotest.(check string) "blocked advance is exact" next_target.id next.slot_id
+          | _ -> Alcotest.fail "wrong durable callback progress quarantined");
+         Alcotest.(check int) "only selected callback fault injected" 1 !injected;
+         let candidates = Candidate.load_candidates ~base_path ~keeper_name:candidate.keeper_name
+           |> Result.get_ok in
+         (match candidates with
+          | [{Candidate.status=Candidate.Quarantine {phase=Candidate.Quarantined; _}; _}] -> ()
+          | _ -> Alcotest.fail "uncertain callback did not retain candidate quarantine");
+         let queue = Keeper_event_queue_persistence.load_result
+             ~base_path ~keeper_name:candidate.keeper_name |> Result.get_ok in
+         Alcotest.(check int) "no owner delivery after uncertainty" 0 (Keeper_event_queue.length queue);
+         (match Worker.For_testing.process_next_exact ~clock ~net:(Some net)
+                  ~now:(fun () -> 4.) ~worker_epoch:(Partition.Worker_epoch.generate ())
+                  ~base_path ~keeper_name:candidate.keeper_name with
+          | Ok Worker.Idle -> ()
+          | _ -> Alcotest.fail "blocked callback was dispatched again")
+       | _, Error detail, _ -> Alcotest.fail detail
+       | _ -> Alcotest.fail "worker did not retain the expected callback disposition");
+      let first_count, next_count = match fault with
+        | Dispatch_unconfirmed -> 0,0
+        | Advance_unconfirmed -> 1,0
+        | No_fault -> 1,1 in
+      Alcotest.(check int) "actual first peer request count" first_count (Fixture.post_count first);
+      Alcotest.(check int) "actual successor peer request count" next_count (Fixture.post_count successor)))
+;;
+
 let board_attention_run_ids () =
   Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
   |> List.filter_map (fun (run : Exact_lane_run_registry.run) ->
@@ -2764,6 +2863,14 @@ let () =
             "a rejected batch answer names its shape, never its values"
             `Quick
             test_batch_rejection_names_the_answer_shape
+        ] )
+    ; ( "callback durability"
+      , [ Alcotest.test_case "unconfirmed bind sends no HTTP and retains quarantine" `Quick
+            (test_worker_callback_durability_blocks_http Dispatch_unconfirmed)
+        ; Alcotest.test_case "unconfirmed advance never dispatches successor" `Quick
+            (test_worker_callback_durability_blocks_http Advance_unconfirmed)
+        ; Alcotest.test_case "confirmed callbacks reach the actual successor" `Quick
+            (test_worker_callback_durability_blocks_http No_fault)
         ] )
     ; ( "production adapter"
       , [ Alcotest.test_case "CLI-only Board judgments need no HTTP attempt" `Quick

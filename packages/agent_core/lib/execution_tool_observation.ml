@@ -31,16 +31,23 @@ let project ~find_node event =
         let* parent = parent view in ancestry turn parent in
   let invocation view =
     let node=Event.node_id view.Journal.node in
-    match Event.node_kind view.node,view.materialized with
-    | Tool_invocation {tool_name;schedule;completion;_},
-      Tool_invocation_state {input=Some (Llm_provider.Types.ToolUse use);_}
-      when String.equal tool_name use.name ->
-      let* agent_name,turn=ancestry None view in
-      let invocation=Tool_contract.Invocation.create ~tool_use_id:use.id ~turn ~schedule ~completion in
-      Ok (agent_name,invocation,tool_name,use.input)
-    | (Agent_run _ | Agent_turn _ | Provider_attempt _ | Output_block _ | Tool_invocation _ | Tool_attempt),
-      (Agent_run_state | Agent_turn_state | Provider_attempt_state _ | Output_block_state _
-       | Tool_invocation_state _ | Tool_attempt_state) -> Error (Invalid_tool_fact node) in
+    let invalid () = Error (Invalid_tool_fact node) in
+    match Event.node_kind view.node with
+    | Tool_invocation {tool_name;schedule;completion;_} ->
+      (match view.materialized with
+       | Tool_invocation_state {input;_} ->
+         (match input with
+          | Some (Llm_provider.Types.ToolUse use) ->
+            if not (String.equal tool_name use.name) then invalid ()
+            else
+              let* agent_name,turn=ancestry None view in
+              let invocation=Tool_contract.Invocation.create ~tool_use_id:use.id ~turn ~schedule ~completion in
+              Ok (agent_name,invocation,tool_name,use.input)
+          | None | Some (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+              | ToolResult _ | Image _ | Document _ | Audio _) -> invalid ())
+       | Agent_run_state | Agent_turn_state | Provider_attempt_state _ | Output_block_state _
+       | Tool_attempt_state -> invalid ())
+    | Agent_run _ | Agent_turn _ | Provider_attempt _ | Output_block _ | Tool_attempt -> invalid () in
   let observed payload = Some {Event_bus.meta=Event.envelope event;payload} in
   match Event.payload event with
   | Node_opened node ->

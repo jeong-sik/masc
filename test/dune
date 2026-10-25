@@ -6627,3 +6627,14 @@
 (include stanzas/test_browser_native_workflow.inc)
 
 (include stanzas/test_prompt_mutation_recovery.inc)
+
+(rule
+ (alias runtest-test_viewer_trpg_unavailable)
+ (deps
+  test_viewer_trpg_unavailable.py
+  ../viewer/Cargo.toml
+  ../viewer/Cargo.lock
+  ../viewer/index.html
+  ../viewer/style.css
+  (source_tree ../viewer/src))
+ (action (run python3 %{dep:test_viewer_trpg_unavailable.py})))

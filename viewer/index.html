@@ -16,11 +16,13 @@
             <p class="home-subtitle">Multi-Agent Shared Context</p>
         </div>
 
+        <p id="mode-unavailable" role="status" hidden></p>
+
         <div id="mode-cards" class="mode-grid">
-            <button class="mode-card" data-mode="trpg">
+            <button class="mode-card" data-mode="trpg" disabled aria-describedby="trpg-unavailable-description">
                 <span class="mode-icon">⚔</span>
                 <span class="mode-name">그림란드 연대기</span>
-                <span class="mode-desc">Dark fantasy TRPG — 5 AI agents play D&amp;D 5e</span>
+                <span class="mode-desc" id="trpg-unavailable-description">현재 지원되지 않음 — 연결할 TRPG 서비스가 없습니다.</span>
             </button>
 
             <button class="mode-card" data-mode="experiment">

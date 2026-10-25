@@ -1,7 +1,8 @@
 # Remote SSH endpoint namespace proposal
 
-Status: Draft. This records a reproduced consumer-contract defect and the next
-implementation boundary. It does not change the current runtime contract.
+Status: Implemented in the endpoint-namespace source change; candidate runtime
+verification remains separate. This records the reproduced defect and the
+implementation boundary.
 Related: #38593; [readiness plan](../plans/2026-10-24-remote-ssh-keeper-ready.md).
 
 ## Observed failure
@@ -32,10 +33,13 @@ contract; the defect is that the reported absolute name is not an OS pathname
 the remote process can use. Rewriting arbitrary script contents cannot repair
 that contract without changing program semantics.
 
-Proposed decision: remote SSH Keeper-facing absolute paths identify the resolved
+Decision: remote SSH Keeper-facing absolute paths identify the resolved
 endpoint namespace. Relative paths resolve from the actual endpoint cwd. Host
 bookkeeping paths remain internal facts with explicit ownership; they are not
-presented as remote OS paths. This decision is proposed, not implemented here.
+presented as remote OS paths. The prompt root is resolved from the admitted
+profile snapshot and retained for prompt/turn telemetry. Each Execute response
+uses its actual dispatch target, so later endpoint reconfiguration is not
+misreported as an atomic whole-turn configuration snapshot.
 
 ## Implementation boundary
 

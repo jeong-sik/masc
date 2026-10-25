@@ -137,14 +137,6 @@ let host_path_of_visible_path ~config ~agent_name raw_path =
         else
           raw_path
 
-let keeper_visible_root_abs_of_meta ~(config : Workspace.config)
-    (meta : Keeper_meta_contract.keeper_meta) =
-  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
-  | Shared_mount -> container_root meta.name
-  (* The keeper-visible root is the host bookkeeping bundle; the remote lane
-     translates it to the endpoint's root on the way out. *)
-  | Endpoint_owned -> host_root_abs_of_meta ~config meta
-
 let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) : t =
   let backend = meta.sandbox_profile in
   { keeper_name = meta.name

@@ -167,13 +167,16 @@ let project_keeper_logical_path
       ~(meta : keeper_meta)
       (raw_path : string)
   =
+  let ( let* ) = Result.bind in
+  let* raw_path = Keeper_workspace_namespace.project_input ~config ~meta raw_path
+    |> Result.map_error Keeper_alerting_path.endpoint_unavailable in
   let raw_path =
     String.trim raw_path
     |> keeper_observation_host_path_of_visible_path ~config ~meta
   in
   if String.equal raw_path "" || not (Filename.is_relative raw_path)
-  then raw_path
-  else Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) raw_path
+  then Ok raw_path
+  else Ok (Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) raw_path)
 ;;
 
 let resolve_projected_keeper_read_path
@@ -182,6 +185,9 @@ let resolve_projected_keeper_read_path
       ~(raw_for_error : string)
       ~(projected_path : string)
   =
+  let ( let* ) = Result.bind in
+  let* projected_path = Keeper_workspace_namespace.project_input ~config ~meta projected_path
+    |> Result.map_error Keeper_alerting_path.endpoint_unavailable in
   (* Both path-carrying rejections format their payload straight into the
      message the keeper reads, and the resolver only ever sees the projected
      path. Restate them with [raw_for_error] so the diagnostic names the path
@@ -214,7 +220,8 @@ let resolve_keeper_confined_write_path
       ~(raw_path : string)
   =
   let sandbox_roots = keeper_sandbox_roots ~meta in
-  let projected_path = project_keeper_logical_path ~config ~meta raw_path in
+  let ( let* ) = Result.bind in
+  let* projected_path = project_keeper_logical_path ~config ~meta raw_path in
   match
     Keeper_alerting_path.resolve_keeper_confined_path
       ~config
@@ -233,7 +240,8 @@ let resolve_keeper_read_path
       ~(raw_path : string)
   =
   let sandbox_roots = keeper_sandbox_roots ~meta in
-  let projected_path = project_keeper_logical_path ~config ~meta raw_path in
+  let ( let* ) = Result.bind in
+  let* projected_path = project_keeper_logical_path ~config ~meta raw_path in
   match
     Keeper_alerting_path.resolve_keeper_read_path
       ~config
@@ -252,6 +260,9 @@ let resolve_keeper_read_cwd
       ~(meta : keeper_meta)
       ~(raw_path : string)
   =
+  let ( let* ) = Result.bind in
+  let* raw_path = Keeper_workspace_namespace.project_input ~config ~meta raw_path
+    |> Result.map_error Keeper_alerting_path.endpoint_unavailable in
   let sandbox_roots = keeper_sandbox_roots ~meta in
   match
     Keeper_alerting_path.resolve_keeper_read_path

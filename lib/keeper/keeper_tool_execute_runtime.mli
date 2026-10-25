@@ -115,6 +115,7 @@ module For_testing : sig
     ref
 
   val model_execute_location_fields :
+    remote_workspace_root:string option ->
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     args:Yojson.Safe.t ->

@@ -1164,7 +1164,7 @@ let format_active_goal_summaries = function
        ^ "\n" ^ format_goal_summaries summaries ^ "\n\n")
 ;;
 
-let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
+let build_system_prompt ~workspace_root ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ()
@@ -1186,7 +1186,7 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     Keeper_prompt.build_keeper_system_prompt
       ~instructions
       ~keeper_name:meta.name
-      ~workspace_root:(Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+      ~workspace_root
       ~constitution
       ()
   in

@@ -824,8 +824,8 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              Eio.Semaphore.release t.shared.semaphore);
            let path_stream emit =
              match t.transport with
-             | Docker_exec _ -> emit, (fun () -> ())
-             | Openssh _ | Container_exec _ ->
+             | Docker_exec _ | Openssh _ -> emit, (fun () -> ())
+             | Container_exec _ ->
                let stream = Keeper_remote_path.stream ~base_path:t.base_path
                  ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name
                  ~emit in
@@ -847,8 +847,8 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
            in
            let rewrite text =
              match t.transport with
-             | Docker_exec _ -> text
-             | Openssh _ | Container_exec _ ->
+             | Docker_exec _ | Openssh _ -> text
+             | Container_exec _ ->
                Keeper_remote_path.rewrite_output ~base_path:t.base_path
                  ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name text
            in

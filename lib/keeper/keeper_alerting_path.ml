@@ -86,6 +86,9 @@ let owned_read_target_refusal = function
     ; message = "cwd_not_directory: " ^ cwd
     }
 
+let endpoint_unavailable message =
+  { failure_class = Tool_result.Dependency_unavailable; message }
+
 let endpoint_unresolved ~tree_refusal ~endpoint_error =
   { failure_class = Tool_result.Runtime_failure
   ; message =

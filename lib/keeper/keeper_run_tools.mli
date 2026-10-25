@@ -95,6 +95,7 @@ val prepare_agent_setup
   -> ?observation_token:Keeper_turn_observation_token.t
   -> ?answer_source_ids:string list
   -> config:Workspace.config
+  -> workspace_root:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> publication_recovery:

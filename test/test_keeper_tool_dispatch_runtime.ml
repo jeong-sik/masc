@@ -2665,7 +2665,7 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
         json_string_field ~default:"" "output" execute_json |> String.trim
       in
       check string "Execute ran in requested cwd"
-        (Masc.Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+        (Masc.Keeper_sandbox.container_root meta.name)
         observed_cwd;
       let execute_at cwd =
         run "Execute"

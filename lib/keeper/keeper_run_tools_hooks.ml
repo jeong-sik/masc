@@ -73,7 +73,8 @@ type agent_setup =
   }
 
 type ctx =
-  { acc : hook_accumulator
+  { workspace_root : string
+  ; acc : hook_accumulator
   ; agent_cell : Agent_core.Agent.t option ref
   ; agent_name : string
   ; all_tool_names : string list
@@ -477,6 +478,7 @@ let assemble_hooks
   : (agent_setup, Agent_core.Error.t) result
   =
   let user_message = model_message.text in
+  let workspace_root = ctx.workspace_root in
   let gate_replay_evidence = model_message.replay_evidence in
   let acc = ctx.acc in
   let compute_tool_surface = ctx.compute_tool_surface in
@@ -1234,8 +1236,7 @@ let assemble_hooks
                     (Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id)
                   ~sandbox_profile:
                     (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile)
-                  ~sandbox_root:
-                    (Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+                  ~sandbox_root:workspace_root
                   ~sandbox_roots:(Keeper_alerting_path.sandbox_roots ~meta)
                   ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode)
                   ~runtime_profile:runtime_id_string

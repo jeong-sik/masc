@@ -124,6 +124,18 @@ let remote_to_logical ~remote_workspace_root path =
   else path
 ;;
 
+let endpoint_to_host ~base_path ~remote_workspace_root ~keeper path =
+  if Filename.is_relative path then None
+  else
+    let root = normalize_remote remote_workspace_root in
+    let path = normalize_remote path in
+    if at_or_below ~root path then
+      let suffix = suffix_below ~root path in
+      let host = host_root ~base_path ~keeper in
+      Some (if String.equal suffix "" then host else Filename.concat host suffix)
+    else None
+;;
+
 let path_component_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' -> true
   | _ -> false

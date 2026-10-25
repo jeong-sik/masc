@@ -142,7 +142,7 @@ let user_message observation =
 
 let system_prompt ?profile_defaults () =
   let config = Masc.Workspace.default_config "/tmp/unused" in
-  match Prompt.build_system_prompt ~meta ~config ?profile_defaults () with
+  match Prompt.build_system_prompt ~workspace_root:"/prompt-fixture" ~meta ~config ?profile_defaults () with
   | Ok system -> system
   | Error error -> fail (Masc.World_constitution_store.read_error_to_string error)
 
@@ -674,12 +674,16 @@ let sandbox_root_for profile =
   let meta = { meta with Masc.Keeper_meta_contract.sandbox_profile = profile } in
   let base_path = "/tmp/unused" in
   let config = Masc.Workspace.default_config base_path in
+  let visible_root = match profile with
+    | Masc.Keeper_types_profile.Docker -> Masc.Keeper_sandbox.container_root meta.name
+    | Remote_ssh -> "/srv/prompt-fixture/keeper"
+    | Micro_vm -> Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let system_prompt =
-    match Prompt.build_system_prompt ~meta ~config () with
+    match Prompt.build_system_prompt ~workspace_root:visible_root ~meta ~config () with
     | Ok system -> system
     | Error error -> fail (Masc.World_constitution_store.read_error_to_string error)
   in
-  (system_prompt, Masc.Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+  (system_prompt, visible_root)
 
 let test_docker_keeper_sees_its_container_root () =
   with_repo_prompt_config (fun () ->
@@ -689,12 +693,12 @@ let test_docker_keeper_sees_its_container_root () =
     check bool "container root is in the prompt" true
       (contains ~needle:visible_root rendered))
 
-let test_local_keeper_sees_its_host_root () =
+let test_remote_keeper_sees_its_endpoint_root () =
   with_repo_prompt_config (fun () ->
     let rendered, visible_root =
       sandbox_root_for Masc.Keeper_types_profile.Remote_ssh
     in
-    check bool "host root is in the prompt" true
+    check bool "endpoint root is in the prompt" true
       (contains ~needle:visible_root rendered))
 
 (* Execute dispatch can transparently run a Docker keeper's command on the
@@ -736,7 +740,7 @@ let () =
           test_case "docker keeper sees its container root" `Quick
             test_docker_keeper_sees_its_container_root;
           test_case "local keeper sees its host root" `Quick
-            test_local_keeper_sees_its_host_root;
+            test_remote_keeper_sees_its_endpoint_root;
           test_case "docker prompt does not carry the host root" `Quick
             test_docker_prompt_does_not_carry_the_host_root;
           test_case "local root carries no backend caveat" `Quick

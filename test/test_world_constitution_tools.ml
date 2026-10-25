@@ -116,7 +116,8 @@ let test_a_written_norm_reaches_the_turn_prompt () =
       let config = Masc.Workspace.default_config base_path in
       let meta = make_meta "prompt-reader" in
       let prompt () =
-        match Masc.Keeper_unified_prompt.build_system_prompt ~meta ~config () with
+        match Masc.Keeper_unified_prompt.build_system_prompt
+          ~workspace_root:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta) ~meta ~config () with
         | Ok prompt -> prompt
         | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
       in
@@ -380,7 +381,8 @@ let test_an_unreadable_ledger_is_not_rendered_as_no_articles () =
       let meta = make_meta "prompt-reader" in
       let config = Masc.Workspace.default_config base_path in
       let prompt () =
-        Masc.Keeper_unified_prompt.build_system_prompt ~meta ~config ()
+        Masc.Keeper_unified_prompt.build_system_prompt
+          ~workspace_root:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta) ~meta ~config ()
       in
       (match prompt () with
        | Ok _ -> ()

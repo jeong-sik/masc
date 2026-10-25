@@ -430,6 +430,82 @@ let test_requested_shape_advances_http_without_replacing_baseline () =
     check int "first candidate dispatched once" 1 (F.post_count wrong);
     check int "second candidate dispatched once" 1 (F.post_count right))
 
+(* Stagehand's act answer has an object-or-null child, rather than the scalar
+   nullable child covered by the quiz fixture above. Exercise the actual HTTP
+   walk, host proof codec and Browser model waiter together. *)
+type act_action = Object_action | Null_action
+
+let test_consumer_act_answer_survives_host_proof action_kind () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let baseline=`Assoc ["type",`String "object";
+      "properties",`Assoc ["twoStep",`Assoc ["type",`String "boolean";"enum",`List [`Bool false]]];
+      "required",`List [`String "twoStep"];"additionalProperties",`Bool true] in
+    let action_schema=`Assoc ["type",`String "object";
+      "properties",`Assoc ["elementId",`Assoc ["type",`String "string"];
+        "method",`Assoc ["type",`String "string"];
+        "arguments",`Assoc ["type",`String "array";"items",`Assoc ["type",`String "string"]]];
+      "required",`List [`String "elementId";`String "method";`String "arguments"];
+      "additionalProperties",`Bool false] in
+    let requested=`Assoc ["type",`String "object";
+      "properties",`Assoc ["action",`Assoc ["anyOf",`List [action_schema;`Assoc ["type",`String "null"]]];
+        "twoStep",`Assoc ["type",`String "boolean"]];
+      "required",`List [`String "action";`String "twoStep"];"additionalProperties",`Bool false] in
+    let action=match action_kind with
+      | Object_action -> `Assoc ["elementId",`String "0-320";"method",`String "click";"arguments",`List []]
+      | Null_action -> `Null in
+    let answer=`Assoc ["action",action;"twoStep",`Bool false] in
+    let output={Types.name="author";schema=baseline;request_schema=Types.Consumer_request_schema} in
+    let package={package with exact_outputs=[output]} in
+    let original=request ~schema:requested "stagehand-act" in
+    let models=Browser_addon_models.create ~incarnation:"0b000000-0000-4000-8000-000000000027"
+      ~configuration:{store_root=Filename.concat base_path "browser-receipts";outputs=[output]}
+      |> function Ok models -> models | Error detail -> fail detail in
+    let waiting=Eio.Fiber.fork_promise ~sw (fun () -> Browser_addon_models.request models original) in
+    ignore (Browser_addon_models.wait models ~after:(Some "0"));
+    let deliver wire=Browser_addon_models.deliver models
+      ~arguments:(Lane_addon_host_request.result_arguments ~request_id:original.request_id ~result:wire) in
+    List.iter (fun malformed ->
+      check bool "initial answer rejects nested shape and package baseline violations" true
+        (Result.is_error (Exact.validate_answer ~output original malformed));
+      let wire=`Assoc ["status",`String "answered";"slot",`String "fixture";"output",malformed] in
+      check bool "worker rejects the same invalid answer before consuming its waiter" true
+        (Result.is_error (deliver wire));
+      check bool "invalid delivery leaves the original waiter pending" false (Eio.Promise.is_resolved waiting))
+      [`Assoc ["action",`Assoc ["elementId",`String "0-320";"arguments",`List []];"twoStep",`Bool false];
+       `Assoc ["action",`Assoc ["elementId",`String "0-320";"method",`Int 7;"arguments",`List []];"twoStep",`Bool false];
+       `Assoc ["action",action;"twoStep",`Bool true]];
+    let server=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response answer)) in
+    publish ~base_path [{F.id="act";base_url=server.base_url}];
+    let run store=match Exact.run ~store ~declaration_id ~package
+      ~runner:(Server_lane_addon_exact.runner ~base_path)
+      ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path) original with
+      | Ok attempt -> attempt | Error detail -> fail detail in
+    let first=run store in
+    let final=match first with
+      | Exact.Final (Call_final (Answered {output;_}) as final) ->
+          check bool "HTTP answer survives original proof publication" true (Exact.checked_json output=answer); final
+      | Exact.Final _ | Exact.Not_final _ -> fail "the valid act response must answer" in
+    let reopened=Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+    let read f=match Eio_unix.run_in_systhread f with Ok value -> value | Error detail -> fail detail in
+    (match read (fun () -> Exact.read_original_execution ~store:reopened ~declaration_id
+        ~schema:requested ~attempt_ordinal:1 original) with
+     | Exact.Completed_original {outcome=Call_ended (Answered {output;_});_} ->
+         check bool "reopened execution proof preserves the act answer" true (Exact.checked_json output=answer)
+     | Exact.Completed_original _ | Exact.No_completed_original -> fail "completed original proof missing");
+    check bool "retained observation uses the original consumer shape" true
+      (read (fun () -> Exact.observe_retained ~store:reopened ~declaration_id ~schema:requested original)
+        =Exact.Retained_terminal (Retained_call (match final with Call_final value -> value
+          | Outcome_unknown | Not_allowed _ | Request_id_reused -> fail "answered final expected")));
+    check bool "reopened host replay returns the original result" true (run reopened=first);
+    let wire=Exact.final_to_json final in
+    check bool "worker retains and delivers the checked original result" true (deliver wire=Ok true);
+    (match Eio.Promise.await_exn waiting with
+     | Ok (Browser_addon_models.Final received) -> check bool "original waiter received its answer" true (received=final)
+     | Ok (Exceeds_frame _) | Error _ -> fail "worker did not receive its original act answer");
+    check bool "duplicate worker delivery is idempotent" true (deliver wire=Ok true);
+    check int "proof reads, replay and duplicate delivery never resend" 1 (F.post_count server);
+    Browser_addon_models.retire models)
+
 module Capture = Workspace_memory_execution_capture
 module Revision = Workspace_memory_revision
 module Curator = Server_workspace_memory_addon_validation
@@ -891,6 +967,10 @@ let () =
         ; test_case "HTTP preserves conversation roles" `Quick test_http_preserves_conversation_roles
         ; test_case "CLI refuses assistant history before dispatch" `Quick test_cli_refuses_assistant_without_dispatch
         ; test_case "request shape advances HTTP without replacing baseline" `Quick test_requested_shape_advances_http_without_replacing_baseline
+        ; test_case "act object survives HTTP proof reopen and Browser delivery" `Quick
+            (test_consumer_act_answer_survives_host_proof Object_action)
+        ; test_case "act null survives HTTP proof reopen and Browser delivery" `Quick
+            (test_consumer_act_answer_survives_host_proof Null_action)
         ; test_case "original Curator facts advance HTTP and survive reopen" `Quick test_original_curator_semantics_advance_http_and_survive_reopen
         ; test_case "original Curator semantics advance CLI tail" `Quick test_original_curator_semantics_advance_the_cli_tail
         ; test_case "Curator authority precedes dispatch and replay" `Quick test_curator_authority_is_required_before_dispatch_and_replay

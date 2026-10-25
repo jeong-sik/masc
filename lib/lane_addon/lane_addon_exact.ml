@@ -102,15 +102,17 @@ let schema_for_request ~(output:Lane_addon_types.exact_output) request =
     | Some _,Package_schema_only -> Error "the package output does not permit a consumer request schema"
     | Some schema,Consumer_request_schema -> Ok schema
 
+let validate_consumer_shape ~schema answer =
+  match Lane_addon_exact_shape.issue ~at:"$" schema answer with
+  | None -> Ok answer
+  | Some issue -> Error (Lane_addon_exact_shape.to_string issue)
+
 let validate_answer ~output request answer =
   let* _ = schema_for_request ~output request in
   let* answer = Lane_addon_action.validate_input ~schema:output.Lane_addon_types.schema ~name:request.output answer in
   match request.schema with
   | None -> Ok answer
-  | Some schema ->
-      match Lane_addon_exact_shape.issue ~at:"$" schema answer with
-      | None -> Ok answer
-      | Some issue -> Error (Lane_addon_exact_shape.to_string issue)
+  | Some schema -> validate_consumer_shape ~schema answer
 
 type input_refusal =
   | Input_capacity
@@ -249,6 +251,22 @@ let final_of_json ~schema json =
       let* output = Lane_addon_action.validate_input ~schema ~name:"model result" output in
       Ok (Call_final (Answered {output;slot;usage}))
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok final
+
+(* A granted consumer schema is a provider requirement with a partial shape
+   guard, not a Host_tool input contract. Original proofs and observations use
+   the same meaning as initial validation. Delivery independently rechecks the
+   current package baseline and original consumer authority. *)
+let original_final_of_json ~schema request json =
+  match request.schema with
+  | None -> final_of_json ~schema json
+  | Some _ ->
+      let* final = final_shape_of_json json in
+      match final with
+      | Call_final (Answered {output;slot;usage}) ->
+          let* output = validate_consumer_shape ~schema output in
+          Ok (Call_final (Answered {output;slot;usage}))
+      | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+      | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok final
 
 let retained_final_to_json = function
   | Retained_unknown cause ->
@@ -449,10 +467,10 @@ let original_schema ~declaration_id ~schema request =
     | Some _ | None -> Ok () in
   Ok schema
 
-let validate_record ~schema record =
+let validate_record ~request ~schema record =
   let decode_final = match schema with
     | None -> final_shape_of_json
-    | Some schema -> final_of_json ~schema in
+    | Some schema -> original_final_of_json ~schema request in
   let rec deferred_only = function
     | [] -> Ok ()
     | Deferred _ :: rest -> deferred_only rest
@@ -508,7 +526,7 @@ let check_retained_record wire =
   let* stored = record_of_json wire in
   let* original = request_of_json stored.request in
   let* stored = bound_record ~declaration_id original wire in
-  let* _ = validate_record ~schema:None stored in
+  let* _ = validate_record ~request:original ~schema:None stored in
   Ok ()
 
 let observe_retained ~store ~declaration_id ~schema request =
@@ -518,7 +536,7 @@ let observe_retained ~store ~declaration_id ~schema request =
   | None -> Ok Retained_absent
   | Some wire ->
     let* record = bound_record ~declaration_id request wire in
-    validate_record ~schema:(Some schema) record
+    validate_record ~request ~schema:(Some schema) record
 
 (* The host link belongs to the original request owner, not to a worker
    evidence address. Canonical tagged tuples keep both ID spaces unambiguous. *)
@@ -535,10 +553,10 @@ let attempt_of_outcome = function
   | Call_ended final -> Final (Call_final final)
   | Call_refused refusal -> Not_final (Provider_refused refusal)
 
-let outcome_of_json ~schema json =
+let outcome_of_json ~schema request json =
   match json with
   | `Assoc fields when List.mem_assoc "status" fields ->
-      let* final = final_of_json ~schema json in
+      let* final = original_final_of_json ~schema request json in
       (match final with
        | Call_final final -> Ok (Call_ended final)
        | Outcome_unknown | Not_allowed _ | Request_id_reused ->
@@ -579,7 +597,7 @@ let decode_proof ~store ~declaration_id request ~attempt_ordinal json =
         if Yojson.Safe.equal schema granted then Ok () else Error "original execution differs from its request schema"
     | None -> Ok () in
   let* outcome = field "outcome" in
-  let* outcome = outcome_of_json ~schema outcome in
+  let* outcome = outcome_of_json ~schema request outcome in
   let* receipt = field "receipt" in
   let* receipt = Keeper_exact_walk_receipt.of_json receipt in
   let execution = {outcome; receipt} in
@@ -688,7 +706,7 @@ let read_original_execution ~store ~declaration_id ~schema ~attempt_ordinal requ
       else Error "original execution proof has no original Exact request"
     | Some wire ->
       let* record=bound_record ~declaration_id request wire in
-      let* _=validate_record ~schema:None record in
+      let* _=validate_record ~request ~schema:None record in
       let* proofs=bound_proofs ~store ~declaration_id request record in
       (match selected_proof ~attempt_ordinal proofs with
        | None -> Ok No_completed_original
@@ -710,7 +728,7 @@ let read_latest_original_execution ~store ~declaration_id ~schema request =
     else Error "original execution proof has no original Exact request"
   | Some wire ->
     let* record=bound_record ~declaration_id request wire in
-    let* _=validate_record ~schema:None record in
+    let* _=validate_record ~request ~schema:None record in
     let* proofs=bound_proofs ~store ~declaration_id request record in
     let attempt_ordinal=List.length record.attempts in
     match selected_proof ~attempt_ordinal proofs with
@@ -780,7 +798,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
         let* () = if String.equal original.request_id request_id then Ok ()
           else Error "retained Exact record has a different original request ID" in
         let* stored = bound_record ~declaration_id original json in
-        let* _ = validate_record ~schema:None stored in
+        let* _ = validate_record ~request:original ~schema:None stored in
         Ok (Some stored) in
     match retained with
     | Some record when not (String.equal record.digest digest) -> Ok (Final Request_id_reused)

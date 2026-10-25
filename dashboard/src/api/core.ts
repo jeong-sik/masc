@@ -836,13 +836,14 @@ export type AbortableRequestOptions = {
 export type GetOptions = AbortableRequestOptions & {
   timeoutMs?: number
   includeActorHeader?: boolean
+  extraHeaders?: Record<string, string>
 }
 
 export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
   const res = await fetchWithTimeout(
     path,
     {
-      headers: authHeaders({ includeActor: opts.includeActorHeader }),
+      headers: { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders },
       cache: readCacheMode(path),
       signal: opts.signal,
     },
@@ -878,7 +879,7 @@ export async function getWithResponse<T>(
   const res = await fetchWithTimeout(
     path,
     {
-      headers: authHeaders({ includeActor: opts.includeActorHeader }),
+      headers: { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders },
       cache: readCacheMode(path),
       signal: opts.signal,
     },

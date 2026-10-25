@@ -475,6 +475,21 @@ describe('typed API errors', () => {
 })
 
 describe('get bootstrap warm-up mapping', () => {
+  it('forwards captured workspace preconditions without dropping current authentication', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    setStoredToken('workspace-read-token')
+    await get('/api/v1/published-artifacts/example?revision=3', { extraHeaders: {
+      'x-masc-expected-base-path': '/workspace-a',
+      'x-masc-expected-masc-root': '/runtime-a',
+    } })
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: 'Bearer workspace-read-token',
+      'x-masc-expected-base-path': '/workspace-a',
+      'x-masc-expected-masc-root': '/runtime-a',
+    })
+  })
+
   it('preserves upstream abort signals instead of reporting them as timeouts', async () => {
     const fetchMock = vi.fn().mockImplementation((_path: string, init?: RequestInit) => (
       new Promise((_resolve, reject) => {

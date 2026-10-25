@@ -38,12 +38,29 @@ export type ArtifactDraft = {
 export type ArtifactPublicationRequest = ArtifactDraft & (
   { id?: never; expected_revision?: never } | { id: string; expected_revision: number }
 )
+const ArtifactWorkspaceSchema = Schema.Struct({ paths: Schema.Struct({
+  effective_base_path: Schema.String.pipe(Schema.nonEmptyString()),
+  effective_masc_root: Schema.String.pipe(Schema.nonEmptyString()),
+}) })
+export type ArtifactWorkspace = { readonly basePath: string; readonly mascRoot: string }
+
+export async function captureArtifactWorkspace(expectedBasePath: string): Promise<ArtifactWorkspace> {
+  const { paths } = Schema.decodeUnknownSync(ArtifactWorkspaceSchema)(await get<unknown>('/health?full=1'))
+  if (paths.effective_base_path !== expectedBasePath) {
+    throw new Error('서버의 작업 공간이 원고를 작성한 작업 공간과 다릅니다. 원고를 보관하고 연결을 확인해 주세요.')
+  }
+  return { basePath: paths.effective_base_path, mascRoot: paths.effective_masc_root }
+}
+
+export function artifactWorkspaceHeaders(workspace: ArtifactWorkspace): Record<string, string> {
+  return { 'x-masc-expected-base-path': workspace.basePath, 'x-masc-expected-masc-root': workspace.mascRoot }
+}
 
 // A publication is sent once. Callers retain the returned identity before
 // readback; a failed response/readback must never trigger an automatic retry.
-export async function publishArtifact(request: ArtifactPublicationRequest): Promise<ArtifactPublication> {
+export async function publishArtifact(request: ArtifactPublicationRequest, workspace: ArtifactWorkspace): Promise<ArtifactPublication> {
   const result = Schema.decodeUnknownSync(ArtifactPublicationSchema)(
-    await post<unknown>('/api/v1/published-artifacts', request),
+    await post<unknown>('/api/v1/published-artifacts', request, artifactWorkspaceHeaders(workspace)),
   )
   if (request.id !== undefined && (result.artifact.id !== request.id
     || result.artifact.revision !== request.expected_revision + 1)) {
@@ -52,8 +69,8 @@ export async function publishArtifact(request: ArtifactPublicationRequest): Prom
   return result
 }
 
-export async function readPublishedDraft(publication: ArtifactPublication, sent: ArtifactDraft): Promise<ArtifactDocument> {
-  const doc = await fetchPublishedArtifact(publication.artifact.id, String(publication.artifact.revision))
+export async function readPublishedDraft(publication: ArtifactPublication, sent: ArtifactDraft, workspace: ArtifactWorkspace): Promise<ArtifactDocument> {
+  const doc = await fetchPublishedArtifact(publication.artifact.id, String(publication.artifact.revision), undefined, workspace)
   if (doc.content !== sent.content || doc.artifact.title !== sent.title
     || doc.artifact.summary !== sent.summary || doc.artifact.format !== sent.format
     || doc.artifact.body._blob.sha256 !== publication.artifact.body._blob.sha256) {
@@ -72,9 +89,11 @@ export async function fetchPublishedArtifacts(signal?: AbortSignal): Promise<Art
   return Schema.decodeUnknownSync(ListSchema)(await get<unknown>('/api/v1/published-artifacts', { signal }))
 }
 
-export async function fetchPublishedArtifact(id: string, revision: string | undefined, signal?: AbortSignal): Promise<ArtifactDocument> {
+export async function fetchPublishedArtifact(id: string, revision: string | undefined, signal?: AbortSignal, workspace?: ArtifactWorkspace): Promise<ArtifactDocument> {
   const query = revision === undefined ? '' : `?revision=${encodeURIComponent(revision)}`
-  const doc = Schema.decodeUnknownSync(DocumentSchema)(await get<unknown>(`/api/v1/published-artifacts/${encodeURIComponent(id)}${query}`, { signal }))
+  const doc = Schema.decodeUnknownSync(DocumentSchema)(await get<unknown>(`/api/v1/published-artifacts/${encodeURIComponent(id)}${query}`, {
+    signal, ...(workspace ? { extraHeaders: artifactWorkspaceHeaders(workspace) } : {}),
+  }))
   if (doc.artifact.id !== id || (revision !== undefined && String(doc.artifact.revision) !== revision)) {
     throw new Error('요청한 문서와 저장된 문서의 식별자가 다릅니다.')
   }

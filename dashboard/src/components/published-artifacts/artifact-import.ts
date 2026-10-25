@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import type { ArtifactDraft, ArtifactPublication } from '../../api/published-artifacts'
 import { ArtifactComposer, type ArtifactPublicationOutcome } from './artifact-composer'
 
-export function ArtifactImport({ isCurrent, onMutation, onSaved, onCancel }: {
+export function ArtifactImport({ workspaceRoot, isCurrent, onMutation, onSaved, onCancel }: {
+  workspaceRoot: string;
   isCurrent: () => boolean; onMutation: (outcome: ArtifactPublicationOutcome) => void;
   onSaved: (publication: ArtifactPublication) => void; onCancel: () => void;
 }) {
@@ -46,7 +47,8 @@ export function ArtifactImport({ isCurrent, onMutation, onSaved, onCancel }: {
       <button type="button" onClick=${onCancel}>닫기</button>
     </div>`}
     ${message ? html`<p role="status" class="px-6">${message}</p>` : null}
-    ${draft ? html`<${ArtifactComposer} key=${draft.key} initial=${draft.value} isCurrent=${isCurrent}
-      onMutation=${onMutation} onSaved=${onSaved} onCancel=${onCancel} />` : null}
+    ${draft ? html`<${ArtifactComposer} key=${draft.key} initial=${draft.value} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent}
+      onMutation=${onMutation} onSaved=${onSaved}
+      onCancel=${() => { if (window.confirm('작성 중인 원고를 닫을까요? 저장하지 않은 내용은 사라집니다.')) onCancel() }} />` : null}
   </section>`
 }

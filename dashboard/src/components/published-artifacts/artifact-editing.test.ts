@@ -26,6 +26,8 @@ const artifact = { id, revision: 2, title: '원래 제목', summary: '원래 요
   created_at: '2026-10-25T00:00:00Z', task_id: 'task-1', goal_id: null, url: '/dashboard', body: { _blob: { sha256: 'a'.repeat(64) } } }
 const original = { artifact, content: '# 원고\r\n한글 😀', revisions: [artifact] }
 const list = '/api/v1/published-artifacts'
+const health = { paths: { effective_base_path: '/workspace-a', effective_masc_root: '/runtime-a' } }
+const workspaceHeaders = { 'x-masc-expected-base-path': '/workspace-a', 'x-masc-expected-masc-root': '/runtime-a' }
 function deferred<T = unknown>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(ok => { resolve = ok })
@@ -34,11 +36,12 @@ function deferred<T = unknown>() {
 function publication(title: string, revision = 3) {
   return { schema: 'masc.published_artifact.v1', artifact: { ...artifact, title, revision }, revision_url: '/dashboard' }
 }
-async function edit() {
+async function edit(waitForWorkspace = true) {
   route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: id }, postId: null }
   render(html`<${ArtifactsSurface} />`)
   const reader = within(await screen.findByRole('dialog'))
   fireEvent.click(reader.getByRole('button', { name: '문서 편집' }))
+  if (waitForWorkspace) await waitFor(() => expect((reader.getByRole('button', { name: '새 버전 저장' }) as HTMLButtonElement).disabled).toBe(false))
   return reader
 }
 
@@ -47,7 +50,7 @@ beforeEach(() => {
   setStoredToken('credential-a')
   workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-a', connectionGeneration: 1 }
   route.value = { tab: 'workspace', params: { section: 'artifacts' }, postId: null }
-  vi.mocked(get).mockImplementation(async path => path === list ? { artifacts: [artifact], diagnostics: [] }
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1' ? health : path === list ? { artifacts: [artifact], diagnostics: [] }
     : path === '/api/v1/published-artifact-checks' ? { checks: [], diagnostics: [] } : original)
 })
 afterEach(() => { cleanup(); clearStoredToken(); vi.restoreAllMocks() })
@@ -69,7 +72,10 @@ it('saves the exact edited source against its captured revision, preserving task
   expect(sent).toEqual({ id, expected_revision: 2, title: '수정 제목', summary: artifact.summary,
     format: 'markdown', content, task_id: 'task-1', goal_id: null })
   await screen.findByText('저장 내용 확인됨', { exact: false })
-  expect(get).toHaveBeenCalledWith(`${list}/${id}?revision=3`, { signal: undefined })
+  expect(screen.getByRole('region', { name: '문서 저장 요청 결과' }).querySelectorAll('p')).toHaveLength(1)
+  expect(screen.queryByText('저장 응답 받음 · 내용 확인 필요', { exact: false })).toBeNull()
+  expect(post).toHaveBeenCalledWith(list, sent, workspaceHeaders)
+  expect(get).toHaveBeenCalledWith(`${list}/${id}?revision=3`, { signal: undefined, extraHeaders: workspaceHeaders })
 })
 
 it('retains a conflicting draft and compares the newest server version without automatically replacing or resending it', async () => {
@@ -84,6 +90,7 @@ it('retains a conflicting draft and compares the newest server version without a
     : fallback(path, options))
   fireEvent.click(reader.getByRole('button', { name: '최신 버전과 비교' }))
   await reader.findByText('다른 사람이 작성한 원고')
+  expect(get).toHaveBeenCalledWith(`${list}/${id}`, { signal: undefined, extraHeaders: workspaceHeaders })
   expect((reader.getByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe('내가 작성한 원고')
   expect(post).toHaveBeenCalledTimes(1)
 })
@@ -113,7 +120,7 @@ it('retains the committed identity when readback fails, without claiming the dra
 it('does not rebase an open draft when automatic document refresh observes a newer revision', async () => {
   const reader = await edit()
   fireEvent.input(reader.getByLabelText('문서 본문'), { target: { value: 'old-base draft' } })
-  vi.mocked(get).mockImplementation(async path => path === list ? { artifacts: [{ ...artifact, revision: 9 }], diagnostics: [] }
+  vi.mocked(get).mockImplementation(async path => path === '/health?full=1' ? health : path === list ? { artifacts: [{ ...artifact, revision: 9 }], diagnostics: [] }
     : path === '/api/v1/published-artifact-checks' ? { checks: [], diagnostics: [] }
       : { ...original, artifact: { ...artifact, revision: 9 }, content: 'new server content' })
   fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
@@ -123,6 +130,67 @@ it('does not rebase an open draft when automatic document refresh observes a new
   fireEvent.click(reader.getByRole('button', { name: '새 버전 저장' }))
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
   expect(vi.mocked(post).mock.calls[0]![1]).toMatchObject({ expected_revision: 2 })
+})
+
+it('refuses a replacement server workspace before sending and preserves the draft without retrying', async () => {
+  const fallback = vi.mocked(get).getMockImplementation()!
+  vi.mocked(get).mockImplementation((path, options) => path === '/health?full=1'
+    ? Promise.resolve({ paths: { effective_base_path: '/workspace-b', effective_masc_root: '/runtime-b' } })
+    : fallback(path, options))
+  const reader = await edit(false)
+  fireEvent.input(reader.getByLabelText('문서 본문'), { target: { value: 'workspace-a draft' } })
+  fireEvent.click(reader.getByRole('button', { name: '새 버전 저장' }))
+  await reader.findByText(/서버의 작업 공간이 원고를 작성한 작업 공간과 다릅니다/)
+  expect((reader.getByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe('workspace-a draft')
+  expect(post).not.toHaveBeenCalled()
+  expect(vi.mocked(get).mock.calls.filter(([path]) => path === '/health?full=1')).toHaveLength(1)
+})
+
+it.each(['credential', 'workspace'] as const)('does not send when %s authority changes during the initial workspace capture', async changed => {
+  const pending = deferred()
+  const fallback = vi.mocked(get).getMockImplementation()!
+  vi.mocked(get).mockImplementation((path, options) => path === '/health?full=1' ? pending.promise : fallback(path, options))
+  const reader = await edit(false)
+  expect((reader.getByRole('button', { name: '새 버전 저장' }) as HTMLButtonElement).disabled).toBe(true)
+  fireEvent.click(reader.getByRole('button', { name: '새 버전 저장' }))
+  await waitFor(() => expect(get).toHaveBeenCalledWith('/health?full=1'))
+  await act(async () => {
+    if (changed === 'workspace') workspace.current.value = null
+    else setStoredToken('credential-b')
+  })
+  await act(async () => pending.resolve(health))
+  expect(post).not.toHaveBeenCalled()
+  expect(screen.queryByRole('region', { name: '문서 저장 요청 결과' })).toBeNull()
+})
+
+it('preserves a draft but blocks saving after failed initial capture without recapturing its origin', async () => {
+  const fallback = vi.mocked(get).getMockImplementation()!
+  vi.mocked(get).mockImplementation((path, options) => path === '/health?full=1'
+    ? Promise.reject(new Error('workspace identity unavailable')) : fallback(path, options))
+  const reader = await edit(false)
+  fireEvent.click(reader.getByRole('button', { name: '새 버전 저장' }))
+  await reader.findByText('workspace identity unavailable')
+  expect((reader.getByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe(original.content)
+  expect((reader.getByRole('button', { name: '새 버전 저장' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(post).not.toHaveBeenCalled()
+  expect(vi.mocked(get).mock.calls.filter(([path]) => path === '/health?full=1')).toHaveLength(1)
+})
+
+it('retains the draft origin if the server switches MASC roots under the same base before save', async () => {
+  const reader = await edit()
+  const fallback = vi.mocked(get).getMockImplementation()!
+  vi.mocked(get).mockImplementation((path, options) => path === '/health?full=1'
+    ? Promise.resolve({ paths: { effective_base_path: '/workspace-a', effective_masc_root: '/runtime-b' } }) : fallback(path, options))
+  vi.mocked(post).mockRejectedValue(new ApiRequestError({
+    method: 'POST', path: list, status: 409, errorCode: 'workspace_precondition_failed',
+  }))
+  fireEvent.click(reader.getByRole('button', { name: '새 버전 저장' }))
+  await reader.findByText(/서버의 작업 공간이 바뀌어 저장 요청이 거절되었습니다/)
+  expect(post).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(post).mock.calls[0]![2]).toEqual(workspaceHeaders)
+  expect(vi.mocked(get).mock.calls.filter(([path]) => path === '/health?full=1')).toHaveLength(1)
+  expect(screen.queryByText(/다른 사용자가 먼저 저장했습니다/)).toBeNull()
+  expect(screen.queryByRole('region', { name: '문서 저장 요청 결과' })).toBeNull()
 })
 
 it('retains a late committed response under the original workspace without reading with a replacement credential', async () => {
@@ -140,6 +208,18 @@ it('retains a late committed response under the original workspace without readi
   expect(result.textContent).toContain('이전 접근 상태의 요청 결과')
   expect(get).toHaveBeenCalledTimes(reads)
   expect(post).toHaveBeenCalledTimes(1)
+})
+
+it('preserves the open draft through a failed document refresh without presenting the retained document as fresh', async () => {
+  const reader = await edit()
+  fireEvent.input(reader.getByLabelText('문서 본문'), { target: { value: 'must survive refresh failure' } })
+  const fallback = vi.mocked(get).getMockImplementation()!
+  vi.mocked(get).mockImplementation((path, options) => path === `${list}/${id}`
+    ? Promise.reject(new Error('refresh unavailable')) : fallback(path, options))
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+  await reader.findByText(/문서 재조회 실패: refresh unavailable/)
+  expect((reader.getByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe('must survive refresh failure')
+  expect(post).not.toHaveBeenCalled()
 })
 
 it('reads an explicitly selected UTF-8 HTML file without running it or publishing before confirmation', async () => {

@@ -30,8 +30,10 @@ function downloadSource(doc: ArtifactDocument): void {
   URL.revokeObjectURL(url)
 }
 
-export function ArtifactReader({ doc, fixedRevision, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, onClose }: {
+export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, checkState, authRevision, isCurrent, onMutation, onPublication, onPublished, onCheckChanged, onClose }: {
   doc: ArtifactDocument; fixedRevision: boolean; checkState: ArtifactCheckState;
+  readError?: string;
+  workspaceRoot: string;
   authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void;
   onPublication: (outcome: ArtifactPublicationOutcome) => void; onPublished: (publication: ArtifactPublication) => void;
   onCheckChanged: () => void; onClose: () => void
@@ -71,6 +73,7 @@ export function ArtifactReader({ doc, fixedRevision, checkState, authRevision, i
       onCancel=${(event: Event) => { event.preventDefault(); close() }}>
     <article class="flex h-full min-w-0 flex-col" aria-label="아티팩트 본문">
       <header class="shrink-0 border-b border-[var(--color-border-default)] px-4 py-3 space-y-2">
+        ${readError ? html`<p role="alert">문서 재조회 실패: ${readError} 이전에 읽은 문서와 작성 중인 원고를 유지합니다.</p>` : null}
         <div class="flex flex-wrap items-center justify-between gap-2">
           <button type="button" aria-label="목록으로" onClick=${close}>← <span class="hidden sm:inline">목록으로</span></button>
           <h2 id="artifact-reader-title" class="m-0 min-w-0 flex-1 truncate text-base font-semibold">${artifact.title}</h2>
@@ -83,8 +86,8 @@ export function ArtifactReader({ doc, fixedRevision, checkState, authRevision, i
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="flex items-center gap-3" aria-label="본문 표시 방식">
             <span class="text-xs uppercase text-[var(--color-fg-muted)]">${artifact.format} · v${artifact.revision}</span>
-            <button type="button" aria-pressed=${view === 'rendered'} onClick=${() => setView('rendered')}>미리보기</button>
-            <button type="button" aria-pressed=${view === 'source'} onClick=${() => setView('source')}>원본</button>
+            <button type="button" disabled=${editing !== null} aria-pressed=${view === 'rendered'} onClick=${() => setView('rendered')}>미리보기</button>
+            <button type="button" disabled=${editing !== null} aria-pressed=${view === 'source'} onClick=${() => setView('source')}>원본</button>
             ${artifact.format === 'markdown' && view === 'rendered' ? html`
               <button type="button" aria-pressed=${width === 'wide'}
                 onClick=${() => setWidth(value => value === 'wide' ? 'reading' : 'wide')}>
@@ -117,7 +120,7 @@ export function ArtifactReader({ doc, fixedRevision, checkState, authRevision, i
         ${editing ? html`<${ArtifactComposer} initial=${{
           title: editing.artifact.title, summary: editing.artifact.summary, format: editing.artifact.format,
           content: editing.content, task_id: editing.artifact.task_id, goal_id: editing.artifact.goal_id,
-        }} base=${editing} isCurrent=${isCurrent} onMutation=${onPublication}
+        }} base=${editing} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent} onMutation=${onPublication}
           onSaved=${(publication: ArtifactPublication) => { setEditing(null); onPublished(publication) }}
           onCancel=${() => { if (discardDraft()) setEditing(null) }} />`
           : view === 'source'

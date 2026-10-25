@@ -52,6 +52,15 @@ reading a file does not execute or publish it. The reader's **편집** action op
 a source editor. It captures the selected revision and Task/Goal links when
 editing starts; a catalog refresh cannot silently rebase that draft.
 
+When an editable draft opens, the editor captures canonical base and MASC roots
+from health and requires the base to match its workspace authority. It checks
+that the workspace and credentials still own the draft after this read, then
+freezes the pair for publication, fixed-revision readback, and latest-version
+comparison using the existing workspace precondition headers. The server rejects
+a different pair before route dispatch, including a changed MASC root under the
+same base. A failed identity read preserves the draft but blocks saving until the
+editor is reopened; it never automatically recaptures or publishes the draft.
+
 Saving uses the existing publication API once and then reads the returned fixed
 revision to compare its body and metadata with the submitted draft. The response
 identity is retained separately from successful readback. Conflicts retain the

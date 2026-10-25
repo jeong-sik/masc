@@ -14,7 +14,7 @@ import { ArtifactImport } from './artifact-import'
 import type { ArtifactPublicationOutcome } from './artifact-composer'
 
 type Remote<T> = { key: object; kind: 'loaded'; data: T; receivedAt: number }
-  | { key: object; kind: 'error'; message: string }
+  | { key: object; kind: 'error'; message: string; data?: T }
 const errorMessage = (error: unknown) => error instanceof ApiRequestError && error.status === 404
   ? '문서 또는 선택한 버전을 찾지 못했습니다.'
   : error instanceof Error ? error.message : '문서를 불러오지 못했습니다.'
@@ -61,14 +61,23 @@ export function ArtifactsSurface() {
     </section>` : null}
     ${authority === null ? html`<p role="status">현재 작업 공간을 확인한 뒤 아티팩트를 읽습니다.</p>`
       : html`<${ArtifactsObservation} key=${owner.mount} authRevision=${authRevision} isCurrent=${current}
-          onPublication=${(outcome: ArtifactPublicationOutcome) => setPublications(previous => [...previous, { owner, outcome }])}
+          workspaceRoot=${authority.workspaceRoot}
+          onPublication=${(outcome: ArtifactPublicationOutcome) => setPublications(previous => {
+            const index = outcome.kind === 'published' ? previous.findIndex(entry => entry.owner === owner
+              && entry.outcome.kind === 'published'
+              && entry.outcome.publication.artifact.id === outcome.publication.artifact.id
+              && entry.outcome.publication.artifact.revision === outcome.publication.artifact.revision) : -1
+            return index < 0 ? [...previous, { owner, outcome }]
+              : previous.map((entry, position) => position === index ? { owner, outcome } : entry)
+          })}
           onMutation=${(outcome: ArtifactCheckOutcome) => setReceipts(previous => [...previous, { owner, outcome }])} />`}
   </div>`
 }
 
-function ArtifactsObservation({ authRevision, isCurrent, onMutation, onPublication }: {
+function ArtifactsObservation({ authRevision, workspaceRoot, isCurrent, onMutation, onPublication }: {
   authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void
   onPublication: (outcome: ArtifactPublicationOutcome) => void
+  workspaceRoot: string
 }) {
   const { artifact: selectedId, revision } = route.value.params
   const [refresh, setRefresh] = useState(0)
@@ -114,7 +123,13 @@ function ArtifactsObservation({ authRevision, isCurrent, onMutation, onPublicati
     void fetchPublishedArtifact(selectedId, revision, controller.signal).then(data => {
       if (!controller.signal.aborted && current()) setDocument({ key: documentKey, kind: 'loaded', data, receivedAt: Date.now() })
     }, error => {
-      if (!controller.signal.aborted && current()) setDocument({ key: documentKey, kind: 'error', message: errorMessage(error) })
+      if (!controller.signal.aborted && current()) setDocument(previous => ({
+        key: documentKey, kind: 'error', message: errorMessage(error),
+        // A failed refresh must not unmount an editor and lose its unsaved draft.
+        // This is only the same selection owner's already-observed document;
+        // the reader exposes the refresh failure instead of claiming freshness.
+        data: previous?.key === documentKey ? previous.data : undefined,
+      }))
     })
     return () => controller.abort()
   }, [authRevision, selectedId, revision, documentKey, refresh])
@@ -161,7 +176,7 @@ function ArtifactsObservation({ authRevision, isCurrent, onMutation, onPublicati
         <div class="flex gap-4"><button type="button" onClick=${() => setImporting(true)}>파일 가져오기</button>
           <button type="button" onClick=${() => setRefresh(n => n + 1)}>새로고침</button></div>
       </header>
-      ${importing ? html`<${ArtifactImport} isCurrent=${current} onMutation=${onPublication} onSaved=${published}
+      ${importing ? html`<${ArtifactImport} workspaceRoot=${workspaceRoot} isCurrent=${current} onMutation=${onPublication} onSaved=${published}
         onCancel=${() => setImporting(false)} />` : null}
       <div class="min-w-0 space-y-4">
         <aside class="min-w-0 space-y-3" aria-label="아티팩트 목록">
@@ -224,8 +239,10 @@ function ArtifactsObservation({ authRevision, isCurrent, onMutation, onPublicati
         </aside>
         ${!selectedId ? html`<div class="rounded-lg border border-dashed border-[var(--color-border-default)] p-8 text-sm text-[var(--color-fg-secondary)]">목록에서 문서를 선택하면 본문이 열립니다.</div>`
           : doc === null ? html`<p role="status">문서를 불러오고 있습니다.</p>`
-          : doc.kind === 'error' ? html`<p role="alert">${doc.message}</p>`
+          : !doc.data ? html`<p role="alert">${doc.kind === 'error' ? doc.message : '문서를 읽지 못했습니다.'}</p>`
           : html`<${ArtifactReader} key=${documentKey.visit} doc=${doc.data} fixedRevision=${revision !== undefined}
+              workspaceRoot=${workspaceRoot}
+              readError=${doc.kind === 'error' ? doc.message : undefined}
               checkState=${checkState(doc.data.artifact)} authRevision=${authRevision} isCurrent=${current} onMutation=${onMutation} onCheckChanged=${checkChanged}
               onPublication=${onPublication} onPublished=${published}
               onClose=${() => navigate('workspace', { section: 'artifacts' })} />`}

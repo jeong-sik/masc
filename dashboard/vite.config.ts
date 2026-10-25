@@ -220,6 +220,7 @@ export default defineConfig(({ command }) => {
     server: proxyTarget
       ? {
           proxy: {
+            '/health': proxyTarget,
             '/api': proxyTarget,
             '/mcp': { target: proxyTarget, changeOrigin: true },
             '/sse': { target: proxyTarget },

@@ -2,18 +2,19 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { ApiRequestError } from '../../api/core'
 import {
-  publishArtifact, readPublishedDraft, fetchPublishedArtifact, artifactHref,
-  type ArtifactDocument, type ArtifactDraft, type ArtifactPublication, type ArtifactPublicationRequest,
+  publishArtifact, readPublishedDraft, fetchPublishedArtifact, artifactHref, captureArtifactWorkspace,
+  type ArtifactDocument, type ArtifactDraft, type ArtifactPublication, type ArtifactPublicationRequest, type ArtifactWorkspace,
 } from '../../api/published-artifacts'
 
 export type ArtifactPublicationOutcome = { title: string; base?: { id: string; revision: number } } & (
   | { kind: 'published'; publication: ArtifactPublication; verified: boolean }
   | { kind: 'unconfirmed'; detail: string }
 )
-type SaveState = { kind: 'ready' } | { kind: 'saving' }
+type SaveState = { kind: 'ready'; message?: string } | { kind: 'saving' }
   | { kind: 'conflict'; message: string; latest?: ArtifactDocument }
   | { kind: 'unconfirmed'; message: string; publication?: ArtifactPublication }
   | { kind: 'saved'; publication: ArtifactPublication }
+type WorkspaceState = { kind: 'loading' } | { kind: 'ready'; value: ArtifactWorkspace } | { kind: 'error'; message: string }
 
 export function downloadArtifactDraft(draft: ArtifactDraft) {
   const blob = new Blob([new TextEncoder().encode(draft.content)], { type: `${draft.format === 'html' ? 'text/html' : 'text/markdown'};charset=utf-8` })
@@ -25,8 +26,9 @@ export function downloadArtifactDraft(draft: ArtifactDraft) {
   URL.revokeObjectURL(url)
 }
 
-export function ArtifactComposer({ initial, base, isCurrent, onMutation, onSaved, onCancel }: {
+export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onMutation, onSaved, onCancel }: {
   initial: ArtifactDraft; base?: ArtifactDocument; isCurrent: () => boolean;
+  workspaceRoot: string;
   onMutation: (outcome: ArtifactPublicationOutcome) => void;
   onSaved: (publication: ArtifactPublication) => void; onCancel: () => void;
 }) {
@@ -35,23 +37,39 @@ export function ArtifactComposer({ initial, base, isCurrent, onMutation, onSaved
   const [latestError, setLatestError] = useState('')
   const active = useRef(true)
   const sending = useRef(false)
+  const [workspace, setWorkspace] = useState<WorkspaceState>({ kind: 'loading' })
   const baseRef = base ? { id: base.artifact.id, revision: base.artifact.revision } : undefined
   useEffect(() => () => { active.current = false }, [])
   const current = () => active.current && isCurrent()
+  useEffect(() => {
+    // Freeze both canonical roots when the editable draft is created. Never
+    // recapture under another root after a failed read or a server switch.
+    void captureArtifactWorkspace(workspaceRoot).then(value => {
+      if (current()) setWorkspace({ kind: 'ready', value })
+    }, error => {
+      if (current()) setWorkspace({ kind: 'error', message: error instanceof Error ? error.message : '작업 공간을 확인하지 못했습니다.' })
+    })
+  }, [])
   const ready = state.kind === 'ready' || state.kind === 'conflict'
   const save = async () => {
-    if (sending.current || state.kind !== 'ready' || !current()) return
+    if (sending.current || state.kind !== 'ready' || workspace.kind !== 'ready' || !current()) return
     sending.current = true
     const sent = { ...draft }
     const request: ArtifactPublicationRequest = base
       ? { ...sent, id: base.artifact.id, expected_revision: base.artifact.revision }
       : sent
     setState({ kind: 'saving' })
+    const expectedWorkspace = workspace.value
     let publication: ArtifactPublication
     try {
-      publication = await publishArtifact(request)
+      publication = await publishArtifact(request, expectedWorkspace)
     } catch (error) {
       const message = error instanceof Error ? error.message : '저장 응답을 받지 못했습니다.'
+      if (error instanceof ApiRequestError && error.errorCode === 'workspace_precondition_failed') {
+        sending.current = false
+        if (current()) setState({ kind: 'ready', message: '서버의 작업 공간이 바뀌어 저장 요청이 거절되었습니다. 작성한 원고는 그대로 남아 있습니다.' })
+        return
+      }
       onMutation({ kind: 'unconfirmed', title: sent.title, base: baseRef, detail: message })
       if (!current()) return
       sending.current = false
@@ -65,7 +83,7 @@ export function ArtifactComposer({ initial, base, isCurrent, onMutation, onSaved
     onMutation({ kind: 'published', title: sent.title, base: baseRef, publication, verified: false })
     if (!current()) return
     try {
-      await readPublishedDraft(publication, sent)
+      await readPublishedDraft(publication, sent, expectedWorkspace)
       onMutation({ kind: 'published', title: sent.title, base: baseRef, publication, verified: true })
       if (!current()) return
       setState({ kind: 'saved', publication })
@@ -81,7 +99,8 @@ export function ArtifactComposer({ initial, base, isCurrent, onMutation, onSaved
     if (!base || !current()) return
     setLatestError('')
     try {
-      const latest = await fetchPublishedArtifact(base.artifact.id, undefined)
+      if (workspace.kind !== 'ready') return
+      const latest = await fetchPublishedArtifact(base.artifact.id, undefined, undefined, workspace.value)
       if (current()) setState({ kind: 'conflict', message: '최신 버전과 작성 중인 원고를 비교해 주세요. 원고는 자동으로 바뀌지 않습니다.', latest })
     } catch (error) {
       if (current()) setLatestError(error instanceof Error ? error.message : '최신 버전을 읽지 못했습니다.')
@@ -104,7 +123,7 @@ export function ArtifactComposer({ initial, base, isCurrent, onMutation, onSaved
       class="mt-1 block min-h-80 w-full resize-y rounded border p-3 font-mono text-sm bg-[var(--color-bg-base)]"
       disabled=${!ready} value=${draft.content} onInput=${(event: Event) => field('content', (event.target as HTMLTextAreaElement).value)} /></label>
     <div class="flex flex-wrap gap-4 text-sm">
-      <button type="button" onClick=${save} disabled=${state.kind !== 'ready' || !draft.title.trim() || !draft.summary.trim() || !draft.content.trim()}>
+      <button type="button" onClick=${save} disabled=${workspace.kind !== 'ready' || state.kind !== 'ready' || !draft.title.trim() || !draft.summary.trim() || !draft.content.trim()}>
         ${state.kind === 'saving' ? '저장 중…' : base ? '새 버전 저장' : '아티팩트 등록'}</button>
       <button type="button" onClick=${() => downloadArtifactDraft(draft)}>원고 다운로드</button>
     </div>
@@ -118,5 +137,9 @@ export function ArtifactComposer({ initial, base, isCurrent, onMutation, onSaved
       ${state.publication ? html`<a href=${artifactHref(state.publication.artifact.id, state.publication.artifact.revision)}>응답받은 버전 확인</a>` : null}
     </div>` : state.kind === 'saved' ? html`<p role="status">v${state.publication.artifact.revision} 저장 후 내용을 다시 읽어 확인했습니다.</p>` : null}
     ${latestError ? html`<p role="alert">${latestError}</p>` : null}
+    ${workspace.kind === 'loading' ? html`<p role="status">작업 공간을 확인하고 있습니다.</p>` : null}
+    ${workspace.kind === 'error' ? html`<div role="alert"><p>${workspace.message}</p>
+      <p>작업 공간을 확인하지 못해 저장할 수 없습니다. 원고를 다운로드하고 편집을 다시 열어 주세요.</p></div>` : null}
+    ${state.kind === 'ready' && state.message ? html`<p role="alert">${state.message}</p>` : null}
   </section>`
 }

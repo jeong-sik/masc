@@ -16,7 +16,7 @@ not through the cleanup descriptor, because nothing of it needs cleanup after
 the worker. It reads `ego-browser --version`, opens or resumes the task space
 by name, and registers one client. One serial `ego-browser nodejs` process
 serves the connection: the SDK's dialog and event state belongs to that
-process. The installed .20 process-state gap is measured in
+process. The process-state gap is measured separately for installed 0.6.0.20 and 0.6.1.11 in
 [session evidence](../evidence/ego-native-session-gap/). MASC sends fixed
 scripts through its private session socket; it does not expose host Node
 execution to Keeper-supplied code.

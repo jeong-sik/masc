@@ -1,10 +1,14 @@
 # Remaining Ego process-state gap
 
-Installed Ego Lite 0.6.0.20 still keeps JavaScript-dialog state in the SDK
+The original Ego Lite 0.6.0.20 experiment found JavaScript-dialog state in the SDK
 process. MASC's persistent Node session is a measured workaround, separate
 from the native locator/input/wait functionality now delegated to Ego.
 
-## Actual same-space observation
+The [0.6.1.11 follow-up](0.6.1.11/) repeats the controlled two-process observation
+after the installed CLI advanced. It supports retaining the serial session;
+it does not relabel earlier MASC/Keeper runs as new-version execution.
+
+## Original .20 same-space observation
 
 The guardian opened a confirm in an owned fixture on existing task space 4,
 page p1, and stayed alive as recovery. A second SDK process acquired space 4

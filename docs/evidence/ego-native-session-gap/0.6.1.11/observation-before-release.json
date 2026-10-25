@@ -1,0 +1,32 @@
+{
+  "observed_at": "2026-10-25T11:21:36.467448+00:00",
+  "observer_stage": {
+    "name": "before_info",
+    "ownership": "agent",
+    "at": "2026-10-25T11:21:29.058Z"
+  },
+  "guardian_ready": {
+    "receipt": {
+      "dialog": {
+        "url": "http://127.0.0.1:52052/",
+        "frameId": "488D2A5BEE0DA2310B9560624F39B07D",
+        "message": "Owned Ego SDK session check",
+        "type": "confirm",
+        "hasBrowserHandler": true,
+        "defaultPrompt": ""
+      }
+    },
+    "info": {
+      "dialog": {
+        "url": "http://127.0.0.1:52052/",
+        "frameId": "488D2A5BEE0DA2310B9560624F39B07D",
+        "message": "Owned Ego SDK session check",
+        "type": "confirm",
+        "hasBrowserHandler": true,
+        "defaultPrompt": ""
+      }
+    }
+  },
+  "observer_process_handle": 9842,
+  "guardian_process_handle": 74495
+}

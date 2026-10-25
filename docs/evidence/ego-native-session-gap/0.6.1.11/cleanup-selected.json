@@ -1,0 +1,33 @@
+{
+  "projection": "Selected fields from original SDK-written cleanup.json; other task names, profiles and titles omitted.",
+  "source_record_sha256": "3f96200ff1247010681345328df79a946e02a96d1fe2feee42b1c3fe341453f0",
+  "spaceId": 8,
+  "finished": true,
+  "finishCalls": 1,
+  "remainingSpaces": [
+    {
+      "id": 2,
+      "ownership": "user"
+    },
+    {
+      "id": 3,
+      "ownership": "user"
+    },
+    {
+      "id": 4,
+      "ownership": "user"
+    },
+    {
+      "id": 5,
+      "ownership": "user"
+    },
+    {
+      "id": 6,
+      "ownership": "agent"
+    },
+    {
+      "id": 7,
+      "ownership": "agent"
+    }
+  ]
+}

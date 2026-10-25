@@ -94,6 +94,13 @@ let scenario mode =
        user_pref(\"browser.tabs.unloadOnLowMemory\", false); user_pref(\"operator.custom\", true);\n\
        user_pref(\"widget.windows.window_occlusion_tracking.enabled\", false); // operator note\n\
        user_pref(\"operator.custom2\", true);\n";
+    (* Only non-occupied modes seed user.js: the occupied-port scenario asserts
+       that admission never writes user.js at all, so it must start absent. *)
+    if mode<>"occupied" then
+      write user_js
+        "user_pref(\"browser.tabs.unloadOnLowMemory\", false); user_pref(\"operator.custom\", true);\n\
+         user_pref(\"widget.windows.window_occlusion_tracking.enabled\", false); // operator note\n\
+         user_pref(\"operator.custom2\", true);\n";
     write (Filename.concat root "mode") mode;
     let binary=Filename.concat root "scripted-firefox" in write binary firefox;Unix.chmod binary 0o700;
     let reservation,port=reserved_port () in

@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { get } from './core'
+import { get, post } from './core'
 
 const revisionFields = {
   revision: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER)),
@@ -30,6 +30,37 @@ const DocumentSchema = Schema.Struct({
 export type PublishedArtifact = typeof PublishedArtifactSchema.Type
 export type ArtifactDocument = typeof DocumentSchema.Type
 export type ArtifactList = typeof ListSchema.Type
+export type ArtifactPublication = typeof ArtifactPublicationSchema.Type
+export type ArtifactDraft = {
+  title: string; summary: string; format: 'markdown' | 'html'; content: string;
+  task_id?: string | null; goal_id?: string | null;
+}
+export type ArtifactPublicationRequest = ArtifactDraft & (
+  { id?: never; expected_revision?: never } | { id: string; expected_revision: number }
+)
+
+// A publication is sent once. Callers retain the returned identity before
+// readback; a failed response/readback must never trigger an automatic retry.
+export async function publishArtifact(request: ArtifactPublicationRequest): Promise<ArtifactPublication> {
+  const result = Schema.decodeUnknownSync(ArtifactPublicationSchema)(
+    await post<unknown>('/api/v1/published-artifacts', request),
+  )
+  if (request.id !== undefined && (result.artifact.id !== request.id
+    || result.artifact.revision !== request.expected_revision + 1)) {
+    throw new Error('저장 응답의 문서 또는 버전이 요청과 다릅니다. 적용 여부를 확인해 주세요.')
+  }
+  return result
+}
+
+export async function readPublishedDraft(publication: ArtifactPublication, sent: ArtifactDraft): Promise<ArtifactDocument> {
+  const doc = await fetchPublishedArtifact(publication.artifact.id, String(publication.artifact.revision))
+  if (doc.content !== sent.content || doc.artifact.title !== sent.title
+    || doc.artifact.summary !== sent.summary || doc.artifact.format !== sent.format
+    || doc.artifact.body._blob.sha256 !== publication.artifact.body._blob.sha256) {
+    throw new Error('저장된 문서가 보낸 내용과 다릅니다. 원고를 보관하고 적용 여부를 확인해 주세요.')
+  }
+  return doc
+}
 
 export function artifactHref(id: string, revision?: number): string {
   const params = new URLSearchParams({ section: 'artifacts', artifact: id })

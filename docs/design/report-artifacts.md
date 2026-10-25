@@ -43,6 +43,29 @@ Existing files can be published by passing their body through the same API or
 tool. Runtime directories and private conversations are not recursively indexed.
 The report producer chooses which output is a standalone artifact.
 
+## Dashboard editing and file import
+
+The catalog's **파일 가져오기** action accepts one explicitly selected or dropped
+UTF-8 HTML/Markdown file. The operator reviews its title, summary, explicit format
+and source before publishing. Invalid UTF-8 is refused rather than replaced;
+reading a file does not execute or publish it. The reader's **편집** action opens
+a source editor. It captures the selected revision and Task/Goal links when
+editing starts; a catalog refresh cannot silently rebase that draft.
+
+Saving uses the existing publication API once and then reads the returned fixed
+revision to compare its body and metadata with the submitted draft. The response
+identity is retained separately from successful readback. Conflicts retain the
+draft and offer a read-only latest-version comparison. An uncertain write never
+automatically retries; the operator can download the draft and inspect the
+recorded revision. Late publication receipts retain their original workspace
+even after the selection or credential changes, without a read under replacement
+credentials. There is no automatic publication or confirmation on editor input.
+
+This source editor is the first layer of #45940. Shared drafts, rich-text editing,
+anchored comments and human/Keeper document positions require their own explicit
+producer/store/consumer contract. Authorship or publication alone is not evidence
+that a Keeper is currently viewing or editing a document.
+
 ## Storage and authority
 
 - Root: `<base-path>/.masc/published_artifacts/`, resolved from workspace config.

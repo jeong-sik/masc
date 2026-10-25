@@ -93,6 +93,7 @@ module Skill_registry = Skill_registry
 module Contract = Contract
 module Structured = Structured
 module Checkpoint = Checkpoint
+module Checkpoint_snapshot = Checkpoint_snapshot
 module Checkpoint_store = Checkpoint_store
 module Session = Session
 module Raw_trace = Raw_trace

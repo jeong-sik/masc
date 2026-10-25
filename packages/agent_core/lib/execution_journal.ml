@@ -732,6 +732,12 @@ module Reducer = struct
 
   let validate_update (record : node_record) node_id update =
     match Event.node_kind record.node, update with
+    | Event.Agent_run {agent_name}, Event.Checkpoint_snapshot snapshot ->
+      if String.equal agent_name (Checkpoint_snapshot.agent_name snapshot) then Ok ()
+      else Error (Invalid_update_for_node node_id)
+    | (Event.Agent_turn _ | Event.Provider_attempt _ | Event.Output_block _
+       | Event.Tool_invocation _ | Event.Tool_attempt), Event.Checkpoint_snapshot _ ->
+      Error (Invalid_update_for_node node_id)
     | Event.Provider_attempt _, Event.Provider_event _ -> Ok ()
     | Event.Provider_attempt _, Event.Provider_request_snapshot _ ->
       if Option.is_some record.provider_request
@@ -1000,13 +1006,14 @@ module Reducer = struct
       ; provider_request =
           (match update with
            | Event.Provider_request_snapshot value -> Some value
-           | Event.Provider_event _ | Event.Provider_response_snapshot _
+           | Event.Checkpoint_snapshot _ | Event.Provider_event _ | Event.Provider_response_snapshot _
            | Event.Output_delta _ | Event.Output_snapshot _ | Event.Tool_input_delta _
            | Event.Tool_input_snapshot _ | Event.Tool_progress _ | Event.Tool_result _ ->
              record.provider_request)
       ; provider_response =
           (match update with
            | Event.Provider_response_snapshot value -> Some value
+           | Event.Checkpoint_snapshot _
            | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Output_delta _
@@ -1018,6 +1025,7 @@ module Reducer = struct
       ; output_snapshot =
           (match update with
            | Event.Output_snapshot value -> Some value
+           | Event.Checkpoint_snapshot _
            | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Provider_response_snapshot _
@@ -1029,6 +1037,7 @@ module Reducer = struct
       ; tool_input =
           (match update with
            | Event.Tool_input_snapshot value -> Some value
+           | Event.Checkpoint_snapshot _
            | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Provider_response_snapshot _
@@ -1040,6 +1049,7 @@ module Reducer = struct
       ; tool_result =
           (match update with
            | Event.Tool_result value -> Some value
+           | Event.Checkpoint_snapshot _
            | Event.Provider_request_snapshot _
            | Event.Provider_event _
            | Event.Provider_response_snapshot _

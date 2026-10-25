@@ -738,6 +738,79 @@ let test_native_request_provenance_reopen () =
     with Exit -> ()) [true; false]) [false; true]
 ;;
 
+let test_checkpoint_fact_ownership_and_reopen () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let runtime=Agent.create_execution_runtime ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+      |> Result.map_error Error.to_string |> value in
+  let internal_runtime=Runtime.create ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+      |> Result.map_error Runtime.create_error_to_string |> value in
+  let dir=make_dir env#fs "agent_core-checkpoint-facts-" in
+  Eio.Switch.on_release sw (fun () -> Eio.Path.rmtree ~missing_ok:true dir);
+  let template=Agent.checkpoint (child_agent ~net:env#net) in
+  let make name stage=Checkpoint_snapshot.create ~stage {template with agent_name=name}
+      |> Result.map_error Checkpoint_snapshot.error_to_string |> value in
+  let fact=make "checkpoint-root" Checkpoint_snapshot.After_assistant_collected in
+  Agent_core.Context.set template.context "producer-mutation" (`Bool true);
+  let frozen=Checkpoint_snapshot.checkpoint fact
+      |> Result.map_error Checkpoint_snapshot.error_to_string |> value in
+  check bool "producer context mutation cannot alter a frozen checkpoint" true
+    (Agent_core.Context.get frozen.context "producer-mutation"=None);
+  let json=Checkpoint_snapshot.to_yojson fact in
+  let checkpoint_json=Checkpoint.to_json {template with agent_name="checkpoint-root"} in
+  let invalids=[
+    `Assoc ["stage",`String "unknown";"checkpoint",checkpoint_json];
+    `Assoc ["stage",`String "after_assistant_collected";"stage",`String "after_assistant_collected";
+            "checkpoint",checkpoint_json];
+    `Assoc ["stage",`String "after_assistant_collected";"checkpoint",checkpoint_json;"extra",`Null];
+    `Assoc ["stage",`String "after_assistant_collected"];
+    `Assoc ["stage",`String "after_assistant_collected";"checkpoint",
+      (match checkpoint_json with `Assoc fields -> `Assoc (("agent_name",`String "duplicate")::fields)
+       | _ -> fail "checkpoint encoder did not emit an object")]] in
+  List.iter (fun json -> check bool "malformed checkpoint fact is rejected" true
+      (match Checkpoint_snapshot.of_yojson json with Error _->true |Ok _->false)) invalids;
+  check bool "checkpoint fact strictly roundtrips" true
+    (match Checkpoint_snapshot.of_yojson json with Ok restored->Checkpoint_snapshot.equal restored fact
+     | Error _->false);
+  let locator=writer_value (Writer.run ~codec:(Codec.of_runtime internal_runtime) ~dir (fun ~sw:_ writer ->
+    let root=scope_value (Scope.start ~writer ~agent_name:"checkpoint-root") in
+    let locator=public_locator root in
+    let projection=projection_value (Agent.open_execution_projection ~runtime ~dir locator) in
+    let before=projection_value (Projection.current_cursor projection) in
+    check bool "checkpoint cannot cross Agent identity" true
+      (match Scope.record_checkpoint root (make "other-agent" Checkpoint_snapshot.After_assistant_collected) with
+       | Error _->true |Ok ()->false);
+    check bool "rejected checkpoint does not consume source sequence" true
+      (before=projection_value (Projection.current_cursor projection));
+    scope_value (Scope.record_checkpoint root fact);
+    let parent=projection_value (Projection.latest_checkpoint projection) |> Option.get in
+    let turn=scope_value (Scope.open_turn root ~ordinal:1) in
+    let provider=scope_value (Scope.open_provider_attempt turn ~ordinal:0 (binding ())) in
+    let call=scope_value (Scope.open_invocation provider ~invocation:(invocation ())
+        ~tool_name:"checkpoint-child" ~input:(`Assoc [])) in
+    ignore (scope_value (Scope.execute call ~invoke:(fun ~start_child ~tool_name:_ ~input:_ ->
+      let child=scope_value (start_child ~agent_name:"checkpoint-child") in
+      scope_value (Scope.record_checkpoint child (make "checkpoint-child" Checkpoint_snapshot.After_input_wait_changed));
+      scope_value (Scope.finish child Event.Succeeded);
+      "child settled",Types.Tool_succeeded)));
+    let latest=projection_value (Projection.latest_checkpoint projection) |> Option.get in
+    check bool "later child checkpoint does not replace root checkpoint" true
+      (Checkpoint_snapshot.equal latest.snapshot fact && latest.event_id=parent.event_id && latest.through=parent.through);
+    scope_value (Scope.close_provider_attempt provider Event.Succeeded);
+    scope_value (Scope.close_turn turn Event.Succeeded);
+    scope_value (Scope.finish root Event.Succeeded);
+    let after=projection_value (Projection.current_cursor projection) in
+    check bool "closed execution rejects checkpoint mutation" true
+      (match Scope.record_checkpoint root fact with Error _->true |Ok ()->false);
+    check bool "closed checkpoint rejection appends no fact" true
+      (after=projection_value (Projection.current_cursor projection));
+    locator)) in
+  let reopened=projection_value (Agent.open_execution_projection ~runtime ~dir locator) in
+  let latest=projection_value (Projection.latest_checkpoint reopened) |> Option.get in
+  check bool "reopened root checkpoint keeps exact frozen value" true
+    (Checkpoint_snapshot.equal latest.snapshot fact)
+;;
+
 type publication_interrupt = Publication_break | Publication_cancel
 
 let test_reserved_publication_replays_after_unlock interrupt =
@@ -829,6 +902,8 @@ let () =
     "Execution projection"
     [ ( "authority"
       , [ test_case "live and restart projection" `Quick test_live_and_restart_projection
+        ; test_case "typed checkpoint facts enforce ownership and reopen" `Quick
+            test_checkpoint_fact_ownership_and_reopen
         ; test_case "Sys.Break publication retries after normal mutex unlock" `Quick
             (fun () -> test_reserved_publication_replays_after_unlock Publication_break)
         ; test_case "cancelled publication retries from a fresh context" `Quick

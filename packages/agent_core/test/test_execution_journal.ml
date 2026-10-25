@@ -1794,7 +1794,7 @@ let test_request_snapshot_single_assignment () =
    | Event.Provider_request_snapshot restored ->
      check bool "request snapshot codec roundtrip" true
        (Llm_provider.Completion_outcome.equal_request_provenance fact restored)
-   | Event.Provider_event _ | Event.Provider_response_snapshot _ | Event.Output_delta _
+   | Event.Checkpoint_snapshot _ | Event.Provider_event _ | Event.Provider_response_snapshot _ | Event.Output_delta _
    | Event.Output_snapshot _ | Event.Tool_input_delta _ | Event.Tool_input_snapshot _
    | Event.Tool_progress _ | Event.Tool_result _ -> fail "request snapshot changed kind");
   let json = Llm_provider.Completion_outcome.request_provenance_to_yojson fact in

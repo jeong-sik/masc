@@ -7,19 +7,14 @@ type periodic_callback =
   ; callback : unit -> unit
   }
 
-type checkpoint_stage =
+type checkpoint_stage = Checkpoint_snapshot.stage =
   | After_input_wait_changed
   | After_assistant_collected
   | After_tool_results_appended
   | After_context_injection
   | After_rejected_response_dropped
 
-let checkpoint_stage_to_string = function
-  | After_input_wait_changed -> "after_input_wait_changed"
-  | After_assistant_collected -> "after_assistant_collected"
-  | After_tool_results_appended -> "after_tool_results_appended"
-  | After_context_injection -> "after_context_injection"
-  | After_rejected_response_dropped -> "after_rejected_response_dropped"
+let checkpoint_stage_to_string = Checkpoint_snapshot.stage_to_string
 ;;
 
 type checkpoint_snapshot =

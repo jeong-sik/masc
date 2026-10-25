@@ -948,3 +948,9 @@ let read_tool_observations scope ~after ~limit =
          project ({run_id=Event.run_id source;event;through}::acc) rest) in
   let+ observations=project [] page.events in
   {observations;next_cursor=page.next_cursor;high_watermark=page.high_watermark;has_more=page.has_more}
+
+let record_checkpoint scope snapshot =
+  transact scope.writer
+    (Tx.update_node ~node:(Journal.run_root scope.run) (Event.Checkpoint_snapshot snapshot))
+  |> Result.map ignore
+;;

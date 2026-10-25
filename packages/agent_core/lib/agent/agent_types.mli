@@ -14,7 +14,7 @@ type periodic_callback =
   ; callback : unit -> unit
   }
 
-type checkpoint_stage =
+type checkpoint_stage = Checkpoint_snapshot.stage =
   | After_input_wait_changed
   (** The exact input wait was installed or consumed. This boundary precedes
       lifecycle publication and any subsequent provider/parameter stage. *)

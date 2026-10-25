@@ -293,3 +293,7 @@ val tool_observation_cursor : t -> (Execution_journal.cursor, error) result
 val read_tool_observations :
   t -> after:Execution_journal.cursor -> limit:int ->
   (tool_observation_page, error) result
+
+(** Commit an immutable checkpoint on this exact open Agent root. A returned
+    success is durable acceptance, before any optional projection sink. *)
+val record_checkpoint : t -> Checkpoint_snapshot.t -> (unit, error) result

@@ -2,7 +2,7 @@ open Agent_types
 
 let _log = Log.create ~module_name:"agent_checkpoint_sink" ()
 
-let persist_for_state agent stage ~pending_input state =
+let persist_caller_owned agent stage ~pending_input state =
   match agent.checkpoint_sink with
   | None -> Ok ()
   | Some sink ->
@@ -41,4 +41,20 @@ let persist_for_state agent stage ~pending_input state =
        Error
          (Error.Internal
             (Printf.sprintf "checkpoint sink failed at %s: %s" stage_label detail)))
+;;
+
+let persist_for_state agent stage ~pending_input state =
+  match agent.checkpoint_sink with
+  | Some _ -> persist_caller_owned agent stage ~pending_input state
+  | None ->
+    match Execution_context.agent_scope () with
+    | None -> Ok ()
+    | Some scope ->
+      let open Result_syntax in
+      let checkpoint=Agent_checkpoint.build_checkpoint ~pending_input ~state
+          ~tools:agent.tools ~context:agent.context ~mcp_clients:agent.options.mcp_clients () in
+      let* fact=Checkpoint_snapshot.create ~stage checkpoint
+          |> Result.map_error (fun error -> Error.Internal (Checkpoint_snapshot.error_to_string error)) in
+      Execution_agent_scope.record_checkpoint scope fact
+      |> Result.map_error (fun error -> Error.Internal (Execution_agent_scope.error_to_string error))
 ;;

@@ -199,6 +199,7 @@ let pp_node formatter node =
 ;;
 
 type node_update =
+  | Checkpoint_snapshot of Checkpoint_snapshot.t
   | Provider_event of Yojson.Safe.t
   | Provider_request_snapshot of Llm_provider.Completion_outcome.request_provenance
   | Provider_response_snapshot of Llm_provider.Types.api_response
@@ -317,6 +318,7 @@ let validate_content_block block =
 
 let validate_node_update update =
   match update with
+  | Checkpoint_snapshot _ -> Ok ()
   | Provider_request_snapshot _ -> Ok ()
   | Provider_response_snapshot value -> Response_snapshot.validate value
   | Provider_event value -> validate_json ~context:"provider event" value
@@ -450,6 +452,7 @@ let payload event = event.payload
 
 let equal_update left right =
   match left, right with
+  | Checkpoint_snapshot left, Checkpoint_snapshot right -> Checkpoint_snapshot.equal left right
   | Provider_event left, Provider_event right
   | Output_delta left, Output_delta right
   | Tool_input_delta left, Tool_input_delta right
@@ -460,7 +463,8 @@ let equal_update left right =
   | Provider_request_snapshot left, Provider_request_snapshot right ->
     Llm_provider.Completion_outcome.equal_request_provenance left right
   | Provider_response_snapshot left, Provider_response_snapshot right -> left = right
-  | ( ( Provider_event _
+  | ( ( Checkpoint_snapshot _
+      | Provider_event _
       | Provider_request_snapshot _
       | Provider_response_snapshot _
       | Output_delta _
@@ -685,6 +689,7 @@ let node_update_json kind value = `Assoc [ "type", `String kind; "value", value 
 
 let node_update_to_yojson_unchecked update =
   match update with
+  | Checkpoint_snapshot value -> node_update_json "checkpoint_snapshot" (Checkpoint_snapshot.to_yojson value)
   | Provider_request_snapshot value ->
     node_update_json "provider_request_snapshot"
       (Llm_provider.Completion_outcome.request_provenance_to_yojson value)
@@ -721,6 +726,10 @@ let node_update_of_yojson json =
   let* value = field "value" fields in
   let* update =
     match kind with
+    | "checkpoint_snapshot" ->
+      let+ value=Checkpoint_snapshot.of_yojson value
+          |> Result.map_error Checkpoint_snapshot.error_to_string in
+      Checkpoint_snapshot value
     | "provider_event" -> Ok (Provider_event value)
     | "provider_request_snapshot" ->
       let+ value = Llm_provider.Completion_outcome.request_provenance_of_yojson value in

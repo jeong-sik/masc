@@ -248,7 +248,7 @@
  (modules masc_exec_ssh_bootstrap)
  (public_name masc-exec-ssh-bootstrap)
  (package masc)
- (libraries masc masc.runtime masc_workspace fs_compat exec_shim cmdliner unix eio eio_main))
+ (libraries masc masc.runtime masc_workspace masc.masc_process fs_compat exec_shim cmdliner unix eio eio_main))
 
 ;; RFC-0374 capability probe runner.  Answers "can runtime R reach tool T"
 ;; without writing to the keeper's chat, checkpoint, or memory, which is what

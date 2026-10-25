@@ -33,3 +33,11 @@ executable with `Unbound module Eio` at `Fs_compat.set_fs (Eio.Stdenv.fs env)`:
 targeted run 40195161883 and macOS artifact run 40195163878. The helper declared
 `eio_main` but omitted its direct `eio` dependency; the repair adds that explicit
 library. Those failed runs do not prove that the new CLI assertions pass.
+
+The macOS retry 40196633648 at source
+`cf52e413dc6305df7989630c56b2671d3815ec12` then reported
+`Unbound module Process_eio` at its initialization call. The helper also needs
+the direct `masc.masc_process` library, whose unwrapped module is not exposed by
+`open Masc`. This dependency is now explicit as well. The preflight library's
+12-case suite passed in the first targeted run; that does not compile this
+separate executable or prove the CLI regressions pass.

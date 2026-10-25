@@ -1,0 +1,61 @@
+{
+  "result": "REPRODUCED",
+  "issue": 38593,
+  "scope": "actual a317 Keeper reuses its previous tool output cwd inside a literal Python script",
+  "observation": {
+    "marker": "ff6e2ef070704f02ac2ebc2c7b9b532c",
+    "reported_cwd": "/private/tmp/mssh-keeper-cwd-replay-ready-a317/.workspace/.masc/playground/ssh-proof-20261025-e",
+    "reported_read_errno": 2,
+    "relative_read_marker": "ff6e2ef070704f02ac2ebc2c7b9b532c",
+    "actual_cwd_base64": "L3Nydi9tYXNjL3BsYXlncm91bmQvc3NoLXByb29mLTIwMjYxMDI1LWU="
+  },
+  "driver_sha256": "e223eba72f33c52b188d1c14868fbab95a47a11aaaf75a856e6dd060268ea6fd",
+  "harness_sha256": "ff2c86e974ae2ac36f01d3a9cceb76bef27f09fda3a26d61b392ef7db6e3256d",
+  "runtime_source": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+  "binary_sha256": "d27fb1565ca8eb220cd751edb83ab193cb43932d8b9ec50fa9ae25067b38a669",
+  "proof_receipt": {
+    "schema": "masc.remote_ssh_keeper_files.v1",
+    "result": "PASS",
+    "keeper": "ssh-proof-20261025-e",
+    "expected_binary_commit": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+    "binary_sha256": "d27fb1565ca8eb220cd751edb83ab193cb43932d8b9ec50fa9ae25067b38a669",
+    "model": "scripted loopback fixture",
+    "claims": [
+      "actual Keeper Execute/Write/Read/Edit/Grep over SSH",
+      "endpoint bytes match tool results",
+      "canonical final checkpoint",
+      "endpoint bytes survive server shutdown",
+      "same manual Keeper explicitly started and resumed after server restart",
+      "canonical ledger records completed SSH tools"
+    ],
+    "identity_sha256": "f296e524ceaa7a66c6da1853fdde526f9f34e2e8af54ceb3e145c3ac0ef805a5",
+    "known_hosts_sha256": "b128384357469d76d39eadc4e2823fad5b9bd36425dc7d0864ebbf11336195ab",
+    "not_measured": [
+      "model quality",
+      "sustained continuity",
+      "GitHub authentication",
+      "bootstrap CLI",
+      "redirects and long jobs",
+      "candidate source unless commit matches",
+      "shim sandbox application receipt when peer omits it"
+    ],
+    "binary_commit": "a3173b973ab93a6b64fd301bca105a67a7529d00",
+    "model_requests": 11,
+    "tool_calls": 9,
+    "runtime_instances": [
+      "01a17074-6d86-7000-ae3b-c1f6c6bb472e",
+      "01a17074-ad96-7000-a65f-2798bf1ab956"
+    ],
+    "checkpoint_relative_path": ".masc/traces/trace-1792888043548-00000/trace-1792888043548-00000.json",
+    "actual_remote_cwd": "/srv/masc/playground/ssh-proof-20261025-e",
+    "model_projected_cwd": "/private/tmp/mssh-keeper-cwd-replay-ready-a317/.workspace/.masc/playground/ssh-proof-20261025-e",
+    "successful_tools": 9,
+    "expected_refusals": 0
+  },
+  "not_claimed": [
+    "repair",
+    "execution of current main",
+    "real-model autonomous discovery",
+    "production installation"
+  ]
+}

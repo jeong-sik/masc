@@ -16,6 +16,8 @@ Related documents, so this one does not repeat them:
   [spec/14-configuration.md](spec/14-configuration.md) §3
 - Sharing one model row across provider accounts:
   [SHARED-RUNTIME-MODELS.md](SHARED-RUNTIME-MODELS.md)
+- Native MiniMax Responses candidate setup and limits:
+  [guides/minimax-responses.md](guides/minimax-responses.md)
 - Environment variables the server reads at boot: [ENV-CONTRACT.md](ENV-CONTRACT.md)
 
 Every rule below cites the source that enforces it. Parser:

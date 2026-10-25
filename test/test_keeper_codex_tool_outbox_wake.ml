@@ -32,10 +32,13 @@ default = "codex.codex"
       Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
         Fs_compat.save_file path toml;
         get (Runtime.init_default ~config_path:path);
-        Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None keeper_name;
+        Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_image:"base"
+          ~sandbox_profile:(Some Keeper_types_profile.Docker) keeper_name;
         let meta = get (Masc_test_deps.meta_of_json_fixture
           (`Assoc ["name",`String keeper_name])) in
+        let meta = get (Keeper_meta_contract.effective_meta_result ~base_path meta) in
         ignore (get (Keeper_meta_store.replace_snapshot config meta));
+        ignore (Keeper_registry.register_offline ~base_path keeper_name meta);
         f config meta env)))
 
 let receipt turn_id : Runtime_codex_app_server.undelivered_tool_result =

@@ -59,6 +59,13 @@ val discover : store:Lane_addon_store.t -> scope:string -> (Record.t list, error
     requests or dispatches are created. Results are observations; load/advance
     and actual workspace authority must be revalidated by the original
     serialized owner. *)
+val load_listed : store:Lane_addon_store.t -> Record.t -> (retained, error) result
+(** Restore one observed record and its complete body using {!load}, then
+    confirm that the record still has the exact discovered identity, summary,
+    digest and progress. Changed or disappeared observations are errors.
+    Consumers may select known typed subjects before reading their bodies;
+    this operation does not turn a partial selection into a complete scope
+    inventory or authorize any effect. *)
 val discover_all : store:Lane_addon_store.t -> (retained list, error) result
 (** Validate the directory and record identity of each published scope, then
     strictly load each original body. This observation is not an atomic

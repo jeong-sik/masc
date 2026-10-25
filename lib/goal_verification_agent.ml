@@ -227,7 +227,8 @@ let owner_store config = Lane_addon_store.create
 let worker_detail = function
   | Worker.Store_unavailable detail | Original_invalid detail | Authority_changed detail
   | Execution_pending detail -> detail
-let originals store = Worker.inventory ~store ~installation_id:Worker.host_installation_id
+let originals_for_goal store ~goal_id = Worker.inventory_for_goal ~store ~goal_id
+  ~installation_id:Worker.host_installation_id
   ~package_id:Worker.host_package_id |> Result.map_error worker_detail
 let reload_original store retained =
   let original = Worker.original retained in
@@ -324,22 +325,30 @@ let new_run () : Worker.run_identity =
 
 let retained_recovery_work config work =
   let store = owner_store config in
-  match originals store with
-  | Error detail ->
-    (* This is not a complete inventory. Ordinary pending work still reaches
-       the same strict read in process_pending_work and cannot dispatch. *)
-    Log.Misc.error "goal verifier original inventory unavailable: %s" detail;
+  match Worker.inventory_by_goal ~store ~installation_id:Worker.host_installation_id
+    ~package_id:Worker.host_package_id with
+  | Error error ->
+    (* Unknown metadata cannot be attributed to an independent Goal. Pending
+       processing repeats the same strict discovery before any dispatch. *)
+    Log.Misc.error "goal verifier original metadata unavailable: %s" (worker_detail error);
     work
-  | Ok rows ->
-    List.fold_left (fun work retained ->
-      let needed = match Host.needs_recovery ~registry:(Registry.global ()) retained with
-        | Ok needed -> needed
-        | Error error ->
-          Log.Misc.error "goal verifier retained observation unavailable: %s" (Host.error_to_string error);
-          true in
-      let goal_id = (Original.subject (Worker.original retained)).goal_id in
-      if needed && not (List.exists (fun item -> item.goal_id=goal_id) work)
-      then work @ [{goal_id}] else work) work rows
+  | Ok goals ->
+    List.fold_left (fun work (goal_id,originals) ->
+      match originals with
+      | Error error ->
+        Log.Misc.error "goal verifier original unavailable goal_id=%s: %s"
+          goal_id (worker_detail error);
+        work
+      | Ok rows ->
+        List.fold_left (fun work retained ->
+          let needed = match Host.needs_recovery ~registry:(Registry.global ()) retained with
+            | Ok needed -> needed
+            | Error error ->
+              Log.Misc.error "goal verifier retained observation unavailable goal_id=%s: %s"
+                goal_id (Host.error_to_string error);
+              true in
+          if needed && not (List.exists (fun item -> item.goal_id=goal_id) work)
+          then work @ [{goal_id}] else work) work rows) work goals
 ;;
 
 let process_pending_work ?(sw : Eio.Switch.t option = None)
@@ -484,7 +493,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
         Ok outcome in
       (match operation () with Ok outcome -> outcome | Error detail -> fail_original detail) in
   try
-    match originals store with
+    match originals_for_goal store ~goal_id:work.goal_id with
     | Error detail -> fail_original detail
     | Ok rows ->
       let recovered, failure = recover rows in

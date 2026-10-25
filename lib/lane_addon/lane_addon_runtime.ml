@@ -1350,7 +1350,7 @@ let run ~sw ~read_browser_document backend m e =
               | Some _ -> stop_entry ~sw ~backend m e)
             else failed m e failure
         | Ok c ->
-            e.connection <- Some {export_owner;worker=c}; e.started <- true;
+            e.connection <- Some {export_owner;worker=c;companion=None;companion_active=None}; e.started <- true;
             notify_exports m e;
             (* Every stop this runtime asks for marks the entry stopping before
                the worker is told. A process that ends without that request

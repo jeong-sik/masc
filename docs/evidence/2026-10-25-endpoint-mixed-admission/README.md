@@ -43,7 +43,9 @@ this fixture does not certify other codecs' count-token traffic.
 
 Adversarial review caught two fixture errors before execution: ordinary Complete
 returns Http_client.http_error (not provider Error.t), and the public exact flow
-requires an explicit body deadline. Both were corrected. The fixture writer's
+requires an explicit body deadline. Both were corrected. Specific error checks use exhaustive closed matches; the
+exact429 assertion reads the public receipt HTTP status without a partial
+closed-variant classifier. The fixture writer's
 Result is checked. The candidate uses current-main public interfaces, including
 the then-required resolver IO argument; it has no compatibility adapter.
 

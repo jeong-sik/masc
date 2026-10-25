@@ -154,13 +154,13 @@ let exact_flow config =
 
 type no_rejection = |
 
-let execute_exact ~net ~clock flow =
+let execute_exact ?(on_receipt=(fun _ -> ())) ~net ~clock flow =
   let validate success : (EO.flow_success, no_rejection) EO.semantic_verdict =
     EO.Accept success in
   EO.execute_flow_once ~net ~clock
     ~before_measurement_dispatch:(fun _ -> Ok ())
     ~on_measurement_terminal:(fun _ -> Ok ())
-    ~before_dispatch:(fun _ -> Ok ())
+    ~before_dispatch:(fun (candidate:EO.flow_attempt_receipt) -> on_receipt candidate.receipt; Ok ())
     ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
     ~validate flow
 
@@ -261,8 +261,12 @@ let test_mixed_declared () = with_fixture Declared (fun ~work ~sw ~net ~clock ~a
   assert_released config;
   a.next_reply <- Rate_limited;
   (match ordinary ~sw ~net config with
-   | Error (LP.Http_client.HttpError {code=429; _}) -> ()
-   | Ok _ | Error _ -> fail "ordinary 429 must retain its typed HTTP status");
+   | Ok _ -> fail "ordinary 429 must fail"
+   | Error error ->
+     (match error with
+      | LP.Http_client.HttpError {code; _} -> check int "ordinary typed HTTP status" 429 code
+      | NetworkError _ | TimeoutError _ | AcceptRejected _
+      | ProviderTerminal _ | ProviderFailure _ -> fail "ordinary 429 lost its HTTP status"));
   assert_released config;
   ordinary ~sw ~net config |> get_ok "ordinary succeeds after 429" |> ignore;
   a.next_reply <- Rate_limited;
@@ -274,8 +278,13 @@ let test_mixed_declared () = with_fixture Declared (fun ~work ~sw ~net ~clock ~a
   execute_exact ~net ~clock (exact_flow exact_config) |> get_ok "exact succeeds after 429" |> ignore;
   a.next_reply <- Rate_limited;
   (match judge ~work ~sw ~net () with
-   | Error (Fusion_types.Provider_error _, _) -> ()
-   | Ok _ | Error _ -> fail "actual Fusion 429 must remain a provider failure");
+   | Ok _ -> fail "actual Fusion 429 must fail"
+   | Error (failure, _) ->
+     (match failure with
+      | Fusion_types.Provider_error _ -> ()
+      | Timeout | Empty_response _ | Empty_result | Build_error _ | Parse_error _
+      | Panels_unavailable _ | Unknown_route _ | Route_unavailable _ | Internal_error _ ->
+        fail "actual Fusion 429 must remain a provider failure"));
   assert_released config;
   judge ~work ~sw ~net () |> get_ok "Fusion succeeds after 429" |> ignore;
   assert_released config)

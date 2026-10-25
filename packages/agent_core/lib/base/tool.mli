@@ -224,7 +224,9 @@ val descriptor_to_yojson : descriptor option -> Yojson.Safe.t
 
     Memoized on physical schema identity: a schema is immutable, so two calls
     on the same schema return the same value — the second call does not
-    rebuild the tree. *)
+    rebuild the tree. The cache holds schemas weakly. Dead bindings are
+    cleaned by the table's automatic resizing rather than an explicit
+    whole-table sweep on each cache miss. *)
 val wire_json_of_schema : Types.tool_schema -> Yojson.Safe.t
 
 val wire_bytes_of_schema : Types.tool_schema -> int

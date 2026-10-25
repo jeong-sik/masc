@@ -75,6 +75,18 @@ the guard existed, but no review path ran it.
 
 Native GitHub Stacks use REST `stack` metadata and the [stack workflow](guides/NATIVE-GITHUB-STACKS.md). Merge a native stack whole, once, through its top PR; never merge it layer by layer from the bottom. The asynchronous merge endpoint on the top PR includes every open PR below it. Inspect and approve every included head; do not treat a non-main direct base as a blocker or manually retarget a native stack. A leaf source-review PASS does not certify its downstack.
 
+For a remote-SSH shim compatibility failure, `linux-x64-probe.yml` also accepts
+the explicit manual targets `exec-shim-linux-arm64` and `exec-shim-linux-amd64`.
+Pass a full `candidate_sha` and dispatch from a ref containing those targets.
+Only the chosen architecture builds, using the release's static-musl builder
+on a matching native Linux runner. Only the probe driver file is checked out
+from the workflow ref, so its nested checkout adds no second Dune package;
+the shim and compiler recipe come from the candidate checkout. The artifact
+includes binary checksums, both source identities, and an actual framed payload
+that loads `env_file`, alongside the version probe. This establishes candidate
+shim/config execution; SSH transport, bootstrap installation, Keeper behavior,
+release verification and production deployment remain separate evidence.
+
 `pr-check.yml` offers optional explicit `workflow_dispatch` source/config syntax
 and committed-credential checks. With `native-tui-source-sha`, it also offers an
 exact-source macOS TUI artifact and focused behavior checks. The default native

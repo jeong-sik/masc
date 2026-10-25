@@ -11,6 +11,8 @@ on:
         options:
           - linux-x64
           - macos-arm64
+          - exec-shim-linux-arm64
+          - exec-shim-linux-amd64
           - ego-runtime-macos-arm64
           - stagehand-model-macos-arm64
           - preparation-driver-macos-arm64
@@ -18,7 +20,7 @@ on:
           - lane-fusion-container
 
       candidate_sha:
-        description: Candidate source SHA (required for Ego runtime and preparation driver; optional for macOS runtime)
+        description: Candidate source SHA (required for exec shim, Ego runtime and preparation driver; optional for macOS runtime)
         type: string
         default: ""
 
@@ -31,6 +33,60 @@ permissions:
   contents: read
 
 jobs:
+  exec-shim-probe:
+    if: inputs.target == 'exec-shim-linux-arm64' || inputs.target == 'exec-shim-linux-amd64'
+    name: Build and exercise exact-source static exec shim
+    runs-on: ${{ inputs.target == 'exec-shim-linux-arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    env:
+      SHIM_ARCH: ${{ inputs.target == 'exec-shim-linux-arm64' && 'arm64' || 'amd64' }}
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Validate immutable candidate identity
+        run: |
+          python3 - <<'PY'
+          import os, re
+          if re.fullmatch(r'[0-9a-f]{40}', os.environ['CANDIDATE_SHA']) is None:
+              raise SystemExit('exec shim candidate_sha must be a full lowercase commit SHA')
+          PY
+      - name: Check out candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+      - name: Check out probe driver
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: probe-driver
+          persist-credentials: false
+          # A full nested repository gives Dune two definitions of masc.
+          # Only this workflow-owned driver is an input to the candidate build.
+          sparse-checkout: /scripts/remote-ssh/probe-shim-artifact.py
+          sparse-checkout-cone-mode: false
+      - uses: ./.github/actions/prepare-shim-builder
+        with:
+          arch: ${{ env.SHIM_ARCH }}
+      - name: Build and verify native static candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code HEAD --
+          scripts/remote-ssh/build-shim.sh --arch "$SHIM_ARCH" --out dist/remote-ssh-probe
+          python3 probe-driver/scripts/remote-ssh/probe-shim-artifact.py \
+            --shim "dist/remote-ssh-probe/masc-exec-shim-linux-$SHIM_ARCH" \
+            --source-commit "$CANDIDATE_SHA" --arch "$SHIM_ARCH" \
+            --output dist/remote-ssh-probe/build-receipt.json
+          git diff --exit-code HEAD --
+          (cd dist/remote-ssh-probe && sha256sum masc-exec-shim-* build-receipt.json > SHA256SUMS)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: exec-shim-linux-${{ env.SHIM_ARCH }}-${{ inputs.candidate_sha }}-attempt-${{ github.run_attempt }}
+          path: dist/remote-ssh-probe/
+          if-no-files-found: error
+          retention-days: 7
+
   rc-pptx-trace:
     if: inputs.target == 'rc-pptx-trace'
     name: Trace the original RC PPTX case

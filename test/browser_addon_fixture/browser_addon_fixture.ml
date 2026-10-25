@@ -117,6 +117,7 @@ let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio_context.with_test_env ~sw ~clock:(Eio.Stdenv.clock env)
         ~mono_clock:(Eio.Stdenv.mono_clock env) ~net:(Eio.Stdenv.net env) (fun () ->
+        Eio_context.set_env env;
         R.For_testing.reset ();
         (* A served workspace has its .masc directory before any Lane Add-on
            attaches, and the Lane Add-on store creates only its own root under

@@ -246,7 +246,7 @@ let with_exec_fixture
       ?(require_sandbox = false)
       (* Own the actual native browser attachment around only the cases that
          need one; other fixtures do not attach or adopt a browser. *)
-      ?(with_browser = fun ~env:_ ~config:_ run -> run ())
+      ?with_browser
       name
       fn
   =
@@ -311,22 +311,24 @@ let with_exec_fixture
                in
                let run () =
                  if process && bind_eio_context then Eio_context.set_env env;
-                 with_browser ~env ~config (fun () ->
-                   fn
-                     ~config
-                     ~meta
-                     ~publication_recovery
-                     ~ctx_work:(make_ctx ()))
+                 fn
+                   ~config
+                   ~meta
+                   ~publication_recovery
+                   ~ctx_work:(make_ctx ())
                in
-               if bind_eio_context
-               then
-                 Eio_context.with_test_env
-                   ~net:(Eio.Stdenv.net env)
-                   ~clock:(Eio.Stdenv.clock env)
-                   ~mono_clock:(Eio.Stdenv.mono_clock env)
-                   ~sw
-                   run
-               else run ())))
+               match with_browser with
+               | Some with_browser -> with_browser ~env ~config run
+               | None ->
+                 if bind_eio_context
+                 then
+                   Eio_context.with_test_env
+                     ~net:(Eio.Stdenv.net env)
+                     ~clock:(Eio.Stdenv.clock env)
+                     ~mono_clock:(Eio.Stdenv.mono_clock env)
+                     ~sw
+                     run
+                 else run ())))
 
 let parse_json raw =
   let cleaned =

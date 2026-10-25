@@ -33,3 +33,16 @@ Source parsing and whitespace pass. Independent source reviews and corrected
 selected execution are pending at creation. These are scripted-adapter and DOM
 fixture controls, not live-browser, real provider, full regression, installed
 runtime, fleet or deployment proof.
+
+Initial corrected run [40233619435](https://github.com/jeong-sik/masc/actions/runs/40233619435)
+at dde494fcb653a44055a3784b9d23fe95f9a07a91 compiled, then timed out at the
+first native fixture after case79. No nine-case success was reached. Source
+inspection found nested Eio_context.with_test_env calls: its global mutex is
+non-reentrant, so the dispatch wrapper held it while the Add-on helper tried
+to bind it again. Earlier SOURCE PASS missed this lifetime deadlock.
+
+The native helper now owns the single test-context binding and full environment;
+the dispatch wrapper keeps its existing Time_compat clock lifetime but delegates
+context ownership for these three cases. Other cases keep their previous binding.
+The helper restores the full environment with its existing scoped snapshot.
+Corrected execution and fresh source review are pending.

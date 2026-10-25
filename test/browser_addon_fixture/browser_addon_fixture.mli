@@ -11,6 +11,9 @@ val with_worker :
   respond:(route:Browser_lane.route -> Browser_lane.verb -> Browser_lane.answer) ->
   (t -> 'a) -> 'a
 (** Owns attachment and confirmed worker detach, and restores the prior PATH.
+    Owns the Eio test context and full environment for that same lifetime.
+    Callers must not already hold [Eio_context.with_test_env]'s non-reentrant
+    global test lock.
     The invoking test declares the native launcher executable as a Dune dep.
     Fixture responses describe the scripted adapter, not real-browser support.
     [downloads] maps a download grant id to the publication the scripted

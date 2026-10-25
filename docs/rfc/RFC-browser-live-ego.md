@@ -102,9 +102,10 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 | `tab_history` | 새로고침은 `page.reload()`. 뒤로·앞으로는 `page.cdp()` 로 `Page.getNavigationHistory` 를 읽고 `Page.navigateToHistoryEntry` 로 한 칸 옮긴 뒤, 그 탭의 현재 항목이 그 칸이 되고 문서가 다 불러와질 때까지 기다린다 (agent 페이지만) | 한다. 그 쪽에 항목이 없으면 행동 전에 거절한다 |
 | `dialog_answer` | `page.info()` 가 페이지를 막은 대화상자를 알려 주고, `acceptDialog(text?)`·`dismissDialog()` 로 답한다 (agent 페이지만) | 한다. 탭 목록의 행에 `dialog` 가 실린다. 클릭·키 입력이 대화상자를 열면 그 영수증에 담고, 페이지 스크립트가 막히면 부분 효과다. 열린 동안 그 페이지의 읽기·이동·입력은 행동 전에 거절하고, 탭 닫기는 받는다. 연결의 프로세스가 하나라서(4절) 다음 명령도 그 대화상자에 닿는다 |
 | `download_listing` | agent 페이지를 건드리는 단계가 그 페이지에 `page.waitForEvent("download")` 대기를 하나 걸어 둔다. 잡힌 다운로드는 `saveAs` 로 worker 의 다운로드 폴더 아래 `ego/<id>` 에 저장하고, ego 의 임시 파일은 `delete()` 로 지운다. 대기는 다운로드마다 다시 걸린다. 대기가 실패하면(페이지가 닫힌 경우 포함) 멈추고, 그 페이지의 다음 단계가 다시 건다 | 한다(BrowserRead `mode=downloads`, 탭 하나). 행은 Gecko 와 같은 모양(대기 중·끝남·중단)이고, 끝난 파일은 Gecko 와 같은 broker 로 publish 해 `artifact` 로 돌려준다. 목록은 ego 프로세스 안에 있어서, 멈춘 명령 뒤 새 프로세스는 그때부터 본 것만 안다. `watchingSince` 가 그 시점이다. 운영자의 다운로드 폴더에는 남는 것이 없다. ego 의 브라우저가 다운로드하는 동안 그 폴더를 건드리기는 한다 |
-| `file_upload` | `page.setInputFiles(selector, paths)`에 native locator/ref와 worker 사본을 그대로 전달한다. label·container·shadow 해소는 SDK가 맡는다 | 영수증 `chosen`은 SDK에 넘긴 staged 파일 메타데이터이며 페이지의 파일 목록을 다시 관측한 값이 아니다. 파일 확인·sandbox 전달·공간 종료까지 lease는 MASC가 맡는다. `opener`는 native locator로 클릭하고 `waitForFileChooser()`의 SDK 대기를 쓴다. 실패한 chooser의 `setFiles([])` 정리는 보존한다 |
+| `file_upload` | `page.setInputFiles(selector, paths)`에 native locator/ref와 worker 사본을 그대로 전달한다. label·container·shadow 해소는 SDK가 맡는다 | 영수증 `chosen`은 SDK에 넘긴 staged 파일 메타데이터이며 페이지의 파일 목록을 다시 관측한 값이 아니다. 파일 확인·sandbox 전달·공간 종료까지 lease는 MASC가 맡는다. `opener`는 native locator로 클릭하고 `waitForFileChooser()`의 SDK 대기를 쓴다. 파일 전달 전에 포기한 chooser만 `setFiles([])`로 닫는다. `setFiles(paths)`에 진입한 뒤에는 실패하더라도 SDK가 정리를 맡으며 MASC가 두 번째 호출을 하지 않는다 |
 | `tab_activation` | CDP `Target.activateTarget` | 다음 단계 |
-| 드래그, 터치, 줌, 뷰포트 | `page.mouse.down`·`up` 등 | 다음 단계 |
+| 드래그 | waypoint 없는 selector 간 `drag_to`는 `page.dragAndDrop`. scene node·좌표·명시적 waypoint는 관측한 pointer 경로를 유지한다 | 한다. SDK에 없는 waypoint-list·scene identity 의미를 보존한다 |
+| 터치, 줌, 뷰포트 | 이 연결에서 아직 지원하지 않는다 | 다음 단계 |
 
 ego 만의 읽기는 연결 방식 표의 기능 `accessibility_snapshot` 으로 둔다. BrowserRead `mode=snapshot` 이 ego 스냅샷을 그대로 돌려주고, 줄마다 붙은 ref(`ref=12`)는 그 순간의 페이지를 가리킨다. BrowserInteract 의 click·fill·hover·double_click은 그 ref 나 role·글을 `target` 으로 받는다(`snapshot_target_input`). Ego 연결의 `selector`와 `target`은 Ego 자신의 locator 뜻을 따른다. `target`은 다른 연결에서 효과 전에 거절한다. 페이지가 바뀌거나 입력한 뒤, 또는 ego 가 Stale/Unknown ref 를 거절하면 새 snapshot 을 읽는다. ref 수명과 문서 식별은 ego 의 고유 registry 가 맡고 MASC 가 다시 구현하지 않는다. URL 검사는 native 메서드를 호출하기 전 관측이며, 메서드 내부 대기·입력과 원자적인 검사는 아니다.
 
@@ -186,8 +187,13 @@ space = "masc"
   downloads already call native SDK methods; their remaining adapters maintain
   MASC receipts, artifact publication and process/file lifetime.
 
-The persistent SDK-process adapter was rechecked on installed Ego .20:
-[session-gap evidence](../evidence/ego-native-session-gap/) shows a second
-process blocked on page.info while the opener owned a confirm. It progressed
-only after the original process dismissed it. Keep this process-state repair;
-do not infer that current .20 round exit always deletes download temp files.
+The persistent SDK-process adapter was checked on Ego 0.6.0.20 and rechecked
+on installed [0.6.1.11](../evidence/ego-native-session-gap/0.6.1.11/).
+The second SDK process made no progress past its before-info marker while the
+original process held the confirm; it returned after the original dismissed
+it. This supports retaining the serial session, without proving the SDK's
+internal blocking cause or relabeling earlier Keeper runs as new-version
+execution. The complete usage guides were byte-identical: the new guide
+exposed no additional Page method replacing a MASC adapter. Separately, the
+[.20 download observation](../evidence/ego-native-session-gap/#download-lifetime-is-not-inferred-from-the-guide)
+does not support claiming every SDK round exit deletes its download temp files.

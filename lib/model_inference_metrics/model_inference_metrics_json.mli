@@ -7,7 +7,10 @@ val render_keeper_prompt_feedback : aggregate -> string
 (** Redacted planning feedback. Pricing and billing fields are excluded. *)
 val compute_cost_latency_json :
   base_path:string -> window_minutes:int -> (Yojson.Safe.t, read_error) result
-(** Decision read failures propagate to the cache; partial samples are not published. *)
+(** Decision read failures propagate to the cache. Token and cost totals are
+    nullable: a field is a complete total only when every successful sample in
+    its lane reports that field. Explicit reported zero remains zero. Global
+    cost is null for no samples or any lane with incomplete cost evidence. *)
 
 (** Operator-only runtime history. Groups by the exact executed runtime from
     decision records; unpaired cost observations and records without an answerer

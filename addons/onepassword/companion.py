@@ -58,11 +58,12 @@ class Endpoint:
     socket_path: str
     invocation_id: str = field(repr=False)
     max_message_bytes: int
+    publication_id: str | None = field(repr=False)
 
     @classmethod
     def decode(cls, value):
         try:
-            if not isinstance(value, dict) or set(value) != {"socket_path", "invocation_id", "max_message_bytes"}:
+            if not isinstance(value, dict) or set(value) != {"socket_path", "invocation_id", "max_message_bytes", "publication_id"}:
                 raise ValueError("invalid endpoint")
             path, invocation_id, maximum = (value[key] for key in ("socket_path", "invocation_id", "max_message_bytes"))
             if (not isinstance(path, str) or "\x00" in path or not Path(path).is_absolute() or str(Path(path)) != path
@@ -70,6 +71,10 @@ class Endpoint:
                     or any(char not in "0123456789abcdef" for char in invocation_id)
                     or type(maximum) is not int or maximum < len('{"error":"outcome_unknown"}')):
                 raise ValueError("invalid endpoint")
+            publication_id = value["publication_id"]
+            if publication_id is not None and (not isinstance(publication_id, str) or len(publication_id) != 64
+                    or any(char not in "0123456789abcdef" for char in publication_id)):
+                raise ValueError("invalid publisher")
             parent = Path(path).parent
             info = parent.lstat()
             if (str(parent.resolve()) != str(parent) or not stat.S_ISDIR(info.st_mode)
@@ -78,7 +83,7 @@ class Endpoint:
             target = Path(path).lstat()
             if not stat.S_ISSOCK(target.st_mode) or target.st_uid != os.getuid():
                 raise ValueError("unsafe endpoint")
-            return cls(path, invocation_id, maximum)
+            return cls(path, invocation_id, maximum, publication_id)
         except (ValueError, TypeError, OSError, UnicodeError):
             raise BridgeError("unavailable") from None
 
@@ -91,7 +96,49 @@ class _Phase(Enum):
     CLOSED = auto()
 
 
-class Companion:
+class _Transport:
+    @staticmethod
+    def _close_flows(*flows):
+        for flow in flows:
+            if flow is None:
+                continue
+            try:
+                flow.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                flow.close()
+            except OSError:
+                pass
+
+    def _encode(self, value):
+        try:
+            raw = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        except (ValueError, TypeError, UnicodeError, RecursionError):
+            raise BridgeError("not_started") from None
+        if len(raw) > self._endpoint.max_message_bytes:
+            raise BridgeError("not_started")
+        return raw
+
+    def _roundtrip(self, flow, raw):
+        # A partial send is uncertain; this method never reconnects or retries.
+        flow.sendall(raw + b"\n")
+        reply = bytearray()
+        while b"\n" not in reply:
+            chunk = flow.recv(min(4096, self._endpoint.max_message_bytes + 2 - len(reply)))
+            if not chunk:
+                raise ValueError("departed host")
+            reply.extend(chunk)
+            if len(reply) > self._endpoint.max_message_bytes + 1:
+                raise ValueError("oversized reply")
+        line, trailing = bytes(reply).split(b"\n", 1)
+        if trailing:
+            raise ValueError("unexpected pipelined reply")
+        return json.loads(line.decode("utf-8"), object_pairs_hook=_object,
+                          parse_constant=_constant, parse_float=_finite_float)
+
+
+class Companion(_Transport):
     def __init__(self, descriptor):
         self._endpoint = Endpoint.decode(descriptor)
         self._io_lock, self._state_lock = threading.Lock(), threading.Lock()
@@ -149,20 +196,6 @@ class Companion:
         with self._state_lock:
             return self._operation_id
 
-    @staticmethod
-    def _close_flows(*flows):
-        for flow in flows:
-            if flow is None:
-                continue
-            try:
-                flow.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            try:
-                flow.close()
-            except OSError:
-                pass
-
     def interrupt(self):
         """Stop original bind/command IO while preserving nonce disposal IO."""
         # An original call's late error handler must not cancel an independent
@@ -191,32 +224,6 @@ class Companion:
             flow, self._socket = self._socket, None
             withdrawal, self._withdraw_socket = self._withdraw_socket, None
         self._close_flows(flow, withdrawal)
-
-    def _encode(self, value):
-        try:
-            raw = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
-        except (ValueError, TypeError, UnicodeError, RecursionError):
-            raise BridgeError("not_started") from None
-        if len(raw) > self._endpoint.max_message_bytes:
-            raise BridgeError("not_started")
-        return raw
-
-    def _roundtrip(self, flow, raw):
-        # A partial send is uncertain; this method never reconnects or retries.
-        flow.sendall(raw + b"\n")
-        reply = bytearray()
-        while b"\n" not in reply:
-            chunk = flow.recv(min(4096, self._endpoint.max_message_bytes + 2 - len(reply)))
-            if not chunk:
-                raise ValueError("departed host")
-            reply.extend(chunk)
-            if len(reply) > self._endpoint.max_message_bytes + 1:
-                raise ValueError("oversized reply")
-        line, trailing = bytes(reply).split(b"\n", 1)
-        if trailing:
-            raise ValueError("unexpected pipelined reply")
-        return json.loads(line.decode("utf-8"), object_pairs_hook=_object,
-                          parse_constant=_constant, parse_float=_finite_float)
 
     def withdraw(self):
         """Dispose only the original nonce; retry an unknown result explicitly.
@@ -325,3 +332,66 @@ class Companion:
             self.interrupt()
             raise BridgeError("outcome_unknown")
         self.interrupt()
+
+
+class Publisher(_Transport):
+    """Original invocation's public notices, independent of Browser settlement.
+
+    Each call sends one immutable envelope and never retries it. A failed ACK
+    remains uncertain; only its owned outbox may reconcile the same ID/envelope.
+    Closing interrupts connect/send/receive without waiting for the IO lock.
+    """
+    def __init__(self, descriptor):
+        self._endpoint = Endpoint.decode(descriptor)
+        if self._endpoint.publication_id is None:
+            raise BridgeError("unavailable")
+        self._io_lock, self._state_lock = threading.Lock(), threading.Lock()
+        self._closed, self._socket = False, None
+        self._original_identity = self._identity()
+
+    def _identity(self):
+        try:
+            path = Path(self._endpoint.socket_path)
+            parent, target = path.parent.lstat(), path.lstat()
+            if (str(path.parent.resolve()) != str(path.parent) or not stat.S_ISDIR(parent.st_mode)
+                    or stat.S_IMODE(parent.st_mode) != 0o700 or parent.st_uid != os.getuid()
+                    or not stat.S_ISSOCK(target.st_mode) or target.st_uid != os.getuid()):
+                raise ValueError("changed publisher")
+            return (parent.st_dev, parent.st_ino, target.st_dev, target.st_ino)
+        except (OSError, ValueError):
+            raise BridgeError("unavailable") from None
+
+    def publish(self, event):
+        raw = self._encode({"publication_id": self._endpoint.publication_id, "event": event})
+        with self._io_lock:
+            with self._state_lock:
+                if self._closed:
+                    raise BridgeError("unavailable")
+                try:
+                    flow = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                except OSError:
+                    raise BridgeError("unavailable") from None
+                self._socket = flow
+            try:
+                if self._identity() != self._original_identity:
+                    raise BridgeError("unavailable")
+                flow.connect(self._endpoint.socket_path)
+                if self._identity() != self._original_identity:
+                    raise BridgeError("outcome_unknown")
+                reply = self._roundtrip(flow, raw)
+                if (not isinstance(reply, dict) or set(reply) != {"accepted"}
+                        or reply["accepted"] is not True):
+                    raise BridgeError("outcome_unknown")
+            except (OSError, ValueError, TypeError, UnicodeError):
+                raise BridgeError("outcome_unknown") from None
+            finally:
+                with self._state_lock:
+                    if self._socket is flow:
+                        self._socket = None
+                self._close_flows(flow)
+
+    def close(self):
+        with self._state_lock:
+            self._closed = True
+            flow, self._socket = self._socket, None
+        self._close_flows(flow)

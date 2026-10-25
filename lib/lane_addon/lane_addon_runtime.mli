@@ -181,7 +181,14 @@ val capture_tool_request_owner : config:Workspace.config -> access:Lane_addon_so
     discover the original ID rather than minting another one. This does not
     dispatch, commit or authorize a later RPC. Manual/missing/conflicting
     configuration is refused rather than supplying invented revisions. *)
-val call_exported_tool_with_authority : continuation:(Lane_addon_companion_origin.source, Lane_addon_companion_origin.error) result option ->
+type companion_publication = origin:Lane_addon_companion_origin.record ->
+  output_schema:Yojson.Safe.t -> event:Lane_addon_companion_publication.event ->
+  (unit,unit) result
+(** Host-injected durable continuation admission. The original private provider
+    owns this callback through delivery; a successful result acknowledges only
+    queue admission. The package never supplies a route or a replacement sink. *)
+val call_exported_tool_with_authority : companion_publish:companion_publication option ->
+  continuation:(Lane_addon_companion_origin.source, Lane_addon_companion_origin.error) result option ->
   on_complete:(unit -> unit) -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal option ->
   config:Workspace.config -> access:Lane_addon_sources.access -> reserved:string list ->
   export:tool_export -> arguments:Yojson.Safe.t ->

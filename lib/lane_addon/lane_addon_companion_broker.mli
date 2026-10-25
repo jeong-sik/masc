@@ -28,7 +28,8 @@ val create : sw:Eio.Switch.t -> directory:string -> max_message_bytes:int -> (t,
     A credentialless first frame may withdraw its exact invocation nonce.
     Its acknowledgement proves admission removed, not Browser settlement.
     Repeating withdrawal of an absent nonce cannot bind or dispatch input. *)
-val issue : t -> bind:(selection -> (binding, error) result) -> (grant, error) result
+val issue : t -> publish:(Yojson.Safe.t -> (unit, error) result) option ->
+  bind:(selection -> (binding, error) result) -> (grant, error) result
 (** [bind] captures one exact owner after checking the original host principal
     and declarations. Binding itself must send no Browser input. The first
     authenticated connection consumes the grant before any yielding work. *)
@@ -38,10 +39,17 @@ val accept : grant -> unit
     unclaimed grant can bind after its public reply, until this provider ends.
     This never restores a cancelled, consumed or revoked grant. *)
 val end_invocation : grant -> unit
-(** Withdraw an unaccepted unused grant. Accepted or already claimed grants
-    remain with their original provider for background binding/execution. *)
-val cancel : grant -> unit
-(** Cancel an unused or claimed original invocation, including after dispatch. *)
+(** Reject an invocation that has not been accepted, including a Browser it
+    already claimed. An accepted invocation keeps its original Browser and
+    publisher authorities independently until their corresponding owner ends. *)
+val cancel_invocation : grant -> unit
+(** Reject the original invocation and both of its private authorities.
+    Browser Release, peer loss and credentialless withdrawal end only Browser
+    admission. A separately authenticated publisher can deliver its final public
+    notice after that settlement, until this original provider is revoked.
+    Publication waits for [accept], validates through the captured callback and
+    acknowledges only confirmed durable host admission. Its callback must never
+    dispatch Browser input or discover a replacement owner. *)
 val revoke : t -> unit
 val await_stopped : t -> (unit, shutdown_error) result
 (** Joins this broker's listener/connections, not an external Browser's cleanup.

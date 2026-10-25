@@ -2049,7 +2049,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
     Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () ->
       Eio.Promise.resolve mark_cleanup_started ();
       Eio.Promise.await cleanup_allowed)) (fun () -> invoke None) in
-  let remote_call () = Runtime.call_exported_tool_with_authority ~continuation:None
+  let remote_call () = Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
     ~on_complete:(fun () -> Atomic.set owner_complete true) ~on_result:(fun _ -> ())
     ~authorize:(Some authorize) ~principal:None ~config ~access ~reserved:[]
     ~export:remote_handle ~arguments:(`Assoc []) in

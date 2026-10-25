@@ -262,6 +262,18 @@ val load_selections_with_errors :
     {!Keeper_event_queue_state.pending_selections}: the same durable read and
     the same typed read errors, keeping each entry's [admitted_revision]. *)
 
+val observe_state_result :
+  base_path:string ->
+  keeper_name:string ->
+  (Keeper_event_queue_state.t, snapshot_read_error list) result
+(** Lock-free read-only observation of the complete durable owner state.
+    Pending selections, transition outbox and projected dispositions belong to
+    the same two-identical-full-state observation. A missing store is [Ok]
+    empty state; failed or incoherent reads are [Error], never healthy emptiness.
+    Does not acquire the owner transaction lock, checkpoint, compact a WAL,
+    project reactions, or make a state transition. Cancellation propagates.
+    The caller owns I/O offloading, as for {!observe_snapshot_with_errors}. *)
+
 val observe_snapshot_with_errors :
   base_path:string -> keeper_name:string -> snapshot_with_errors
 (** Read-only operator projection of the pending queue. Unlike
@@ -315,6 +327,12 @@ module For_testing : sig
     -> (Keeper_event_queue_state.t, string) result
   (** Call-scoped interleave between decoding bytes and validating their file
       identity. Exercises the production loader without a global test hook. *)
+
+  val observe_state_result_with_interleave :
+    between_samples:(unit -> unit) ->
+    base_path:string ->
+    keeper_name:string ->
+    (Keeper_event_queue_state.t, snapshot_read_error list) result
 
   val observe_snapshot_with_errors_with_interleave :
     between_samples:(unit -> unit) ->

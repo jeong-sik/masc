@@ -1112,27 +1112,33 @@ let load_selections_with_errors ~base_path ~keeper_name =
   load_with_read_errors ~projection:State.pending_selections ~base_path ~keeper_name
 ;;
 
-let observe_snapshot_with_errors_with ~between_samples ~base_path ~keeper_name =
+let observe_state_result_with ~between_samples ~base_path ~keeper_name =
   match
     observe_state_read_only_typed_with
       ~between_samples
       ~base_path
       ~keeper_name
   with
-  | Ok state -> { pending = State.pending state; read_errors = [] }
+  | Ok state -> Ok state
   | Error (Observation_read_failed message) ->
-    { pending = Keeper_event_queue.empty
-    ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
-    }
+    Error (diagnose_snapshot_read_error ~base_path ~keeper_name message)
   | Error (Observation_changed _ as error) ->
-    { pending = Keeper_event_queue.empty
-    ; read_errors =
-        [ { kind = Incoherent_read
-          ; path = None
-          ; message = read_only_observation_error_to_string error
-          }
-        ]
-    }
+    Error
+      [ { kind = Incoherent_read
+        ; path = None
+        ; message = read_only_observation_error_to_string error
+        }
+      ]
+;;
+
+let observe_state_result ~base_path ~keeper_name =
+  observe_state_result_with ~between_samples:(fun () -> ()) ~base_path ~keeper_name
+;;
+
+let observe_snapshot_with_errors_with ~between_samples ~base_path ~keeper_name =
+  match observe_state_result_with ~between_samples ~base_path ~keeper_name with
+  | Ok state -> { pending = State.pending state; read_errors = [] }
+  | Error read_errors -> { pending = Keeper_event_queue.empty; read_errors }
 ;;
 
 let observe_snapshot_with_errors ~base_path ~keeper_name =
@@ -2011,6 +2017,9 @@ module For_testing = struct
     | Error _ as error -> error
     | Ok owner -> Owner_lock.with_durable_lock owner (fun () ->
         load_state_unlocked ~after_read owner)
+  ;;
+
+  let observe_state_result_with_interleave = observe_state_result_with
   ;;
 
   let observe_snapshot_with_errors_with_interleave =

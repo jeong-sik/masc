@@ -135,13 +135,13 @@ val agent_core_version : string
 
 (** {1 Construction} *)
 
-(** [checkpoint_sink] attaches an optional caller-owned mutation-boundary
-    checkpoint sink. The pipeline updates live state first, then emits a typed
-    snapshot after assistant collection, after base tool-result append, and
-    after successful context injection. A sink failure is returned before the
-    pipeline advances to the next mutation stage. The sink is passed here
-    rather than through {!options} so callers that construct options records
-    remain source-compatible.
+(** [checkpoint_sink] selects caller-owned checkpoint persistence. Its failure
+    rejects the candidate mutation or continuation, including during journalled
+    execution; existing sinks may perform Owner and input authority transitions.
+    These checkpoints are not also appended to the execution journal. Without
+    a caller sink, journalled execution commits frozen typed checkpoint facts;
+    without either store, state remains in memory. The journal reader reports
+    absence explicitly and does not fall back to caller-owned checkpoints.
 
     [options.provider_config] is the exact typed provider carrier. Endpoint,
     credential, request path, headers, and capability overrides are preserved.

@@ -1,0 +1,9 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40215354533
+Complete raw log SHA256: df312da1ffb5c436f07d96f5c03db861db7d5710544dde28271813c7f6b95533
+Complete raw log bytes: 129740
+Selected checkout, relevant assertions, failures and suite summaries.
+
+test suite	Checkout	2026-10-25T17:12:58.7766725Z HEAD is now at 3e3d1c92 feat(execution): commit frozen typed checkpoints before projection sinks
+test suite	Test	2026-10-25T17:13:54.0219333Z [targeted] FAIL - packages/agent_core/test/test_advanced_agent names no suite: no test/packages/agent_core/test/test_advanced_agent.ml, packages/agent_core/test/test_advanced_agent.ml, test/packages/agent_core/test/test_advanced_agent.py or packages/agent_core/test/test_advanced_agent.py, and no (alias runtest-test_advanced_agent)
+test suite	Test	2026-10-25T17:14:30.9780900Z Error: Unbound module Checkpoint_snapshot
+test suite	Test	2026-10-25T17:14:32.4636708Z Error (warning 8 [partial-match]): this pattern-matching is not exhaustive.

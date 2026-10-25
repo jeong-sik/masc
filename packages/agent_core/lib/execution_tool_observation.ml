@@ -80,6 +80,6 @@ let project ~find_node event =
          Ok (observed (ToolCompleted {agent_name;invocation;tool_name;output}))
        | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
        | ToolResult _ | Image _ | Document _ | Audio _ -> Error (Invalid_tool_fact node_id))
-  | Node_updated {update=(Provider_event _ | Provider_request_snapshot _ | Provider_response_snapshot _
+  | Node_updated {update=(Checkpoint_snapshot _ | Provider_event _ | Provider_request_snapshot _ | Provider_response_snapshot _
       | Output_delta _ | Output_snapshot _ | Tool_input_delta _ | Tool_input_snapshot _ | Tool_progress _);_}
   | Node_closed _ -> Ok None

@@ -1,6 +1,8 @@
-(** Private checkpoint persistence shared by input ownership and pipeline
-    mutation boundaries. The supplied pending proof belongs to the same
-    candidate state; no second read of the mutable Agent participates. *)
+(** Checkpoint persistence for input ownership and pipeline mutations.
+    An explicit caller sink remains the required persistence authority; it is
+    not an optional observer and does not dual-write a journal checkpoint.
+    Without a caller sink, an active journal commits a frozen candidate. With
+    neither authority the transition remains in-memory. *)
 
 val persist_for_state
   :  Agent_types.t

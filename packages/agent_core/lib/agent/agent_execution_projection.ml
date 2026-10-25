@@ -70,6 +70,7 @@ type node =
   }
 
 type node_update =
+  | Checkpoint_snapshot of Checkpoint_snapshot.t
   | Provider_event of Yojson.Safe.t
   | Provider_request_snapshot of Llm_provider.Completion_outcome.request_provenance
   | Provider_response_snapshot of Llm_provider.Types.api_response
@@ -397,6 +398,7 @@ let node value =
 ;;
 
 let node_update = function
+  | Event.Checkpoint_snapshot value -> Checkpoint_snapshot value
   | Event.Provider_event value -> Provider_event value
   | Event.Provider_request_snapshot value -> Provider_request_snapshot value
   | Event.Provider_response_snapshot value -> Provider_response_snapshot value
@@ -698,7 +700,7 @@ let provider_requests t ?(after : cursor option) () =
                List.exists (fun (update:Event.node_update Journal.event_record) ->
                  match update.value with
                  | Event.Provider_request_snapshot _ -> Event.seq update.event > after_seq
-                 | Event.Provider_event _ | Event.Provider_response_snapshot _
+                 | Event.Checkpoint_snapshot _ | Event.Provider_event _ | Event.Provider_response_snapshot _
                  | Event.Output_delta _ | Event.Output_snapshot _ | Event.Tool_input_delta _
                  | Event.Tool_input_snapshot _ | Event.Tool_progress _ | Event.Tool_result _ -> false)
                  view.updates in
@@ -710,6 +712,29 @@ let provider_requests t ?(after : cursor option) () =
         | Event.Output_block _ | Event.Tool_invocation _ | Event.Tool_attempt -> visit records rest
   in
   visit [] [root,None]
+;;
+
+type checkpoint_observation =
+  {snapshot:Checkpoint_snapshot.t;event_id:Event_id.t;run_id:Run_id.t;through:cursor}
+
+let latest_checkpoint t =
+  let* snapshot=refresh t in
+  let* root=match Journal.Reducer.find_run snapshot.reducer t.locator_run_id with
+    | None -> Error (Locator_not_found t.locator_run_id)
+    | Some run -> Ok (Journal.run_root run.run) in
+  let* view=match Journal.Reducer.find_node snapshot.reducer root with
+    | None -> Error (Semantic_failure {seq=Durable.last_seq snapshot.durable;
+                  detail="checkpoint root disappeared"})
+    | Some view -> Ok view in
+  Ok (List.fold_left (fun latest (record:Event.node_update Journal.event_record) ->
+    match record.value with
+    | Event.Checkpoint_snapshot snapshot -> Some
+      {snapshot;event_id=Event.event_id record.event;run_id=Event.run_id record.event;
+       through={scope_id=t.scope_id;seq=Event.seq record.event}}
+    | Event.Provider_event _ | Event.Provider_request_snapshot _ | Event.Provider_response_snapshot _
+    | Event.Output_delta _ | Event.Output_snapshot _ | Event.Tool_input_delta _
+    | Event.Tool_input_snapshot _ | Event.Tool_progress _ | Event.Tool_result _ -> latest)
+    None view.updates)
 ;;
 
 let settled_tool_invocations t =
@@ -731,7 +756,7 @@ let settled_tool_invocations t =
         (fun (update : Event.node_update Journal.event_record) ->
            match update.value with
            | Event.Tool_result _ -> Some (Event.seq update.event)
-           | Event.Provider_request_snapshot _ | Event.Provider_event _ | Event.Provider_response_snapshot _
+           | Event.Checkpoint_snapshot _ | Event.Provider_request_snapshot _ | Event.Provider_event _ | Event.Provider_response_snapshot _
            | Event.Output_delta _ | Event.Output_snapshot _
            | Event.Tool_input_delta _ | Event.Tool_input_snapshot _
            | Event.Tool_progress _ -> None)

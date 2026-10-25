@@ -102,6 +102,7 @@ val node_kind : node -> node_kind
     snapshots retain the canonical provider content type, so their structural
     classification cannot disagree with an untyped JSON label. *)
 type node_update =
+  | Checkpoint_snapshot of Checkpoint_snapshot.t
   | Provider_event of Yojson.Safe.t
   | Provider_request_snapshot of Llm_provider.Completion_outcome.request_provenance
   | Provider_response_snapshot of Llm_provider.Types.api_response

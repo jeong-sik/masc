@@ -1,0 +1,36 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40215507460
+Complete raw log SHA256: c389b6045cf55290f02b7c34b297b2185d1a68ecedc1a0a5cb3277c192fbd567
+Complete raw log bytes: 249592
+Selected checkout, relevant assertions, failures and suite summaries.
+
+test suite	Checkout	2026-10-25T17:14:52.8031403Z HEAD is now at 82c8fc0d fix(execution): expose checkpoint facts and complete consumer match
+test suite	Test	2026-10-25T17:16:25.8537653Z ASSERT checkpoint retains actual source
+test suite	Test	2026-10-25T17:16:26.4213598Z ASSERT checkpoint persisted
+test suite	Test	2026-10-25T17:16:26.6529011Z ASSERT journal checkpoints exist without a caller sink
+test suite	Test	2026-10-25T17:16:26.6529510Z ASSERT latest checkpoint cites exact committed event and cursor
+test suite	Test	2026-10-25T17:16:26.6530022Z ASSERT observer cannot mutate canonical checkpoint context
+test suite	Test	2026-10-25T17:16:26.6530525Z ASSERT each checkpoint reader receives an independent context
+test suite	Test	2026-10-25T17:16:26.6560101Z ASSERT reopened reader retains checkpoint identity and cursor
+test suite	Test	2026-10-25T17:16:26.6798766Z ASSERT effect committed before checkpoint observer failure
+test suite	Test	2026-10-25T17:16:26.6802331Z ASSERT sink receives the already committed checkpoint
+test suite	Test	2026-10-25T17:16:27.1861256Z Test Successful in 1.360s. 81 tests run.
+test suite	Test	2026-10-25T17:16:28.9613965Z ASSERT malformed checkpoint fact is rejected
+test suite	Test	2026-10-25T17:16:28.9617100Z ASSERT checkpoint fact strictly roundtrips
+test suite	Test	2026-10-25T17:16:28.9650487Z ASSERT checkpoint cannot cross Agent identity
+test suite	Test	2026-10-25T17:16:28.9652368Z ASSERT rejected checkpoint does not consume source sequence
+test suite	Test	2026-10-25T17:16:28.9724190Z   [FAIL]        authority          1   typed checkpoint facts enforce ownersh...
+test suite	Test	2026-10-25T17:16:29.1887072Z │ [FAIL]        authority          1   typed checkpoint facts enforce owne...  │
+test suite	Test	2026-10-25T17:16:29.1889635Z FAIL execution transaction rejected: invalid execution journal argument: tool invocation turn does not match its provider attempt
+test suite	Test	2026-10-25T17:16:29.1928854Z 1 failure! in 0.298s. 9 tests run.
+test suite	Test	2026-10-25T17:16:31.1475478Z Test Successful in 0.328s. 20 tests run.
+test suite	Test	2026-10-25T17:16:32.9554369Z ASSERT assistant checkpoint persisted before provider lease release
+test suite	Test	2026-10-25T17:16:32.9556505Z ASSERT context checkpoint persisted before callback
+test suite	Test	2026-10-25T17:16:32.9558706Z ASSERT checkpoint turn count
+test suite	Test	2026-10-25T17:16:32.9559138Z ASSERT yielded checkpoint stage
+test suite	Test	2026-10-25T17:16:32.9559652Z ASSERT yielded checkpoint includes projected context
+test suite	Test	2026-10-25T17:16:32.9567906Z ASSERT base tool-result checkpoint boundary
+test suite	Test	2026-10-25T17:16:32.9579462Z ASSERT context checkpoint failure does not reacquire provider lease
+test suite	Test	2026-10-25T17:16:32.9648713Z ASSERT checkpoint stage
+test suite	Test	2026-10-25T17:16:32.9740755Z ASSERT cancellation stops before next provider
+test suite	Test	2026-10-25T17:16:32.9747644Z ASSERT exception stops before next provider call
+test suite	Test	2026-10-25T17:16:32.9763484Z Test Successful in 0.053s. 21 tests run.

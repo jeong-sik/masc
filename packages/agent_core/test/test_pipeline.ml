@@ -1863,7 +1863,9 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
       (List.length tail.events)
 ;;
 
-let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) () =
+exception Checkpoint_authority_refused
+
+let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoint_failure () =
   with_execution_test_dir "agent_core-tool-observation-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let bus=Event_bus.create () in
@@ -1884,7 +1886,22 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) () =
   let transport=Llm_provider.Llm_transport.custom
     {complete_sync=(fun _ -> {Llm_provider.Llm_transport.response=next ();latency_ms=None});
      complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> next ())} in
-  let agent=Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool]
+  let checkpoint_sink=Option.map (fun fail (snapshot:Agent.checkpoint_snapshot) ->
+    match snapshot.stage with
+    | Agent.After_tool_results_appended ->
+      let locator=match !locator with Some locator->locator
+        | None->Alcotest.fail "checkpoint observer has no canonical locator" in
+      let projection=match Agent.open_execution_projection ~runtime ~dir locator with
+        | Ok projection->projection
+        | Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+      let settled=match Agent.Execution_projection.settled_tool_invocations projection with
+        | Ok settled->settled
+        | Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+      Alcotest.(check int) "effect committed before checkpoint observer failure" 1 (List.length settled);
+      fail ()
+    | Agent.After_assistant_collected | Agent.After_context_injection
+    | Agent.After_input_wait_changed | Agent.After_rejected_response_dropped -> Ok ()) checkpoint_failure in
+  let agent=Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool] ?checkpoint_sink
       ~config:{(Types.default_config ~model:"test-model") with name="canonical-bus"}
       ~options:{Agent.default_options with transport=Some transport;event_bus=Some bus;
         provider_config=Some (Provider_mock.to_provider_config ())} () in
@@ -1915,7 +1932,22 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) () =
            | Ok ()->() |Error error->Alcotest.fail (Internal_scope.error_to_string error));
           result) with
       | Ok result->result |Error error->Alcotest.fail (Internal_writer.scope_failure_to_string error) in
-  (match run () with Ok _ -> () | Error error -> Alcotest.fail (Error.to_string error));
+  let outcome=try run () with
+    | Checkpoint_authority_refused -> Error (Error.Internal "required checkpoint authority raised") in
+  match checkpoint_failure with
+  | Some _ ->
+    Alcotest.(check bool) "required checkpoint authority refusal rejects continuation" true
+      (match outcome with Error _->true |Ok _->false);
+    Alcotest.(check int) "required checkpoint refusal never repeats committed effect" 1 !tool_calls;
+    Alcotest.(check int) "required checkpoint refusal prevents next provider call" 1 (List.length !responses);
+    let locator=match !locator with Some locator->locator |None->Alcotest.fail "missing locator" in
+    let projection=match Agent.open_execution_projection ~runtime ~dir locator with
+      | Ok projection->projection |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+    Alcotest.(check bool) "caller-owned checkpoints are not dual-written into journal" true
+      (match Agent.Execution_projection.latest_checkpoint projection with
+       | Ok None->true |Ok (Some _) |Error _->false)
+  | None ->
+  (match outcome with Ok _ -> () | Error error -> Alcotest.fail (Error.to_string error));
   Alcotest.(check int) "tool effect once" 1 !tool_calls;
   Alcotest.(check int) "called observation arrives before effect" 1 (List.length !during);
   let deliveries= !during @ Event_bus.drain sub in
@@ -1955,6 +1987,34 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) () =
       (Option.map Agent.Execution_projection.Event_id.to_string source.parent_event_id) observation.meta.parent_event_id;
     Alcotest.(check (option string)) "no synthetic lifecycle causation replaces source facts" None observation.meta.caused_by)
     observations;
+  let checkpoint_facts=List.filter_map (fun (event:Agent.Execution_projection.event)->
+    match event.payload with
+    | Node_updated {update=Checkpoint_snapshot snapshot;_}->Some (event,snapshot)
+    | Node_opened _ | Node_updated _ | Node_closed _->None) page.events in
+  Alcotest.(check bool) "journal checkpoints exist without a caller sink" true
+    (List.exists (fun (_,snapshot)->Checkpoint_snapshot.stage snapshot=After_tool_results_appended) checkpoint_facts);
+  let latest=match Agent.Execution_projection.latest_checkpoint projection with
+    | Ok (Some latest)->latest |Ok None->Alcotest.fail "latest canonical checkpoint absent"
+    | Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  Alcotest.(check bool) "latest checkpoint cites exact committed event and cursor" true
+    (List.exists (fun ((event:Agent.Execution_projection.event),snapshot)->
+      Agent.Execution_projection.Event_id.equal event.event_id latest.event_id &&
+      Agent.Execution_projection.cursor_seq latest.through=event.seq &&
+      Checkpoint_snapshot.equal snapshot latest.snapshot) checkpoint_facts);
+  let restore ()=match Checkpoint_snapshot.checkpoint latest.snapshot with
+    | Ok checkpoint->checkpoint |Error error->Alcotest.fail (Checkpoint_snapshot.error_to_string error) in
+  let first_copy=restore () in
+  Context.set first_copy.context "reader-mutation" (`Bool true);
+  Alcotest.(check bool) "each checkpoint reader receives an independent context" true
+    (Context.get (restore ()).context "reader-mutation"=None);
+  let reopened=match Agent.open_execution_projection ~runtime ~dir locator with
+    | Ok projection->projection |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  Alcotest.(check bool) "reopened reader retains checkpoint identity and cursor" true
+    (match Agent.Execution_projection.latest_checkpoint reopened with
+     | Ok (Some restored)->Checkpoint_snapshot.equal restored.snapshot latest.snapshot &&
+       Agent.Execution_projection.Event_id.equal restored.event_id latest.event_id &&
+       restored.through=latest.through
+     | Ok None | Error _ ->false);
   let read_tools projection after limit = match Agent.Execution_projection.read_tool_observations projection
       ~after ~through:page.high_watermark ~limit () with
     | Ok page->page |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
@@ -3835,7 +3895,7 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
         , Tool_contract.Terminal_after_success Tool_contract.Effect_outcome_unknown ))
 ;;
 
-let test_agent_run_replays_precheckpoint_terminal_settlement () =
+let test_agent_run_replays_stale_checkpoint_terminal_settlement () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -3920,7 +3980,7 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
                  saved_checkpoint := Some snapshot.checkpoint;
                  Ok ()
                | Agent.After_tool_results_appended ->
-                 Error "simulated crash before Agent tool-result checkpoint"
+                 raise Sys.Break
                | Agent.After_context_injection ->
                  Alcotest.fail "fixture unexpectedly reached context injection"
                | Agent.After_input_wait_changed
@@ -3952,10 +4012,9 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
                     ~api_strategy:Internal_pipeline.Sync
                     initial_agent)
               with
-              | Error _ -> ()
-              | Ok _ ->
-                Alcotest.fail
-                  "simulated crash boundary completed instead of rejecting its checkpoint")
+              | exception Sys.Break -> ()
+              | Error error -> Alcotest.fail (Error.to_string error)
+              | Ok _ -> Alcotest.fail "reserved checkpoint delivery interruption did not escape")
           with
           | Ok () -> ()
           | Error failure ->
@@ -4730,9 +4789,9 @@ let () =
             `Quick
             test_terminal_durability_failure_is_typed_non_retryable
         ; Alcotest.test_case
-            "terminal pre-checkpoint settlement survives removal and drift"
+            "stale checkpoint terminal settlement survives removal and drift"
             `Quick
-            test_agent_run_replays_precheckpoint_terminal_settlement
+            test_agent_run_replays_stale_checkpoint_terminal_settlement
         ; Alcotest.test_case
             "Agent.run rejects a closed-Failed turn on resume (#2683)"
             `Quick
@@ -4777,6 +4836,12 @@ let () =
             "durable tool bus uses canonical committed facts"
             `Quick
             (test_durable_tool_bus_uses_canonical_facts ~delivery_fault:false)
+        ; Alcotest.test_case "required checkpoint sink Error refuses continuation" `Quick
+            (test_durable_tool_bus_uses_canonical_facts
+              ~checkpoint_failure:(fun () -> Error "checkpoint delivery refused"))
+        ; Alcotest.test_case "required checkpoint sink exception refuses continuation" `Quick
+            (test_durable_tool_bus_uses_canonical_facts
+              ~checkpoint_failure:(fun () -> raise Checkpoint_authority_refused))
         ; Alcotest.test_case
             "durable tool partial delivery retains source cursor"
             `Quick

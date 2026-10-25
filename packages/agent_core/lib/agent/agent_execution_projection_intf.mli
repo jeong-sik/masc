@@ -51,6 +51,7 @@ module type S = sig
     }
 
   type node_update =
+  | Checkpoint_snapshot of Checkpoint_snapshot.t
     | Provider_event of Yojson.Safe.t
     | Provider_request_snapshot of Llm_provider.Completion_outcome.request_provenance
     | Provider_response_snapshot of Llm_provider.Types.api_response
@@ -251,6 +252,16 @@ module type S = sig
       [after] selects only attempts opened or request snapshots materialized
       after that exact same-scope journal boundary. *)
   val provider_requests : t -> ?after:cursor -> unit -> (provider_request list, error) result
+
+  type checkpoint_observation =
+    { snapshot : Checkpoint_snapshot.t
+    ; event_id : Event_id.t
+    ; run_id : Run_id.t
+    ; through : cursor
+    }
+  (** Latest committed checkpoint of the selected root, excluding child runs.
+      Absence is explicit; this observation grants no effect replay permission. *)
+  val latest_checkpoint : t -> (checkpoint_observation option, error) result
 
   val settled_tool_invocations : t -> (settled_tool_invocation list, error) result
   (** Canonically settled invocations of this root run, in journal settlement

@@ -364,7 +364,8 @@ val load_file : string -> string
 
 (** Load entire file as string, or [None] when the file is missing.
     A file that vanishes before it is opened is also absent. Other I/O
-    failures, including denied or non-directory parents, raise [Sys_error].
+    failures, including denied or non-directory parents and a directory used
+    as the file, raise [Sys_error].
     This preserves {!load_file}'s opened-descriptor read across a concurrent
     atomic replacement; the path need not keep naming that descriptor.
     Only an absent path at open is [None]. Open, read and close form one

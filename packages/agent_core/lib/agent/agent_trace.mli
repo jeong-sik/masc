@@ -77,8 +77,12 @@ val with_raw_trace_run_classified_result
 (** Execute [f] within a raw-trace run, handling start/finish recording
     and lifecycle status updates.  [f] receives [Some active_run] when
     raw-trace is configured, [None] otherwise.  [of_core_error] lifts
-    trace-infrastructure failures into the caller's carrier, while
+    trace-start failures into the caller's carrier, while
     [error_to_string] is used only for lifecycle/raw-trace diagnostics.
+
+    A trace-finalization error is reported separately and cannot replace [f]'s
+    result, completion callback outcome or lifecycle status. In particular,
+    finalization after a durable terminal commit does not relabel execution.
 
     If [f] raises, the original exception and raw backtrace are preserved.
     A secondary failure to finalize the raw trace is emitted as a structured

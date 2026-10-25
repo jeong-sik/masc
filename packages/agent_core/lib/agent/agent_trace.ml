@@ -142,16 +142,6 @@ let invoke_on_run_complete agent ~ok =
          [ Log.S ("error", Printexc.to_string exn) ])
 ;;
 
-let set_terminal_lifecycle ~error_to_string agent = function
-  | Ok _ -> set_lifecycle agent ~finished_at:(Unix.gettimeofday ()) Completed
-  | Error err ->
-    set_lifecycle
-      agent
-      ~finished_at:(Unix.gettimeofday ())
-      ~last_error:(error_to_string err)
-      Failed
-;;
-
 let final_text_of_response response =
   let text = Types.text_of_response response in
   if String.trim text = "" then None else Some text
@@ -278,22 +268,21 @@ let with_raw_trace_run_classified_result
          (* Raw trace is finished first (so a reserved exception re-raised from the
          callback cannot leave the trace open), then on_run_complete runs before
          the lifecycle transition per the agent_types.mli contract. *)
-         match Raw_trace.finish_run active ~final_text ~stop_reason ~error with
-         | Ok _ ->
-           (try invoke_completion_for_result result with
-            | exn ->
-              set_lifecycle_for_result result;
-              raise exn);
-           set_lifecycle_for_result result;
-           result
-         | Error err ->
-           let trace_error = Error (of_core_error err) in
-           (try invoke_on_run_complete agent ~ok:false with
-            | exn ->
-              set_terminal_lifecycle ~error_to_string agent trace_error;
-              raise exn);
-           set_terminal_lifecycle ~error_to_string agent trace_error;
-           trace_error
+         (match Raw_trace.finish_run active ~final_text ~stop_reason ~error with
+          | Ok _ -> ()
+          | Error trace_error ->
+            Log.error
+              _log
+              "raw trace finalization failed after run result"
+              [ Log.S ("worker_run_id", Raw_trace.active_run_id active)
+              ; Log.S ("finalization_error", Error.to_string trace_error)
+              ]);
+         (try invoke_completion_for_result result with
+          | exn ->
+            set_lifecycle_for_result result;
+            raise exn);
+         set_lifecycle_for_result result;
+         result
        in
        (match f (Some active) with
         | result -> finalize result

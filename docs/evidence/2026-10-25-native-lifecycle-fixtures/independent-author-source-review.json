@@ -1,0 +1,195 @@
+{
+  "schema": "masc.independent.source-review.v1",
+  "reviewer": "/root/repair_evidence_integrity",
+  "reviewed_at_utc": "2026-10-25T00:09:30.387035+00:00",
+  "verdict": "PASS",
+  "verdict_scope": "Exact source and bounded fixture/evidence review only. No GitHub approval, full MASC typing, repaired native execution, vendor run, model success, integration, merge or installation verdict.",
+  "head": "e079b1835facfc0ebe1850f42b26d637ad40fb04",
+  "base": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "parent_matches_base": true,
+  "working_tree_clean": true,
+  "full_diff": {
+    "path": "/tmp/masc-independent-review-native-e079-by-evidence-20261025/review.diff",
+    "sha256": "d15e22121978f7182a5be0fc103eb6919e63978dd7e4875333c2586ea3dc1674"
+  },
+  "files": [
+    {
+      "path": "docs/evidence/2026-10-25-native-lifecycle-fixtures/README.md",
+      "sha256": "e758cf97cc13a0543180ac74c0d86b94b11de68aa81effcd8b15ef6c051cf85e",
+      "bytes": 4285,
+      "working_copy_matches_frozen_commit": true
+    },
+    {
+      "path": "docs/evidence/2026-10-25-native-lifecycle-fixtures/fixture-protocol-check.json",
+      "sha256": "4e6c63882b84197d4c6edea7ec77d14ad32554a352866583ab131a15766da4d3",
+      "bytes": 2961,
+      "working_copy_matches_frozen_commit": true
+    },
+    {
+      "path": "docs/evidence/2026-10-25-native-lifecycle-fixtures/original-native-run.json",
+      "sha256": "851cdf9c958c2631a63379e62c1323aed0ed52b014cf15bea4b1e408f297c61c",
+      "bytes": 7665,
+      "working_copy_matches_frozen_commit": true
+    },
+    {
+      "path": "docs/evidence/2026-10-25-native-lifecycle-fixtures/parse-check.json",
+      "sha256": "ee543d8bb6a2a255f23067c29d3c6775312a68606effeb2dab55e950ddef97b8",
+      "bytes": 331,
+      "working_copy_matches_frozen_commit": true
+    },
+    {
+      "path": "docs/evidence/2026-10-25-native-lifecycle-fixtures/probe_fixture_protocol.py",
+      "sha256": "62fb4aaca224225f126cbc4202a2977478d6df24e3dba2642cd69a522225524c",
+      "bytes": 6353,
+      "working_copy_matches_frozen_commit": true
+    },
+    {
+      "path": "test/test_keeper_claude_code_runtime.ml",
+      "sha256": "df97f87f2c61708a68f0fb76a01d37312f77bbb6a98f4164e7e2b1821c60e618",
+      "bytes": 347653,
+      "working_copy_matches_frozen_commit": true
+    }
+  ],
+  "product_tree_bindings": [
+    {
+      "path": "lib",
+      "base": "896c46ee1ce0e89f1b63556e566a790486aa92b8",
+      "head": "896c46ee1ce0e89f1b63556e566a790486aa92b8"
+    },
+    {
+      "path": "bin",
+      "base": "a174c659a14b7c72df10ee240a52ece5ee085ef9",
+      "head": "a174c659a14b7c72df10ee240a52ece5ee085ef9"
+    },
+    {
+      "path": "config",
+      "base": "9cc654caafe2b955f3e2631dfb178ec0af5344af",
+      "head": "9cc654caafe2b955f3e2631dfb178ec0af5344af"
+    },
+    {
+      "path": "packages",
+      "base": "e3d2cf0aeac18c66b3248732bc29a9dd9b618fcb",
+      "head": "e3d2cf0aeac18c66b3248732bc29a9dd9b618fcb"
+    },
+    {
+      "path": "scripts",
+      "base": "6af9dcbedb9e3471684696f0199bfb46ca6692b5",
+      "head": "6af9dcbedb9e3471684696f0199bfb46ca6692b5"
+    },
+    {
+      "path": "dashboard",
+      "base": "671f76373baa3e3b283af471cd2c11e6dd1761c9",
+      "head": "671f76373baa3e3b283af471cd2c11e6dd1761c9"
+    }
+  ],
+  "product_trees_unchanged": true,
+  "findings_p0_p1_p2": [],
+  "reviewed_contracts": [
+    {
+      "case": "Start authority (lifecycle0)",
+      "source": "test/test_keeper_claude_code_runtime.ml:3035",
+      "judgement": "Known-empty librarian_front freezes an explicit typed observation. Full Start System equality includes exactly that encoded carrier; Resume equality retains standing BASE+Goal and keeps current Completion_authority in User. Same/present/absent/changed event checks and one post-hook issuer read remain. This does not change the runtime default reader."
+    },
+    {
+      "case": "Gate resume (lifecycle8)",
+      "source": "test/test_keeper_claude_code_runtime.ml:1933",
+      "judgement": "Held unread is captured from the actual settled seed before Resume; context kind and encoded-body digest must match. Owner-only Resume is therefore justified by prior acknowledgement rather than inferred after refusal. No-respawn, Vendor_session_full/No_activity_observed, exact continuation identity, no same-session replay and fresh subsequent ordinary session checks remain."
+    },
+    {
+      "case": "Checkpointless cycles (lifecycle13)",
+      "source": "test/test_keeper_claude_code_runtime.ml:628",
+      "judgement": "run_autonomous_if_idle matches the actual mli result. The registry delegates to Owner Run_if_idle, which forks under with_owner before run; canonical input writer capture requires this inherited child. Both cycles require Turn_completed and no checkpoint, restored shared Context and real ledger IDs[1,1,2], successful equal input/output remain."
+    },
+    {
+      "case": "Deleted repetition expectations",
+      "source": "test/test_keeper_claude_code_runtime.ml:508",
+      "judgement": "The 205-row seed, third-call yield and changed-query streak rearm expectations served a count-based stop that has no producer on this Host path and is forbidden by the current constitution. The replacement actively checks all three reads execute and completes from an explicit provider result. It does not restore a repeat counter or broaden acceptable outcomes. Compatibility variant consumers elsewhere are not proof of a current producer."
+    },
+    {
+      "case": "Terminal root context (formerly48)",
+      "source": "test/test_keeper_claude_code_runtime.ml:5093",
+      "judgement": "Every actual callback increments a count checked at3, Completed is required, and the durable identity must equal the result UUID. Parent input200+cache5 remains205 despite child900+90; terminal fixture contains no usage and runtime retains latest root request input apart from terminal totals."
+    },
+    {
+      "case": "Hook failure",
+      "source": "test/test_keeper_claude_code_runtime.ml:5136",
+      "judgement": "A terminal is supplied but every Ok is rejected; the exact post-tool fixture exception must survive. No catch-all success or fallback was added."
+    },
+    {
+      "case": "Auth retry (lifecycle37)",
+      "source": "test/test_keeper_claude_code_runtime.ml:4832",
+      "judgement": "The prior Error-anything/Ok-anything acceptance is removed. Every Error now fails, successful assistant/result text must match and the first-cut marker must exist. The fixture checks cut then valid auth and successful terminal; exact auth invocation count is not directly instrumented by this test."
+    }
+  ],
+  "evidence_checks": {
+    "original_log": {
+      "sha256": "188f6c4fe588ab36098c9f14d29cc49ccc0cf2bda50e9d96215d7ec16d65b3b3",
+      "bytes": 404357,
+      "matches_declared_sha256": true,
+      "matches_declared_bytes": true,
+      "timeout_line_matches": true,
+      "last_finished_case_matches": true,
+      "failure_anchors": [
+        {
+          "log_line": 1812,
+          "matches": true
+        },
+        {
+          "log_line": 2028,
+          "matches": true
+        },
+        {
+          "log_line": 2149,
+          "matches": true
+        }
+      ]
+    },
+    "original_completed_pass_suites": 6,
+    "original_completed_pass_tests": 245,
+    "original_claude_failures": [
+      0,
+      8,
+      13
+    ],
+    "original_claude_timeout_exit": 124,
+    "original_first_unfinished_case": 48,
+    "original_auth37_timeout_then_recorded_PASS_verified": true,
+    "author_parse_source_digest_matches": true,
+    "peer_report_path": "/tmp/masc-independent-native-fixture-review-e079-20261025/independent-check.json",
+    "peer_report_sha256": "5c15b813f674932dd06f08b3cfe18cbcf9828426eaf1e820723476698e9b03e3",
+    "peer_executed_checks": {
+      "scope": "Actual fixture generator/stdin/stdout protocol only, plus parse/diff; no MASC native/Host/Owner/vendor/model execution",
+      "probe_script_sha256": "62fb4aaca224225f126cbc4202a2977478d6df24e3dba2642cd69a522225524c",
+      "probe_exit": 0,
+      "probe_stdout": "{\n  \"variants\": [\n    {\n      \"name\": \"before\",\n      \"calls\": 3,\n      \"terminal_frames\": 0\n    },\n    {\n      \"name\": \"after\",\n      \"calls\": 3,\n      \"terminal_frames\": 1\n    },\n    {\n      \"name\": \"auth_retry_after\",\n      \"calls\": 0,\n      \"terminal_frames\": 1\n    }\n  ],\n  \"result\": \"PASS\",\n  \"scope\": \"Actual fixture OCaml generator and generated shell/stdin/stdout protocol only; not Host, Owner, native MASC suite, SDK, vendor, runtime or model-success execution\"\n}\n",
+      "probe_stderr": "",
+      "parse_exit": 0,
+      "parse_output": "",
+      "git_diff_check_exit": 0,
+      "git_diff_check_output": ""
+    },
+    "peer_protocol_receipt_matches_author": true,
+    "peer_execution_attribution": "Executed by /root/repair_eval_metrics in its independent output directory; this reviewer inspected the bound report and the complete probe source and did not duplicate the execution.",
+    "probe_scope": "Actual extracted OCaml fixture definitions and generated shell/stdin/stdout only. Closing stdin permits the old fixture to exit and does not reproduce the runtime600s wait.",
+    "native_repaired_head": "UNRUN at review; do not promote parser/protocol checks to MASC full typing, Owner native execution or suite PASS."
+  },
+  "nonblocking_notes": [
+    {
+      "severity": "P3",
+      "file": "docs/evidence/2026-10-25-native-lifecycle-fixtures/probe_fixture_protocol.py:87",
+      "detail": "compiled_generator_sha256 hashes the extracted generator source string, not the compiled executable. source_sha256 and compile result still bind the relevant source; rename to generator_source_sha256 in later evidence cleanup to avoid binary-identity ambiguity."
+    }
+  ],
+  "remaining_execution_boundary": [
+    "Hosted test/test_keeper_claude_code_runtime.exe must exercise actual Start/Resume, Gate, inherited Owner child, root usage, hook-failure and auth-retry paths on the integrated candidate.",
+    "No real provider/model behavior or universal autonomy claim follows from fixture protocol success."
+  ],
+  "mutations": {
+    "reviewed_tree": false,
+    "product_code": false,
+    "github_approval": false,
+    "ci_query": false,
+    "local_dune": false,
+    "external_review_artifacts_only": true
+  }
+}

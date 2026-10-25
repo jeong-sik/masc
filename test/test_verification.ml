@@ -2766,6 +2766,7 @@ let test_rejected_submission_captures_current_handoff_on_first_retry () =
   with_eio_temp_dir @@ fun base_path ->
   let producer = "snapshot-retry-worker" in
   let prepared = ref [] in
+  let scheduled = ref [] in
   let notifications = ref [] in
   with_scoped_hook Workspace_hooks.verification_submit_request_fn
     (fun config ~task ~assignee ~verification_id ~claim ->
@@ -2774,10 +2775,7 @@ let test_rejected_submission_captures_current_handoff_on_first_retry () =
   with_scoped_hook Workspace_hooks.verification_delete_request_fn real_delete_request @@ fun () ->
   with_scoped_hook Workspace_hooks.verification_submitted_fn
     (fun config ~task ~assignee:_ ~verification_id ->
-      Alcotest.(check bool) "capture and authority scheduling share one immutable Task"
-        true (List.assoc verification_id !prepared == task);
-      Alcotest.(check bool) "scheduled Task includes the committed handoff"
-        true (task = receipt_task config)) @@ fun () ->
+      scheduled := (verification_id, task, receipt_task config) :: !scheduled) @@ fun () ->
   with_scoped_hook Workspace_hooks.verification_notify_submit_fn
     (fun config ~task ~assignee ~verification_id ~claim:_ ->
       let captured = List.assoc verification_id !prepared in
@@ -2838,7 +2836,16 @@ let test_rejected_submission_captures_current_handoff_on_first_retry () =
           ~completion:Continue_after_success in
         (match Agent_core.Tool.execute ~invocation tool (`Assoc []) with
          | Ok _ -> () | Error error -> Alcotest.fail error.message));
-    let _, _, id = receipt_submission (receipt_task config) in id in
+    let _, _, id = receipt_submission (receipt_task config) in
+    let captured = List.assoc id !prepared in
+    (match List.filter (fun (observed_id, _, _) -> observed_id = id) !scheduled with
+     | [(_, scheduled_task, committed_task)] ->
+       Alcotest.(check bool) "capture and authority scheduling share one immutable Task"
+         true (captured == scheduled_task);
+       Alcotest.(check bool) "scheduled Task includes the committed handoff"
+         true (scheduled_task = committed_task)
+     | _ -> Alcotest.fail "each submission must schedule exactly once");
+    id in
   Fs_compat.save_file artifact original_body;
   let first_id = submit "first-submit" in
   let authority = Masc_domain.Human_operator {operator_id="retry-operator"} in
@@ -2854,6 +2861,9 @@ let test_rejected_submission_captures_current_handoff_on_first_retry () =
   Alcotest.(check int) "no duplicate retry was needed" 2 (List.length !prepared);
   Alcotest.(check (list string)) "each committed snapshot notifies once"
     [first_id; retry_id] (List.rev !notifications);
+  Alcotest.(check (list string)) "authority scheduling observes both committed snapshots"
+    [first_id; retry_id]
+    (List.rev_map (fun (id, _, _) -> id) !scheduled);
   let receipt = match VS.submission_receipt ~base_path ~request_id:retry_id
     ~task_id:"task-001" ~worker:producer with
     | Ok receipt -> receipt

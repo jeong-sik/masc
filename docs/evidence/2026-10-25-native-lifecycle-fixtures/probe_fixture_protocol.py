@@ -82,7 +82,7 @@ with tempfile.TemporaryDirectory(prefix="masc-cli-fixture-protocol-") as tempora
                 and terminals[0]["result"] == expected_text
             )
             records.append({"variant": label, "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
-                            "compiled_generator_sha256": hashlib.sha256(generator.encode()).hexdigest(),
+                            "generator_source_sha256": hashlib.sha256(generator.encode()).hexdigest(),
                             "generated_script_sha256": hashlib.sha256(script.read_bytes()).hexdigest(),
                             "compile_exit": built.returncode, "compile_stderr": built.stderr,
                             "protocol_exit": ran.returncode, "actual_tool_call_ids": [call["id"] for call in calls],

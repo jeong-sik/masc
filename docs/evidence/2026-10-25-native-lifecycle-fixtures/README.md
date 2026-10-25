@@ -66,3 +66,11 @@ probe do not establish MASC typing, Owner execution or native suite success.
 The necessary next native target is `test_keeper_claude_code_runtime`, including
 the actual Start/Resume, Gate, Owner-cycle and explicit-terminal fixtures. No
 local Dune, native rerun, vendor process or model-success result is claimed.
+
+## Current-parent integration and scheduling callback control
+
+The author fixture was integrated over frozen source47d9 (its parent is ab7639). Current-parent parse and actual generated-process protocol receipts are separate from the authored receipts. The original `compiled_generator_sha256` field hashes the extracted generator source, not its executable; the script and current-parent receipt use `generator_source_sha256`.
+
+Independent review also reproduced an ineffective assertion inside the submission scheduling callback: production intentionally catches that callback exception. The integration fixture now collects `(verification_id, supplied_task, committed_task)` and checks count, identity and handoff equality after the callback returns. A missing callback or a captured stale Task fails outside the isolating guard. No production exception policy or Task behavior changes in this validation layer. Native execution of this integrated source remains a separate check.
+
+The parent source review is bound to47d9/ab7639. Another session is restacking the existing Native Stack; neither that source review nor the older GLM328 runtime certifies a changed remote parent/head or the whole stack.

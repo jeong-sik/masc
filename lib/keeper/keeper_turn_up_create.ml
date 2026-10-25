@@ -197,10 +197,18 @@ let create_keeper ~expected_config_revision (ctx : _ context)
       keeper_id = Some (Keeper_input_birth.keeper_uid creation);
       agent_core_env = p.profile_defaults.agent_core_env;
       } in
+      let prompt_profile_defaults =
+        { p.profile_defaults with
+          remote_endpoint =
+            if p.remote_endpoint_present
+            then p.remote_endpoint_opt
+            else p.profile_defaults.remote_endpoint
+        }
+      in
       match
         Keeper_run_context.build_base_system_prompt
           ~config:ctx.config
-          ~profile_defaults:p.profile_defaults
+          ~profile_defaults:prompt_profile_defaults
           ~meta
       with
       (* #38354: the initial checkpoint is not saved with a prompt that lacks

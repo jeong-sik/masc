@@ -30,7 +30,9 @@ val create_response_json :
 
 (** Create a new keeper from parsed args: build initial meta,
     write checkpoint, start keepalive, return the [keeper_up]
-    response envelope. *)
+    response envelope. The initial prompt uses the effective remote endpoint:
+    an explicit argument takes precedence over profile defaults, including
+    before the first declarative keeper file exists. *)
 val create_keeper :
   expected_config_revision:Keeper_turn_up_config_persistence.config_revision ->
   _ Keeper_types_profile.context ->

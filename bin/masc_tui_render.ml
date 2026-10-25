@@ -138,7 +138,7 @@ let render_overview (state : state) home =
     else None
   in
   let cols = full_cols - (match sidebar with None -> 0 | Some (width, _) -> width) in
-  let all_decisions = Masc_tui_home.home_decision_rows home in
+  let decision_count = Masc_tui_home.home_decision_count home in
   let continuation = Masc_tui_home.home_continue_rows home in
   let selected = Masc_tui_home.home_selected_action home in
   let overview_error, overview = overview_refresh_reading state in
@@ -214,13 +214,13 @@ let render_overview (state : state) home =
         |> List.take (max 0 (budget - warning_rows)) in
       List.iter c.push notices;
       let budget = max 0 (budget - List.length notices) in
-      let decisions = List.drop first all_decisions |> List.take capacity in
+      let decisions = Masc_tui_home.home_decision_rows home ~first ~capacity in
       let actions = decisions @ continuation in
       (* Headers and action destinations take precedence over health/history
          context. The request window preserves continuation below it even
          when the queue contains more rows than the viewport. *)
       let essential_rows = List.length actions + 2 + warning_rows in
-      if budget >= essential_rows && (all_decisions = [] || capacity > 0) then begin
+      if budget >= essential_rows && (decision_count = 0 || capacity > 0) then begin
         let card_rows =
           let status ~cells =
             let wrapped line =
@@ -237,7 +237,7 @@ let render_overview (state : state) home =
             ~rows:(budget - warning_rows)
             ~is_selected:(fun action -> Some action = selected)
             ~decisions
-            ~decisions_whole:(List.length decisions = List.length all_decisions)
+            ~decisions_whole:(List.length decisions = decision_count)
             ~continuation ~status
         in
         match card_rows with

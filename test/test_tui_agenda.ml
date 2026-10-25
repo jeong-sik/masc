@@ -435,6 +435,11 @@ let test_goal_selection_survives_refresh_reordering () =
   check bool "Enter still opens the Goal actually selected" true
     (opened_target state refreshed = Some (Agenda.Goal_to_confirm "goal-a"))
 
+let all_home_decisions state =
+  let prepared = Masc_tui_home.prepare state in
+  Masc_tui_home.home_decision_rows prepared ~first:0
+    ~capacity:(Masc_tui_home.home_decision_count prepared)
+
 let test_home_task_survives_supplemental_source_failure () =
   List.iter (fun diagnostic ->
     let state = agenda_state () in
@@ -443,7 +448,7 @@ let test_home_task_survives_supplemental_source_failure () =
     state.tasks_error <- Some diagnostic;
     check bool "Home retains a current task despite supplemental failure" true
       (List.mem_assoc (Masc_tui_types.Home_request (Home_operator_task task_id))
-         (Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state)));
+         (all_home_decisions state));
     check bool "Agenda uses the same primary reading" true
       (List.exists (fun line -> line.Agenda.goes_to = Agenda.Stuck_task task_id)
          (lines_of_state state));
@@ -463,7 +468,7 @@ let test_home_and_agenda_refuse_noncurrent_task_source () =
   check bool "Home offers no current task from a backup" false
     (List.exists (fun (action, _) -> match action with
        | Masc_tui_types.Home_request (Home_operator_task _) -> true
-       | _ -> false) (Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state)));
+       | _ -> false) (all_home_decisions state));
   let agenda_lines = lines_of_state state in
   check bool "Agenda reports the noncurrent source" true
     (List.exists (fun line -> line.Agenda.tone = Agenda.Failed
@@ -691,7 +696,7 @@ let home_questions state =
        | Masc_tui_types.Home_request (Masc_tui_types.Home_question ask) -> Some ask
        | Masc_tui_types.Home_request _ | Home_approvals | Home_agenda | Home_resume _
        | Home_read_last _ | Home_choose_keeper | Home_create_keeper -> None)
-    (Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state))
+    (all_home_decisions state)
 
 let asker_of (ask : Masc.Tui_decode_asks.ask_key) =
   match ask.ak_asker with

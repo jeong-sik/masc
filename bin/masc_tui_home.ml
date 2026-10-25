@@ -17,6 +17,47 @@ module Action_table = Hashtbl.Make (struct
   let hash = Hashtbl.hash
 end)
 
+type decision_label =
+  | Label_text of string
+  | Approval_label of { kind : string; who : string; request_id : string; why : string }
+  | Question_label of Masc.Tui_decode_asks.ask_row
+  | Goal_label of Masc_tui_agenda.goal_to_confirm
+  | Task_label of Masc_tui_agenda.stalled
+  | Agenda_labels of decision_label list
+
+(* These immutable source values belong to one synchronous Home reading.
+   Resolving an action never formats its label or reads terminal state. *)
+let rec decision_label_text label =
+  let clean = Masc_tui_ansi.Terminal_text.single_line in
+  match label with
+  | Label_text text -> text
+  | Approval_label { kind; who; request_id; why } ->
+      Printf.sprintf "%s · %s [%s] · %s" kind (clean who)
+        (Masc_tui_message_layout.truncate_middle 12 (clean request_id)) (clean why)
+  | Question_label row ->
+      let why = match row.ar_context, row.ar_questions with
+        | Some reason, _ -> reason
+        | None, question :: _ -> question.aq_prompt
+        | None, [] -> "open question"
+      in
+      Printf.sprintf "Question · %s [%s] · %s"
+        (clean (Masc.Tui_decode_asks.ask_asker_label row.ar_asker))
+        (Masc_tui_message_layout.truncate_middle 12 (clean row.ar_id)) (clean why)
+  | Goal_label row ->
+      Printf.sprintf "Confirm Goal · %s · %s" (clean row.goal_id) (clean row.title)
+  | Task_label row ->
+      let id = clean row.task_id in
+      let what = clean row.what in
+      let detail =
+        if String.starts_with ~prefix:(id ^ ":") what
+           || String.starts_with ~prefix:(id ^ " · ") what
+        then what
+        else Printf.sprintf "%s · %s" id what
+      in
+      Printf.sprintf "Operator task · %s" detail
+  | Agenda_labels labels ->
+      String.concat "; " (List.map decision_label_text labels)
+
 let ordered_decision_rows rows =
   (* The index belongs to this projection. The reversed list, never table
      iteration, owns the first-seen order; only the shared Agenda destination
@@ -31,7 +72,7 @@ let ordered_decision_rows rows =
           (action, held) :: reversed
       | Some held ->
           (match action with
-           | Home_agenda -> held := !held ^ "; " ^ label
+           | Home_agenda -> held := Agenda_labels [!held; label]
            | Home_approvals | Home_request _ | Home_resume _ | Home_read_last _
            | Home_choose_keeper | Home_create_keeper -> ());
           reversed) [] rows
@@ -42,7 +83,6 @@ let ordered_decision_rows rows =
    reachable through their source reading, never offered as current requests. *)
 let decision_rows_of_state (state : state) =
   let reading = approvals_reading state in
-  let clean = Masc_tui_ansi.Terminal_text.single_line in
   let approval_rows =
     approval_items state
     |> List.filter_map (fun row ->
@@ -56,22 +96,15 @@ let decision_rows_of_state (state : state) =
       in
       if current && approval_item_needs_person row then
         Some (Home_request (home_request_of_approval row),
-              Printf.sprintf "%s · %s [%s] · %s" kind (clean who)
-                (Masc_tui_message_layout.truncate_middle 12 (clean request_id)) (clean why))
+              Approval_label { kind; who; request_id; why })
       else None)
   in
   let questions =
     if list_is_read reading.questions then
       Option.value ~default:[] (approvals_open_questions state)
       |> List.map (fun (row : Masc.Tui_decode_asks.ask_row) ->
-          let why = match row.ar_context, row.ar_questions with
-            | Some reason, _ -> reason
-            | None, question :: _ -> question.aq_prompt
-            | None, [] -> "open question"
-          in
           Home_request (Home_question (Masc.Tui_decode_asks.ask_key row)),
-          Printf.sprintf "Question · %s [%s] · %s" (clean (Masc.Tui_decode_asks.ask_asker_label row.ar_asker))
-            (Masc_tui_message_layout.truncate_middle 12 (clean row.ar_id)) (clean why))
+          Question_label row)
     else []
   in
   let source_notes =
@@ -105,32 +138,24 @@ let decision_rows_of_state (state : state) =
           List.map fst (approval_rows @ questions) |> List.sort_uniq compare |> List.length
         in
         if count = 0 then []
-        else [Home_approvals, Printf.sprintf "Approvals and questions: %d need you · all requests" count]
-    | _ :: _ -> [Home_approvals, "Approvals and questions: " ^ String.concat "; " notes]
+        else [Home_approvals, Label_text (Printf.sprintf "Approvals and questions: %d need you · all requests" count)]
+    | _ :: _ -> [Home_approvals, Label_text ("Approvals and questions: " ^ String.concat "; " notes)]
   in
   let goals = match state.goals_to_confirm with
     | Masc_tui_agenda.Read rows ->
         List.map (fun (row : Masc_tui_agenda.goal_to_confirm) ->
           Home_request (Home_goal_confirmation row.goal_id),
-          Printf.sprintf "Confirm Goal · %s · %s" (clean row.goal_id) (clean row.title)) rows
-    | Not_read -> [Home_agenda, "Goal confirmations not read · inspect sources"]
-    | Read_failed _ -> [Home_agenda, "Goal confirmations unavailable · inspect sources"]
+          Goal_label row) rows
+    | Not_read -> [Home_agenda, Label_text "Goal confirmations not read · inspect sources"]
+    | Read_failed _ -> [Home_agenda, Label_text "Goal confirmations unavailable · inspect sources"]
   in
   let tasks = match state.operator_stalled with
-    | Masc_tui_agenda.Read_failed _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
-    | Not_read -> [Home_agenda, "Operator tasks not read · inspect sources"]
+    | Masc_tui_agenda.Read_failed _ -> [Home_agenda, Label_text "Operator tasks unavailable · inspect sources"]
+    | Not_read -> [Home_agenda, Label_text "Operator tasks not read · inspect sources"]
     | Read rows ->
         List.map (fun (row : Masc_tui_agenda.stalled) ->
-          let id = clean row.task_id in
-          let what = clean row.what in
-          let detail =
-            if String.starts_with ~prefix:(id ^ ":") what
-               || String.starts_with ~prefix:(id ^ " · ") what
-            then what
-            else Printf.sprintf "%s · %s" id what
-          in
           Home_request (Home_operator_task row.task_id),
-          Printf.sprintf "Operator task · %s" detail) rows
+          Task_label row) rows
   in
   (* Equality is kind plus authoritative request ID, never a Keeper/task
      grouping key. Distinct calls belonging to one Keeper remain distinct. *)
@@ -307,7 +332,8 @@ let notice_lines_of_state state =
      | Some (_, receipt) -> [" Last decision receipt · " ^ clean receipt])
 
 type prepared = {
-  decisions : (home_action * string) list;
+  decisions : (home_action * decision_label) list;
+  decision_count : int;
   continuation : (home_action * string) list;
   selected : home_action option;
   selection_changed : bool;
@@ -332,13 +358,16 @@ let prepare (state : state) =
          | Some _ as action -> action
          | None -> find continuation)
   in
-  { decisions; continuation; selected;
+  { decisions; decision_count = List.length decisions; continuation; selected;
     selection_changed = Option.is_some state.home_selected && Option.is_none selected;
     notices = notice_lines_of_state state;
     help_hint_shown = state.help_hint_shown;
     initial_ready = initial_reading_ready state selected }
 
-let home_decision_rows prepared = prepared.decisions
+let home_decision_count prepared = prepared.decision_count
+let home_decision_rows prepared ~first ~capacity =
+  prepared.decisions |> List.drop first |> List.take capacity
+  |> List.map (fun (action, label) -> action, decision_label_text label)
 let home_continue_rows prepared = prepared.continuation
 let home_selected_action prepared = prepared.selected
 let home_selection_changed prepared = prepared.selection_changed
@@ -359,7 +388,7 @@ let home_decision_window prepared ~scroll ~budget =
   let warning_rows = if prepared.selection_changed then 1 else 0 in
   let capacity = max 0 (budget - List.length prepared.notices
       - List.length prepared.continuation - 2 - warning_rows) in
-  let first = max 0 (min scroll (List.length decisions - capacity)) in
+  let first = max 0 (min scroll (prepared.decision_count - capacity)) in
   let first = match List.find_index (fun (action, _) -> Option.equal equal_home_action (Some action) selected) decisions with
     | Some index when index < first -> index
     | Some index when index >= first + capacity -> max 0 (index - capacity + 1)
@@ -369,7 +398,7 @@ let home_decision_window prepared ~scroll ~budget =
 
 let home_step state ~backwards =
   let prepared = prepare state in
-  let actions = List.map fst (prepared.decisions @ prepared.continuation) in
+  let actions = List.map fst prepared.decisions @ List.map fst prepared.continuation in
   let current = prepared.selected in
   let index =
     match List.find_index (fun action -> Option.equal equal_home_action (Some action) current) actions with

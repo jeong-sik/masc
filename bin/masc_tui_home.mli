@@ -8,7 +8,15 @@ val home_request_of_approval : Masc_tui_approvals_model.approval_row -> Masc_tui
     It contains no execution authority and does not store terminal state. *)
 type prepared
 val prepare : Masc_tui_types.state -> prepared
-val home_decision_rows : prepared -> (Masc_tui_types.home_action * string) list
+val home_decision_count : prepared -> int
+(** Complete decision population, including requests outside the viewport. *)
+val home_decision_rows :
+  prepared -> first:int -> capacity:int -> (Masc_tui_types.home_action * string) list
+(** Format only the requested viewport from the same immutable reading used by
+    {!home_decision_window}. Request identity, currentness, first-seen order and
+    selection are resolved before formatting. No labels or reading survive the
+    synchronous UI operation. Negative [first] or [capacity] raises
+    [Invalid_argument], as for [List.drop] and [List.take]. *)
 val clear_ask_answering : Masc_tui_types.state -> unit
 val reconcile_home_request_detail : Masc_tui_types.state -> unit
 val home_continue_rows : prepared -> (Masc_tui_types.home_action * string) list

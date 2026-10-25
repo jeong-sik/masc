@@ -5205,7 +5205,9 @@ let test_post_tool_hook_failure_survives_provider_terminal () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        with_fixture
-         (repeated_read_frames @ [Emit (result ~turn_id:"turn-hook-complete" "READS_COMPLETE")])
+         (repeated_read_frames
+          @ [Emit (assistant ~turn_id:"turn-hook-complete" "READS_COMPLETE");
+             Emit (result ~turn_id:"turn-hook-complete" "READS_COMPLETE")])
          (fun cli_path ->
          let attempt =
            run_direct_attempt

@@ -346,6 +346,9 @@ Use MASC's tools to change tasks, records and approval state.
 | `masc web-search-setup --base-path <dir>` | Inspect or configure workspace web search (`searxng`, `zai`, etc.) |
 | `masc --help` | List commands; use `<command> --help` for details |
 
+See [server startup ownership](docs/guides/server-startup-ownership.md) for
+workspace lease and occupied-port behavior.
+
 The TUI starts a background server when nothing answers the port. Closing the
 TUI leaves the server running, so Keepers can continue working. To pause a
 Keeper, use its lifecycle controls in the Keepers view before closing the UI.

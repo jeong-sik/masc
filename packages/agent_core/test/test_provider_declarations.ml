@@ -67,6 +67,36 @@ let test_cross_source_collision alias =
       ["snapshot-provider";"other-provider"] provider_ids
   | Ok _ | Error (D.Unknown_capability_base _) -> Alcotest.fail "collision must fail typed admission"
 
+let test_distinct_providers_keep_independent_policy () =
+  let declarations = snapshot ~providers:(overlay ~id:"other-provider" ~alias:"other-alias" ()) () in
+  let registry = Provider_registry.of_declarations declarations in
+  let names = Provider_registry.all registry
+    |> List.map (fun (entry : Provider_registry.entry) -> entry.name) in
+  Alcotest.(check (list string)) "both explicitly declared providers survive projection"
+    ["other-provider";"snapshot-provider"] names;
+  let select label = match B.find_in_declarations declarations label with
+    | Some binding -> binding | None -> Alcotest.failf "missing selected provider %s" label in
+  let seed_binding = select "old-alias" in
+  let overlay_binding = select "other-alias" in
+  Alcotest.(check int) "runtime listing retains both independent providers" 2
+    (List.length (B.all_from_declarations declarations));
+  Alcotest.(check string) "seed endpoint remains its own" "https://seed.example.invalid"
+    seed_binding.base_url;
+  Alcotest.(check string) "second endpoint remains its own" "https://overlay.example.invalid"
+    overlay_binding.base_url;
+  let config binding = match B.to_provider_config binding with
+    | Ok config -> config | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+  let first = config seed_binding in
+  let second = config overlay_binding in
+  Alcotest.(check (option string)) "first request carries first identity"
+    (Some "snapshot-provider") first.provider_id;
+  Alcotest.(check (option string)) "second request carries second identity"
+    (Some "other-provider") second.provider_id;
+  Alcotest.(check bool) "first request does not acquire second reasoning policy" false
+    (B.capabilities_for_provider_config first).supports_reasoning;
+  Alcotest.(check bool) "second request retains its declared reasoning policy" true
+    (B.capabilities_for_provider_config second).supports_reasoning
+
 let test_missing_preset_fails_closed () =
   let invalid = models {|[[providers]]
 id = "unmapped-fixture"
@@ -145,4 +175,5 @@ let () = Alcotest.run "provider declarations"
     "invalid current declaration has no fallback",`Quick,test_current_rejects_invalid_combination];
    "consumers",[
     "immutable captured selection",`Quick,test_snapshot_survives_source_replacement;
-    "credential observation",`Quick,test_credential_observation_edge]]
+    "credential observation",`Quick,test_credential_observation_edge;
+    "independent declared provider requests",`Quick,test_distinct_providers_keep_independent_policy]]

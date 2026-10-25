@@ -1,11 +1,43 @@
 [
   {
+    "path": "lib/runtime/runtime_adapter.ml",
+    "sha256": "a0adbe7bc2db44377987147145193ae0898a0dca33818e7d22445d2071647319"
+  },
+  {
+    "path": "lib/server/server_dashboard_runtime_declaration_projection.ml",
+    "sha256": "6ede3b117b75fb1673b0c8d11767b0740617333f0e283dce3137484f82622dd5"
+  },
+  {
     "path": "packages/agent_core/lib/llm_provider/backend_openai_responses.ml",
     "sha256": "a17ef1214b56fe875a61df224804ef9224a27a33a0c7f778ef7a0ee0dcbee6e8"
   },
   {
     "path": "packages/agent_core/lib/llm_provider/backend_openai_responses.mli",
     "sha256": "2a9a5e3e10df979c939f31d7b537fdba11edbb504a530b4630a9efd952ded6de"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/capabilities.ml",
+    "sha256": "6eb3da09e2bfa6a4347975cf444e733196a8a691682fb1f603a8ae2cf7142fc8"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/capabilities.mli",
+    "sha256": "82617790ffc83d9820ad7d157f950dbfe115b9372f74b89176c7ba7a8582dc15"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/capability_vocab.ml",
+    "sha256": "b1ebb4253a7f9506f3709ab0f0a5d3fd701a2b5f25e72e05072233101af191d6"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/capability_vocab.mli",
+    "sha256": "ee27f7582e05cf8ab0321505f2cfb0d9f9772e773da1175ca4c3e9b23a7965e9"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/message_origin_lowering.ml",
+    "sha256": "f9d195044ba3596989e92e35b517aee30f6b4d00c0aa17275aff03f4d2c1ce31"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/reasoning_dialect.ml",
+    "sha256": "276e7074dc5dfe7aab32a954e53ac72b525c4628858558e52b8393dd22794324"
   },
   {
     "path": "packages/agent_core/lib/llm_provider/responses_reasoning.ml",
@@ -17,6 +49,6 @@
   },
   {
     "path": "packages/agent_core/test/test_responses_reasoning_content.ml",
-    "sha256": "5b7ce97413149b539ae2fa53313a70d3ac27587e74b37e306634ea74d7db8aac"
+    "sha256": "490875343a749978d32c9ee928bac8d99c95bd13d7618d22400c654d2b8b1b81"
   }
 ]

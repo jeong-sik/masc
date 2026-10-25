@@ -28,11 +28,23 @@ The request projector already serializes Thinking as summary_text, but its
 supported-carrier predicate allowed only opaque reasoning. It now accepts
 Thinking under an admitting declared policy. Policy and source identity checks
 still run first. In particular, OpenAI Provider_opaque_state still excludes
-plaintext and preserves its opaque objects. No provider/model-name checks,
-activation, catalog or capability policy are changed.
+plaintext and preserves its opaque objects. No provider/model-name checks or shipped catalog activation are added.
 
-Eleven current cases use an explicitly synthetic plaintext replay declaration
+The first corrected run40191951639 at a3a still failed because the transport
+unconditionally replaced even an explicit generic preserve-always declaration
+with opaque-only. Source review caught the same seam. The corrected contract
+adds a Responses-only member to the existing typed replay capability vocabulary:
+`preserve_responses_text`. Only this declaration admits plaintext on Responses;
+ordinary Chat preserve-always cannot enable it. Stable response stamping and
+request-local projection consume the same final transport rule. Other protocols
+keep their defaults, including Ollama and the embedding runtime's Anthropic
+history rule. Dashboard declaration serialization covers the new member.
+No shipped catalog row opts in, and no MiniMax activation is claimed.
+
+Fifteen current cases use an explicitly synthetic plaintext replay declaration
 for plaintext round-trips, plus actual default OpenAI opaque-policy control.
+Additional public cases verify producer/request contract identity, the manifest
+vocabulary, other-protocol defaults and nonactivation from a Chat override.
 This override does not certify production MiniMax Responses binding. Source
 telemetry, response cache JSON, assistant conversion and the actual Checkpoint
 message codec are used. Canonical message bytes are written to/read from an
@@ -44,7 +56,7 @@ array; its old string assertion was unreached in the failed baseline.
 ## Validation boundary
 
 Changed OCaml parses, fragment and whitespace pass. A corrected run of the
-new suite plus existing backend codec and phase-replay suites is requested
+new suite plus existing backend codec, phase-replay and capability suites is requested
 separately. Execution at the corrected source has not yet been observed here.
 `source-sha256.json` binds the candidate implementation/fixture, not a new
 execution receipt. No local Dune/typecheck/full build or full regression.

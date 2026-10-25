@@ -284,6 +284,26 @@ val observe_snapshot_with_errors :
     rather than a healthy empty projection. *)
 
 module For_testing : sig
+  val ack_pending_with_before_write :
+    before_write:(unit -> unit) ->
+    ?after_commit:(Keeper_event_queue.t -> unit) ->
+    base_path:string -> keeper_name:string ->
+    selection:Keeper_event_queue_state.pending_selection -> unit ->
+    (unit, string) result
+  (** Pause after snapshot encoding, before the existing atomic writer, inside
+      the production ACK transaction and durable owner lock. The callback does
+      not supply state, bytes, a writer or a durability result. *)
+
+  val ack_source_terminal_with_before_write :
+    before_write:(unit -> unit) ->
+    ?after_commit:(Keeper_event_queue.t -> unit) ->
+    base_path:string -> keeper_name:string -> acked_at:float ->
+    source_terminal:accepted_source_terminal -> unit ->
+    (transition_result, string) result
+  (** Pause after encoding a new transition WAL row, before its actual durable
+      append, inside the production source-terminal ACK and durable owner lock.
+      No callback runs for an already-applied transition. *)
+
   val move_aside_with_sync :
     sync_intent:(string -> (unit, string) result) ->
     base_path:string -> keeper_name:string ->

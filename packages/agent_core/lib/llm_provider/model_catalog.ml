@@ -881,11 +881,6 @@ let reject_duplicate_rows models providers =
      | None -> Ok ())
 ;;
 
-let of_model_entries models =
-  let* () = reject_duplicate_rows models [] in
-  Ok (make ~models ~providers:[])
-;;
-
 let catalog_of_toml toml =
   match parse_table_array toml "models" parse_entry with
   | Error _ as e -> e
@@ -996,7 +991,8 @@ let lookup_model_for_provider t ~provider ~model_id =
      | Some _ | None -> None)
 ;;
 
-let model_entries_for_provider t ~provider ~model_entries =
+let model_entries_for_provider t ~provider =
+  let model_entries = t.models in
   let requested = normalize_label (match provider with
     | Declared_provider id -> id
     | Anonymous_wire kind -> Provider_kind.to_string kind) in

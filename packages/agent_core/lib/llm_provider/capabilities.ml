@@ -1676,59 +1676,19 @@ let%test "for_model_id glm-4.5-flash has GLM-4.5 thinking limits" =
    exercise the production catalog use the embedded default generated directly
    from the AGENT_CORE-owned [models.toml].
 
-   [test_catalog_entry] fills every field with [None]; each fixture entry
-   then sets only the capability-relevant fields, mirroring the
-   corresponding [models.toml] entries at the time of writing. The fixture
-   is a deterministic snapshot, not auto-synced with [models.toml]. *)
-let test_catalog_entry model_id : Model_catalog.model_entry =
-  { model_id = Model_identifiers.Model_id.of_string_exn model_id
-  ; suggested_clients = []
-  ; base_label = None
-  ; provider_name = None
-  ; max_context_tokens = None
-  ; serving_constraint = None
-  ; max_output_tokens = None
-  ; supports_tools = None
-  ; supports_tool_choice = None
-  ; supports_required_tool_choice = None
-  ; supports_named_tool_choice = None
-  ; supports_parallel_tool_calls = None
-  ; assistant_tool_content_format = None
-  ; chat_output_budget_field = None
-  ; tool_schema_conformance = None
-  ; supports_reasoning = None
-  ; accepted_reasoning_efforts = None
-  ; supports_response_format_json = None
-  ; supports_structured_output = None
-  ; json_schema_dialect = None
-  ; supports_multimodal_inputs = None
-  ; supports_image_input = None
-  ; supports_audio_input = None
-  ; supports_video_input = None
-  ; supports_document_input = None
-  ; modality_priority = None
-  ; task = None
-  ; supported_models = None
-  ; supports_native_streaming = None
-  ; supports_system_prompt = None
-  ; supports_assistant_prefill = None
-  ; supports_prompt_caching = None
-  ; supports_top_k = None
-  ; supports_min_p = None
-  ; supports_seed = None
-  ; ignored_sampling_parameters = None
-  ; thinking_control_format = None
-  ; anthropic_thinking_control = None
-  ; preserve_thinking_control_format = None
-  ; content_inline_reasoning = None
-  ; reasoning_output_format = None
-  ; reasoning_streaming_format = None
-  ; reasoning_replay = None
-  ; input_per_million = None
-  ; output_per_million = None
-  ; cache_write_multiplier = None
-  ; cache_read_multiplier = None
-  }
+   Fixtures are strict TOML snapshots, parsed through the same constructor as
+   deployment catalogs; they are not auto-synced with [models.toml]. *)
+let test_catalog_of_toml contents =
+  Model_catalog.of_toml_string ~source:"capabilities inline fixture" contents
+  |> Result.get_ok
+;;
+
+let test_catalog_entry model_id fields =
+  let catalog = test_catalog_of_toml
+      (Printf.sprintf "[[models]]\nmodel_id = %S\n%s" model_id fields) in
+  match Model_catalog.model_entries catalog with
+  | [ entry ] -> entry
+  | _ -> invalid_arg "capabilities fixture must declare one row"
 ;;
 
 let%test "named tool choice needs its own declaration, not a sibling override" =
@@ -1736,11 +1696,10 @@ let%test "named tool choice needs its own declaration, not a sibling override" =
      to be answered `true`, so the record advertised a capability the catalog
      never declared. 21 rows in models.toml are shaped this way. *)
   let entry =
-    { (test_catalog_entry "named-choice-omitted") with
-      base_label = Some "openai_chat"
-    ; supports_tools = Some true
-    ; supports_tool_choice = Some true
-    }
+    test_catalog_entry "named-choice-omitted" {|base = "openai_chat"
+supports_tools = true
+supports_tool_choice = true
+|}
   in
   let derived = apply_catalog_entry ~provider_entry:None ~wire:None entry in
   let base =
@@ -1754,12 +1713,11 @@ let%test "named tool choice needs its own declaration, not a sibling override" =
 
 let%test "named tool choice honours an explicit declaration" =
   let entry =
-    { (test_catalog_entry "named-choice-declared") with
-      base_label = Some "openai_chat"
-    ; supports_tools = Some true
-    ; supports_tool_choice = Some true
-    ; supports_named_tool_choice = Some true
-    }
+    test_catalog_entry "named-choice-declared" {|base = "openai_chat"
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = true
+|}
   in
   (apply_catalog_entry ~provider_entry:None ~wire:None entry).supports_named_tool_choice
 ;;
@@ -1768,205 +1726,431 @@ let%test "named tool choice cannot outlive tool choice" =
   (* Declaring named choice while tool choice is off stays false: the sibling
      fields are conjoined, not independent. *)
   let entry =
-    { (test_catalog_entry "named-choice-without-tool-choice") with
-      base_label = Some "openai_chat"
-    ; supports_tools = Some true
-    ; supports_tool_choice = Some false
-    ; supports_named_tool_choice = Some true
-    }
+    test_catalog_entry "named-choice-without-tool-choice" {|base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_named_tool_choice = true
+|}
   in
   not
     (apply_catalog_entry ~provider_entry:None ~wire:None entry).supports_named_tool_choice
 ;;
 
-let qwen3_family_test_entry model_id : Model_catalog.model_entry =
-  { (test_catalog_entry model_id) with
-    base_label = Some "openai_chat"
-  ; max_context_tokens = Some 262_144
-  ; max_output_tokens = Some 81_920
-  ; supports_tools = Some true
-  ; supports_tool_choice = Some true
-  ; supports_required_tool_choice = Some true
-  ; supports_named_tool_choice = Some true
-  ; supports_reasoning = Some true
-  ; thinking_control_format = Some Chat_template_kwargs
-  ; preserve_thinking_control_format = Some "chat_template_kwargs_preserve_thinking"
-  ; supports_native_streaming = Some true
-  }
-;;
+let test_catalog : Model_catalog.t =
+  test_catalog_of_toml {|
+[[models]]
+model_id = "qwen3"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
 
-let glm_thinking_test_entry model_id ~ctx ~out : Model_catalog.model_entry =
-  { (test_catalog_entry model_id) with
-    base_label = Some "glm"
-  ; max_context_tokens = Some ctx
-  ; max_output_tokens = Some out
-  ; supports_tools = Some true
-  ; supports_tool_choice = Some false
-  ; supports_required_tool_choice = Some false
-  ; supports_named_tool_choice = Some false
-  ; supports_reasoning = Some true
-  ; supports_native_streaming = Some true
-  }
-;;
+[[models]]
+model_id = "qwen3-32b"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
 
-let deepseek_v4_test_entry model_id : Model_catalog.model_entry =
-  { (test_catalog_entry model_id) with
-    base_label = Some "openai_chat"
-  ; max_context_tokens = Some 1_000_000
-  ; max_output_tokens = Some 384_000
-  ; supports_tools = Some true
-  ; supports_tool_choice = Some true
-  ; (* DeepSeek V4 thinking mode (the default for these thinking_object rows)
-       400s on forced tool_choice — both required and named function choice.
-       Mirrors the models.toml entries. Ref 2026-06-30: deepseek-ai/DeepSeek-V3
-       issue #1376, api-docs.deepseek.com/guides/function_calling. *)
-    supports_required_tool_choice = Some false
-  ; (* Same DeepSeek V4 thinking-mode forced tool_choice rejection, split by
-       required vs named capability. *)
-    supports_named_tool_choice = Some false
-  ; supports_reasoning = Some true
-  ; thinking_control_format = Some Thinking_object
-  ; supports_native_streaming = Some true
-  }
-;;
+[[models]]
+model_id = "qwen3.5"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
 
-let gemma4_openai_test_entry model_id : Model_catalog.model_entry =
-  { (test_catalog_entry model_id) with
-    base_label = Some "openai_chat"
-  ; max_context_tokens = Some 262_144
-  ; supports_tools = Some true
-  ; supports_tool_choice = Some true
-  ; supports_required_tool_choice = Some true
-  ; supports_named_tool_choice = Some true
-  ; supports_multimodal_inputs = Some true
-  ; supports_image_input = Some true
-  ; modality_priority = Some "visual_first"
-  ; supports_native_streaming = Some true
-  ; supports_seed = Some true
-  }
-;;
+[[models]]
+model_id = "qwen36-35b-a3b-mtp"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
 
-let test_catalog_entries =
-  [ qwen3_family_test_entry "qwen3"
-  ; qwen3_family_test_entry "qwen3-32b"
-  ; qwen3_family_test_entry "qwen3.5"
-  ; qwen3_family_test_entry "qwen36-35b-a3b-mtp"
-  ; qwen3_family_test_entry "qwen-3"
-  ; qwen3_family_test_entry "qwen/qwen3.6"
-  ; glm_thinking_test_entry "glm-5.1" ~ctx:200_000 ~out:128_000
-  ; glm_thinking_test_entry "glm-5-turbo" ~ctx:200_000 ~out:128_000
-  ; { (glm_thinking_test_entry "glm-5v-turbo" ~ctx:200_000 ~out:128_000) with
-      supports_multimodal_inputs = Some true
-    ; supports_image_input = Some true
-    }
-  ; { (test_catalog_entry "glm-ocr") with
-      base_label = Some "glm"
-    ; max_context_tokens = Some 128_000
-    ; max_output_tokens = Some 16_384
-    ; supports_tools = Some false
-    ; supports_multimodal_inputs = Some true
-    ; supports_image_input = Some true
-    }
-  ; glm_thinking_test_entry "glm-4.7-flashx" ~ctx:200_000 ~out:128_000
-  ; glm_thinking_test_entry "glm-4.7-flash" ~ctx:200_000 ~out:128_000
-  ; glm_thinking_test_entry "glm-4.5-air" ~ctx:128_000 ~out:96_000
-  ; glm_thinking_test_entry "glm-4.5-flash" ~ctx:128_000 ~out:96_000
-  ; glm_thinking_test_entry "glm-5" ~ctx:200_000 ~out:128_000
-  ; glm_thinking_test_entry "glm-4.6" ~ctx:200_000 ~out:128_000
-  ; glm_thinking_test_entry "glm-4.7" ~ctx:200_000 ~out:128_000
-  ; glm_thinking_test_entry "glm-4.5" ~ctx:128_000 ~out:96_000
-  ; { (glm_thinking_test_entry "glm-4.6v" ~ctx:128_000 ~out:32_768) with
-      supports_multimodal_inputs = Some true
-    ; supports_image_input = Some true
-    }
-  ; { (test_catalog_entry "glm-4-flash") with
-      max_context_tokens = Some 128_000
-    ; max_output_tokens = Some 4_096
-    ; supports_tools = Some true
-    }
-  ; { (test_catalog_entry "glm-4v") with
-      max_context_tokens = Some 128_000
-    ; max_output_tokens = Some 4_096
-    ; supports_tools = Some true
-    ; supports_multimodal_inputs = Some true
-    ; supports_image_input = Some true
-    }
-  ; { (test_catalog_entry "glm-4") with
-      max_context_tokens = Some 128_000
-    ; max_output_tokens = Some 4_096
-    ; supports_tools = Some true
-    }
-  ; deepseek_v4_test_entry "deepseek-v4-pro"
-  ; deepseek_v4_test_entry "deepseek-ai/deepseek-v4-pro"
-  ; deepseek_v4_test_entry "deepseek-v4-flash"
-  ; deepseek_v4_test_entry "deepseek-ai/deepseek-v4-flash"
-  ; { (test_catalog_entry "nvidia/nvidia-vl") with
-      base_label = Some "nvidia"
-    ; max_context_tokens = Some 131_072
-    ; max_output_tokens = Some 16_384
-    ; supports_multimodal_inputs = Some true
-    ; supports_image_input = Some true
-    }
-  ; { (test_catalog_entry "nvidia-vl") with
-      base_label = Some "nvidia"
-    ; max_context_tokens = Some 131_072
-    ; max_output_tokens = Some 16_384
-    ; supports_multimodal_inputs = Some true
-    ; supports_image_input = Some true
-    }
-  ; { (test_catalog_entry "nvidia/nvidia") with
-      base_label = Some "nvidia"
-    ; max_context_tokens = Some 131_072
-    ; max_output_tokens = Some 16_384
-    }
-  ; { (test_catalog_entry "nvidia") with
-      base_label = Some "nvidia"
-    ; max_context_tokens = Some 131_072
-    ; max_output_tokens = Some 16_384
-    }
-  ; gemma4_openai_test_entry "google/gemma-4"
-  ; gemma4_openai_test_entry "google/gemma-4-26b-a4b"
-  ; { (test_catalog_entry "hf.co/unsloth/gemma-4") with
-      base_label = Some "ollama"
-    ; max_context_tokens = Some 262_144
-    ; supports_tools = Some true
-    ; supports_tool_choice = Some false
-    ; supports_named_tool_choice = Some false
-    ; supports_reasoning = Some true
-    ; thinking_control_format = Some (Chat_template_token "<|think|>")
-    ; supports_multimodal_inputs = Some true
-    ; supports_image_input = Some true
-    ; modality_priority = Some "visual_first"
-    ; supports_seed = Some true
-    }
-  ; { (test_catalog_entry "hf.co/unsloth/gemma-4-e2b-it-qat-gguf") with
-      base_label = Some "ollama"
-    ; max_context_tokens = Some 131_072
-    ; supports_tools = Some true
-    ; supports_tool_choice = Some false
-    ; supports_named_tool_choice = Some false
-    ; supports_reasoning = Some true
-    ; thinking_control_format = Some (Chat_template_token "<|think|>")
-    ; supports_multimodal_inputs = Some true
-    ; supports_image_input = Some true
-    ; supports_audio_input = Some true
-    ; modality_priority = Some "visual_first"
-    ; supports_seed = Some true
-    }
-  ; { (test_catalog_entry "claude-opus-5-5") with
-      base_label = Some "anthropic"
-    ; max_context_tokens = Some 1_000_000
-    ; max_output_tokens = Some 128_000
-    }
-  ; { (test_catalog_entry "gpt-4.1") with
-      base_label = Some "openai_chat"
-    ; max_context_tokens = Some 1_000_000
-    ; max_output_tokens = Some 32_000
-    }
-  ]
-;;
+[[models]]
+model_id = "qwen-3"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
 
-let test_catalog : Model_catalog.t = Model_catalog.of_model_entries test_catalog_entries |> Result.get_ok
+[[models]]
+model_id = "qwen/qwen3.6"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5.1"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5-turbo"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5v-turbo"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "glm-ocr"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 16384
+supports_tools = false
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "glm-4.7-flashx"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.7-flash"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.5-air"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.5-flash"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.6"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.7"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.5"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.6v"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "glm-4-flash"
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+
+[[models]]
+model_id = "glm-4v"
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "glm-4"
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+
+[[models]]
+model_id = "deepseek-v4-pro"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "thinking_object"
+supports_native_streaming = true
+
+[[models]]
+model_id = "deepseek-ai/deepseek-v4-pro"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "thinking_object"
+supports_native_streaming = true
+
+[[models]]
+model_id = "deepseek-v4-flash"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "thinking_object"
+supports_native_streaming = true
+
+[[models]]
+model_id = "deepseek-ai/deepseek-v4-flash"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "thinking_object"
+supports_native_streaming = true
+
+[[models]]
+model_id = "nvidia/nvidia-vl"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "nvidia-vl"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "nvidia/nvidia"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+
+[[models]]
+model_id = "nvidia"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+
+[[models]]
+model_id = "google/gemma-4"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+model_id = "google/gemma-4-26b-a4b"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+model_id = "hf.co/unsloth/gemma-4"
+base = "ollama"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_seed = true
+
+[[models]]
+model_id = "hf.co/unsloth/gemma-4-e2b-it-qat-gguf"
+base = "ollama"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_seed = true
+supports_audio_input = true
+
+[[models]]
+model_id = "claude-opus-5-5"
+base = "anthropic"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+
+[[models]]
+model_id = "gpt-4.1"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 32000
+|}
+;;
 
 (* Installs [test_catalog] as the runtime override for the duration of [f],
    then clears the override so subsequent lookups use the embedded catalog. *)
@@ -2041,11 +2225,10 @@ let%test "for_model_id_catalog empty catalog returns None" =
 
 let%test "Anthropic thinking policy resolves from the model catalog declaration" =
   Model_catalog.set_global
-    (Model_catalog.of_model_entries
-       [ { (test_catalog_entry "declared-anthropic-model") with
-           anthropic_thinking_control = Some Capability_vocab.Adaptive_default
-         }
-       ] |> Result.get_ok);
+    (test_catalog_of_toml {|[[models]]
+model_id = "declared-anthropic-model"
+anthropic_thinking_control = "adaptive_default"
+|});
   Fun.protect ~finally:Model_catalog.clear_global (fun () ->
     anthropic_thinking_control_for_model_id "declared-anthropic-model"
     = Some Anthropic_adaptive_default)
@@ -2072,12 +2255,11 @@ let%test "Anthropic thinking policy falls back to manifest when catalog has no r
    reading must stay blind to it. *)
 let%test "Anthropic thinking policy on a provider-qualified row resolves by provider label" =
   Model_catalog.set_global
-    (Model_catalog.of_model_entries
-       [ { (test_catalog_entry "provider-scoped-anthropic-model") with
-           provider_name = Some "deepseek-anthropic";
-           anthropic_thinking_control = Some Capability_vocab.Always_adaptive
-         }
-       ] |> Result.get_ok);
+    (test_catalog_of_toml {|[[models]]
+model_id = "provider-scoped-anthropic-model"
+provider_name = "deepseek-anthropic"
+anthropic_thinking_control = "always_adaptive"
+|});
   Fun.protect ~finally:Model_catalog.clear_global (fun () ->
     anthropic_thinking_control_for_provider_model_id
       ~provider:(Model_catalog.Declared_provider "deepseek-anthropic")

@@ -103,8 +103,6 @@ type t
 exception Invalid_embedded_catalog of string
 
 val empty : t
-val of_model_entries : model_entry list -> (t, string) result
-(** Reject duplicate exact model/provider identities before indexing. *)
 val model_entries : t -> model_entry list
 val provider_entries : t -> provider_entry list
 
@@ -196,9 +194,8 @@ val lookup_model_for_provider
 val model_entries_for_provider
   :  t
   -> provider:provider_reference
-  -> model_entries:model_entry list
   -> model_entry list
-(** Visible rows from the supplied immutable model snapshot. Verbatim scoped
+(** Visible rows owned by this validated immutable catalog. Verbatim scoped
     rows precede canonical scoped rows, then permitted bare rows; a row with
     the same whole id in an earlier scope shadows the later row. Model ids
     remain verbatim. Enumeration preserves declared exact identities. *)

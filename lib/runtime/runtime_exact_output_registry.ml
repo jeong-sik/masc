@@ -710,7 +710,6 @@ let catalog_source_to_string = function
 
 let collision_to_string = function
   | Exact_output.Duplicate_provider_identity -> "duplicate provider identity"
-  | Exact_output.Duplicate_model_identity -> "duplicate model identity"
   | Exact_output.Duplicate_target_identity -> "duplicate target identity"
   | Exact_output.Provider_alias_shadow -> "provider alias shadow"
 ;;

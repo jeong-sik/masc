@@ -54,7 +54,6 @@ type resolver_catalog_source =
 
 type resolver_collision =
   | Duplicate_provider_identity
-  | Duplicate_model_identity
   | Duplicate_target_identity
   | Provider_alias_shadow
 
@@ -425,11 +424,6 @@ let validate_catalog_source catalog targets =
       (Model_catalog.provider_entries catalog)
   in
   let* () =
-    if Binding.model_identities_unique (Model_catalog.model_entries catalog)
-    then Ok ()
-    else Error (Catalog_collision Duplicate_model_identity)
-  in
-  let* () =
     ensure_unique
       ~collision:Duplicate_target_identity
       ~key:(fun entry -> target_ref_id entry.target_ref |> normalize_identity)
@@ -717,7 +711,6 @@ let load_resolver_snapshot
          match
            Binding.resolve_exact
              ~catalog
-             ~model_entries
              ~provider_ref:target.provider_ref
              ~model_id:target.model_id
          with

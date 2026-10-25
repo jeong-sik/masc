@@ -1,6 +1,5 @@
 module Caps = Capabilities
 module PC = Provider_config
-module String_set = Set.Make (String)
 
 type exact_binding_error =
   | Provider_missing
@@ -144,19 +143,7 @@ let model_identity_key (entry : Model_catalog.model_entry) =
   ^ (Model_identifiers.Model_id.equality_key entry.model_id :> string)
 ;;
 
-let model_identities_unique entries =
-  let rec loop seen = function
-    | [] -> true
-    | entry :: rest ->
-      let identity = model_identity_key entry in
-      if String_set.mem identity seen
-      then false
-      else loop (String_set.add identity seen) rest
-  in
-  loop String_set.empty entries
-;;
-
-let resolve_exact ~catalog ~model_entries ~provider_ref ~model_id =
+let resolve_exact ~catalog ~provider_ref ~model_id =
   match
     Model_catalog.provider_entries catalog
     |> List.find_opt (fun (entry : Model_catalog.provider_entry) ->
@@ -167,7 +154,7 @@ let resolve_exact ~catalog ~model_entries ~provider_ref ~model_id =
     let requested = Model_identifiers.Model_id.of_string model_id in
     (match
        Model_catalog.model_entries_for_provider catalog
-         ~provider:(Model_catalog.Declared_provider provider.id) ~model_entries
+         ~provider:(Model_catalog.Declared_provider provider.id)
        |>
        List.find_opt
          (fun (entry : Model_catalog.model_entry) ->

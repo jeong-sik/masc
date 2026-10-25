@@ -10,6 +10,7 @@ import { ArtifactSharedEditor, type ArtifactSharedCloseRequest } from './artifac
 import { ArtifactComposer, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
 import { ArtifactAppView } from './artifact-app-view'
 import { ArtifactWordExport } from './artifact-word-export'
+import { ArtifactPptxExport } from './artifact-pptx-export'
 
 function downloadSource(doc: ArtifactDocument): void {
   const { artifact, content } = doc
@@ -115,6 +116,8 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
         <${ArtifactCheckControl} key=${JSON.stringify([authRevision,artifact.id,artifact.revision,artifact.body._blob.sha256])}
           artifact=${artifact} state=${checkState} authRevision=${authRevision} isCurrent=${isCurrent} onMutation=${onMutation} onChanged=${onCheckChanged} />
         <${ArtifactWordExport} key=${JSON.stringify([authRevision,workspaceRoot,artifact.id,artifact.revision,artifact.body._blob.sha256])}
+          doc=${doc} authRevision=${authRevision} isCurrent=${isCurrent} disabled=${editing!==null||sharing!==null} />
+        <${ArtifactPptxExport} key=${JSON.stringify(['pptx',authRevision,workspaceRoot,artifact.id,artifact.revision,artifact.body._blob.sha256])}
           doc=${doc} authRevision=${authRevision} isCurrent=${isCurrent} disabled=${editing!==null||sharing!==null} />
         <p role="status" class="m-0 text-xs">${copyFeedback}</p>
         <details class="text-xs text-[var(--color-fg-secondary)]">

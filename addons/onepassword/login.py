@@ -48,6 +48,46 @@ TERMINAL = frozenset({Phase.RELEASED, Phase.DENIED, Phase.EXPIRED,
                       Phase.FAILED, Phase.CANCELLED, Phase.NOT_STARTED, Phase.OUTCOME_UNKNOWN})
 
 
+class PublicationKind(StrEnum):
+    ATTENTION_REQUIRED = "attention_required"
+    EFFECT_SUBMITTED = "effect_submitted"
+    TERMINAL = "terminal"
+
+
+def _publication_kind(phase):
+    if phase in {Phase.APPROVAL_READY, Phase.WAITING_USER}:
+        return PublicationKind.ATTENTION_REQUIRED
+    if phase is Phase.FILL_SUBMITTED:
+        return PublicationKind.EFFECT_SUBMITTED
+    if phase in TERMINAL:
+        return PublicationKind.TERMINAL
+    return None
+
+
+@dataclass(frozen=True)
+class Publication:
+    publication_id: str
+    kind: PublicationKind
+    phase: Phase
+    fill_submitted: bool
+    host_accepted: bool = False
+
+    def public(self, operation_id):
+        return {"publication_id": self.publication_id, "kind": self.kind.value,
+                "output": {"operation_id": operation_id, "phase": self.phase.value,
+                           "fill_submitted": self.fill_submitted, "website_login_verified": False}}
+
+    def matches(self, operation_id, envelope):
+        expected = self.public(operation_id)
+        if (not isinstance(envelope, dict) or set(envelope) != set(expected)
+                or not isinstance(envelope["output"], dict) or set(envelope["output"]) != set(expected["output"])):
+            return False
+        return (all(type(envelope[key]) is str and envelope[key] == expected[key]
+                    for key in ["publication_id", "kind"])
+                and all(type(envelope["output"][key]) is type(value) and envelope["output"][key] == value
+                        for key, value in expected["output"].items()))
+
+
 class _Lifecycle(StrEnum):
     OPEN = "open"
     CLOSING = "closing"
@@ -123,17 +163,37 @@ class Record:
     opened_at: float | None = None
     next_check_at: float | None = None
     fill_submitted: bool = False
+    publications: tuple[Publication, ...] = ()
 
     def public(self):
         return {"operation_id": self.operation_id, "phase": self.phase.value,
                 "fill_submitted": self.fill_submitted, "website_login_verified": False}
 
 
+def _decode_publication(value):
+    if not isinstance(value, dict) or set(value) != set(Publication.__dataclass_fields__):
+        raise ConnectionError("invalid_login_publication")
+    try:
+        publication = Publication(**{**value, "kind": PublicationKind(value["kind"]),
+                                     "phase": Phase(value["phase"])})
+    except (ValueError, TypeError):
+        raise ConnectionError("invalid_login_publication") from None
+    if (not _uuid(publication.publication_id) or type(publication.fill_submitted) is not bool
+            or type(publication.host_accepted) is not bool
+            or _publication_kind(publication.phase) is not publication.kind
+            or publication.phase in {Phase.FILL_SUBMITTED, Phase.RELEASED} and not publication.fill_submitted):
+        raise ConnectionError("invalid_login_publication")
+    return publication
+
+
 def _decode(value):
     if not isinstance(value, dict) or set(value) != set(Record.__dataclass_fields__):
         raise ConnectionError("invalid_login_record")
     try:
-        record = Record(**{**value, "phase": Phase(value["phase"])})
+        if not isinstance(value["publications"], list):
+            raise ConnectionError("invalid_login_publication")
+        record = Record(**{**value, "phase": Phase(value["phase"]),
+                           "publications": tuple(_decode_publication(p) for p in value["publications"])})
     except (ValueError, TypeError):
         raise ConnectionError("invalid_login_record") from None
     if (not all(_uuid(v) for v in [record.operation_id, record.browser_instance_id, record.connection_id])
@@ -154,7 +214,17 @@ def _decode(value):
     if (record.phase in {Phase.FILLING, Phase.FILL_SUBMITTED} and record.reference is None
             or record.phase in {Phase.FILL_SUBMITTED, Phase.RELEASED} and not record.fill_submitted):
         raise ConnectionError("invalid_login_record")
+    if _publication_kind(record.phase) is not None and (
+            not record.publications or record.publications[-1].phase is not record.phase
+            or record.publications[-1].fill_submitted is not record.fill_submitted):
+        raise ConnectionError("invalid_login_publication")
+    if not record.fill_submitted and any(p.fill_submitted for p in record.publications):
+        raise ConnectionError("invalid_login_publication")
     return record
+
+
+def _encode(record):
+    return {**asdict(record), "publications": [asdict(p) for p in record.publications]}
 
 
 class Journal(PrivateStore):
@@ -166,12 +236,15 @@ class Journal(PrivateStore):
     @staticmethod
     def _validate(value):
         if (not isinstance(value, dict) or set(value) != {"version", "operations"}
-                or type(value["version"]) is not int or value["version"] != 1
+                or type(value["version"]) is not int or value["version"] != 2
                 or not isinstance(value["operations"], list)):
             raise ConnectionError("invalid_login_journal")
         records = [_decode(item) for item in value["operations"]]
         if len({record.operation_id for record in records}) != len(records):
             raise ConnectionError("duplicate_login_operation")
+        publications = [p.publication_id for record in records for p in record.publications]
+        if len(set(publications)) != len(publications):
+            raise ConnectionError("duplicate_login_publication")
 
 
 @dataclass
@@ -190,6 +263,7 @@ class Logins:
         self._lock, self._handles_lock = threading.RLock(), threading.Lock()
         self._lifecycle = _Lifecycle.OPEN
         self._cleanup_unconfirmed = False
+        self._storage_failed = False
         self._live, self._lease = {}, None
         self._prepare = Path(__file__).with_name("prepare.js").read_text()
         self._program = Path(__file__).with_name("autofill.js").read_text()
@@ -204,12 +278,12 @@ class Logins:
                     os.close(fd)
                     raise
                 self._lease = fd
-                value = journal.read(root) or {"version": 1, "operations": []}
+                value = journal.read(root) or {"version": 2, "operations": []}
                 records = [_decode(item) for item in value["operations"]]
                 # No socket, provider owner or extension binding survives this
                 # engine. Never rebind or replay a retained private operation.
-                self._records = {r.operation_id: (replace(r, phase=Phase.OUTCOME_UNKNOWN,
-                    app_link=None, reference=None) if r.phase not in TERMINAL else r) for r in records}
+                self._records = {r.operation_id: (self._changed(r, replace(r, phase=Phase.OUTCOME_UNKNOWN,
+                    app_link=None, reference=None)) if r.phase not in TERMINAL else r) for r in records}
                 if any(r.phase not in TERMINAL for r in records):
                     journal.write(root, self._value())
         except (OSError, ConnectionError, ValueError, TypeError):
@@ -219,22 +293,79 @@ class Logins:
             raise LoginError("unavailable") from None
 
     def _value(self):
-        return {"version": 1, "operations": [asdict(record) for record in self._records.values()]}
+        return {"version": 2, "operations": [_encode(record) for record in self._records.values()]}
 
-    def _save(self, record):
-        # Publish memory only after the private durable record is committed.
+    @staticmethod
+    def _changed(prior, record):
+        publications = prior.publications if prior is not None else ()
+        kind = _publication_kind(record.phase)
+        if kind is not None and (prior is None or prior.phase is not record.phase):
+            publications += (Publication(str(uuid.uuid4()), kind, record.phase, record.fill_submitted),)
+        return replace(record, publications=publications)
+
+    def _commit(self, record):
+        # The state and immutable delivery intent share one atomic private
+        # record. A failed replace/fsync cannot authorize another write from
+        # the old in-memory snapshot: the committed result may already exist.
+        if self._storage_failed:
+            raise LoginError("outcome_unknown")
         records = {**self._records, record.operation_id: record}
-        with self.journal.locked() as root:
-            self.journal.write(root, {"version": 1, "operations": [asdict(r) for r in records.values()]})
+        try:
+            with self.journal.locked() as root:
+                self.journal.write(root, {"version": 2, "operations": [_encode(r) for r in records.values()]})
+        except (ConnectionError, OSError, ValueError, TypeError):
+            self._storage_failed = True
+            with self._handles_lock:
+                for live in self._live.values():
+                    live.cancelled.set()
+                    try:
+                        live.bridge.cancel()
+                    except (BridgeError, OSError, ValueError, TypeError):
+                        self._cleanup_unconfirmed = True
+            raise LoginError("outcome_unknown") from None
         self._records = records
         return record
+
+    def _save(self, record):
+        if self._storage_failed:
+            raise LoginError("outcome_unknown")
+        return self._commit(self._changed(self._records.get(record.operation_id), record))
 
     def _owned(self, operation_id, caller):
         record = self._records.get(operation_id)
         if self._lease is None or record is None or not _caller(caller) or (
                 caller != record.caller and caller != {"kind": "operator"}):
             raise LoginError("unavailable")
+        if self._storage_failed:
+            raise LoginError("outcome_unknown")
         return record
+
+    def pending_publications(self, operation_id, caller):
+        """Private delivery inputs; no endpoint, approval link or reference.
+
+        Re-read the same immutable envelopes after an uncertain host ACK.
+        This read never allocates a replacement host/Browser binding.
+        """
+        record = self._owned(operation_id, caller)
+        return [publication.public(operation_id) for publication in record.publications if not publication.host_accepted]
+
+    def acknowledge_publication(self, operation_id, caller, envelope):
+        """Commit an exact original sender's ACK without replaying its effect.
+
+        Only the private delivery owner calls this after the host confirms
+        durable admission. No public MCP tool exposes acknowledgement.
+        """
+        with self._lock:
+            record = self._owned(operation_id, caller)
+            if record.caller != caller or not isinstance(envelope, dict):
+                raise LoginError("unavailable")
+            publication = next((p for p in record.publications if p.matches(operation_id, envelope)), None)
+            if publication is None:
+                raise LoginError("unavailable")
+            if not publication.host_accepted:
+                self._commit(replace(record, publications=tuple(
+                    replace(p, host_accepted=True) if p.publication_id == publication.publication_id else p
+                    for p in record.publications)))
 
     def _invoke(self, record, live, **arguments):
         if live.cancelled.is_set():
@@ -285,6 +416,8 @@ class Logins:
         if not self._lock.acquire(blocking=False):
             raise LoginError("unavailable")
         try:
+            if self._storage_failed:
+                raise LoginError("outcome_unknown")
             yield
         finally:
             self._lock.release()
@@ -364,12 +497,16 @@ class Logins:
     def operations(self, caller):
         if self._lease is None or not _caller(caller):
             raise LoginError("unavailable")
+        if self._storage_failed:
+            raise LoginError("outcome_unknown")
         records = self._records
         return [r.public() for r in records.values()
                 if caller == r.caller or caller == {"kind": "operator"}]
 
     def pending_checks(self):
         """Private scheduler inputs from the last committed snapshot."""
+        if self._storage_failed:
+            raise LoginError("outcome_unknown")
         return [(r.operation_id, r.next_check_at) for r in self._records.values()
                 if r.phase is Phase.AWAITING_APPROVAL]
 
@@ -552,5 +689,5 @@ class Logins:
             with self._handles_lock:
                 self._live.clear()
                 self._lifecycle = _Lifecycle.CLOSED
-            if self._cleanup_unconfirmed:
+            if self._cleanup_unconfirmed or self._storage_failed:
                 raise LoginError("outcome_unknown")

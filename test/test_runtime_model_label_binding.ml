@@ -117,6 +117,12 @@ let invalid_endpoint () =
       (Runtime_model_string.parse_model_string spec=None))
     ["custom:overlap@";"custom:@https://explicit.invalid";
      "custom:overlap@not-an-endpoint";"custom:overlap@ftp://explicit.invalid"]
+let malformed_endpoint () =
+  List.iter (fun endpoint ->
+    Alcotest.(check bool) "custom URL parser must consume the complete endpoint" true
+      (Runtime_model_string.parse_model_string ("custom:overlap@" ^ endpoint)=None))
+    ["https://explicit.invalid:bogus";"https://explicit.invalid/path%ZZ";
+     "https://explicit.invalid/path invalid"]
 let explicit_endpoint () = with_endpoint_env (Some "https://ambient.invalid") (fun () ->
   let spec = "custom:overlap@https://explicit.invalid/v1" in
   (match Provider_kind_resolver.resolve spec with
@@ -138,4 +144,5 @@ let explicit_endpoint () = with_endpoint_env (Some "https://ambient.invalid") (f
 let () = Alcotest.run "runtime model label binding"
   ["provider authority",["identity",`Quick,identity;"context",`Quick,context;"policy and wire",`Quick,policy];
    "custom endpoint",["missing",`Quick,missing_endpoint;"ambient",`Quick,ambient_endpoint;
-     "invalid",`Quick,invalid_endpoint;"explicit",`Quick,explicit_endpoint]]
+     "invalid",`Quick,invalid_endpoint;"malformed",`Quick,malformed_endpoint;
+     "explicit",`Quick,explicit_endpoint]]

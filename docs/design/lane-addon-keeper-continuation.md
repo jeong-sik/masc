@@ -62,10 +62,29 @@ Browser command authority and progress delivery have different lifetimes. A
 released or withdrawn Browser grant permits no more Browser input. A separate
 publication binding may still deliver the final committed result of that same
 invocation, then end explicitly. It cannot bind another Browser or adopt another
-provider connection. Provider retirement closes and joins publication admission. A separate durable
-host owner-loss notice remains to be implemented; no successor may claim the
-original private authority.
+provider connection. Provider retirement closes and joins publication admission.
+After that join, the allocation's existing settlement owner emits a host-only
+`owner_lost` notice for an invocation whose successful acceptance was confirmed.
+Its fixed output is `{"outcome":"unknown"}`; the worker decoder refuses that
+kind. The retained record preserves the original closed worker schema as
+provenance without fabricating a worker operation phase or credential result.
+No successor may claim the original private authority.
 No elapsed-time expiry or replacement operation is introduced.
+
+This settlement uses the captured raw host sink and original origin. It cannot
+reenter provider authorization, allocation cleanup or Browser work. Live
+invocation acceptance and eligibility are recorded without yielding. A rejected
+or unaccepted invocation completes its notification without an owner-loss event.
+A worker Terminal that reached confirmed durable admission completes the same
+notification before the following fresh authorization read can yield, preventing
+a false loss notice if the provider ends during that read. Browser Release and
+withdrawal never complete this separate publication notification.
+
+This is source implementation for detected provider retirement while the host
+owner is alive. A cancelled root switch or failed storage remains unconfirmed
+under the allocation's existing cleanup contract. It does not promise recovery
+from whole-host power loss. The owner-loss source fixture has only been parsed;
+its native execution and provider-kill scenario remain unverified.
 
 ## Commit, deliver and acknowledge
 

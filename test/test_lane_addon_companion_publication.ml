@@ -79,6 +79,45 @@ let canonical_retention _env fs config origin =
   check string "conflict never rewrites original" bytes (read (path origin));
   check bool "original publication strictly reloads" true
     (P.find ~config ~origin_id:origin.id ~publication_id=Ok first)
+let host_owner_loss _env fs config origin =
+  let event=P.owner_lost ~publication_id |> pub_ok in
+  check bool "host notice uses a fixed generic unknown output" true
+    (event.kind=P.Owner_lost && event.output=`Assoc ["outcome",`String "unknown"]);
+  check bool "worker capability cannot forge host owner loss" true
+    (P.event ~output_schema (P.event_json event)=Error P.Invalid_event);
+  check bool "host notice requires a canonical publication identity" true
+    (P.owner_lost ~publication_id:"../replacement"=Error P.Invalid_event);
+  let retained=retain fs config origin event |> pub_ok in
+  check bool "original closed worker schema remains provenance" true
+    (retained.output_schema=(Lane_addon_action.canonical output_schema |> string_ok));
+  check bool "host notice strictly reloads without worker-schema coercion" true
+    (P.find ~config ~origin_id:origin.id ~publication_id=Ok retained);
+  deliver fs config origin event |> delivery_ok;
+  let change=only config |> payload in
+  check (option string) "owner loss retains the original Task" (Some "task-original") change.ao_source.task_id;
+  check bool "owner loss retains its original conversation" true
+    (Keeper_continuation_channel.same_route origin.source.channel change.ao_channel);
+  let observed=Keeper_world_observation.pending_board_event_of_addon_operation_change
+    ~base_path:config.base_path ~keeper_name:keeper ~arrived_at:0. change |> pub_ok in
+  let fields=Keeper_unified_prompt.For_testing.board_event_fields {observed with preview=""} in
+  check bool "resumed input carries the complete host event" true
+    (Yojson.Safe.from_string (List.assoc "publication" fields)=P.event_json event);
+  let file=path origin in
+  let bytes=read file in
+  let json=Yojson.Safe.from_string bytes in
+  let changed=match json with
+    | `Assoc fields -> `Assoc (List.map (fun (name,value) ->
+        if name="event" then name,`Assoc ["publication_id",`String publication_id;
+          "kind",`String "owner_lost";"output",`Assoc ["outcome",`String "known"]]
+        else name,value) fields)
+    | _ -> fail "retained host publication missing" in
+  let damaged=Yojson.Safe.to_string changed ^ "\n" in
+  write file damaged;
+  check bool "changed host outcome is not authoritative" true
+    (P.find ~config ~origin_id:origin.id ~publication_id=Error P.Corrupt);
+  check bool "damaged host record cannot be silently repaired" true
+    (retain fs config origin event=Error P.Corrupt);
+  check string "failed reconciliation preserves damaged evidence" damaged (read file)
 let schema_refusal _env _fs _config origin =
   let raw=P.event_json (notice ()) in
   let fields=match raw with `Assoc fields -> fields | _ -> fail "event object missing" in
@@ -310,6 +349,7 @@ let unreadable_source_does_not_anchor_batch env fs config origin = with_intake e
   check int "completion cannot consume unreadable original source" 1 (List.length (pending config));
   check string "failed source is not silently repaired" "{" (read (path origin)))
 let ()=run "Original companion publication" ["publication",[
+  test_case "host-only owner loss retains original source and fixed outcome" `Quick (with_origin host_owner_loss);
   test_case "one original invocation and conversation per intake" `Quick (with_origin invocation_batches);
   test_case "ordinary sources defer companion routing intact" `Quick (with_origin general_source_precedes_addon);
   test_case "retired tool result hint cannot anchor companion admission" `Quick (with_origin retired_tool_result_does_not_anchor_batch);

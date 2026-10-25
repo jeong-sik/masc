@@ -37,3 +37,23 @@ outside this fix. The guide's example host is api.cohere.ai; the packaged
 api.cohere.com URL is unchanged. Live alias equivalence and provider acceptance
 remain unverified. Mistral/Kimi issue acceptance remains separate. No complete
 #27869 closure, full regression, deployment or live provider result is claimed.
+
+## Provider route audit and observed initial compiler failure
+
+Initial run40152018270 actually checked outbf3f2b64469bf3951bcc54d7fb8538e4044a7d1a
+and failed before selected tests: fatal fragile-match warning4 for the codec
+and new dialect. The prior source PASS is invalidated by that compiler evidence.
+Schema-wire selection is now a codec-owned closed function with an optional
+Chat dialect. Codec and dialect cases are exhaustive; other transports retain
+their schema shape. No warning suppression or catch-all branch is added.
+
+The [Mistral OpenAPI](https://docs.mistral.ai/openapi.yaml) was retrieved and its
+JsonSchema definition read on2026-10-25: strict defaults false. Existing raw
+schema and exact-admission code already sends true. New peer-body cases cover
+Mistral sync/SSE with that explicit field, preserving named caller envelopes.
+The [Kimi platform guide](https://platform.kimi.ai/docs/guide/response_format)
+was also read: platform schema support is model-specific and recommends
+strict=true. The fixture distinguishes the existing coding profile from an
+explicit OpenAI-compatible schema capability declaration using the same model
+name. This is typed configuration/wire proof when executed, not provider
+acceptance, full platform model metadata, or MFJS validator coverage.

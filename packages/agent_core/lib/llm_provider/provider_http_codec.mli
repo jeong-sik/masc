@@ -27,7 +27,10 @@ val of_config : Provider_config.t -> t
 val fingerprint_tag : t -> string
 
 (** Serializer-owned schema shape for this wire codec. *)
-val json_schema_wire : t -> json_schema_wire
+val json_schema_wire
+  :  ?chat_dialect:Capabilities.json_schema_dialect
+  -> t
+  -> json_schema_wire
 
 (** Whether this wire codec has a concrete JSON-mode serializer. *)
 val supports_json_mode : t -> bool

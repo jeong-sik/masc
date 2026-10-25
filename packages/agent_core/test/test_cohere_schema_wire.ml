@@ -78,6 +78,40 @@ let test_explicit_override_and_provider_isolation () =
   check bool "JSON mode has no schema invented" true
     (wire json_mode = `Assoc [ "type", `String "json_object" ])
 
+let test_mistral_and_kimi_declarations () =
+  List.iter (fun stream -> with_peer ~stream (fun ~sw ~net ~url captured ->
+    let config = Provider_config.make ~kind:OpenAI_compat ~provider_id:"mistral"
+      ~model_id:"mistral-large" ~base_url:url ~api_key:"fixture-only"
+      ~response_format:(Types.JsonSchema schema) () in
+    let outcome = if stream then
+        Complete.complete_stream ~sw ~net ~config ~messages ~on_event:(fun _ -> ()) ()
+      else Complete.complete ~sw ~net ~config ~messages () in
+    ignore (get_ok "Mistral peer completion" outcome.Completion_outcome.result);
+    let body = match !captured with Some body -> Yojson.Safe.from_string body
+      | None -> fail "Mistral peer received no request" in
+    let format = Yojson.Safe.Util.member "response_format" body in
+    check string "Mistral uses the named schema dialect" "json_schema"
+      Yojson.Safe.Util.(format |> member "type" |> to_string);
+    let payload = Yojson.Safe.Util.member "json_schema" format in
+    check bool "Mistral strict is explicitly true" true
+      Yojson.Safe.Util.(payload |> member "strict" |> to_bool);
+    check bool "Mistral raw domain schema is retained" true
+      (Yojson.Safe.Util.member "schema" payload = schema))) [ false; true ];
+  let coding = Provider_config.make ~kind:Kimi ~provider_id:"kimi"
+    ~model_id:"kimi-k2.7-code" ~base_url:"https://opaque-proxy.example"
+    ~response_format:(Types.JsonSchema schema) () in
+  check bool "coding capability does not promise platform schema support" true
+    (Result.is_error (Provider_config.validate_output_schema_request coding));
+  let platform = Provider_config.make ~kind:OpenAI_compat ~provider_id:"platform-fixture"
+    ~model_id:"kimi-k2.7-code" ~base_url:"https://opaque-proxy.example"
+    ~model_capabilities_override:Capabilities.openai_compat_chat_capabilities
+    ~response_format:(Types.JsonSchema schema) () in
+  check bool "explicit platform wire/capability is independently admitted" true
+    (Result.is_ok (Provider_config.validate_output_schema_request platform));
+  let body = Backend_openai.build_request ~config:platform ~messages () |> Yojson.Safe.from_string in
+  check bool "platform declaration sends strict named schema" true
+    Yojson.Safe.Util.(body |> member "response_format" |> member "json_schema" |> member "strict" |> to_bool)
+
 let catalog ?(kind = "openai_compat") dialect = Printf.sprintf
   "[[providers]]\nid = \"fixture\"\nkind = %S\nbase_url = \"http://127.0.0.1:1\"\nrequest_path = \"/chat/completions\"\nauth = \"none\"\ncapabilities_base = \"openai_chat\"\n[[models]]\nid_prefix = \"same-model\"\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nsupports_structured_output = true\njson_schema_dialect = %S\n[[targets]]\nid = \"slot\"\nprovider_ref = \"fixture\"\nmodel_id = \"same-model\"\nconnect_timeout_s = 30.0\nbody_timeout_s = 30.0\n" kind dialect
 
@@ -145,5 +179,6 @@ let () =
   run "Cohere schema wire" [ "contract", [
     test_case "Complete sync/SSE reaches the peer with declared shape" `Quick test_complete_sync_and_sse;
     test_case "explicit override and provider isolation" `Quick test_explicit_override_and_provider_isolation;
+    test_case "Mistral strict and typed Kimi route separation" `Quick test_mistral_and_kimi_declarations;
     test_case "strict typed declarations" `Quick test_strict_declarations;
     test_case "exact frozen schema contract" `Quick test_exact_frozen_contract ] ]

@@ -19,8 +19,12 @@ let fingerprint_tag = function
   | Glm_chat -> "glm-chat"
 ;;
 
-let json_schema_wire = function
-  | Openai_chat | Openai_responses | Glm_chat -> Openai_named_schema
+let json_schema_wire ?(chat_dialect = Capabilities.Openai_json_schema) = function
+  | Openai_chat ->
+    (match chat_dialect with
+     | Capabilities.Openai_json_schema -> Openai_named_schema
+     | Capabilities.Json_object_schema -> Raw_schema)
+  | Openai_responses | Glm_chat -> Openai_named_schema
   | Anthropic_messages | Ollama_chat | Gemini_generate_content -> Raw_schema
 ;;
 

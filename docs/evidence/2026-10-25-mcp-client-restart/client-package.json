@@ -1,0 +1,9 @@
+{
+  "name": "mcp-remote",
+  "version": "0.15.2",
+  "package_json_sha256": "18346a61cbf130f304985abb3e7e461560a29a04d3f7ae6436a2cc3965b30a5b",
+  "package_lock_sha256": "44e41d5e8026698d357896228d07d75fc0c5cdba3758c8ca5c3f7a9e494d7745",
+  "npm_integrity": "sha512-3PrXMgjJew6xbZH21D7AbtOoHwhvjWt1IY6wepHjKTZLPSkTPifdMVBFuoxsuF6WK6nUlZIgpSj5o5NscJ+XXw==",
+  "invocation": "generated npx -y mcp-remote URL --header Authorization: Bearer ${MASC_RESTART_PROOF_TOKEN}; cwd contains pinned installed package",
+  "executed_probe_sha256": "ef6e0fd5278824becbd48ef799a470ee69ca6eb086e051ab3095fdcb9681d45b"
+}

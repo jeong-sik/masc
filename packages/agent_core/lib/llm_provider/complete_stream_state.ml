@@ -497,7 +497,15 @@ let normalize_event state event =
     (match Blocks.find_opt index state.blocks with
      | Some {header=Announced{kind=Thinking_block;_};lifecycle=Open;signature_chunks_rev=[];_} ->
        Ok(Some event)
-     | Some _ | None -> Error(Types.Stream_parse_failed
+     | Some { header = Unannounced; lifecycle = Open | Closed; _ }
+     | Some { header = Announced { kind = Thinking_block; _ }; lifecycle = Closed; _ }
+     | Some { header = Announced { kind = Thinking_block; _ }; lifecycle = Open;
+              signature_chunks_rev = _ :: _; _ }
+     | Some { header = Announced { kind = (Text_block | Reasoning_details_block
+                  | Redacted_thinking_block | Tool_use_block | Tool_result_block _
+                  | Image_block | Document_block | Audio_block | Unknown_block _); _ };
+              lifecycle = Open | Closed; _ }
+     | None -> Error(Types.Stream_parse_failed
          {reason="thinking_snapshot_requires_unsigned_open_block";raw=""}))
   | Types.ContentBlockDelta { index; delta = Types.TextSnapshot snapshot } ->
     (match Blocks.find_opt index state.blocks with

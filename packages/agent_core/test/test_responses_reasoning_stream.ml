@@ -134,4 +134,3 @@ let () = Alcotest.run "responses_reasoning_stream"
    ;"late plaintext",late_plaintext;"item identity",wrong_identity
    ;"signed thinking guard",(fun()->invalid_snapshot_target true)
    ;"wrong block guard",(fun()->invalid_snapshot_target false)]]
-

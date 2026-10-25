@@ -23,9 +23,12 @@ type locator =
   ; initial_target : entry_observation
   }
 
+type publication = Replace | Create_exclusive
+
 type prepared =
   { owner : owner
   ; operation_id : operation_id
+  ; publication : publication
   ; locator : locator
   ; permissions : int
   }
@@ -286,7 +289,7 @@ let forensic_directory_leaf = "forensic"
 let directory_permissions = 0o700
 let record_permissions = 0o600
 let record_schema = "masc.fs-publication-recovery"
-let record_version = 1
+let record_version = 2
 let stage_prefix = ".masc_atomic_stage_"
 let stage_suffix = ".dir"
 
@@ -445,6 +448,7 @@ let locator_parent_components (locator : locator) = locator.parent_components
 let locator_parent (locator : locator) = locator.parent
 let locator_target_leaf (locator : locator) = locator.target_leaf
 
+let prepared_publication (prepared : prepared) = prepared.publication
 let prepared_operation_id (prepared : prepared) = prepared.operation_id
 let prepared_locator (prepared : prepared) = prepared.locator
 let bound_prepared (bound : bound) = bound.prepared
@@ -703,6 +707,17 @@ let operation_id_of_json fields =
   | Error error -> raise_invalid error
 ;;
 
+let publication_to_json = function
+  | Replace -> `String "replace"
+  | Create_exclusive -> `String "create_exclusive"
+;;
+
+let publication_of_json = function
+  | `String "replace" -> Replace
+  | `String "create_exclusive" -> Create_exclusive
+  | value -> raise_invalid (Record_field_invalid { field = "publication"; value })
+;;
+
 let prepared_to_json (prepared : prepared) =
   `Assoc
     [ "schema", `String record_schema
@@ -710,6 +725,7 @@ let prepared_to_json (prepared : prepared) =
     ; "state", `String "prepared"
     ; "owner", `String (owner_to_string prepared.owner)
     ; "operation_id", `String (operation_id_to_string prepared.operation_id)
+    ; "publication", publication_to_json prepared.publication
     ; "allowed_root_path", `String prepared.locator.allowed_root_path
     ; "allowed_root", identity_to_json prepared.locator.allowed_root
     ; ( "parent_components"
@@ -730,6 +746,7 @@ let prepared_fields =
   ; "state"
   ; "owner"
   ; "operation_id"
+  ; "publication"
   ; "allowed_root_path"
   ; "allowed_root"
   ; "parent_components"
@@ -745,6 +762,7 @@ let prepared_of_json json =
   validate_header fields ~state:"prepared";
   let owner = owner_of_json fields in
   let operation_id = operation_id_of_json fields in
+  let publication = publication_of_json (field fields "publication") in
   let allowed_root_path = string_field fields "allowed_root_path" in
   let allowed_root =
     identity_of_json ~field:"allowed_root" (field fields "allowed_root")
@@ -790,7 +808,7 @@ let prepared_of_json json =
     | Ok permissions -> permissions
     | Error error -> raise_invalid error
   in
-  { owner; operation_id; locator; permissions }
+  { owner; operation_id; publication; locator; permissions }
 ;;
 
 let bound_to_json (bound : bound) =
@@ -2697,10 +2715,11 @@ let fresh_operation_id () =
 let prepare_with_operation_id_internal
       ~store
       ~operation_id
+      ~publication
       ~locator
       ~permissions
   =
-  let prepared = { owner = store.owner; operation_id; locator; permissions } in
+  let prepared = { owner = store.owner; operation_id; publication; locator; permissions } in
   let raw = encode_prepared prepared in
   (match record_kind ~store ~area:Owned ~operation_id with
    | `Not_found -> ()
@@ -2720,10 +2739,10 @@ let prepare_with_operation_id_internal
   prepared
 ;;
 
-let prepare ~(store : store) ~(locator : locator) ~(permissions : permissions) =
+let prepare ~(store : store) ~publication ~(locator : locator) ~(permissions : permissions) =
   let create_attempt () =
     let operation_id = fresh_operation_id () in
-    let prepared = { owner = store.owner; operation_id; locator; permissions } in
+    let prepared = { owner = store.owner; operation_id; publication; locator; permissions } in
     let raw = encode_prepared prepared in
     run_mutation ~initial_effect:No_record_change @@ fun observed_effect ->
     match
@@ -3076,6 +3095,7 @@ module For_testing = struct
   let prepare_with_operation_id
         ~(store : store)
         ~operation_id
+        ~publication
         ~(locator : locator)
         ~(permissions : permissions)
     =
@@ -3084,6 +3104,7 @@ module For_testing = struct
       prepare_with_operation_id_internal
         ~store
         ~operation_id
+        ~publication
         ~locator
         ~permissions
     in

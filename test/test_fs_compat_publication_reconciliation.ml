@@ -184,7 +184,7 @@ let test_prepared_absent_becomes_forensic () =
     | `Assoc fields -> List.map fst fields |> List.sort String.compare
     | _ -> fail "forensic recovery record was not an object"
   in
-  check (list string) "version-1 forensic fields"
+  check (list string) "version-2 forensic fields"
     [ "operation_id"; "outcome"; "owner"; "schema"
     ; "source"; "source_state"; "state"; "version"
     ]
@@ -245,10 +245,10 @@ let test_bound_stage_is_preserved () =
     | `Assoc fields -> List.map fst fields |> List.sort String.compare
     | _ -> fail "bound recovery record was not an object"
   in
-  check (list string) "version-1 bound fields"
+  check (list string) "version-2 bound fields"
     [ "allowed_root"; "allowed_root_path"; "initial_target"
     ; "operation_id"; "owner"; "parent"; "parent_components"
-    ; "permissions"; "schema"; "stage_identity"; "stage_name"
+    ; "permissions"; "publication"; "schema"; "stage_identity"; "stage_name"
     ; "state"; "target_leaf"; "version"
     ]
     bound_fields;
@@ -273,14 +273,14 @@ let test_bound_stage_is_preserved () =
     | `Assoc fields -> List.map fst fields |> List.sort String.compare
     | _ -> fail "bound forensic layer was not an object"
   in
-  check string "version-1 bound source state" "bound"
+  check string "version-2 bound source state" "bound"
     (Yojson.Safe.Util.member "source_state" forensic
      |> Yojson.Safe.Util.to_string);
   let outcome = Yojson.Safe.Util.member "outcome" forensic in
-  check (list string) "version-1 bound outcome fields"
+  check (list string) "version-2 bound outcome fields"
     [ "kind"; "observed_target"; "stage_identity"; "stage_kind" ]
     (names outcome);
-  check (list string) "version-1 observed target fields"
+  check (list string) "version-2 observed target fields"
     [ "identity"; "kind"; "presence" ]
     (names (Yojson.Safe.Util.member "observed_target" outcome));
   ignore (inventory_owner registry owner_name);
@@ -331,12 +331,12 @@ let test_allowed_root_identity_mismatch_is_forensic () =
     | _ -> fail "prepared mismatch layer was not an object"
   in
   let outcome = Yojson.Safe.Util.member "outcome" forensic in
-  check (list string) "version-1 prepared mismatch outcome fields"
+  check (list string) "version-2 prepared mismatch outcome fields"
     [ "kind"; "mismatch" ] (names outcome);
   let mismatch = Yojson.Safe.Util.member "mismatch" outcome in
-  check (list string) "version-1 mismatch fields"
+  check (list string) "version-2 mismatch fields"
     [ "expected"; "observed" ] (names mismatch);
-  check (list string) "version-1 observed root fields"
+  check (list string) "version-2 observed root fields"
     [ "identity"; "kind"; "presence" ]
     (names (Yojson.Safe.Util.member "observed" mismatch));
   ignore (inventory_owner registry owner_name)
@@ -442,7 +442,7 @@ let test_remaining_forensic_outcome_fields_stay_decodable () =
                        ~initial_target:Core.Absent)
                 in
                 let permissions = valid (Core.permissions_of_int 0o600) in
-                let prepared = transitioned (Core.prepare ~store ~locator ~permissions) in
+                let prepared = transitioned (Core.prepare ~store ~publication:Core.Replace ~locator ~permissions) in
                 let forensic = transitioned (write store prepared) in
                 Core.forensic_operation_id forensic |> Core.operation_id_to_string)
          with
@@ -465,7 +465,7 @@ let test_remaining_forensic_outcome_fields_stay_decodable () =
        check string "writer outcome kind" expected_kind
          (Yojson.Safe.Util.member "kind" outcome
           |> Yojson.Safe.Util.to_string);
-       check (list string) "version-1 outcome fields" expected_fields names;
+       check (list string) "version-2 outcome fields" expected_fields names;
        let rows =
          match
            Core.with_existing_store
@@ -482,7 +482,7 @@ let test_remaining_forensic_outcome_fields_stay_decodable () =
     cases
 ;;
 
-let test_historical_prepared_record_fields_stay_decodable () =
+let test_current_prepared_record_fields_stay_decodable () =
   with_tmp_dir @@ fun temp_root ->
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
@@ -510,28 +510,28 @@ let test_historical_prepared_record_fields_stay_decodable () =
     | `Assoc fields -> List.map fst fields |> List.sort String.compare
     | _ -> fail "prepared recovery record layer was not an object"
   in
-  check (list string) "version-1 prepared fields"
+  check (list string) "version-2 prepared fields"
     [ "allowed_root"; "allowed_root_path"; "initial_target"
     ; "operation_id"; "owner"; "parent"; "parent_components"
-    ; "permissions"; "schema"; "state"; "target_leaf"; "version"
+    ; "permissions"; "publication"; "schema"; "state"; "target_leaf"; "version"
     ]
     (names json);
-  check (list string) "version-1 identity fields"
+  check (list string) "version-2 identity fields"
     [ "dev"; "ino" ]
     (names (Yojson.Safe.Util.member "allowed_root" json));
-  check int "version remains 1" 1
+  check int "version is 2" 2
     (Yojson.Safe.Util.member "version" json |> Yojson.Safe.Util.to_int);
-  (* Replay the old record independently of the current writer. *)
+  (* Decode a complete record independently of the writer. *)
   let identity =
     `Assoc
       [ "dev", `String (Int64.to_string root.dev)
       ; "ino", `String (Int64.to_string root.ino)
       ]
   in
-  let historical =
+  let independent_record =
     `Assoc
       [ "schema", `String "masc.fs-publication-recovery"
-      ; "version", `Int 1
+      ; "version", `Int 2
       ; "state", `String "prepared"
       ; "owner", `String owner_name
       ; "operation_id", `String record_name
@@ -540,15 +540,135 @@ let test_historical_prepared_record_fields_stay_decodable () =
       ; "parent_components", `List []
       ; "parent", identity
       ; "target_leaf", `String "target.json"
+      ; "publication", `String "replace"
       ; "initial_target", `Assoc [ "presence", `String "absent" ]
       ; "permissions", `Int 0o600
       ]
   in
-  Fs_compat.save_file record_path (Yojson.Safe.to_string historical ^ "\n");
+  Fs_compat.save_file record_path (Yojson.Safe.to_string independent_record ^ "\n");
   let owner = inventory_owner registry owner_name in
   let report = reconcile ~fs registry owner in
-  check bool "historical prepared record remains readable" true
+  check bool "current prepared record remains readable" true
     (report_ready report)
+;;
+
+let test_publication_intent_survives_owned_and_forensic_records () =
+  with_tmp_dir @@ fun temp_root ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let fs = Eio.Stdenv.fs env in
+  let root_path = Unix.realpath temp_root in
+  let root = Eio.Path.stat ~follow:false Eio.Path.(fs / root_path) in
+  let registry_path = Filename.concat temp_root "registry" in
+  Unix.mkdir registry_path 0o700;
+  let valid = function
+    | Ok value -> value
+    | Error error -> fail (Core.validation_error_to_string error)
+  in
+  let transitioned = function
+    | Ok value -> value
+    | Error error -> fail (Core.transition_error_to_string error)
+  in
+  let registry = transitioned
+      (Core.open_registry ~sw ~registry_root:Eio.Path.(fs / registry_path)) in
+  let identity = valid (Core.identity ~dev:root.dev ~ino:root.ino) in
+  let locator = valid
+      (Core.locator ~allowed_root_path:root_path ~allowed_root:identity
+         ~parent_components:[] ~parent:identity ~target_leaf:"target.json"
+         ~initial_target:Core.Absent) in
+  let permissions = valid (Core.permissions_of_int 0o600) in
+  List.iter
+    (fun (name, publication) ->
+       let owner = valid (Core.owner_of_string name) in
+       let with_store f =
+         match Core.with_store ~registry ~owner
+                 ~on_release_failure:(fun _ -> fail "store release failed") f with
+         | Ok (Core.Store_scope_released value) -> value
+         | Ok (Core.Store_scope_release_failed _) -> fail "store release failed"
+         | Error error -> fail (Core.transition_error_to_string error)
+       in
+       let read f =
+         match Core.with_existing_store ~registry ~owner (fun store ->
+           f store (transitioned (Core.inventory store))) with
+         | Ok (Core.Existing_store_scope_released value) -> value
+         | Ok (Core.Existing_store_scope_release_failed _) -> fail "reader release failed"
+         | Ok (Core.Existing_store_scope_cancelled _) -> fail "reader cancelled"
+         | Error error -> fail (Core.transition_error_to_string error)
+       in
+       let original = with_store (fun store ->
+         let original = transitioned (Core.prepare ~store ~publication ~locator ~permissions) in
+         let other_publication = match publication with
+           | Core.Replace -> Core.Create_exclusive
+           | Core.Create_exclusive -> Core.Replace in
+         (match Core.For_testing.prepare_with_operation_id ~store
+                  ~operation_id:(Core.prepared_operation_id original)
+                  ~publication:other_publication ~locator ~permissions with
+          | Error _ -> ()
+          | Ok _ -> fail "existing operation intent was reclassified");
+         original) in
+       let assert_intent prepared =
+         check bool "same publication intent" true
+           (Core.prepared_publication prepared = publication);
+         check string "same operation identity"
+           (Core.operation_id_to_string (Core.prepared_operation_id original))
+           (Core.operation_id_to_string (Core.prepared_operation_id prepared))
+       in
+       read (fun store -> function
+         | [Core.Active_record prepared] ->
+           assert_intent prepared;
+           ignore (transitioned (Core.bind ~store ~prepared ~stage_identity:identity))
+         | _ -> fail "fresh reader did not find the exact prepared intent");
+       read (fun store -> function
+         | [Core.Owned_record bound] ->
+           assert_intent (Core.bound_prepared bound);
+           ignore (transitioned (Core.record_forensic_bound ~store ~bound
+             ~outcome:(Core.Bound_stage_absent { observed_target = Core.Absent })))
+         | _ -> fail "fresh reader did not find the exact bound intent");
+       read (fun _ -> function
+         | [Core.Forensic_record forensic] ->
+           (match Core.forensic_source forensic with
+            | Core.Bound_source (bound, _) -> assert_intent (Core.bound_prepared bound)
+            | Core.Prepared_source _ -> fail "bound source became prepared")
+         | _ -> fail "fresh reader did not retain forensic intent"))
+    ["replace-intent", Core.Replace; "create-intent", Core.Create_exclusive]
+;;
+
+let test_invalid_publication_intent_is_preserved_and_refused () =
+  with_tmp_dir @@ fun temp_root ->
+  Eio_main.run @@ fun env ->
+  let fs = Eio.Stdenv.fs env in
+  let root_path = Unix.realpath temp_root in
+  let root = Eio.Path.stat ~follow:false Eio.Path.(fs / root_path) in
+  let registry_root = Filename.concat temp_root "registry" in
+  Unix.mkdir registry_root 0o700;
+  let remove fields = List.remove_assoc "publication" fields in
+  let replace value fields = ("publication", value) :: remove fields in
+  List.iter
+    (fun (owner_name, change) ->
+       with_registry ~fs ~registry_root @@ fun registry ->
+       let record_name = "55555555-5555-4555-8555-555555555555" in
+       seed_prepared ~registry ~owner:owner_name
+         ~operation_id:(operation_id record_name) ~allowed_root_path:root_path
+         ~allowed_root_device:root.dev ~allowed_root_inode:root.ino;
+       let path = Filename.concat
+           (owner_area_path ~registry_root ~owner:owner_name "active") record_name in
+       let fields = match Yojson.Safe.from_string (Fs_compat.load_file path) with
+         | `Assoc fields -> fields
+         | _ -> fail "writer did not produce an object" in
+       let raw = Yojson.Safe.to_string (`Assoc (change fields)) ^ "\n" in
+       Fs_compat.save_file path raw;
+       let owner = inventory_owner registry owner_name in
+       let report = reconcile ~fs registry owner in
+       check bool "malformed intent blocks this owner" false (report_ready report);
+       check string "unproven record is never rewritten or removed" raw
+         (Fs_compat.load_file path))
+    [ "missing-intent", remove
+    ; "duplicate-intent", (fun fields -> ("publication", `String "replace") :: fields)
+    ; "null-intent", replace `Null
+    ; "unknown-intent", replace (`String "overwrite_if_old")
+    ; "non-string-intent", replace (`Int 1)
+    ; "wrong-version-intent", (fun fields -> ("version", `Int 1) :: List.remove_assoc "version" fields)
+    ]
 ;;
 
 let test_corrupt_and_invalid_rows_block_only_owner () =
@@ -1684,7 +1804,7 @@ let test_structured_report_preserves_corrupt_evidence () =
     Yojson.Safe.to_string
       (`Assoc
          [ "schema", `String "masc.fs-publication-recovery"
-         ; "version", `Int 1
+         ; "version", `Int 2
          ; "state", `String "prepared"
          ; "owner", `Assoc [ "secret", `String secret ]
          ; "operation_id", `String record_name
@@ -1694,6 +1814,7 @@ let test_structured_report_preserves_corrupt_evidence () =
          ; "parent_components", `List []
          ; "parent", `Assoc [ "dev", `String "1"; "ino", `String "1" ]
          ; "target_leaf", `String "target.json"
+         ; "publication", `String "replace"
          ; "initial_target", `Assoc [ "presence", `String "absent" ]
          ; "permissions", `Int 0o600
          ])
@@ -1948,9 +2069,17 @@ let () =
             `Quick
             test_remaining_forensic_outcome_fields_stay_decodable
         ; test_case
-            "historical prepared fields stay decodable"
+            "current prepared fields stay decodable"
             `Quick
-            test_historical_prepared_record_fields_stay_decodable
+            test_current_prepared_record_fields_stay_decodable
+        ; test_case
+            "publication intent survives reopen, bind and forensic transition"
+            `Quick
+            test_publication_intent_survives_owned_and_forensic_records
+        ; test_case
+            "malformed publication intent is preserved and refused"
+            `Quick
+            test_invalid_publication_intent_is_preserved_and_refused
         ; test_case
             "corrupt and invalid rows block only owner"
             `Quick

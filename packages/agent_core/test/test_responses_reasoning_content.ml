@@ -144,7 +144,8 @@ let dedicated_contract () =
     let capability=get(Reasoning_dialect.replay_capability_for_provider_config ~tools_present config) in
     Alcotest.(check bool) "stamped source and request contract agree" true
       (source=capability.target && source.replay_contract=capability.contract
-       && capability.contract.replay_policy=Reasoning_replay_contract.All_assistant_messages)) [false;true]
+       && capability.contract.replay_policy=Reasoning_replay_contract.All_assistant_messages
+       && capability.rotation=Reasoning_replay_contract.Require_identical_source)) [false;true]
 let other_protocol_defaults () =
   List.iter(fun(kind,path)->
     let make override=Provider_config.make ~kind ~provider_id:"protocol-control"
@@ -172,6 +173,14 @@ let manifest_declaration () =
       ((Capabilities.apply_manifest_entry entry).reasoning_replay_override=Force_preserve_responses_text)
   | [] | _::_ -> Alcotest.fail "one manifest entry expected"
 
+let opaque_endpoint_control () =
+  let response=parse [reasoning "r" ~encrypted:"endpoint-bound-token";answer] in
+  let message=restored_assistant response in
+  let rotated={config with Provider_config.base_url="https://rotated.invalid"} in
+  let rows=input ~config:rotated message [] in
+  Alcotest.(check (list string)) "plaintext admission does not rotate opaque tokens" ["message"]
+    (List.map(fun row->member "type" row |> to_string)rows)
+
 let () = Alcotest.run "responses_reasoning_content"
   ["public history",List.map(fun(name,fn)->Alcotest.test_case name `Quick fn)
     ["full content through tool and later turn",full_tool_history
@@ -188,4 +197,5 @@ let () = Alcotest.run "responses_reasoning_content"
     ;"producer consumer contract identity",dedicated_contract
     ;"other protocol default controls",other_protocol_defaults
     ;"Chat override cannot activate Responses",chat_override_does_not_activate_responses
-    ;"public manifest declaration",manifest_declaration]]
+    ;"public manifest declaration",manifest_declaration
+    ;"opaque endpoint binding",opaque_endpoint_control]]

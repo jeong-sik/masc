@@ -776,7 +776,11 @@ let replay_capability_for_provider_config ?(tools_present = false) config =
          | (false, _, _) | (true, true, _) | (true, false, Provider_opaque_state) ->
            contract
        in
-       { target; contract; rotation = rotation_policy dialect })
+       { target; contract
+       ; rotation = (match Provider_http_codec.of_config config with
+           | Openai_responses -> Reasoning_replay_contract.Require_identical_source
+           | Openai_chat | Glm_chat | Anthropic_messages | Ollama_chat | Gemini_generate_content ->
+             rotation_policy dialect) })
     (reasoning_source_for_provider_config config)
 ;;
 

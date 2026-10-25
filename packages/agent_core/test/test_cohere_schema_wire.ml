@@ -113,7 +113,7 @@ let test_mistral_and_kimi_declarations () =
     Yojson.Safe.Util.(body |> member "response_format" |> member "json_schema" |> member "strict" |> to_bool)
 
 let catalog ?(kind = "openai_compat") dialect = Printf.sprintf
-  "[[providers]]\nid = \"fixture\"\nkind = %S\nbase_url = \"http://127.0.0.1:1\"\nrequest_path = \"/chat/completions\"\nauth = \"none\"\ncapabilities_base = \"openai_chat\"\n[[models]]\nid_prefix = \"same-model\"\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nsupports_structured_output = true\njson_schema_dialect = %S\n[[targets]]\nid = \"slot\"\nprovider_ref = \"fixture\"\nmodel_id = \"same-model\"\nconnect_timeout_s = 30.0\nbody_timeout_s = 30.0\n" kind dialect
+  "[[providers]]\nid = \"fixture\"\nkind = %S\nbase_url = \"http://127.0.0.1:1\"\nrequest_path = \"/chat/completions\"\nauth = \"none\"\ncapabilities_base = \"openai_chat\"\n[[models]]\nmodel_id = \"same-model\"\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nsupports_structured_output = true\njson_schema_dialect = %S\n[[targets]]\nid = \"slot\"\nprovider_ref = \"fixture\"\nmodel_id = \"same-model\"\nconnect_timeout_s = 30.0\nbody_timeout_s = 30.0\n" kind dialect
 
 let test_strict_declarations () =
   let valid = "json_object_schema" in
@@ -122,8 +122,8 @@ let test_strict_declarations () =
    | [ row ] -> check bool "TOML carries typed dialect" true
        (row.json_schema_dialect = Some Capability_vocab.Json_object_schema)
    | _ -> fail "expected one model");
-  let manifest dialect = `Assoc [ "schema_version", `Int 1; "models", `List [ `Assoc
-    [ "id_prefix", `String "same-model"; "json_schema_dialect", `String dialect ] ] ] in
+  let manifest dialect = `Assoc [ "schema_version", `Int 2; "models", `List [ `Assoc
+    [ "model_id", `String "same-model"; "json_schema_dialect", `String dialect ] ] ] in
   let provider dialect = `Assoc [ "schema_version", `Int 1; "providers", `List [ `Assoc
     [ "id", `String "custom"; "kind", `String "openai_compat"
     ; "base_url", `String "https://example.test"; "request_path", `String "/chat/completions"
@@ -150,7 +150,6 @@ let test_strict_declarations () =
 let test_exact_frozen_contract () =
   let observe ?kind dialect =
     let snapshot = get_ok "exact snapshot" (EO.load_resolver_snapshot
-      ~io:{ getenv = (fun _ -> Ok None) }
       ~catalog:(EO.Full_replacement { source = "dialect fixture"; contents = catalog ?kind dialect }) ()) in
     let admitted = get_ok "exact target admission" (EO.admit_target_ref snapshot "slot") in
     let target = get_ok "exact target resolution" (EO.resolve_target admitted) in

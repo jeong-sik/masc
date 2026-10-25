@@ -520,6 +520,56 @@ let test_parse_reasoning_details_and_tool_calls_coexist () =
 (* #27924: exercise the shipped declared provider and each exact native row.
    No capability override may bypass production resolution. These are offline
    codec fixtures, not evidence of provider HTTP acceptance or Ollama behavior. *)
+(* #27924: the shipped native Chat binding must transmit M3.1's depth
+   control through the same final serializer as a completion request. *)
+let test_minimax_m31_native_effort () =
+  let entry = match Provider_registry.find (Provider_registry.default ()) "minimax" with
+    | Some entry -> entry
+    | None -> Alcotest.fail "native MiniMax provider is absent" in
+  let config = Provider_config.make ~kind:entry.defaults.kind ~provider_id:entry.name
+      ~model_id:"MiniMax-M3.1-Flash" ~base_url:entry.defaults.base_url
+      ~request_path:entry.defaults.request_path ~max_tokens:128 () in
+  let accepted = [Reasoning_effort.Low;Medium;High;XHigh;Max] in
+  let messages = [msg User [Text "Compare the receipts"]] in
+  let request stream config =
+    match Complete_common.serialize_http_request ~stream ~config ~messages ~tools:[] with
+    | Ok request -> Yojson.Safe.from_string request.Complete_common.body
+    | Error _ -> Alcotest.fail "native M3.1 effort rejected by final request serializer" in
+  List.iter (fun stream ->
+    List.iter (fun effort ->
+      let selected = {config with Provider_config.reasoning_effort=Some effort} in
+      check_bool "documented effort admitted through native catalog" true
+        (Result.is_ok (Provider_config.validate_reasoning_effort_request_typed selected));
+      List.iter (fun enable_thinking ->
+        let body = request stream {selected with enable_thinking} in
+        check_string "native Chat transmits the requested effort"
+          (Reasoning_effort.to_string effort)
+          Yojson.Safe.Util.(member "reasoning_effort" body |> to_string);
+        check_bool "no competing thinking object" true
+          (Yojson.Safe.Util.member "thinking" body = `Null)) [None;Some true]) accepted;
+    let body = request stream config in
+    check_bool "omission preserves the provider's default depth" true
+      (Yojson.Safe.Util.member "reasoning_effort" body = `Null)) [false;true];
+  List.iter (fun effort ->
+    let selected = {config with Provider_config.reasoning_effort=Some effort} in
+    (match Provider_config.validate_reasoning_effort_request_typed selected with
+     | Error (Provider_config.Unsupported_reasoning_effort {accepted=ladder;_}) ->
+       check_bool "rejection retains the documented ladder" true (ladder=accepted)
+     | Ok () | Error _ -> Alcotest.fail "unsupported native depth lacks typed ladder rejection");
+    check_bool "unsupported depth cannot reach a final request" true
+      (Result.is_error (Complete_common.serialize_http_request
+        ~stream:false ~config:selected ~messages ~tools:[])))
+    [Reasoning_effort.None_;Minimal;Ultra];
+  List.iter (fun reasoning_effort ->
+    let disabled = {config with enable_thinking=Some false;reasoning_effort} in
+    (match Provider_config.validate_reasoning_effort_request_typed disabled with
+     | Error (Provider_config.Explicit_disable_outside_ladder _) -> ()
+     | Ok () | Error _ -> Alcotest.fail "always-thinking model lacks typed disable rejection");
+    check_bool "explicit disable cannot reach a final request" true
+      (Result.is_error (Complete_common.serialize_http_request
+        ~stream:false ~config:disabled ~messages ~tools:[]))) [None;Some Reasoning_effort.High]
+;;
+
 let test_minimax_native_catalog_replay_for_model model_id =
   let config =
     Provider_config.make
@@ -3609,6 +3659,8 @@ let () =
             "reasoning_details and tool_calls coexist"
             `Quick
             test_parse_reasoning_details_and_tool_calls_coexist
+        ; Alcotest.test_case "MiniMax M3.1 native Chat depth control" `Quick
+            test_minimax_m31_native_effort
         ; Alcotest.test_case
             "MiniMax native catalog parse/history/request replay"
             `Quick

@@ -75,6 +75,25 @@ The checks use a transport fixture, never a personal account or real tokens.
 ## Install the development status connector
 
 Python 3.11 or later and the installed `masc-native-addon-launcher` are required.
+Prepare the package environment in the final installed `onepassword/` directory
+before saving its declaration:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+The manifest runs that package's `.venv/bin/python` from its package directory.
+Saving a declaration does not create the environment or install dependencies.
+The pinned [keyring dependency](https://pypi.org/project/keyring/25.7.0/) supplies
+the Python backend; it does not provision or unlock an OS credential store.
+The connector uses macOS Keychain or Linux Secret Service. Provision the Linux
+service and its session D-Bus through the host OS, outside the declaration.
+Protected-record access fails closed when dependencies or the OS backend are
+missing, unsupported or locked; public status reports those failures as
+`unavailable`. With the package interpreter present, unconfigured MCP
+discovery/status does not import `keyring`.
+
 Use the [example declaration](../../docs/examples/lane-addons/onepassword.toml),
 resolve `manifest_path` relative to its installed location, and save it under the
 runtime's resolved `lane-addons` directory. This package is a normal MCP Add-on;

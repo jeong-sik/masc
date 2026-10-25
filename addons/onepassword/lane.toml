@@ -3,7 +3,7 @@ revision = "0.1.0"
 title = "1Password connection"
 ui_category = "browser"
 runtime = "host_process"
-command = ["python3", "server.py"]
+command = [".venv/bin/python", "server.py"]
 contributions = ["observe"]
 
 [world.tools]

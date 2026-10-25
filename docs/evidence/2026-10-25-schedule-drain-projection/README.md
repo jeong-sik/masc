@@ -1,6 +1,6 @@
 # Schedule drain dispositions before reaction projection
 
-Refs #26430. Upper base is lower observation PR45897 head0ebfd17f0da3b5038d2ac1ccea6c813a5f6de1c3. This is the actual schedule projection/UI layer, not just the lower observer API.
+Refs #26430. Upper base is lower observation PR45897 head311ae801c6137a788637b7b5401c458c2e5301cf. The external update from0ebfd17f changes only the changelog fragment; its feature code and test blobs are identical. This is the actual schedule projection/UI layer, not just the lower observer API.
 
 The page resolves complete read-only queue state before reading the reaction ledger. It uses the existing durable occurrence index: latest incarnation, same-incarnation conflicts, transfer cycles, cached-target absence refresh, exact retired receipts. Every supplied read observes fresh bytes and replaces the displayed queue state; there is no separate pre-capture cache. Per-owner coherence is not a global cross-store transaction. The GET does not acquire the owner lock, mutate the queue, replay an outbox or invent reaction fields.
 
@@ -14,8 +14,14 @@ The selected backend suite is test/test_schedule_consumer_dispatch. New defined 
 
 ## Source review repairs
 
-Initial source head6563a4c8499226f1368e549347b9d0a5bd925011 failed independent review: two extracted bindings remained referenced, the source Keeper fixture was missing, pre-captured empty target observations could escape the resolver cache refresh rule, transfer provenance was omitted, and explicit ledger contradictions could become healthy completion. Repair78c26470dfa070a535e386e05646f2e08b6dd166 addresses those findings. Final independent review and requested selected execution must be recorded separately; parsing and TS tests do not establish backend compilation.
+Initial source head6563a4c8499226f1368e549347b9d0a5bd925011 failed independent review: two extracted bindings remained referenced, the source Keeper fixture was missing, pre-captured empty target observations could escape the resolver cache refresh rule, transfer provenance was omitted, and explicit ledger contradictions could become healthy completion. Repair78c26470dfa070a535e386e05646f2e08b6dd166 addresses those findings. Both independent source sessions passed repair78c26470. Rebase onto the external fragment-only parent update and final documentation require refreshed head/base identities. Requested selected execution must be recorded separately; parsing and TS tests do not establish backend compilation.
 
 ## Remaining evidence
 
 Backend selected execution, actual page-row-to-frontend replay and visible browser QA are not yet established. No merge, installed runtime, live Keeper/provider, full regression, performance or whole-issue completion is claimed. #26430 remains OPEN pending these results and integration. Native stack submission/membership and exact final source review belong to separate receipts.
+
+## Stack and prerequisite observation
+
+The prior unrelated gh-stack editing process was confirmed gone. gh stack init adopted the two own branches. gh stack submit then refused with “Stacked PRs are not enabled for this repository”. This is branch-chain draft PR45901 on parent45897, not confirmed native membership. The parent externally advanced to311ae801 with only its fragment correction; the whole local two-layer chain was restacked using gh stack rebase --no-trunk, preserving that update.
+
+Actual prerequisite run40178416108 completed SUCCESS at0ebfd17f: 47 selected ledger cases in0.173s, including complete-state owner-lock observation/no durable byte changes and full-state generation-change refusal. The current parent has identical feature/test inputs; this is not a new execution at311ae801. It does not execute this upper layer.

@@ -1,3 +1,0 @@
-Fixed
-
-Scheduled Keeper wakes retain committed completion, failure, cancellation and transfer evidence while reaction projection is pending, so the schedule page distinguishes settling from a lost wake and verifies exact durable source provenance.

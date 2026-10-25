@@ -112,6 +112,18 @@ the model-mediated `act` operation. Screenshot capture returned image data;
 its subsequent clicked-title assertion failed after `act` did not finish.
 The overall run failed, and its binary is not a production installation.
 
+That retained `d02f48fe` host also accepted a controlled external worker's
+request from a real Keeper with `task-001`. After that exact worker process was
+killed with SIGKILL, the live host reported its failed owner, retained one
+host-only `owner_lost` notice with `outcome = unknown`, and delivered it through
+the canonical queue. The next actual Keeper turn posted the publication to
+its original Dashboard conversation while the Task remained in progress.
+No Detach request was sent. IPC absence was checked after host shutdown;
+completion of directory removal before shutdown was not separately measured.
+This fixture used no 1Password worker, account or Browser effect. An earlier
+observer failure caused by comparing model and Keeper turn ordinals is retained
+separately; the corrected rerun and independent source join passed.
+
 The act response exposed a source contract mismatch: initial and Browser-worker
 checks apply the package baseline plus the consumer's partial required-shape
 guard, but original proof retention had reinterpreted the consumer schema as
@@ -158,10 +170,10 @@ published account-authentication evidence.
    session/tab and principal pins. Exercise the read/screenshot exclusion and
    original-owner cancellation fences while a real extension call is in flight.
    A lost fill cannot authorize replay or adoption of another Browser.
-4. Exercise the implemented host-owned unknown notice after detected original
-   provider loss. It requires confirmed invocation acceptance; an origin record
-   alone remains pre-dispatch intent and cannot prove execution. Whole-host crash
-   recovery is outside that source implementation's guarantee.
+4. Extend the controlled worker-loss evidence to the connected 1Password path.
+   The host-owned unknown notice requires confirmed invocation acceptance; an
+   origin record alone remains pre-dispatch intent and cannot prove execution.
+   Whole-host crash recovery is outside that source implementation's guarantee.
 5. Verify worker publication, durable intake and the original Keeper's resumed
    turn through the connected path. Generic Lane Ask stores question text and
    does not itself resume a Keeper; it must not carry opaque approval links.

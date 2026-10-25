@@ -270,10 +270,14 @@ let test_mixed_declared () = with_fixture Declared (fun ~work ~sw ~net ~clock ~a
   assert_released config;
   ordinary ~sw ~net config |> get_ok "ordinary succeeds after 429" |> ignore;
   a.next_reply <- Rate_limited;
-  (match execute_exact ~net ~clock (exact_flow exact_config) with
-   | Error (EO.Flow_execution_terminal {cause=EO.Flow_exact_execution_failed
-        {cause={cause=EO.Provider_response_refused {http_status=429; _}; _}; _}; _}) -> ()
-   | Ok _ | Error _ -> fail "exact 429 must retain the provider refusal status");
+  let receipt = ref None in
+  let refused = execute_exact ~net ~clock ~on_receipt:(fun value -> receipt := Some value)
+      (exact_flow exact_config) in
+  check bool "exact HTTP429 is a failed execution" true (Result.is_error refused);
+  (match !receipt with
+   | Some receipt -> check (option int) "exact receipt retains actual HTTP status"
+       (Some 429) (EO.receipt_http_status receipt)
+   | None -> fail "exact HTTP429 lost its generation receipt");
   assert_released config;
   execute_exact ~net ~clock (exact_flow exact_config) |> get_ok "exact succeeds after 429" |> ignore;
   a.next_reply <- Rate_limited;

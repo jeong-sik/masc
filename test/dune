@@ -6656,3 +6656,5 @@
  (libraries masc_test_deps exact_output_fixture eio_main unix))
 
 (include stanzas/test_endpoint_mixed_admission.inc)
+
+(include stanzas/test_runtime_model_label_binding.inc)

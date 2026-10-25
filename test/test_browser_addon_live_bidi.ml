@@ -88,6 +88,19 @@ let scenario mode =
     let profile=Filename.concat root "profile" and allocation=Filename.concat root "allocation" in
     Unix.mkdir profile 0o700;Unix.mkdir allocation 0o700;
     let sentinel=Filename.concat profile "operator-login" in write sentinel "preserved";
+    let prefs_js=Filename.concat profile "prefs.js" and user_js=Filename.concat profile "user.js" in
+    write prefs_js
+      "user_pref(\"remote.prefs.recommended.applied\", true);\n\
+       user_pref(\"browser.tabs.unloadOnLowMemory\", false); user_pref(\"operator.custom\", true);\n\
+       user_pref(\"widget.windows.window_occlusion_tracking.enabled\", false); // operator note\n\
+       user_pref(\"operator.custom2\", true);\n";
+    (* Only non-occupied modes seed user.js: the occupied-port scenario asserts
+       that admission never writes user.js at all, so it must start absent. *)
+    if mode<>"occupied" then
+      write user_js
+        "user_pref(\"browser.tabs.unloadOnLowMemory\", false); user_pref(\"operator.custom\", true);\n\
+         user_pref(\"widget.windows.window_occlusion_tracking.enabled\", false); // operator note\n\
+         user_pref(\"operator.custom2\", true);\n";
     write (Filename.concat root "mode") mode;
     let binary=Filename.concat root "scripted-firefox" in write binary firefox;Unix.chmod binary 0o700;
     let reservation,port=reserved_port () in
@@ -162,8 +175,34 @@ let scenario mode =
              |Download_reply _|Poll_result _|Receipt|Issue_result _) -> false);
       check string "operator profile is never cleared" "preserved" (read sentinel);
       let commands=Filename.concat root "commands" in
-      if mode="occupied" then check bool "occupied port never spawns or adopts a browser" false (Sys.file_exists (Filename.concat root "spawned"))
+      if mode="occupied" then (
+        check bool "occupied port never spawns or adopts a browser" false (Sys.file_exists (Filename.concat root "spawned"));
+        check bool "occupied port never writes user.js before admission" false (Sys.file_exists user_js))
       else (
+        (* P2 regression: a line whose guard key is only its first statement
+           keeps every other statement (and any trailing comment). Guard keys
+           are still stripped from lines that are exactly one statement. *)
+        check string "multi-statement operator lines are preserved verbatim, poisoned single statements stripped"
+          ("user_pref(\"browser.tabs.unloadOnLowMemory\", false); user_pref(\"operator.custom\", true);\n\
+            user_pref(\"widget.windows.window_occlusion_tracking.enabled\", false); // operator note\n\
+            user_pref(\"operator.custom2\", true);\n") (read prefs_js);
+        let pinned_user_js=read user_js in
+        (* The shared line survives whole (no wholesale deletion), and each
+           guard key is re-pinned as its own appended statement. *)
+        check bool "user.js keeps the multi-statement operator line verbatim" true
+          (List.mem
+             "user_pref(\"browser.tabs.unloadOnLowMemory\", false); user_pref(\"operator.custom\", true);"
+             (String.split_on_char '\n' pinned_user_js));
+        check bool "user.js keeps the trailing-comment operator line verbatim" true
+          (List.exists
+             (fun line -> String.starts_with ~prefix:"user_pref(\"widget.windows.window_occlusion_tracking.enabled\", false);" line
+                          && String.length line > 76)
+             (String.split_on_char '\n' pinned_user_js));
+        List.iter (fun (key,value) ->
+          let expected=Printf.sprintf "user_pref(%S, %s);" key (Yojson.Safe.to_string value) in
+          check bool ("user.js pins " ^ key) true
+            (List.mem expected (String.split_on_char '\n' pinned_user_js)))
+          Masc.Browser_gecko_profile.resource_guard_prefs;
         let calls=String.split_on_char '\n' (read commands) in
         check int "session is created once, without reattachment" 1
           (List.length (List.filter (String.equal "session.new") calls));

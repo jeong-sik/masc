@@ -485,6 +485,7 @@ let rec execute_unlocked t = function
           "webSocketUrl", `Bool true;
           "unhandledPromptBehavior", `String "ignore";
           "moz:firefoxOptions", `Assoc (("args", `List args) ::
+            ("prefs", `Assoc Browser_gecko_profile.resource_guard_prefs) ::
             (Option.map (fun path -> "binary", `String path) t.binary |> Option.to_list))]]] in
 
        Atomic.set t.observed_session Browser_lane.Browser_changing;

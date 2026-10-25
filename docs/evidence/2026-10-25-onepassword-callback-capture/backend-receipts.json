@@ -1,0 +1,96 @@
+{
+  "scope": "actual Python producer/store; fake provider; no HTTP/Native/browser",
+  "source_sha256": {
+    "addons/onepassword/oauth.py": "72b8bc19ba2a942e88b35a10bda2eaa2ce11f7860f545b077e1e710b932a7bf7",
+    "addons/onepassword/server.py": "e8417f0b112269906a49256a39e63461b48f97529ac6107a0be6db4db8e0c9df"
+  },
+  "pending": {
+    "title": "1Password",
+    "message": "Approve the connection in 1Password, then return here.",
+    "actions": [
+      {
+        "id": "complete",
+        "label": "Finish connection",
+        "arguments": {
+          "state": "osF1kPQDVhQmXGt7mlmcCz-6Ps5inS6JFjS52FDTDmY",
+          "connection_id": "f58f35d5-85d5-43d8-91d7-8954e08d2377"
+        },
+        "fields": [
+          {
+            "name": "callback_url",
+            "label": "Returned connection URL",
+            "secret": true
+          }
+        ]
+      },
+      {
+        "id": "cancel",
+        "label": "Cancel this connection attempt",
+        "arguments": {
+          "state": "osF1kPQDVhQmXGt7mlmcCz-6Ps5inS6JFjS52FDTDmY",
+          "connection_id": "f58f35d5-85d5-43d8-91d7-8954e08d2377"
+        },
+        "fields": []
+      }
+    ],
+    "callback": {
+      "action": "complete",
+      "field": "callback_url",
+      "arguments": {
+        "state": "osF1kPQDVhQmXGt7mlmcCz-6Ps5inS6JFjS52FDTDmY",
+        "connection_id": "f58f35d5-85d5-43d8-91d7-8954e08d2377"
+      },
+      "state": "osF1kPQDVhQmXGt7mlmcCz-6Ps5inS6JFjS52FDTDmY"
+    },
+    "open_url": "https://my.1password.com/oauth/authorize?response_type=code&client_id=fixture-client&redirect_uri=https%3A%2F%2Fmasc.example%2Faddons%2Foauth%2Fcallback&scope=brokered-credentials%3Arequest-access+brokered-credentials%3Aread&state=osF1kPQDVhQmXGt7mlmcCz-6Ps5inS6JFjS52FDTDmY&code_challenge=jy28HOA6bGimrY-rXmMShs6vYwIwl7rBVQ21PoED_Ao&code_challenge_method=S256"
+  },
+  "callback_url": "https://masc.example/addons/oauth/callback?state=osF1kPQDVhQmXGt7mlmcCz-6Ps5inS6JFjS52FDTDmY&code=FIXTURE_CODE#integration_key=FIXTURE_KEY",
+  "not_captured": {
+    "title": "1Password",
+    "message": "Connection unavailable. Inspect the account connection before another attempt.",
+    "actions": [
+      {
+        "id": "view",
+        "label": "Inspect connection",
+        "arguments": {},
+        "fields": []
+      }
+    ]
+  },
+  "captured": {
+    "title": "1Password",
+    "message": "Account connected. Use the controls below for pending Browser sign-in approvals.",
+    "actions": [],
+    "callback_receipt": {
+      "kind": "captured",
+      "connection_id": "f58f35d5-85d5-43d8-91d7-8954e08d2377"
+    }
+  },
+  "replayed": {
+    "title": "1Password",
+    "message": "Connection unavailable. Inspect the account connection before another attempt.",
+    "actions": [
+      {
+        "id": "view",
+        "label": "Inspect connection",
+        "arguments": {},
+        "fields": []
+      }
+    ],
+    "callback_receipt": {
+      "kind": "captured",
+      "connection_id": "f58f35d5-85d5-43d8-91d7-8954e08d2377"
+    }
+  },
+  "provider_calls": [
+    {
+      "path": "/v1/oauth/token",
+      "fields": [
+        "code",
+        "code_verifier",
+        "grant_type",
+        "redirect_uri"
+      ]
+    }
+  ]
+}

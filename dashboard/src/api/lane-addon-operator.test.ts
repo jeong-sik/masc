@@ -32,4 +32,14 @@ describe('private Add-on operator transport', () => {
     expect(String(failure)).not.toContain('PRIVATE_MARKER')
     expect(post).toHaveBeenCalledTimes(1)
   })
+  it('preserves only typed original capture receipts and refuses malformed receipts', async () => {
+    const receipt = { kind: 'captured', connection_id: 'original-connection' }
+    post.mockResolvedValue({ ...view, callback_receipt: receipt })
+    expect((await invokeAddonOperator(owner, 'complete', {})).callback_receipt).toEqual(receipt)
+    for (const callback_receipt of [null, {}, { kind: 'connected', connection_id: 'original-connection' },
+      { kind: 'captured', connection_id: '' }, { kind: 'captured', connection_id: 1 }]) {
+      post.mockResolvedValue({ ...view, callback_receipt })
+      await expect(invokeAddonOperator(owner, 'complete', {})).rejects.toThrow('Private operation outcome unavailable.')
+    }
+  })
 })

@@ -14,6 +14,9 @@ const viewSchema = Schema.Struct({
   callback: Schema.optional(Schema.Struct({
     action: text, field: text, arguments: argumentsSchema, state: text,
   })),
+  callback_receipt: Schema.optional(Schema.Struct({
+    kind: Schema.Literal('captured', 'declined'), connection_id: text,
+  })),
 })
 export type AddonOperatorView = Schema.Schema.Type<typeof viewSchema>
 export type AddonOperatorAction = Schema.Schema.Type<typeof actionSchema>

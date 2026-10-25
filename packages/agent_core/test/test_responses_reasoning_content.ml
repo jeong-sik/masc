@@ -5,9 +5,16 @@ open Types
 open Yojson.Safe.Util
 module Codec = Backend_openai_responses
 
-let config = Provider_config.make ~kind:Provider_config.OpenAI_compat
+let openai_config = Provider_config.make ~kind:Provider_config.OpenAI_compat
   ~provider_id:"openai" ~model_id:"gpt-5.5" ~base_url:"https://api.openai.com"
   ~request_path:"/v1/responses" ~max_tokens:128 ()
+(* Explicit synthetic plaintext replay policy. This does not activate a
+   MiniMax binding or change OpenAI's production opaque-only policy. *)
+let config = Provider_config.make ~kind:Provider_config.OpenAI_compat
+  ~provider_id:"responses-text-fixture" ~model_id:"responses-text-fixture"
+  ~base_url:"https://fixture.invalid" ~request_path:"/v1/responses" ~max_tokens:128
+  ~model_capabilities_override:{Capabilities.default_capabilities with
+    supports_reasoning=true;reasoning_replay_override=Capabilities.Force_preserve_always} ()
 let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let text_part kind text = `Assoc ["type",`String kind;"text",`String text]
 let reasoning ?(summary=[]) ?(content=[]) ?encrypted id =
@@ -21,7 +28,7 @@ let answer = `Assoc ["type",`String "message";"role",`String "assistant"
 let parse items = Codec.parse_response_result (Yojson.Safe.to_string (`Assoc
   ["id",`String "reasoning-fixture";"model",`String "fixture";"status",`String "completed"
   ;"output",`List items])) |> get
-let restored_assistant response =
+let restored_assistant ?(config=config) response =
   let response = Complete_common.patch_telemetry response ~config None in
   let response = Cache.response_to_json response |> Yojson.Safe.to_string
     |> Yojson.Safe.from_string |> Cache.response_of_json in
@@ -36,7 +43,7 @@ let restored_assistant response =
     In_channel.with_open_bin path In_channel.input_all) in
   match Agent_core.Checkpoint.message_of_json (Yojson.Safe.from_string restored) with
   | Ok message -> message | Error _ -> Alcotest.fail "actual checkpoint message codec rejected history"
-let input message trailing = Codec.build_request ~config ~messages:(message :: trailing) ()
+let input ?(config=config) message trailing = Codec.build_request ~config ~messages:(message :: trailing) ()
   |> Yojson.Safe.from_string |> member "input" |> to_list
 let check_reasoning label expected response =
   let actual = List.filter_map (function Thinking {content;_} -> Some content
@@ -63,8 +70,8 @@ let full_tool_history () =
     (replay_text (List.nth rows 0));
   Alcotest.(check string) "tool call ID" "call-weather" (member "call_id" (List.nth rows 1) |> to_string);
   Alcotest.(check string) "result call ID" "call-weather" (member "call_id" (List.nth rows 2) |> to_string);
-  Alcotest.(check string) "later user content" "continue after tool"
-    (member "content" (List.nth rows 3) |> to_string)
+  Alcotest.(check bool) "later user content" true
+    (member "content" (List.nth rows 3) = `List [text_part "input_text" "continue after tool"])
 let full_over_summary () =
   let response=parse [reasoning "r" ~summary:[text_part "summary_text" "condensed"]
     ~content:[text_part "reasoning_text" "full one";text_part "reasoning_text" "full two"];answer] in
@@ -124,6 +131,13 @@ let malformed_carrier () =
       "malformed_responses_reasoning:content" error
   | Ok _ -> Alcotest.fail "malformed content carrier silently disappeared"
 
+let openai_opaque_policy_control () =
+  let response=parse [reasoning "r" ~content:[text_part "reasoning_text" "plain reasoning"];answer] in
+  let rows=input ~config:openai_config
+    (restored_assistant ~config:openai_config response) [] in
+  Alcotest.(check (list string)) "existing OpenAI policy still excludes plaintext" ["message"]
+    (List.map(fun row->member "type" row |> to_string)rows)
+
 let () = Alcotest.run "responses_reasoning_content"
   ["public history",List.map(fun(name,fn)->Alcotest.test_case name `Quick fn)
     ["full content through tool and later turn",full_tool_history
@@ -135,4 +149,5 @@ let () = Alcotest.run "responses_reasoning_content"
     ;"blank encrypted content",blank_encrypted
     ;"unknown content extensions",unknown_content_part
     ;"malformed recognized text",malformed_content
-    ;"malformed content carrier",malformed_carrier]]
+    ;"malformed content carrier",malformed_carrier
+    ;"OpenAI opaque policy control",openai_opaque_policy_control]]

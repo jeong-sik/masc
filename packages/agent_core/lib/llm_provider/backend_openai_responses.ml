@@ -432,8 +432,7 @@ let project_history ?(tools_present = false) config messages =
     ~tools_present
     ~assistant_has_payload:(fun content -> content <> [])
     ~reasoning_block_supported:(function
-      | RedactedThinking _ -> true
-      | Thinking _
+      | RedactedThinking _ | Thinking _ -> true
       | ReasoningDetails _
       | Text _
       | ToolUse _

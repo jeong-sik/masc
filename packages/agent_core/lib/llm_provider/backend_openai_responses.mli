@@ -12,7 +12,10 @@ val project_history
   -> Provider_config.t
   -> Types.message list
   -> (Reasoning_history_projection.t, Reasoning_history_projection.error) result
-(** The history this codec will actually serialize: reasoning blocks it cannot
+(** The history this codec will actually serialize: plaintext Thinking and opaque
+    Responses reasoning are supported carriers. The declared replay policy still
+    decides which may be sent (OpenAI opaque-only excludes plaintext). Other
+    reasoning blocks it cannot
     carry, and blocks the config's replay policy excludes, are already gone.
 
     Exported so a caller that must size a request before building it asks the

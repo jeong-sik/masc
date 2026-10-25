@@ -527,6 +527,7 @@ jobs:
               "masc-browser-host-$arch" \
               "masc-deployment-preflight-helper-$arch" \
               "masc-check-runtime-deployment-preflight-$arch" \
+              "masc-exec-ssh-bootstrap-$arch" \
               "masc-dashboard-$arch.tar.gz" \
               "masc-release-dashboard-bundle-$arch.py"; do
               if [ ! -f "dist/$asset" ]; then

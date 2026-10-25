@@ -7,7 +7,7 @@ import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/install.sh'
 NAMES = ('masc', 'masc-tui', 'masc-browser-host', 'masc-deployment-preflight-helper',
-         'masc-check-runtime-deployment-preflight')
+         'masc-check-runtime-deployment-preflight', 'masc-exec-ssh-bootstrap')
 
 
 class Uninstall(unittest.TestCase):

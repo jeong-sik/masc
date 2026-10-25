@@ -34,7 +34,7 @@ jobs:
               dist.mkdir()
               # Only the Python bytes are native evidence in this fixture. The
               # release workflow repeats packaging with actual MASC executables.
-              for name in ('masc','masc-tui','masc-browser-host','masc-deployment-preflight-helper','masc-check-runtime-deployment-preflight'):
+              for name in ('masc','masc-tui','masc-browser-host','masc-deployment-preflight-helper','masc-check-runtime-deployment-preflight','masc-exec-ssh-bootstrap'):
                   path = dist/(name+'-'+platform)
                   path.write_text('#!/bin/sh\nprintf "%s\\n" '+commit+'\n')
                   path.chmod(0o755)

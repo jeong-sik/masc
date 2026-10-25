@@ -1,5 +1,6 @@
 import { parse, defaultTreeAdapter as tree, html, type DefaultTreeAdapterTypes as Nodes } from 'parse5'
 import { Schema } from 'effect'
+import { resourceOrigins } from './artifact-app-resources'
 import { isJson, isJsonObject, type JsonObject } from '../api/artifact-app-data'
 
 const Value=Schema.Union(Schema.Struct({kind:Schema.Literal('value'),type:Schema.String,value:Schema.String}),
@@ -8,7 +9,7 @@ const Value=Schema.Union(Schema.Struct({kind:Schema.Literal('value'),type:Schema
 export const FrameInputsSchema=Schema.Struct({forms:Schema.Record({key:Schema.String,value:Value}),app:Schema.Unknown.pipe(Schema.filter(isJsonObject))})
 export type FrameInputs=typeof FrameInputsSchema.Type
 export type AppFrame={readonly token:string;readonly document:string}
-export type AppFrameMessage=({kind:'ready'}|{kind:'initialized'}|{kind:'change';change:number;commit:boolean;data:FrameInputs})&{instance:string}
+export type AppFrameMessage=({kind:'ready'}|{kind:'initialized'}|{kind:'change';change:number;commit:boolean;data:FrameInputs}|{kind:'suspended';change:number;data:FrameInputs})&{instance:string}
 export function artifactPreviewDocument(source:string):string {
   return '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src \'none\'; frame-src \'none\'; object-src \'none\'; base-uri \'none\'; form-action \'none\'">'+source
 }
@@ -19,6 +20,9 @@ export function appFrameMessage(frame:AppFrame,input:unknown):AppFrameMessage|nu
   if(!isJsonObject(input)||input.token!==frame.token||typeof input.instance!=='string'||input.instance==='')return null
   if(input.type==='masc.artifact.inputs.ready.v1')return {kind:'ready',instance:input.instance}
   if(input.type==='masc.artifact.inputs.initialized.v1')return {kind:'initialized',instance:input.instance}
+  if(input.type==='masc.artifact.inputs.suspended.v1'&&typeof input.change==='number'&&Number.isSafeInteger(input.change)&&input.change>=1){
+    try{return {kind:'suspended',instance:input.instance,change:input.change,data:Schema.decodeUnknownSync(FrameInputsSchema)(input.data)}}catch{return null}
+  }
   if(input.type!=='masc.artifact.inputs.change.v1'||typeof input.change!=='number'||!Number.isSafeInteger(input.change)||input.change<1||typeof input.commit!=='boolean')return null
   try{return {kind:'change',instance:input.instance,change:input.change,commit:input.commit,data:Schema.decodeUnknownSync(FrameInputsSchema)(input.data)}}catch{return null}
 }
@@ -29,7 +33,7 @@ function bootstrap(config:{token:string;marker:string},valid:typeof isJson):void
   type Inputs=FrameInputs
   type Control=HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement
   const instance=crypto.randomUUID()
-  let initialized=false,formsReady=false,change=0,current:Inputs={forms:{},app:{}}
+  let initialized=false,formsReady=false,suspended=false,suspendRequested=false,change=0,current:Inputs={forms:{},app:{}}
   let defaults:Inputs['forms']={}
   let resolveReady!:()=>void
   const ready=new Promise<void>(resolve=>{resolveReady=resolve})
@@ -68,19 +72,28 @@ function bootstrap(config:{token:string;marker:string},valid:typeof isJson):void
       else if(value.kind==='value'&&!(node instanceof HTMLSelectElement)&&node.type===value.type)node.value=value.value
     }
     send('masc.artifact.inputs.initialized.v1')
+    if(suspendRequested)suspend()
   }
   const changed=(commit:boolean):number=>{
-    if(!initialized)return change
+    if(!initialized||suspended)return change
     if(!Number.isSafeInteger(change+1))throw new Error('입력 변경 번호를 더 만들 수 없습니다.')
     change++
     if(formsReady)current={...current,forms:capture()}
     send('masc.artifact.inputs.change.v1',{change,commit,data:current})
     return change
   }
+  const suspend=()=>{
+    if(!initialized||!formsReady||suspended)return
+    suspended=true;document.documentElement.inert=true
+    if(!Number.isSafeInteger(change+1))throw new Error('입력 변경 번호를 더 만들 수 없습니다.')
+    current={...current,forms:capture()};change++
+    send('masc.artifact.inputs.suspended.v1',{change,data:current})
+  }
   const sdk=Object.freeze({
     read:async()=>{await ready;return structuredClone(current.app)},
     write:async(data:JsonObject)=>{
       await ready
+      if(suspendRequested)throw new Error('연결 설정을 적용하고 있습니다. 새 문서에서 다시 저장해 주세요.')
       if(pending)throw new Error('앞선 입력의 저장 결과를 기다려 주세요.')
       if(data===null||typeof data!=='object'||Array.isArray(data)||!valid(data))throw new Error('앱 입력은 JSON 객체여야 합니다.')
       const app=structuredClone(data)
@@ -94,6 +107,7 @@ function bootstrap(config:{token:string;marker:string},valid:typeof isJson):void
   window.addEventListener('message',event=>{
     if(event.source!==parent||event.data?.token!==config.token||event.data?.instance!==instance)return
     const message=event.data
+    if(message.type==='masc.artifact.inputs.suspend.v1'){suspendRequested=true;suspend();return}
     if(message.type==='masc.artifact.inputs.init.v1'||message.type==='masc.artifact.inputs.restore.v1') {
       if(initialized&&message.type==='masc.artifact.inputs.init.v1')return
       current=message.data;initialized=true;restore();resolveReady()
@@ -110,7 +124,7 @@ function bootstrap(config:{token:string;marker:string},valid:typeof isJson):void
   send('masc.artifact.inputs.ready.v1')
 }
 
-export function artifactAppFrame(source:string):AppFrame {
+export function artifactAppFrame(source:string,origins:readonly string[]=[]):AppFrame {
   const token=crypto.randomUUID(),marker='data-masc-input-'+crypto.randomUUID().replaceAll('-','')
   const document=parse(source,{sourceCodeLocationInfo:true}),insertions:{at:number;text:string}[]=[]
   const visit=(parent:Nodes.ParentNode):void=>{
@@ -130,6 +144,7 @@ export function artifactAppFrame(source:string):AppFrame {
   let marked=source
   for(const insertion of insertions.sort((a,b)=>b.at-a.at))marked=marked.slice(0,insertion.at)+insertion.text+marked.slice(insertion.at)
   const config=JSON.stringify({token,marker})
-  const policy="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+  const sources=resourceOrigins({resource_origins:[...origins]}).join(' ')
+  const policy="default-src 'none'; script-src 'unsafe-inline' "+sources+"; style-src 'unsafe-inline' "+sources+"; img-src data: blob: "+sources+"; font-src data: "+sources+"; media-src data: blob: "+sources+"; connect-src "+(sources||"'none'")+"; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
   return {token,document:`<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"><script>(${bootstrap.toString()})(${config},(${isJson.toString()}))</script>${marked}`}
 }

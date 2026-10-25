@@ -82,3 +82,30 @@ it('rejects invalid SDK values and forged capabilities, and keeps reading a deta
   await child.eval('window.MASC.inputs.read().then(value=>{value.changed=true})')
   expect(await child.eval('window.MASC.inputs.read()')).toEqual({})
 })
+it('limits network resources to explicit canonical origins and rejects CSP injection',()=>{
+  const frame=artifactAppFrame('<script src="https://cdn.example.com/app.js"></script>',['https://api.example.com','http://[::1]:9876'])
+  const document=parse(frame.document)
+  const head=document.childNodes.find(tree.isElementNode)!.childNodes.find(node=>tree.isElementNode(node)&&node.tagName==='head')! as Nodes.Element
+  const policy=(head.childNodes.find(node=>tree.isElementNode(node)&&node.tagName==='meta'&&node.attrs.some(attr=>attr.name==='http-equiv')) as Nodes.Element).attrs.find(attr=>attr.name==='content')!.value
+  expect(policy).toContain('connect-src https://api.example.com http://[::1]:9876;')
+  expect(policy).toContain("script-src 'unsafe-inline' https://api.example.com http://[::1]:9876;")
+  expect(policy).toContain("frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
+  for(const origin of ['https://*.example.com','https://x;connect-src','https://x\"foo','https://x\'foo','https://x/path','https://a@x','data:text/plain,hello','https://x/#y','https://x/?y','https://API.example.com'])expect(()=>artifactAppFrame('hello',[origin])).toThrow()
+})
+
+it('suspends user and SDK editing only after capturing the final unsent form value',async()=>{
+  const {child,messages,send,frame}=await open('<textarea>기본</textarea>')
+  const area=child.document.querySelector('textarea')!
+  area.value='마지막으로 입력한 값'
+  area.dispatchEvent(new child.Event('input',{bubbles:true}))
+  send({type:'masc.artifact.inputs.suspend.v1'})
+  await child.happyDOM.whenAsyncComplete()
+  expect(child.document.documentElement.inert).toBe(true)
+  const suspended=appFrameMessage(frame,messages.at(-1))
+  expect(suspended).toMatchObject({kind:'suspended',change:1,data:{app:{}}})
+  if(suspended?.kind==='suspended')expect(Object.values(suspended.data.forms)[0]).toMatchObject({value:'마지막으로 입력한 값'})
+  await expect(child.eval('window.MASC.inputs.write({memo:"late"})')).rejects.toThrow()
+  const count=messages.length
+  area.dispatchEvent(new child.Event('change',{bubbles:true}))
+  expect(messages).toHaveLength(count)
+})

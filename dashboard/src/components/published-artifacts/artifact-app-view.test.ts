@@ -80,3 +80,68 @@ it('accepts new input after the same iframe restarts its bootstrap counter',asyn
   await send({type:'masc.artifact.inputs.change.v1',instance:'first-document',change:99,commit:true,data:{forms:{},app:{memo:'late old input'}}})
   expect(post).toHaveBeenCalledTimes(2);expect(server.data).toEqual({forms:{},app:{memo:'after reload'}})
 })
+it('applies confirmed connections without losing edits or accepting the retired frame',async()=>{
+  const {iframe,send,frame}=await open()
+  const reads=vi.mocked(get).mock.calls.length
+  await send({type:'masc.artifact.inputs.change.v1',change:1,commit:false,data:{forms:{},app:{memo:'저장 전'}}})
+  const field=screen.getByRole('textbox',{name:'허용할 외부 출처'})
+  fireEvent.input(field,{target:{value:'https://example.com/path'}})
+  fireEvent.click(screen.getByRole('button',{name:'연결 설정 저장'}))
+  expect(post).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toBeTruthy()
+  let finish!:(state:AppState)=>void
+  vi.mocked(post).mockImplementationOnce(()=>new Promise<AppState>(resolve=>{finish=resolve}))
+  fireEvent.input(field,{target:{value:'https://API.example.com:443\nhttps://cdn.example.com\nhttps://api.example.com'}})
+  fireEvent.click(screen.getByRole('button',{name:'연결 설정 저장'}))
+  await waitFor(()=>expect(post).toHaveBeenCalledTimes(1))
+  const request=vi.mocked(post).mock.calls[0]![1] as AppRequest
+  expect(request.data).toEqual({forms:{},app:{memo:'저장 전'},resource_origins:['https://api.example.com','https://cdn.example.com']})
+  expect(iframe.srcdoc).toBe(frame.document)
+  await send({type:'masc.artifact.inputs.change.v1',change:2,commit:false,data:{forms:{},app:{memo:'응답 전 새 입력'}}})
+  server={...initial,version:1,data:request.data,receipts:[{id:request.id,expected_version:0,data_sha256:'a'.repeat(64),at:'now'}]}
+  const messages=vi.spyOn(iframe.contentWindow!,'postMessage')
+  await act(async()=>finish(server))
+  await waitFor(()=>expect(messages).toHaveBeenCalledWith(expect.objectContaining({type:'masc.artifact.inputs.suspend.v1'}),'*'))
+  expect(iframe.srcdoc).toBe(frame.document)
+  await send({type:'masc.artifact.inputs.change.v1',change:3,commit:false,data:{forms:{},app:{memo:'응답 뒤 전달된 입력'}}})
+  await send({type:'masc.artifact.inputs.suspended.v1',change:2,data:{forms:{},app:{memo:'stale capture'}}})
+  expect(iframe.srcdoc).toBe(frame.document)
+  await send({type:'masc.artifact.inputs.suspended.v1',change:4,data:{forms:{},app:{memo:'응답 뒤 전달된 입력'}}})
+  await waitFor(()=>expect(iframe.srcdoc).toContain('connect-src https://api.example.com https://cdn.example.com;'))
+  const next=vi.mocked(artifactAppFrame).mock.results.at(-1)!.value as AppFrame
+  expect(next.token).not.toBe(frame.token)
+  expect(iframe.srcdoc).toContain('connect-src https://api.example.com https://cdn.example.com;')
+  expect(iframe.style.visibility).toBe('hidden')
+  const newMessages=vi.spyOn(iframe.contentWindow!,'postMessage')
+  await act(async()=>{window.dispatchEvent(new MessageEvent('message',{source:iframe.contentWindow,data:{token:next.token,instance:'resources-document',type:'masc.artifact.inputs.ready.v1'}}))})
+  expect(newMessages).toHaveBeenLastCalledWith(expect.objectContaining({data:{forms:{},app:{memo:'응답 뒤 전달된 입력'}}}),'*')
+  await send({type:'masc.artifact.inputs.change.v1',change:99,commit:true,data:{forms:{},app:{memo:'retired'}}})
+  expect(post).toHaveBeenCalledTimes(1)
+  await act(async()=>{window.dispatchEvent(new MessageEvent('message',{source:iframe.contentWindow,data:{token:next.token,instance:'resources-document',type:'masc.artifact.inputs.change.v1',change:1,commit:true,data:{forms:{},app:{memo:'새 문서 입력'},resource_origins:['https://attacker.example']}}}))})
+  await waitFor(()=>expect(post).toHaveBeenCalledTimes(2))
+  expect((vi.mocked(post).mock.calls[1]![1] as AppRequest).data).toEqual({forms:{},app:{memo:'새 문서 입력'},resource_origins:['https://api.example.com','https://cdn.example.com']})
+  expect(get).toHaveBeenCalledTimes(reads)
+})
+it('keeps connections closed after a lost response until GET confirms the exact saved request',async()=>{
+  const {iframe,frame,send}=await open()
+  vi.mocked(post).mockImplementationOnce(async(_path,body)=>{
+    const request=body as AppRequest
+    server={...initial,version:1,data:request.data,receipts:[{id:request.id,expected_version:0,data_sha256:'a'.repeat(64),at:'now'}]}
+    throw new Error('ACK lost')
+  })
+  fireEvent.input(screen.getByRole('textbox',{name:'허용할 외부 출처'}),{target:{value:'https://api.example.com'}})
+  fireEvent.click(screen.getByRole('button',{name:'연결 설정 저장'}))
+  await screen.findByText('저장 결과를 확인하지 못했습니다.')
+  expect(iframe.srcdoc).toBe(frame.document)
+  fireEvent.click(screen.getByRole('button',{name:'저장 상태 확인'}))
+  await screen.findByText('입력이 저장됐습니다.')
+  expect(iframe.srcdoc).toBe(frame.document)
+  await send({type:'masc.artifact.inputs.suspended.v1',change:1,data:{forms:{},app:{}}})
+  await waitFor(()=>expect(iframe.srcdoc).toContain('connect-src https://api.example.com;'))
+  expect(post).toHaveBeenCalledTimes(1)
+})
+it('refuses malformed stored resource authority instead of opening the frame',async()=>{
+  server={...initial,data:{resource_origins:['https://good.example; connect-src *']}}
+  render(html`<${ArtifactAppView} doc=${doc} workspaceRoot=${workspace.basePath} authRevision=${currentStoredTokenRevision()} isCurrent=${()=>true} onPending=${()=>{}} />`)
+  await screen.findByRole('alert')
+  expect(screen.queryByTitle('메모')).toBeNull();expect(post).not.toHaveBeenCalled()
+})

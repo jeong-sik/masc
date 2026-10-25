@@ -83,6 +83,8 @@ val with_raw_trace_run_classified_result
     A trace-finalization error is reported separately and cannot replace [f]'s
     result, completion callback outcome or lifecycle status. In particular,
     finalization after a durable terminal commit does not relabel execution.
+    Ordinary diagnostic-sink failures are best effort; reserved exceptions still
+    propagate, with the lifecycle finalized from the original execution result.
 
     If [f] raises, the original exception and raw backtrace are preserved.
     A secondary failure to finalize the raw trace is emitted as a structured

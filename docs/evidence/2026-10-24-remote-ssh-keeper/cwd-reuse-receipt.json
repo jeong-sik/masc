@@ -1,0 +1,60 @@
+{
+  "result": "PASS",
+  "scope": "reported cwd reused in literal Python, Execute cwd, and absolute Write/Read/Edit/Grep inputs",
+  "driver_sha256": "2c1c3c85f9dbe0599b2370366dab4a542d7dd43e12b38884a7df065cadebd807",
+  "harness_sha256": "ff2c86e974ae2ac36f01d3a9cceb76bef27f09fda3a26d61b392ef7db6e3256d",
+  "runtime_source": "cc9b7661cc6d7b5970ccef4007d2faa1544bdf93",
+  "proof_receipt": {
+    "schema": "masc.remote_ssh_keeper_files.v1",
+    "result": "PASS",
+    "keeper": "ssh-proof-20261025-g",
+    "expected_binary_commit": "cc9b7661cc6d7b5970ccef4007d2faa1544bdf93",
+    "binary_sha256": "94d6a318d47aec870c6435da16dbe5aeaba91f3b88f5b1fd57f9148b06d50006",
+    "model": "scripted loopback fixture",
+    "claims": [
+      "actual Keeper Execute/Write/Read/Edit/Grep over SSH",
+      "endpoint bytes match tool results",
+      "canonical final checkpoint",
+      "endpoint bytes survive server shutdown",
+      "same manual Keeper explicitly started and resumed after server restart",
+      "canonical ledger records completed SSH tools"
+    ],
+    "identity_sha256": "f296e524ceaa7a66c6da1853fdde526f9f34e2e8af54ceb3e145c3ac0ef805a5",
+    "known_hosts_sha256": "b128384357469d76d39eadc4e2823fad5b9bd36425dc7d0864ebbf11336195ab",
+    "not_measured": [
+      "model quality",
+      "sustained continuity",
+      "GitHub authentication",
+      "bootstrap CLI",
+      "redirects and long jobs",
+      "candidate source unless commit matches",
+      "shim sandbox application receipt when peer omits it"
+    ],
+    "binary_commit": "cc9b7661cc6d7b5970ccef4007d2faa1544bdf93",
+    "model_requests": 11,
+    "tool_calls": 9,
+    "runtime_instances": [
+      "01a172b1-0d65-7000-a759-27d702f211e8",
+      "01a172b1-25ca-7000-8f3c-52e045b17463"
+    ],
+    "checkpoint_relative_path": ".masc/traces/trace-1792925571144-00000/trace-1792925571144-00000.json",
+    "actual_remote_cwd": "/srv/masc/playground/ssh-proof-20261025-g",
+    "model_projected_cwd": "/srv/masc/playground/ssh-proof-20261025-g",
+    "successful_tools": 9,
+    "expected_refusals": 0
+  },
+  "not_claimed": [
+    "real-model autonomy",
+    "production installation",
+    "whole-turn configuration freeze"
+  ],
+  "observation": {
+    "marker": "fecd98086cd343e4830ada379ed0bf26",
+    "cwd": "/srv/masc/playground/ssh-proof-20261025-g",
+    "hostname": "6758e8d27ec8",
+    "uid": 1000,
+    "reused_marker": "fecd98086cd343e4830ada379ed0bf26",
+    "copied_cwd": "/srv/masc/playground/ssh-proof-20261025-g",
+    "actual_cwd_base64": "L3Nydi9tYXNjL3BsYXlncm91bmQvc3NoLXByb29mLTIwMjYxMDI1LWc="
+  }
+}

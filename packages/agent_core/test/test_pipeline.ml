@@ -1863,7 +1863,7 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
       (List.length tail.events)
 ;;
 
-let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoint_failure () =
+let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) () =
   with_execution_test_dir "agent_core-tool-observation-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let bus=Event_bus.create () in
@@ -1884,22 +1884,7 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoi
   let transport=Llm_provider.Llm_transport.custom
     {complete_sync=(fun _ -> {Llm_provider.Llm_transport.response=next ();latency_ms=None});
      complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> next ())} in
-  let checkpoint_sink=Option.map (fun fail (snapshot:Agent.checkpoint_snapshot) ->
-    match snapshot.stage with
-    | Agent.After_tool_results_appended ->
-      let locator=match !locator with Some locator->locator
-        | None->Alcotest.fail "checkpoint observer has no canonical locator" in
-      let projection=match Agent.open_execution_projection ~runtime ~dir locator with
-        | Ok projection->projection
-        | Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
-      let settled=match Agent.Execution_projection.settled_tool_invocations projection with
-        | Ok settled->settled
-        | Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
-      Alcotest.(check int) "effect committed before checkpoint observer failure" 1 (List.length settled);
-      fail ()
-    | Agent.After_assistant_collected | Agent.After_context_injection
-    | Agent.After_input_wait_changed | Agent.After_rejected_response_dropped -> Ok ()) checkpoint_failure in
-  let agent=Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool] ?checkpoint_sink
+  let agent=Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool]
       ~config:{(Types.default_config ~model:"test-model") with name="canonical-bus"}
       ~options:{Agent.default_options with transport=Some transport;event_bus=Some bus;
         provider_config=Some (Provider_mock.to_provider_config ())} () in
@@ -1946,6 +1931,15 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoi
   let page=match Agent.Execution_projection.read_page projection
       ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
     | Ok page->page |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let root=List.find_map (fun (event:Agent.Execution_projection.event)->
+    match event.payload with
+    | Node_opened {node_id;parent_node_id=None;kind=Agent_run _;_}->Some node_id
+    | Node_opened _ | Node_updated _ | Node_closed _->None) page.events in
+  let root=match root with Some root->root |None->Alcotest.fail "canonical root missing" in
+  Alcotest.(check bool) "journal contains root checkpoint facts without a caller sink" true
+    (List.exists (fun (event:Agent.Execution_projection.event)->match event.payload with
+      | Node_updated {node_id;_}->Agent.Execution_projection.Node_id.equal root node_id
+      | Node_opened _ | Node_closed _->false) page.events);
   let fact is_called=List.find (fun (event:Agent.Execution_projection.event)->
       match event.payload with
       | Node_opened {kind=Tool_attempt;_}->is_called
@@ -4792,12 +4786,6 @@ let () =
             "durable tool bus uses canonical committed facts"
             `Quick
             (test_durable_tool_bus_uses_canonical_facts ~delivery_fault:false)
-        ; Alcotest.test_case "checkpoint sink Error preserves canonical execution" `Quick
-            (test_durable_tool_bus_uses_canonical_facts
-              ~checkpoint_failure:(fun () -> Error "checkpoint delivery refused"))
-        ; Alcotest.test_case "checkpoint sink exception preserves canonical execution" `Quick
-            (test_durable_tool_bus_uses_canonical_facts
-              ~checkpoint_failure:(fun () -> raise (Failure "checkpoint delivery raised")))
         ; Alcotest.test_case
             "durable tool partial delivery retains source cursor"
             `Quick

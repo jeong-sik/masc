@@ -648,6 +648,68 @@ let test_recovery_cancellation_preserves_authority_and_backtrace ~fs () =
         = Fs_compat.Recovery_no_record_change))
 ;;
 
+let test_recovery_unlink_cancellation_retains_actual_effect ~fs ~write_primary () =
+  let module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing in
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  write_file target "old";
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  let record_names () = match Recovery_test.record_names recovery ~area:Recovery_test.Owned with
+    | Ok names -> names
+    | Error Recovery_test.Keeper_lane_not_available -> fail "recovery lane lost during inspection"
+  in
+  let reason = Failure "cancel after actual recovery record unlink" in
+  let backtrace = Printexc.get_callstack 32 in
+  let fault = match Recovery_test.discharge_cancellation
+    ~owner:"capability-write-test" ~record:Recovery_test.Bound_record ~reason ~backtrace with
+    | Ok fault -> fault
+    | Error _ -> fail "valid recovery cancellation fixture owner was rejected"
+  in
+  let observed_record = ref false in
+  let write_backtrace = Printexc.get_callstack 32 in
+  let observed_reason, cancellation, observed_backtrace =
+    require_capability_write_cancellation ~label:"after recovery unlink" (fun () ->
+      Recovery_test.with_discharge_cancellation fault (fun () ->
+        ignore (replace_capability_file_for_testing
+          ~before_stage:(function
+            | Fs_compat.Write_payload ->
+              check int "real bound record exists before the attempted write" 1 (List.length (record_names ()));
+              observed_record := true;
+              if write_primary then Printexc.raise_with_backtrace Exit write_backtrace
+            | _ -> ())
+          ~recovery ~allowed_root_path:directory ~parent ~leaf:"target" ~permissions:0o640
+          "new" : (unit, Fs_compat.capability_write_error) result)))
+  in
+  check bool "the write reached its durable bound obligation" true !observed_record;
+  check bool "recovery unlink preserves original cancellation reason" true (observed_reason == reason);
+  check_preserved_backtrace ~label:"after recovery unlink" backtrace observed_backtrace;
+  check (list string) "actual owned record is gone after the injected cancellation" [] (record_names ());
+  check bool "replacement operation preserved" true
+    (cancellation.operation = Fs_compat.Atomic_replace_operation);
+  check bool "target effect matches whether publication happened" true
+    (cancellation.target_effect = if write_primary then Fs_compat.Target_unchanged else Fs_compat.Target_replaced);
+  (match write_primary, cancellation.interrupted_primary_failure with
+   | false, None -> ()
+   | true, Some (Fs_compat.Write_primary_failure { stage = Fs_compat.Write_payload;
+       cause = Fs_compat.Operation_failed { exception_; backtrace = primary_backtrace } }) ->
+     check bool "original write failure survives recovery cleanup cancellation" true (exception_ == Exit);
+     check_preserved_backtrace ~label:"write primary after recovery unlink"
+       write_backtrace primary_backtrace
+   | true, _ | false, Some _ -> fail "write primary authority changed during recovery cleanup");
+  check bool "no invented cleanup failures" true (cancellation.cleanup_failures = []);
+  check string "published target matches the actual write boundary"
+    (if write_primary then "old" else "new") (read_file target);
+  check (list string) "actual staging cleanup finished" [ "target" ] (directory_entries directory);
+  match cancellation.interrupted_recovery with
+  | None -> fail "actual recovery unlink interruption was lost"
+  | Some interruption ->
+    check bool "exact bound discharge phase survives" true
+      (Fs_compat.capability_recovery_failure_phase interruption = Fs_compat.Recovery_discharge_bound);
+    check bool "removed record is not reported as still durable" true
+      (Fs_compat.capability_recovery_failure_effect interruption
+       = Fs_compat.Recovery_source_removal_durability_unknown Fs_compat.Recovery_discharge_owned)
+;;
+
 let test_atomic_replace_preserves_requested_mode ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
@@ -2406,6 +2468,10 @@ let () =
             (test_create_direct_cleanup_cancellation_preserves_authority ~fs)
         ; test_case "recovery cancellation preserves authority" `Quick
             (test_recovery_cancellation_preserves_authority_and_backtrace ~fs)
+        ; test_case "actual recovery unlink cancellation retains effect" `Quick
+            (test_recovery_unlink_cancellation_retains_actual_effect ~fs ~write_primary:false)
+        ; test_case "write primary survives actual recovery unlink cancellation" `Quick
+            (test_recovery_unlink_cancellation_retains_actual_effect ~fs ~write_primary:true)
         ; test_case "typed parent components" `Quick
             (test_atomic_replace_uses_typed_parent_components ~fs)
         ; test_case "owned restrictive staging directory" `Quick

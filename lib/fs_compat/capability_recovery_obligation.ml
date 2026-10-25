@@ -316,6 +316,19 @@ let matching_lane_scope_release_fault owner =
   | None | Some _ -> None
 ;;
 
+type discharge_record = Prepared_record | Bound_record
+
+type discharge_cancellation =
+  { discharge_owner : owner
+  ; discharge_transition : removal_transition
+  ; discharge_reason : exn
+  ; discharge_backtrace : Printexc.raw_backtrace
+  }
+
+let discharge_cancellation_key : discharge_cancellation Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
 let operation_id_to_string operation_id = Uuidm.to_string operation_id
 let equal_operation_id = Uuidm.equal
 let record_name = operation_id_to_string
@@ -2571,6 +2584,12 @@ let remove_exact_source
            { expected = expected_identity; actual = actual_identity });
     raise_io ~operation:Remove_record ~subject (fun () -> Eio.Path.unlink path);
     removed := true;
+    (match Eio.Fiber.get discharge_cancellation_key with
+     | Some fault when equal_owner store.owner fault.discharge_owner
+         && removal_transition = fault.discharge_transition ->
+       Printexc.raise_with_backtrace
+         (Eio.Cancel.Cancelled fault.discharge_reason) fault.discharge_backtrace
+     | None | Some _ -> ());
     sync_directory
       ~subject:(Area (area, store.owner))
       (area_directory store area)
@@ -3000,6 +3019,25 @@ let record_forensic_bound ~(store : store) ~(bound : bound) ~outcome =
 ;;
 
 module For_testing = struct
+  type nonrec discharge_record = discharge_record = Prepared_record | Bound_record
+  type nonrec discharge_cancellation = discharge_cancellation
+
+  let discharge_cancellation ~owner ~record ~reason ~backtrace =
+    match owner_of_string owner with
+    | Error _ as error -> error
+    | Ok discharge_owner ->
+      let discharge_transition = match record with
+        | Prepared_record -> Discharge_active
+        | Bound_record -> Discharge_owned
+      in
+      Ok { discharge_owner; discharge_transition;
+           discharge_reason = reason; discharge_backtrace = backtrace }
+  ;;
+
+  let with_discharge_cancellation fault f =
+    Eio.Fiber.with_binding discharge_cancellation_key fault f
+  ;;
+
   type nonrec lane_scope_release_fault = lane_scope_release_fault
 
   let lane_scope_release_fault ~owner ~exception_ =

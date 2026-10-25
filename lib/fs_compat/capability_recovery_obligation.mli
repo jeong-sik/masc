@@ -511,6 +511,20 @@ type inventory = inventory_row list
 val inventory : store -> (inventory, transition_error) result
 
 module For_testing : sig
+  type discharge_record = Prepared_record | Bound_record
+  type discharge_cancellation
+
+  val discharge_cancellation
+    : owner:string -> record:discharge_record -> reason:exn
+    -> backtrace:Printexc.raw_backtrace
+    -> (discharge_cancellation, validation_error) result
+
+  val with_discharge_cancellation
+    : discharge_cancellation -> (unit -> 'a) -> 'a
+  (** Fiber-local cancellation fault immediately after the exact record has
+      really been unlinked, before its directory sync. It supplies no record,
+      writer, effect classification or durability outcome. *)
+
   type lane_scope_release_fault
 
   val lane_scope_release_fault

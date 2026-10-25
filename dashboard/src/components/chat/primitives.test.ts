@@ -249,12 +249,12 @@ describe('ChatTranscript', () => {
     )
     expect(status).not.toBeNull()
     expect(status?.textContent).toContain('승인 요청됨')
-    expect(status?.textContent).toContain('현재 승인 상태')
+    expect(status?.textContent).toContain('승인 요청 ID가 없어')
     expect(status?.textContent).not.toContain('External effect is awaiting')
     expect(container.querySelector('.chat-bubble')).toBeNull()
 
     const openGate = Array.from(status?.querySelectorAll('button') ?? [])
-      .find(button => button.textContent?.includes('승인 화면 열기'))
+      .find(button => button.textContent?.includes('전체 승인 목록'))
     expect(openGate).toBeDefined()
     fireEvent.click(openGate!)
     expect(window.location.hash).toBe('#approvals')
@@ -446,6 +446,30 @@ describe('ChatTranscript', () => {
     expect(status?.textContent).toContain('이어가기 예약됨')
     expect(status?.textContent).toContain('다음 주기에 이어서')
     expect(container.querySelector('.chat-bubble')).toBeNull()
+  })
+
+  it('keeps the exact approval destination through persisted history hydration', () => {
+    const approvalId = 'appr_01exact'
+    const restored = chatHistoryEntriesFromRest('echo', [{
+      id: 'durable-approval-request', role: 'system', content: '', ts: 1_780_000_000,
+      delivery_provenance: {
+        delivery_key: { kind: 'approval_lifecycle', approval_id: approvalId },
+        transcript_slot: { kind: 'approval_request' },
+      },
+      delivery_provenance_status: 'valid',
+      approval_lifecycle: { approval_id: approvalId, phase: 'requested', tool_name: 'Execute' },
+    }])
+    const live = entry({
+      id: 'live-approval', role: 'system', text: '',
+      approvalLifecycle: { approvalId, phase: 'requested', toolName: 'Execute', artifactSha256: null },
+    })
+    for (const entries of [[live], restored]) {
+      render(html`<${ChatTranscript} entries=${entries} emptyText="empty" variant="messenger" />`, container)
+      const link = container.querySelector<HTMLAnchorElement>('[data-chat-approval-id] a')
+      expect(link?.getAttribute('href')).toBe('#approvals?approval=appr_01exact')
+      expect(new URL(link!.href).hash).toBe('#approvals?approval=appr_01exact')
+      render(null, container)
+    }
   })
 
   it('renders approval resolution, replay, and continuation as distinct typed cards', () => {

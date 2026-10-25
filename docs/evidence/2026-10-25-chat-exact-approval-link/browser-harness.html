@@ -1,0 +1,12 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><link rel="stylesheet" href="/dashboard/src/styles/keeper-v2/colors_and_type.css?direct"><link rel="stylesheet" href="/dashboard/src/styles/keeper-v2/v2.css?direct"><link rel="stylesheet" href="/dashboard/src/styles/keeper-v2/surfaces.css?direct"><link rel="stylesheet" href="/dashboard/src/styles/approvals-v2.css?direct"><title>Exact approval link — controlled fixture</title><body data-theme="dark"><div id="root"></div><script type="module">
+import {html} from 'htm/preact';import {render} from 'preact';
+import {route} from './src/router.ts';import {ChatTranscript} from './src/components/chat/primitives.ts';
+import {ApprovalsSurface} from './src/components/approvals/approvals-surface.ts';
+import {chatHistoryEntriesFromRest} from './src/keeper-state.ts';
+import './src/styles/ds-theme-tokens.css';import './src/styles/global.css';import './src/styles/tokens.css';
+import './src/styles/approvals-v2.css';import './src/styles/keeper-v2/surfaces.css';
+const history=await fetch('/api/test/approval-history').then(r=>r.json());
+const entries=chatHistoryEntriesFromRest('keeper-x',history);
+function App(){return html`<div style="padding:20px"><p>Controlled HTTP fixture · candidate Dashboard components</p>${route.value.tab==='approvals'?html`<${ApprovalsSurface}/>`:html`<${ChatTranscript} entries=${entries} emptyText="empty" variant="messenger"/>`}</div>`}
+render(html`<${App}/>`,document.getElementById('root'));
+</script></body></html>

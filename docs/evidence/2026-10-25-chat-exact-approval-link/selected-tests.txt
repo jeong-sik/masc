@@ -1,0 +1,11 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-chat-exact-approval-link-20261025/dashboard
+
+
+ Test Files  3 passed (3)
+      Tests  265 passed (265)
+   Start at  14:18:04
+   Duration  4.20s (tests 57%, environment 16%, import 10%, transform 9%, setup 7%)
+
+    Isolate  3 workers spawned · ~303ms startup each (spawn + environment, per file)
+             at least ~606ms faster with isolate: false — reuses workers across files instead of one per file

@@ -45,7 +45,7 @@ import {
   keeperResolvedApprovalDecisionLabel,
   type KeeperResolvedApprovalDecision,
 } from '../../lib/keeper-approval-decision'
-import { navigate } from '../../router'
+import { navigate, route } from '../../router'
 import { AgentAvatar } from '../overview/agent-avatar'
 import { LoadingState } from '../common/feedback-state'
 import {
@@ -1116,10 +1116,16 @@ export function ApprovalsSurface() {
   // keeps the previous data — gateData is null ONLY before the first load
   // resolves. Show a loading state then, instead of asserting the empty queue.
   const firstLoad = gateLoading.value && gateData.value === null
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [view, setView] = useState<ApprovalsView>('queue')
-  const selectedItem =
-    items?.find(item => item.id === selectedId) ?? items?.[0] ?? null
+  const targetId = route.value.params.approval
+  const view: ApprovalsView = targetId === undefined && route.value.params.view === 'history'
+    ? 'history' : 'queue'
+  // A URL names one exact request. Absence must never select another request.
+  const selectedItem = targetId !== undefined
+    ? items?.find(item => item.id === targetId) ?? null
+    : items?.[0] ?? null
+  const targetUnavailable = targetId !== undefined && items !== null
+    && selectedItem === null && !firstLoad && !queueUnavailable
+  const selectApproval = (id: string) => navigate('approvals', { approval: id })
 
   const stats = useMemo(() => {
     if (items === null) return null
@@ -1146,7 +1152,7 @@ export function ApprovalsSurface() {
                 type="button"
                 class=${`ap-viewbtn ${view === 'queue' ? 'on' : ''}`}
                 aria-selected=${view === 'queue'}
-                onClick=${() => setView('queue')}
+                onClick=${() => navigate('approvals', targetId === undefined ? {} : { approval: targetId })}
               >
                 큐${items && items.length > 0 ? html`<span class="ap-viewbtn-n mono">${items.length}</span>` : null}
               </button>
@@ -1154,7 +1160,7 @@ export function ApprovalsSurface() {
                 type="button"
                 class=${`ap-viewbtn ${view === 'history' ? 'on' : ''}`}
                 aria-selected=${view === 'history'}
-                onClick=${() => setView('history')}
+                onClick=${() => navigate('approvals', { view: 'history' })}
               >
                 이력${resolvedItems.length > 0
                   ? html`<span class="ap-viewbtn-n neutral mono" data-testid="approvals-history-count">${resolvedItems.length}</span>`
@@ -1253,6 +1259,13 @@ export function ApprovalsSurface() {
           </div>
         </section>
 
+        ${targetUnavailable ? html`
+          <div class="ap-error flex flex-col gap-2" role="status" data-testid="approval-target-unavailable">
+            <strong>요청한 승인 상세를 표시할 수 없습니다</strong>
+            <code>${targetId}</code>
+            <span>현재 조회 결과로는 이 요청의 상태를 확인할 수 없습니다.</span>
+            <button type="button" class="ap-viewbtn" onClick=${() => navigate('approvals')}>전체 대기 요청 보기</button>
+          </div>` : null}
         ${items.length > 0
           ? html`
               <div class="ap-workspace" data-testid="approvals-workspace">
@@ -1262,7 +1275,7 @@ export function ApprovalsSurface() {
                       <${ApprovalCard}
                         item=${item}
                         selected=${selectedItem?.id === item.id}
-                        onSelect=${setSelectedId}
+                        onSelect=${selectApproval}
                       />
                       ${selectedItem?.id === item.id
                         ? html`<${ApprovalDetailPanel} item=${item} variant="inline" />`

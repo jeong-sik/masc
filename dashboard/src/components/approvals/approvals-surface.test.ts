@@ -248,10 +248,12 @@ async function loadSurface(
   // Preserve the real router (route signal etc.) but capture navigate() so the
   // "open keeper conversation" wiring can be asserted without a real route change.
   const navigate = vi.fn()
-  vi.doMock('../../router', async (importOriginal) => ({
-    ...(await importOriginal<typeof import('../../router')>()),
-    navigate,
-  }))
+  vi.doMock('../../router', async (importOriginal) => {
+    const original = await importOriginal<typeof import('../../router')>()
+    original.replaceRoute('approvals')
+    navigate.mockImplementation(original.navigate)
+    return { ...original, navigate }
+  })
   const mod = await import('./approvals-surface')
   const gateSignals = await import('../gate-signals')
   gateSignals.clearGateAuditWriteFailures()
@@ -264,6 +266,7 @@ async function loadSurface(
     setExternalGateMode,
     navigate,
     gateSignals,
+    router: await import('../../router'),
   }
 }
 
@@ -634,6 +637,49 @@ describe('ApprovalsSurface', () => {
     expect(kpi).not.toBeNull()
     expect(kpi?.textContent?.trim()).toBe('2')
   }, 20000)
+
+  it('opens a URL-named request after reload and keeps decision identity exact', async () => {
+    const { ApprovalsSurface, router, resolveGateApproval } = await loadSurface([
+      queueItem({ id: 'appr-first' }), queueItem({ id: 'appr-target' }),
+    ])
+    router.replaceRoute('approvals', { approval: 'appr-target' })
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+    expect(container.querySelector('[data-testid="approval-detail-panel"]')?.getAttribute('data-approval-id')).toBe('appr-target')
+    render(null, container)
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+    expect(container.querySelector('[data-testid="approval-detail-panel"]')?.getAttribute('data-approval-id')).toBe('appr-target')
+    container.querySelector<HTMLButtonElement>('[data-approval-id="appr-target"] .ap-act.approve')?.click()
+    await flushUi()
+    expect(resolveGateApproval).toHaveBeenCalledWith('appr-target', { decision: 'approve', rememberRule: false })
+  })
+
+  it('retains missing target identity without substituting another request', async () => {
+    const { ApprovalsSurface, router, gateSignals } = await loadSurface([queueItem({ id: 'appr-other' })])
+    router.replaceRoute('approvals', { approval: 'appr-missing' })
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+    expect(container.querySelector('[data-testid="approval-target-unavailable"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="approval-detail-panel"]')).toBeNull()
+    expect(container.querySelector('[data-selected="true"]')).toBeNull()
+    // A later authoritative refresh can make that exact request available.
+    gateSignals.gateResource.reset(responseWithQueue([queueItem({ id: 'appr-other' }), queueItem({ id: 'appr-missing' })]))
+    await flushUi()
+    expect(container.querySelector('[data-testid="approval-detail-panel"]')?.getAttribute('data-approval-id')).toBe('appr-missing')
+    // Removing the selected request must not silently promote its neighbour.
+    gateSignals.gateResource.reset(responseWithQueue([queueItem({ id: 'appr-other' })]))
+    await flushUi()
+    expect(container.querySelector('[data-testid="approval-detail-panel"]')).toBeNull()
+    expect(router.route.value.params.approval).toBe('appr-missing')
+    router.navigate('approvals', { view: 'history' })
+    await flushUi()
+    expect(container.querySelector('[data-testid="approvals-history-view"]')).not.toBeNull()
+    router.navigate('approvals', { approval: 'appr-other' })
+    await flushUi()
+    expect(container.querySelector('[data-testid="approvals-history-view"]')).toBeNull()
+    expect(container.querySelector('[data-testid="approval-detail-panel"]')?.getAttribute('data-approval-id')).toBe('appr-other')
+  })
 
   it('renders a selected request dossier from backed approval queue fields', async () => {
     const { ApprovalsSurface } = await loadSurface([

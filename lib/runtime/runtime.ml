@@ -1733,7 +1733,7 @@ let materialize_runtime_config_text ~config_path content =
 let runtime_config_commit_order = ref Int64.zero
 let runtime_config_commit_order_mu = Stdlib.Mutex.create ()
 
-let committed_receipt ~observation ~durability ~exact_output_registry =
+let committed_receipt ~observation ~durability ~exact_output_registry ~content =
   let order =
     (* Process-global publication order spans every runtime.toml authority.
        The file lock is path-scoped, so distinct config paths can commit on
@@ -1747,6 +1747,7 @@ let committed_receipt ~observation ~durability ~exact_output_registry =
   ; order = Config_commit_order order
   ; lock_warnings = []
   ; exact_output_registry
+  ; ignored_legacy_keys = Runtime_toml.ignored_legacy_keys content
   }
 ;;
 
@@ -1818,6 +1819,7 @@ let runtime_config_atomic_failure
     ~replacement_visible
     ~observation
     ~exact_output_registry
+    ~content
     (failure : Fs_compat.atomic_replace_failure)
   =
   if replacement_visible
@@ -1827,7 +1829,8 @@ let runtime_config_atomic_failure
       (committed_receipt
          ~observation
          ~durability:(Durability_unconfirmed { detail })
-         ~exact_output_registry)
+         ~exact_output_registry
+         ~content)
   else
     match failure.Fs_compat.exception_ with
     | Eio.Cancel.Cancelled _ ->
@@ -2543,7 +2546,7 @@ let commit_config_text_locked
        publish_runtimes ();
        Ok
          (committed
-            (committed_receipt ~observation ~durability:Durable ~exact_output_registry))
+            (committed_receipt ~observation ~durability:Durable ~exact_output_registry ~content))
      | Error (failure : Fs_compat.atomic_replace_failure) ->
        (match failure.stage with
         | Fs_compat.Before_rename ->
@@ -2551,6 +2554,7 @@ let commit_config_text_locked
             ~replacement_visible:false
             ~observation
             ~exact_output_registry
+            ~content
             failure
         | Fs_compat.After_rename ->
           publish_runtimes ();
@@ -2558,6 +2562,7 @@ let commit_config_text_locked
             ~replacement_visible:true
             ~observation
             ~exact_output_registry
+            ~content
             failure
           |> Result.map committed))
   | Commit_with_registry (prepared_replacement, exact_output_registry) ->
@@ -2580,11 +2585,12 @@ let commit_config_text_locked
          ~replacement_visible:false
          ~observation
          ~exact_output_registry
+         ~content
          failure
      | Ok (Runtime_exact_output_registry.Committed `Durable) ->
        Ok
          (committed
-            (committed_receipt ~observation ~durability:Durable ~exact_output_registry))
+            (committed_receipt ~observation ~durability:Durable ~exact_output_registry ~content))
      | Ok
          (Runtime_exact_output_registry.Committed
            (`Durability_unconfirmed failure)) ->
@@ -2592,6 +2598,7 @@ let commit_config_text_locked
          ~replacement_visible:true
          ~observation
          ~exact_output_registry
+         ~content
          failure
        |> Result.map committed)
 ;;

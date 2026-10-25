@@ -23116,7 +23116,12 @@ let main
      nothing having told them. *)
   let store_theme_choice choice =
     match Masc_tui_config.set_theme ~base_path choice with
-    | Ok () -> ()
+    | Ok [] -> ()
+    | Ok ignored ->
+        report_action state "warn"
+          (Printf.sprintf
+             "테마를 runtime.toml 에 저장했습니다. 이후 릴리스에서 읽지 않는 옛 키가 파일에 남아 있어 무시됩니다: %s"
+             (String.concat ", " ignored))
     | Error message ->
         report_action state "error"
           (Printf.sprintf

@@ -83,6 +83,13 @@ type config_commit_receipt = private
   ; order : config_commit_order
   ; lock_warnings : config_lock_warning list
   ; exact_output_registry : exact_output_registry_application
+  ; ignored_legacy_keys : string list
+        (** Legacy keys the committed text still carries
+            (e.g. ["models.gpt-5.max-prompt-bytes"]) that this masc reads
+            past without a value. Empty on a receipt whose write did not
+            land, where there is no committed text to name keys from. The
+            editor that caused the commit says them in a warning so the
+            reader knows the old key is now inert (#45985). *)
   }
 
 and config_lock_warning =

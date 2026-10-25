@@ -150,7 +150,6 @@ let test_strict_declarations () =
 let test_exact_frozen_contract () =
   let observe ?kind dialect =
     let snapshot = get_ok "exact snapshot" (EO.load_resolver_snapshot
-      ~io:{ getenv = (fun _ -> Ok None) }
       ~catalog:(EO.Full_replacement { source = "dialect fixture"; contents = catalog ?kind dialect }) ()) in
     let admitted = get_ok "exact target admission" (EO.admit_target_ref snapshot "slot") in
     let target = get_ok "exact target resolution" (EO.resolve_target admitted) in

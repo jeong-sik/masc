@@ -21,16 +21,16 @@ endpoint authority; no local/Docker fallback on SSH failure.
 | Change profiles with endpoint/network fields together | Actual TUI/Dashboard request, persisted TOML reread, rejected/uncertain save recovery | Browser endpoint save and TOML readback passed at a317; full profile transition and native TUI unverified |
 | Keeper can Execute, Read, Grep, Write, Edit and enumerate files | Keeper tool records and endpoint-side reread/hash; enumeration uses the exposed Execute tool | Actual baseline and exact-source a317 candidate workflows measured; scripted model |
 | Path/root/cwd semantics agree across tools, scripts and receipts | Same nested file accessed through each surface, declared roots and sibling refusal scenarios | Audit required; #37324, #38593, #38895 |
-| Typed stdin/stdout/stderr redirects work remotely | Actual typed redirect workflow including append and split streams; host path never opened | Gap; #31442 |
+| stdin/stdout/stderr redirects work through the public Execute contract | Actual Keeper command workflow including append and split streams; independent endpoint bytes and no projected host file | Public command route passed at a317; current argv contract has no redirect fields. Internal typed IR attachment gap #31442 remains separate |
 | Long commands do not block Keeper interaction | Remote process handle, output/wait/cancel and actual remote child cleanup | Gap; #36941 |
 | Explicit repository materialization has exact identity | Declared URL/revision/destination, actual clone/readback, repeat without loss of dirty work | Gap; #31460 |
 | Optional GitHub workflow works and cancellation cleans up | Keeper-scoped actual auth and repository operation, no token leakage, cancelled remote login cleanup | Unverified; #32910 |
 | Reconnect/restart and transport failures remain truthful | Persisted output reread after server restart; named error on disconnect; explicit cancellation and no orphan | Exact-source a317 candidate passed long-base paths, pin refusal/recovery and explicit manual restart; disconnect/cancel still open |
-| Endpoint replacement and trust rotation do not borrow old authority | Same-name host/root/key-path changes invalidate readiness and observations; same-path key/pin rotation and ControlMaster reauthentication are separately exercised | Source review found stale cache keys; repair in progress |
+| Endpoint replacement and trust rotation do not borrow old authority | Same-name host/root/key-path changes invalidate readiness and observations; same-path key/pin rotation and ControlMaster reauthentication are separately exercised | Cache identity fix merged; actual a317 pin refusal and explicit recovery passed without ControlMaster; real identity replacement still unverified |
 | Runtime installation includes the required SSH operator tools | Exact-source packaged bootstrap/shim availability and install/readback on the exercised platforms | Audit required; normal runtime package currently lists four operator executables |
 | Operator and Keeper can observe the lane | Current endpoint/shim/last dispatch and errors visible through relevant API, native TUI and browser proof | Unverified |
 | Sustained representative Keeper use | Multi-turn real task with artifacts and measured continuity/performance; compare same workload where needed | Unverified |
-| Review and integration are complete | Native stack membership/current heads, independent source review, targeted checks, verified merge and matching installed candidate | Not started |
+| Review and integration are complete | Native stack membership/current heads, independent source review, targeted checks, verified merge and matching installed candidate | Implementation stack #45815 merged; follow-up #45848 has independent source review and targeted checks, but independent GitHub approval and matching installed candidate remain open |
 
 Implementation units remain bounded and are stacked with `gh stack`:
 

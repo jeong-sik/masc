@@ -138,3 +138,34 @@ timeline can show different tools in this candidate. Canonical tool results and
 the detailed timeline were the execution evidence here; the reply tile's mapping
 requires separate investigation. These observations belong to the tested a317
 candidate and are not a verdict on an unexecuted rebased head.
+
+## Public shell command redirects
+
+The current public Execute contract offers literal `argv` or an explicit shell
+`command`; it has no typed redirect fields. Issue #31442 describes the internal
+Shell IR attachment path. That limitation does not establish a failure of the
+public shell command route.
+
+An additional actual Keeper run at the same a317 binary used
+`--exercise-shell-io`. Its final Execute deliberately requested a `sh` command
+with `intent=request_effect` and performed stdin from a file, truncate, append,
+and separate stdout/stderr file redirects. All filenames contained spaces.
+The command then read the four files and returned their exact expected bytes.
+Independent pinned SSH readback matched them, the projected host cwd held none
+of those files, and the endpoint bytes were unchanged after server shutdown.
+The same manual Keeper was explicitly started after restart and resumed Read
+and Execute. Eight tools and ten scripted model requests completed successfully.
+
+The six `shell-io-*` files retain raw tool results, canonical ledger rows,
+independent endpoint reads, the result receipt, and binary/harness provenance.
+Both file readback paths use raw bytes with strict UTF-8 decoding so newline
+translation cannot hide CRLF differences. Independent review found that defect
+in an earlier harness; the retained run was repeated in a fresh workspace after
+the correction. A separate comparison rejected 48 byte mutations across both
+actual generated readback paths, including CRLF and lone CR variants.
+The isolated server was stopped. This proves the public shell route on the
+measured candidate; internal typed IR redirects, long remote jobs, real-model
+autonomy, current-main execution and production installation remain unverified.
+The final Execute repeats the redirect writes after restart; only the unchanged
+notes file is read without being recreated then. The independent before/after
+shutdown comparison is the redirect files' persistence evidence.

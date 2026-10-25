@@ -2,12 +2,12 @@
 title: "기계 화면은 Lane 라우트 하나로 보고, 사람의 조작도 알림을 낸다"
 status: Draft
 created: 2026-09-24
-updated: 2026-09-25
+updated: 2026-10-25
 author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0439", "lane-addon-v0"]
-implementation_prs: ["#38733", "#38730", "#38815"]
+implementation_prs: ["#38733", "#38730", "#38815", "#39168", "#45971"]
 ---
 
 # RFC — 기계 화면은 Lane 라우트 하나로 본다

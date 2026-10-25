@@ -1,0 +1,376 @@
+{
+  "schema": "masc.goal-outcomes.acceptance.v1",
+  "goal_id": "goal-outcome-driven-work-20261024",
+  "baseline_source_sha": "8eac5c07c290d134a9ef6acb1e298584bf9a1366",
+  "generated_at": "2026-10-24T07:09:57.956101+00:00",
+  "baseline": {
+    "task_counts_by_status": {
+      "cancelled": {
+        "total": 720,
+        "linked": 23,
+        "goalless": 697
+      },
+      "done": {
+        "total": 669,
+        "linked": 40,
+        "goalless": 629
+      },
+      "todo": {
+        "total": 161,
+        "linked": 28,
+        "goalless": 133
+      },
+      "in_progress": {
+        "total": 22,
+        "linked": 4,
+        "goalless": 18
+      },
+      "awaiting_verification": {
+        "total": 2,
+        "linked": 0,
+        "goalless": 2
+      }
+    },
+    "backlog_version": 18267,
+    "source": "authoritative tasks/backlog.json + tasks/goal_task_links.json at same read window; two reads, no atomic cross-store snapshot claim"
+  },
+  "required_case_ids": [
+    "G1",
+    "G2",
+    "G3",
+    "G4",
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5",
+    "A6",
+    "A7"
+  ],
+  "cases": [
+    {
+      "id": "G1",
+      "requirement": "Keeper receives current-revision Goal criterion, measurement, evidence and explicit missing/unavailable state",
+      "state": "measured_pass",
+      "evidence": [
+        "https://github.com/jeong-sik/masc/actions/runs/40078581651",
+        "/tmp/masc-goal-wire-7501aec0/request-000003.request",
+        "/tmp/masc-goal-candidate-7501aec0/server-extraction-receipt.json"
+      ],
+      "source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "scope": "Fresh real Keeper direct request reached actual Ollama /api/chat with correct Goal ID, criterion revision, reported measurement ID/value/evidence; exact serialized request SHA a842806027d75fb9cf1edde83380edde3e519ffbb73fc1d58a0a25e38bfe6b95. Native controlled-HTTP missing/stale/unavailable cases passed separately. Server binary7501 verified; support libraries reused from checked dca bundle with equal upstream library/Python provenance. Not full new bundle installation.",
+      "counterevidence": [
+        "/tmp/masc-goal-canary-dca2013e/.masc/keepers/goal-canary/last-prompt.json",
+        "/tmp/masc-goal-canary-dca2013e/.masc/keepers/goal-canary/provider-inputs/2026-10/24.jsonl"
+      ]
+    },
+    {
+      "id": "G2",
+      "requirement": "Keeper chooses a matching Goal for related work and creates a Task with its goal_id",
+      "state": "measured_pass",
+      "source_sha": "32805eb764eab2710262446e925b0ea5c3a44c08",
+      "measured_at": "2026-10-24T18:27:26.067536+00:00",
+      "evidence": [
+        "docs/evidence/2026-10-25-goal-continuation-glm/README.md",
+        "docs/evidence/2026-10-25-goal-continuation-glm/preapproval/g2-alpha-checkpoint.json",
+        "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json"
+      ],
+      "scope": "One configured single-provider GLM-5.3 ordinary HTTP cohort. Model chose matching Goal ID in Task create; authoritative external Goal index agrees. Full original alpha-only contract preserved/current and immutable55B match; no operator link or nudge. Original Gate checkpoint and unavailable judge/resubmission are preserved, not terminal or first-attempt judge PASS.",
+      "previous_measurement": {
+        "id": "G2",
+        "requirement": "Keeper chooses a matching Goal for related work and creates a Task with its goal_id",
+        "state": "measured_pass",
+        "source_sha": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+        "measured_at": "2026-10-24T17:40:49.622498+00:00",
+        "evidence": [
+          "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/README.md",
+          "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/diagnosis.json"
+        ],
+        "scope": "Actual2be Qwen chooses matching Goal ID in first Task create; authoritative external Goal index agrees; no operator Goal link or execution nudge. Initial alpha-only execution nevertheless FAILS(alltrue before approval). Single Goal/cohort association evidence, not execution or population success.",
+        "previous_measurement": {
+          "id": "G2",
+          "requirement": "Keeper chooses a matching Goal for related work and creates a Task with its goal_id",
+          "state": "measured_fail",
+          "source_sha": "3014cfce79636f1e41cc39f6019a3428c6912145",
+          "measured_at": "2026-10-24T16:31:03.171301+00:00",
+          "evidence": [
+            "docs/evidence/2026-10-25-goal-receipt-runtime/README.md",
+            "docs/evidence/2026-10-25-goal-receipt-runtime/preapproval/snapshot.json"
+          ],
+          "scope": "Latest actual3014 Qwen cohort received Goal/revision but omitted goal_id when creating first Task and never linked it before terminal. Earlier54 Qwen/Gemma passes remain historical. Root public-MCP linking only established the later controlled G3 fixture and is not model-selected association.",
+          "previous_measurement": {
+            "id": "G2",
+            "requirement": "Keeper chooses a matching Goal for related work and creates a Task with its goal_id",
+            "state": "measured_pass",
+            "evidence": [
+              "docs/evidence/2026-10-25-goal-lookup-runtime/g2-goal-links.json",
+              "docs/evidence/2026-10-25-goal-lookup-runtime/g2-task.json",
+              "docs/evidence/2026-10-25-goal-lookup-runtime/first-wire-schema.json"
+            ],
+            "scope": "Fresh real Qwen3:8b at54e8 emitted matching Goal ID in actual Task-create, persisted authoritative link and claimed task-001. Owner request contains no Goal ID; no operator Task link or execution reminder. Initial Read path misuse and all-false formatting Write before Task are retained in this cohort; no first-attempt or population success claim. G3 remains unpassed.",
+            "counterevidence": [
+              "/tmp/masc-goal-wire-7501aec0/request-000003.request",
+              "/tmp/masc-goal-wire-7501aec0/request-000006.response",
+              "/tmp/masc-goal-canary-7501aec0/.masc/tasks/backlog.json",
+              "docs/evidence/2026-10-24-goal-tool-round-context/baseline.json",
+              "/tmp/masc-goal-canary-c6e54ff5/failed-g2-observation.json",
+              "docs/evidence/2026-10-24-goal-retention-runtime/failed-gemma-observation.json",
+              "docs/evidence/2026-10-24-goal-carrier-diagnostic/README.md"
+            ],
+            "source_sha": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+            "prior_measured_pass": {
+              "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+              "scope": "Actual local Gemma Read→Task-create emitted matching delivered Goal ID, self-corrected required description after two rejected calls, actual handler accepted and authoritative Goal registry links task-001. Owner request contained no Goal ID. Captured System bytes/hash equal actual provider wire; no Goal in trailing User. Task stillTodo at this snapshot; first-turn execution and G3 are not inferred. Single Goal, changed staged prompt cohort, no multi-Goal selection-rate claim.",
+              "evidence": [
+                "docs/evidence/2026-10-24-goal-system-runtime/g2-observation.json",
+                "docs/evidence/2026-10-24-goal-system-runtime/g2-goal-links.json",
+                "docs/evidence/2026-10-24-goal-system-runtime/g2-task.json"
+              ]
+            },
+            "additional_cohort_counterevidence": {
+              "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+              "model": "qwen3:8b",
+              "result": "omitted Goal association",
+              "evidence": "docs/evidence/2026-10-24-goal-qwen-runtime/README.md"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "G3",
+      "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
+      "state": "measured_pass",
+      "source_sha": "32805eb764eab2710262446e925b0ea5c3a44c08",
+      "measured_at": "2026-10-24T18:27:26.067536+00:00",
+      "evidence": [
+        "docs/evidence/2026-10-25-goal-continuation-glm/README.md",
+        "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/diagnosis.json",
+        "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json"
+      ],
+      "scope": "One configured GLM-5.3 ordinary HTTP cohort, exactly one controlled sleep20 Gate permission plus one inspected partial Task operator-proxy approval after original operation completion. Actual Read→1/3 measure→beta/gamma Edit→Read→3/3 measure+Task2 submit→Goal request_complete→accurate public proof/human-pending report. Measurement receipts reported_only/unchanged while Executing. Final canary GoalVerifying/proof_pending, Task2Awaiting; exact approved source ACK turn_completed/pending0. No human Goal confirmation, final proof, population success, model independence, source/model causal comparison or Official vendor claim.",
+      "previous_measurement": {
+        "id": "G3",
+        "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
+        "state": "measured_fail",
+        "source_sha": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+        "measured_at": "2026-10-24T17:40:49.622498+00:00",
+        "evidence": [
+          "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/README.md",
+          "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/diagnosis.json"
+        ],
+        "scope": "Actual2be Qwen controlled rejection restores alpha-only, then first positive operator-proxy approval of exact immutable/current bytes. Fresh request20 has approved outcome; zero postapproval Tool calls, stale Awaiting report, no Goal measurement/remaining work. GoalExecuting. Postapproval tool-round retention unexercised; rejection10–19 retention proven separately. No sole cause established. Initial execution, capture defect, recovery and stale reports preserved.",
+        "previous_measurement": {
+          "id": "G3",
+          "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
+          "state": "measured_fail",
+          "source_sha": "3014cfce79636f1e41cc39f6019a3428c6912145",
+          "measured_at": "2026-10-24T16:40:35.848236+00:00",
+          "evidence": [
+            "docs/evidence/2026-10-25-goal-receipt-runtime/README.md",
+            "docs/evidence/2026-10-25-goal-receipt-runtime/postapproval/diagnosis.json"
+          ],
+          "scope": "Latest actual3014 Qwen: controlled preapproval public-MCP link + inspected immutable partial Task operator approval. No postapproval Keeper messages. Actual approval reaches21 then disappears in22–31. Model temporarily overwrites approved alpha with false, restores/reworks alpha, queries exactTaskID and gets actualDone, still resubmits then ends without Goal measurement or beta/gamma work. New measurement receipt never executes, so its live interpretation is unmeasured. Source input loss is not established as sole cause.",
+          "previous_measurement": {
+            "id": "G3",
+            "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
+            "state": "measured_fail",
+            "source_sha": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+            "measured_at": "2026-10-24T15:40:10.576374+00:00",
+            "evidence": [
+              "docs/evidence/2026-10-25-goal-lookup-runtime/README.md",
+              "docs/evidence/2026-10-25-goal-lookup-runtime/postapproval-diagnosis.json",
+              "docs/evidence/2026-10-25-goal-lookup-runtime/independent-runtime-audit.json"
+            ],
+            "scope": "Fresh real Qwen3:8b; model creates/claims Goal-linked first Task without operator association or reminder; operator proxy approves immutable alpha-only artifact. No postapproval Keeper message. Approval reaches request15; model performs actual beta/gamma work, rereads/submits retained artifacts and persists final3/3 observation at request26. Strict full case FAIL: terminal27 calls this Goal verification/achievement and predicts Task approval completes Goal, while actual Goal remains Executing and Task2/3 await verification. Asked intermediate1/3-before-work order also missed. Only explicit awaiting-verification listing occurs; no causal runtime proof of exact-ID default repair.",
+            "prior_measured_failures": {
+              "id": "G3",
+              "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
+              "state": "measured_fail",
+              "evidence": [
+                "docs/evidence/2026-10-24-goal-system-runtime/g3-after-approval-observation.json",
+                "/tmp/masc-goal-wire-3badb881/request-000019.request",
+                "/tmp/masc-goal-canary-3badb881/operator-observations/approval-receipt.json"
+              ],
+              "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+              "measured_at": "2026-10-24T14:45:45.548135+00:00",
+              "scope": "Real gemma4:e2b linked partial Task approved by controlled operator proxy after exact immutable artifact inspection; approval event and current Goal reach actual request000019, 33 tools offered including goal_measure. Model returns text claiming still awaiting verification and calls no tools; artifact remains1/3 and Goal reported measurement0/3. No Keeper message after approval. One pre-approval execution reminder disclosed.",
+              "additional_cohort_counterevidence": {
+                "model": "qwen3:8b",
+                "source_sha": "3badb88117794510dac576bf3fc34f0336e17d8a",
+                "evidence": "docs/evidence/2026-10-24-goal-qwen-runtime/README.md",
+                "result": "measured_fail",
+                "scope": "Fresh real Keeper executes partial Task, omits Goal association. Controlled pre-approval public-MCP link establishes G3 fixture condition. Approval delivered; three exact-ID default queries omit Done and return empty; model ends stale-awaiting without actual Goal measurement or remaining work. No postapproval message; model/tool default interaction not proven sole cause."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "G4",
+      "requirement": "Independent goalless Task creation and execution remain supported",
+      "state": "measured_pass",
+      "evidence": [
+        "/tmp/masc-goal-canary-dca2013e/goalless-create.json",
+        "/tmp/masc-goal-canary-dca2013e/goalless-execution.json",
+        "/tmp/masc-goal-canary-dca2013e/goalless-submit.json",
+        "/tmp/masc-goal-canary-dca2013e/goalless-approval.json"
+      ],
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "scope": "isolated candidate external-agent MCP create→claim→start, actual Node Docker computation, verification submission→controlled operator-proxy approval→Done; goal_id null and no assigned link; not Keeper inference proof"
+    },
+    {
+      "id": "A1",
+      "requirement": "Coding verify, regression and build execute inside the declared supported grading sandbox; Docker and microVM support boundaries are explicit",
+      "state": "measured_pass",
+      "evidence": [
+        "scripts/tests/test_coding_eval_boundary.py",
+        "docs/evidence/2026-10-24-coding-boundary/README.md"
+      ],
+      "scope": "actual Python Docker grading, same captured bytes across verify/regression/build; no host credentials/socket/network",
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f"
+    },
+    {
+      "id": "A2",
+      "requirement": "Changing only Node oracle code with broken solution unchanged cannot pass protected grading",
+      "state": "measured_pass",
+      "evidence": [
+        "docs/evidence/2026-10-24-coding-boundary/observations.json"
+      ],
+      "scope": "actual Node Docker grader rejected both oracle-only edits; unchanged broken implementation hashes; both reference controls pass",
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f"
+    },
+    {
+      "id": "A3",
+      "requirement": "Image bytes and length must match stored identity before judge or operator delivery",
+      "state": "measured_pass",
+      "evidence": [
+        "https://github.com/jeong-sik/masc/actions/runs/40074289285",
+        "/tmp/masc-goal-native-suites-dca2013e/ci-run-tests.log"
+      ],
+      "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "scope": "native filesystem image digest/length/symlink and judge/operator/TUI typed propagation"
+    },
+    {
+      "id": "A4",
+      "requirement": "Model and experiment cohorts retain distinct pass@k, cost and unknown coverage",
+      "state": "measured_pass",
+      "evidence": [
+        "docs/evidence/2026-10-24-coding-eval-cohorts/observations.json",
+        "docs/evidence/2026-10-24-coding-eval-cohorts/duplicate-keys/observations.json",
+        "docs/evidence/2026-10-24-coding-json-integrity/",
+        "docs/evidence/2026-10-24-coding-cohort-identities/",
+        "/tmp/masc-goal-cohort-identities-root-check.txt"
+      ],
+      "scope": "Complete real report source cohort/cost probes, actual Python/shell collector and full-original-identity controls. Distinct org/model versus org-model aliases/run IDs; eight wrong cohort receipt controls refuse; duplicate nested/top-level JSON rejected before re-encoding. Six Python/CLI tests and four transport fixtures pass; no full live-provider coding harness or resume claim.",
+      "source_sha": "2d92eeb337f6e38cc307211d5c662956b8891299",
+      "additional_source_binding": {
+        "duplicate_key_fix": "4493ac314c21e87f1c4a2ed092cf1c9dfccc0866"
+      },
+      "counterevidence": [
+        "https://github.com/jeong-sik/masc/pull/45755#pullrequestreview-5637521780",
+        "coding model aliases/run IDs org/model and org-model collide; actual shell helper reproduction on7501"
+      ]
+    },
+    {
+      "id": "A5",
+      "requirement": "Changed experiment inputs cannot reuse stale resume evidence",
+      "state": "measured_pass",
+      "evidence": [
+        "scripts/tests/test_coding_eval_boundary.py",
+        "docs/evidence/2026-10-24-coding-json-integrity/",
+        "docs/evidence/2026-10-24-coding-cohort-identities/",
+        "/tmp/masc-goal-cohort-identities-root-check.txt"
+      ],
+      "scope": "Complete real report source cohort/cost probes, actual Python/shell collector and full-original-identity controls. Distinct org/model versus org-model aliases/run IDs; eight wrong cohort receipt controls refuse; duplicate nested/top-level JSON rejected before re-encoding. Six Python/CLI tests and four transport fixtures pass; no full live-provider coding harness or resume claim.",
+      "source_sha": "2d92eeb337f6e38cc307211d5c662956b8891299",
+      "counterevidence": [
+        "https://github.com/jeong-sik/masc/pull/45755#pullrequestreview-5637521780",
+        "coding model aliases/run IDs org/model and org-model collide; actual shell helper reproduction on7501"
+      ]
+    },
+    {
+      "id": "A6",
+      "requirement": "Actual producer and judge identity coverage is represented honestly; unknown is not claimed independent",
+      "state": "measured_pass",
+      "evidence": [
+        "https://github.com/jeong-sik/masc/actions/runs/40078581651",
+        "/tmp/masc-goal-native-7501-clean.log"
+      ],
+      "source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "scope": "Native deterministic provider pipeline, submission/verdict persistence and calibration suites passed: raw reported model versus requested fallback, exact admitted source ordinal, reserved metadata spoof/reload, nested unknown identities and pair coverage. This proves actual native code against controlled HTTP peers; it is not live cloud-model independence or model-weight proof."
+    },
+    {
+      "id": "A7",
+      "requirement": "LLM approval, observed external acceptance and human Goal confirmation remain distinct facts",
+      "state": "measured_pass",
+      "evidence": [
+        "docs/evidence/2026-10-24-outcome-api-runtime/",
+        "https://github.com/jeong-sik/masc/actions/runs/40082520098",
+        "docs/evidence/2026-10-24-outcome-dashboard-runtime/"
+      ],
+      "source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "scope": "Real isolated Task API→actual Node Docker computation→immutable evidence reread→controlled operator-proxy approval→durable metric and API reread: lifecycle success1, external acceptance unobserved1. Separate Goal reread remained Executing with0/3 reported measurement and no completion proof/person confirmation. Native model verdict/Goal human policy suites passed separately, not an actual independent LLM verdict for this fixture. Actual AgentDetailOverlay preview now visually captured with real API: completion and lifecycle approval100%, handoff unknown, external acceptance unobserved and Goal human confirmation separate. App module opened the dialog; full roster navigation and production installation remain unclaimed. Test MCP proxy same-origin translation is recorded."
+    }
+  ],
+  "limits": [
+    "No production deployment performed by this campaign. Isolated candidate observations and native fixtures are explicitly scoped.",
+    "Historical Task counts include legitimate independent Tasks; linkage ratio is diagnostic, not a target or gate.",
+    "The3014 model never invoked goal_measure, so new receipt interpretation remains unmeasured. Exact-ID Done lookup did execute successfully but model still resubmitted Done; disappearing approval input is not proven sole cause.",
+    "GLM328 strictG3 scopedPASS is one controlled ordinary HTTP case. Qwen2be G3 failure/initial execution failure and earlier source failures remain history; no population or causal model comparison, all-current-head regression, production install, Official vendor session, microVM end-to-end grading or human Goal completion claim."
+  ],
+  "measured_at": "2026-10-24T18:31:26.391447+00:00",
+  "summary": {
+    "required": 11,
+    "measured_pass": 11,
+    "passed_case_ids": [
+      "G1",
+      "G2",
+      "G3",
+      "G4",
+      "A1",
+      "A2",
+      "A3",
+      "A4",
+      "A5",
+      "A6",
+      "A7"
+    ],
+    "remaining": [],
+    "goal_complete": false,
+    "native_candidate": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+    "native_result": "40078581651:26PASS3FAIL at7501; repaired4 targeted suites allPASS40082520098 atb9bba3d4b416e269ff1d586f17f81e55c09ad8b3; not full regression or29allPASSonehead",
+    "candidate_build": "40078868804 SUCCESS source7501; server entry extracted/CRC/SHA checked; reused checked compatible support bundle dca; isolated server62470; no production deployment",
+    "reopened_cases": [],
+    "eager_candidate": "c6e54ff523772596ce70a9b158f89c74fedeab17",
+    "eager_build_run": 40095081238,
+    "eager_build_result": "SUCCESS40095081238; exact c6 server firstwire33tools confirms both eager schemas. Real G2 failed association after post-tool Goal context loss; G3 unproven. Keeper explicitly stopped and pause reread.",
+    "retention_candidate": "1eef45b69f395b1819537c116c7df839023da110",
+    "retention_native_result": "Initial40097972974 at1eef6PASS1FAIL; correctedHTTP6testsPASS40098831581 at9f024959528a5c0ea12ce59f0c1a63b2a364695d; productdiffempty, not whole7rerunonehead.",
+    "retention_build_result": "SUCCESS40097972842 source1eef; serverSHA24e409da4e773983b10bb0e7d5af0d1c93ce1e7257c5ba4083e93bd649083cb6; checked compatible dca support reused; isolated49916, roots match.",
+    "stable_system_candidate": "3badb88117794510dac576bf3fc34f0336e17d8a",
+    "stable_system_native": "40101087040: six selected suites passed at3bad",
+    "stable_system_build": "40101087227: macOS server build/extraction checked at3bad; not full bundle installation",
+    "official_resume_native": "40102214212: two selected suites passed atd3a242837194e94c435a228228ac0eaab10724aa",
+    "measured_fail_case_ids": [],
+    "followup_task_id": "task-2620",
+    "task_ledger_note": "Prior four session Tasks2595–2598 were externally cancelled by local-admin at13:39Z orphan cleanup; cancellation is not completion. Task2620 is a Goal-linked, claimed/started successor to2595 for remaining G3.",
+    "lookup_candidate": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+    "lookup_native_result": "40105703498 PASS:27Taskoutcomes +2canonicalTOML parity",
+    "lookup_build_result": "40105705308 SUCCESS; exact candidate54e8, workflowf31033df4d45a2ee97ec7f86ce149a6a33cff6a1; serverSHA6a2266ee62065039dfd4f37651b21122f8a239041bd762532392f9f46b5f0b57; checked server-only extraction, compatible dca support, not package installation.",
+    "latest_runtime_candidate": "32805eb764eab2710262446e925b0ea5c3a44c08",
+    "latest_runtime_cohort": "Configured GLM-5.3 ordinary HTTP single cohort: G2 and strictG3 scopedPASS; independent diagnosis and actual tool/measurement/ACK evidence frozen",
+    "historical_case_evidence_coverage": "10/11; latest completed2be G2 PASS/G3 FAIL, prior3014 and54 failures remain nested",
+    "evidence_scope": "A1–A7/G1/G4 keep older exact-source scopes. G2/G3 latest328 GLM runtime; all historical Qwen/Gemma failures retained. Eleven scoped cases, not a full regression at one head.",
+    "receipt_native": "3014: Goal50 + canonicalTOML1 passed40110334799, HTTP5PASS1FAIL; test-only ec664 HTTP6PASS40111175993",
+    "receipt_build": "macOS40110337126 SUCCESS explicit3014, workflow98a1508; checked serverSHA bd9042e019d31c377e8c9ca72409bc5b152052dc79dd70621f027cc008c475b6; server-only isolated, not production install",
+    "authority_native": "328:6 completed suites245PASS, Claude3FAIL then existing600s timeout; not full native PASS",
+    "main_goal_measurement_status": "artifact updated to11/11; registered main MCP measurement pending because read endpoints are unresponsive",
+    "remaining_work_outside_case_count": [
+      "Publish/review follow-up submission snapshot repair and native fixture repair.",
+      "Register main Goal11/11 measurement through actual API when responsive.",
+      "Main Goal completion proof/verifier and human confirmation remain separate, not performed."
+    ]
+  }
+}

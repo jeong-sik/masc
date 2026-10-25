@@ -1,0 +1,683 @@
+{
+  "verdict": "PASS_SOURCE_AND_RETAINED_EVIDENCE_BINDING",
+  "reviewed_at_utc": "2026-10-24T18:29:34.124827+00:00",
+  "base": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "head": "2bc6ae8fa1904d8232c8ea0738e0b14bab824945",
+  "scope": "Independent bounded one-line UI source review and retained evidence binding checks. No current full Stack16 approval, independent browser session, new Vitest/TSC/native execution, install/deploy or model/Goal success claim. No source mutations.",
+  "p0_p2_findings": [],
+  "product_diff_sha256": "961678dee79106ae3127436dd4976c851c6e3e21ac51c4adc25f497b3d731d6f",
+  "full_diff_sha256": "9f411b87ccc7ecc0f3d0d16e07175d17a44934c5f1d23c2081a37b8aee7029b2",
+  "product_paths": [
+    "dashboard/src/components/memory-inspector.ts"
+  ],
+  "source_reason": "The existing closed TurnInputComponentId union admits prompt.completion_authority, while INPUT_COMPONENT_META lacked it and PROMPT_BLOCK_META already supplies its Task verification label/color/memory classification. The sole line reuses that metadata, closes undefined lbl lookup and TS2741, and does not widen tokens or add a fallback.",
+  "exact_one_line_insertion_only": true,
+  "served_frontend_equals_reviewed_head": [
+    {
+      "file": "dashboard/src/api/dashboard-turn-records.ts",
+      "current_head_sha256": "1557e34cd56e07615a4ec2919b0b26d1fe4bdb270f310344aed339fe8b82a106",
+      "matches_actual_served_bytes": true
+    },
+    {
+      "file": "dashboard/src/api/dashboard-keeper-prompt.ts",
+      "current_head_sha256": "19e1d10a9decb1dfd9d3a391b570eb04f7048f259cc44e3bcccfea3890a7e5f9",
+      "matches_actual_served_bytes": true
+    },
+    {
+      "file": "dashboard/src/components/keeper-turn-inspector-panel.ts",
+      "current_head_sha256": "74c3d6f6071b6771c2978edf9b437b04cfa715be32cfe52f49fca8bbdf242f8f",
+      "matches_actual_served_bytes": true
+    },
+    {
+      "file": "dashboard/src/components/memory-inspector.ts",
+      "current_head_sha256": "1c545c596a309fcff283ecbb610ee3c028cdffbd9716441f7420b06de8c58b51",
+      "matches_actual_served_bytes": true
+    }
+  ],
+  "manifest_entries_verified": 78,
+  "manifest_checks": [
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "README.md",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/README.md",
+      "sha256": "f1ed7e6c1381a73ed4644f54d459bcf4dd0a1c16062da76538028c8881525d8e",
+      "bytes": 3607,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "after-metadata-fix-components.png",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/after-metadata-fix-components.png",
+      "sha256": "835827b3267363d37ceb1d63cfb8813fee6afc3503ac4f8e4eb8728d60226880",
+      "bytes": 172206,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "backend-binding.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/backend-binding.json",
+      "sha256": "84aa3664b2bbdc5e484f738df6bad004dd84494b6907bddee6c977857ade30a1",
+      "bytes": 1375,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "browser-completion.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/browser-completion.json",
+      "sha256": "9b8ac14c5767586af8a25442b36fa11cb58b3e35f5ebd72a0040398947aa1187",
+      "bytes": 199,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "captured-prompt-before-metadata-fix.png",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/captured-prompt-before-metadata-fix.png",
+      "sha256": "034006839cb8d6f64d0f16daf94a24c2cf1bb711b5a57c7ee7a792561c5cd35a",
+      "bytes": 141698,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "dom-observation.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/dom-observation.json",
+      "sha256": "f27a8708d1d7d4793e7f7ee6793b44689dba882c999925899d30b2bcfe0e75a6",
+      "bytes": 1345,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "frontend-binding.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/frontend-binding.json",
+      "sha256": "2fdc5507e2e17cfec3500ccd378743d154709533bfdbaa55839cf31f5702492c",
+      "bytes": 4417,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "frontend-stop.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/frontend-stop.json",
+      "sha256": "62380b2013f4680901444fcaabd047530109f78f00719e8068fe98d0c01745a8",
+      "bytes": 446,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "last-prompt-api.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/last-prompt-api.json",
+      "sha256": "7100710c82f60cbcc77368111c8b23a44ddab64a720d74aabeb5366489c06362",
+      "bytes": 66283,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "memory-inspector-render-error.png",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/memory-inspector-render-error.png",
+      "sha256": "ac920dac57881f29e48d0590f455edaa00ecb5d683a19abafb33ed7b30e6da4a",
+      "bytes": 79970,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "persisted-prompt-capture.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/persisted-prompt-capture.json",
+      "sha256": "83840c81b9c0c2c369a3bbe8e2817bc71cf30540fb103a61c53e584db0603dc0",
+      "bytes": 66204,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "turn-record-components.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/turn-record-components.json",
+      "sha256": "8e5a85c063e9f600382c971122ebd4968f3238b46d6d89c5be9f9513cc308750",
+      "bytes": 5477,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "wire-system-binding.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/ui-runtime/wire-system-binding.json",
+      "sha256": "df7b29210aed4d9223cf2431247798639cd8f08105263a0aa72f2bad80ce9137",
+      "bytes": 8313,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "ui-runtime/artifact-manifest.json",
+      "artifact_name": "dashboard-authority-observation.png",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/dashboard-authority-observation.png",
+      "sha256": "a2a426efeb6fb331a0303cbff57463c8428eed9ed2416e835e600633a3993fbf",
+      "bytes": 154167,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "independent-diagnosis/diagnosis.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/independent-diagnosis/diagnosis.json",
+      "sha256": "061803d6221750dccd05c0de3a9106e1fc68d20238647380f89888042ae10954",
+      "bytes": 24990,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "independent-diagnosis/handoff-probe.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/independent-diagnosis/handoff-probe.json",
+      "sha256": "ea18954559edddc7c412834d684396f61e1d1597a9e8214c71b2e9e879d30bad",
+      "bytes": 3606,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "independent-diagnosis/public-wire-extract.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/independent-diagnosis/public-wire-extract.json",
+      "sha256": "e18bb7881b1eff804bfaaacdeecb48ead89c8be4513ada11752d7e5e13a83e86",
+      "bytes": 21785,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/README.md",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/README.md",
+      "sha256": "e1a797b2b9549d9438ff37b53efaa41041121805814fba20fe12d1fb47c5b76f",
+      "bytes": 3262,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/approval-system-carrier.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/approval-system-carrier.json",
+      "sha256": "51f2c03b8b3e549e473cf294d3ba0b3df8cd518e973bb34f508d11560f22483c",
+      "bytes": 1814,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/approved-verification-source.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/approved-verification-source.json",
+      "sha256": "5116671a04d2ffac65240edc960b1114615c12f934358ea7620e0ecc4d41332d",
+      "bytes": 914,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/artifact-approved-immutable.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/artifact-approved-immutable.json",
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc",
+      "bytes": 55,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/artifact-final.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/artifact-final.json",
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc",
+      "bytes": 55,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/diagnosis.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/diagnosis.json",
+      "sha256": "7825f33336239f843a988893a0108f327dae9f093ed5d1c719f642e57aa2eb59",
+      "bytes": 12213,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/earlier-stage-references.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/earlier-stage-references.json",
+      "sha256": "42746612ca1ccb36e8710e54da30aa66ce48a4ca4b0530483cb333807db146d5",
+      "bytes": 877,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/manifest.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/manifest.json",
+      "sha256": "52b3ab633b516f65c9b6be851df90fd5c49d3144a6e7e3e71ee3056d346862ca",
+      "bytes": 2487,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/observe.py",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/observe.py",
+      "sha256": "a06d675c6b5cb0635fe69a462da90a962e74c33874eeaa0d8dbfcf5dbd56cc37",
+      "bytes": 10198,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/operator/approval-intent.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/operator/approval-intent.json",
+      "sha256": "9de5431335fea9d4e567ce7e350b54d89b37c21ba54906b6726a42bc8ef73a5f",
+      "bytes": 337,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/operator/approval-receipt.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/operator/approval-receipt.json",
+      "sha256": "03f878421a564b40272bfffd05d1a9f1f5871e660acec76c2393b7128e0f3112",
+      "bytes": 118,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/operator/fixture-scope.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/operator/fixture-scope.json",
+      "sha256": "7b9ffb46f1bd1b59290a4a13b371ab2e79f13e90096050157216b09ddfb0524f",
+      "bytes": 809,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/operator/partial-artifact.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/operator/partial-artifact.json",
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc",
+      "bytes": 55,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/operator/partial-inspection.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/operator/partial-inspection.json",
+      "sha256": "8f76f8ea5d00aa90ba56375992fd2654746706d1bb0d44f9d9295228fd352c5b",
+      "bytes": 2545,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/snapshot.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/snapshot.json",
+      "sha256": "c28ef6f66308fa7d66e23f1334f914ca6c6051a7b1fde8d888fa2de51e68fb5e",
+      "bytes": 82128,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/snapshots/20261024T174049623208Z.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/snapshots/20261024T174049623208Z.json",
+      "sha256": "c28ef6f66308fa7d66e23f1334f914ca6c6051a7b1fde8d888fa2de51e68fb5e",
+      "bytes": 82128,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "postapproval/terminal.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/postapproval/terminal.json",
+      "sha256": "d021161e56aa17926d5ef5ba6985f0adc13852dbbd684c53a6840cce235d1296",
+      "bytes": 3520,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/README.md",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/README.md",
+      "sha256": "e843956243b1075c14b1a1bf8781205ae7b4c030fc178599c71c8cbd0d79cdb4",
+      "bytes": 3277,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/artifact-interim-all-true-171912.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/artifact-interim-all-true-171912.json",
+      "sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856",
+      "bytes": 53,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/artifact.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/artifact.json",
+      "sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856",
+      "bytes": 53,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/binary-binding.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/binary-binding.json",
+      "sha256": "7bd3dcd26c29d055c14486fa596055891a4745bc7508100eec7fe7c8be4fde40",
+      "bytes": 631,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/diagnosis.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/diagnosis.json",
+      "sha256": "824311b801867ab39989c2b3389ed229be5e2a7326ad97de685a86b6615977a8",
+      "bytes": 6591,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/manifest.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/manifest.json",
+      "sha256": "b21af1da43e9becf02b6c00840e771ac536638150a2186762c7dabc0a77c74ed",
+      "bytes": 2157,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/observe.py",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/observe.py",
+      "sha256": "7fcfb3ec80b959c450c1fab08e2138b2f33fb6872afa9f99b30dee19031cdc66",
+      "bytes": 7405,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/owner-terminal.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/owner-terminal.json",
+      "sha256": "59e4020b260476a12d2eed24be0f2cae0e69596cb9c270ccc8e0ec65abee91e0",
+      "bytes": 5375,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/prompt-delivery.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/prompt-delivery.json",
+      "sha256": "ba14198a5953630f74f58dddcb74e5bcccb8e9b862421b656c44c8cddfd7c2fb",
+      "bytes": 1620,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/snapshot.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/snapshot.json",
+      "sha256": "8ca8b0a73c7d2fead78c240e4571a4857cc6996afcd201424848a3aa4dc2b4ed",
+      "bytes": 34681,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/snapshots/20261024T171912016846Z.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/snapshots/20261024T171912016846Z.json",
+      "sha256": "ddc8470c22644be6938f081421f2f3297437f86e308107be090c5a00e81243cd",
+      "bytes": 21281,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/snapshots/20261024T172043814559Z.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/snapshots/20261024T172043814559Z.json",
+      "sha256": "6d0c31c2fcae80a482509ee8a7eaa5bfaff7e903aa01ad36ec3c639ec9eed404",
+      "bytes": 28556,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/snapshots/20261024T172152801290Z.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/snapshots/20261024T172152801290Z.json",
+      "sha256": "8ca8b0a73c7d2fead78c240e4571a4857cc6996afcd201424848a3aa4dc2b4ed",
+      "bytes": 34681,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/task-creation.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/task-creation.json",
+      "sha256": "e5e99bd5e18e1e3080cf46dd44d5dc106c12a1131da2aaafadb9095e39b1c4c7",
+      "bytes": 5158,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "preapproval/verification-source.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/preapproval/verification-source.json",
+      "sha256": "a5207b8f3ad8db9b470ad87b99aee6c06af550ac2dfbfab68fc245e5d1d98e8c",
+      "bytes": 870,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/README.md",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/README.md",
+      "sha256": "7ae4211c1abe768b107e7ec151ba87bc01e316ce7716a7bc46bd9b0557cf0e8e",
+      "bytes": 3698,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/artifact-interim-all-false-173023.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/artifact-interim-all-false-173023.json",
+      "sha256": "bf72d0c301f77c9d6d61e53874b822de08d4ad129254ff29c616b462f4cff4e1",
+      "bytes": 56,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/artifact-interim-alpha-only-173132.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/artifact-interim-alpha-only-173132.json",
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc",
+      "bytes": 55,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/artifact.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/artifact.json",
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc",
+      "bytes": 55,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/diagnosis.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/diagnosis.json",
+      "sha256": "0b9e15b863dd38e81dca2167dc26207c226b289f5b9d446d41b4ca6fad908ec1",
+      "bytes": 14630,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/first-attempt-reference.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/first-attempt-reference.json",
+      "sha256": "4469cba8b028c92c73d3f5b29020e0f68770c766f77c93f2dd8ef9e4714a1c98",
+      "bytes": 638,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/intermediate-capture-failure.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/intermediate-capture-failure.json",
+      "sha256": "4767fb3ae0d3c85340bba2cce59b204ad0f579f51a83957f9f533e0fe0503bf5",
+      "bytes": 4059,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/manifest.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/manifest.json",
+      "sha256": "d9aacefdefe0073abab5a5837e7b673db9c4060486b9d02c2d43a816a99aa4a6",
+      "bytes": 4437,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/observe.py",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/observe.py",
+      "sha256": "275c5288d37102583e13436bfe6f68d8cab52a9cf4d6bced1fe85a5f15d90533",
+      "bytes": 8906,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/operator/first-rejected-artifact.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/operator/first-rejected-artifact.json",
+      "sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856",
+      "bytes": 53,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/operator/first-rejection-corrected-intent.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/operator/first-rejection-corrected-intent.json",
+      "sha256": "7162b4c6657b9330c0106e5eb85df3809906e17b5968064530231627425106ad",
+      "bytes": 713,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/operator/first-rejection-inspection.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/operator/first-rejection-inspection.json",
+      "sha256": "cdb20e5be141606e242bbe07b26f2aedd71d558c0c75a1de13a291f2bc7d282b",
+      "bytes": 2509,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/operator/first-rejection-intent.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/operator/first-rejection-intent.json",
+      "sha256": "798ceb14af7e7d3c0a471e1d343cad19ba4946feb2b1cac9c5b6a15faef1d54a",
+      "bytes": 569,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/operator/first-rejection-receipt.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/operator/first-rejection-receipt.json",
+      "sha256": "002eb78a8c3b71749b6479b11490eb9d503f0bb9f6224b65e5645c5e752bd41e",
+      "bytes": 128,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/operator/first-rejection-validation-failure.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/operator/first-rejection-validation-failure.json",
+      "sha256": "1fecbffbc769393b9f5a166ecdec831a26e6d4fa0380831c1a0e1dc236280589",
+      "bytes": 285,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/preapproval-measurement-check.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/preapproval-measurement-check.json",
+      "sha256": "ffc54c32f602cb5ba51f03b95206363ec778b326f1dfbac9d93f5c8a24e02c61",
+      "bytes": 2583,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/recovery-sequence.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/recovery-sequence.json",
+      "sha256": "a1c7c22d3c5ba21df9328bdc5b292237d566d26b161a5eedd472b3ffc4e09c98",
+      "bytes": 19277,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/rejection-system-carrier.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/rejection-system-carrier.json",
+      "sha256": "b2592c875bbe8113d76af37111f40bd5794241126b7ae27e1386ea0349c7fbb9",
+      "bytes": 1648,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/snapshot.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/snapshot.json",
+      "sha256": "724f0b2739d9b4e85ba6b1d6d32be9ee7f9454bfbd3d3b2bf19601c86fd715a1",
+      "bytes": 76647,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/snapshots/20261024T172911091449Z.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/snapshots/20261024T172911091449Z.json",
+      "sha256": "8bd2a09a6824ff64f3cf2dd4a94135fe11156bd6916448998b1572494843f63a",
+      "bytes": 47067,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/snapshots/20261024T173023506481Z.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/snapshots/20261024T173023506481Z.json",
+      "sha256": "5428fb5aba9c7ad394474fbb80435db077486b8f8130f6070ab6daccc58a7cbe",
+      "bytes": 52637,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/snapshots/20261024T173132330351Z.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/snapshots/20261024T173132330351Z.json",
+      "sha256": "a5138b7ff1e17b94961467bf7251305dd50c9c80e0b758379ea8cc2aee9fc2e2",
+      "bytes": 58197,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/snapshots/20261024T173307617803Z.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/snapshots/20261024T173307617803Z.json",
+      "sha256": "9c79204b0977f8f6c6393768a5ed57ef3a0223c19686d7a8aa91f9f64144ffdf",
+      "bytes": 68001,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/snapshots/20261024T173446601667Z.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/snapshots/20261024T173446601667Z.json",
+      "sha256": "724f0b2739d9b4e85ba6b1d6d32be9ee7f9454bfbd3d3b2bf19601c86fd715a1",
+      "bytes": 76647,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/system-retention.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/system-retention.json",
+      "sha256": "15ad3fcb2b8f1b8386eda26b71fe232b38ce38b4a7fb06574c5374072d6fb3c3",
+      "bytes": 5563,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/terminal.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/terminal.json",
+      "sha256": "55bc9fdd2b69dab9a4d8282ae627a6572eb22d5e96122010eb9e89499a9fb2da",
+      "bytes": 4257,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/verification-history/vrf-5dd15968c9ec601c495335d00cc7b471.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/verification-history/vrf-5dd15968c9ec601c495335d00cc7b471.json",
+      "sha256": "a5207b8f3ad8db9b470ad87b99aee6c06af550ac2dfbfab68fc245e5d1d98e8c",
+      "bytes": 870,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/verification-history/vrf-a42e77c7eac0e45281d6cd2245840243.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/verification-history/vrf-a42e77c7eac0e45281d6cd2245840243.json",
+      "sha256": "5116671a04d2ffac65240edc960b1114615c12f934358ea7620e0ecc4d41332d",
+      "bytes": 914,
+      "matches_manifest": true
+    },
+    {
+      "manifest": "qwen-runtime/publication-manifest.json",
+      "artifact_name": "recovery/verification-source.json",
+      "resolved_repository_path": "docs/evidence/2026-10-25-completion-authority-retention/qwen-runtime/recovery/verification-source.json",
+      "sha256": "5116671a04d2ffac65240edc960b1114615c12f934358ea7620e0ecc4d41332d",
+      "bytes": 914,
+      "matches_manifest": true
+    }
+  ],
+  "manifest_relocation": "The original UI artifact manifest records the final screenshot basename. It is staged in the parent evidence directory; explicit README ../ link was followed and its exact hash/size verified.",
+  "actual_ui_evidence_binding": {
+    "authority_matches_api_sha256": "602462c67a76266db3fabce6a9e75eec293bdb24cc6713af034711258a3dd793",
+    "authority_bytes": 795,
+    "system_bytes": 25974,
+    "system_sha256": "348ef89fc94fd37f07d8dd15e807d0b30f6bf06276fe27760220a83a2345490d",
+    "dom_reports_no_render_error": true,
+    "scope": "Static retained DOM/API/capture/source verification, not a fresh browser replay."
+  },
+  "validation_records_reviewed": {
+    "focused_vitest": "Recorded39 passed across2files; not independently rerun.",
+    "tsc": "Recorded before has mapping TS2741 plus2 keeper-stream errors; after retains exactly those2 baseline errors. Full TSC remains FAIL, not PASS.",
+    "native": "No CI queried; parent-disclosed partial native result is separate."
+  },
+  "source_history_limit": "Earlier8266 source PASS and328 integration binding are distinct evidence; this review does not automatically approve those complete layers.",
+  "qwen_failure_preservation": "All published manifest entries verify by bytes. The independent diagnostic is byte-equal to the reviewer frozen original. Failed2be Qwen initial execution and postapproval continuation are not counted as328/GLM/Official success.",
+  "git_diff_check_product_exit": 0,
+  "git_diff_check_full_exit": 2,
+  "git_diff_check_full_output": "docs/evidence/2026-10-25-completion-authority-retention/dashboard-focused-tests.txt:12: new blank line at EOF.\n"
+}

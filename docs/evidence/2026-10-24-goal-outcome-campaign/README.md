@@ -1,14 +1,14 @@
 # Goal outcomes and verification integrity campaign
 
-The audit of [Mental Models in the Agentic Era](https://productmindset.substack.com/p/mental-models-in-the-agentic-era) identified seven specific weaknesses at source8eac5c07c290d134a9ef6acb1e298584bf9a1366. The implementation and measurements are in [Native Stack45750](https://github.com/jeong-sik/masc/pull/45839), linked to [issue45747](https://github.com/jeong-sik/masc/issues/45747).
+The audit of [Mental Models in the Agentic Era](https://productmindset.substack.com/p/mental-models-in-the-agentic-era) identified seven specific weaknesses at source8eac5c07c290d134a9ef6acb1e298584bf9a1366. The implementation and measurements are in [Native Stack45750](https://github.com/jeong-sik/masc/pull/45853), linked to [issue45747](https://github.com/jeong-sik/masc/issues/45747).
 
 The metric is defined by fixed cases G1–G4 and A1–A7. Task count and Goal linkage ratio are diagnostic, not success targets. Independent Tasks remain valid. The canonical host metric is the experiment-owned acceptance.json referenced by Goal goal-outcome-driven-work-20261024, revision306708facbfb9379a9e51b8f7c815678. This directory preserves a dated snapshot, not another mutable authority.
 
 | Case | Observed status | Evidence and scope |
 | --- | --- | --- |
 | G1 Current Goal criterion, revision, measurement and explicit unknown reach Keeper | Pass | Actual7501 direct-provider request plus deterministic native missing/stale/error controls. [Direct context](../2026-10-24-direct-goal-context/README.md). |
-| G2 Model creates a related Task with matching Goal | Latest measured failure; earlier passes preserved | Source3014 Qwen receives Goal/revision but omits the association through terminal. Earlier54 Qwen and Gemma passes remain historical. [Latest runtime](../2026-10-25-goal-receipt-runtime/README.md). |
-| G3 Approval returns attention to actual Goal measurement and remaining work without inferring Goal completion | Latest measured failure | Source3014 controlled linked-Task approval reaches the model; actual exact-ID Done lookup works, but model resubmits Done and ends with no measurement or remaining work. New receipt is never invoked. [Latest diagnosis](../2026-10-25-goal-receipt-runtime/README.md). |
+| G2 Model creates a related Task with matching Goal | Scoped pass | Source328 configured GLM-5.3 chooses the matching Goal ID; original alpha-only Task constraints and external Goal index agree. Earlier failures remain preserved. [Latest runtime](../2026-10-25-goal-continuation-glm/README.md). |
+| G3 Approval returns attention to actual Goal measurement and remaining work without inferring Goal completion | Scoped pass | Source328 configured GLM-5.3: approved Task → Read →1/3 measure → actual beta/gamma Edit/Read →3/3 measure → Task2 submission → Goal request_complete and accurate proof/human-pending report. One controlled ordinary HTTP cohort, not general reliability. [Independent diagnosis](../2026-10-25-goal-continuation-glm/postapproval/diagnosis.json). |
 | G4 Independent Tasks remain supported | Pass | Isolated external-agent create/claim/start, actual Node Docker computation, submission and controlled operator approval. This is not Keeper inference proof. |
 | A1 Grading execution boundary | Pass, Docker scope | [Actual grading stages](../2026-10-24-coding-boundary/README.md) use captured bytes inside fresh unprivileged containers. |
 | A2 Oracle-only success forgery | Pass | Both broken Node implementations remained unchanged and both oracle-only edits were rejected; both reference controls passed. |
@@ -18,15 +18,11 @@ The metric is defined by fixed cases G1–G4 and A1–A7. Task count and Goal li
 | A6 Producer/judge model observation | Pass, controlled native scope | Actual native provider parsing, admitted ToolUse ordinal, submission/verdict persistence and calibration tests at7501. Missing raw model identity remains unknown; response ID is a correlation label. This does not prove independent weights. |
 | A7 Lifecycle approval, external acceptance and human Goal confirmation | Pass within explicit scopes | [Actual API](../2026-10-24-outcome-api-runtime/README.md) and [visually inspected dashboard](../2026-10-24-outcome-dashboard-runtime/README.md): lifecycle approval1, external acceptance unobserved1, Goal unchanged. Controlled operator proxy is not an independent LLM or actual human Goal verdict. |
 
-Latest acceptance: **9/11**, measured after candidate3014 completed. G2 is
-reopened and G3 remains failed. The earlier **10/11 historical case evidence
-coverage** is preserved, not presented as current candidate success. G1/G4 and
-A1–A7 keep their explicitly bound older scopes; this is not a single-head full
-regression result. [The latest cohort](../2026-10-25-goal-receipt-runtime/README.md)
-received the current Goal and new receipt instructions, omitted the Task link,
-and failed continuation after controlled link/approval. Exact-ID Done lookup
-worked; the model still resubmitted Done and never called goal_measure. A typed
-completion-authority retention repair is in progress, with no success inferred.
+Latest experiment-owned acceptance file: **11/11 scoped cases**. G2/G3 are measured at source328 in the configured single GLM-5.3 ordinary-HTTP cohort; G1/G4 and A1–A7 retain their explicitly bound older evidence. This is not a full regression at one head or Goal Completed. The actual [dashboard](../2026-10-25-goal-continuation-glm/ui/README.md) shows reported3/3 separately from Verifying/proof_pending and Task2 AwaitingVerification.
+
+The main8935 read APIs stopped responding during the update. The canonical acceptance file was atomically updated and reread, but a registered main Goal measurement, verifier proof and human confirmation remain separate, pending work. The shared main Goal remains Executing; the isolated canary Goal's Verifying state must not be substituted for it.
+
+Historical failures remain material. Candidate3014 completed at9/11: Qwen omitted the Task link and failed continuation after controlled link/approval, even after an exact-ID Done query succeeded; it never invoked the new receipt. Candidate2be recovered unforced association but initially made all three fields true before approval, then needed actual rejection/recovery. Its fresh approval reached request20, yet the model performed no further tool call or measurement. [Those frozen stages](../2026-10-25-completion-authority-retention/qwen-runtime/README.md) remain intact. The current-turn retention and Official Start carrier repairs have their own source/native scope; the single positive GLM case does not isolate a source/model cause or a population success rate.
 
 The prior54e8 Qwen cohort passed G2 and actual remaining-work/3/3 measurement,
 but failed G3's full contract through incorrect Goal verification/completion
@@ -64,3 +60,5 @@ The inspected microVM runtime executes through its guest/shim path; it was not t
 No full regression, production installation, deployment, stack merge or actual human Goal completion is claimed. Ordinary independent source reviews, native execution, isolated runtime and browser observations are separate evidence. The lower boundary PR45755 still has a historical standalone request-changes; its two additional identity repairs are in upper layer45779. Integrate the reviewed native stack whole through its top; do not merge lower layers separately.
 
 At the current ledger read, local-admin had cancelled the original four session Tasks at13:39Z as orphan cleanup, naming other stack PR coordinates. That cancellation is preserved and is not execution completion. Remaining G3 work continues as Goal-linked task-2620, predecessor task-2595, claimed and started by the dedicated session identity. The shared Goal remains Executing at its original criterion revision.
+
+-32805eb764eab2710262446e925b0ea5c3a44c08: native40116634161 completed six suites245 tests; Claude had3 explicit failures then600s timeout. Checked macOS server40116636410, SHA98cd486335f7a40d2d49cc05501a52e1b4aee958732453405db8ded17e4de8b7; actual configured GLM-5.3 strictG2/G3 scopedPASS and API/persisted/visible-UI proof. Separate snapshot and Claude fixture repairs follow without converting this run to full native PASS.

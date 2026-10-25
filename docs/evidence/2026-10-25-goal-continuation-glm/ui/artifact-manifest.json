@@ -1,0 +1,78 @@
+{
+  "scope": "Actual isolated ordinary-HTTP GLM UI evidence; no product or canary mutation",
+  "observed_at": "2026-10-25T00:09:33.891939+00:00",
+  "task_space_id": 32,
+  "screenshots_directly_viewed": [
+    "goal-task-status.png",
+    "goal-measurement-proof-pending.png"
+  ],
+  "private_operator_token_in_artifacts": false,
+  "frontend_stopped": true,
+  "artifacts": [
+    {
+      "file": "README.md",
+      "bytes": 4357,
+      "sha256": "217311854e5d607b48937dec38ea0bbf71261475b9c3ee39065885656c2f829d"
+    },
+    {
+      "file": "browser-completion.json",
+      "bytes": 232,
+      "sha256": "f2ecf1d78155da31c31733ea6ea32a62f704d5c8cbead8781ab2c03765a948a9"
+    },
+    {
+      "file": "cross-layer-check.json",
+      "bytes": 861,
+      "sha256": "de0a5a59a05263e4c5e056321699d923e2dcf5df04e9daca9e940684a11a36d0"
+    },
+    {
+      "file": "frontend-stop.json",
+      "bytes": 465,
+      "sha256": "b70cdc8ea0f96a33bf5a4719709f359766240877458f351e7523e7d0f0abd5bd"
+    },
+    {
+      "file": "goal-detail-projection.json",
+      "bytes": 5652,
+      "sha256": "641799f34202756ccd2958b3863582087a5c171a568ca3c5e20814ac6a77fcce"
+    },
+    {
+      "file": "goal-measurement-dom.json",
+      "bytes": 3655,
+      "sha256": "926c0e43b4f7be672305a823035372412617c40f547e2b6630415f5bcb461486"
+    },
+    {
+      "file": "goal-measurement-proof-pending.png",
+      "bytes": 139436,
+      "sha256": "f347c5261b9ee6eb16144aadaf510642375c838ab33d3380ce894f19faa30b3e"
+    },
+    {
+      "file": "goal-task-status-dom.json",
+      "bytes": 1437,
+      "sha256": "ea346a7f5e8345605d0398af001896822aa37cc37c1424eeb0a3ab54fcee9c8f"
+    },
+    {
+      "file": "goal-task-status.png",
+      "bytes": 134859,
+      "sha256": "475e20b1ecc32d629a58ba22e9719077803a22ba87057dfeeba3c0789ec9e7f3"
+    },
+    {
+      "file": "goals-api.json",
+      "bytes": 5428,
+      "sha256": "d959c10be5b5898ddb15ebf922bb890c152ea984bdeea42e9aeca324e4257d75"
+    },
+    {
+      "file": "measurement-tool-observations.json",
+      "bytes": 6521,
+      "sha256": "39b55ddab01ce4d57373a7c22372a7de2ca90b3a667a6336b5f1cf5635921a07"
+    },
+    {
+      "file": "persisted-values.json",
+      "bytes": 5289,
+      "sha256": "98d8d4045627351fce6b66c37a5e0f1ec8d718f31a6ad4d0f137bfd6bbc4d7d2"
+    },
+    {
+      "file": "runtime-binding.json",
+      "bytes": 4732,
+      "sha256": "7b1dd29c427036f163c928f8d8656cf020bab5cfccbbed10ec9a12ef17df19ae"
+    }
+  ]
+}

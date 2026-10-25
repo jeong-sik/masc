@@ -1,7 +1,6 @@
 (** Model-label string → [Provider_config.t] resolution (RFC-0206).
     Re-homed from deleted [Runtime_config_parser.parse_model_string]; resolves
-    a ["provider:model"] / ["custom:model@url"] label via Provider_registry
-    (SSOT). No runtime routing/weighted-entry machinery. *)
+    a ["provider:model"] / ["custom:model@url"] label via a resolved AGENT_CORE runtime binding. No runtime routing/weighted-entry machinery. *)
 
 val parse_model_string
   :  ?temperature:float
@@ -13,11 +12,11 @@ val parse_model_string
   -> string
   -> Llm_provider.Provider_config.t option
 (** Resolve a model label to a hot-path provider config. [None] when the
-    provider is unregistered, unavailable, or the spec is malformed, or when
-    a keyed entry has no supplied credential. Unknown specs are never
-    flattened to a default kind (Provider_kind_resolver SSOT).
+    provider is unknown/unavailable, the spec is malformed, a keyed binding
+    has no supplied credential, or [auto] has no catalog-declared default.
+    Classification carries the selected binding into config construction.
 
-    A registered label carries the canonical registry provider id into the
+    A registered label carries the canonical binding provider id into the
     returned config. Its context window uses that config's provider/model
     capability lookup, so an unrelated bare model row cannot substitute for
     the selected provider. Request preparation still owns policy freezing.

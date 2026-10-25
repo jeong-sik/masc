@@ -199,7 +199,10 @@ let projected_defaults () = with_catalog (fun () ->
       with_env "MASC_DEFAULT_MODEL" None (fun () ->
         with_env "LABEL_A_DEFAULT_MODEL" (Some "ambient-model") (fun () ->
           Alcotest.(check (list string)) "projection offers only explicitly declared catalog defaults"
-            ["label-b:overlap"] (Provider_runtime_projection.default_execution_model_strings "fixture"))))))
+            ["label-b:overlap"] (Provider_runtime_projection.default_execution_model_strings "fixture");
+          with_env "MASC_DEFAULT_PROVIDER" (Some "label-a") (fun () ->
+            Alcotest.(check (list string)) "incomplete explicit configuration cannot trigger a fallback"
+              [] (Provider_runtime_projection.default_execution_model_strings "fixture")))))))
 
 let () = Alcotest.run "runtime model label binding"
   ["provider authority",["identity",`Quick,identity;"context",`Quick,context;"policy and wire",`Quick,policy];

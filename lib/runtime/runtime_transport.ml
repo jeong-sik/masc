@@ -5,7 +5,7 @@
 
 
 (** Resolve a model label string to an AGENT_CORE Provider.config.
-    Uses MASC [Runtime_model_string.parse_model_string] (with Provider_registry as SSOT).
+    Uses MASC [Runtime_model_string.parse_model_string] with an AGENT_CORE runtime binding.
     Explicit model-label execution must never silently substitute a
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)

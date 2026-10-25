@@ -105,6 +105,13 @@ let write path content =
   output_string oc content;
   close_out oc
 
+let read_file path =
+  let ic = open_in_bin path in
+  let n = in_channel_length ic in
+  let s = really_input_string ic n in
+  close_in ic;
+  s
+
 let io_cases =
   [ Alcotest.test_case "all startup choices come from one retained snapshot" `Quick
       (fun () ->
@@ -349,6 +356,82 @@ let store_or_fail ~base_path theme =
   match Config.set_theme ~base_path theme with
   | Ok _ignored_legacy_keys -> ()
   | Error message -> Alcotest.failf "storing the theme failed: %s" message
+
+(* A runtime.toml carrying keys a released masc once read (see #45985): the
+   save must still land, and the receipt must name what was ignored -- on the
+   durable path AND on the after-rename durability-unconfirmed path, because
+   the file on disk changed in both. Regression guard for the P2 that found
+   the after-rename receipt computing its list from an empty string. *)
+let legacy_runtime =
+  String.concat "\n"
+    [ "[providers.local]"
+    ; "protocol = \"openai-compatible-http\""
+    ; "endpoint = \"http://127.0.0.1:1/v1\""
+    ; ""
+    ; "[models.sample]"
+    ; "api-name = \"sample\""
+    ; "max-context = 1024"
+    ; "max-prompt-bytes = 32768"
+    ; ""
+    ; "[models.sample.capabilities]"
+    ; "max-output-tokens = 1024"
+    ; "supports-reasoning-budget = true"
+    ; ""
+    ; "[local.sample]"
+    ; ""
+    ; "[runtime]"
+    ; "default = \"local.sample\"" ]
+
+let receipt_case (label : string) ~(inject : bool) =
+  Alcotest.test_case label `Quick (fun () ->
+      with_temp_base (fun ~base ~config ->
+          let path = Filename.concat config "runtime.toml" in
+          write path legacy_runtime;
+          Fun.protect
+            ~finally:(fun () -> try Sys.remove (path ^ ".lock") with _ -> ())
+            (fun () ->
+              let edited =
+                Config.text_with_theme legacy_runtime ~theme:(Some "ayu-dark")
+              in
+              let replace_file =
+                if inject then
+                  fun path content ->
+                    (* the rename landed; the post-rename fsync did not *)
+                    ignore (Fs_compat.save_file_atomic_strict_staged path content);
+                    Error
+                      { Fs_compat.path
+                      ; stage = Fs_compat.After_rename
+                      ; exception_ = Failure "injected: directory fsync failed"
+                      ; backtrace = Printexc.get_callstack 0 }
+                else Fs_compat.save_file_atomic_strict_staged
+              in
+              match
+                Runtime.commit_config_text_locked ~replace_file
+                  ~runtime_config_path:path edited
+              with
+              | Error (Runtime.Config_commit_refused detail) ->
+                Alcotest.failf "commit refused: %s" detail
+              | Error (Runtime.Config_commit_write_failed failure) ->
+                Alcotest.failf "commit write failed: %s"
+                  (Fs_compat.atomic_replace_failure_to_string failure)
+              | Ok receipt ->
+                let durability_tag =
+                  match receipt.Runtime.durability with
+                  | Runtime.Durable -> "durable"
+                  | Runtime.Durability_unconfirmed _ -> "durability-unconfirmed"
+                in
+              Alcotest.(check string) "durability follows the injection"
+                (if inject then "durability-unconfirmed" else "durable")
+                durability_tag;
+              Alcotest.(check (list string))
+                "the receipt names both ignored legacy keys"
+                [ "models.sample.capabilities.supports-reasoning-budget"
+                ; "models.sample.max-prompt-bytes" ]
+                (List.sort compare receipt.Runtime.ignored_legacy_keys);
+              (* the file the operator would read changed in both worlds *)
+              Alcotest.(check bool) "the edited text landed on disk" true
+                (let on_disk = read_file path in
+                 String.equal on_disk edited))))
 
 (* Runtime's config write lock leaves a runtime.toml.lock beside the file it
    guards. Removing it here is what lets the shared temp-base cleanup finish
@@ -668,4 +751,9 @@ let () =
     ; ("theme_io", io_cases)
     ; ("text_with_theme", write_cases)
     ; ("set_theme", store_cases)
+    ; ( "commit receipt carries the ignored legacy keys"
+      , [ receipt_case "durable save names ignored legacy keys" ~inject:false
+        ; receipt_case
+            "after-rename unconfirmed save still names ignored legacy keys"
+            ~inject:true ] )
     ]

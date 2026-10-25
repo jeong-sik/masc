@@ -1819,6 +1819,7 @@ let runtime_config_atomic_failure
     ~replacement_visible
     ~observation
     ~exact_output_registry
+    ~content
     (failure : Fs_compat.atomic_replace_failure)
   =
   if replacement_visible
@@ -1829,7 +1830,7 @@ let runtime_config_atomic_failure
          ~observation
          ~durability:(Durability_unconfirmed { detail })
          ~exact_output_registry
-         ~content:"")
+         ~content)
   else
     match failure.Fs_compat.exception_ with
     | Eio.Cancel.Cancelled _ ->
@@ -2553,6 +2554,7 @@ let commit_config_text_locked
             ~replacement_visible:false
             ~observation
             ~exact_output_registry
+            ~content
             failure
         | Fs_compat.After_rename ->
           publish_runtimes ();
@@ -2560,6 +2562,7 @@ let commit_config_text_locked
             ~replacement_visible:true
             ~observation
             ~exact_output_registry
+            ~content
             failure
           |> Result.map committed))
   | Commit_with_registry (prepared_replacement, exact_output_registry) ->
@@ -2582,6 +2585,7 @@ let commit_config_text_locked
          ~replacement_visible:false
          ~observation
          ~exact_output_registry
+         ~content
          failure
      | Ok (Runtime_exact_output_registry.Committed `Durable) ->
        Ok
@@ -2594,6 +2598,7 @@ let commit_config_text_locked
          ~replacement_visible:true
          ~observation
          ~exact_output_registry
+         ~content
          failure
        |> Result.map committed)
 ;;

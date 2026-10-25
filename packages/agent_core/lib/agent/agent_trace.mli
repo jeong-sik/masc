@@ -86,7 +86,8 @@ val with_raw_trace_run_classified_result
     Ordinary diagnostic-sink failures are best effort; reserved exceptions still
     propagate, with the lifecycle finalized from the original execution result.
 
-    If [f] raises, the original exception and raw backtrace are preserved.
+    If [f] raises, the original exception and raw backtrace are preserved
+    unless a reserved exception preempts diagnostic reporting.
     A secondary failure to finalize the raw trace is emitted as a structured
     error log before the original exception is re-raised. *)
 val with_raw_trace_run_result

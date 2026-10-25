@@ -6,8 +6,8 @@ let _log = Log.create ~module_name:"agent_trace" ()
 
 (* Failure reporting is an observer too. Never turn a diagnostic sink failure
    into a new execution outcome; cancellation/runtime exceptions still escape. *)
-let report_finalization_failure message fields =
-  try Log.error _log message fields with
+let report_observer_failure report message fields =
+  try report _log message fields with
   | exn -> Llm_provider.Reserved_exn.reraise_if_reserved exn
 ;;
 
@@ -143,8 +143,7 @@ let invoke_on_run_complete agent ~ok =
     (try cb ok with
      | exn ->
        Llm_provider.Reserved_exn.reraise_if_reserved exn;
-       Log.warn
-         _log
+       report_observer_failure Log.warn
          "on_run_complete callback raised"
          [ Log.S ("error", Printexc.to_string exn) ])
 ;;
@@ -281,7 +280,7 @@ let with_raw_trace_run_classified_result
              (match Raw_trace.finish_run active ~final_text ~stop_reason ~error with
               | Ok _ -> ()
               | Error trace_error ->
-                report_finalization_failure
+                report_observer_failure Log.error
                   "raw trace finalization failed after run result"
                   [ Log.S ("worker_run_id", Raw_trace.active_run_id active)
                   ; Log.S ("finalization_error", Error.to_string trace_error)
@@ -308,7 +307,7 @@ let with_raw_trace_run_classified_result
                        ~error:(Some error_msg) with
                | Ok _ -> ()
                | Error trace_error ->
-                 report_finalization_failure
+                 report_observer_failure Log.error
                    "raw trace finalization failed after run exception"
                    [ Log.S ("worker_run_id", Raw_trace.active_run_id active)
                    ; Log.S ("primary_exception", Printexc.to_string exn)

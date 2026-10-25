@@ -1746,7 +1746,11 @@ let test_terminal_disposition_sink_failure_fails_call () =
     (Eio.Path.is_file Eio.Path.(dir / "events.v1.commit"))
 ;;
 
-type trace_diagnostic_fault = Diagnostic_ok | Diagnostic_failed | Diagnostic_reserved
+type trace_diagnostic_fault =
+  | Diagnostic_ok
+  | Diagnostic_failed
+  | Diagnostic_reserved
+  | Callback_diagnostic_failed
 
 let test_trace_finalization_preserves_committed_success diagnostic_fault () =
   with_execution_test_dir "agent_core-trace-postcommit-"
@@ -1775,7 +1779,11 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
       ~tools:[tool]
       ~options:{Agent.default_options with transport=Some transport;
         provider_config=Some (Provider_mock.to_provider_config ());raw_trace=Some trace;
-        on_run_complete=Some (fun ok -> completion:=Some ok)} () in
+        on_run_complete=Some (fun ok ->
+          completion:=Some ok;
+          match diagnostic_fault with
+          | Callback_diagnostic_failed -> raise (Failure "injected completion observer failure")
+          | Diagnostic_ok | Diagnostic_failed | Diagnostic_reserved -> ())} () in
   let open_projection () = match !locator with
     | None -> Alcotest.fail "scope locator missing"
     | Some locator -> match Agent.open_execution_projection ~runtime ~dir locator with
@@ -1800,17 +1808,20 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
         Sys.remove trace_path;
         Unix.mkdir trace_path 0o700;
         Ok ()) () in
-  let diagnostics=ref 0 in
+  let diagnostics=ref 0 and callback_diagnostics=ref 0 in
   Log.clear_sinks ();
-  Log.set_global_level Log.Error;
+  Log.set_global_level Log.Warn;
   Log.add_sink (fun (record : Log.record) ->
     if record.module_name="agent_trace"
        && record.message="raw trace finalization failed after run result" then (
       incr diagnostics;
       match diagnostic_fault with
-      | Diagnostic_ok -> ()
+      | Diagnostic_ok | Callback_diagnostic_failed -> ()
       | Diagnostic_failed -> raise (Failure "injected diagnostic sink failure")
-      | Diagnostic_reserved -> raise Sys.Break));
+      | Diagnostic_reserved -> raise Sys.Break)
+    else if record.module_name="agent_trace" && record.message="on_run_complete callback raised" then (
+      incr callback_diagnostics;
+      raise (Failure "injected callback diagnostic sink failure")));
   let result=Fun.protect
       ~finally:(fun () -> Log.clear_sinks ();Log.set_global_level Log.Info)
       (fun () -> match Agent.run ~sw ~execution_store agent "settle the effect" with
@@ -1822,15 +1833,18 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
   (match diagnostic_fault,result with
    | Diagnostic_reserved,None ->
      Alcotest.(check (option bool)) "reserved diagnostic preempts completion callback" None !completion
-   | (Diagnostic_ok | Diagnostic_failed),Some (Ok response) ->
+   | (Diagnostic_ok | Diagnostic_failed | Callback_diagnostic_failed),Some (Ok response) ->
      Alcotest.(check string) "committed answer survives observer failure"
        "committed answer" (Types.text_of_response response);
      Alcotest.(check (option bool)) "completion callback observes execution success" (Some true) !completion
-   | (Diagnostic_ok | Diagnostic_failed | Diagnostic_reserved),Some (Error error) ->
+   | (Diagnostic_ok | Diagnostic_failed | Diagnostic_reserved | Callback_diagnostic_failed),Some (Error error) ->
      Alcotest.failf "observer relabeled committed success: %s" (Error.to_string error)
    | Diagnostic_reserved,Some (Ok _)
-   | (Diagnostic_ok | Diagnostic_failed),None -> Alcotest.fail "diagnostic fault propagation mismatch");
+   | (Diagnostic_ok | Diagnostic_failed | Callback_diagnostic_failed),None -> Alcotest.fail "diagnostic fault propagation mismatch");
   Alcotest.(check int) "trace failure diagnostic attempted once" 1 !diagnostics;
+  Alcotest.(check int) "callback diagnostic only follows a callback failure"
+    (match diagnostic_fault with Callback_diagnostic_failed -> 1
+     | Diagnostic_ok | Diagnostic_failed | Diagnostic_reserved -> 0) !callback_diagnostics;
   (match Agent.lifecycle agent with
    | Some snapshot -> Alcotest.(check bool) "lifecycle retains committed success" true
        (snapshot.status=Agent.Completed)
@@ -4493,6 +4507,10 @@ let () =
             "reserved trace diagnostic finalizes committed lifecycle"
             `Quick
             (test_trace_finalization_preserves_committed_success Diagnostic_reserved)
+        ; Alcotest.test_case
+            "completion callback diagnostic preserves committed success"
+            `Quick
+            (test_trace_finalization_preserves_committed_success Callback_diagnostic_failed)
         ; Alcotest.test_case
             "terminal disposition observes cancellation"
             `Quick

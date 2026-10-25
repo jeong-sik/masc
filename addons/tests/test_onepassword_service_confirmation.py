@@ -78,7 +78,7 @@ class ConfirmationTests(unittest.TestCase):
                 return result
 
             engine.request, engine.opened, engine.advance = observed_request, observed_opened, observed_advance
-            service = Service(engine, clock=lambda: now[0])
+            service = Service(engine, publisher=lambda _: None, clock=lambda: now[0])
             enqueue = service._enqueue
             captured = []
 

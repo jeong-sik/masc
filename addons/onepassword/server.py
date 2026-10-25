@@ -373,10 +373,13 @@ class Worker:
         if (not isinstance(arguments, dict) or set(arguments) != {"binding", "sources"}
                 or arguments["binding"] != {"sources": []} or arguments["sources"] != []):
             raise InvalidInput("connector observation takes no sources or credentials")
+        status = self.status()
+        if self._service_value is not None:
+            self._service_value.notify()
         return {"rows": [{"id": "connection", "lane_id": "connection", "kind": "value",
                           "title": "1Password connection", "observed_at": time.time(),
                           "subject_id": "onepassword", "clock": None, "actor": None,
-                          "fields": self.status(), "evidence": [], "related_ids": []}],
+                          "fields": status, "evidence": [], "related_ids": []}],
                 "coverage": []}
 
     def admitted(self, envelope):

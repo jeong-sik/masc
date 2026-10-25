@@ -73,7 +73,7 @@ class ServiceTests(unittest.TestCase):
         self.engine = Logins(self.connector, self.journal,
             Extension(Path(self.temp.name) / "extension", "a" * 32),
             bridge=create, clock=lambda: self.now)
-        self.service = Service(self.engine, clock=lambda: self.now)
+        self.service = Service(self.engine, publisher=lambda _: None, clock=lambda: self.now)
         self.addCleanup(self.service.close)
 
     def submit(self, **changes):
@@ -179,7 +179,7 @@ class ServiceTests(unittest.TestCase):
         self.addCleanup(host.close)
         engine = Logins(self.connector, self.journal,
             Extension(Path(self.temp.name) / "extension", "a" * 32), clock=lambda: self.now)
-        service = Service(engine, clock=lambda: self.now)
+        service = Service(engine, publisher=lambda _: None, clock=lambda: self.now)
         self.addCleanup(service.close)
         try:
             admitted = service.submit(descriptor=host.descriptor, caller=CALLER,
@@ -231,7 +231,7 @@ class ServiceTests(unittest.TestCase):
             return original_request(*args, **kwargs)
 
         engine.request = gated_request
-        service = Service(engine, clock=lambda: self.now)
+        service = Service(engine, publisher=lambda _: None, clock=lambda: self.now)
         self.addCleanup(service.close)
         try:
             operation = service.submit(descriptor=host.descriptor, caller=CALLER,
@@ -319,7 +319,7 @@ class ServiceTests(unittest.TestCase):
             return original_interrupt(operation_id, caller)
 
         engine.interrupt = counted_interrupt
-        service = Service(engine, clock=lambda: self.now)
+        service = Service(engine, publisher=lambda _: None, clock=lambda: self.now)
         self.addCleanup(service.close)
         try:
             operation = service.submit(descriptor=host.descriptor, caller=CALLER,

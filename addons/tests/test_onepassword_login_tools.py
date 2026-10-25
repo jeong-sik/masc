@@ -41,7 +41,7 @@ class LoginToolTests(unittest.TestCase):
             Logins(connector, journal, extension, bridge=lambda descriptor: self.bridge, clock=lambda: self.now))
         self.engine_factory.start()
         self.addCleanup(self.engine_factory.stop)
-        self.service_factory = patch.object(server, "Service", side_effect=lambda engine: Service(engine, clock=lambda: self.now))
+        self.service_factory = patch.object(server, "Service", side_effect=lambda engine: Service(engine, publisher=lambda _: None, clock=lambda: self.now))
         self.service_factory.start()
         self.addCleanup(self.service_factory.stop)
         self.worker = server.Worker(self.root / "configuration.json")
@@ -205,7 +205,7 @@ class SettingsRetirementTests(unittest.TestCase):
                     with patch.object(server, "Connector", side_effect=make_connector) as connections, \
                          patch.object(server, "Logins", side_effect=lambda c, journal, extension:
                              Logins(c, journal, extension, bridge=lambda descriptor: bridge, clock=lambda: now[0])), \
-                         patch.object(server, "Service", side_effect=lambda engine: Service(engine, clock=lambda: now[0])):
+                         patch.object(server, "Service", side_effect=lambda engine: Service(engine, publisher=lambda _: None, clock=lambda: now[0])):
                         worker = server.Worker(configuration)
                         worker.handshake({"version": 3})
 
@@ -302,7 +302,7 @@ class SettingsRetirementTests(unittest.TestCase):
             with patch.object(server, "Connector", side_effect=make_connector) as connections, \
                  patch.object(server, "Logins", side_effect=lambda c, journal, extension:
                      Logins(c, journal, extension, clock=lambda: 1000.)), \
-                 patch.object(server, "Service", side_effect=lambda engine: Service(engine, clock=lambda: 1000.)):
+                 patch.object(server, "Service", side_effect=lambda engine: Service(engine, publisher=lambda _: None, clock=lambda: 1000.)):
                 worker = server.Worker(configuration)
                 worker.handshake({"version": 3})
                 reader = closer = None

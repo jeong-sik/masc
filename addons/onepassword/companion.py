@@ -349,6 +349,11 @@ class Publisher(_Transport):
         self._closed, self._socket = False, None
         self._original_identity = self._identity()
 
+    @classmethod
+    def optional(cls, descriptor):
+        endpoint = Endpoint.decode(descriptor)
+        return None if endpoint.publication_id is None else cls(descriptor)
+
     def _identity(self):
         try:
             path = Path(self._endpoint.socket_path)

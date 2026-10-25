@@ -115,8 +115,8 @@ starts the five-second wait. It uses the declared
 2/5/10-second windows, pauses for the user after two minutes and respects a
 one-minute rate-limit wait. Pausing does not expire the task or create another
 request. The service schedules the engine's steps with one checker per request.
-Its worker tools and private approval UI are source implementation; automatic
-durable Keeper continuation remains to be connected.
+Its worker tools and private approval UI are source implementation; private durable delivery into the host Keeper queue is now connected in source.
+Actual installed Keeper turn continuation remains unverified.
 
 The Browser private wire and original-CDP extension loader are now source
 implementation. Package-owned `prepare.js` waits for extension readiness and
@@ -252,3 +252,12 @@ These are partner preview contracts; confirm access and supported builds with
 1Password before using production accounts. Client registration currently needs
 a Business account and a production HTTPS callback; end-user consent uses a
 separate Individual/Family account on 1password.com.
+
+`delivery.py` owns a separate joined outbox thread. It keeps the original caller
+and publisher, acknowledges only exact envelopes after confirmed host admission,
+and never blocks the request/check/cancel actor on publication IO. State commits
+and existing reads/observations trigger reconciliation after an uncertain ACK.
+Storage uncertainty fences publication sockets and cached batches. Shutdown joins
+the delivery owner before releasing the engine lease. No endpoint is retained or
+adopted after restart. Controlled Service/file/socket tests use a fabricated host
+ACK; real host queue admission and Keeper resumption still need runtime proof.

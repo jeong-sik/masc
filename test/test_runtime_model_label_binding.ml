@@ -123,6 +123,19 @@ let malformed_endpoint () =
       (Runtime_model_string.parse_model_string ("custom:overlap@" ^ endpoint)=None))
     ["https://explicit.invalid:bogus";"https://explicit.invalid/path%ZZ";
      "https://explicit.invalid/path invalid"]
+let endpoint_ports () =
+  List.iter (fun endpoint ->
+    Alcotest.(check bool) "invalid explicit port cannot become the default port" true
+      (Runtime_model_string.parse_model_string ("custom:overlap@" ^ endpoint)=None))
+    ["https://explicit.invalid:999999999999999999999999999999";
+     "https://explicit.invalid:65536";"https://explicit.invalid:0"];
+  List.iter (fun endpoint ->
+    let config = match Runtime_model_string.parse_model_string ("custom:overlap@" ^ endpoint) with
+      | Some config -> config | None -> Alcotest.fail "valid explicit authority was refused" in
+    Alcotest.(check string) "valid authority and path/query bytes remain explicit"
+      endpoint config.Provider_config.base_url)
+    ["https://explicit.invalid:00443/v1";"http://[::1]:8080/v1";
+     "http://[::1]/v1";"https://user:password@explicit.invalid/v1?q=a%2Fb"]
 let explicit_endpoint () = with_endpoint_env (Some "https://ambient.invalid") (fun () ->
   let spec = "custom:overlap@https://explicit.invalid/v1" in
   (match Provider_kind_resolver.resolve spec with
@@ -145,4 +158,4 @@ let () = Alcotest.run "runtime model label binding"
   ["provider authority",["identity",`Quick,identity;"context",`Quick,context;"policy and wire",`Quick,policy];
    "custom endpoint",["missing",`Quick,missing_endpoint;"ambient",`Quick,ambient_endpoint;
      "invalid",`Quick,invalid_endpoint;"malformed",`Quick,malformed_endpoint;
-     "explicit",`Quick,explicit_endpoint]]
+     "ports",`Quick,endpoint_ports;"explicit",`Quick,explicit_endpoint]]

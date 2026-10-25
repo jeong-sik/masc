@@ -1,0 +1,4 @@
+(test
+ (name test_artifact_document_engine)
+ (modules test_artifact_document_engine)
+ (libraries masc.artifact_document_engine masc.masc_process yojson alcotest eio eio_main unix))

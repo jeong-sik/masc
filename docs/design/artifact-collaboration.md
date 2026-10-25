@@ -26,6 +26,10 @@ Keeper는 문서를 읽은 뒤 받은 상대 위치와 읽었던 문장을 함�
 
 ## 현재 구현 범위
 
-공유 텍스트 병합, 상대 선택 영역, Keeper의 선택 영역 교체, JSON 변환 프로세스와 focused 검사가 구현되어 있습니다. 영속 저장·인증된 HTTP/실시간 전달·Keeper 도구·화면 연결은 후속 작업입니다. 이 층의 테스트 성공은 공동 편집 제품 완료나 운영 설치 증명이 아닙니다.
+공유 텍스트 병합, 상대 선택 영역, Keeper의 선택 영역 교체, JSON 변환 프로세스와 focused 검사가 구현되어 있습니다. `masc.artifact_document_engine`은 OCaml 호출자에게 snapshot·상대 선택 영역·오류를 타입으로 돌려줍니다. 변환 프로세스에는 PATH만 전달하며 공급자 인증 정보나 Node 옵션을 넘기지 않습니다. stdout 전체를 별도 파일에서 읽으므로 일반 도구 출력의 미리보기 제한으로 원고가 잘리지 않습니다. 위치는 UTF-8 바이트 수가 아닌 UTF-16 단위로 검사합니다.
+
+독립 경계 검사는 `scripts/dune-local.sh build test/artifact_document_engine/test_artifact_document_engine.exe`로 컴파일합니다. 설치된 실제 변환 프로세스를 포함하려면 실행 파일에 `--transformer /path/to/masc-artifact-document`를 넘깁니다. 인자를 생략하면 요청·응답 경계 검사만 실행합니다.
+
+영속 저장·인증된 HTTP/실시간 전달·Keeper 도구·화면 연결은 후속 작업입니다. 이 층의 테스트 성공은 공동 편집 제품 완료나 운영 설치 증명이 아닙니다.
 
 설계 근거: [Yjs document updates](https://docs.yjs.dev/api/document-updates), [relative positions](https://docs.yjs.dev/api/relative-positions). 공식 문서에서 update의 순서 독립성과 상대 위치 동작을 2026-10-25에 확인했습니다.

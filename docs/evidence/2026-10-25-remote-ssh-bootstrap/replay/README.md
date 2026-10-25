@@ -28,7 +28,44 @@ retained. An earlier driver attempt stopped at the expected old refusal because
 it compared JSON-escaped stderr text rather than decoding the trailer; it ran no
 candidate payload. The corrected attempt's receipt binds its own driver hash.
 
-This is a direct framed OpenSSH experiment, not a Keeper tool call or a successful
-bootstrap receipt. The native helper's EINTR repair must separately pass actual
-CLI and bootstrap-to-Keeper replay. No production install, GitHub login,
-real-model continuity or full readiness is claimed.
+The comparison above is a direct framed OpenSSH experiment. The following
+native-bootstrap and Keeper stages are separate executions with their own raw
+logs, drivers, hashes and receipts.
+
+Native macOS artifact run 40201223245 / artifact 12600889724 built helper/server
+source `a7685562be55678229ce29668c624d222cd76d67`. The six executable assets and
+runtime archive passed their downloaded checksums; the main executable returned
+that exact source commit. Helper SHA256 is
+`b1463d327eb76f49cde71871b0da4c9eb8c664215ab5258a4a805ca8c2fd4efd`;
+server SHA256 is `3c5304609b04f85ba6747407a631a8e14730b7da7dd8d79c0be321a23d367f1a`.
+The ten fake-SSH CLI cases passed locally after the native EINTR repair. The
+local receipt explicitly records the observed terminal completion and its output
+tail; it is not a newly executed test or a full raw log.
+
+The packaged helper then ran three actual SSH bootstrap invocations, with no
+GitHub token: old-shim refusal, exact-source shim install, and repeat install.
+The old shim returned nonzero `remote_ssh_preflight_unavailable` with its config
+cause and no success announcement. Its exit 124 is the native CLI's code; this
+driver used no timeout wrapper. The new shim succeeded twice and its installed
+remote bytes matched the static artifact hash. The preexisting 39-byte file,
+workspace/file owner/group/mode, endpoint `path`/`env_file`/`scratch_root`, and
+absence of a Keeper GitHub hosts file were independently reread and preserved.
+The identity was already authorized: password-based first key copying is not
+covered. The native driver checks helper and shim source identities separately;
+the shim is source 327 above, while the helper/server is source a768.
+
+After that bootstrap, an actual Keeper used Execute/Write/Read/Edit/Grep over
+the same endpoint. Nine calls completed through eleven scripted model requests.
+Endpoint-side readbacks verified the edited file and retained binary file after
+work, server shutdown, and explicit resumption of the same manual Keeper on a
+new server runtime instance. The payload verified the endpoint environment and
+PATH tool both initially and in the final resumed execution. It reused the
+reported absolute cwd inside Python, as Execute cwd, and in absolute file-tool
+arguments. Canonical tool ledger/checkpoint, model requests, server identity,
+stream responses and direct endpoint snapshots are retained.
+
+The model is a scripted loopback fixture. These real tool/SSH/bootstrap stages
+do not establish real-model autonomy, long-job lifecycle, GitHub authentication,
+visible native TUI behavior, release installation, production deployment or full
+readiness. Private workspace files and auth tokens are excluded from the public
+evidence; the copied files were checked against the actual private token bytes.

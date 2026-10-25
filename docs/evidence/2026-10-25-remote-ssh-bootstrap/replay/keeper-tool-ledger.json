@@ -1,0 +1,2056 @@
+[
+  {
+    "ts": 1792939687.834428,
+    "record_kind": "tool_call",
+    "keeper": "native-bootstrap-keeper",
+    "tool": "Execute",
+    "input": {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib,json,os,socket,subprocess; from pathlib import Path; p={\"marker\":'b8e1b7b5a00e42b78bce74a41e158ba7',\"cwd\":os.getcwd(),\"hostname\":socket.gethostname(),\"uid\":os.getuid(),\"bootstrap_env\":os.environ.get(\"BOOTSTRAP_PROOF_ENV\"),\"bootstrap_tool\":subprocess.check_output([\"bootstrap-proof-tool\"],text=True).strip(),\"retained_sha256\":hashlib.sha256(Path(\"retained file.bin\").read_bytes()).hexdigest()}; assert p[\"bootstrap_env\"]==\"bootstrap-environment-preserved\",p; assert p[\"bootstrap_tool\"]==\"bootstrap-tool-preserved\",p; assert p[\"retained_sha256\"]==\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\",p; Path(\"ssh-proof.json\").write_text(json.dumps(p)+\"\\n\"); print(json.dumps(p))"
+      ]
+    },
+    "output": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"execution_location\":{\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"b8e1b7b5a00e42b78bce74a41e158ba7\\\", \\\"cwd\\\": \\\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\\\", \\\"hostname\\\": \\\"7c0b77a2fd78\\\", \\\"uid\\\": 1000, \\\"bootstrap_env\\\": \\\"bootstrap-environment-preserved\\\", \\\"bootstrap_tool\\\": \\\"bootstrap-tool-preserved\\\", \\\"retained_sha256\\\": \\\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\\\"}\\n\",\"typed\":true,\"execution_time_ms\":323}",
+    "duration_ms": 340.0111198425293,
+    "runtime_contract": {
+      "keeper_name": "native-bootstrap-keeper",
+      "trace_id": "trace-1792939687301-00000",
+      "session_id": "trace-1792939687301-00000",
+      "keeper_turn_id": 1,
+      "task_id": null,
+      "goal_ids": [],
+      "sandbox_profile": "remote_ssh",
+      "sandbox_root": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+      "sandbox_roots": [
+        ".masc/playground/native-bootstrap-keeper/"
+      ],
+      "path_resolution": {
+        "read_implicit_cwd": false,
+        "read_explicit_cwd_supported": true,
+        "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+        "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+        "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+        "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+      },
+      "network_mode": "inherit",
+      "runtime_profile": "ollama_cloud.deepseek-v4.1-flash"
+    },
+    "action_radius": {
+      "tool_name": "Execute",
+      "action_key": "Execute",
+      "target_kind": "tool",
+      "target_path": null,
+      "sandbox_target": "remote_ssh",
+      "observed_paths": [],
+      "duration_ms": 340.0111198425293,
+      "error": null
+    },
+    "route_evidence": {
+      "descriptor_id": "agent.execute",
+      "capability_id": "tool_execute",
+      "keeper_model_projection": "preferred_public_name",
+      "public_name": "Execute",
+      "canonical_name": "tool_execute",
+      "description": "Run one command inside the Keeper sandbox. Give exactly one of argv or command: argv is one non-empty argv process vector run without a shell, tokens verbatim, and command is one line handed to a real shell. cwd is a relative path inside the path jail, and MASC never interprets program or subcommand meaning. A call runs to completion or stops at timeout_sec; there is no background task lifecycle. intent is one of auto (the default) or request_effect. In auto mode an observation-only run returns its actual exit status and output, including failed writes; auto never authorizes an effect. Use intent=request_effect when the command needs persistent writes or network effects: the configured Gate decides permission before effect execution. A nonzero exit alone is not a permission request. A completed tool call means the command ran: read ok and status for its result. For checks, prefer argv so the checked program supplies the exit status. Shell pipelines normally report the last stage; use bash with -o pipefail when an earlier stage's failure must survive a pipe to tail or tee. Do not repeat a write just because its output was truncated.",
+      "executor": "shell_ir",
+      "backend": "sandbox_process",
+      "sandbox": "backend_selected",
+      "runtime_handler": "tool_execute",
+      "execution": "serial",
+      "tool_kind": "atomic",
+      "composable_output": {
+        "kind": "json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "status": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "integer"
+                },
+                "signal": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "string"
+            },
+            "output_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "stdout_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "stderr_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "output_completeness": {
+              "type": "string"
+            },
+            "typed": {
+              "type": "boolean"
+            },
+            "execution_time_ms": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "status",
+            "typed",
+            "execution_time_ms"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "receipt_labels": {
+        "descriptor_id": "agent.execute",
+        "capability_id": "tool_execute",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Execute",
+        "canonical_name": "tool_execute",
+        "executor": "shell_ir",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_execute",
+        "execution": "serial",
+        "composable_output": "opaque",
+        "input_schema_source": "descriptor_owned"
+      },
+      "eval_tags": [],
+      "readonly": null,
+      "cwd_scope": "keeper_sandbox",
+      "polling_read": false,
+      "status": {
+        "kind": "exit",
+        "code": 0
+      },
+      "sandbox_profile": "remote_ssh",
+      "via": "remote_ssh",
+      "command": "[REDACTED]",
+      "tool_name": "Execute"
+    },
+    "agent_name": "native-bootstrap-keeper",
+    "model": "runtime",
+    "runtime_profile": "ollama_cloud.deepseek-v4.1-flash",
+    "turn_kind": "direct",
+    "lane": "tool_optional",
+    "prompt_fingerprint": "f6f9b6833bf64e74ec3517e1d6498ff5782ffb2757d313c6ef1d12ed53cd96fe",
+    "execution_id": "exec-1792939687834-0001",
+    "tool_observation": {
+      "attribution": {
+        "kind": "pathless"
+      },
+      "turn_ref": "trace-1792939687301-00000#1",
+      "declared_progress": null
+    },
+    "physical_execution_id": "exec-1792939687834-0001",
+    "tool_use_id": "ssh-file-0-0",
+    "planned_index": 0,
+    "batch_index": 0,
+    "batch_size": 1,
+    "execution_mode": "serial",
+    "wire_outcome": "ok",
+    "disposition": "completed",
+    "execution_evidence": {
+      "shim_execution_evidence": {
+        "status": "recorded",
+        "receipts": [
+          {
+            "status": "observed",
+            "receipt": {
+              "mode": "effect",
+              "plan": "unrestricted",
+              "boundary": "sandbox_applied"
+            },
+            "outcome": {
+              "exit": 0,
+              "signal": null,
+              "timed_out": false,
+              "shim_error": false
+            }
+          }
+        ]
+      },
+      "compared_output_bytes": 333,
+      "handler_stored": false,
+      "output_completeness": "capture_only",
+      "requested_sandbox": "remote_ssh",
+      "via": "remote_ssh",
+      "sandbox_profile": "remote_ssh",
+      "remote_endpoint": "proof",
+      "remote_host": "127.0.0.1"
+    },
+    "trace_id": "trace-1792939687301-00000",
+    "session_id": "trace-1792939687301-00000",
+    "turn": 0,
+    "keeper_turn_id": 1,
+    "sandbox_profile": "remote_ssh",
+    "network_mode": "inherit",
+    "result_bytes": 781,
+    "input_fingerprint": "8c2350c100acb36cbaa84bbead73cc6faf7b2244eccd4b69268c75b5ae58c6ae",
+    "output_fingerprint": "2444b7769457e61287d7cc1d931876bbdfc76cb6d813dee13a72b2731f40500e"
+  },
+  {
+    "ts": 1792939688.22545,
+    "record_kind": "tool_call",
+    "keeper": "native-bootstrap-keeper",
+    "tool": "Execute",
+    "input": {
+      "argv": [
+        "python3",
+        "-c",
+        "import base64,json,os; from pathlib import Path; reported='/srv/masc/bootstrap-ready/native-bootstrap-keeper'; p=json.loads(Path(reported,\"ssh-proof.json\").read_bytes()); p.update(reused_marker=p[\"marker\"],copied_cwd=reported,actual_cwd_base64=base64.b64encode(os.getcwd().encode()).decode()); print(json.dumps(p))"
+      ],
+      "cwd": "/srv/masc/bootstrap-ready/native-bootstrap-keeper"
+    },
+    "output": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"execution_location\":{\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"cwd_source\":\"explicit_cwd\",\"scope\":\"playground_root\",\"playground_root\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"b8e1b7b5a00e42b78bce74a41e158ba7\\\", \\\"cwd\\\": \\\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\\\", \\\"hostname\\\": \\\"7c0b77a2fd78\\\", \\\"uid\\\": 1000, \\\"bootstrap_env\\\": \\\"bootstrap-environment-preserved\\\", \\\"bootstrap_tool\\\": \\\"bootstrap-tool-preserved\\\", \\\"retained_sha256\\\": \\\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\\\", \\\"reused_marker\\\": \\\"b8e1b7b5a00e42b78bce74a41e158ba7\\\", \\\"copied_cwd\\\": \\\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\\\", \\\"actual_cwd_base64\\\": \\\"L3Nydi9tYXNjL2Jvb3RzdHJhcC1yZWFkeS9uYXRpdmUtYm9vdHN0cmFwLWtlZXBlcg==\\\"}\\n\",\"typed\":true,\"execution_time_ms\":339}",
+    "duration_ms": 341.6440486907959,
+    "runtime_contract": {
+      "keeper_name": "native-bootstrap-keeper",
+      "trace_id": "trace-1792939687301-00000",
+      "session_id": "trace-1792939687301-00000",
+      "keeper_turn_id": 1,
+      "task_id": null,
+      "goal_ids": [],
+      "sandbox_profile": "remote_ssh",
+      "sandbox_root": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+      "sandbox_roots": [
+        ".masc/playground/native-bootstrap-keeper/"
+      ],
+      "path_resolution": {
+        "read_implicit_cwd": false,
+        "read_explicit_cwd_supported": true,
+        "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+        "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+        "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+        "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+      },
+      "network_mode": "inherit",
+      "runtime_profile": "ollama_cloud.deepseek-v4.1-flash"
+    },
+    "action_radius": {
+      "tool_name": "Execute",
+      "action_key": "Execute",
+      "target_kind": "directory",
+      "target_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+      "sandbox_target": "remote_ssh",
+      "observed_paths": [
+        "/srv/masc/bootstrap-ready/native-bootstrap-keeper"
+      ],
+      "duration_ms": 341.6440486907959,
+      "error": null
+    },
+    "route_evidence": {
+      "descriptor_id": "agent.execute",
+      "capability_id": "tool_execute",
+      "keeper_model_projection": "preferred_public_name",
+      "public_name": "Execute",
+      "canonical_name": "tool_execute",
+      "description": "Run one command inside the Keeper sandbox. Give exactly one of argv or command: argv is one non-empty argv process vector run without a shell, tokens verbatim, and command is one line handed to a real shell. cwd is a relative path inside the path jail, and MASC never interprets program or subcommand meaning. A call runs to completion or stops at timeout_sec; there is no background task lifecycle. intent is one of auto (the default) or request_effect. In auto mode an observation-only run returns its actual exit status and output, including failed writes; auto never authorizes an effect. Use intent=request_effect when the command needs persistent writes or network effects: the configured Gate decides permission before effect execution. A nonzero exit alone is not a permission request. A completed tool call means the command ran: read ok and status for its result. For checks, prefer argv so the checked program supplies the exit status. Shell pipelines normally report the last stage; use bash with -o pipefail when an earlier stage's failure must survive a pipe to tail or tee. Do not repeat a write just because its output was truncated.",
+      "executor": "shell_ir",
+      "backend": "sandbox_process",
+      "sandbox": "backend_selected",
+      "runtime_handler": "tool_execute",
+      "execution": "serial",
+      "tool_kind": "atomic",
+      "composable_output": {
+        "kind": "json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "status": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "integer"
+                },
+                "signal": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "string"
+            },
+            "output_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "stdout_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "stderr_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "output_completeness": {
+              "type": "string"
+            },
+            "typed": {
+              "type": "boolean"
+            },
+            "execution_time_ms": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "status",
+            "typed",
+            "execution_time_ms"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "receipt_labels": {
+        "descriptor_id": "agent.execute",
+        "capability_id": "tool_execute",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Execute",
+        "canonical_name": "tool_execute",
+        "executor": "shell_ir",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_execute",
+        "execution": "serial",
+        "composable_output": "opaque",
+        "input_schema_source": "descriptor_owned"
+      },
+      "eval_tags": [],
+      "readonly": null,
+      "cwd_scope": "keeper_sandbox",
+      "polling_read": false,
+      "status": {
+        "kind": "exit",
+        "code": 0
+      },
+      "sandbox_profile": "remote_ssh",
+      "via": "remote_ssh",
+      "cwd": "[REDACTED]",
+      "command": "[REDACTED]",
+      "tool_name": "Execute"
+    },
+    "agent_name": "native-bootstrap-keeper",
+    "model": "runtime",
+    "runtime_profile": "ollama_cloud.deepseek-v4.1-flash",
+    "turn_kind": "direct",
+    "lane": "tool_optional",
+    "prompt_fingerprint": "f6f9b6833bf64e74ec3517e1d6498ff5782ffb2757d313c6ef1d12ed53cd96fe",
+    "execution_id": "exec-1792939688225-0002",
+    "tool_observation": {
+      "attribution": {
+        "kind": "pathless"
+      },
+      "turn_ref": "trace-1792939687301-00000#1",
+      "declared_progress": null
+    },
+    "physical_execution_id": "exec-1792939688225-0002",
+    "tool_use_id": "ssh-file-0-1",
+    "planned_index": 0,
+    "batch_index": 0,
+    "batch_size": 1,
+    "execution_mode": "serial",
+    "wire_outcome": "ok",
+    "disposition": "completed",
+    "execution_evidence": {
+      "shim_execution_evidence": {
+        "status": "recorded",
+        "receipts": [
+          {
+            "status": "observed",
+            "receipt": {
+              "mode": "effect",
+              "plan": "unrestricted",
+              "boundary": "sandbox_applied"
+            },
+            "outcome": {
+              "exit": 0,
+              "signal": null,
+              "timed_out": false,
+              "shim_error": false
+            }
+          }
+        ]
+      },
+      "compared_output_bytes": 546,
+      "handler_stored": false,
+      "output_completeness": "capture_only",
+      "requested_sandbox": "remote_ssh",
+      "via": "remote_ssh",
+      "sandbox_profile": "remote_ssh",
+      "remote_endpoint": "proof",
+      "remote_host": "127.0.0.1"
+    },
+    "trace_id": "trace-1792939687301-00000",
+    "session_id": "trace-1792939687301-00000",
+    "turn": 1,
+    "keeper_turn_id": 1,
+    "sandbox_profile": "remote_ssh",
+    "network_mode": "inherit",
+    "result_bytes": 995,
+    "input_fingerprint": "3738dc01ab885fadb2f8aac5f49327db8bb9058970ebc21e36a6920541530640",
+    "output_fingerprint": "f5b71e3b83a7a4430dcfac9a1c368a3aeaf0c8f137a6312394a04bf96f97f510"
+  },
+  {
+    "ts": 1792939688.573772,
+    "record_kind": "tool_call",
+    "keeper": "native-bootstrap-keeper",
+    "tool": "Write",
+    "input": {
+      "file_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt",
+      "content": "before"
+    },
+    "output": "{\"ok\":true,\"path\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt\",\"mode\":\"overwrite\",\"bytes_written\":7,\"via\":\"remote_ssh\"}",
+    "duration_ms": 302.74009704589844,
+    "runtime_contract": {
+      "keeper_name": "native-bootstrap-keeper",
+      "trace_id": "trace-1792939687301-00000",
+      "session_id": "trace-1792939687301-00000",
+      "keeper_turn_id": 1,
+      "task_id": null,
+      "goal_ids": [],
+      "sandbox_profile": "remote_ssh",
+      "sandbox_root": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+      "sandbox_roots": [
+        ".masc/playground/native-bootstrap-keeper/"
+      ],
+      "path_resolution": {
+        "read_implicit_cwd": false,
+        "read_explicit_cwd_supported": true,
+        "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+        "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+        "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+        "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+      },
+      "network_mode": "inherit",
+      "runtime_profile": "ollama_cloud.deepseek-v4.1-flash"
+    },
+    "action_radius": {
+      "tool_name": "Write",
+      "action_key": "Write",
+      "target_kind": "path",
+      "target_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt",
+      "sandbox_target": "remote_ssh",
+      "observed_paths": [
+        "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt"
+      ],
+      "duration_ms": 302.74009704589844,
+      "error": null
+    },
+    "route_evidence": {
+      "descriptor_id": "agent.write_file",
+      "capability_id": "tool_write_file",
+      "keeper_model_projection": "preferred_public_name",
+      "public_name": "Write",
+      "canonical_name": "tool_write_file",
+      "description": "Write full file content into the keeper sandbox or an allowed path. Missing parent directories are created safely; call Write directly instead of using Execute mkdir.",
+      "executor": "filesystem",
+      "backend": "sandbox_process",
+      "sandbox": "backend_selected",
+      "runtime_handler": "tool_write_file",
+      "execution": "serial",
+      "tool_kind": "atomic",
+      "composable_output": {
+        "kind": "json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "bytes_written": {
+              "type": "integer"
+            },
+            "via": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "path",
+            "mode",
+            "bytes_written"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "receipt_labels": {
+        "descriptor_id": "agent.write_file",
+        "capability_id": "tool_write_file",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Write",
+        "canonical_name": "tool_write_file",
+        "executor": "filesystem",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_write_file",
+        "execution": "serial",
+        "composable_output": "opaque",
+        "input_schema_source": "canonical_registry"
+      },
+      "eval_tags": [],
+      "readonly": false,
+      "cwd_scope": "keeper_sandbox",
+      "polling_read": false,
+      "via": "remote_ssh",
+      "tool_name": "Write"
+    },
+    "agent_name": "native-bootstrap-keeper",
+    "model": "runtime",
+    "runtime_profile": "ollama_cloud.deepseek-v4.1-flash",
+    "turn_kind": "direct",
+    "lane": "tool_optional",
+    "prompt_fingerprint": "f6f9b6833bf64e74ec3517e1d6498ff5782ffb2757d313c6ef1d12ed53cd96fe",
+    "execution_id": "exec-1792939688573-0003",
+    "tool_observation": {
+      "attribution": {
+        "kind": "unaddressed",
+        "reason": {
+          "kind": "checkout_unavailable",
+          "detail": null
+        },
+        "attempted_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt"
+      },
+      "turn_ref": "trace-1792939687301-00000#1",
+      "declared_progress": null
+    },
+    "physical_execution_id": "exec-1792939688573-0003",
+    "tool_use_id": "ssh-file-0-2",
+    "planned_index": 0,
+    "batch_index": 0,
+    "batch_size": 1,
+    "execution_mode": "serial",
+    "wire_outcome": "ok",
+    "disposition": "completed",
+    "file_change_evidence": {
+      "kind": "write",
+      "new_range": {
+        "start_line": 1,
+        "end_line": 1
+      }
+    },
+    "trace_id": "trace-1792939687301-00000",
+    "session_id": "trace-1792939687301-00000",
+    "turn": 2,
+    "keeper_turn_id": 1,
+    "sandbox_profile": "remote_ssh",
+    "network_mode": "inherit",
+    "result_bytes": 136,
+    "input_fingerprint": "bed9e74e83986f00f78835f7d11fbf64ca2f71660c73933ef685e2e5eeee380a",
+    "output_fingerprint": "b451843f74b81c8c669c371dc9e40d489c8647a7e30a6aebeabbc2407e3a0dcc"
+  },
+  {
+    "ts": 1792939688.707303,
+    "record_kind": "tool_call",
+    "keeper": "native-bootstrap-keeper",
+    "tool": "Read",
+    "input": {
+      "file_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt"
+    },
+    "output": "{\"ok\":true,\"path\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt\",\"bytes\":7,\"truncated\":false,\"offset\":1,\"returned_lines\":1,\"content\":\"before\\n\",\"via\":\"remote_ssh\"}",
+    "duration_ms": 90.4080867767334,
+    "runtime_contract": {
+      "keeper_name": "native-bootstrap-keeper",
+      "trace_id": "trace-1792939687301-00000",
+      "session_id": "trace-1792939687301-00000",
+      "keeper_turn_id": 1,
+      "task_id": null,
+      "goal_ids": [],
+      "sandbox_profile": "remote_ssh",
+      "sandbox_root": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+      "sandbox_roots": [
+        ".masc/playground/native-bootstrap-keeper/"
+      ],
+      "path_resolution": {
+        "read_implicit_cwd": false,
+        "read_explicit_cwd_supported": true,
+        "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+        "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+        "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+        "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+      },
+      "network_mode": "inherit",
+      "runtime_profile": "ollama_cloud.deepseek-v4.1-flash"
+    },
+    "action_radius": {
+      "tool_name": "Read",
+      "action_key": "Read",
+      "target_kind": "path",
+      "target_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt",
+      "sandbox_target": "remote_ssh",
+      "observed_paths": [
+        "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt"
+      ],
+      "duration_ms": 90.4080867767334,
+      "error": null
+    },
+    "route_evidence": {
+      "descriptor_id": "agent.read_file",
+      "capability_id": "tool_read_file",
+      "keeper_model_projection": "preferred_public_name",
+      "public_name": "Read",
+      "canonical_name": "tool_read_file",
+      "description": "Read one existing file, or a line range of one file, from the keeper sandbox or an allowed path with no implicit cwd. Read targets a single FILE; to list a directory use the Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read never inherits Execute cwd. For a line range, pass offset (1-based line) and limit (max lines) \u2014 do not run sed -n via Execute for this. The payload carries the exact current bytes (no line numbers) plus offset, returned_lines, truncated; when truncated=true a next_offset field gives the next line offset. If last_line_partial=true, the byte budget cut inside the final returned line and next_offset intentionally skips that line's unseen remainder rather than continuing byte-for-byte. Before Edit, Read the target region so old_string matches current bytes.",
+      "executor": "filesystem",
+      "backend": "sandbox_process",
+      "sandbox": "backend_selected",
+      "runtime_handler": "tool_read_file",
+      "execution": "concurrent",
+      "tool_kind": "atomic",
+      "composable_output": {
+        "kind": "json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "offset": {
+              "type": "integer"
+            },
+            "returned_lines": {
+              "type": "integer"
+            },
+            "content": {
+              "type": "string"
+            },
+            "next_offset": {
+              "type": "integer"
+            },
+            "last_line_partial": {
+              "type": "boolean"
+            },
+            "file_bytes": {
+              "type": "integer"
+            },
+            "via": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "path",
+            "bytes",
+            "truncated",
+            "offset",
+            "returned_lines",
+            "content"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "receipt_labels": {
+        "descriptor_id": "agent.read_file",
+        "capability_id": "tool_read_file",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Read",
+        "canonical_name": "tool_read_file",
+        "executor": "filesystem",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_read_file",
+        "execution": "concurrent",
+        "composable_output": "opaque",
+        "input_schema_source": "canonical_registry"
+      },
+      "eval_tags": [],
+      "readonly": true,
+      "cwd_scope": "keeper_sandbox",
+      "polling_read": false,
+      "via": "remote_ssh",
+      "tool_name": "Read"
+    },
+    "agent_name": "native-bootstrap-keeper",
+    "model": "runtime",
+    "runtime_profile": "ollama_cloud.deepseek-v4.1-flash",
+    "turn_kind": "direct",
+    "lane": "tool_optional",
+    "prompt_fingerprint": "f6f9b6833bf64e74ec3517e1d6498ff5782ffb2757d313c6ef1d12ed53cd96fe",
+    "execution_id": "exec-1792939688707-0004",
+    "tool_observation": {
+      "attribution": {
+        "kind": "unaddressed",
+        "reason": {
+          "kind": "checkout_unavailable",
+          "detail": null
+        },
+        "attempted_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt"
+      },
+      "turn_ref": "trace-1792939687301-00000#1",
+      "declared_progress": null
+    },
+    "physical_execution_id": "exec-1792939688707-0004",
+    "tool_use_id": "ssh-file-0-3",
+    "planned_index": 0,
+    "batch_index": 0,
+    "batch_size": 1,
+    "execution_mode": "concurrent",
+    "wire_outcome": "ok",
+    "disposition": "completed",
+    "trace_id": "trace-1792939687301-00000",
+    "session_id": "trace-1792939687301-00000",
+    "turn": 3,
+    "keeper_turn_id": 1,
+    "sandbox_profile": "remote_ssh",
+    "network_mode": "inherit",
+    "result_bytes": 178,
+    "input_fingerprint": "5a080bd7db720e26b7e7865b14a1b9896d678f75531dfc53782cbbaca9e03ad0",
+    "output_fingerprint": "875b8cd07b47854675b8384d78d25990645504cc02aea5e41cd9c0b1efcab1fa"
+  },
+  {
+    "ts": 1792939689.356392,
+    "record_kind": "tool_call",
+    "keeper": "native-bootstrap-keeper",
+    "tool": "Edit",
+    "input": {
+      "file_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt",
+      "old_string": "before",
+      "new_string": "after"
+    },
+    "output": "{\"ok\":true,\"path\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt\",\"mode\":\"patch\",\"bytes_written\":6,\"changed\":true,\"occurrences\":1,\"replace_all\":false,\"via\":\"remote_ssh\"}",
+    "duration_ms": 592.7259922027588,
+    "runtime_contract": {
+      "keeper_name": "native-bootstrap-keeper",
+      "trace_id": "trace-1792939687301-00000",
+      "session_id": "trace-1792939687301-00000",
+      "keeper_turn_id": 1,
+      "task_id": null,
+      "goal_ids": [],
+      "sandbox_profile": "remote_ssh",
+      "sandbox_root": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+      "sandbox_roots": [
+        ".masc/playground/native-bootstrap-keeper/"
+      ],
+      "path_resolution": {
+        "read_implicit_cwd": false,
+        "read_explicit_cwd_supported": true,
+        "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+        "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+        "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+        "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+      },
+      "network_mode": "inherit",
+      "runtime_profile": "ollama_cloud.deepseek-v4.1-flash"
+    },
+    "action_radius": {
+      "tool_name": "Edit",
+      "action_key": "Edit",
+      "target_kind": "path",
+      "target_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt",
+      "sandbox_target": "remote_ssh",
+      "observed_paths": [
+        "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt"
+      ],
+      "duration_ms": 592.7259922027588,
+      "error": null
+    },
+    "route_evidence": {
+      "descriptor_id": "agent.edit_file",
+      "capability_id": "tool_edit_file",
+      "keeper_model_projection": "preferred_public_name",
+      "public_name": "Edit",
+      "canonical_name": "tool_edit_file",
+      "description": "Patch an existing file by replacing an exact string. Prefer Edit over sed -i/awk/perl via Execute for file changes: the exact-match check and the 'not found' error keep a failed edit from writing anything. Each call replaces one exact string (every occurrence with replace_all=true); apply several disjoint changes as successive Edit calls. Read the file first and copy old_string verbatim from its current bytes, including leading whitespace, indentation, and newlines; the match is exact and byte-sensitive. On 'old_string not found', re-Read the file to get the current text instead of retrying the same string.",
+      "executor": "filesystem",
+      "backend": "sandbox_process",
+      "sandbox": "backend_selected",
+      "runtime_handler": "tool_edit_file",
+      "execution": "serial",
+      "tool_kind": "atomic",
+      "composable_output": {
+        "kind": "json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "bytes_written": {
+              "type": "integer"
+            },
+            "via": {
+              "type": "string"
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "occurrences": {
+              "type": "integer"
+            },
+            "replace_all": {
+              "type": "boolean"
+            },
+            "edit_snapshots": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string"
+                },
+                "before": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": true
+                },
+                "after": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": true
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "ok",
+            "path",
+            "mode",
+            "bytes_written"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "receipt_labels": {
+        "descriptor_id": "agent.edit_file",
+        "capability_id": "tool_edit_file",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Edit",
+        "canonical_name": "tool_edit_file",
+        "executor": "filesystem",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_edit_file",
+        "execution": "serial",
+        "composable_output": "opaque",
+        "input_schema_source": "canonical_registry"
+      },
+      "eval_tags": [],
+      "readonly": false,
+      "cwd_scope": "keeper_sandbox",
+      "polling_read": false,
+      "via": "remote_ssh",
+      "tool_name": "Edit"
+    },
+    "agent_name": "native-bootstrap-keeper",
+    "model": "runtime",
+    "runtime_profile": "ollama_cloud.deepseek-v4.1-flash",
+    "turn_kind": "direct",
+    "lane": "tool_optional",
+    "prompt_fingerprint": "f6f9b6833bf64e74ec3517e1d6498ff5782ffb2757d313c6ef1d12ed53cd96fe",
+    "execution_id": "exec-1792939689356-0005",
+    "tool_observation": {
+      "attribution": {
+        "kind": "unaddressed",
+        "reason": {
+          "kind": "checkout_unavailable",
+          "detail": null
+        },
+        "attempted_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt"
+      },
+      "turn_ref": "trace-1792939687301-00000#1",
+      "declared_progress": null
+    },
+    "physical_execution_id": "exec-1792939689356-0005",
+    "tool_use_id": "ssh-file-0-4",
+    "planned_index": 0,
+    "batch_index": 0,
+    "batch_size": 1,
+    "execution_mode": "serial",
+    "wire_outcome": "ok",
+    "disposition": "completed",
+    "file_change_evidence": {
+      "kind": "edit",
+      "occurrence_count": 1,
+      "occurrences": [
+        {
+          "old_range": {
+            "start_line": 1,
+            "end_line": 1
+          },
+          "new_range": {
+            "start_line": 1,
+            "end_line": 1
+          }
+        }
+      ]
+    },
+    "trace_id": "trace-1792939687301-00000",
+    "session_id": "trace-1792939687301-00000",
+    "turn": 4,
+    "keeper_turn_id": 1,
+    "sandbox_profile": "remote_ssh",
+    "network_mode": "inherit",
+    "result_bytes": 183,
+    "input_fingerprint": "5a2ee846d90588918354c10483e7e4152af34b89e01b393e0465f62b55899218",
+    "output_fingerprint": "8b0e57b8361cc1e519b708056628b182683735bb33f6a720f62d4507d193d33e"
+  },
+  {
+    "ts": 1792939689.692162,
+    "record_kind": "tool_call",
+    "keeper": "native-bootstrap-keeper",
+    "tool": "Grep",
+    "input": {
+      "path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt",
+      "pattern": "^after$"
+    },
+    "output": "{\"ok\":true,\"op\":\"rg\",\"path\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt\",\"pattern\":\"^after$\",\"via\":\"remote_ssh\",\"status\":{\"kind\":\"exit\",\"code\":0},\"matches\":[\"1:after\"]}",
+    "duration_ms": 299.90100860595703,
+    "runtime_contract": {
+      "keeper_name": "native-bootstrap-keeper",
+      "trace_id": "trace-1792939687301-00000",
+      "session_id": "trace-1792939687301-00000",
+      "keeper_turn_id": 1,
+      "task_id": null,
+      "goal_ids": [],
+      "sandbox_profile": "remote_ssh",
+      "sandbox_root": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+      "sandbox_roots": [
+        ".masc/playground/native-bootstrap-keeper/"
+      ],
+      "path_resolution": {
+        "read_implicit_cwd": false,
+        "read_explicit_cwd_supported": true,
+        "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+        "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+        "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+        "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+      },
+      "network_mode": "inherit",
+      "runtime_profile": "ollama_cloud.deepseek-v4.1-flash"
+    },
+    "action_radius": {
+      "tool_name": "Grep",
+      "action_key": "Grep",
+      "target_kind": "path",
+      "target_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt",
+      "sandbox_target": "remote_ssh",
+      "observed_paths": [
+        "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt"
+      ],
+      "duration_ms": 299.90100860595703,
+      "error": null
+    },
+    "route_evidence": {
+      "descriptor_id": "agent.search_files",
+      "capability_id": "tool_search_files",
+      "keeper_model_projection": "preferred_public_name",
+      "public_name": "Grep",
+      "canonical_name": "tool_search_files",
+      "description": "Search file contents with ripgrep: provide a regex `pattern` (and optionally path/glob/type). To list a directory, read a file, or run git status/log/diff, use the Execute tool (e.g. argv=['ls','-la','<path>']). Patterns match within a single line; a literal newline in `pattern` is rejected. To match across lines, run `rg -U` through the Execute tool.",
+      "executor": "shell_ir",
+      "backend": "sandbox_process",
+      "sandbox": "backend_selected",
+      "runtime_handler": "tool_search_files",
+      "execution": "concurrent",
+      "tool_kind": "atomic",
+      "composable_output": {
+        "kind": "json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "op": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "pattern": {
+              "type": "string"
+            },
+            "via": {
+              "type": "string"
+            },
+            "status": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "integer"
+                },
+                "signal": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            "matches": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "error_detail": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "op",
+            "path",
+            "pattern",
+            "via",
+            "status",
+            "matches"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "receipt_labels": {
+        "descriptor_id": "agent.search_files",
+        "capability_id": "tool_search_files",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Grep",
+        "canonical_name": "tool_search_files",
+        "executor": "shell_ir",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_search_files",
+        "execution": "concurrent",
+        "composable_output": "opaque",
+        "input_schema_source": "canonical_registry"
+      },
+      "eval_tags": [],
+      "readonly": true,
+      "cwd_scope": "keeper_sandbox",
+      "polling_read": false,
+      "status": {
+        "kind": "exit",
+        "code": 0
+      },
+      "via": "remote_ssh",
+      "path": "[REDACTED]",
+      "tool_name": "Grep"
+    },
+    "agent_name": "native-bootstrap-keeper",
+    "model": "runtime",
+    "runtime_profile": "ollama_cloud.deepseek-v4.1-flash",
+    "turn_kind": "direct",
+    "lane": "tool_optional",
+    "prompt_fingerprint": "f6f9b6833bf64e74ec3517e1d6498ff5782ffb2757d313c6ef1d12ed53cd96fe",
+    "execution_id": "exec-1792939689692-0006",
+    "tool_observation": {
+      "attribution": {
+        "kind": "unaddressed",
+        "reason": {
+          "kind": "checkout_unavailable",
+          "detail": null
+        },
+        "attempted_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt"
+      },
+      "turn_ref": "trace-1792939687301-00000#1",
+      "declared_progress": null
+    },
+    "physical_execution_id": "exec-1792939689692-0006",
+    "tool_use_id": "ssh-file-0-5",
+    "planned_index": 0,
+    "batch_index": 0,
+    "batch_size": 1,
+    "execution_mode": "concurrent",
+    "wire_outcome": "ok",
+    "disposition": "completed",
+    "trace_id": "trace-1792939687301-00000",
+    "session_id": "trace-1792939687301-00000",
+    "turn": 5,
+    "keeper_turn_id": 1,
+    "sandbox_profile": "remote_ssh",
+    "network_mode": "inherit",
+    "result_bytes": 185,
+    "input_fingerprint": "55abac66fba19de43dd4476896937892211663f7266be92150cbcc2af1098f5e",
+    "output_fingerprint": "4ce68fd197153f6d61fee1a26208f03587d01fbfd32c95b1bf818a617087e01e"
+  },
+  {
+    "ts": 1792939690.253706,
+    "record_kind": "tool_call",
+    "keeper": "native-bootstrap-keeper",
+    "tool": "Execute",
+    "input": {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib,json,os,subprocess; from pathlib import Path; p=json.loads(Path(\"ssh-proof.json\").read_bytes()); b=Path(\"notes.txt\").read_bytes(); assert b==b\"after\\n\"; p.update(notes=b.decode(),sha256=hashlib.sha256(b).hexdigest(),files=sorted(os.listdir(\".\")),bootstrap_env=os.environ.get(\"BOOTSTRAP_PROOF_ENV\"),bootstrap_tool=subprocess.check_output([\"bootstrap-proof-tool\"],text=True).strip(),retained_sha256=hashlib.sha256(Path(\"retained file.bin\").read_bytes()).hexdigest()); assert p[\"bootstrap_env\"]==\"bootstrap-environment-preserved\",p; assert p[\"bootstrap_tool\"]==\"bootstrap-tool-preserved\",p; assert p[\"retained_sha256\"]==\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\",p; print(json.dumps(p))"
+      ]
+    },
+    "output": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"execution_location\":{\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"b8e1b7b5a00e42b78bce74a41e158ba7\\\", \\\"cwd\\\": \\\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\\\", \\\"hostname\\\": \\\"7c0b77a2fd78\\\", \\\"uid\\\": 1000, \\\"bootstrap_env\\\": \\\"bootstrap-environment-preserved\\\", \\\"bootstrap_tool\\\": \\\"bootstrap-tool-preserved\\\", \\\"retained_sha256\\\": \\\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\\\", \\\"notes\\\": \\\"after\\\\n\\\", \\\"sha256\\\": \\\"7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919\\\", \\\"files\\\": [\\\"notes.txt\\\", \\\"retained file.bin\\\", \\\"ssh-proof.json\\\"]}\\n\",\"typed\":true,\"execution_time_ms\":316}",
+    "duration_ms": 318.8040256500244,
+    "runtime_contract": {
+      "keeper_name": "native-bootstrap-keeper",
+      "trace_id": "trace-1792939687301-00000",
+      "session_id": "trace-1792939687301-00000",
+      "keeper_turn_id": 1,
+      "task_id": null,
+      "goal_ids": [],
+      "sandbox_profile": "remote_ssh",
+      "sandbox_root": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+      "sandbox_roots": [
+        ".masc/playground/native-bootstrap-keeper/"
+      ],
+      "path_resolution": {
+        "read_implicit_cwd": false,
+        "read_explicit_cwd_supported": true,
+        "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+        "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+        "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+        "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+      },
+      "network_mode": "inherit",
+      "runtime_profile": "ollama_cloud.deepseek-v4.1-flash"
+    },
+    "action_radius": {
+      "tool_name": "Execute",
+      "action_key": "Execute",
+      "target_kind": "tool",
+      "target_path": null,
+      "sandbox_target": "remote_ssh",
+      "observed_paths": [],
+      "duration_ms": 318.8040256500244,
+      "error": null
+    },
+    "route_evidence": {
+      "descriptor_id": "agent.execute",
+      "capability_id": "tool_execute",
+      "keeper_model_projection": "preferred_public_name",
+      "public_name": "Execute",
+      "canonical_name": "tool_execute",
+      "description": "Run one command inside the Keeper sandbox. Give exactly one of argv or command: argv is one non-empty argv process vector run without a shell, tokens verbatim, and command is one line handed to a real shell. cwd is a relative path inside the path jail, and MASC never interprets program or subcommand meaning. A call runs to completion or stops at timeout_sec; there is no background task lifecycle. intent is one of auto (the default) or request_effect. In auto mode an observation-only run returns its actual exit status and output, including failed writes; auto never authorizes an effect. Use intent=request_effect when the command needs persistent writes or network effects: the configured Gate decides permission before effect execution. A nonzero exit alone is not a permission request. A completed tool call means the command ran: read ok and status for its result. For checks, prefer argv so the checked program supplies the exit status. Shell pipelines normally report the last stage; use bash with -o pipefail when an earlier stage's failure must survive a pipe to tail or tee. Do not repeat a write just because its output was truncated.",
+      "executor": "shell_ir",
+      "backend": "sandbox_process",
+      "sandbox": "backend_selected",
+      "runtime_handler": "tool_execute",
+      "execution": "serial",
+      "tool_kind": "atomic",
+      "composable_output": {
+        "kind": "json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "status": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "integer"
+                },
+                "signal": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "string"
+            },
+            "output_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "stdout_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "stderr_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "output_completeness": {
+              "type": "string"
+            },
+            "typed": {
+              "type": "boolean"
+            },
+            "execution_time_ms": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "status",
+            "typed",
+            "execution_time_ms"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "receipt_labels": {
+        "descriptor_id": "agent.execute",
+        "capability_id": "tool_execute",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Execute",
+        "canonical_name": "tool_execute",
+        "executor": "shell_ir",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_execute",
+        "execution": "serial",
+        "composable_output": "opaque",
+        "input_schema_source": "descriptor_owned"
+      },
+      "eval_tags": [],
+      "readonly": null,
+      "cwd_scope": "keeper_sandbox",
+      "polling_read": false,
+      "status": {
+        "kind": "exit",
+        "code": 0
+      },
+      "sandbox_profile": "remote_ssh",
+      "via": "remote_ssh",
+      "command": "[REDACTED]",
+      "tool_name": "Execute"
+    },
+    "agent_name": "native-bootstrap-keeper",
+    "model": "runtime",
+    "runtime_profile": "ollama_cloud.deepseek-v4.1-flash",
+    "turn_kind": "direct",
+    "lane": "tool_optional",
+    "prompt_fingerprint": "f6f9b6833bf64e74ec3517e1d6498ff5782ffb2757d313c6ef1d12ed53cd96fe",
+    "execution_id": "exec-1792939690253-0007",
+    "tool_observation": {
+      "attribution": {
+        "kind": "pathless"
+      },
+      "turn_ref": "trace-1792939687301-00000#1",
+      "declared_progress": null
+    },
+    "physical_execution_id": "exec-1792939690253-0007",
+    "tool_use_id": "ssh-file-0-6",
+    "planned_index": 0,
+    "batch_index": 0,
+    "batch_size": 1,
+    "execution_mode": "serial",
+    "wire_outcome": "ok",
+    "disposition": "completed",
+    "execution_evidence": {
+      "shim_execution_evidence": {
+        "status": "recorded",
+        "receipts": [
+          {
+            "status": "observed",
+            "receipt": {
+              "mode": "effect",
+              "plan": "unrestricted",
+              "boundary": "sandbox_applied"
+            },
+            "outcome": {
+              "exit": 0,
+              "signal": null,
+              "timed_out": false,
+              "shim_error": false
+            }
+          }
+        ]
+      },
+      "compared_output_bytes": 494,
+      "handler_stored": false,
+      "output_completeness": "capture_only",
+      "requested_sandbox": "remote_ssh",
+      "via": "remote_ssh",
+      "sandbox_profile": "remote_ssh",
+      "remote_endpoint": "proof",
+      "remote_host": "127.0.0.1"
+    },
+    "trace_id": "trace-1792939687301-00000",
+    "session_id": "trace-1792939687301-00000",
+    "turn": 6,
+    "keeper_turn_id": 1,
+    "sandbox_profile": "remote_ssh",
+    "network_mode": "inherit",
+    "result_bytes": 959,
+    "input_fingerprint": "cf300e687ad491dd312ea359c5adabbe5346559afe4900d37dd3a7edc24a4c37",
+    "output_fingerprint": "ccc8af4b7bd2a03ed132526609503e08a4a71a6e028ebcae1cf885d7d336f577"
+  },
+  {
+    "ts": 1792939703.530096,
+    "record_kind": "tool_call",
+    "keeper": "native-bootstrap-keeper",
+    "tool": "Read",
+    "input": {
+      "file_path": "notes.txt"
+    },
+    "output": "{\"ok\":true,\"path\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt\",\"bytes\":6,\"truncated\":false,\"offset\":1,\"returned_lines\":1,\"content\":\"after\\n\",\"via\":\"remote_ssh\"}",
+    "duration_ms": 90.35301208496094,
+    "runtime_contract": {
+      "keeper_name": "native-bootstrap-keeper",
+      "trace_id": "trace-1792939687301-00000",
+      "session_id": "trace-1792939687301-00000",
+      "keeper_turn_id": 2,
+      "task_id": null,
+      "goal_ids": [],
+      "sandbox_profile": "remote_ssh",
+      "sandbox_root": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+      "sandbox_roots": [
+        ".masc/playground/native-bootstrap-keeper/"
+      ],
+      "path_resolution": {
+        "read_implicit_cwd": false,
+        "read_explicit_cwd_supported": true,
+        "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+        "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+        "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+        "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+      },
+      "network_mode": "inherit",
+      "runtime_profile": "ollama_cloud.deepseek-v4.1-flash"
+    },
+    "action_radius": {
+      "tool_name": "Read",
+      "action_key": "Read",
+      "target_kind": "path",
+      "target_path": "notes.txt",
+      "sandbox_target": "remote_ssh",
+      "observed_paths": [
+        "notes.txt"
+      ],
+      "duration_ms": 90.35301208496094,
+      "error": null
+    },
+    "route_evidence": {
+      "descriptor_id": "agent.read_file",
+      "capability_id": "tool_read_file",
+      "keeper_model_projection": "preferred_public_name",
+      "public_name": "Read",
+      "canonical_name": "tool_read_file",
+      "description": "Read one existing file, or a line range of one file, from the keeper sandbox or an allowed path with no implicit cwd. Read targets a single FILE; to list a directory use the Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read never inherits Execute cwd. For a line range, pass offset (1-based line) and limit (max lines) \u2014 do not run sed -n via Execute for this. The payload carries the exact current bytes (no line numbers) plus offset, returned_lines, truncated; when truncated=true a next_offset field gives the next line offset. If last_line_partial=true, the byte budget cut inside the final returned line and next_offset intentionally skips that line's unseen remainder rather than continuing byte-for-byte. Before Edit, Read the target region so old_string matches current bytes.",
+      "executor": "filesystem",
+      "backend": "sandbox_process",
+      "sandbox": "backend_selected",
+      "runtime_handler": "tool_read_file",
+      "execution": "concurrent",
+      "tool_kind": "atomic",
+      "composable_output": {
+        "kind": "json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "offset": {
+              "type": "integer"
+            },
+            "returned_lines": {
+              "type": "integer"
+            },
+            "content": {
+              "type": "string"
+            },
+            "next_offset": {
+              "type": "integer"
+            },
+            "last_line_partial": {
+              "type": "boolean"
+            },
+            "file_bytes": {
+              "type": "integer"
+            },
+            "via": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ok",
+            "path",
+            "bytes",
+            "truncated",
+            "offset",
+            "returned_lines",
+            "content"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "receipt_labels": {
+        "descriptor_id": "agent.read_file",
+        "capability_id": "tool_read_file",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Read",
+        "canonical_name": "tool_read_file",
+        "executor": "filesystem",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_read_file",
+        "execution": "concurrent",
+        "composable_output": "opaque",
+        "input_schema_source": "canonical_registry"
+      },
+      "eval_tags": [],
+      "readonly": true,
+      "cwd_scope": "keeper_sandbox",
+      "polling_read": false,
+      "via": "remote_ssh",
+      "tool_name": "Read"
+    },
+    "agent_name": "native-bootstrap-keeper",
+    "model": "runtime",
+    "runtime_profile": "ollama_cloud.deepseek-v4.1-flash",
+    "turn_kind": "direct",
+    "lane": "tool_optional",
+    "prompt_fingerprint": "6224f915d1d2ba3ed9da03a61d6281b1c715c0444e50e0db2adb353a61d73dde",
+    "execution_id": "exec-1792939703515-0001",
+    "tool_observation": {
+      "attribution": {
+        "kind": "unaddressed",
+        "reason": {
+          "kind": "checkout_unavailable",
+          "detail": null
+        },
+        "attempted_path": "/private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/playground/native-bootstrap-keeper/notes.txt"
+      },
+      "turn_ref": "trace-1792939687301-00000#2",
+      "declared_progress": null
+    },
+    "physical_execution_id": "exec-1792939703515-0001",
+    "tool_use_id": "ssh-file-restart-0",
+    "planned_index": 0,
+    "batch_index": 0,
+    "batch_size": 1,
+    "execution_mode": "concurrent",
+    "wire_outcome": "ok",
+    "disposition": "completed",
+    "trace_id": "trace-1792939687301-00000",
+    "session_id": "trace-1792939687301-00000",
+    "turn": 8,
+    "keeper_turn_id": 2,
+    "sandbox_profile": "remote_ssh",
+    "network_mode": "inherit",
+    "result_bytes": 177,
+    "input_fingerprint": "d9b9ad004ba3ae47915772846d236f6d997507cecd8091dddda04d9fa580dc4f",
+    "output_fingerprint": "4670075351d6c30cba21d55e94eb2437896d229e7f72d8f1cbfab36961cd614f"
+  },
+  {
+    "ts": 1792939703.903369,
+    "record_kind": "tool_call",
+    "keeper": "native-bootstrap-keeper",
+    "tool": "Execute",
+    "input": {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib,json,os,subprocess; from pathlib import Path; p=json.loads(Path(\"ssh-proof.json\").read_bytes()); b=Path(\"notes.txt\").read_bytes(); assert b==b\"after\\n\"; p.update(notes=b.decode(),sha256=hashlib.sha256(b).hexdigest(),files=sorted(os.listdir(\".\")),bootstrap_env=os.environ.get(\"BOOTSTRAP_PROOF_ENV\"),bootstrap_tool=subprocess.check_output([\"bootstrap-proof-tool\"],text=True).strip(),retained_sha256=hashlib.sha256(Path(\"retained file.bin\").read_bytes()).hexdigest()); assert p[\"bootstrap_env\"]==\"bootstrap-environment-preserved\",p; assert p[\"bootstrap_tool\"]==\"bootstrap-tool-preserved\",p; assert p[\"retained_sha256\"]==\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\",p; print(json.dumps(p))"
+      ]
+    },
+    "output": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"execution_location\":{\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"b8e1b7b5a00e42b78bce74a41e158ba7\\\", \\\"cwd\\\": \\\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\\\", \\\"hostname\\\": \\\"7c0b77a2fd78\\\", \\\"uid\\\": 1000, \\\"bootstrap_env\\\": \\\"bootstrap-environment-preserved\\\", \\\"bootstrap_tool\\\": \\\"bootstrap-tool-preserved\\\", \\\"retained_sha256\\\": \\\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\\\", \\\"notes\\\": \\\"after\\\\n\\\", \\\"sha256\\\": \\\"7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919\\\", \\\"files\\\": [\\\"notes.txt\\\", \\\"retained file.bin\\\", \\\"ssh-proof.json\\\"]}\\n\",\"typed\":true,\"execution_time_ms\":316}",
+    "duration_ms": 330.4150104522705,
+    "runtime_contract": {
+      "keeper_name": "native-bootstrap-keeper",
+      "trace_id": "trace-1792939687301-00000",
+      "session_id": "trace-1792939687301-00000",
+      "keeper_turn_id": 2,
+      "task_id": null,
+      "goal_ids": [],
+      "sandbox_profile": "remote_ssh",
+      "sandbox_root": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+      "sandbox_roots": [
+        ".masc/playground/native-bootstrap-keeper/"
+      ],
+      "path_resolution": {
+        "read_implicit_cwd": false,
+        "read_explicit_cwd_supported": true,
+        "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+        "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+        "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+        "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+      },
+      "network_mode": "inherit",
+      "runtime_profile": "ollama_cloud.deepseek-v4.1-flash"
+    },
+    "action_radius": {
+      "tool_name": "Execute",
+      "action_key": "Execute",
+      "target_kind": "tool",
+      "target_path": null,
+      "sandbox_target": "remote_ssh",
+      "observed_paths": [],
+      "duration_ms": 330.4150104522705,
+      "error": null
+    },
+    "route_evidence": {
+      "descriptor_id": "agent.execute",
+      "capability_id": "tool_execute",
+      "keeper_model_projection": "preferred_public_name",
+      "public_name": "Execute",
+      "canonical_name": "tool_execute",
+      "description": "Run one command inside the Keeper sandbox. Give exactly one of argv or command: argv is one non-empty argv process vector run without a shell, tokens verbatim, and command is one line handed to a real shell. cwd is a relative path inside the path jail, and MASC never interprets program or subcommand meaning. A call runs to completion or stops at timeout_sec; there is no background task lifecycle. intent is one of auto (the default) or request_effect. In auto mode an observation-only run returns its actual exit status and output, including failed writes; auto never authorizes an effect. Use intent=request_effect when the command needs persistent writes or network effects: the configured Gate decides permission before effect execution. A nonzero exit alone is not a permission request. A completed tool call means the command ran: read ok and status for its result. For checks, prefer argv so the checked program supplies the exit status. Shell pipelines normally report the last stage; use bash with -o pipefail when an earlier stage's failure must survive a pipe to tail or tee. Do not repeat a write just because its output was truncated.",
+      "executor": "shell_ir",
+      "backend": "sandbox_process",
+      "sandbox": "backend_selected",
+      "runtime_handler": "tool_execute",
+      "execution": "serial",
+      "tool_kind": "atomic",
+      "composable_output": {
+        "kind": "json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "status": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "integer"
+                },
+                "signal": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            "output": {
+              "type": "string"
+            },
+            "output_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "stdout_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "stderr_artifact": {
+              "type": "object",
+              "properties": {
+                "_blob": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "mime",
+                    "preview"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "_blob"
+              ],
+              "additionalProperties": false
+            },
+            "output_completeness": {
+              "type": "string"
+            },
+            "typed": {
+              "type": "boolean"
+            },
+            "execution_time_ms": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "ok",
+            "status",
+            "typed",
+            "execution_time_ms"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "receipt_labels": {
+        "descriptor_id": "agent.execute",
+        "capability_id": "tool_execute",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Execute",
+        "canonical_name": "tool_execute",
+        "executor": "shell_ir",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_execute",
+        "execution": "serial",
+        "composable_output": "opaque",
+        "input_schema_source": "descriptor_owned"
+      },
+      "eval_tags": [],
+      "readonly": null,
+      "cwd_scope": "keeper_sandbox",
+      "polling_read": false,
+      "status": {
+        "kind": "exit",
+        "code": 0
+      },
+      "sandbox_profile": "remote_ssh",
+      "via": "remote_ssh",
+      "command": "[REDACTED]",
+      "tool_name": "Execute"
+    },
+    "agent_name": "native-bootstrap-keeper",
+    "model": "runtime",
+    "runtime_profile": "ollama_cloud.deepseek-v4.1-flash",
+    "turn_kind": "direct",
+    "lane": "tool_optional",
+    "prompt_fingerprint": "6224f915d1d2ba3ed9da03a61d6281b1c715c0444e50e0db2adb353a61d73dde",
+    "execution_id": "exec-1792939703903-0002",
+    "tool_observation": {
+      "attribution": {
+        "kind": "pathless"
+      },
+      "turn_ref": "trace-1792939687301-00000#2",
+      "declared_progress": null
+    },
+    "physical_execution_id": "exec-1792939703903-0002",
+    "tool_use_id": "ssh-file-restart-1",
+    "planned_index": 0,
+    "batch_index": 0,
+    "batch_size": 1,
+    "execution_mode": "serial",
+    "wire_outcome": "ok",
+    "disposition": "completed",
+    "execution_evidence": {
+      "shim_execution_evidence": {
+        "status": "recorded",
+        "receipts": [
+          {
+            "status": "observed",
+            "receipt": {
+              "mode": "effect",
+              "plan": "unrestricted",
+              "boundary": "sandbox_applied"
+            },
+            "outcome": {
+              "exit": 0,
+              "signal": null,
+              "timed_out": false,
+              "shim_error": false
+            }
+          }
+        ]
+      },
+      "compared_output_bytes": 494,
+      "handler_stored": false,
+      "output_completeness": "capture_only",
+      "requested_sandbox": "remote_ssh",
+      "via": "remote_ssh",
+      "sandbox_profile": "remote_ssh",
+      "remote_endpoint": "proof",
+      "remote_host": "127.0.0.1"
+    },
+    "trace_id": "trace-1792939687301-00000",
+    "session_id": "trace-1792939687301-00000",
+    "turn": 9,
+    "keeper_turn_id": 2,
+    "sandbox_profile": "remote_ssh",
+    "network_mode": "inherit",
+    "result_bytes": 959,
+    "input_fingerprint": "cf300e687ad491dd312ea359c5adabbe5346559afe4900d37dd3a7edc24a4c37",
+    "output_fingerprint": "ccc8af4b7bd2a03ed132526609503e08a4a71a6e028ebcae1cf885d7d336f577"
+  }
+]

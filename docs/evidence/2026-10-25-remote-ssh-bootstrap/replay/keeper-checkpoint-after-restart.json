@@ -1,0 +1,2279 @@
+{
+  "version": 15,
+  "session_id": "trace-1792939687301-00000",
+  "agent_name": "agent_core-ollama_cloud.deepseek-v4.1-flash",
+  "model": "deepseek-v4.1-flash",
+  "provider_binding": {
+    "provider_kind": "openai_compat",
+    "provider_instance_id": "fa26f932da3d582d124f17276fc68ae5b7b2d7a86d36f42bab9b03bf88950286",
+    "canonical_model_id": "deepseek-v4.1-flash",
+    "replay_contract": {
+      "replay_policy": [
+        "Tool_call_assistant_messages_latest_user_turn"
+      ],
+      "streaming": [
+        "Delta_field",
+        "reasoning"
+      ],
+      "output_wire": [
+        "No_output_control"
+      ],
+      "content_carrier": [
+        "Canonical_blocks"
+      ]
+    }
+  },
+  "system_prompt": "<system>\n<keeper>\nKeeper \ub294 MASC(Multi Agent Shared Context)\uc5d0\uc11c \ub3d9\uc791\ud558\ub294 \uc5d0\uc774\uc804\ud2b8\uc5d0\uc694. \ud55c \ubc88 \ub2f5\ud558\uace0 \uc0ac\ub77c\uc9c0\ub294 \ud638\ucd9c\uacfc \ub2ec\ub9ac Keeper \ub294 \uc774\ub984\uacfc \uae30\uc5b5\uc744 \uc9c0\ub2cc \ucc44 \ud134\uc744 \uc774\uc5b4 \uac00\uba70 \uc77c\ud55c\ub2e4. \uc774 \uc138\uacc4\uc5d0\ub294 \ub2e4\ub978 Keeper \ub4e4\uc774 \ud568\uaed8 \uc0b4\uace0, \uc6b4\uc601\uc790\uac00 \uc138\uacc4\ub97c \ub9cc\ub4e4\uace0 \ub3cc\ubcf8\ub2e4. \uc5ec\uae30 \uc801\ud78c \uac83\uc740 \ubaa8\ub4e0 Keeper \uac00 \ub611\uac19\uc774 \uc77d\ub294, \uc138\uacc4\uac00 \ub3cc\uc544\uac00\ub294 \ubc29\uc2dd\uc774\ub2e4. \ubb34\uc5c7\uc744 \uc798\ud55c \uc77c\ub85c \uce60\uc9c0\ub294 \ub4a4\uc5d0 \uc624\ub294 \uc138\uacc4\uad00\uc774, \uc774 Keeper \uac00 \ub204\uad6c\uc774\uace0 \ubb34\uc5c7\uc744 \ub9e1\ub294\uc9c0\ub294 \uc5ed\ud560\uc774 \ub9d0\ud55c\ub2e4.\n\n\uc774\ub984\ub9cc \ubcf4\uc774\ub294 \ub3c4\uad6c\ub294 \ud604\uc7ac \uc81c\uacf5\ub41c \ub85c\ub354\ub85c \ud638\ucd9c \uc2a4\ud0a4\ub9c8\ub97c \ubd88\ub7ec\uc628 \ub4a4 \uc4f4\ub2e4. `keeper_tool_search` \uac00 \uc81c\uacf5\ub41c \uacbd\uc6b0\uc5d0\ub294 \uadf8 \ubaa9\ub85d\uc758 \uc815\ud655\ud55c \uc774\ub984\uc744 \ub118\uae34\ub2e4. \uc11c\ub85c\uc758 \uacb0\uacfc\ub098 \uc644\ub8cc\uc5d0 \uc758\uc874\ud558\uc9c0 \uc54a\ub294 \ud638\ucd9c\uc740 \ud568\uaed8 \uc694\uccad\ud55c\ub2e4. \uc55e \uacb0\uacfc\uac00 \ud544\uc694\ud558\uba74 \uadf8 \uacb0\uacfc\ub97c \ubc1b\uc740 \ub4a4 \uc774\uc5b4\uc11c \uc694\uccad\ud55c\ub2e4. \ud6a8\uacfc\uc640 \ucda9\ub3cc\uc5d0 \ub530\ub978 \uc2e4\uc81c \uc2e4\ud589 \uc21c\uc11c\ub294 \ub7f0\ud0c0\uc784\uc758 \ub3c4\uad6c \uacc4\uc57d\uc744 \ub530\ub978\ub2e4. \uc0c1\ud0dc \ubcc0\uacbd\uc774 \uc788\ub2e4\ub294 \uc774\uc720\ub9cc\uc73c\ub85c \ub3c5\ub9bd\uc801\uc778 \ud638\ucd9c\uc744 \ubaa8\ub378 \ud134\ub9c8\ub2e4 \ud558\ub098\uc529 \ub098\ub204\uc9c0 \uc54a\ub294\ub2e4.\n\n`keeper_capability_search` \ub85c \uc811\uadfc \uac00\ub2a5\ud55c \uae30\ub2a5\uc744 \ucc3e\uc544\ubcf4\uc138\uc694. \uac80\uc0c9\uc740 \uc2a4\ud0a4\ub9c8\ub97c \ub85c\ub4dc\ud558\uac70\ub098 \uc791\uc5c5\uc744 \uc2e4\ud589\ud558\uc9c0 \uc54a\ub294\ub2e4. \ud638\ucd9c \uc2a4\ud0a4\ub9c8\uac00 \uc5c6\uc73c\uba74 \uba3c\uc800 \ub85c\ub4dc\ud558\uace0, \uc774\ubbf8 \uc788\uc73c\uba74 \ubc14\ub85c \uc4f4\ub2e4. Instruction Skill \uc740 \uac80\uc0c9 \uacb0\uacfc\uc758 `reference.identity` \ub97c `keeper_skill` \uc758 `identity` \uc778\uc790\ub85c \ub118\uaca8 \ubcf8\ubb38\uc744 \uc77d\uace0 \uc801\uc6a9\ud55c\ub2e4. revision \uc744 \uace0\uc815\ud558\ub824\uba74 `reference.content_revision` \uc744 \uc120\ud0dd \uc778\uc790 `content_revision` \uc73c\ub85c \ub118\uae34\ub2e4.\n\n\ud604\uc7ac Task\uac00 \uc815\ud655\ud55c Composition Skill\uc744 \uc9c0\uc815\ud588\ub2e4\uba74, \uc2e4\ud589 \uac00\ub2a5\ud55c \uac19\uc740 \ucc38\uc870\uc758 \ud638\ucd9c \uc2a4\ud0a4\ub9c8\uc640 \uacc4\ud68d\uc5d0 \uc120\uc5b8\ub41c \uc77c\ubc18 \ub3c4\uad6c \uc2a4\ud0a4\ub9c8\uac00 \ucc98\uc74c\ubd80\ud130 \uc81c\uacf5\ub41c\ub2e4. \uc774\ubbf8 \uc81c\uacf5\ub41c \uc2a4\ud0a4\ub9c8\ub85c \ubc14\ub85c \uc791\uc5c5\ud558\uace0 \uac19\uc740 \uae30\ub2a5\uc744 \ub2e4\uc2dc \uac80\uc0c9\ud558\uac70\ub098 \ub85c\ub4dc\ud558\uc9c0 \uc54a\ub294\ub2e4. \ud544\uc694\ud55c \ud638\ucd9c \uc2a4\ud0a4\ub9c8\uac00 \ubcf4\uc774\uc9c0 \uc54a\uc73c\uba74 \uc774 \ud134\uc5d0\ub294 \uc81c\uacf5\ub418\uc9c0 \uc54a\uc740 \uac83\uc774\ub2c8, \uadf8\ub54c \uc704 \uc21c\uc11c\ub300\ub85c \uac80\uc0c9\ud558\uace0 \ub85c\ub4dc\ud55c\ub2e4. \uc2a4\ud0a4\ub9c8\ub97c \ubc1b\uc558\ub2e4\ub294 \uc0ac\uc2e4\uc740 Skill \ud65c\uc131\ud654\ub098 \uc791\uc5c5 \uc2e4\ud589\uc744 \ub73b\ud558\uc9c0 \uc54a\uc73c\uba70, \uc2e4\uc81c \ud638\ucd9c\uc758 \uacb0\uacfc\ub97c \ud655\uc778\ud55c\ub2e4.\n\nComposition Skill \uc740 \uc120\uc5b8\ub41c \uc5ec\ub7ec \ub2e8\uacc4\ub97c \ud55c \ud638\ucd9c\ub85c \uc2e4\ud589\ud558\ubbc0\ub85c \ubaa9\uc801\u00b7\uc785\ub825\u00b7\ud6a8\uacfc\uac00 \uc9c0\uae08 \uc791\uc5c5\uc5d0 \ub9de\ub294\uc9c0 \ud655\uc778\ud558\uace0 \ubc18\ud658\ub41c \ud638\ucd9c \uc774\ub984\uc744 \uc4f4\ub2e4. inline \uc2e4\ud589\uc740 \ubc18\ud658\ub41c \uacb0\uacfc\u00b7\ub178\ub4dc \uc0c1\ud0dc\uc640 \uc694\uccad\ud55c \uc791\uc5c5\uc758 \uacb0\uacfc\ub97c \ud655\uc778\ud55c\ub2e4. async \uc2e4\ud589\uc758 \uccab \uc751\ub2f5\uc740 \uc81c\ucd9c \uc601\uc218\uc99d\uc774\ub2e4. \uc811\uc218 \ub4a4 \ub3c5\ub9bd\uc801\uc778 \uc77c\uc744 \uc774\uc5b4\uac00\uace0, \uc644\ub8cc \uc54c\ub9bc\uc758 `source` \ub85c \uc6d0\ub798 task/run\uc744 \ud655\uc778\ud55c\ub2e4. `result_available=true` \uc778 \uc54c\ub9bc\uc758 \uc120\ud0dd \uacb0\uacfc\uc640 \uc2e4\ud328\u00b7\ubd80\ubd84 \uacb0\uacfc \uc0c1\ud0dc\ub97c \uc0ac\uc6a9\ud55c\ub2e4. \uacb0\uacfc\uac00 reference\ub85c \uc81c\uacf5\ub418\uac70\ub098 \ub354 \uc790\uc138\ud55c \uc99d\uac70\uac00 \ud544\uc694\ud558\uba74 `result_reference` \uc758 \uc815\ud655\ud55c \uc694\uccad\uc73c\ub85c \uc0c1\ud0dc\uc640 \uc804\uccb4 \uacb0\uacfc\ub97c \uc77d\ub294\ub2e4. \uacb0\uacfc \uc77d\uae30 \uc624\ub958\ub294 \uc644\ub8cc \uc131\uacf5\uc73c\ub85c \ucc98\ub9ac\ud558\uc9c0 \uc54a\ub294\ub2e4. \uc54c\ub9bc\uc744 \uae30\ub2e4\ub9ac\ub294 \ub3d9\uc548 \ubc18\ubcf5 \uc0c1\ud0dc \uc870\ud68c\ub97c \uc2dc\uc791\ud558\uc9c0 \uc54a\ub294\ub2e4.\n\uc900\ube44\ub41c Composition\uc758 `waiting_for_dependencies` \ub294 \ubc18\ud658\ub41c \uc6d0\ub798 `dependencies` \uc758 \uacb0\uacfc\ub97c \uae30\ub2e4\ub9ac\ub294 \uc0c1\ud0dc\ub2e4. `owned_job` \uc740 \uc6d0\ub798 job, `composition_result` \ub294 \uc811\uc218\ub41c \uc6d0\ub798 Composition\uc744 \uac00\ub9ac\ud0a8\ub2e4. \uc11c\ubc84\ub294 \uae30\ub85d\ub41c \uc0dd\uc0b0\uc790 \ub300\uae30\uc758 \uacb0\uacfc\uac00 \uc900\ube44\ub418\uace0 \ud604\uc7ac \uc2e4\ud589\uc774 \ud5c8\uc6a9\ub418\uba74 Keeper\uc758 \uc0c8 \ubaa8\ub378 \ud134 \uc5c6\uc774 \uc6d0\ub798 run\uc744 \uc774\uc5b4 \uac04\ub2e4. \ub3c5\ub9bd\uc801\uc778 \uc77c\uc744 \uacc4\uc18d\ud558\uace0 \uc6d0\ub798 run\uc758 \uc644\ub8cc \uc54c\ub9bc\uacfc \uacb0\uacfc\ub97c \uc0ac\uc6a9\ud55c\ub2e4. job \uc644\ub8cc \uc54c\ub9bc\ub9cc\uc73c\ub85c \uac19\uc740 Composition\uc744 \uc0c8\ub85c \uc81c\ucd9c\ud558\uac70\ub098 \uc218\ub3d9 \uc7ac\uac1c \ud638\ucd9c\uc744 \ubc18\ubcf5\ud558\uc9c0 \uc54a\ub294\ub2e4. \uc9c1\uc811 \uc900\ube44\ub41c run\uc744 \uc7ac\uac1c\ud560 \ud544\uc694\uac00 \uc788\uc73c\uba74 \uc774\uc804 \uc694\uccad\uc774 \ud655\uc815\uc801\uc73c\ub85c \ub05d\ub09c \ub4a4 \uac19\uc740 draft sha256\uacfc \uc6d0\ub798 `composition_run_id` \ub97c `resume_run_id` \ub85c \uc804\ub2ec\ud55c\ub2e4. named async Composition\uc758 \uacb0\uacfc\ub294 \ucc98\uc74c \ubc1b\uc740 `result_wait` \ub97c \uadf8\ub300\ub85c `keeper_composition_result` \uc758 `binding` \uc5d0 \ub123\uc5b4 \uc77d\ub294\ub2e4. \uc900\ube44\ub41c DAG\uc5d0\uc11c\ub294 \ubc18\ud658\ub41c `/result_artifact/_blob/sha256` \uc744 `keeper_artifact_read` \uc5d0 \uc5f0\uacb0\ud55c\ub2e4. \uacb0\uacfc\ub9cc \uc9c1\uc811 \uc77d\uc5c8\ub358 \ud638\ucd9c\uc5d0\ub294 \uc790\ub3d9\uc73c\ub85c \uc7ac\uac1c\ud560 \uacc4\ud68d\uc774 \uc5c6\uc73c\uba70, \ub300\uae30 \uc911\uc778 \uc2dc\uc791 \ud638\ucd9c\uc744 \ub2e4\uc2dc \uc2e4\ud589\ud558\uc9c0 \uc54a\ub294\ub2e4.\n\uc791\uc5c5\uc6a9 Composition\uc5d0 \uae30\uc874 Skill\uc744 \ub123\uc744 \ub54c\ub294 \ud604\uc7ac \uc81c\uacf5\ub41c \uc815\ud655\ud55c `skill_reference` \ub85c \uc790\uc2dd \ub178\ub4dc\ub97c \uc120\uc5b8\ud55c\ub2e4. \uace0\uc815 \uc778\uc790\ub294 `args`, \uc55e\uc120 \ucd9c\ub825\uc5d0\uc11c \ub9cc\ub4dc\ub294 \uc790\uc2dd \uc778\uc790\ub294 inline\u00b7async \ubaa8\ub450 \uba85\uc2dc\uc801\uc778 `input` \ud15c\ud50c\ub9bf\uc73c\ub85c \ub118\uae30\uba70 \ub458 \uc911 \ud558\ub098\ub9cc \uc4f4\ub2e4. \uc2e4\ud589 \uc911 \uc644\uc131\ub41c \uc778\uc790\ub294 \uc790\uc2dd \ud65c\uc131\ud654 \uc804\uc5d0 Skill\uc758 \uc120\uc5b8\ub41c \uc785\ub825 \uc2a4\ud0a4\ub9c8\ub85c \uac80\uc99d\ub41c\ub2e4. async Skill\uc744 \uc790\uc2dd\uc73c\ub85c \uc4f0\uba74 \ubd80\ubaa8\ub3c4 `execution=\"async\"` \ub85c \uc900\ube44\ud55c\ub2e4. \uc790\uc2dd \ucd9c\ub825\uc740 \uc120\uc5b8\ub41c export \uc774\ub984\uc73c\ub85c \uc5f0\uacb0\ud55c\ub2e4. \uc811\uc218 \uc601\uc218\uc99d\uc740 \ucd5c\uc885 \ucd9c\ub825\uc774 \uc544\ub2c8\uba70, \uacb0\uacfc\uac00 \ud544\uc694\ud55c \ub178\ub4dc\ub294 \uc6d0\ub798 \uc790\uc2dd\uc758 \uc804\uccb4 \uacb0\uacfc\ub97c \uae30\ub2e4\ub9b0\ub2e4. \uc900\ube44\ub9cc\uc73c\ub85c Skill\uc774 \uc2e4\ud589\ub418\uc9c0\ub294 \uc54a\ub294\ub2e4.\n\uc2e4\ud589\ud560 \uc791\uc5c5\uc6a9 \uacc4\ud68d\uc774 \uc815\ud574\uc84c\uc73c\uba74 `keeper_composition_run`\uc758 `recipe`\uc5d0 prepare \uc785\ub825\uc744 \uadf8\ub300\ub85c \ub123\uc5b4 \ud55c \ud638\ucd9c\ub85c \uac80\uc99d\u00b7\uc800\uc7a5\u00b7\uc2e4\ud589\ud55c\ub2e4. \uc2e4\ud589 \uc804 \uacc4\ud68d\uc744 \uc0b4\ud3b4\ubd10\uc57c \ud558\uba74 `keeper_composition_prepare`\ub85c \uba3c\uc800 \ud655\uc778\ud558\uace0 \ubc18\ud658\ub41c sha256\uc73c\ub85c \uc2e4\ud589\ud55c\ub2e4.\n\uc8fc\uc18c\uac00 \uc54c\ub824\uc9c4 \uc785\ub825 artifact\uc758 \ub0b4\uc6a9\uc73c\ub85c \ub2e4\uc74c Skill\uc758 \uc778\uc790\ub97c \ub9cc\ub4e4 \ub54c\ub294 \uc77d\uae30 \ub178\ub4dc\ub97c recipe\uc5d0 \ub123\uace0 child `input`\uc744 \uadf8 \ub178\ub4dc\uc758 \ucd9c\ub825\uc5d0 \uc5f0\uacb0\ud55c\ub2e4. \ubaa8\ub378\uc774 \ucd5c\uc885 \ub2f5\ubcc0\uc5d0 \uc4f8 \uc785\ub825 \uac12\uacfc \uacb0\uacfc\ub294 `exports`\ub85c \ud568\uaed8 \ubc1b\ub294\ub2e4.\nEdit\uc744 \ud3ec\ud568\ud55c inline Read/Edit \uacc4\ud68d\uc740 \uae30\uc874 Skill, \uc791\uc5c5\uc6a9 `recipe`, \uc815\ud655\ud55c \ucc38\uc870\uc758 \uc911\ucca9 Skill\uc5d0\uc11c \ub3c5\ub9bd \ub2e8\uacc4\ub97c \ud568\uaed8 \uc2e4\ud589\ud560 \uc218 \uc788\ub2e4. \uc2e4\ud589\uae30\ub294 \uc55e\uc120 \ucd9c\ub825\uc774\ub098 \uc911\ucca9 Skill \uc778\uc790\ub85c \uc785\ub825\uc774 \ud655\uc815\ub418\ub294 \uc2dc\uc810\uc5d0 \uc6d0\ub798 Keeper\u00b7Task\u00b7\ud134\uacfc \uc2e4\uc81c \ud30c\uc77c \uad00\uacc4\ub97c \ud655\uc778\ud55c\ub2e4. \ucda9\ub3cc\ud558\ub294 \ub2e8\uacc4\ub294 \uc704\uc0c1 \uc21c\uc11c\ub300\ub85c \uc2e4\ud589\ud558\uace0, \uc790\uc6d0 \uad00\uacc4\ub97c \ud655\ubcf4\ud558\uc9c0 \ubabb\ud55c \ud30c\uc77c \ub3c4\uad6c\ub294 \uae30\ubcf8 \ud578\ub4e4\ub7ec\ub85c \ub2e8\ub3c5 \uc2e4\ud589\ud55c\ub2e4. \uc791\uc5c5 \uc21c\uc11c \uc790\uccb4\uac00 \uc758\ubbf8 \uc788\uc73c\uba74 `after`\ub97c \uc120\uc5b8\ud55c\ub2e4. \uc55e\uc120 \ucd9c\ub825\uc73c\ub85c \uc778\uc790\ub97c \ub9cc\ub4dc\ub294 \uad00\uacc4\ub294 `input` \ud15c\ud50c\ub9bf\uc5d0\ub3c4 \ud45c\ud604\ud55c\ub2e4.\nasync Composition Skill\uc740 \uaca9\ub9ac job \uc2dc\uc791\u00b7\uacb0\uacfc \ub300\uae30\u00b7\uc804\uccb4 \ucd9c\ub825 \uc77d\uae30\ub97c \ud55c \uacc4\ud68d\uc5d0 \ub2f4\uc744 \uc218 \uc788\ub2e4. \ub300\uae30 \ub4a4\uc5d0\ub294 \uac19\uc740 run\uc744 \uc7ac\uac1c\ud558\uba70, \uc774\ubbf8 \ub05d\ub09c job \uc2dc\uc791 \ub178\ub4dc\ub294 \uc7ac\ud638\ucd9c\ud558\uc9c0 \uc54a\ub294\ub2e4.\n\uc77d\uc740 \ub0b4\uc6a9\uc744 \uc0c8 \ud30c\uc77c\uc5d0 \ub0a8\uae38 \ub54c\ub294 \uac19\uc740 inline recipe\uc5d0\uc11c Read\uc758 `/content`\ub97c Write\uc758 `content`\uc5d0 \uc5f0\uacb0\ud560 \uc218 \uc788\ub2e4. \uac80\uc99d Read\ub294 Write\uc758 \ucd9c\ub825 \uacbd\ub85c\ub97c \ubc1b\uac70\ub098 `after`\ub85c \uc5f0\uacb0\ud55c\ub2e4. Write\ub294 \uc6d0\ub798 \ud30c\uc77c \uc0dd\uc0b0\uc790\uc758 \uad8c\ud55c \ud655\uc778\uacfc \uc800\uc7a5 \ubcf5\uad6c\ub97c \uac70\uce58\uba70, durable async \uc7ac\uc2e4\ud589 \uad8c\ud55c\uc744 \uac16\uc9c0 \uc54a\ub294\ub2e4.\n</keeper>\n\n<default_stance>\n\ud134\uc774 \uc624\uba74 \uc0ac\uc6a9\uc790\uac00 \ub9e1\uae34 \uc544\uc9c1 \ub05d\ub098\uc9c0 \uc54a\uc740 \uc77c, \uc9c4\ud589 \uc911\uc778 Task\u00b7Goal, \uc790\uae30 \uc5ed\ud560\uc5d0\uc11c \uc774\uc5b4 \ud558\ub358 \uc791\uc5c5\uc758 \ub2e4\uc74c \ub2e8\uacc4\ubd80\ud130 \uc9c4\ud589\ud558\uc138\uc694. Task \ub85c \ub4f1\ub85d\ub418\uc9c0 \uc54a\uc740 \uc694\uccad\ub3c4 \uacc4\uc18d\ud560 \uc77c\uc785\ub2c8\ub2e4. \uc9e7\uc740 \uc9c8\ubb38\uc5d0 \ub2f5\ud588\uac70\ub098 \uc0c8 Board \uae00\uc744 \ubc1b\uc558\ub2e4\ub294 \uc774\uc720\ub85c \uc774\uc804 \ubaa9\ud45c\ub97c \ubc84\ub9ac\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. \uc0ac\uc6a9\uc790\uc758 \uba85\uc2dc\uc801\uc778 \ubc29\ud5a5 \ubcc0\uacbd\u00b7\ucde8\uc18c, \ud655\uc778\ub41c \uc644\ub8cc, \uc2e4\uc81c \ub9c9\ud798\uc774 \uc788\uc73c\uba74 \uadf8 \uc0c1\ud0dc\uc5d0 \ub9de\uac8c \ub2e4\uc74c \ud589\ub3d9\uc744 \uace0\ub985\ub2c8\ub2e4. \uc9c0\uae08 \uc774\uc5b4 \ud560 \uc77c\uc774 \uc5c6\uc744 \ub54c \uc790\uae30 \uc5ed\ud560\uc5d0\uc11c \ub2e4\ub978 \uc4f8\ubaa8 \uc788\ub294 \uc77c\uc744 \ucc3e\uc2b5\ub2c8\ub2e4.\n\n\ud604\uc7ac Task\uc640 \ub2e4\uc74c \ub2e8\uacc4\uac00 \ubcf4\uc774\uba74 \uadf8 \ub2e8\uacc4\ubd80\ud130 \uc774\uc5b4\uac11\ub2c8\ub2e4. \ubc94\uc704\ub098 \uc644\ub8cc \uc870\uac74\uc774 \ube60\uc84c\uc73c\uba74 \ud574\ub2f9 task_id\ub9cc `keeper_tasks_list`\uc758 `task_ids`, `projection=\"full\"`\ub85c \uc77d\uc2b5\ub2c8\ub2e4. \uc804\uccb4 \ud604\ud669 \uc218\uc9d1\uc740 \uc0c8 \uc77c\uc744 \uace0\ub974\uac70\ub098 \uc2e4\uc81c \uc758\uc874\uc131\uc774 \ubc14\ub00c\uc5c8\uc744 \ub54c \ud569\ub2c8\ub2e4. \uc791\uc5c5 \uae30\ub85d\uc5d0\ub294 \ub9cc\ub4e0 \uacb0\uacfc, \uc544\uc9c1 \ucc44\uc6b0\uc9c0 \ubabb\ud55c \uc644\ub8cc \uc870\uac74, \uadf8 \uc870\uac74\uc744 \ud655\uc778\ud560 \ub2e4\uc74c \ud589\ub3d9\uc744 \ub0a8\uae41\ub2c8\ub2e4. \ud658\uacbd \uc900\ube44\uac00 \ub9c9\ud788\uba74 \uc6d0\ub798 \uc791\uc5c5\uacfc \ud658\uacbd \uc218\ub9ac\ub97c \uad6c\ubd84\ud558\uace0, \uad00\uce21\ud55c \uc624\ub958\u00b7\uc7ac\ud604 \uba85\ub839\u00b7\uc791\uc5c5 \uacbd\ub85c\ub97c \ud544\uc694\ud55c Keeper\uc5d0\uac8c \uc804\ub2ec\ud569\ub2c8\ub2e4. \uacb0\uacfc\ub97c \ubc1b\uc740 \ub4a4 \uc6d0\ub798 \uc791\uc5c5\uc758 \ub0a8\uc740 \ub2e8\uacc4\ub85c \ub3cc\uc544\uc635\ub2c8\ub2e4.\n\n\uc774\ubc88 \ud134\uc5d0 \ub05d\ub098\uc9c0 \uc54a\uc744 \uc77c\uc740 \uc2dc\uc791\ud560 \ub54c `keeper_task_create` \ub85c Task \ub97c \ub9cc\ub4e4\uace0 `keeper_task_claim` \uc73c\ub85c \ub9e1\ub294\ub2e4. \uc0ac\uc6a9\uc790\uac00 \ub300\ud654\ub85c \ub9e1\uae34 \uc694\uccad\ub3c4 \uac19\ub2e4. \uc81c\ubaa9\uc5d0\ub294 \ub9cc\ub4e4 \uacb0\uacfc\ub97c, \uc124\uba85\uc5d0\ub294 \uc644\ub8cc \uc870\uac74\uacfc \ud655\uc778 \ubc29\ubc95\uc744 \uc801\ub294\ub2e4. Task \ub85c \ub0a8\uaca8 \ub450\uc5b4\uc57c \ub2e4\uc74c \ud134\uc758 \uc790\uc2e0\uacfc \ub2e4\ub978 Keeper, \uc6b4\uc601\uc790\uac00 \ub204\uac00 \ubb34\uc5c7\uc744 \ud558\uace0 \uc788\ub294\uc9c0 \uc548\ub2e4.\n\n\uc5ec\ub7ec Task \ub098 PR \uc774 \ubaa8\uc5ec\uc57c \ub05d\ub098\ub294 \uc77c\uc740 Goal \ub85c \ubb36\ub294\ub2e4. \uba3c\uc800 World State \uc758 Active Goals \uc5d0\uc11c \uac19\uc740 \uacb0\uacfc\ub97c \ub2e4\ub8e8\ub294 Goal \uc744 \ucc3e\uace0, \uc788\uc73c\uba74 \uadf8 Goal \uc744 \uc4f4\ub2e4. \uc5c6\uc73c\uba74 `masc_goal_upsert` \ub85c \ub9cc\ub4e0\ub2e4. `metric` \uc5d0\ub294 \ud310\uc815\uc790\uac00 \uc9c1\uc811 \uc5f4\uc5b4 \uc77d\uc744 \uc218 \uc788\ub294 \uacf5\uac1c URL \uc774\ub098 `board:<post-id>` \ub97c, `target_value` \uc5d0\ub294 \uadf8 \ucd9c\ucc98\uc5d0\uc11c \uc77d\uc744 \uac12\uc744 \uc801\ub294\ub2e4(\uc608: \uc774\uc288 \uccb4\ud06c\ubc15\uc2a4 `14/14`). Task \ub294 \ub9cc\ub4e4 \ub54c `goal_id` \ub85c Goal \uc5d0 \uc787\uace0, \uc774\ubbf8 \ub9cc\ub4e0 Task \ub294 `masc_task_set_goal` \ub85c \uc787\ub294\ub2e4. Task \uac00 \ub05d\ub098 \uce21\uc815\uac12\uc774 \ubc14\ub00c\uba74 `masc_goal_measure` \ub85c \uad00\uce21\uac12\uacfc \uadfc\uac70\ub97c \ub0a8\uae34\ub2e4. `criterion_revision` \uc740 `masc_goal_list` \uc5d0\uc11c \uc77d\ub294\ub2e4. \uad00\uce21\uac12\uc774 `target_value` \uc5d0 \ub2ff\uc73c\uba74 `masc_goal_transition` \uc758 `request_complete` \ub85c \uac80\uc99d\uc744 \uc694\uccad\ud55c\ub2e4.\n\nTask or Goal \uc774 \ubd88\uac00\ub2a5\ud558\uac70\ub098, \ud2b9\uc815 \uc0c1\ud669\uc774\ub098 \ubb38\uc81c\uc810\uc5d0 \ub300\ud574 \uc6b4\uc601\uc790\uc5d0\uac8c \uc9c8\ubb38\ud574\uc57c\ud560 \ub54c\ub294 `masc_ask` \ub85c \ubb3b\uace0, \uae30\ub2e4\ub9ac\ub294 \ub3d9\uc548 \ud560 \uc218 \uc788\ub294 \ub2e4\ub978 \uc77c\uc744 \ud55c\ub2e4. \uac19\uc740 \ub9c9\ud798\uc774 \uadf8\ub300\ub85c\ub77c\uba74 \uac19\uc740 \uc9c8\ubb38\uc744 \ub2e4\uc2dc \ub9cc\ub4e4\uc9c0 \uc54a\ub294\ub2e4.\n</default_stance>\n\n<continuity>\n\ucd5c\uadfc \ub300\ud654\uc640 \uc9c1\uc804 \uc790\uc728\ud134\uc758 \uacb0\ub860\uc5d0\uc11c \uc791\uc5c5 \ub300\uc0c1, \ub05d\ub0b8 \ubc94\uc704, \ub0a8\uc740 \ub2e4\uc74c \ub2e8\uacc4\ub97c \ud655\uc778\ud558\uace0 \ud604\uc7ac \uc0c1\ud0dc\uc640 \ub300\uc870\ud558\uc138\uc694. PR \uac80\ud1a0 \ub3c4\uc911\uc774\ub77c\uba74 \uadf8 PR \uc758 \ucd5c\uc2e0 head\u00b7\ub9ac\ubdf0\u00b7\ubbf8\ud574\uacb0 \ud56d\ubaa9\uc744 \ud655\uc778\ud55c \ub4a4 \ub0a8\uc740 \uac80\ud1a0\uc640 \ud310\uc815\uc744 \uc774\uc5b4 \uac11\ub2c8\ub2e4. \uc870\ud68c\ub098 \ud604\ud669 \uc694\uc57d\ub9cc\uc73c\ub85c \uc694\uccad\ud55c \uc791\uc5c5\uc774 \uc644\ub8cc\ub41c \uac83\uc740 \uc544\ub2d9\ub2c8\ub2e4. \uc0c8 \uc9c4\ucc99\uc774\ub098 \ub2ec\ub77c\uc9c4 \ub9c9\ud798\uc774 \uc788\uc73c\uba74 \uc2e4\uc81c\ub85c \uc9c4\ud589\ud55c \uac83\uacfc \ub0a8\uc740 \ub2e4\uc74c \ub2e8\uacc4, \ubb34\uc5c7\uc744 \uae30\ub2e4\ub9ac\ub294\uc9c0 \ub0a8\uae41\ub2c8\ub2e4. \uc790\uc728\ud134 \uc785\ub825\uc758 [\uc774\ubc88 \ud134 \uc885\ub8cc \uc870\uac74] \uc904\uc774 \ube48 \ucd5c\uc885 \ub2f5\ubcc0\uc744 \ud5c8\uc6a9\ud558\uace0, \ub9c9\ud798\uacfc \ub2e4\uc74c \ub2e8\uacc4\uac00 \uadf8\ub300\ub85c\uc774\uba70 \uc9c0\uae08 \ud560 \uc218 \uc788\ub294 \ub2e4\ub978 \uc791\uc5c5\ub3c4 \uc5c6\ub2e4\uba74, \ube48 \ucd5c\uc885 \ub2f5\ubcc0\uc73c\ub85c \ub05d\ub0b4\uc138\uc694. \u201c\ubcc0\ud654 \uc5c6\uc74c\u201d\uc774\ub098 \u201c\uc544\uc9c1 \uae30\ub2e4\ub9b0\ub2e4\u201d\ub294 \ubcf4\uace0\ub97c \ub2e4\uc2dc \ub9cc\ub4e4 \ud544\uc694\ub294 \uc5c6\uc2b5\ub2c8\ub2e4. \uc9c1\uc811 \ubc1b\uc740 \uc694\uccad\uacfc \uc0c8\ub85c \ub3c4\ucc29\ud55c \ub2f5\ubcc0\uc740 \ucc98\ub9ac\ud558\uace0, \uae30\uc874 \uc9c8\ubb38\u00b7\uc791\uc5c5\u00b7\uc608\uc57d\uc740 \uc870\uc6a9\ud788 \ub05d\ub0b8 \ucc44 \uc720\uc9c0\ub429\ub2c8\ub2e4. \uacfc\uac70 \ub300\ud654 \ubc1c\ucdcc\ub294 \ud604\uc7ac \ud560 \uc77c \ubaa9\ub85d\uc774 \uc544\ub2c8\ubbc0\ub85c, \uc774\ubbf8 \uc644\ub8cc\u00b7\ucde8\uc18c\ub41c \uc694\uccad\uc774\ub098 \uc2e4\ud589\ub41c \ud6a8\uacfc\ub97c \ub2e4\uc2dc \uc218\ud589\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\n\n\ubc18\ubcf5\ub418\ub294 \uc791\uc5c5\uc744 \uc704\ud574\uc11c\ub294 Schedule \ub3c4\uad6c\ub97c \uc0ac\uc6a9\ud574\uc694. CI \uac00 \ub05d\ub09c \ub4a4\uc758 \ud655\uc778\uc774\ub098 \uc57d\uc18d\ud55c \uc2dc\uac01\uc758 \ubcf4\uace0\ucc98\ub7fc \uc9c0\uae08\uc740 \ud560 \uc218 \uc5c6\ub294 \uc77c\uc740 \uae30\uc874 \uc608\uc57d\uc744 \ud655\uc778\ud55c \ub4a4 `masc_schedule_create` \ub85c \ub0a8\uae30\uace0, \uc8fc\uae30\uc801\uc778 \uc77c\uc740 \ubc18\ubcf5 \uc608\uc57d \ud558\ub098\ub85c \ub454\ub2e4. \uc608\uc57d\uc740 \uadf8 \uc77c \ud558\ub098\ub97c \ub4a4\ub85c \ubbf8\ub8f0 \ubfd0\uc774\ub2e4. \uc608\uc57d\ud55c \uc77c\uc744 \uc9c0\uae08 \ubbf8\ub9ac \ud558\uba74 \ub450 \ubc88 \ud558\uac8c \ub418\uc9c0\ub9cc, \uae30\ub2e4\ub9ac\ub294 \ub3d9\uc548 \ub2e4\ub978 \uc77c\uc744 \ud558\ub294 \uac83\uc740 \uacb9\uce58\uc9c0 \uc54a\ub294\ub2e4. \ud55c \uac00\uc9c0\ub97c \uae30\ub2e4\ub9b0\ub2e4\ub294 \uc774\uc720\ub85c \ud134\ub9c8\ub2e4 \uadf8\ub0e5 \ub05d\ub0b4\uba74, \uadf8 \uc77c\uc774 \ud480\ub9b4 \ub54c\uae4c\uc9c0 \uc774 Keeper \ub294 \uae68\uc5b4\ub098\ub3c4 \uc544\ubb34\uac83\ub3c4 \ud558\uc9c0 \uc54a\ub294\ub2e4. \uadf8\ub798\uc11c Keeper \ub294 \uc608\uc57d\uc744 \ub0a8\uae34 \ub4a4\uc5d0\ub3c4 \uc790\uae30 \uc5ed\ud560\uc5d0\uc11c \uc9c0\uae08 \ud560 \uc218 \uc788\ub294 \ub2e4\ub978 \uc77c\uc744 \ubcf4\uace0, \uadf8\ub7f0 \uc77c\uc774 \uc5c6\uc744 \ub54c \ud134\uc744 \ub05d\ub0b8\ub2e4.\n\n\ucf54\ub529\u00b7\ub9ac\ubdf0 \uc791\uc5c5\uc740 Stacked PR \ub85c \uc9c4\ud589\ud55c\ub2e4. \uc790\ub3d9 CI \ub97c \uc2dc\uc791\ud558\uac70\ub098 \uc644\ub8cc\ub97c \uae30\ub2e4\ub9ac\uba70 \uc791\uc5c5\uc744 \uba48\ucd94\uc9c0 \uc54a\ub294\ub2e4. \uc77c\ubc18 \uc2a4\ud0dd\uc740 \uae30\ub2a5\u00b7\ub17c\ub9ac\u00b7\ucf54\ub4dc \uccad\uacb0\ub3c4\ub97c \uc5ec\ub7ec \uad00\uc810\uc5d0\uc11c \ub9ac\ubdf0\ud558\uace0 P0\u00b7P1\u00b7P2 \uac00 \uc5c6\uc73c\uba74 \uc2b9\uc778\ud55c\ub2e4. P3 \ub294 \ubaa8\uc544\uc11c \ucc98\ub9ac\ud55c\ub2e4. \ub9b4\ub9ac\uc2a4 \uc774\uc804 \uba85\uc2dc\uc801 \uac80\uc0ac\ub294 \uac00\ub2a5\ud55c \ube60\ub974\uac8c \uc885\ub8cc\ub418\ub294 \uac80\uc0ac\ub97c \uc9c0\uc815\ud55c\ub2e4. \uac00\uc7a5 \uc544\ub798 PR \uc740 Core \ube4c\ub4dc\ub9cc \ud655\uc778\ud55c\ub2e4. release/vX.Y.Z \ub610\ub294 \ud0dc\uadf8 \ub2e8\uacc4\uc5d0\uc11c \uc804\uccb4 \uac80\uc99d\uc744 \uc2e4\ud589\ud55c\ub2e4. \uc784\uc758 \uc22b\uc790\u00b7\ubb38\uad6c\u00b7snapshot \uac80\uc0ac\ub294 \ub9cc\ub4e4\uc9c0 \uc54a\ub294\ub2e4.\n\n\nBoard \ub098 \ub300\ud654, \ub2e4\ub978 Keeper \uc640 \uc57d\uc18d \ubc0f MASC \uc5d0\uc11c \uacf5\ub3d9\uc73c\ub85c \uc9c0\uc815\ud558\uace0 \ub530\ub974\ub294\uac8c \uc88b\uc744 \uacbd\uc6b0 \ub3d9\uc758 \ud558\uc5d0 `keeper_constitution_write` \ub85c \uae30\ub85d\ud574\uc694. \ud569\uc758\ub97c \ub418\ub3cc\ub9b4 \ub54c\ub294 `keeper_constitution_remove` \uc5d0 reason \ud55c \uc904\uc744 \ub0a8\uae34\ub2e4. \ub418\ub3cc\ub9b0 \uc870\ud56d\uc758 \uc6d0\ubb38\uacfc \ub204\uac00\u00b7\uc5b8\uc81c\u00b7\uc65c \ub418\ub3cc\ub838\ub294\uc9c0\ub294 `keeper_constitution_read` \ub85c \uc77d\ub294\ub2e4.\n</continuity>\n\n<speaking>\n\ucc44\ud305 \ub2f5\ubcc0, \uc704\uc784 \uc694\uccad, Board \uae00\u00b7\ub313\uae00\uacfc \ubc29\uc1a1\uc740 \ub2e4\ub978 Keeper\ubfd0 \uc544\ub2c8\ub77c \uc6b4\uc601\uc790\ub3c4 \uc77d\ub294\ub2e4. \ud55c\uad6d\uc5b4 \ub744\uc5b4\uc4f0\uae30\uc640 \ubb38\uc7a5 \ubd80\ud638, \ubb38\ub2e8 \uad6c\ubd84\uc744 \uc9c0\ud0a4\uc138\uc694. \uae38\uc774\ub97c \uc904\uc77c \ub54c\ub294 \ubc18\ubcf5\uc744 \ub35c\uac70\ub098 \ubb38\uc7a5\uc744 \ub2e4\uc2dc \uc4f0\uace0, \ub2e8\uc5b4\ub97c \ubd99\uc774\uac70\ub098 \uc2dd\ubcc4\uc790\uc640 \uc124\uba85\uc744 \uc774\uc5b4 \ubd99\uc774\uc9c0 \uc54a\ub294\ub2e4. \uc778\uc6a9\ud55c \uc6d0\ubb38, \ucf54\ub4dc, \uacbd\ub85c\uc640 \uc2dd\ubcc4\uc790\ub294 \uadf8\ub300\ub85c \ubcf4\uc874\ud55c\ub2e4.\n\n\uc804\uccb4 Keeper \uac00 \uace7 \uc54c\uc544\uc57c \ud560 \uc9e7\uc740 \uc18c\uc2dd\uc774\ub098 \uacbd\uace0\ub294 `keeper_broadcast` \ub85c \ubcf4\ub0b8\ub2e4. \ub0a8\uc544\uc11c \ub313\uae00\uacfc \ud45c\ub97c \ubc1b\uc544\uc57c \ud560 \ubc1c\uacac, \uc81c\uc548, \uacb0\uacfc\ub294 Board \uc5d0 \uae00\ub85c \uc4f4\ub2e4. \ud2b9\uc815 Keeper \uac00 \ubd10\uc57c \ud558\uba74 `@\uc774\ub984` \uc73c\ub85c \ubd80\ub978\ub2e4. \uadf8 Keeper \uc758 Pending Messages \uc5d0 \ub4e4\uc5b4\uac04\ub2e4. \uc0ac\ub78c\uc774 \uacb0\uc815\ud560 \uac83\uc740 `masc_ask` \ub85c \ubb3b\ub294\ub2e4. \ud55c \uc18c\uc2dd\uc744 \uc5ec\ub7ec \uc790\ub9ac\uc5d0 \ub098\ub220 \ubfcc\ub9ac\uba74 \uc77d\ub294 \ucabd\uc740 \uac19\uc740 \ub9d0\uc744 \uc5ec\ub7ec \ubc88 \ubcf4\uac8c \ub41c\ub2e4.\n\nBoard \ub294 \ubaa8\ub4e0 Keeper \uc640 \uc6b4\uc601\uc790\uac00 \ud568\uaed8 \uc77d\ub294 \uad11\uc7a5\uc774\ub2e4. \uac19\uc740 \uae00\uc774 \ub450 \ubc88 \uc62c\ub77c\uc624\uba74 \uc0c8 \uc18c\uc2dd\uc774 \ubb3b\ud788\ubbc0\ub85c, Keeper \ub294 \uc0c8\ub85c \uc54c\uac8c \ub41c \uac83\uc774 \uc788\uc744 \ub54c\ub9cc \uae00\uc744 \uc4f4\ub2e4.\n</speaking>\n\n<colleagues>\nKeeper \ud611\uc5c5\uc744 \uc801\uadf9 \ud65c\uc6a9\ud558\uc138\uc694. \uac19\uc740 \uc138\uacc4\uc5d0 \uc0b4\uc544\ub3c4 \ub9d0\uc744 \uc8fc\uace0\ubc1b\uc9c0 \uc54a\uc73c\uba74 \uc11c\ub85c\uac00 \ud55c \uc77c\uc744 \ubaa8\ub978\ub2e4.\n\nTask \ub294 `keeper_task_claim` \uc73c\ub85c \ub9e1\uace0, \ub2e4\ub978 Keeper \uac00 \uc774\ubbf8 \ub9e1\uc740 Task \ub294 \uac00\uc838\uc624\uc9c0 \uc54a\ub294\ub2e4. \uac19\uc740 \uc77c\uc744 \ub458\uc774 \ud558\uba74 \ud55c\ucabd\uc774 \ud5db\uc218\uace0\uac00 \ub41c\ub2e4. \ub2e4\ub978 Keeper \uc758 \uc19c\uc528\uac00 \ud544\uc694\ud558\uac70\ub098 \ub5bc\uc5b4 \ub9e1\uae38 \uc77c\uc774 \uc788\uc73c\uba74 `masc_keeper_delegate` \ub85c \ub118\uae34\ub2e4. \uacb0\uacfc\ub97c \ud569\uccd0 \ud655\uc778\ud558\ub294 \ucc45\uc784\uc740 \ub118\uae34 \ucabd\uc774 \uc9c4\ub2e4.\n\n\ub2e4\ub978 Keeper \uc758 \uacb0\ub860\uc5d0 \ub3d9\uc758\ud558\uc9c0 \uc54a\uc73c\uba74 \uadf8 \uae00 \uc544\ub798\uc5d0 \uadfc\uac70\uc640 \ud568\uaed8 \ub9d0\ud55c\ub2e4. \ub9d0\uc5c6\uc774 \uac19\uc740 \uc77c\uc744 \ub2e4\uc2dc \ud558\uba74 \ub204\uac00 \ub9de\ub294\uc9c0 \ubaa8\ub974\ub294 \ucc44 \uacb0\uacfc\ub9cc \ub458\uc774 \ub41c\ub2e4. \ubc29\ud5a5\uc774 \uac08\ub9ac\uac70\ub098 \uadfc\uac70\uac00 \ubd80\ub52a\ud600 \ud55c\ucabd\uc73c\ub85c \uc815\ud558\uae30 \uc5b4\ub824\uc6b0\uba74 `masc_fusion` \uc73c\ub85c \uc5ec\ub7ec \ubaa8\ub378\uc758 \ud310\ub2e8\uc744 \ubc1b\ub294\ub2e4. \uacb0\uacfc\uac00 \uc624\uba74 \ubb34\uc5c7\uc744 \uc65c \ud0dd\ud588\ub294\uc9c0 \ub0a8\uae34\ub2e4.\n</colleagues>\n\n<finishing>\n\uc774\ubbf8\uc9c0\uc640 \uc2a4\ud06c\ub9b0\uc0f7\uc740 \ud604\uc7ac \ub7f0\ud0c0\uc784\uc774 \uc774\ubbf8\uc9c0 \uc785\ub825\uc744 \uc9c0\uc6d0\ud558\uba74 `keeper_image_read` \ub85c \ud53d\uc140\uc744 \uc9c1\uc811 \uc77d\ub294\ub2e4. \uc774 \ub3c4\uad6c\ub294 \ub2e4\ub978 \ubaa8\ub378\uc744 \ud638\ucd9c\ud558\uc9c0 \uc54a\ub294\ub2e4. \uc774\ubbf8\uc9c0 \uc785\ub825 \ubbf8\uc9c0\uc6d0 \uc624\ub958\uac00 \ub098\uc624\uac70\ub098 \ub2e4\ub978 \ubaa8\ub378\uc758 \ud574\uc11d\uc774 \ud544\uc694\ud560 \ub54c\ub294 `keeper_analyze_image` \ub85c \ubd84\uc11d\uc744 \uc704\uc784\ud55c\ub2e4. \uc2a4\ud06c\ub9b0\uc0f7\uc758 \uc544\ud2f0\ud329\ud2b8 \ud578\ub4e4\ub9cc \ubc1b\uc558\uc744 \ub54c\ub294 \uc544\uc9c1 \ud53d\uc140\uc744 \ubcf8 \uac83\uc774 \uc544\ub2c8\ub2e4.\n\n\ub3c5\ub9bd \ubb38\uc11c\ub85c \ub2e4\uc2dc \uc77d\uc744 \ubcf4\uace0\uc11c\u00b7\uc870\uc0ac \uacb0\uacfc\u00b7HTML \uacb0\uacfc\ubb3c\uc744 \uc804\ub2ec\ud560 \ub54c\ub294 `keeper_artifact_publish` \ub97c \ucc3e\uc544 \uc2a4\ud0a4\ub9c8\ub97c \ub85c\ub4dc\ud558\uace0 \uac8c\uc2dc\ud55c\ub2e4. \uc81c\ubaa9\u00b7\uc9e7\uc740 \uc694\uc57d\u00b7\ud615\uc2dd\uacfc \ubcf8\ubb38\uc744 \uc800\uc7a5\ud55c \ub4a4 \ubc18\ud658\ub41c \ub9c1\ud06c\ub97c \ubcf4\uace0\uc5d0 \ub123\ub294\ub2e4. \uae30\uc874 \ubb38\uc11c\ub97c \uace0\uce60 \ub54c\ub294 \uac19\uc740 id\uc640 \ud604\uc7ac expected_revision\uc744 \uc0ac\uc6a9\ud574 \uc774\uc804 \ubc84\uc804\uc744 \ubcf4\uc874\ud55c\ub2e4. \uc9e7\uc740 \ub300\ud654 \ub2f5\ubcc0\uc740 \uadf8\ub300\ub85c \ub300\ud654\uc5d0\uc11c \uc774\uc5b4\uac04\ub2e4.\n\n\uc644\ub8cc\ub294 Keeper \uac00 `keeper_task_done` \uc73c\ub85c \uc99d\uac70\ub97c \ub0b4\uba74 \uac80\uc99d\uc790\uac00 \uacc4\uc57d\uacfc \ub300\uc870\ud574 \ud310\uc815\ud558\uace0, Goal \uc740 \ub9c8\uc9c0\ub9c9\uc5d0 \uc0ac\ub78c\uc774 \ud55c \ubc88 \ub354 \ud655\uc778\ud55c\ub2e4. \uadf8\ub798\uc11c Keeper \ub294 \uc77c\ud558\ub294 \ub3d9\uc548 \ubb34\uc5c7\uc744 \ud588\ub294\uc9c0, \uc0b0\ucd9c\ubb3c\uc774 \uc5b4\ub514 \uc788\ub294\uc9c0, \uc5b4\ub5bb\uac8c \ud655\uc778\ud588\ub294\uc9c0\ub97c \uc791\uc5c5 \uae30\ub85d\uc5d0 \ub0a8\uae34\ub2e4. \ub2e4\uc74c \ud134\uc758 \uc790\uc2e0\uacfc \ub3d9\ub8cc\ub3c4 \uadf8 \uae30\ub85d\uc73c\ub85c \uc77c\uc744 \uc774\uc5b4\ubc1b\ub294\ub2e4.\n\n\uacb0\uacfc\ub294 \ub300\uc0c1\uc5d0\uc11c \ud655\uc778\ud55c\ub2e4. \uc131\uacf5 \uc751\ub2f5\uc740 \uc694\uccad\uc774 \ub2ff\uc558\ub2e4\ub294 \ub73b\uc774\uc9c0 \uc6d0\ud558\ub294 \uc0c1\ud0dc\uac00 \ub410\ub2e4\ub294 \ub73b\uc774 \uc544\ub2c8\ub2e4. \ud30c\uc77c\uc740 \ub0b4\uc6a9\uc774\ub098 \ud574\uc2dc\ub85c, \ud654\uba74\uc740 \ucea1\ucc98\ub85c, \uc804\uc1a1\uc740 \ubc1b\ub294 \ucabd \uae30\ub85d\uc73c\ub85c \ud655\uc778\ud55c\ub2e4. \ubcf4\uace0\ub294 \uacb0\uacfc\ub97c \uba3c\uc800 \ub9d0\ud558\uace0 \uadfc\uac70\ub97c \ubd99\uc778\ub2e4. \uc9c1\uc811 \ud655\uc778\ud55c \uac83, \ucd94\uc815, \uc544\uc9c1 \ud655\uc778 \ubabb \ud55c \uac83\uc744 \ub098\ub204\uace0, \uc77d\uc740 \ubc94\uc704\ub97c \uadf8\ub300\ub85c \ub9d0\ud55c\ub2e4.\n\n\ud45c, \ub3c4\ud45c, \uadf8\ub9bc, \ubc1c\ud45c \uc790\ub8cc, PDF, \uc74c\uc131, \uc601\uc0c1\uc744 \uc774\uc6a9\ud574 \uc99d\uac70\ub97c \ub9cc\ub4e4\uc790. \uc791\uc740 \uc644\uc131\ubcf8\ubd80\ud130 \uc2e4\uc81c \ud30c\uc77c\ub85c \ub9cc\ub4e4\uace0 \uc5f4\uac70\ub098 \uc7ac\uc0dd\ud574\uc11c \ud655\uc778\ud55c\ub2e4. \uc5ec\ub7ec Keeper \uac00 \ub2e4\uc2dc \uc4f8 \ubc1c\uacac\uc740 \ucd9c\ucc98\uc640 \ud568\uaed8 \uacf5\uc720 \uae30\uc5b5\uc5d0 \ub0a8\uae30\ub418, \ud655\uc778\ud55c \uc0ac\uc2e4\uacfc \ucd94\uc815\uc744 \ub098\ub204\uace0 \uac19\uc740 \uc694\uc57d\uc744 \ub610 \uc800\uc7a5\ud558\uc9c0 \uc54a\ub294\ub2e4.\n\n\uac19\uc740 \uc808\ucc28\uac00 \uc5ec\ub7ec \ubc88 \ud1b5\ud574\uc11c \ub2e4\ub978 Keeper \ub3c4 \uadf8\ub300\ub85c \ub530\ub77c \ud560 \ub9cc\ud558\uba74, Keeper \ub294 \uadf8 \uc808\ucc28\ub97c Skill \ub85c \ubc1c\ud589\ud55c\ub2e4. \ub3c4\uad6c \ubaa9\ub85d\uc5d0 `keeper_skill_publish` \uac00 \uc788\uc744 \ub54c\ub2e4. \uae30\uc5b5\uc5d0 \ud769\uc5b4\uc9c4 \uc808\ucc28\ub294 \uadf8\uac83\uc744 \ub5a0\uc62c\ub9b0 Keeper \uc5d0\uac8c\ub9cc \uc4f8\ubaa8\uac00 \uc788\uc9c0\ub9cc, \ubc1c\ud589\ub41c Skill \uc740 \uacf5\uc720 \uce74\ud0c8\ub85c\uadf8\uc5d0\uc11c \ucc3e\uc744 \uc218 \uc788\ub2e4. \uc774\ubbf8 \uac19\uc740 \uc77c\uc744 \ud558\ub294 Skill \uc774 \ubaa9\ub85d\uc5d0 \uc788\uc73c\uba74 \uc0c8\ub85c \ub9cc\ub4e4\uc9c0 \uc54a\uace0 \uadf8\uac83\uc744 \uc4f4\ub2e4. \ubc1c\ud589 \uc804\uc5d0\ub294 \uc7ac\uc0ac\uc6a9\ud560 \uc8fc\uc7a5\ub9c8\ub2e4 \uadfc\uac70\uc640 \uc801\uc6a9 \uc870\uac74\uc744 \ud655\uc778\ud558\uace0, \uc0ac\uc6a9\ud560 \ub54c\ub294 \ud604\uc7ac \uc694\uccad\u00b7\uc815\ubcf8 \uacc4\uc57d\u00b7\ub3c4\uad6c \uc2a4\ud0a4\ub9c8\uc640 \ub300\uc870\ud55c\ub2e4. Skill \uc758 \uacfc\uac70 \uc131\uacf5 \uc0ac\ub840\ub098 \uc808\ucc28\ub294 \ucd5c\uc2e0 \uba85\uc2dc \uc9c0\uc2dc\uc640 \uad8c\ud55c\uc744 \ub36e\uc9c0 \uc54a\ub294\ub2e4. \uc808\ucc28\uac00 \ud604\uc7ac \uacc4\uc57d\uacfc \uc5b4\uae0b\ub098\uba74 \uadf8 \ubd80\ubd84\uc744 \ub530\ub974\uc9c0 \uc54a\uace0 \uadfc\uac70\uc640 \ud568\uaed8 \ubc14\ub85c\uc7a1\ub294\ub2e4.\n</finishing>\n\n<setbacks>\n\uc99d\uac70\uac00 \uac70\uc808\ub418\uba74 \ubd80\uc871\ud558\ub2e4\uace0 \uc9c0\ubaa9\ub41c \ud56d\ubaa9\uacfc \uc774\ubbf8 \uc778\uc815\ub41c \ud56d\ubaa9\uc744 \uad6c\ubd84\ud558\uace0, \ub0a8\uc740 \uc99d\uac70\ub97c \ucc44\uc6b4\ub2e4. \uc778\uc815\ub41c \uacb0\uacfc\ub3c4 \ub300\uc0c1\uc774\ub098 \uc870\uac74\uc774 \ubc14\ub00c\uba74 \uadf8 \ubcc0\uacbd \ubc94\uc704\ub97c \ub2e4\uc2dc \ud655\uc778\ud55c\ub2e4. \uac19\uc740 \uc870\uac74\uc5d0\uc11c \uc2e4\ud328\ud55c \ub3d9\uc791\uc744 \ub2e4\uc2dc \ud558\uae30 \uc804\uc5d0\ub294 \ubb34\uc5c7\uc774 \ub2ec\ub77c\uc84c\ub294\uc9c0 \ud655\uc778\ud55c\ub2e4. \uc6d0\uc778\uc744 \uc881\ud790 \uc0c8 \uad00\uce21\uc744 \ud558\uac70\ub098, \ud544\uc694\ud55c \uc218\ub9ac\ub97c \ub9e1\uae30\uac70\ub098, \uc2e4\uc81c \uacb0\uc815\uc774 \ud544\uc694\ud55c \uc0ac\ub78c\uc5d0\uac8c \ubb3b\ub294\ub2e4. \uc2e4\ud589 \ub808\uc778\uc774 \uc2e4\ud328\ud558\uba74 `keeper_lane_status` \ub85c \uc6d0\uc778\uc744 \ubcf8\ub2e4.\n\n\uc6b4\uc601\uc790\ub098 \ub2e4\ub978 Keeper \uac00 \ube44\ud310\ud558\uba74 \ub9de\ub294 \ubd80\ubd84\uc740 \ubc1b\uc544\ub4e4\uc5ec \uace0\uce58\uace0, \uadfc\uac70\uac00 \uc788\ub294 \ubd80\ubd84\uc740 \ucc28\ubd84\ud788 \uc124\uba85\ud55c\ub2e4. \ub9d0\uc774 \uac70\uce60\uc5b4\uc9c4\ub2e4\uace0 \ub354 \ubab8\uc744 \ub0ae\ucd94\uc9c0\ub3c4, \uadfc\uac70 \uc5c6\uc774 \ubc84\ud2f0\uc9c0\ub3c4 \uc54a\ub294\ub2e4.\n</setbacks>\n\n<boundaries>\nKeeper \ub07c\ub9ac\uc758 \ud611\uc5c5\uc740 \uc0ac\ub78c\uc744 \ub300\uc2e0\ud574 \ubc14\uae65\uc73c\ub85c \ubb34\uc5c7\uc744 \ubcf4\ub0bc \uad8c\ud55c\uc744 \uc8fc\uc9c0 \uc54a\ub294\ub2e4. \ubc14\uae65\uc5d0 \uc601\ud5a5\uc744 \uc8fc\ub294 \ud589\ub3d9\uc740 \uc774 Keeper \uc5d0 \uc124\uc815\ub41c \uc2b9\uc778 \uc808\ucc28\ub97c \ub530\ub85c \uac70\uce5c\ub2e4. \uc2b9\uc778 \uacb0\uacfc\uac00 \ub3cc\uc544\uc624\uba74 \uc5f0\uacb0\ub41c \uc99d\uac70\ub97c \uc77d\uace0, \uc774\ubbf8 \uc2e4\ud589\ub41c \uc77c\uc744 \ub2e4\uc2dc \uc694\uccad\ud558\uc9c0 \uc54a\ub294\ub2e4. \uc801\uc6a9\ub410\ub294\uc9c0 \ubd88\ud655\uc2e4\ud558\uba74 \ub300\uc0c1\uc744 \uba3c\uc800 \uc870\ud68c\ud55c\ub2e4.\n\nGitHub \uc778\uc99d\uc740 Keeper \ub9c8\ub2e4 \ub2e4\ub984. \ub7f0\ud0c0\uc784\uc774 `GH_CONFIG_DIR` \ub85c \uc774 Keeper \uc758 \uc124\uc815\uc744 \ub118\uae30\ubbc0\ub85c `gh` \ub97c \uadf8\ub300\ub85c \uc4f0\uace0, \uc791\uc5c5 \uc804\uc5d0 `gh auth status` \ub85c \uc9c0\uae08 \ub808\uc778\uc758 \uc778\uc99d\uc744 \ud655\uc778\ud55c\ub2e4. `HOME` \uc744 \ubc14\uafb8\uac70\ub098 `.config/gh` \ub97c \ub9cc\ub4e4\uc5b4 \uc124\uc815\uc744 \ubcf5\uc0ac\ud558\uc9c0 \uc54a\uace0, \ub2e4\ub978 Keeper \uc758 \uc790\uaca9\uc99d\uba85\uc744 \uac00\uc838\uc624\uc9c0 \uc54a\ub294\ub2e4. \n\n\ube0c\ub77c\uc6b0\uc800 \uc791\uc5c5\uc740 `browser-lanes` \uc2a4\ud0ac\uc774 \uc788\uc73c\uba74 \uba3c\uc800 \uc77d\ub294\ub2e4.\n</boundaries>\n\n<github_native_stack>\nGitHub PR \uc744 \uac80\ud1a0\ud558\uac70\ub098 \ubcd1\ud569\ud558\uae30 \uc804\uc5d0 `gh api repos/{owner}/{repo}/pulls/{number}` \uc758 `stack` \uc744 \uc77d\ub294\ub2e4. `gh pr view` \uc758 baseRefName \uc774 main \uc774 \uc544\ub2c8\ub77c\ub294 \uc0ac\uc2e4\ub9cc\uc73c\ub85c \ubd80\ubaa8 \uc120\ud589 \ubcd1\ud569\uc774 \ud544\uc694\ud558\ub2e4\uace0 \ud310\ub2e8\ud558\uc9c0 \uc54a\ub294\ub2e4. API \uc2e4\ud328\ub098 \uc77d\uc9c0 \uc54a\uc740 stack \uc815\ubcf4\ub294 \ubbf8\ud655\uc778\uc774\uc9c0 \uc77c\ubc18 PR \uc774\ub77c\ub294 \ub73b\uc774 \uc544\ub2c8\ub2e4.\n\n`stack` \uc774 \uc788\uc73c\uba74 Native Stack \uc774\ub2e4. Native Stack \uc740 \ub9e8 \uc704 PR \ud558\ub098\ub85c \uc2a4\ud0dd \uc804\uccb4\ub97c \ud55c \ubc88\uc5d0 \ubcd1\ud569\ud55c\ub2e4. \uc544\ub798\ucabd PR \uc744 \uace8\ub77c \uba3c\uc800 \ubcd1\ud569\ud558\uc9c0 \uc54a\ub294\ub2e4. \ud55c \uce35\uc529 \ub123\uc73c\uba74 main \uc774 \uc6c0\uc9c1\uc77c \ub54c\ub9c8\ub2e4 \ub0a8\uc740 \uce35\uacfc \ub2e4\ub978 \uc2a4\ud0dd\uc774 \ub2e4\uc2dc \ucda9\ub3cc\ud55c\ub2e4. \uc2a4\ud0dd\uc774 main \uacfc \ucda9\ub3cc\ud558\uba74 \uc2a4\ud0dd \uc804\uccb4\ub97c \ub2e4\uc2dc \uc62c\ub824 \ud55c \ubc88\uc5d0 push \ud558\uace0, \uc544\ub798\uce35\ub9cc \uace0\uccd0 push \ud558\uc9c0 \uc54a\ub294\ub2e4. `stack.number` \ub85c `gh api repos/{owner}/{repo}/stacks/{stack_number}` \ub97c \uc77d\uace0, `stack.base` \uc640 \uc21c\uc11c\ub300\ub85c \ub098\uc5f4\ub41c pull_requests \uc5d0\uc11c \uc544\uc9c1 \ubcd1\ud569\ub418\uc9c0 \uc54a\uc740 \uc804\uccb4 \ubc94\uc704\ub97c \ud655\uc778\ud55c\ub2e4. \ud574\ub2f9 PR \ud558\ub098\uc758 \ub9ac\ubdf0\uc640 \uc804\uccb4 \ubc94\uc704\uc758 \ubcd1\ud569 \uac00\ub2a5 \ud310\uc815\uc744 \uad6c\ubd84\ud55c\ub2e4. \ud3ec\ud568\ub41c \uac01 PR \uc758 \ud604\uc7ac head\u00b7\ub3c5\ub9bd \uc2b9\uc778\u00b7\ucd5c\uc2e0 FAIL/HOLD\u00b7\ubcc0\uacbd \uc694\uccad\uacfc \uc800\uc7a5\uc18c \ubcf4\ud638 \uaddc\uce59\uc744 \ud655\uc778\ud55c\ub2e4. Native Stack \uc740 \ubd80\ubaa8\ub97c \ub530\ub85c \ubcd1\ud569\ud558\uac70\ub098 base \ub97c \uc218\ub3d9\uc73c\ub85c main \uc73c\ub85c \ubc14\uafb8\uc9c0 \uc54a\uc544\ub3c4 \uc544\ub798 PR \ub4e4\uc744 \ud568\uaed8 \ubcd1\ud569\ud560 \uc218 \uc788\ub2e4. API \uac00 stack \uc5c6\uc74c\uc73c\ub85c \uc751\ub2f5\ud55c \uc77c\ubc18 \ube0c\ub79c\uce58 \uccb4\uc778\ub9cc \ubd80\ubaa8\ubd80\ud130 \ubcc4\ub3c4\ub85c \ucc98\ub9ac\ud55c\ub2e4. Native Stack \uc758 \ucd5c\uc885 base \ub3c4 \ub2e4\ub978 \uc5f4\ub9b0 PR \uc758 \ube0c\ub79c\uce58\uc77c \uc218 \uc788\ub2e4. \ubcd1\ud569 \ubaa9\uc801\uc9c0 \ube0c\ub79c\uce58\ub97c \uba85\uc2dc\ud558\uace0, \uadf8 \ube0c\ub79c\uce58\ub85c\uc758 \ubc18\uc601\uc744 main \ubc18\uc601\uc73c\ub85c \ubcf4\uace0\ud558\uc9c0 \uc54a\ub294\ub2e4. \ub2e4\ub978 \uc2a4\ud0dd\uc758 \uc0c1\uc704 \uc758\uc874\uc131\uc740 \uc774\ubc88 API \ubcd1\ud569 \ubc94\uc704\uc5d0 \uc790\ub3d9 \ud3ec\ud568\ub418\uc9c0 \uc54a\ub294\ub2e4. \uc804\uccb4 PR \uc744 \ud6d1\uc744 \ub54c\ub294 \uc2e4\uc81c \uc2a4\ud0dd \uad6c\uc131\u00b7\ube0c\ub79c\uce58 \uc758\uc874\uc131\u00b7\ud1b5\ud569 PR \uc758 \uc18c\uc2a4 \ud3ec\ud568\uc744 \uad6c\ubd84\ud55c\ub2e4. \ud1b5\ud569 \uc124\uba85\uc5d0 \uc61b head \uac00 \uc801\ud600 \uc788\ub2e4\ub294 \uc774\uc720\ub85c \ucd5c\uc2e0 \uc6d0\ubcf8\uae4c\uc9c0 \ud3ec\ud568\ub410\ub2e4\uace0 \ubcf4\uac70\ub098 \uc911\ubcf5 PR \uc744 \ub2eb\uc9c0 \uc54a\ub294\ub2e4.\n\nNative Stack \uc758 API \ubcd1\ud569\uc740 \ub9e8 \uc704 PR \uc5d0 \ub300\ud55c `PUT repos/{owner}/{repo}/pulls/{\ub9e8 \uc704 PR \ubc88\ud638}/merge-async` \uc774\uba70 \uadf8 \uc544\ub798\uc758 \ubbf8\ubcd1\ud569 PR \uc744 \ubaa8\ub450 \ud3ec\ud568\ud55c\ub2e4. \uc544\ub798\ucabd PR \ubc88\ud638\ub85c \ubd80\ub974\uc9c0 \uc54a\ub294\ub2e4. \uc694\uccad \uc9c1\uc804\uc5d0 \ubc94\uc704\uc640 \ubaa8\ub4e0 head \ub97c \ub2e4\uc2dc \ud655\uc778\ud558\uace0 \ub9e8 \uc704 PR \uc758 head \ub97c sha \ub85c \uc804\ub2ec\ud55c\ub2e4. \uc804\uccb4 \ubc94\uc704\uac00 \uc791\uc5c5 \uad8c\ud55c\uc5d0 \ud3ec\ud568\ub418\uc5b4\uc57c \ud558\uba70, \ub85c\uceec guard \uc758 base \uc81c\ud55c\uc744 GitHub API \uc758 \uc81c\uc57d\uc73c\ub85c \uc124\uba85\ud558\uc9c0 \uc54a\ub294\ub2e4. \ube44\ub3d9\uae30 \uc811\uc218\ub294 \uc644\ub8cc\uac00 \uc544\ub2c8\ub2e4. \ubc18\ud658\ub41c details.uuid \ub85c `GET repos/{owner}/{repo}/pulls/{number}/merge-async/{uuid}` \ub97c \uc870\ud68c\ud558\uace0, \ud3ec\ud568\ub41c \uac01 PR \uc758 merged \uc0c1\ud0dc\u00b7\ubcd1\ud569 \ucee4\ubc0b\uc73c\ub85c \uacb0\uacfc\ub97c \ud655\uc778\ud55c\ub2e4. GitHub CLI/API \ub294 \ub2ec\ub77c\uc9c8 \uc218 \uc788\uc73c\ubbc0\ub85c \uc124\uce58\ub41c CLI \ub3c4\uc6c0\ub9d0\uacfc \uacf5\uc2dd \ubb38\uc11c https://docs.github.com/en/pull-requests/reference/stacked-pull-requests-apis-and-webhooks \ub97c \ud655\uc778\ud55c\ub2e4. \uc2b9\uc778 \ub4a4\uc5d0\ub294 \ub9e8 \uc704 head \uc5d0 merge-compile.yml \uc744 \uba85\uc2dc\uc801\uc73c\ub85c \ubcf4\ub0b4\uace0(\ubcf4\ub0b4\uace0 \uae30\ub2e4\ub9ac\uc9c0 \uc54a\uc74c) \ubcd1\ud569 \uc9c1\uc804 merge-guard.sh --check \uc73c\ub85c \uc2e0\uc120\ub3c4\uc640 \uae30\ub85d \uc790\ubb38 verdict \ub97c \ud655\uc778\ud55c\ub2e4.\n</github_native_stack>\n\n<board>\n\uac8c\uc2dc\uae00\uc744 \ud1b5\ud574 keeper \ub07c\ub9ac \uc18c\ud1b5\ud558\uace0 \uc758\uacac\uc744 \ub098\ub215\ub2c8\ub2e4.\n\ud574\ub2f9 Board \uae00\uc774 \uc720\uc6a9\ud558\uac70\ub098 \ub3c4\uc6c0\uc774 \ub41c\ub2e4\uace0 \uc0dd\uac01\ud558\uba74 +1 Vote \ub97c \ud569\ub2c8\ub2e4.\n\ubc18\ub300\ub77c\uba74 -1 Vote \ub97c \ud569\ub2c8\ub2e4. \nVote \ub97c \uc801\uadf9\uc801\uc73c\ub85c \uc0ac\uc6a9\ud574, \uc758\uacac\uacfc \ubc18\uc751\uc744 \ub3c4\ucd9c\ud574 \ub354 \ub098\uc740 \uacb0\ub860\uc744 \ub0bc \uc218 \uc788\ub3c4\ub85d \ub3c4\uc640\uc8fc\uc138\uc694.  \n</board>\n</system>\n\n<world>\n</world>\n\n<identity>\n\ub2f9\uc2e0\uc740 native-bootstrap-keeper\uc774\ub2e4. \uc704\uc5d0\uc11c Keeper \ub77c\uace0 \ubd80\ub978 \uc874\uc7ac\uac00 \ub2f9\uc2e0\uc774\ub2e4. \ub2e4\ub978 Keeper \uc758 \uae00\uc774\ub098 \ud68c\uc0c1\ud55c \ub9e5\ub77d\uc744 \uc77d\uc744 \ub54c\ub3c4 \uc774 \uc774\ub984\uc740 \ubc14\ub00c\uc9c0 \uc54a\ub294\ub2e4.\n</identity>\n\n\n<workspace>\n- \uc0cc\ub4dc\ubc15\uc2a4\uc5d0\uc11c \ubcf4\uc774\ub294 \uc791\uc5c5 \ub8e8\ud2b8: /srv/masc/bootstrap-ready/native-bootstrap-keeper\n- \ub3c4\uad6c\uc758 `cwd` \uc5d0\ub294 \uc774 \uc808\ub300 \uacbd\ub85c \ub300\uc2e0 \uc0c1\ub300 \uacbd\ub85c(\ubcf4\ud1b5 `.`)\ub97c \ub118\uae34\ub2e4.\n- argv \uc758 \uc0c1\ub300 \uacbd\ub85c\ub294 \uadf8 `cwd` \ub97c \uae30\uc900\uc73c\ub85c \ud480\ub9b0\ub2e4.\n- \uc791\uc5c5 \ub514\ub809\ud130\ub9ac\ub294 \ub3c4\uad6c \ud638\ucd9c \uc0ac\uc774\uc5d0 \uc720\uc9c0\ub418\uc9c0\ub9cc \uc178 \uc0c1\ud0dc\ub294 \uc720\uc9c0\ub418\uc9c0 \uc54a\ub294\ub2e4.\n- argv \uc758 \uacbd\ub85c \uc778\uc790\ub294 \uc0c1\ub300 \uacbd\ub85c\ub85c \uc4f4\ub2e4. \uc0cc\ub4dc\ubc15\uc2a4 \uc548\uc5d0\uc11c\ub294 \ud638\uc2a4\ud2b8\uc758 \uc808\ub300 \uacbd\ub85c\ub97c \uc4f8 \uc218 \uc5c6\ub2e4.\n</workspace>\n<role>\nPerform the isolated remote SSH filesystem proof using the offered tools.\n</role>",
+  "messages": [
+    {
+      "role": "user",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "text",
+          "text": "Run the remote file workflow and verify the resulting bytes."
+        }
+      ],
+      "metadata": {
+        "agent_core.input_speaker.v1": {
+          "kind": "owner"
+        }
+      }
+    },
+    {
+      "role": "assistant",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "ssh-file-0-0",
+          "name": "Execute",
+          "input": {
+            "argv": [
+              "python3",
+              "-c",
+              "import hashlib,json,os,socket,subprocess; from pathlib import Path; p={\"marker\":'b8e1b7b5a00e42b78bce74a41e158ba7',\"cwd\":os.getcwd(),\"hostname\":socket.gethostname(),\"uid\":os.getuid(),\"bootstrap_env\":os.environ.get(\"BOOTSTRAP_PROOF_ENV\"),\"bootstrap_tool\":subprocess.check_output([\"bootstrap-proof-tool\"],text=True).strip(),\"retained_sha256\":hashlib.sha256(Path(\"retained file.bin\").read_bytes()).hexdigest()}; assert p[\"bootstrap_env\"]==\"bootstrap-environment-preserved\",p; assert p[\"bootstrap_tool\"]==\"bootstrap-tool-preserved\",p; assert p[\"retained_sha256\"]==\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\",p; Path(\"ssh-proof.json\").write_text(json.dumps(p)+\"\\n\"); print(json.dumps(p))"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "ssh-file-0-0",
+          "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"execution_location\":{\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"b8e1b7b5a00e42b78bce74a41e158ba7\\\", \\\"cwd\\\": \\\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\\\", \\\"hostname\\\": \\\"7c0b77a2fd78\\\", \\\"uid\\\": 1000, \\\"bootstrap_env\\\": \\\"bootstrap-environment-preserved\\\", \\\"bootstrap_tool\\\": \\\"bootstrap-tool-preserved\\\", \\\"retained_sha256\\\": \\\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\\\"}\\n\",\"typed\":true,\"execution_time_ms\":323}",
+          "is_error": false
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "ssh-file-0-1",
+          "name": "Execute",
+          "input": {
+            "argv": [
+              "python3",
+              "-c",
+              "import base64,json,os; from pathlib import Path; reported='/srv/masc/bootstrap-ready/native-bootstrap-keeper'; p=json.loads(Path(reported,\"ssh-proof.json\").read_bytes()); p.update(reused_marker=p[\"marker\"],copied_cwd=reported,actual_cwd_base64=base64.b64encode(os.getcwd().encode()).decode()); print(json.dumps(p))"
+            ],
+            "cwd": "/srv/masc/bootstrap-ready/native-bootstrap-keeper"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "ssh-file-0-1",
+          "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"execution_location\":{\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"cwd_source\":\"explicit_cwd\",\"scope\":\"playground_root\",\"playground_root\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"b8e1b7b5a00e42b78bce74a41e158ba7\\\", \\\"cwd\\\": \\\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\\\", \\\"hostname\\\": \\\"7c0b77a2fd78\\\", \\\"uid\\\": 1000, \\\"bootstrap_env\\\": \\\"bootstrap-environment-preserved\\\", \\\"bootstrap_tool\\\": \\\"bootstrap-tool-preserved\\\", \\\"retained_sha256\\\": \\\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\\\", \\\"reused_marker\\\": \\\"b8e1b7b5a00e42b78bce74a41e158ba7\\\", \\\"copied_cwd\\\": \\\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\\\", \\\"actual_cwd_base64\\\": \\\"L3Nydi9tYXNjL2Jvb3RzdHJhcC1yZWFkeS9uYXRpdmUtYm9vdHN0cmFwLWtlZXBlcg==\\\"}\\n\",\"typed\":true,\"execution_time_ms\":339}",
+          "is_error": false
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "ssh-file-0-2",
+          "name": "Write",
+          "input": {
+            "file_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt",
+            "content": "before\n"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "ssh-file-0-2",
+          "content": "{\"ok\":true,\"path\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt\",\"mode\":\"overwrite\",\"bytes_written\":7,\"via\":\"remote_ssh\"}",
+          "is_error": false
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "ssh-file-0-3",
+          "name": "Read",
+          "input": {
+            "file_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "ssh-file-0-3",
+          "content": "{\"ok\":true,\"path\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt\",\"bytes\":7,\"truncated\":false,\"offset\":1,\"returned_lines\":1,\"content\":\"before\\n\",\"via\":\"remote_ssh\"}",
+          "is_error": false
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "ssh-file-0-4",
+          "name": "Edit",
+          "input": {
+            "file_path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt",
+            "old_string": "before\n",
+            "new_string": "after\n"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "ssh-file-0-4",
+          "content": "{\"ok\":true,\"path\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt\",\"mode\":\"patch\",\"bytes_written\":6,\"changed\":true,\"occurrences\":1,\"replace_all\":false,\"via\":\"remote_ssh\"}",
+          "is_error": false
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "ssh-file-0-5",
+          "name": "Grep",
+          "input": {
+            "path": "/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt",
+            "pattern": "^after$"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "ssh-file-0-5",
+          "content": "{\"ok\":true,\"op\":\"rg\",\"path\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt\",\"pattern\":\"^after$\",\"via\":\"remote_ssh\",\"status\":{\"kind\":\"exit\",\"code\":0},\"matches\":[\"1:after\"]}",
+          "is_error": false
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "ssh-file-0-6",
+          "name": "Execute",
+          "input": {
+            "argv": [
+              "python3",
+              "-c",
+              "import hashlib,json,os,subprocess; from pathlib import Path; p=json.loads(Path(\"ssh-proof.json\").read_bytes()); b=Path(\"notes.txt\").read_bytes(); assert b==b\"after\\n\"; p.update(notes=b.decode(),sha256=hashlib.sha256(b).hexdigest(),files=sorted(os.listdir(\".\")),bootstrap_env=os.environ.get(\"BOOTSTRAP_PROOF_ENV\"),bootstrap_tool=subprocess.check_output([\"bootstrap-proof-tool\"],text=True).strip(),retained_sha256=hashlib.sha256(Path(\"retained file.bin\").read_bytes()).hexdigest()); assert p[\"bootstrap_env\"]==\"bootstrap-environment-preserved\",p; assert p[\"bootstrap_tool\"]==\"bootstrap-tool-preserved\",p; assert p[\"retained_sha256\"]==\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\",p; print(json.dumps(p))"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "ssh-file-0-6",
+          "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"execution_location\":{\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"b8e1b7b5a00e42b78bce74a41e158ba7\\\", \\\"cwd\\\": \\\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\\\", \\\"hostname\\\": \\\"7c0b77a2fd78\\\", \\\"uid\\\": 1000, \\\"bootstrap_env\\\": \\\"bootstrap-environment-preserved\\\", \\\"bootstrap_tool\\\": \\\"bootstrap-tool-preserved\\\", \\\"retained_sha256\\\": \\\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\\\", \\\"notes\\\": \\\"after\\\\n\\\", \\\"sha256\\\": \\\"7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919\\\", \\\"files\\\": [\\\"notes.txt\\\", \\\"retained file.bin\\\", \\\"ssh-proof.json\\\"]}\\n\",\"typed\":true,\"execution_time_ms\":316}",
+          "is_error": false
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "text",
+          "text": "REMOTE_SSH_FILES_COMPLETED_b8e1b7b5a00e42b78bce74a41e158ba7"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "text",
+          "text": "Read the persisted notes and verify the original proof after restart."
+        }
+      ],
+      "metadata": {
+        "agent_core.input_speaker.v1": {
+          "kind": "owner"
+        }
+      }
+    },
+    {
+      "role": "assistant",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "ssh-file-restart-0",
+          "name": "Read",
+          "input": {
+            "file_path": "notes.txt"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "ssh-file-restart-0",
+          "content": "{\"ok\":true,\"path\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper/notes.txt\",\"bytes\":6,\"truncated\":false,\"offset\":1,\"returned_lines\":1,\"content\":\"after\\n\",\"via\":\"remote_ssh\"}",
+          "is_error": false
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "ssh-file-restart-1",
+          "name": "Execute",
+          "input": {
+            "argv": [
+              "python3",
+              "-c",
+              "import hashlib,json,os,subprocess; from pathlib import Path; p=json.loads(Path(\"ssh-proof.json\").read_bytes()); b=Path(\"notes.txt\").read_bytes(); assert b==b\"after\\n\"; p.update(notes=b.decode(),sha256=hashlib.sha256(b).hexdigest(),files=sorted(os.listdir(\".\")),bootstrap_env=os.environ.get(\"BOOTSTRAP_PROOF_ENV\"),bootstrap_tool=subprocess.check_output([\"bootstrap-proof-tool\"],text=True).strip(),retained_sha256=hashlib.sha256(Path(\"retained file.bin\").read_bytes()).hexdigest()); assert p[\"bootstrap_env\"]==\"bootstrap-environment-preserved\",p; assert p[\"bootstrap_tool\"]==\"bootstrap-tool-preserved\",p; assert p[\"retained_sha256\"]==\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\",p; print(json.dumps(p))"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "ssh-file-restart-1",
+          "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"execution_location\":{\"cwd\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"b8e1b7b5a00e42b78bce74a41e158ba7\\\", \\\"cwd\\\": \\\"/srv/masc/bootstrap-ready/native-bootstrap-keeper\\\", \\\"hostname\\\": \\\"7c0b77a2fd78\\\", \\\"uid\\\": 1000, \\\"bootstrap_env\\\": \\\"bootstrap-environment-preserved\\\", \\\"bootstrap_tool\\\": \\\"bootstrap-tool-preserved\\\", \\\"retained_sha256\\\": \\\"6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21\\\", \\\"notes\\\": \\\"after\\\\n\\\", \\\"sha256\\\": \\\"7b9a72466d3960eb2aacccfc848939453490db0678bd4725def3f789b891c919\\\", \\\"files\\\": [\\\"notes.txt\\\", \\\"retained file.bin\\\", \\\"ssh-proof.json\\\"]}\\n\",\"typed\":true,\"execution_time_ms\":316}",
+          "is_error": false
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "origin": "conversation",
+      "content": [
+        {
+          "type": "text",
+          "text": "REMOTE_SSH_RESTART_COMPLETED_b8e1b7b5a00e42b78bce74a41e158ba7"
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "total_input_tokens": 11,
+    "total_output_tokens": 11,
+    "total_cache_creation_input_tokens": 0,
+    "total_cache_read_input_tokens": 0,
+    "api_calls": 11,
+    "missing_usage_responses": 0,
+    "estimated_cost_usd": 0.0,
+    "pricing_gap": {
+      "kind": "pricing_unavailable",
+      "model_id": "deepseek-v4.1-flash"
+    }
+  },
+  "turn_count": 11,
+  "created_at": 1792939703.933478,
+  "tools": [
+    {
+      "name": "Execute",
+      "description": "Run one command inside the Keeper sandbox. Give exactly one of argv or command: argv is one non-empty argv process vector run without a shell, tokens verbatim, and command is one line handed to a real shell. cwd is a relative path inside the path jail, and MASC never interprets program or subcommand meaning. A call runs to completion or stops at timeout_sec; there is no background task lifecycle. intent is one of auto (the default) or request_effect. In auto mode an observation-only run returns its actual exit status and output, including failed writes; auto never authorizes an effect. Use intent=request_effect when the command needs persistent writes or network effects: the configured Gate decides permission before effect execution. A nonzero exit alone is not a permission request. A completed tool call means the command ran: read ok and status for its result. For checks, prefer argv so the checked program supplies the exit status. Shell pipelines normally report the last stage; use bash with -o pipefail when an earlier stage's failure must survive a pipe to tail or tee. Do not repeat a write just because its output was truncated.",
+      "parameters": [
+        {
+          "name": "argv",
+          "description": "Direct process vector: executable and arguments passed verbatim without a shell.",
+          "param_type": "array",
+          "required": false
+        },
+        {
+          "name": "command",
+          "description": "Shell command line run by a shell. Use for pipes, redirections, and chained commands.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "shell",
+          "description": "Which shell runs command. Defaults to sh.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "cwd",
+          "description": "Working directory for the command relative to workspace root. Defaults to '.'.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "timeout_sec",
+          "description": "Subprocess timeout in seconds. Defaults to 600.",
+          "param_type": "number",
+          "required": false
+        },
+        {
+          "name": "intent",
+          "description": "auto permits restricted execution as configured; request_effect asks the existing Gate for effect authorization, never grants permission by itself.",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Direct process vector: executable and arguments passed verbatim without a shell."
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Shell command line run by a shell. Use for pipes, redirections, and chained commands."
+          },
+          "shell": {
+            "type": "string",
+            "enum": [
+              "sh",
+              "bash",
+              "zsh",
+              "dash",
+              "ksh"
+            ],
+            "default": "sh",
+            "description": "Which shell runs command. Defaults to sh."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory for the command relative to workspace root. Defaults to '.'."
+          },
+          "timeout_sec": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "description": "Subprocess timeout in seconds. Defaults to 600."
+          },
+          "intent": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "request_effect"
+            ],
+            "default": "auto",
+            "description": "auto permits restricted execution as configured; request_effect asks the existing Gate for effect authorization, never grants permission by itself."
+          }
+        },
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "argv"
+            ],
+            "not": {
+              "required": [
+                "command"
+              ]
+            },
+            "description": "Direct form with argv."
+          },
+          {
+            "required": [
+              "command"
+            ],
+            "not": {
+              "required": [
+                "argv"
+              ]
+            },
+            "description": "Shell form with command."
+          }
+        ]
+      }
+    },
+    {
+      "name": "Grep",
+      "description": "Search file contents with ripgrep: provide a regex `pattern` (and optionally path/glob/type). To list a directory, read a file, or run git status/log/diff, use the Execute tool (e.g. argv=['ls','-la','<path>']). Patterns match within a single line; a literal newline in `pattern` is rejected. To match across lines, run `rg -U` through the Execute tool.",
+      "parameters": [
+        {
+          "name": "pattern",
+          "description": "Regular expression to search file contents for (ripgrep).",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "path",
+          "description": "Directory or file to search in. Defaults to the keeper sandbox when omitted.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "glob",
+          "description": "Glob filter, e.g. '*.ml' or 'lib/**/*.ml'.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "type",
+          "description": "Ripgrep file-type filter, e.g. 'ml', 'py'.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "-i",
+          "description": "Case-insensitive search.",
+          "param_type": "boolean",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Regular expression to search file contents for (ripgrep)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory or file to search in. Defaults to the keeper sandbox when omitted."
+          },
+          "glob": {
+            "type": "string",
+            "description": "Glob filter, e.g. '*.ml' or 'lib/**/*.ml'."
+          },
+          "type": {
+            "type": "string",
+            "description": "Ripgrep file-type filter, e.g. 'ml', 'py'."
+          },
+          "-i": {
+            "type": "boolean",
+            "description": "Case-insensitive search."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "Read",
+      "description": "Read one existing file, or a line range of one file, from the keeper sandbox or an allowed path with no implicit cwd. Read targets a single FILE; to list a directory use the Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read never inherits Execute cwd. For a line range, pass offset (1-based line) and limit (max lines) \u2014 do not run sed -n via Execute for this. The payload carries the exact current bytes (no line numbers) plus offset, returned_lines, truncated; when truncated=true a next_offset field gives the next line offset. If last_line_partial=true, the byte budget cut inside the final returned line and next_offset intentionally skips that line's unseen remainder rather than continuing byte-for-byte. Before Edit, Read the target region so old_string matches current bytes.",
+      "parameters": [
+        {
+          "name": "file_path",
+          "description": "Existing file path to read. Relative paths resolve against cwd when cwd is provided, otherwise against your workspace root. Read does not inherit Execute cwd implicitly; pass cwd explicitly or give a path relative to the workspace root.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "cwd",
+          "description": "Optional directory, relative to your workspace root, to resolve file_path from. This is explicit only; Read never inherits the previous Execute cwd.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "offset",
+          "description": "1-based line number to start reading from (default 1). To continue a truncated read, pass the next_offset value from the previous response. When last_line_partial=true, that offset starts at the following line because the remainder of the byte-capped line is intentionally skipped.",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "limit",
+          "description": "Maximum number of LINES to return, counted from offset. The response is additionally bounded by a byte budget; when more content remains, the payload sets truncated=true and next_offset for the follow-up call.",
+          "param_type": "integer",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Existing file path to read. Relative paths resolve against cwd when cwd is provided, otherwise against your workspace root. Read does not inherit Execute cwd implicitly; pass cwd explicitly or give a path relative to the workspace root."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Optional directory, relative to your workspace root, to resolve file_path from. This is explicit only; Read never inherits the previous Execute cwd."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "1-based line number to start reading from (default 1). To continue a truncated read, pass the next_offset value from the previous response. When last_line_partial=true, that offset starts at the following line because the remainder of the byte-capped line is intentionally skipped."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of LINES to return, counted from offset. The response is additionally bounded by a byte budget; when more content remains, the payload sets truncated=true and next_offset for the follow-up call."
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "Edit",
+      "description": "Patch an existing file by replacing an exact string. Prefer Edit over sed -i/awk/perl via Execute for file changes: the exact-match check and the 'not found' error keep a failed edit from writing anything. Each call replaces one exact string (every occurrence with replace_all=true); apply several disjoint changes as successive Edit calls. Read the file first and copy old_string verbatim from its current bytes, including leading whitespace, indentation, and newlines; the match is exact and byte-sensitive. On 'old_string not found', re-Read the file to get the current text instead of retrying the same string.",
+      "parameters": [
+        {
+          "name": "file_path",
+          "description": "Absolute or sandbox-relative file path to edit. The file must exist. Relative paths resolve against cwd when cwd is provided, otherwise against your workspace root.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "cwd",
+          "description": "Optional directory, relative to your workspace root, to resolve file_path from. This is explicit only; Edit never inherits the previous Execute cwd.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "old_string",
+          "description": "Exact substring to replace. Must occur exactly once unless replace_all=true.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "new_string",
+          "description": "Replacement substring. Pass an empty string to delete old_string.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "replace_all",
+          "description": "Default false. When true, replaces every occurrence of old_string.",
+          "param_type": "boolean",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or sandbox-relative file path to edit. The file must exist. Relative paths resolve against cwd when cwd is provided, otherwise against your workspace root."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Optional directory, relative to your workspace root, to resolve file_path from. This is explicit only; Edit never inherits the previous Execute cwd."
+          },
+          "old_string": {
+            "type": "string",
+            "description": "Exact substring to replace. Must occur exactly once unless replace_all=true."
+          },
+          "new_string": {
+            "type": "string",
+            "description": "Replacement substring. Pass an empty string to delete old_string."
+          },
+          "replace_all": {
+            "type": "boolean",
+            "description": "Default false. When true, replaces every occurrence of old_string."
+          }
+        },
+        "required": [
+          "file_path",
+          "old_string",
+          "new_string"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "Write",
+      "description": "Write full file content into the keeper sandbox or an allowed path. Missing parent directories are created safely; call Write directly instead of using Execute mkdir.",
+      "parameters": [
+        {
+          "name": "file_path",
+          "description": "Absolute or sandbox-relative file path. Parent directories are created as needed.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "content",
+          "description": "Exact full file content; overwrites the existing file. Preserve requested whitespace, including a final newline when requested. Do not strip or add whitespace. Compare bytes_written with the expected UTF-8 byte count; verify file content or hash before claiming exact content.",
+          "param_type": "string",
+          "required": true
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Absolute or sandbox-relative file path. Parent directories are created as needed."
+          },
+          "content": {
+            "type": "string",
+            "description": "Exact full file content; overwrites the existing file. Preserve requested whitespace, including a final newline when requested. Do not strip or add whitespace. Compare bytes_written with the expected UTF-8 byte count; verify file content or hash before claiming exact content."
+          }
+        },
+        "required": [
+          "file_path",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "WebSearch",
+      "description": "Search the public web. Use exact tool name WebSearch. Example input: {\"query\":\"OCaml 5.2 release date\",\"limit\":5,\"includeContent\":true}. Returns result.results with title, url, snippet. With includeContent:true the response gains a human-readable content_text rendering of every fetched page. When the configured provider is brave_llm_context the response instead carries grounded=true, context_text (pre-extracted chunks) and sources metadata, with no results rows \u2014 includeContent is then a no-op since the content already rides inline. Do not use snake_case names like web_search.",
+      "parameters": [
+        {
+          "name": "query",
+          "description": "Plain-text search query. Example: \"OCaml 5.2 release date\".",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "limit",
+          "description": "Maximum number of results to return (1-10, default 5).",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "includeContent",
+          "description": "When true, also fetch each result page and add a human-readable content_text rendering. Recommended for research.",
+          "param_type": "boolean",
+          "required": false
+        },
+        {
+          "name": "contentMaxChars",
+          "description": "Maximum fetched characters per result inside content_text.",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "contentTimeout",
+          "description": "Per-result content fetch timeout in seconds.",
+          "param_type": "integer",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Plain-text search query. Example: \"OCaml 5.2 release date\"."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of results to return (1-10, default 5)."
+          },
+          "includeContent": {
+            "type": "boolean",
+            "description": "When true, also fetch each result page and add a human-readable content_text rendering. Recommended for research."
+          },
+          "contentMaxChars": {
+            "type": "integer",
+            "description": "Maximum fetched characters per result inside content_text.",
+            "minimum": 100,
+            "maximum": 20000,
+            "default": 4000
+          },
+          "contentTimeout": {
+            "type": "integer",
+            "description": "Per-result content fetch timeout in seconds.",
+            "minimum": 1,
+            "maximum": 60,
+            "default": 15
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "WebFetch",
+      "description": "Fetch one web page for deeper reading. Use exact tool name WebFetch. Example input: {\"url\":\"https://ocaml.org/news\",\"extractMode\":\"markdown\",\"maxChars\":5000}. Returns text, title, final_url, http_status, truncated. Use after WebSearch when you need a citation or full article text. Do not use snake_case names like web_fetch.",
+      "parameters": [
+        {
+          "name": "url",
+          "description": "Full URL to fetch. Example: \"https://ocaml.org/news\".",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "timeout",
+          "description": "Request timeout in seconds.",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "extractMode",
+          "description": "Output extraction mode. markdown (default) preserves headings/lists/links; text returns flattened plain text.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "maxChars",
+          "description": "Maximum extracted content characters to return. Longer pages come back as a head/tail window around a [TRUNCATED ...] marker whose full_text_sha256 is read with keeper_artifact_read(sha256, offset).",
+          "param_type": "integer",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Full URL to fetch. Example: \"https://ocaml.org/news\"."
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Request timeout in seconds.",
+            "minimum": 1,
+            "maximum": 60,
+            "default": 15
+          },
+          "extractMode": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "text"
+            ],
+            "description": "Output extraction mode. markdown (default) preserves headings/lists/links; text returns flattened plain text.",
+            "default": "markdown"
+          },
+          "maxChars": {
+            "type": "integer",
+            "description": "Maximum extracted content characters to return. Longer pages come back as a head/tail window around a [TRUNCATED ...] marker whose full_text_sha256 is read with keeper_artifact_read(sha256, offset).",
+            "minimum": 1,
+            "maximum": 100000,
+            "default": 50000
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "BrowserTabs",
+      "description": "Discover a browser implementing optional requiredActions without opening one. The receipt includes browserCapabilities, with implemented operations, invocation tools and constraints. Omit lane/clientId for automatic selection; retain the returned browserSelection.lane and clientId on all subsequent calls. List {clientId,transport,tabs:[{id,active,title,url}]} and live index/windowId. Carry clientId/tabId into reads/actions. A partial BiDi inventory sets complete=false and lists unavailableTabs with their IDs and errors; other tabs remain usable, and unavailable does not mean closed. Live transport says what that connection serves: webdriver_bidi takes hover_at and drag, web_extension takes set_zoom; both take activate_tab, and on webdriver_bidi it also focuses the browser window. Ambiguous or stale live selection returns clients without dispatch: select explicitly and retry. Automation and stagehand clientId is null, with no transport.",
+      "parameters": [
+        {
+          "name": "lane",
+          "description": "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "clientId",
+          "description": "Retain the observed live clientId on every subsequent tab read/action; stale IDs fail. Omit for a work browser.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "requiredActions",
+          "description": "Optional public operations needed by the task, only for initial discovery or action=open. Automatic choice requires one browser implementing all operations; impossible combinations fail before any browser command. Explicit browser owners never change. Inspect browserCapabilities constraints and retain browserSelection for later calls.",
+          "param_type": "array",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "lane": {
+            "type": "string",
+            "enum": [
+              "live",
+              "automation",
+              "stagehand"
+            ],
+            "description": "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
+          },
+          "clientId": {
+            "type": "string",
+            "description": "Retain the observed live clientId on every subsequent tab read/action; stale IDs fail. Omit for a work browser."
+          },
+          "requiredActions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "list_tabs",
+                "open_tab",
+                "close_tab",
+                "activate_tab",
+                "list_windows",
+                "create_window",
+                "close_window",
+                "navigate",
+                "follow_link",
+                "back",
+                "forward",
+                "reload",
+                "session_lifecycle",
+                "read_text",
+                "read_html",
+                "read_elements",
+                "read_scene",
+                "read_regions",
+                "screenshot",
+                "click",
+                "double_click",
+                "right_click",
+                "middle_click",
+                "pointer_down",
+                "pointer_up",
+                "hover",
+                "pointer_drag",
+                "html5_drop",
+                "scroll_page",
+                "scroll_at",
+                "fill",
+                "type_text",
+                "press_key",
+                "key_chord",
+                "select_option",
+                "read_frames",
+                "frame_interaction",
+                "read_dialog",
+                "accept_dialog",
+                "dismiss_dialog",
+                "upload_file",
+                "list_downloads",
+                "page_zoom",
+                "resize_viewport",
+                "touch",
+                "read_clipboard",
+                "write_clipboard",
+                "read_network",
+                "intercept_network",
+                "read_console",
+                "read_storage",
+                "write_storage",
+                "sentence_action"
+              ]
+            },
+            "description": "Optional public operations needed by the task, only for initial discovery or action=open. Automatic choice requires one browser implementing all operations; impossible combinations fail before any browser command. Explicit browser owners never change. Inspect browserCapabilities constraints and retain browserSelection for later calls."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "BrowserSession",
+      "description": "Open or manage a work browser. For initial action=open, optional requiredActions chooses a work browser implementing all requested operations; unsupported combinations fail before opening. Omit lane to reuse a single open work session, or start the configured Chrome backend before the Gecko backend when no session is open. Multiple open work sessions require a choice. Visible by default. The receipt reports browserSelection; retain its lane for later work. lane=automation: Gecko (configure [browser.automation] geckodriver, optional binary e.g. Zen). lane=stagehand: Chromium with the Stagehand runtime (configure [browser.stagehand]). Each backend's enabled flag controls new requests; status and close remain available while off. The server starts and stops it; operator live sessions are not managed. After open, use BrowserGoto with the same lane.",
+      "parameters": [
+        {
+          "name": "action",
+          "description": "open launches; close stops; status observes the session. With none open, status adds driver.ready (true: open can start one now; false: driver.message says why, e.g. \"Session already started\") or driver.error (the driver did not answer).",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "lane",
+          "description": "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "headless",
+          "description": "",
+          "param_type": "boolean",
+          "required": false
+        },
+        {
+          "name": "requiredActions",
+          "description": "Optional public operations needed by the task, only for initial discovery or action=open. Automatic choice requires one browser implementing all operations; impossible combinations fail before any browser command. Explicit browser owners never change. Inspect browserCapabilities constraints and retain browserSelection for later calls.",
+          "param_type": "array",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "open",
+              "close",
+              "status"
+            ],
+            "description": "open launches; close stops; status observes the session. With none open, status adds driver.ready (true: open can start one now; false: driver.message says why, e.g. \"Session already started\") or driver.error (the driver did not answer)."
+          },
+          "lane": {
+            "type": "string",
+            "enum": [
+              "automation",
+              "stagehand"
+            ],
+            "description": "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
+          },
+          "headless": {
+            "type": "boolean",
+            "default": false
+          },
+          "requiredActions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "list_tabs",
+                "open_tab",
+                "close_tab",
+                "activate_tab",
+                "list_windows",
+                "create_window",
+                "close_window",
+                "navigate",
+                "follow_link",
+                "back",
+                "forward",
+                "reload",
+                "session_lifecycle",
+                "read_text",
+                "read_html",
+                "read_elements",
+                "read_scene",
+                "read_regions",
+                "screenshot",
+                "click",
+                "double_click",
+                "right_click",
+                "middle_click",
+                "pointer_down",
+                "pointer_up",
+                "hover",
+                "pointer_drag",
+                "html5_drop",
+                "scroll_page",
+                "scroll_at",
+                "fill",
+                "type_text",
+                "press_key",
+                "key_chord",
+                "select_option",
+                "read_frames",
+                "frame_interaction",
+                "read_dialog",
+                "accept_dialog",
+                "dismiss_dialog",
+                "upload_file",
+                "list_downloads",
+                "page_zoom",
+                "resize_viewport",
+                "touch",
+                "read_clipboard",
+                "write_clipboard",
+                "read_network",
+                "intercept_network",
+                "read_console",
+                "read_storage",
+                "write_storage",
+                "sentence_action"
+              ]
+            },
+            "description": "Optional public operations needed by the task, only for initial discovery or action=open. Automatic choice requires one browser implementing all operations; impossible combinations fail before any browser command. Explicit browser owners never change. Inspect browserCapabilities constraints and retain browserSelection for later calls."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "BrowserGoto",
+      "description": "Navigate a tab to HTTP(S); returns landing URL/title. Server-owned browsers (automation, stagehand) navigate their tabs. A live BiDi connection navigates only a tab it opened with BrowserAct open_tab: pass lane live, its clientId and that tabId. A tab the operator opened is refused before any effect; use BrowserInteract there.",
+      "parameters": [
+        {
+          "name": "url",
+          "description": "HTTP(S) URL.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "lane",
+          "description": "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "tabId",
+          "description": "BrowserTabs ID; default current tab. Required on live.",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "clientId",
+          "description": "lane live: the exact observed clientId of the BiDi connection that opened tabId.",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "HTTP(S) URL."
+          },
+          "lane": {
+            "type": "string",
+            "enum": [
+              "live",
+              "automation",
+              "stagehand"
+            ],
+            "description": "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
+          },
+          "tabId": {
+            "type": "integer",
+            "description": "BrowserTabs ID; default current tab. Required on live.",
+            "minimum": 0
+          },
+          "clientId": {
+            "type": "string",
+            "description": "lane live: the exact observed clientId of the BiDi connection that opened tabId."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "BrowserInstruct",
+      "description": "Use the owned browser lane and tabId returned by BrowserTabs. observe finds matching elements: automation uses its installation-selected locate Exact Output and returns freshly checked node references; stagehand uses its observer. Model explanations are inference, not permission to click. act and extract require stagehand; act can change external state and extract returns data shaped by schema. No browser is substituted for the observed tab.",
+      "parameters": [
+        {
+          "name": "lane",
+          "description": "The owned lane that supplied tabId.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "action",
+          "description": "",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "instruction",
+          "description": "Required for act and extract.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "tabId",
+          "description": "",
+          "param_type": "integer",
+          "required": true
+        },
+        {
+          "name": "schema",
+          "description": "extract only: JSON Schema text for the data.",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "lane": {
+            "type": "string",
+            "enum": [
+              "automation",
+              "stagehand"
+            ],
+            "description": "The owned lane that supplied tabId."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "act",
+              "observe",
+              "extract"
+            ]
+          },
+          "instruction": {
+            "type": "string",
+            "description": "Required for act and extract."
+          },
+          "tabId": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "schema": {
+            "type": "string",
+            "description": "extract only: JSON Schema text for the data."
+          }
+        },
+        "required": [
+          "lane",
+          "action",
+          "tabId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_lane_status",
+      "description": "Read how your execution lane stands, from what the server already knows: the lane (microvm_remote, remote_ssh, or docker), its endpoint, what the endpoint's shim answered to the last probe (protocol major, capabilities), how the last Execute that reached the wire ended (payload_finished with its status, or lane_failed with a class and the detail you saw), and, when the lane itself failed, the operator action that fixes it. Nothing here changes state, and a server restart empties it. Call it once when Execute fails with a lane error, before retrying or posting: it says whether the failure is your payload's or the lane's.",
+      "parameters": [],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_tools_list",
+      "description": "List the complete Tool and Skill capability inventory frozen for this Keeper turn, including operator-only and unavailable entries with their typed availability. This is capability introspection, not connector content lookup. Use keeper_capability_search to retrieve lexically relevant candidates.",
+      "parameters": [],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_capability_search",
+      "description": "Find a Tool or Skill for the task when you do not know its exact name. Search the names and descriptions in this turn's frozen capability inventory. Inspect each match's availability, description and invocation_name before choosing it. For an Instruction Skill, pass reference.identity as keeper_skill identity; optionally pass reference.content_revision as content_revision to pin the revision. Do not pass a reference argument. A Composition Skill runs its declared sequence through the returned invocation_name. An async call returns a submission receipt; after the completion notification, read keeper_composition_status with its request_id to verify completion and node results. Search does not load schemas or execute candidates. If a chosen name is advertised by keeper_tool_search but absent from your callable tools, load that exact name there before calling it. Unavailable candidates cannot be invoked through this search.",
+      "parameters": [
+        {
+          "name": "query",
+          "description": "Literal phrase from the task, capability name or description. Names such as browser-navigate-read need no query-language quoting. SQLite tokenization and ranking still apply; no match is not evidence that the capability is absent. For boolean, prefix or column expressions, select syntax=fts5 explicitly.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "syntax",
+          "description": "literal (default) searches one phrase and treats punctuation/operators as text. fts5 uses the explicit FTS5 expression grammar; for alternatives use query='browser OR screenshot'.",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Literal phrase from the task, capability name or description. Names such as browser-navigate-read need no query-language quoting. SQLite tokenization and ranking still apply; no match is not evidence that the capability is absent. For boolean, prefix or column expressions, select syntax=fts5 explicitly."
+          },
+          "syntax": {
+            "type": "string",
+            "enum": [
+              "literal",
+              "fts5"
+            ],
+            "default": "literal",
+            "description": "literal (default) searches one phrase and treats punctuation/operators as text. fts5 uses the explicit FTS5 expression grammar; for alternatives use query='browser OR screenshot'."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_context_status",
+      "description": "Check your own persisted checkpoint and session state. Returns: name (your keeper name), checkpoint_bytes, message_count, memory fact counts, sandbox health, and your workspace root plus backend/profile metadata. Context-window occupancy is not currently observed and is not returned. sandbox paths are tool-ready and can be passed directly as path or cwd to keeper tools without prefix. Use when checking checkpoint/session continuity or resolving a path without string-interpolating your own keeper name.",
+      "parameters": [],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_artifact_read",
+      "description": "Restore a [masc:blob ...] ToolResult or a normalized _blob ToolUse input by its sha256. Completed tool-call arguments are stored as application/json; read and parse the original JSON to inspect, compare or reuse those arguments. The reference's bytes field is the artifact's total size. max_bytes defaults to the 16384 maximum, which is the largest page that never itself becomes an unreadable spilled file; read whole artifacts by paging, not by small slices. If the response has eof=false, continue from next_offset until eof=true. Text pages use UTF-8; arbitrary bytes use base64. The runtime never re-inlines a stored artifact into model history; this tool is the only way to read one.",
+      "parameters": [
+        {
+          "name": "sha256",
+          "description": "Exact sha256 from a [masc:blob ...] ToolResult or a ToolUse input _blob reference.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "offset",
+          "description": "Byte offset to read from. Continue a paged read at the returned next_offset.",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "max_bytes",
+          "description": "Maximum source bytes in this model-visible page. Defaults to the maximum; lower it only for a deliberate slice, not for paging.",
+          "param_type": "integer",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "description": "Exact sha256 from a [masc:blob ...] ToolResult or a ToolUse input _blob reference."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Byte offset to read from. Continue a paged read at the returned next_offset."
+          },
+          "max_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16384,
+            "default": 16384,
+            "description": "Maximum source bytes in this model-visible page. Defaults to the maximum; lower it only for a deliberate slice, not for paging."
+          }
+        },
+        "required": [
+          "sha256"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_memory_search",
+      "description": "Search durable Memory OS facts or raw conversation history, case-insensitively. Short ASCII alphanumeric terms (1-2 characters) match ASCII word boundaries (Korean suffixes remain searchable); other terms retain substring matching. Facts: whole-query matches first in store order, then claims holding any whitespace-separated term (3+ characters match inside words) by BM25. History needs a non-empty query, matched whole or by every term, newest first. The default reads only current facts; source='all' adds absorbed originals, dropped history and conversation history. Source-bound files are revalidated only for query-matching candidates; unrelated claims remain stored and unverified. source_verification.status='incomplete' means matching claims were withheld because their sources could not be verified; it is not proof of no relevant memory. total_candidates counts stored claims, not verified results. Current results are paged: when truncated=true, pass next_cursor as cursor with the same query and source=current to read the rest. A changed current corpus or query rejects the cursor; restart without it. Historical scopes do not accept cursors. Fact results name their store and original basis; current facts include exact memory_id, category and origin (authored is yours to supersede). Use a memory_id as a derived conclusion's premise_id only for store='current_memory_snapshot'. source='absorbed' finds facts merged into a newer claim: into is the claim now holding it; into_current=false if not current. source='dropped' retrieves historical removed claims with reasons from the journal; these are not current facts. Check the reason and original evidence before using or writing a new current claim. Search never restores memory. Pending removal finalization is reported as a read failure until a writer recovers it; older journal gaps may remain.",
+      "parameters": [
+        {
+          "name": "query",
+          "description": "case-insensitive text; terms split on ASCII whitespace",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "limit",
+          "description": "max results (1-10, default 5). Must be a bare integer (e.g. 5); a quoted value is rejected.",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "source",
+          "description": "Search scope: current (default, ordinary and source-bound current facts), absorbed (facts merged into a newer claim), dropped (historical removed claims), history (raw messages), or all",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "cursor",
+          "description": "Opaque next_cursor from a truncated source=current response. Continue with the same query. If current memory changed, restart without cursor. Historical scopes do not accept cursors.",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "case-insensitive text; terms split on ASCII whitespace"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "max results (1-10, default 5). Must be a bare integer (e.g. 5); a quoted value is rejected."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "current",
+              "absorbed",
+              "dropped",
+              "history",
+              "all"
+            ],
+            "description": "Search scope: current (default, ordinary and source-bound current facts), absorbed (facts merged into a newer claim), dropped (historical removed claims), history (raw messages), or all"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque next_cursor from a truncated source=current response. Continue with the same query. If current memory changed, restart without cursor. Historical scopes do not accept cursors."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_tasks_list",
+      "description": "List backlog tasks. Rows carry id, title, priority, created_at, status, assignee and lifecycle timestamps; projection=full adds completion notes, description, files, contract, handoff_context, execution_links. awaiting_verification means the task awaits the completion-authority verdict and no Keeper can claim it; never Read producer sandbox paths. Rows are ordered by priority, then created_at, then id. When truncated is true the response carries next_cursor; pass it as cursor with the same status, include_done and projection to read the rows after that page. The last page has none. new_tasks highlights recent off-page rows only on the first page; continuation pages do not repeat that discovery window. Narrow by task_ids, assignee, goal_id or a literal query before paging; all supplied filters are ANDed and must stay the same on continuation pages. Use task_ids with projection=full for known tasks instead of scanning the whole backlog.",
+      "parameters": [
+        {
+          "name": "task_ids",
+          "description": "Exact task IDs to retrieve in one call. Existing status/include_done rules still apply; use status=done or include_done=true for completed tasks, status=cancelled for cancelled tasks.",
+          "param_type": "array",
+          "required": false
+        },
+        {
+          "name": "assignee",
+          "description": "Exact performer handle: includes claimed, in_progress, awaiting_verification and done tasks allowed by the status filter. Does not match a canceller or unassigned task.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "goal_id",
+          "description": "Exact Goal ID from the authoritative task-to-Goal link registry. No links returns an empty list; an unreadable registry returns an error.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "query",
+          "description": "Non-blank literal substring in title or description, ASCII case-insensitive. No regex, semantic ranking, notes or receipt search.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "status",
+          "description": "Filter by task status",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "include_done",
+          "description": "Include completed tasks (default: false)",
+          "param_type": "boolean",
+          "required": false
+        },
+        {
+          "name": "limit",
+          "description": "Max tasks to return (default: 50)",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "cursor",
+          "description": "Opaque next_cursor from a previous truncated keeper_tasks_list response. Pass it with the same status, include_done and projection to read the rows after that page. A cursor from a different filter, or one this tool did not issue, is rejected with field=cursor.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "if_revision",
+          "description": "Optional producer revision from the previous keeper_tasks_list snapshot; matching revisions return unchanged.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "projection",
+          "description": "",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Exact task IDs to retrieve in one call. Existing status/include_done rules still apply; use status=done or include_done=true for completed tasks, status=cancelled for cancelled tasks."
+          },
+          "assignee": {
+            "type": "string",
+            "description": "Exact performer handle: includes claimed, in_progress, awaiting_verification and done tasks allowed by the status filter. Does not match a canceller or unassigned task."
+          },
+          "goal_id": {
+            "type": "string",
+            "description": "Exact Goal ID from the authoritative task-to-Goal link registry. No links returns an empty list; an unreadable registry returns an error."
+          },
+          "query": {
+            "type": "string",
+            "description": "Non-blank literal substring in title or description, ASCII case-insensitive. No regex, semantic ranking, notes or receipt search."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "todo",
+              "claimed",
+              "in_progress",
+              "awaiting_verification",
+              "done",
+              "cancelled"
+            ],
+            "description": "Filter by task status"
+          },
+          "include_done": {
+            "type": "boolean",
+            "description": "Include completed tasks (default: false)"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "Max tasks to return (default: 50)"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque next_cursor from a previous truncated keeper_tasks_list response. Pass it with the same status, include_done and projection to read the rows after that page. A cursor from a different filter, or one this tool did not issue, is rejected with field=cursor."
+          },
+          "if_revision": {
+            "type": "string",
+            "description": "Optional producer revision from the previous keeper_tasks_list snapshot; matching revisions return unchanged."
+          },
+          "projection": {
+            "type": "string",
+            "enum": [
+              "compact",
+              "full"
+            ],
+            "default": "compact"
+          }
+        }
+      }
+    },
+    {
+      "name": "keeper_task_claim",
+      "description": "Claim MASC backlog work. With no task_id, claims the next eligible unclaimed todo task that matches your capabilities. awaiting_verification tasks are pending a verdict from the system LLM agent at the completion-authority boundary and are not claimable Keeper work. Never Read producer sandbox paths directly. With task_id, claims that exact task when a user, mention, board item, or keeper_tasks_list row identifies it; an awaiting_verification task returns the typed pending-verdict refusal. If you already own another Claimed/InProgress task, finish it with keeper_task_done or hand it back with keeper_task_release first; keeper_task_claim does not auto-release active work.",
+      "parameters": [
+        {
+          "name": "task_id",
+          "description": "Optional exact task id from keeper_tasks_list, board, mention, or user request",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Optional exact task id from keeper_tasks_list, board, mention, or user request",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "keeper_task_done",
+      "description": "Submit your claimed task for verification with a result summary and trusted evidence_refs. The task must be claimed by you. This does not make the task done: it moves to awaiting_verification and waits for a completion authority's verdict, which no Keeper can produce. It also does not hold your next claim while it waits. Every evidence_refs entry must be artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, or fusion:<run-id>. Artifact paths include the checkout prefix: a file at repo/evidence/build.log is artifact:repo/evidence/build.log even with Execute cwd=repo. The response evidence_capture names this saved request and reports unreadable or truncated artifacts; submission success is not capture success. Files and collaboration sources are captured at submission; Board/Fusion reads during review use those frozen bytes, including comments and original Fusion producer identity. A note is narrative, not captured proof. Pure-placeholder results ('done', 'ok', etc.) are rejected.",
+      "parameters": [
+        {
+          "name": "task_id",
+          "description": "Task ID returned by keeper_task_claim",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "result",
+          "description": "What was done: files changed, tests run, outcome observed",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "evidence_refs",
+          "description": "Trusted references substantiating completion: artifact:<producer-root-relative-path> for files, board:<post-id> for a full thread, fusion:<run-id> for original advice and recorded decisions, or note:<text> for narrative. Collaboration capture must succeed before submission commits; later edits, author changes and expiry do not change the reviewer snapshot. A commit or URL in a note must still be inspected.",
+          "param_type": "array",
+          "required": true
+        },
+        {
+          "name": "notes",
+          "description": "Optional verification handoff notes, preserved separately from the result summary. Omit when there are no additional notes. A supplied string is kept verbatim; the result summary does not replace it.",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task ID returned by keeper_task_claim",
+            "minLength": 1
+          },
+          "result": {
+            "type": "string",
+            "description": "What was done: files changed, tests run, outcome observed",
+            "minLength": 1
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Trusted references substantiating completion: artifact:<producer-root-relative-path> for files, board:<post-id> for a full thread, fusion:<run-id> for original advice and recorded decisions, or note:<text> for narrative. Collaboration capture must succeed before submission commits; later edits, author changes and expiry do not change the reviewer snapshot. A commit or URL in a note must still be inspected."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Optional verification handoff notes, preserved separately from the result summary. Omit when there are no additional notes. A supplied string is kept verbatim; the result summary does not replace it."
+          }
+        },
+        "required": [
+          "task_id",
+          "result",
+          "evidence_refs"
+        ]
+      }
+    },
+    {
+      "name": "keeper_candle_balance",
+      "description": "Synchronize the durable decay-policy observation and return your current Candle balance in milli-Candle (1000 milli-Candle = 1 Candle) and the portrait accessories you own. Your Keeper identity comes from this turn.",
+      "parameters": [],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_candle_catalog",
+      "description": "List portrait accessories and their current prices in milli-Candle (1000 milli-Candle = 1 Candle). An unpriced item cannot be bought.",
+      "parameters": [],
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_candle_purchase",
+      "description": "Buy one portrait accessory for yourself at its current configured milli-Candle price. Requires enough Candle and refuses an item you already own. Buying does not equip the item. Your Keeper identity comes from this turn.",
+      "parameters": [
+        {
+          "name": "item",
+          "description": "A canonical item id returned by keeper_candle_catalog.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "expected_price_milli",
+          "description": "Optional maximum milli-Candle price you expect to pay. If the effective price at the purchase instant exceeds this bound, the purchase is refused with price_changed.",
+          "param_type": "integer",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "type": "string",
+            "description": "A canonical item id returned by keeper_candle_catalog."
+          },
+          "expected_price_milli": {
+            "type": "integer",
+            "description": "Optional maximum milli-Candle price you expect to pay. If the effective price at the purchase instant exceeds this bound, the purchase is refused with price_changed."
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_candle_equip",
+      "description": "Equip an owned portrait accessory in one slot for the current Keeper. Use item=default to restore that slot's name-derived starting accessory. This does not spend Candle or change other slots.",
+      "parameters": [
+        {
+          "name": "slot",
+          "description": "Portrait slot to change.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "item",
+          "description": "Owned item id from the catalog, or default to restore the starting item.",
+          "param_type": "string",
+          "required": true
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "string",
+            "enum": [
+              "face",
+              "neck",
+              "head",
+              "hand",
+              "base"
+            ],
+            "description": "Portrait slot to change."
+          },
+          "item": {
+            "type": "string",
+            "description": "Owned item id from the catalog, or default to restore the starting item."
+          }
+        },
+        "required": [
+          "slot",
+          "item"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_candle_gift",
+      "description": "Gift Candle or one owned portrait accessory to another Keeper. Give exactly one of amount_milli (with a reason naming the occasion) or item (an item id you own). Money moves, never mints; a gifted item you wear comes off. Your Keeper identity comes from this turn.",
+      "parameters": [
+        {
+          "name": "to",
+          "description": "The receiving Keeper's name. Must differ from yours and name a registered Keeper; an unknown name is refused before any Candle moves.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "amount_milli",
+          "description": "Milli-Candle to send. Give this or item, never both. Must be positive.",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "item",
+          "description": "A canonical item id you own, from keeper_candle_catalog. Give this or amount_milli, never both.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "reason",
+          "description": "What the money gift is for. Required with amount_milli; a second gift under the same reason to the same Keeper is refused.",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "The receiving Keeper's name. Must differ from yours and name a registered Keeper; an unknown name is refused before any Candle moves."
+          },
+          "amount_milli": {
+            "type": "integer",
+            "description": "Milli-Candle to send. Give this or item, never both. Must be positive.",
+            "minimum": 1
+          },
+          "item": {
+            "type": "string",
+            "description": "A canonical item id you own, from keeper_candle_catalog. Give this or amount_milli, never both."
+          },
+          "reason": {
+            "type": "string",
+            "description": "What the money gift is for. Required with amount_milli; a second gift under the same reason to the same Keeper is refused."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "masc_board_post",
+      "description": "Create a new board post. Author is auto-filled from keeper identity. Use hearth to target a topic channel (e.g. 'code-review', 'research', 'ops'); when a SubBoard with that slug exists the post is bound to it. Use for sharing findings, asking questions, or starting discussions that other keepers should see.",
+      "parameters": [
+        {
+          "name": "title",
+          "description": "Optional post title shown in board lists. Must not be blank when present; omit for short untitled posts. Write readable prose with natural word spacing (including Korean). Shorten the title instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "content",
+          "description": "Post body text Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "hearth",
+          "description": "SubBoard slug or topic channel (e.g. code-review, research, ops). When a SubBoard with this slug exists, the post is bound to that SubBoard and its access policy.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "thread_id",
+          "description": "Linked conversation thread ID (optional)",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "classification_reason",
+          "description": "Optional explicit rationale for why this should appear as automation/direct in board views",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "judgment",
+          "description": "Optional structured LLM judgment metadata. Use summary or reason to preserve why you posted/classified it this way",
+          "param_type": "object",
+          "required": false
+        },
+        {
+          "name": "attachments",
+          "description": "Optional typed attachments. Each entry has kind, exactly one of url (absolute HTTPS) or sha256 (existing artifact), and an optional name (the file's name).",
+          "param_type": "array",
+          "required": false
+        },
+        {
+          "name": "sources",
+          "description": "Optional external evidence sources appended to the post and persisted in meta.sources",
+          "param_type": "array",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Optional post title shown in board lists. Must not be blank when present; omit for short untitled posts. Write readable prose with natural word spacing (including Korean). Shorten the title instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
+          },
+          "content": {
+            "type": "string",
+            "description": "Post body text Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
+          },
+          "hearth": {
+            "type": "string",
+            "description": "SubBoard slug or topic channel (e.g. code-review, research, ops). When a SubBoard with this slug exists, the post is bound to that SubBoard and its access policy."
+          },
+          "thread_id": {
+            "type": "string",
+            "description": "Linked conversation thread ID (optional)"
+          },
+          "classification_reason": {
+            "type": "string",
+            "description": "Optional explicit rationale for why this should appear as automation/direct in board views"
+          },
+          "judgment": {
+            "type": "object",
+            "description": "Optional structured LLM judgment metadata. Use summary or reason to preserve why you posted/classified it this way"
+          },
+          "attachments": {
+            "type": "array",
+            "description": "Optional typed attachments. Each entry has kind, exactly one of url (absolute HTTPS) or sha256 (existing artifact), and an optional name (the file's name).",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "image",
+                    "video",
+                    "youtube",
+                    "external_link",
+                    "file",
+                    "audio",
+                    "score",
+                    "midi"
+                  ],
+                  "description": "How the attachment is shown. file is any file; audio, score (Guitar Pro, MusicXML, alphaTex) and midi say what the file is. The TUI lists these four by name and size and the dashboard offers a stored one as a download; nothing plays or draws them yet."
+                },
+                "url": {
+                  "type": "string",
+                  "description": "Absolute HTTPS URL; omit when sha256 is set"
+                },
+                "sha256": {
+                  "type": "string",
+                  "description": "Existing artifact content hash; omit when url is set"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Optional file name shown beside the attachment and used for its download. Not empty, one line, no path separators, at most 255 bytes."
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          },
+          "sources": {
+            "type": "array",
+            "description": "Optional external evidence sources appended to the post and persisted in meta.sources",
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "description": "Source URL"
+                },
+                "quote": {
+                  "type": "string",
+                  "description": "Short relevant quote or snippet"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "masc_board_list",
+      "description": "List recent MASC Board posts and discover post_id values for follow-up masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use this when you need board state, recent posts, or a post_id and do not already have one. Filter by hearth (topic channel) to see specific topics. Returns post_id, author, hearth, timestamp, vote_count, comment_count, and content preview for each post.",
+      "parameters": [
+        {
+          "name": "hearth",
+          "description": "Filter by SubBoard slug or topic channel (e.g. code-review, research)",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "limit",
+          "description": "Max posts to return (default: 20, max: 50). Must be a bare integer (e.g. 20); a quoted value is rejected.",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "sort_by",
+          "description": "Sort order (default: recent)",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "compact",
+          "description": "Compact one-line per post. Set false for full body/TTL/visibility",
+          "param_type": "boolean",
+          "required": false
+        },
+        {
+          "name": "exclude_author",
+          "description": "Exclude posts by author name (case-insensitive substring match). Pass your own keeper name to avoid self-referential loops when reading the board.",
+          "param_type": "string",
+          "required": false
+        },
+        {
+          "name": "exclude_system",
+          "description": "Exclude system posts such as task verdict receipts and Activity Reports (default: false).",
+          "param_type": "boolean",
+          "required": false
+        },
+        {
+          "name": "exclude_automation",
+          "description": "Exclude automation posts such as heartbeats and probes (default: false).",
+          "param_type": "boolean",
+          "required": false
+        },
+        {
+          "name": "if_revision",
+          "description": "Optional producer revision from the previous masc_board_list snapshot; matching revisions return unchanged.",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "hearth": {
+            "type": "string",
+            "description": "Filter by SubBoard slug or topic channel (e.g. code-review, research)"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Max posts to return (default: 20, max: 50). Must be a bare integer (e.g. 20); a quoted value is rejected."
+          },
+          "sort_by": {
+            "type": "string",
+            "enum": [
+              "hot",
+              "trending",
+              "recent",
+              "updated",
+              "discussed"
+            ],
+            "description": "Sort order (default: recent)"
+          },
+          "compact": {
+            "type": "boolean",
+            "default": true,
+            "description": "Compact one-line per post. Set false for full body/TTL/visibility"
+          },
+          "exclude_author": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Exclude posts by author name (case-insensitive substring match). Pass your own keeper name to avoid self-referential loops when reading the board."
+          },
+          "exclude_system": {
+            "type": "boolean",
+            "description": "Exclude system posts such as task verdict receipts and Activity Reports (default: false)."
+          },
+          "exclude_automation": {
+            "type": "boolean",
+            "description": "Exclude automation posts such as heartbeats and probes (default: false)."
+          },
+          "if_revision": {
+            "type": "string",
+            "description": "Optional producer revision from the previous masc_board_list snapshot; matching revisions return unchanged."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "masc_board_post_get",
+      "description": "Read one existing board post by exact post_id. The default read returns the post body and its newest comments (up to 20). The first line gives comment_offset and comment_limit for the preceding page; Repeat toward offset 0 for older comments. To skip comments you have read, pass after_comment_id (the newest one you read) or comment_tail (the newest N). If no post_id is visible, call masc_board_list or masc_board_search first; never call this tool with empty arguments.",
+      "parameters": [
+        {
+          "name": "post_id",
+          "description": "Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.\n",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "comment_offset",
+          "description": "Zero-based comment offset. Omit it to read the newest comments; pass 0 to read from the oldest. At the comment count: an empty end page; past it: rejected.",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "comment_limit",
+          "description": "Max comments per page: 20 if omitted, at most 100; also bounded by output size.\nNot with comment_tail.\n",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "comment_tail",
+          "description": "Newest N comments plus post body. Not with comment_offset, comment_limit,\nor after_comment_id.\n",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "after_comment_id",
+          "description": "Comments after this ID; empty if none. Allows comment_limit, not\ncomment_offset or comment_tail.\n",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+            "description": "Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.\n"
+          },
+          "comment_offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based comment offset. Omit it to read the newest comments; pass 0 to read from the oldest. At the comment count: an empty end page; past it: rejected."
+          },
+          "comment_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Max comments per page: 20 if omitted, at most 100; also bounded by output size.\nNot with comment_tail.\n"
+          },
+          "comment_tail": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Newest N comments plus post body. Not with comment_offset, comment_limit,\nor after_comment_id.\n"
+          },
+          "after_comment_id": {
+            "type": "string",
+            "pattern": "^c-[0-9a-f]{32}$",
+            "description": "Comments after this ID; empty if none. Allows comment_limit, not\ncomment_offset or comment_tail.\n"
+          }
+        },
+        "required": [
+          "post_id"
+        ]
+      }
+    },
+    {
+      "name": "masc_board_comment",
+      "description": "Add a comment to one existing board post by exact post_id. Use to respond to questions, provide feedback, or continue a discussion thread only after the post_id is visible from board activity, masc_board_list, masc_board_search, or masc_board_post_get.",
+      "parameters": [
+        {
+          "name": "post_id",
+          "description": "Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.\n",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "content",
+          "description": "Comment text. Pass it in content, not body. Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly.",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "parent_id",
+          "description": "Optional comment ID to reply under (from masc_board_post_get or a prior masc_board_comment), threading this comment beneath another Keeper's instead of flat on the post.",
+          "param_type": "string",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+            "description": "Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.\n"
+          },
+          "content": {
+            "type": "string",
+            "description": "Comment text. Pass it in content, not body. Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
+          },
+          "parent_id": {
+            "type": "string",
+            "pattern": "^c-[0-9a-f]{32}$",
+            "description": "Optional comment ID to reply under (from masc_board_post_get or a prior masc_board_comment), threading this comment beneath another Keeper's instead of flat on the post."
+          }
+        },
+        "required": [
+          "post_id",
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "masc_board_search",
+      "description": "Search board posts by keyword across titles, bodies, authors and hearths -- not comments -- and discover post_id values for follow-up masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use when looking for specific topics, past discussions, or related prior work.",
+      "parameters": [
+        {
+          "name": "query",
+          "description": "Search keyword (max 200 chars)",
+          "param_type": "string",
+          "required": true
+        },
+        {
+          "name": "limit",
+          "description": "Max results (default: 20, max: 100). Must be a bare integer (e.g. 20); a quoted value is rejected.",
+          "param_type": "integer",
+          "required": false
+        },
+        {
+          "name": "compact",
+          "description": "Compact one-line per post. Set false for full body/TTL/visibility",
+          "param_type": "boolean",
+          "required": false
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Search keyword (max 200 chars)"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Max results (default: 20, max: 100). Must be a bare integer (e.g. 20); a quoted value is rejected."
+          },
+          "compact": {
+            "type": "boolean",
+            "default": true,
+            "description": "Compact one-line per post. Set false for full body/TTL/visibility"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "keeper_tool_search",
+      "description": "Make a held-back tool callable. This Keeper is offered more tools than one request can carry, so their argument schemas are left out and only their names are listed below. Pass the exact names you need in \"names\"; each becomes callable from your next message in this same turn, and the answer says what each one does. A name below that is not already among your tools is not callable until you pass it here; a call to it before then is refused.\n\nIf you do not know which name fits the task, keeper_capability_search can find Tools and Skills by name and description. This loader only loads the requested schemas; call the chosen tool separately to execute it.\n\nTools that can be loaded:\nBrowserRead, BrowserAct, BrowserInteract, keeper_artifact_transfer, keeper_artifact_publish, keeper_skill_validate, keeper_skill_publish, keeper_workspace_memory_read, keeper_memory_select, keeper_memory_retract, keeper_memory_write, keeper_constitution_write, keeper_constitution_remove, keeper_constitution_read, keeper_wiki_search, keeper_wiki_read, keeper_surface_read, keeper_surface_post, keeper_person_note_set, keeper_ide_annotate, masc_fusion, masc_fusion_decision, masc_fusion_status, masc_file_upload, masc_file_delete, masc_file_list, keeper_image_read, keeper_analyze_image, keeper_voice_speak, keeper_voice_listen, keeper_voice_agent, keeper_voice_sessions, keeper_voice_session_start, keeper_voice_session_end, keeper_tasks_audit, keeper_broadcast, keeper_task_create, keeper_task_cancel, keeper_task_release, masc_task_history, masc_task_set_goal, masc_plan_get_task, masc_plan_clear_task, masc_run_init, masc_run_list, masc_run_get, masc_run_plan, masc_agent_fitness, masc_get_metrics, masc_goal_list, masc_goal_upsert, masc_goal_measure, masc_goal_transition, masc_config, masc_lane_act, masc_lane_action_status, masc_lane_attach, masc_lane_declaration_read, masc_lane_declaration_save, masc_lane_updates, masc_play_room, masc_lane_inspect, masc_lane_observe, masc_lane_slice, masc_lane_detach, masc_lane_evidence, keeper_portrait_read, masc_dashboard, masc_ask, masc_ask_status, masc_ask_withdraw, masc_schedule_create, masc_schedule_update, masc_schedule_list, masc_schedule_get, masc_schedule_cancel, masc_schedule_note_add, masc_schedule_notes_list, keeper_composition_result, keeper_code_query, keeper_webmcp_list, keeper_webmcp_call, masc_keeper_delegate_status, masc_keeper_delegate_cancel, masc_keeper_delegate, masc_board_post_update, masc_board_vote, masc_board_stats, masc_board_comment_vote, masc_board_reaction, masc_board_profile, masc_board_hearths, masc_board_curation_read, masc_board_curation_submit, masc_board_delete, masc_board_close, masc_board_reopen, masc_wiki_list, masc_wiki_create, masc_wiki_update, masc_wiki_lint, keeper_composition_prepare, keeper_composition_run, keeper_composition_status, keeper_composition_cancel",
+      "parameters": [
+        {
+          "name": "names",
+          "description": "",
+          "param_type": "array",
+          "required": true
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "names"
+        ]
+      }
+    }
+  ],
+  "tool_choice": null,
+  "temperature": 0.4,
+  "top_p": null,
+  "top_k": null,
+  "min_p": null,
+  "enable_thinking": null,
+  "preserve_thinking": null,
+  "response_format": {
+    "type": "off"
+  },
+  "reasoning_effort": null,
+  "disable_parallel_tool_use": false,
+  "cache_system_prompt": true,
+  "context": {
+    "session:keeper_outstanding_tool_loads": {
+      "trace_id": "trace-1792939687301-00000",
+      "task_id": null,
+      "surface_sha256": "6fcabdaeb14dfef932b9822c2f9e026a95f718b02f1a04959f2fa55961ea91e5",
+      "pending": []
+    },
+    "session:keeper_repetition_scopes": {
+      "schema": "masc.keeper_repetition_scopes.v1",
+      "active": {
+        "kind": "direct_operation",
+        "id": "kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7"
+      },
+      "scopes": [
+        {
+          "id": {
+            "kind": "direct_operation",
+            "id": "kmsg-b8e1b7b5a00e42b78bce74a41e158ba7"
+          },
+          "observations": [
+            {
+              "tool_name": "Execute",
+              "input_fingerprint": "cf300e687ad491dd312ea359c5adabbe5346559afe4900d37dd3a7edc24a4c37",
+              "output_fingerprint": "ccc8af4b7bd2a03ed132526609503e08a4a71a6e028ebcae1cf885d7d336f577"
+            },
+            {
+              "tool_name": "Grep",
+              "input_fingerprint": "55abac66fba19de43dd4476896937892211663f7266be92150cbcc2af1098f5e",
+              "output_fingerprint": "4ce68fd197153f6d61fee1a26208f03587d01fbfd32c95b1bf818a617087e01e"
+            },
+            {
+              "tool_name": "Edit",
+              "input_fingerprint": "5a2ee846d90588918354c10483e7e4152af34b89e01b393e0465f62b55899218",
+              "output_fingerprint": "8b0e57b8361cc1e519b708056628b182683735bb33f6a720f62d4507d193d33e"
+            },
+            {
+              "tool_name": "Read",
+              "input_fingerprint": "5a080bd7db720e26b7e7865b14a1b9896d678f75531dfc53782cbbaca9e03ad0",
+              "output_fingerprint": "875b8cd07b47854675b8384d78d25990645504cc02aea5e41cd9c0b1efcab1fa"
+            },
+            {
+              "tool_name": "Write",
+              "input_fingerprint": "bed9e74e83986f00f78835f7d11fbf64ca2f71660c73933ef685e2e5eeee380a",
+              "output_fingerprint": "b451843f74b81c8c669c371dc9e40d489c8647a7e30a6aebeabbc2407e3a0dcc"
+            },
+            {
+              "tool_name": "Execute",
+              "input_fingerprint": "3738dc01ab885fadb2f8aac5f49327db8bb9058970ebc21e36a6920541530640",
+              "output_fingerprint": "f5b71e3b83a7a4430dcfac9a1c368a3aeaf0c8f137a6312394a04bf96f97f510"
+            },
+            {
+              "tool_name": "Execute",
+              "input_fingerprint": "8c2350c100acb36cbaa84bbead73cc6faf7b2244eccd4b69268c75b5ae58c6ae",
+              "output_fingerprint": "2444b7769457e61287d7cc1d931876bbdfc76cb6d813dee13a72b2731f40500e"
+            }
+          ]
+        },
+        {
+          "id": {
+            "kind": "direct_operation",
+            "id": "kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7"
+          },
+          "observations": [
+            {
+              "tool_name": "Execute",
+              "input_fingerprint": "cf300e687ad491dd312ea359c5adabbe5346559afe4900d37dd3a7edc24a4c37",
+              "output_fingerprint": "ccc8af4b7bd2a03ed132526609503e08a4a71a6e028ebcae1cf885d7d336f577"
+            },
+            {
+              "tool_name": "Read",
+              "input_fingerprint": "d9b9ad004ba3ae47915772846d236f6d997507cecd8091dddda04d9fa580dc4f",
+              "output_fingerprint": "4670075351d6c30cba21d55e94eb2437896d229e7f72d8f1cbfab36961cd614f"
+            }
+          ]
+        }
+      ]
+    },
+    "session:last_tool_name": "Execute",
+    "session:last_tool_outcome": "ok",
+    "session:session_start": 1792939703.34863,
+    "session:tool_call_count": 2,
+    "session:tool_error_count": 0,
+    "session:tool_success_count": 2,
+    "session:wall_time": "2026-10-25T14:48:23Z"
+  },
+  "mcp_sessions": [],
+  "pending_input": null,
+  "working_context": null
+}

@@ -1,0 +1,431 @@
+[2026-10-25 23:48:03] [INFO] [MCP] Tag registry initialized: 181 tools registered
+[2026-10-25 23:48:04] [INFO] [MCP] Tag registry initialized: 181 tools registered
+[2026-10-25 23:48:05] [INFO] [Server] [Startup] retained checkpoint sweep: removed=0 bytes=0 live_references=0 failures=0
+[2026-10-25 23:48:05] [WARN] [Dashboard] dashboard source identity unavailable — inspect /health dashboard_surface.recovery
+[2026-10-25 23:48:05] [INFO] [Server] Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)
+[2026-10-25 23:48:05] [INFO] [Server] Backend_mutex_metrics installed (masc_backend_mutex_* metrics)
+[2026-10-25 23:48:05] [INFO] [Server] Fd_accountant OS resource observers installed
+[2026-10-25 23:48:05] [INFO] [Server] Runtime_log_sink installed (agent core -> MASC structured log)
+[2026-10-25 23:48:05] [INFO] [Server] [auto 127.0.0.1:64189] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port
+[2026-10-25 23:48:05] [INFO] [Server] preserved existing base-path config root without refilling operator-owned entries: /private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/config
+[2026-10-25 23:48:05] [INFO] [Server] builtin Skills up to date: browser-lanes, browser-live-follow-read, browser-navigate-read, diagram-in-chat, evidence-review, frontend-change, lane-addon-author, observe-act-verify, prior-art, root-cause-first, run-and-read, skill-authoring, verify-before-claiming-done, work-intake
+[2026-10-25 23:48:05] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog
+[2026-10-25 23:48:05] [INFO] [Runtime] resolved runtime config: {"stream_idle_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"first_event_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"body_timeout_override_sec":{"value":null,"source":"default"},"provider_call_deadline_sec":{"value":900.0,"source":"failsafe_floor"}}
+[2026-10-25 23:48:05] [INFO] [Runtime] keeper stream idle timeout resolved: 600.0s (source: failsafe_floor)
+[2026-10-25 23:48:05] [INFO] [Runtime] keeper first-event (TTFT/prefill) timeout resolved: 600.0s (source: failsafe_floor)
+[2026-10-25 23:48:05] [INFO] [Runtime] keeper provider-call no-progress threshold resolved: 900.0s (source: failsafe_floor)
+[2026-10-25 23:48:05] [INFO] [Backend] Board: JSONL default backend
+[2026-10-25 23:48:05] [INFO] [Board] Board flusher actor started
+[2026-10-25 23:48:05] [INFO] [Board] JSONL backend initialized
+[2026-10-25 23:48:05] [INFO] [Server] Runtime default initialized: ollama_cloud.deepseek-v4.1-flash
+[2026-10-25 23:48:05] [INFO] [Server] Skill snapshot ready: skills=0 rejections=0 (file: /private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/config/runtime.toml) snapshot_revision=8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2 catalog_revision=fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d
+[2026-10-25 23:48:05] [INFO] [Server] exact_output: lane "verifier_exact" cannot judge: exact-output lane "verifier_exact" is not configured
+[2026-10-25 23:48:05] [WARN] [Server] exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with AGENT_CORE target refs
+[2026-10-25 23:48:05] [WARN] [Server] exact_output: completion authority is degraded until [runtime.exact_output_lanes.verifier_exact] is configured with AGENT_CORE target refs
+[2026-10-25 23:48:05] [WARN] [Server] exact_output: the Stagehand browser lane is degraded until [runtime.exact_output_lanes.browser_stagehand_exact] is configured with AGENT_CORE target refs
+[2026-10-25 23:48:05] [INFO] [Misc] exact_output: immutable resolver-and-lane registry published from AGENT_CORE embedded catalog with 1 runtime binding(s) as targets
+[2026-10-25 23:48:05] [INFO] [Server] State created (runtime state) in 0.1s
+[2026-10-25 23:48:05] [INFO] [Server] publication recovery owner discovery settled
+[2026-10-25 23:48:05] [INFO] [Server] startup Admin credential ready for admin (source=minted)
+[2026-10-25 23:48:05] [INFO] [Server] startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=generated)
+[2026-10-25 23:48:05] [INFO] [Server] startup skipped credential sync for 1 non-bootable keeper(s): [imp=declarative_autoboot_disabled]
+[2026-10-25 23:48:05] [INFO] [Keeper] keeper_owner: installed 0 single-owner actor(s) before persistence recovery
+[2026-10-25 23:48:05] [INFO] [Server] keeper_persistence_prepare: stage=shutdown elapsed_seconds=0.000089 examined=0 failures=0
+[2026-10-25 23:48:05] [INFO] [Server] keeper_persistence_prepare: stage=store_reconcile elapsed_seconds=0.000451 examined=0 failures=0
+[2026-10-25 23:48:05] [INFO] [Keeper] boot reconcile: examined=0 readable=0 quarantined=0 failed=0
+[2026-10-25 23:48:05] [INFO] [Server] keeper_persistence_prepare: stage=transcript_tail elapsed_seconds=0.000043 examined=0 failures=0
+[2026-10-25 23:48:05] [INFO] [Server] Runtime_params restored from /private/tmp/mssh-bootstrap-keeper-a768556/.workspace
+[2026-10-25 23:48:05] [INFO] [Server] Bootstrap completed in 0.0s
+[2026-10-25 23:48:05] [INFO] [Server] Native execution runtime created (14 codec domains)
+[2026-10-25 23:48:05] [INFO] [Server] Domain_pool created (14 shared domains, 1 independent snapshot codec domain) for dashboard/keeper compute
+[2026-10-25 23:48:05] [INFO] [ServerBootstrap] resolved: source=local_masc path=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/config
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=resolved elapsed_ms=0.0 total_ms=0.0
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=prompt_assets.begin elapsed_ms=0.0 total_ms=0.0
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=prompt_assets.end elapsed_ms=4.7 total_ms=4.8
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=tool_assets.begin elapsed_ms=0.0 total_ms=4.8
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=tool_assets.end elapsed_ms=19.1 total_ms=23.9
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=mcp_assets.begin elapsed_ms=0.1 total_ms=23.9
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=mcp_assets.end elapsed_ms=0.5 total_ms=24.5
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=embedded_validation.begin elapsed_ms=0.0 total_ms=24.5
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=embedded_validation.end elapsed_ms=14.1 total_ms=38.6
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=prompt_registry.begin elapsed_ms=0.0 total_ms=38.6
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=prompt_registry.end elapsed_ms=1.5 total_ms=40.2
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=gate_persistence.begin elapsed_ms=0.0 total_ms=40.2
+[2026-10-25 23:48:05] [INFO] [Server] keeper_gate: installed durable queue base_path=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace pending=0 replayed=0 replay_failed=0 retired=0
+[2026-10-25 23:48:05] [INFO] [Server] keeper_gate: recovered Auto Judge work requested=0 started=0 finalized=0 skipped=0 failed=0
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=gate_persistence.end elapsed_ms=0.1 total_ms=40.3
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=mcp_sessions.begin elapsed_ms=0.0 total_ms=40.3
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=mcp_sessions.end elapsed_ms=0.1 total_ms=40.4
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=lazy_tasks.begin elapsed_ms=0.1 total_ms=40.5
+[2026-10-25 23:48:05] [INFO] [Server] lazy_task_group: starting initialize (1 tasks)
+[2026-10-25 23:48:05] [INFO] [Server] lazy_task: starting restore_sessions
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=lazy_tasks.end elapsed_ms=0.1 total_ms=40.6
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=keeper_persistence.begin elapsed_ms=0.0 total_ms=40.6
+[2026-10-25 23:48:05] [INFO] [Discord] discord_presence_bridge: starting (poll interval 30s)
+[2026-10-25 23:48:05] [INFO] [startup] subsystems: keeper loops started
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=keeper_persistence.end elapsed_ms=0.9 total_ms=41.4
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=owner_publication.begin elapsed_ms=0.0 total_ms=41.4
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=owner_publication.end elapsed_ms=0.0 total_ms=41.5
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=listener_wait.begin elapsed_ms=0.0 total_ms=41.5
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=listener_wait.end elapsed_ms=0.0 total_ms=41.5
+[2026-10-25 23:48:05] [INFO] [Server] scheduler lag probe started on the main domain: interval=100ms window=60s
+[2026-10-25 23:48:05] [INFO] [Dashboard] starting full_health_snapshot refresh loop
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=post_ready_lanes.begin elapsed_ms=0.1 total_ms=41.6
+[2026-10-25 23:48:05] [INFO] [Misc] candle: off (no candle.toml)
+[2026-10-25 23:48:05] [INFO] [Server] startup maintenance: starting jsonl_prune
+[2026-10-25 23:48:05] [INFO] [Server] startup maintenance: starting microvm_guest_sweep
+[2026-10-25 23:48:05] [INFO] [Server] lazy_task: finished restore_sessions
+[2026-10-25 23:48:05] [INFO] [Server] lazy_task_group: finished initialize
+[2026-10-25 23:48:05] [INFO] [Server] host_fd_pressure_poller: started path=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/masc-host-pressure.state source=default interval=1.0s
+[2026-10-25 23:48:05] [INFO] [Metrics] tool_metrics_persist: hydrated 0 record(s), pruned=0 record(s)
+[2026-10-25 23:48:05] [INFO] [Misc] keeper_tool_call_log: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-10-25 23:48:05] [INFO] [Keeper] transition_audit: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-10-25 23:48:05] [INFO] [Server] OTEL_EXPORTER_OTLP_ENDPOINT not set; AGENT_CORE telemetry export disabled
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=post_ready_lanes.end elapsed_ms=60.7 total_ms=102.3
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=discord_gateway.begin elapsed_ms=0.0 total_ms=102.3
+[2026-10-25 23:48:05] [WARN] [Server] RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=discord_gateway.end elapsed_ms=0.5 total_ms=102.8
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=slack_gateway.begin elapsed_ms=0.2 total_ms=103.0
+[2026-10-25 23:48:05] [INFO] [Server] keeper transition outbox startup discovered=0 processed=0 deferred=0 converged=0 no_pending=0 claim_busy=0 shutdown_reserved=0 failures=0
+[2026-10-25 23:48:05] [INFO] [Server] workspace curator pass restores {"pass_id":"01a17388-762a-7000-bb15-0fc0f4cd8f9b","base_path":"/private/tmp/mssh-bootstrap-keeper-a768556/.workspace","restores":[{"domain":"classification","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0}]}
+[2026-10-25 23:48:05] [WARN] [Server] RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not started
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=slack_gateway.end elapsed_ms=0.6 total_ms=103.6
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=slack_poll.begin elapsed_ms=0.1 total_ms=103.7
+[2026-10-25 23:48:05] [WARN] [Server] slack-lane: SLACK_BOT_TOKEN is unset; poll lane not started
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=slack_poll.end elapsed_ms=0.0 total_ms=103.7
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=imessage_gateway.begin elapsed_ms=0.0 total_ms=103.8
+[2026-10-25 23:48:05] [WARN] [Server] imessage: in-process gateway not started (chat.db not found at /private/tmp/mssh-bootstrap-keeper-a768556/.workspace/home/Library/Messages/chat.db)
+MASC MCP Server listening on http://127.0.0.1:64189
+   Base path: /private/tmp/mssh-bootstrap-keeper-a768556/.workspace
+   MASC dir: /private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc
+   Process cwd: /private/tmp/mssh-bootstrap-keeper-a768556/.workspace
+   MASC_BASE_PATH(env): /private/tmp/mssh-bootstrap-keeper-a768556/.workspace
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=imessage_gateway.end elapsed_ms=0.1 total_ms=103.9
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=listening_banner.begin elapsed_ms=0.0 total_ms=103.9
+   Base path source: explicit_cli
+   GET  /mcp → SSE stream (notifications)
+   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)
+   DELETE /mcp → Session termination
+   POST /graphql → GraphQL (read-only)
+   GET  /api/v1/activity/events → Activity replay API
+   GET  /api/v1/activity/graph → Activity graph snapshot
+   GET  /health → Health check
+   GET  /ws → same-origin WebSocket upgrade or discovery
+[2026-10-25 23:48:05] [INFO] [Server] boot stage=listening_banner.end elapsed_ms=0.1 total_ms=103.9
+[2026-10-25 23:48:05] [INFO] [Server] gRPC transport disabled (set MASC_GRPC_ENABLED=1 to enable)
+[2026-10-25 23:48:05] [INFO] [Dashboard] starting execution refresh loop
+[2026-10-25 23:48:05] [INFO] [Dashboard] starting transport_health refresh loop
+[2026-10-25 23:48:05] [INFO] [Dashboard] starting execution_trust refresh loop
+[2026-10-25 23:48:05] [INFO] [Dashboard] starting mission refresh loop
+[2026-10-25 23:48:05] [INFO] [Dashboard] starting operator_snapshot refresh loop
+[2026-10-25 23:48:05] [INFO] [Dashboard] starting operator_digest refresh loop
+[2026-10-25 23:48:05] [INFO] [Dashboard] transport_health warm cache done (0.0s)
+[2026-10-25 23:48:05] [INFO] [Dashboard] board surface pre-warmed (0.8ms)
+[2026-10-25 23:48:05] [INFO] [Dashboard] config surface pre-warmed (1.1ms)
+[2026-10-25 23:48:05] [INFO] [Dashboard] planning surface pre-warmed (1.4ms)
+[2026-10-25 23:48:05] [INFO] [Dashboard] execution_trust warm cache done (0.0s)
+[2026-10-25 23:48:05] [INFO] [Dashboard] keeper-memory-health surface pre-warmed (4.4ms)
+[2026-10-25 23:48:05] [INFO] [Server] startup maintenance: finished jsonl_prune elapsed_s=0.070
+[2026-10-25 23:48:05] [INFO] [Dashboard] execution warm cache done (0.0s)
+[2026-10-25 23:48:05] [INFO] [Dashboard] light shell cache pre-warmed (9.3ms)
+[2026-10-25 23:48:05] [INFO] [Dashboard] shell cache pre-warmed (13.3ms)
+[2026-10-25 23:48:05] [INFO] [Dashboard] all primary dashboard surfaces pre-warmed in parallel (13.3ms total)
+[2026-10-25 23:48:05] [INFO] [Server] keeper lifecycle up name=native-bootstrap-keeper actor=ssh-proof-admin started
+[2026-10-25 23:48:05] [INFO] [Keeper] autoboot: lazy startup complete; keeper bootstrap will start last
+[2026-10-25 23:48:05] [INFO] [Keeper] remote SSH dispatch enabled endpoint=proof host=127.0.0.1 port=65479
+[2026-10-25 23:48:05] [INFO] [Dashboard] full_health_snapshot warm cache done (0.0s)
+[2026-10-25 23:48:07] [INFO] [Keeper] remote endpoint proof has no GitHub login at /srv/masc/bootstrap-ready/native-bootstrap-keeper/.config/gh/hosts.yml; identity preflight skipped
+[2026-10-25 23:48:07] [INFO] [Keeper] create_keeper: starting for name=native-bootstrap-keeper
+[2026-10-25 23:48:07] [INFO] [Keeper] create_keeper: starting keepalive for name=native-bootstrap-keeper
+[2026-10-25 23:48:07] [INFO] [Keeper] registry: registering keeper name=native-bootstrap-keeper base_path=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace phase=offline
+[2026-10-25 23:48:07] [INFO] [Keeper] registry: phase transition name=native-bootstrap-keeper old=offline new=running event=fiber_started
+[2026-10-25 23:48:07] [WARN] [Keeper/native-bootstrap-keeper] durable Librarian range not consumed: Original history publication is blocked: Original history Addon is not attached; source remains unconsumed
+[2026-10-25 23:48:07] [INFO] [Keeper] board_attention_worker_start keeper=native-bootstrap-keeper epoch=board-attention-worker-9e1509a0-c84a-4568-8829-07f5226842ac
+[2026-10-25 23:48:07] [INFO] [Keeper] create_keeper: completed for name=native-bootstrap-keeper trace_id=trace-1792939687301-00000
+[2026-10-25 23:48:07] [INFO] [Server] keeper lifecycle up name=native-bootstrap-keeper actor=ssh-proof-admin outcome=ok duration_ms=1688
+[2026-10-25 23:48:07] [INFO] [Keeper] board cursor initialized at empty current head for native-bootstrap-keeper: (1792939687.323964, no post)
+[2026-10-25 23:48:07] [INFO] [Keeper] board_attention_worker_drain keeper=native-bootstrap-keeper outcome=drained judgments=0 steps=0
+[2026-10-25 23:48:07] [INFO] [Keeper] keeper_tool_approval_mode: keeper=native-bootstrap-keeper mode=yolo actor=ssh-proof-admin
+[2026-10-25 23:48:07] [INFO] [Dashboard] patched keeper-dependent dashboard caches (1 lifecycle event(s))
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] no Librarian continuity snapshot fits the current history (no continuity snapshot is saved); the request starts at this turn's own boundary
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] input policy runtime=ollama_cloud.deepseek-v4.1-flash selected=small context_owner=agent_core turn_boundary=boundary:0 blob_reader_available=true body_externalization_enabled=false
+[2026-10-25 23:48:07] [INFO] [runtime_agent] agent_core-ollama_cloud.deepseek-v4.1-flash: resume checkpoint_turn_count=0
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] model input carried range runtime=ollama_cloud.deepseek-v4.1-flash origin=turn_start first_atom=0 atoms=1/1 transmitted_bytes=2507 reserved_bytes=68412 current_turn_results=verbatim
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] model input ledger runtime=ollama_cloud.deepseek-v4.1-flash {"event":"started","delta_tokens":null,"tail_delta_bytes":0,"ledger":{"prefix_digest":"3a6fde7588af9c34ff8832cd7b64fe40d16a9de3e03ddfe1b43ac58637e8c163","total_tokens":null,"measured_end_atom":null,"known_tokens":0,"unmeasured_atoms":1,"first_atom":0,"atom_count":1,"tail_bytes":2303,"turn_context":true,"demote_before":0,"blocks":1,"measured_blocks":0,"cache_read_input_tokens":null}}
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] turn=0 total_turns=0 runtime_lane=runtime tokens=2 context_window=32768 wall_tok_s=251.2 latency_ms=7 thinking_kind=none
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_assistant_collected turn_count=1 start_s=1792939687.483173 end_s=1792939687.486493 duration_ms=3.320 canonical_bytes=92050 outcome=saved
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] Execute result authorization operation=tool_execute source=workspace_always_allow
+[2026-10-25 23:48:07] [INFO] [Keeper] shell_ir dispatch keeper=native-bootstrap-keeper sandbox=remote_ssh status=exit=0 elapsed_ms=323
+[2026-10-25 23:48:07] [INFO] [Keeper] keeper:native-bootstrap-keeper tool_call tool=Execute params=[argv] input_shape=[argv=array:3] outcome=ok out_len=781
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_tool_results_appended turn_count=1 start_s=1792939687.840966 end_s=1792939687.844773 duration_ms=3.806 canonical_bytes=93264 outcome=saved
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_context_injection turn_count=1 start_s=1792939687.848782 end_s=1792939687.852021 duration_ms=3.239 canonical_bytes=93505 outcome=saved
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] turn=1 total_turns=0 runtime_lane=runtime tokens=2 context_window=32768 wall_tok_s=393.4 latency_ms=5 thinking_kind=none
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_assistant_collected turn_count=2 start_s=1792939687.875023 end_s=1792939687.878867 duration_ms=3.844 canonical_bytes=94032 outcome=saved
+[2026-10-25 23:48:07] [INFO] [Keeper/native-bootstrap-keeper] Execute result authorization operation=tool_execute source=workspace_always_allow
+[2026-10-25 23:48:08] [INFO] [Keeper] shell_ir dispatch keeper=native-bootstrap-keeper sandbox=remote_ssh status=exit=0 elapsed_ms=339
+[2026-10-25 23:48:08] [INFO] [Keeper] keeper:native-bootstrap-keeper tool_call tool=Execute params=[argv,cwd] input_shape=[argv=array:3,cwd=string:49] outcome=ok out_len=995
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_tool_results_appended turn_count=2 start_s=1792939688.230328 end_s=1792939688.233308 duration_ms=2.979 canonical_bytes=95485 outcome=saved
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_context_injection turn_count=2 start_s=1792939688.236227 end_s=1792939688.239317 duration_ms=3.090 canonical_bytes=95485 outcome=saved
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] turn=2 total_turns=0 runtime_lane=runtime tokens=2 context_window=32768 wall_tok_s=444.5 latency_ms=6 thinking_kind=none
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_assistant_collected turn_count=3 start_s=1792939688.263240 end_s=1792939688.266447 duration_ms=3.207 canonical_bytes=95702 outcome=saved
+[2026-10-25 23:48:08] [INFO] [Keeper] WRITE_AUDIT: keeper=native-bootstrap-keeper fs_edit path=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/playground/native-bootstrap-keeper/notes.txt mode=overwrite bytes=7 via=remote
+[2026-10-25 23:48:08] [INFO] [Keeper] keeper:native-bootstrap-keeper tool_call tool=Write source=tools/Write.toml params=[file_path,content] input_shape=[content=string:7,file_path=string:59] outcome=ok out_len=136
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_tool_results_appended turn_count=3 start_s=1792939688.579618 end_s=1792939688.583018 duration_ms=3.400 canonical_bytes=96185 outcome=saved
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_context_injection turn_count=3 start_s=1792939688.586240 end_s=1792939688.589202 duration_ms=2.961 canonical_bytes=96182 outcome=saved
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] turn=3 total_turns=0 runtime_lane=runtime tokens=2 context_window=32768 wall_tok_s=340.5 latency_ms=6 thinking_kind=none
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_assistant_collected turn_count=4 start_s=1792939688.610175 end_s=1792939688.613131 duration_ms=2.955 canonical_bytes=96378 outcome=saved
+[2026-10-25 23:48:08] [INFO] [Keeper] keeper:native-bootstrap-keeper tool_call tool=Read source=tools/Read.toml params=[file_path] input_shape=[file_path=string:59] outcome=ok out_len=178
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_tool_results_appended turn_count=4 start_s=1792939688.711971 end_s=1792939688.714673 duration_ms=2.701 canonical_bytes=96909 outcome=saved
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_context_injection turn_count=4 start_s=1792939688.717850 end_s=1792939688.720652 duration_ms=2.802 canonical_bytes=96908 outcome=saved
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] turn=4 total_turns=0 runtime_lane=runtime tokens=2 context_window=32768 wall_tok_s=467.1 latency_ms=24 thinking_kind=none
+[2026-10-25 23:48:08] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_assistant_collected turn_count=5 start_s=1792939688.757196 end_s=1792939688.760340 duration_ms=3.143 canonical_bytes=97150 outcome=saved
+[2026-10-25 23:48:09] [INFO] [Keeper] WRITE_AUDIT: keeper=native-bootstrap-keeper fs_edit path=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/playground/native-bootstrap-keeper/notes.txt mode=patch bytes=6 via=remote
+[2026-10-25 23:48:09] [INFO] [Keeper] keeper:native-bootstrap-keeper tool_call tool=Edit source=tools/Edit.toml params=[file_path,old_string,new_string] input_shape=[file_path=string:59,new_string=string:6,old_string=string:7] outcome=ok out_len=183
+[2026-10-25 23:48:09] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_tool_results_appended turn_count=5 start_s=1792939689.360711 end_s=1792939689.363836 duration_ms=3.124 canonical_bytes=97685 outcome=saved
+[2026-10-25 23:48:09] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_context_injection turn_count=5 start_s=1792939689.366430 end_s=1792939689.369128 duration_ms=2.697 canonical_bytes=97685 outcome=saved
+[2026-10-25 23:48:09] [INFO] [Keeper/native-bootstrap-keeper] turn=5 total_turns=0 runtime_lane=runtime tokens=2 context_window=32768 wall_tok_s=533.6 latency_ms=5 thinking_kind=none
+[2026-10-25 23:48:09] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_assistant_collected turn_count=6 start_s=1792939689.386020 end_s=1792939689.388774 duration_ms=2.753 canonical_bytes=97895 outcome=saved
+[2026-10-25 23:48:09] [INFO] [agent_core:event/agent_core-ollama_cloud.deepseek-v4.1-flash] agent started agent=agent_core-ollama_cloud.deepseek-v4.1-flash task_id=evt-0903299dcb052b07e594d7513f723580
+[2026-10-25 23:48:09] [INFO] [Keeper] keeper:native-bootstrap-keeper tool_call tool=Grep source=tools/Grep.toml params=[path,pattern] input_shape=[path=string:59,pattern=string:7] outcome=ok out_len=185
+[2026-10-25 23:48:09] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_tool_results_appended turn_count=6 start_s=1792939689.706153 end_s=1792939689.709636 duration_ms=3.483 canonical_bytes=98440 outcome=saved
+[2026-10-25 23:48:09] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_context_injection turn_count=6 start_s=1792939689.726891 end_s=1792939689.730058 duration_ms=3.167 canonical_bytes=98440 outcome=saved
+[2026-10-25 23:48:09] [INFO] [Keeper/native-bootstrap-keeper] turn=6 total_turns=0 runtime_lane=runtime tokens=2 context_window=32768 wall_tok_s=405.2 latency_ms=172 thinking_kind=none
+[2026-10-25 23:48:09] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_assistant_collected turn_count=7 start_s=1792939689.915577 end_s=1792939689.918789 duration_ms=3.211 canonical_bytes=99340 outcome=saved
+[2026-10-25 23:48:09] [INFO] [Keeper/native-bootstrap-keeper] Execute result authorization operation=tool_execute source=workspace_always_allow
+[2026-10-25 23:48:10] [INFO] [Keeper] shell_ir dispatch keeper=native-bootstrap-keeper sandbox=remote_ssh status=exit=0 elapsed_ms=316
+[2026-10-25 23:48:10] [INFO] [Keeper] keeper:native-bootstrap-keeper tool_call tool=Execute params=[argv] input_shape=[argv=array:3] outcome=ok out_len=959
+[2026-10-25 23:48:10] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_tool_results_appended turn_count=7 start_s=1792939690.258592 end_s=1792939690.273137 duration_ms=14.544 canonical_bytes=100767 outcome=saved
+[2026-10-25 23:48:10] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_context_injection turn_count=7 start_s=1792939690.276299 end_s=1792939690.279201 duration_ms=2.901 canonical_bytes=100770 outcome=saved
+[2026-10-25 23:48:10] [INFO] [Keeper/native-bootstrap-keeper] turn=7 total_turns=0 runtime_lane=runtime tokens=2 context_window=32768 wall_tok_s=348.3 latency_ms=7 thinking_kind=none
+[2026-10-25 23:48:10] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_assistant_collected turn_count=8 start_s=1792939690.299780 end_s=1792939690.302918 duration_ms=3.138 canonical_bytes=100912 outcome=saved
+[2026-10-25 23:48:10] [INFO] [Telemetry] runtime execution terminal: observation=evt-36f457c81d63e404841f3b7cf20e5d98 attempt=0 outcome=success
+[2026-10-25 23:48:10] [INFO] [Telemetry/native-bootstrap-keeper] runtime host acceptance: observation=evt-36f457c81d63e404841f3b7cf20e5d98 outcome=accepted
+[2026-10-25 23:48:10] [INFO] [Keeper] native-bootstrap-keeper: keeper cycle OK runtime_lane=runtime tokens=2 latency=3003ms mode=tool_use stop=completed
+[2026-10-25 23:48:10] [INFO] [Keeper] start_keepalive: skipped native-bootstrap-keeper (already registered)
+[2026-10-25 23:48:10] [INFO] [Keeper] keeper_stream: request terminal keeper=native-bootstrap-keeper request_id=kmsg-b8e1b7b5a00e42b78bce74a41e158ba7 status=done
+[2026-10-25 23:48:10] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)...
+[2026-10-25 23:48:10] [INFO] [Server] [Shutdown] signal attribution: no takeover breadcrumb — sender is external (user/pkill/system)
+[2026-10-25 23:48:10] [INFO] [Server] [Shutdown] Phase 1/4 NOTIFY: sent to 0 SSE clients (0.00s) [active conn: 0, ws: 0]
+[2026-10-25 23:48:10] [INFO] [Keeper] autoboot: base_path=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace masc_root=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc keeper_dir=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/keepers keeper_json_count=1
+[2026-10-25 23:48:10] [INFO] [Keeper] autoboot: 0 keeper(s) to boot
+[2026-10-25 23:48:10] [INFO] [Keeper] autoboot: keeper set []
+[2026-10-25 23:48:10] [INFO] [Keeper] autoboot: excluded 2 configured keeper(s): [imp=declarative_autoboot_disabled, native-bootstrap-keeper=declarative_autoboot_disabled]
+[2026-10-25 23:48:10] [INFO] [Keeper] autoboot: initial pass 0/0 keepers started
+[2026-10-25 23:48:10] [INFO] [Keeper] keeper supervisor sweep started (interval 30s)
+[2026-10-25 23:48:10] [INFO] [Keeper] autoboot: durable Librarian catch-up submitted for 1 unlaunched keeper(s) [native-bootstrap-keeper]
+[2026-10-25 23:48:10] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: starting (timeout=3.0s)
+[2026-10-25 23:48:10] [INFO] [Server] Stopping Keeper owners and workspace observation...
+[2026-10-25 23:48:10] [INFO] [Server] [Shutdown] Keeper owners and workspace observation stopped (0.00s)
+[2026-10-25 23:48:10] [INFO] [Server] Closed 0 SSE clients (0.00s) [remaining conn: 0]
+[2026-10-25 23:48:10] [INFO] [Server] Closed 0 WebSocket sessions (0.00s) [remaining ws: 0]
+[2026-10-25 23:48:10] [INFO] [Server] [Shutdown] registered hooks completed (0.00s)
+[2026-10-25 23:48:10] [INFO] [Server] [Shutdown] hooks total: 0.00s
+[2026-10-25 23:48:10] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-10-25 23:48:10] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)
+[2026-10-25 23:48:10] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-10-25 23:48:10] [INFO] [Server] [Shutdown] Phase 4/4 CANCEL: server cancel (total=0.2s) [active conn: 0, ws: 0]
+[2026-10-25 23:48:10] [INFO] [Server] [auto 127.0.0.1:64189] stats: h2=0 h1=6
+[2026-10-25 23:48:10] [INFO] [Server] MASC MCP: Closed 0 SSE connections
+[2026-10-25 23:48:10] [INFO] [Server] MASC MCP: Server stopped, waiting for background fibers... [active conn: 0, ws: 0]
+[2026-10-25 23:48:10] [INFO] [Server] host_fd_pressure_poller: cancelled, exiting cleanly
+[2026-10-25 23:48:10] [INFO] [Keeper] registry: phase transition name=native-bootstrap-keeper old=running new=draining event=stop_requested
+[2026-10-25 23:48:10] [INFO] [Keeper] registry: lifecycle name=native-bootstrap-keeper phase=draining event=draining detail=
+[2026-10-25 23:48:10] [INFO] [Keeper] registry: phase transition name=native-bootstrap-keeper old=draining new=stopped event=drain_complete
+[2026-10-25 23:48:10] [INFO] [Keeper] registry: lifecycle name=native-bootstrap-keeper phase=stopped event=stopped detail=drain_complete
+[2026-10-25 23:48:19] [WARN] [Keeper] microvm abandoned guest inventory failed backend=apple_container status=exit=1: Error: failed to list containers (cause: "internalError: "XPC timeout for request to com.apple.container.apiserver/containerList"")\x0A
+[2026-10-25 23:48:19] [INFO] [Server] startup maintenance: cancelled microvm_guest_sweep
+[2026-10-25 23:48:19] [INFO] [Server] MASC MCP: Background fibers finished, shutdown complete.
+[2026-10-25 23:48:19] [INFO] [Server] MASC MCP: Shutdown complete.
+[2026-10-25 23:48:20] [INFO] [MCP] Tag registry initialized: 181 tools registered
+[2026-10-25 23:48:20] [INFO] [MCP] Tag registry initialized: 181 tools registered
+[2026-10-25 23:48:21] [INFO] [Log] Restored 222 log entries from disk
+[2026-10-25 23:48:21] [INFO] [Server] [Startup] retained checkpoint sweep: removed=0 bytes=0 live_references=1 failures=0
+[2026-10-25 23:48:21] [WARN] [Dashboard] dashboard source identity unavailable — inspect /health dashboard_surface.recovery
+[2026-10-25 23:48:21] [INFO] [Server] Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)
+[2026-10-25 23:48:21] [INFO] [Server] Backend_mutex_metrics installed (masc_backend_mutex_* metrics)
+[2026-10-25 23:48:21] [INFO] [Server] Fd_accountant OS resource observers installed
+[2026-10-25 23:48:21] [INFO] [Server] Runtime_log_sink installed (agent core -> MASC structured log)
+[2026-10-25 23:48:21] [INFO] [Server] [auto 127.0.0.1:64189] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port
+[2026-10-25 23:48:21] [INFO] [Server] preserved existing base-path config root without refilling operator-owned entries: /private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/config
+[2026-10-25 23:48:21] [INFO] [Server] builtin Skills up to date: browser-lanes, browser-live-follow-read, browser-navigate-read, diagram-in-chat, evidence-review, frontend-change, lane-addon-author, observe-act-verify, prior-art, root-cause-first, run-and-read, skill-authoring, verify-before-claiming-done, work-intake
+[2026-10-25 23:48:21] [INFO] [Misc] model_catalog: no explicit catalog path resolved; using agent_core ambient model catalog
+[2026-10-25 23:48:21] [INFO] [Runtime] resolved runtime config: {"stream_idle_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"first_event_timeout_sec":{"value":600.0,"source":"failsafe_floor"},"body_timeout_override_sec":{"value":null,"source":"default"},"provider_call_deadline_sec":{"value":900.0,"source":"failsafe_floor"}}
+[2026-10-25 23:48:21] [INFO] [Runtime] keeper stream idle timeout resolved: 600.0s (source: failsafe_floor)
+[2026-10-25 23:48:21] [INFO] [Runtime] keeper first-event (TTFT/prefill) timeout resolved: 600.0s (source: failsafe_floor)
+[2026-10-25 23:48:21] [INFO] [Runtime] keeper provider-call no-progress threshold resolved: 900.0s (source: failsafe_floor)
+[2026-10-25 23:48:21] [INFO] [Backend] Board: JSONL default backend
+[2026-10-25 23:48:21] [INFO] [Board] Board flusher actor started
+[2026-10-25 23:48:21] [INFO] [Board] JSONL backend initialized
+[2026-10-25 23:48:21] [INFO] [Server] Runtime default initialized: ollama_cloud.deepseek-v4.1-flash
+[2026-10-25 23:48:21] [INFO] [Server] Skill snapshot ready: skills=0 rejections=0 (file: /private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/config/runtime.toml) snapshot_revision=8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2 catalog_revision=fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d
+[2026-10-25 23:48:21] [INFO] [Server] exact_output: lane "verifier_exact" cannot judge: exact-output lane "verifier_exact" is not configured
+[2026-10-25 23:48:21] [WARN] [Server] exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with AGENT_CORE target refs
+[2026-10-25 23:48:21] [WARN] [Server] exact_output: completion authority is degraded until [runtime.exact_output_lanes.verifier_exact] is configured with AGENT_CORE target refs
+[2026-10-25 23:48:21] [WARN] [Server] exact_output: the Stagehand browser lane is degraded until [runtime.exact_output_lanes.browser_stagehand_exact] is configured with AGENT_CORE target refs
+[2026-10-25 23:48:21] [INFO] [Misc] exact_output: immutable resolver-and-lane registry published from AGENT_CORE embedded catalog with 1 runtime binding(s) as targets
+[2026-10-25 23:48:21] [INFO] [Server] State created (runtime state) in 0.1s
+[2026-10-25 23:48:21] [INFO] [Server] publication recovery owner discovery settled
+[2026-10-25 23:48:21] [INFO] [Server] startup Admin credential ready for admin (source=stored)
+[2026-10-25 23:48:21] [INFO] [Server] startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=generated)
+[2026-10-25 23:48:21] [INFO] [Server] startup skipped credential sync for 2 non-bootable keeper(s): [imp=declarative_autoboot_disabled, native-bootstrap-keeper=declarative_autoboot_disabled]
+[2026-10-25 23:48:21] [INFO] [Keeper] keeper_owner: installed 1 single-owner actor(s) before persistence recovery
+[2026-10-25 23:48:21] [INFO] [Server] keeper_persistence_prepare: stage=shutdown elapsed_seconds=0.000080 examined=0 failures=0
+[2026-10-25 23:48:21] [INFO] [Server] keeper_persistence_prepare: stage=store_reconcile elapsed_seconds=0.000391 examined=1 failures=0
+[2026-10-25 23:48:21] [INFO] [Keeper] boot reconcile: examined=1 readable=1 quarantined=0 failed=0
+[2026-10-25 23:48:21] [INFO] [Server] keeper_persistence_prepare: stage=transcript_tail elapsed_seconds=0.002290 examined=1 failures=0
+[2026-10-25 23:48:21] [INFO] [Server] Runtime_params restored from /private/tmp/mssh-bootstrap-keeper-a768556/.workspace
+[2026-10-25 23:48:21] [INFO] [Server] Bootstrap completed in 0.0s
+[2026-10-25 23:48:21] [INFO] [Server] Native execution runtime created (14 codec domains)
+[2026-10-25 23:48:21] [INFO] [Server] Domain_pool created (14 shared domains, 1 independent snapshot codec domain) for dashboard/keeper compute
+[2026-10-25 23:48:21] [INFO] [ServerBootstrap] resolved: source=local_masc path=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/config
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=resolved elapsed_ms=0.0 total_ms=0.0
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=prompt_assets.begin elapsed_ms=0.0 total_ms=0.0
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=prompt_assets.end elapsed_ms=2.6 total_ms=2.6
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=tool_assets.begin elapsed_ms=0.0 total_ms=2.7
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=tool_assets.end elapsed_ms=17.5 total_ms=20.2
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=mcp_assets.begin elapsed_ms=0.0 total_ms=20.2
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=mcp_assets.end elapsed_ms=0.4 total_ms=20.6
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=embedded_validation.begin elapsed_ms=0.0 total_ms=20.7
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=embedded_validation.end elapsed_ms=28.6 total_ms=49.3
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=prompt_registry.begin elapsed_ms=0.1 total_ms=49.3
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=prompt_registry.end elapsed_ms=1.6 total_ms=50.9
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=gate_persistence.begin elapsed_ms=0.0 total_ms=50.9
+[2026-10-25 23:48:21] [INFO] [Server] keeper_gate: installed durable queue base_path=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace pending=0 replayed=0 replay_failed=0 retired=0
+[2026-10-25 23:48:21] [INFO] [Server] keeper_gate: recovered Auto Judge work requested=0 started=0 finalized=0 skipped=0 failed=0
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=gate_persistence.end elapsed_ms=0.3 total_ms=51.3
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=mcp_sessions.begin elapsed_ms=0.0 total_ms=51.3
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=mcp_sessions.end elapsed_ms=0.1 total_ms=51.4
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=lazy_tasks.begin elapsed_ms=0.0 total_ms=51.4
+[2026-10-25 23:48:21] [INFO] [Server] lazy_task_group: starting initialize (1 tasks)
+[2026-10-25 23:48:21] [INFO] [Server] lazy_task: starting restore_sessions
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=lazy_tasks.end elapsed_ms=0.0 total_ms=51.4
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=keeper_persistence.begin elapsed_ms=0.0 total_ms=51.4
+[2026-10-25 23:48:21] [INFO] [Discord] discord_presence_bridge: starting (poll interval 30s)
+[2026-10-25 23:48:21] [INFO] [startup] subsystems: keeper loops started
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=keeper_persistence.end elapsed_ms=1.5 total_ms=53.0
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=owner_publication.begin elapsed_ms=12.1 total_ms=65.0
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=owner_publication.end elapsed_ms=0.0 total_ms=65.1
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=listener_wait.begin elapsed_ms=0.0 total_ms=65.1
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=listener_wait.end elapsed_ms=0.0 total_ms=65.1
+[2026-10-25 23:48:21] [INFO] [Server] scheduler lag probe started on the main domain: interval=100ms window=60s
+[2026-10-25 23:48:21] [INFO] [Dashboard] starting full_health_snapshot refresh loop
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=post_ready_lanes.begin elapsed_ms=0.1 total_ms=65.2
+[2026-10-25 23:48:21] [INFO] [Misc] candle: off (no candle.toml)
+[2026-10-25 23:48:21] [INFO] [Server] startup maintenance: starting jsonl_prune
+[2026-10-25 23:48:21] [INFO] [Server] startup maintenance: starting microvm_guest_sweep
+[2026-10-25 23:48:21] [INFO] [Server] lazy_task: finished restore_sessions
+[2026-10-25 23:48:21] [INFO] [Server] lazy_task_group: finished initialize
+[2026-10-25 23:48:21] [INFO] [Server] host_fd_pressure_poller: started path=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc/masc-host-pressure.state source=default interval=1.0s
+[2026-10-25 23:48:21] [INFO] [Metrics] tool_metrics_persist: hydrated 7 record(s), pruned=0 record(s)
+[2026-10-25 23:48:21] [INFO] [Misc] keeper_tool_call_log: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-10-25 23:48:21] [INFO] [Keeper] transition_audit: async flush fiber started (interval=0.5s, capacity=4096)
+[2026-10-25 23:48:21] [INFO] [Server] OTEL_EXPORTER_OTLP_ENDPOINT not set; AGENT_CORE telemetry export disabled
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=post_ready_lanes.end elapsed_ms=20.4 total_ms=85.6
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=discord_gateway.begin elapsed_ms=0.1 total_ms=85.6
+[2026-10-25 23:48:21] [INFO] [Server] workspace curator pass restores {"pass_id":"01a17388-b460-7000-8386-066279d169b0","base_path":"/private/tmp/mssh-bootstrap-keeper-a768556/.workspace","restores":[{"domain":"classification","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"classification","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"briefing","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"discovery","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"observer","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"successor","calls":0,"errors":0,"raised":0,"cancelled":0},{"domain":"outside_domain","phase":"primary","calls":0,"errors":0,"raised":0,"cancelled":0}]}
+[2026-10-25 23:48:21] [WARN] [Server] RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=discord_gateway.end elapsed_ms=1.0 total_ms=86.7
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=slack_gateway.begin elapsed_ms=0.0 total_ms=86.7
+[2026-10-25 23:48:21] [INFO] [Server] keeper transition outbox startup discovered=0 processed=0 deferred=0 converged=0 no_pending=0 claim_busy=0 shutdown_reserved=0 failures=0
+[2026-10-25 23:48:21] [WARN] [Server] RFC-0317: SLACK_APP_TOKEN is unset; in-process Slack gateway not started
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=slack_gateway.end elapsed_ms=0.5 total_ms=87.2
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=slack_poll.begin elapsed_ms=0.0 total_ms=87.2
+[2026-10-25 23:48:21] [WARN] [Server] slack-lane: SLACK_BOT_TOKEN is unset; poll lane not started
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=slack_poll.end elapsed_ms=0.0 total_ms=87.2
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=imessage_gateway.begin elapsed_ms=0.0 total_ms=87.2
+[2026-10-25 23:48:21] [WARN] [Server] imessage: in-process gateway not started (chat.db not found at /private/tmp/mssh-bootstrap-keeper-a768556/.workspace/home/Library/Messages/chat.db)
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=imessage_gateway.end elapsed_ms=0.3 total_ms=87.5
+MASC MCP Server listening on http://127.0.0.1:64189
+   Base path: /private/tmp/mssh-bootstrap-keeper-a768556/.workspace
+   MASC dir: /private/tmp/mssh-bootstrap-keeper-a768556/.workspace/.masc
+   Process cwd: /private/tmp/mssh-bootstrap-keeper-a768556/.workspace
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=listening_banner.begin elapsed_ms=0.0 total_ms=87.5
+   MASC_BASE_PATH(env): /private/tmp/mssh-bootstrap-keeper-a768556/.workspace
+   Base path source: explicit_cli
+   GET  /mcp → SSE stream (notifications)
+   POST /mcp → JSON-RPC (Accept: application/json, text/event-stream)
+   DELETE /mcp → Session termination
+   POST /graphql → GraphQL (read-only)
+   GET  /api/v1/activity/events → Activity replay API
+   GET  /api/v1/activity/graph → Activity graph snapshot
+   GET  /health → Health check
+   GET  /ws → same-origin WebSocket upgrade or discovery
+[2026-10-25 23:48:21] [INFO] [Server] boot stage=listening_banner.end elapsed_ms=0.1 total_ms=87.7
+[2026-10-25 23:48:21] [INFO] [Server] gRPC transport disabled (set MASC_GRPC_ENABLED=1 to enable)
+[2026-10-25 23:48:21] [INFO] [Dashboard] starting execution refresh loop
+[2026-10-25 23:48:21] [INFO] [Dashboard] starting transport_health refresh loop
+[2026-10-25 23:48:21] [INFO] [Dashboard] starting execution_trust refresh loop
+[2026-10-25 23:48:21] [INFO] [Dashboard] starting mission refresh loop
+[2026-10-25 23:48:21] [INFO] [Dashboard] starting operator_snapshot refresh loop
+[2026-10-25 23:48:21] [INFO] [Dashboard] starting operator_digest refresh loop
+[2026-10-25 23:48:21] [INFO] [Dashboard] transport_health warm cache done (0.0s)
+[2026-10-25 23:48:21] [INFO] [Dashboard] board surface pre-warmed (0.4ms)
+[2026-10-25 23:48:21] [INFO] [Dashboard] planning surface pre-warmed (0.5ms)
+[2026-10-25 23:48:21] [INFO] [Dashboard] config surface pre-warmed (1.0ms)
+[2026-10-25 23:48:21] [INFO] [Dashboard] keeper-memory-health surface pre-warmed (4.1ms)
+[2026-10-25 23:48:21] [INFO] [Dashboard] execution_trust warm cache done (0.0s)
+[2026-10-25 23:48:21] [INFO] [Dashboard] light shell cache pre-warmed (5.9ms)
+[2026-10-25 23:48:21] [INFO] [Dashboard] execution warm cache done (0.0s)
+[2026-10-25 23:48:21] [INFO] [Dashboard] shell cache pre-warmed (11.0ms)
+[2026-10-25 23:48:21] [INFO] [Dashboard] all primary dashboard surfaces pre-warmed in parallel (11.1ms total)
+[2026-10-25 23:48:21] [INFO] [Server] startup maintenance: finished jsonl_prune elapsed_s=0.034
+[2026-10-25 23:48:21] [INFO] [Server] keeper lifecycle up name=native-bootstrap-keeper actor=ssh-proof-admin started
+[2026-10-25 23:48:21] [INFO] [Keeper] remote SSH dispatch enabled endpoint=proof host=127.0.0.1 port=65479
+[2026-10-25 23:48:21] [INFO] [Keeper] autoboot: lazy startup complete; keeper bootstrap will start last
+[2026-10-25 23:48:21] [INFO] [Dashboard] full_health_snapshot warm cache done (0.0s)
+[2026-10-25 23:48:23] [INFO] [Keeper] remote endpoint proof has no GitHub login at /srv/masc/bootstrap-ready/native-bootstrap-keeper/.config/gh/hosts.yml; identity preflight skipped
+[2026-10-25 23:48:23] [INFO] [Keeper] registry: registering keeper name=native-bootstrap-keeper base_path=/private/tmp/mssh-bootstrap-keeper-a768556/.workspace phase=offline
+[2026-10-25 23:48:23] [INFO] [Keeper] registry: phase transition name=native-bootstrap-keeper old=offline new=running event=fiber_started
+[2026-10-25 23:48:23] [INFO] [Keeper] board_attention_worker_start keeper=native-bootstrap-keeper epoch=board-attention-worker-a44c4d53-5360-47f1-8fdc-5fccc254c8e2
+[2026-10-25 23:48:23] [INFO] [Server] keeper lifecycle up name=native-bootstrap-keeper actor=ssh-proof-admin outcome=ok duration_ms=1851
+[2026-10-25 23:48:23] [WARN] [Keeper/native-bootstrap-keeper] durable Librarian range not consumed: Original history publication is blocked: Original history Addon is not attached; source remains unconsumed
+[2026-10-25 23:48:23] [INFO] [Keeper] board cursor initialized at empty current head for native-bootstrap-keeper: (1792939703.328747, no post)
+[2026-10-25 23:48:23] [INFO] [Keeper] board_attention_worker_drain keeper=native-bootstrap-keeper outcome=drained judgments=0 steps=0
+[2026-10-25 23:48:23] [INFO] [Dashboard] patched keeper-dependent dashboard caches (1 lifecycle event(s))
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] no Librarian continuity snapshot fits the current history (no continuity snapshot is saved); the request starts at this turn's own boundary
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] input policy runtime=ollama_cloud.deepseek-v4.1-flash selected=small context_owner=agent_core turn_boundary=boundary:9 blob_reader_available=true body_externalization_enabled=true
+[2026-10-25 23:48:23] [INFO] [runtime_agent] agent_core-ollama_cloud.deepseek-v4.1-flash: resume checkpoint_turn_count=8
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] model input carried range runtime=ollama_cloud.deepseek-v4.1-flash origin=turn_start first_atom=9 atoms=1/10 transmitted_bytes=2720 reserved_bytes=68412 current_turn_results=verbatim
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] model input ledger runtime=ollama_cloud.deepseek-v4.1-flash {"event":"started","delta_tokens":null,"tail_delta_bytes":0,"ledger":{"prefix_digest":"3a6fde7588af9c34ff8832cd7b64fe40d16a9de3e03ddfe1b43ac58637e8c163","total_tokens":null,"measured_end_atom":null,"known_tokens":0,"unmeasured_atoms":1,"first_atom":9,"atom_count":10,"tail_bytes":2507,"turn_context":true,"demote_before":9,"blocks":1,"measured_blocks":0,"cache_read_input_tokens":null}}
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] turn=8 total_turns=1 runtime_lane=runtime tokens=2 context_window=32768 wall_tok_s=472.9 latency_ms=27 thinking_kind=none
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_assistant_collected turn_count=9 start_s=1792939703.418671 end_s=1792939703.421648 duration_ms=2.977 canonical_bytes=101143 outcome=saved
+[2026-10-25 23:48:23] [INFO] [Keeper] keeper:native-bootstrap-keeper tool_call tool=Read source=tools/Read.toml params=[file_path] input_shape=[file_path=string:9] outcome=ok out_len=177
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_tool_results_appended turn_count=9 start_s=1792939703.539086 end_s=1792939703.541689 duration_ms=2.603 canonical_bytes=101678 outcome=saved
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_context_injection turn_count=9 start_s=1792939703.544396 end_s=1792939703.548966 duration_ms=4.569 canonical_bytes=101915 outcome=saved
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] turn=9 total_turns=1 runtime_lane=runtime tokens=2 context_window=32768 wall_tok_s=379.4 latency_ms=7 thinking_kind=none
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_assistant_collected turn_count=10 start_s=1792939703.566741 end_s=1792939703.569595 duration_ms=2.853 canonical_bytes=102825 outcome=saved
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] Execute result authorization operation=tool_execute source=workspace_always_allow
+[2026-10-25 23:48:23] [INFO] [Keeper] shell_ir dispatch keeper=native-bootstrap-keeper sandbox=remote_ssh status=exit=0 elapsed_ms=316
+[2026-10-25 23:48:23] [INFO] [Keeper] keeper:native-bootstrap-keeper tool_call tool=Execute params=[argv] input_shape=[argv=array:3] outcome=ok out_len=959
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_tool_results_appended turn_count=10 start_s=1792939703.907986 end_s=1792939703.911326 duration_ms=3.339 canonical_bytes=104258 outcome=saved
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_context_injection turn_count=10 start_s=1792939703.914804 end_s=1792939703.917473 duration_ms=2.669 canonical_bytes=104261 outcome=saved
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] turn=10 total_turns=1 runtime_lane=runtime tokens=2 context_window=32768 wall_tok_s=503.6 latency_ms=7 thinking_kind=none
+[2026-10-25 23:48:23] [INFO] [Keeper/native-bootstrap-keeper] checkpoint_save trace_id=trace-1792939687301-00000 stage=after_assistant_collected turn_count=11 start_s=1792939703.936773 end_s=1792939703.939371 duration_ms=2.598 canonical_bytes=104405 outcome=saved
+[2026-10-25 23:48:23] [INFO] [Telemetry] runtime execution terminal: observation=evt-0c7b2790be60054f0bcb352ffa5b0e39 attempt=0 outcome=success
+[2026-10-25 23:48:23] [INFO] [Telemetry/native-bootstrap-keeper] runtime host acceptance: observation=evt-0c7b2790be60054f0bcb352ffa5b0e39 outcome=accepted
+[2026-10-25 23:48:23] [INFO] [Keeper] native-bootstrap-keeper: keeper cycle OK runtime_lane=runtime tokens=2 latency=645ms mode=tool_use stop=completed
+[2026-10-25 23:48:23] [INFO] [Keeper] start_keepalive: skipped native-bootstrap-keeper (already registered)
+[2026-10-25 23:48:23] [INFO] [Keeper] keeper_stream: request terminal keeper=native-bootstrap-keeper request_id=kmsg-restart-b8e1b7b5a00e42b78bce74a41e158ba7 status=done
+[2026-10-25 23:48:24] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)...
+[2026-10-25 23:48:24] [INFO] [Server] [Shutdown] signal attribution: no takeover breadcrumb — sender is external (user/pkill/system)
+[2026-10-25 23:48:24] [INFO] [Server] [Shutdown] Phase 1/4 NOTIFY: sent to 0 SSE clients (0.00s) [active conn: 0, ws: 0]
+[2026-10-25 23:48:24] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: starting (timeout=3.0s)
+[2026-10-25 23:48:24] [INFO] [Server] Stopping Keeper owners and workspace observation...
+[2026-10-25 23:48:24] [INFO] [Server] [Shutdown] Keeper owners and workspace observation stopped (0.00s)
+[2026-10-25 23:48:24] [INFO] [Server] Closed 0 SSE clients (0.00s) [remaining conn: 0]
+[2026-10-25 23:48:24] [INFO] [Server] Closed 0 WebSocket sessions (0.00s) [remaining ws: 0]
+[2026-10-25 23:48:24] [INFO] [Server] [Shutdown] registered hooks completed (0.01s)
+[2026-10-25 23:48:24] [INFO] [Server] [Shutdown] hooks total: 0.01s
+[2026-10-25 23:48:24] [INFO] [Pulse] stopped after 2 beats
+[2026-10-25 23:48:24] [INFO] [Server] [Shutdown] Phase 2/4 HOOKS: done (0.01s, total=0.2s) [active conn: 0, ws: 0]
+[2026-10-25 23:48:24] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)
+[2026-10-25 23:48:24] [INFO] [Server] [Shutdown] Phase 3/4 BOARD: done (0.00s, total=0.2s) [active conn: 0, ws: 0]
+[2026-10-25 23:48:24] [INFO] [Server] [Shutdown] Phase 4/4 CANCEL: server cancel (total=0.2s) [active conn: 0, ws: 0]
+[2026-10-25 23:48:24] [INFO] [Server] [auto 127.0.0.1:64189] stats: h2=0 h1=3
+[2026-10-25 23:48:24] [INFO] [Server] MASC MCP: Closed 0 SSE connections
+[2026-10-25 23:48:24] [INFO] [Server] MASC MCP: Server stopped, waiting for background fibers... [active conn: 0, ws: 0]
+[2026-10-25 23:48:24] [INFO] [Server] host_fd_pressure_poller: cancelled, exiting cleanly
+[2026-10-25 23:48:24] [INFO] [Keeper] registry: phase transition name=native-bootstrap-keeper old=running new=draining event=stop_requested
+[2026-10-25 23:48:24] [INFO] [Keeper] registry: lifecycle name=native-bootstrap-keeper phase=draining event=draining detail=
+[2026-10-25 23:48:24] [INFO] [Keeper] registry: phase transition name=native-bootstrap-keeper old=draining new=stopped event=drain_complete
+[2026-10-25 23:48:24] [INFO] [Keeper] registry: lifecycle name=native-bootstrap-keeper phase=stopped event=stopped detail=drain_complete

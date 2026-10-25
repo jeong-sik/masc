@@ -380,20 +380,7 @@ let decode = function
          let* lock_warnings = field "warnings" commit_fields in
          let* lock_warnings = decode_lock_warnings lock_warnings in
          let* ignored_legacy_keys =
-           match field "ignored_legacy_keys" commit_fields with
-           | Ok (`List items) ->
-             let* keys =
-               List.fold_right
-                 (fun item acc ->
-                   let* acc = acc in
-                   match item with
-                   | `String key -> Ok (key :: acc)
-                   | _ -> Error "runtime config ignored_legacy_keys must be strings")
-                 items (Ok [])
-             in
-             Ok keys
-           | Ok _ -> Error "runtime config ignored_legacy_keys must be a list"
-           | Error _ -> Ok []  (* older servers: the member is absent *)
+           string_list_field "ignored_legacy_keys" commit_fields
          in
          let* source_revision = string_field "source_revision" commit_fields in
          let* order = string_field "order" commit_fields in

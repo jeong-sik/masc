@@ -145,7 +145,32 @@ let test_accepts_ignored_legacy_keys_and_retains_them () =
 ;;
 
 let test_rejects_non_string_ignored_legacy_keys () =
-  rejected (receipt ~ignored_legacy_keys:(`List [ `Int 7 ]) ())
+  rejected (receipt ~ignored_legacy_keys:(`List [ `Int 7 ]) ());
+  (* The member is mandatory, matching the server's always-write projection:
+     an absent member is a malformed receipt, not an older-server receipt. *)
+  let raw = receipt () in
+  let strip_commit_member = function
+    | `Assoc fields ->
+      `Assoc
+        (List.filter
+           (fun (k, _) ->
+              match k with
+              | "ignored_legacy_keys" -> false
+              | _ -> true)
+           fields)
+    | _ -> fail "expected object" in
+  let without_member =
+    match raw with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (k, v) ->
+              match k with
+              | "commit" -> (k, strip_commit_member v)
+              | _ -> (k, v))
+           fields)
+    | _ -> fail "expected object" in
+  rejected without_member
 ;;
 
 let test_rejects_open_or_incomplete_skill_variants () =

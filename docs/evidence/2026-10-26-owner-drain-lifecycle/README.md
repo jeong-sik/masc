@@ -1,6 +1,6 @@
 # Production owner-local HITL drain lifecycle
 
-Relates to #25860 and its merged member #25166. Source base:
+Relates to #25860 and its consolidated member #25166. Source base:
 `4ecf1de7a6a324bf9e55818c496768053f5edc4e`.
 
 The added control runs two real `resume_persisted_auto_judges` fibers from a
@@ -26,8 +26,11 @@ scope. Eio fibers do not establish multi-domain CAS contention. This new control
 proves overlapping production owner lifecycles, not a multicore stress test.
 
 Source hashes are in `source-sha256.json`. OCaml parsing and whitespace checks
-passed. Selected execution and independent source review are not yet verified
-at the time this record is written. No local Dune build/typecheck was run.
+passed. Two independent source reviews and response review passed at
+`33bb1b7efce4bf3546cb8d65973a66b48ee315f6`; these are source assessments, not
+formal GitHub approval. [Selected run 40227874157](https://github.com/jeong-sik/masc/actions/runs/40227874157)
+was dispatched on that head for `test_hitl_summary_worker` with `minimal=true`.
+Its execution outcome has not yet been read when this record is written. No local Dune build/typecheck was run.
 
 This does not prove process restart, every persistence fault, live provider or
 connector behavior, installation, deployment, or completion of all #25860

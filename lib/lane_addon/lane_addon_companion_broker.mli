@@ -16,7 +16,9 @@ type binding = {
     before returning; this socket broker does not own that browser's serializer.
     [finish] is an owner-domain nonblocking notification: no I/O, raise or yield.
     Abandonment must fence an in-flight uncertain effect before admitting reads.
-    It must never retire a replacement Browser. *)
+    It must never retire a replacement Browser. A late successful [bind] is
+    retained before its cancelled result can be discarded; [finish] runs once
+    after that original factory and its cleanup have joined. *)
 type t
 type grant
 val create : sw:Eio.Switch.t -> directory:string -> max_message_bytes:int -> (t, error) result

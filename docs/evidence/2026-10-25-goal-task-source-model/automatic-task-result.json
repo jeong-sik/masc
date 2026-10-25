@@ -1,0 +1,54 @@
+{
+  "schema": "masc.task-source.automatic-task-projection.v1",
+  "projection_not_verbatim_ledger": true,
+  "register": {
+    "event": "register",
+    "id": "vrf-4aad634d6347ed69ed6807d5a1ef203d",
+    "started_at": 1792935856.836484,
+    "registration": {
+      "task_id": "task-001",
+      "producer": "task-source-controls-operator",
+      "authority_kind": "system_llm_agent",
+      "authority_actor": "verifier_exact"
+    }
+  },
+  "completion": {
+    "outcome": "approved",
+    "elapsed_s": 52.91838097572327,
+    "reason": "Read the actual submitted artifact directly from the producer tree at workspace/positive.json (45 bytes, untruncated): {\"controlled_fixture\":true,\"actual_value\":1}. This matches the typed snapshot artifact byte-for-byte. Contract item verified: controlled_fixture is boolean true and actual_value is integer 1.",
+    "evaluator_runtime": "glm-coding.glm-5-3"
+  },
+  "actual_tools": [
+    {
+      "tool_name": "tool_read_file",
+      "input": {
+        "file_path": "workspace/positive.json"
+      },
+      "disposition": "completed",
+      "finished_at": 1792935893.582116,
+      "private_full_output_not_republished": true
+    },
+    {
+      "tool_name": "report_review_verdict",
+      "input": {
+        "reason": "Read the actual submitted artifact directly from the producer tree at workspace/positive.json (45 bytes, untruncated): {\"controlled_fixture\":true,\"actual_value\":1}. This matches the typed snapshot artifact byte-for-byte. Contract item verified: controlled_fixture is boolean true and actual_value is integer 1.",
+        "verdict": "APPROVE"
+      },
+      "disposition": "completed",
+      "finished_at": 1792935903.522076,
+      "private_full_output_not_republished": true
+    }
+  ],
+  "task_id": "task-001",
+  "primary_status": "done",
+  "primary_completed_at": "2026-10-25T13:45:09Z",
+  "artifact": {
+    "bytes": 45,
+    "sha256": "92cb7294ca51ca773d72453b8cdb317e1acea54514c0cb6ede4097650775ff88",
+    "content": "{\"controlled_fixture\":true,\"actual_value\":1}\n"
+  },
+  "private_original_registry_sha256": "72bf907e1e2eecd65cc20ae0fce98c703e4d7646790ee9c45121bd7f2fac9c95",
+  "producer_is_operator_fixture_not_model": true,
+  "producer_model_identity": null,
+  "permanent_typed_Task_approval_certificate_claim": false
+}

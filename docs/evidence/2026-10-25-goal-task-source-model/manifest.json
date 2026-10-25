@@ -1,0 +1,98 @@
+{
+  "schema": "masc.task-source.model-publication-manifest.v1",
+  "code_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "direct_publication_parent": "5ef6623937fab2a04f10862605b7d7db56ab8bdb",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 7468,
+      "sha256": "a16623b58db71f42dad7e4957050d239f1d2f6e4899711990dcb23f8f8d1c343"
+    },
+    {
+      "path": "automatic-task-result.json",
+      "bytes": 2282,
+      "sha256": "2f9886a7e3066f8b09fe34056b4c49578df8b0808df2937c880b5d9fdd388120"
+    },
+    {
+      "path": "browser-goals.png",
+      "bytes": 123048,
+      "sha256": "2b4bb74057f8567f78b07213c5c463f04f8e26e6d567b7dcb4f2a6420424fbec"
+    },
+    {
+      "path": "browser-observation.json",
+      "bytes": 938,
+      "sha256": "96d652a268ac530a074b285dbb7691b5e618151fa0d410b512cb490d74cd0ffb"
+    },
+    {
+      "path": "cohort-review.json",
+      "bytes": 21787,
+      "sha256": "007d24926220d62a33354ff0058f66858cbc9c93f1015bbe89d6e01b9aeafa13"
+    },
+    {
+      "path": "design-response.json",
+      "bytes": 18275,
+      "sha256": "e0db2b14b292d08f303f8dbd95fb2eb0c38767a1d14759effc82f25d1dad9de4"
+    },
+    {
+      "path": "design-review.json",
+      "bytes": 13085,
+      "sha256": "57e87d25dd29251981aba09b8b4e86588113686989780f0dbc19e1d7ffc480a1"
+    },
+    {
+      "path": "goal-N-result.json",
+      "bytes": 4468,
+      "sha256": "1325bb9455844d4255b2355465cb522dd9c230a48cbb13909ed4c8c2cf3d7478"
+    },
+    {
+      "path": "goal-P-result.json",
+      "bytes": 3751,
+      "sha256": "115cbe6e54961abe2650abb393dcb297959b89daa031f06e9b86fd222f5bcfa6"
+    },
+    {
+      "path": "instrumentation-recovery.json",
+      "bytes": 1154,
+      "sha256": "e14c530827732b3e467bcd0b676b65392b80840f22f861f11a9acc608ecefe10"
+    },
+    {
+      "path": "owned-cleanup.json",
+      "bytes": 1030,
+      "sha256": "1fe679720de90c1cb6332abb68594978df44690872be8a85797f0b528f6443eb"
+    },
+    {
+      "path": "private-originals-manifest.json",
+      "bytes": 9301,
+      "sha256": "5e029c8a55d99ac776028b595d6616effd9669b7a637b35f00d3da4f18b19982"
+    },
+    {
+      "path": "result.json",
+      "bytes": 3394,
+      "sha256": "caf052119facd3ae5147ec3fa178a34ae319fc95691d733d19fb5bd021454126"
+    },
+    {
+      "path": "runtime-observation.json",
+      "bytes": 2754,
+      "sha256": "aa9cc35b7a78680b03e3468f010be28f28e6495c94a4474c20b6200e4be441d7"
+    },
+    {
+      "path": "source-N.json",
+      "bytes": 527,
+      "sha256": "4b1f5e01e6ab54933347eafa604f9a691a23fafe7f81d7ee40fe4db011abf482"
+    },
+    {
+      "path": "source-P.json",
+      "bytes": 2561,
+      "sha256": "a6c643bf14be8b9bfb49dfc848dd00174adfa0531fe99c7c1c559773f009867e"
+    },
+    {
+      "path": "wire-projection.json",
+      "bytes": 8198,
+      "sha256": "6afbd53dc495345621dfe441c72db5dd764a667536f0d7cb6190d215e028dc17"
+    }
+  ],
+  "manifest_self": {
+    "path": "manifest.json",
+    "sha256": "bound externally in final review PR and Task receipt"
+  },
+  "private_original_scope": "37 frozen originals indexed separately; hashes are references, their private payloads are not published",
+  "original_main_Goal_complete": false
+}

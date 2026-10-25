@@ -1,0 +1,391 @@
+{
+  "schema": "masc.task-source.actual-model-design-response.v1",
+  "status": "FINAL_FROZEN",
+  "created_at_utc": "2026-10-25T14:01:55.112795+00:00",
+  "verdict": "DESIGN_OBSERVATION_REQUIREMENTS_MET_IN_ONE_UNBLINDED_CONTROLLED_COHORT",
+  "input_design_review": {
+    "name": "review.json",
+    "bytes": 13085,
+    "sha256": "57e87d25dd29251981aba09b8b4e86588113686989780f0dbc19e1d7ffc480a1",
+    "verdict": "PASS_SCOPED_DESIGN_WITH_OBSERVATION_REQUIREMENTS",
+    "read_in_full": true
+  },
+  "candidate": {
+    "source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "source_checkout_head": "5ef6623937fab2a04f10862605b7d7db56ab8bdb",
+    "canonical_goal_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "slot": "glm-coding.glm-5-3",
+    "configured_model": "glm-5.3",
+    "effective_private_roots_match_plan": true,
+    "health_source_and_binary_match_plan": true,
+    "health_status": "ok",
+    "health_overall_status": "degraded",
+    "health_overall_reasons": [
+      "keeper_memory_execution:addon_unattached"
+    ],
+    "configured_exact_lanes": [
+      {
+        "lane": "board_attention_exact",
+        "admitted_slots": [
+          "glm-coding.glm-5-3"
+        ],
+        "cli_slots": []
+      },
+      {
+        "lane": "hitl_auto_judge",
+        "admitted_slots": [
+          "glm-coding.glm-5-3"
+        ],
+        "cli_slots": []
+      },
+      {
+        "lane": "verifier_exact",
+        "admitted_slots": [
+          "glm-coding.glm-5-3"
+        ],
+        "cli_slots": []
+      }
+    ]
+  },
+  "frozen_inputs": {
+    "manifests": [
+      {
+        "relative_path": "terminal-proof-private/manifest.json",
+        "entries": 37,
+        "bytes": 9301,
+        "sha256": "5e029c8a55d99ac776028b595d6616effd9669b7a637b35f00d3da4f18b19982"
+      },
+      {
+        "relative_path": "positive-task-proof-private/manifest.json",
+        "entries": 3,
+        "bytes": 854,
+        "sha256": "39ba45141887971a801a03ae93866466bdb2a22baa6f8aeac2aaf6a2c459e7f3"
+      },
+      {
+        "relative_path": "goal-requests-proof-private/manifest.json",
+        "entries": 5,
+        "bytes": 1278,
+        "sha256": "d8f4dbaea154a8ec0b179bf14308508cf9c15068bfb5ac87524e3fecac80a910"
+      }
+    ],
+    "design_input_hash_links_checked": 10,
+    "retained_owner_body_bindings": [
+      {
+        "kind": "retained_owner",
+        "name": "65deaf1926e6db453cf910b9dc516029c88ba100d2a56c40dd303fac212f590a.json",
+        "sha256": "183e5d7cfadcc0f9783c643a723140757b864601a61086d56bf8acf048330b36"
+      },
+      {
+        "kind": "retained_body",
+        "name": "ced18bc4d0f0692eb41a7e3b1a2926b0291187ce83fe2d692772c17907efe79b.json",
+        "sha256": "ced18bc4d0f0692eb41a7e3b1a2926b0291187ce83fe2d692772c17907efe79b"
+      },
+      {
+        "kind": "retained_owner",
+        "name": "80540b057cdba238cb6ce3717528eb4de64a37f5f573cc6e6608257d9fb54bd6.json",
+        "sha256": "0d30797596930d823bf98976f506e5a78b393e46928199933ad3a937eb2cea11"
+      },
+      {
+        "kind": "retained_body",
+        "name": "bb30472e4cf329d5ceb0d21f97721ca6763e522b4e36ad80aca9dd321da92687.json",
+        "sha256": "bb30472e4cf329d5ceb0d21f97721ca6763e522b4e36ad80aca9dd321da92687"
+      },
+      {
+        "kind": "retained_owner",
+        "name": "53476976873ed20710df6e842a0c47897e12f7b2d89780cc8e8876c97c3201e5.json",
+        "sha256": "9e206da050d7b1f25e78ec23df4b33dd5f32a2ea181651d302139e8b115a5c8b"
+      },
+      {
+        "kind": "retained_body",
+        "name": "ffb92c161687c22e64aa48629ba649f91f3bc34fb7769941ef83d456b95490f8.json",
+        "sha256": "ffb92c161687c22e64aa48629ba649f91f3bc34fb7769941ef83d456b95490f8"
+      }
+    ],
+    "health_snapshot_sha256": "a848e12457e027e1a778595887c5973b2e9f5461095edc144c752aa6560ba82d",
+    "lane_snapshot_sha256": "87f3f04aa8048cf25b97f9b342c32c1764e437ce8b169c089918af22a66d8892"
+  },
+  "automatic_Task_observation": {
+    "task_id": "task-001",
+    "verification_id": "vrf-4aad634d6347ed69ed6807d5a1ef203d",
+    "producer_execution": null,
+    "producer_is_operator_fixture_not_model": true,
+    "artifact_reference": "artifact:workspace/positive.json",
+    "artifact_bytes": 45,
+    "artifact_sha256": "92cb7294ca51ca773d72453b8cdb317e1acea54514c0cb6ede4097650775ff88",
+    "artifact_controlled_fixture": true,
+    "artifact_actual_value": 1,
+    "actual_Read_input_matches_submitted_artifact": true,
+    "actual_Read_tool_message_bytes": 383,
+    "actual_structured_verdict": "APPROVE",
+    "actual_verdict_call_id": "call_-7138394491022469320",
+    "authority_kind": "system_llm_agent",
+    "authority_actor": "verifier_exact",
+    "evaluator_runtime": "glm-coding.glm-5-3",
+    "captured_evaluator_identity": {
+      "provider_id": "glm-coding",
+      "model_id": "glm-5.3",
+      "runtime_id": "glm-coding.glm-5-3",
+      "tool_use_id": "call_-7138394491022469320",
+      "provider_turn": 1,
+      "source_tool_use_ordinal": 0
+    },
+    "registry_outcome": "approved",
+    "primary_status": "done",
+    "primary_completed_at": "2026-10-25T13:45:09Z",
+    "provider_POST_sequence": [
+      2,
+      3,
+      4
+    ],
+    "negative_Task_id": "task-002",
+    "negative_Task_status": "in_progress",
+    "negative_Task_submission_or_approval_observed": false,
+    "primary_Task_count": 2
+  },
+  "Goal_controls": [
+    {
+      "label": "P",
+      "goal_id": "goal-task-state-bde4636ab8314491942f146c375a2027-p",
+      "task_id": "task-001",
+      "criterion_revision": "a87186151ae1e7197793970a646e3c8e",
+      "request_id": "a292506b327eb99fabc643039af5bb31",
+      "run_id": "01a1734f-92de-7000-8534-e53baff3df62",
+      "measurement_id": "3909d023f32dd5f607b8ae14372c065e",
+      "reported_value": "1",
+      "target_value": "1",
+      "captured_task_status": "done",
+      "actual_metric_value": "1",
+      "source_sha256": "a6c643bf14be8b9bfb49dfc848dd00174adfa0531fe99c7c1c559773f009867e",
+      "source_bytes": 2561,
+      "first_provider_request": "request-000005",
+      "lookup_tool_call_id": "call_-7138396449527558395",
+      "next_provider_request": "request-000007",
+      "full_sent_tool_message_bytes": 2984,
+      "full_sent_tool_message_sha256": "35113670b0b53dff5a0645c4a55d270f3f777208b338157e06da598f398ba51f",
+      "sent_source_equals_submitted_bytes": true,
+      "registry_lookup_excerpt_bytes": 1024,
+      "registry_lookup_excerpt_truncated": true,
+      "structured_verdict": "APPROVE",
+      "verdict_tool_call_id": "call_-7138402771719421001",
+      "typed_completion_states": [
+        "reviewed",
+        "committed"
+      ],
+      "primary_proof_state": "proof_proven",
+      "primary_phase": "awaiting_confirmation",
+      "original_prompt_sha256": "98c92cd98725320533dfcb562caf36b459557477fcab6be654beda454675b801",
+      "original_prompt_exact_wire_User": true,
+      "original_system_instructions_exact_wire_System": true,
+      "full_reported_measurement_JSON_exact": true,
+      "retained_original_body_sha256": "ffb92c161687c22e64aa48629ba649f91f3bc34fb7769941ef83d456b95490f8",
+      "provider_POST_sequence": [
+        5,
+        7,
+        10
+      ]
+    },
+    {
+      "label": "N",
+      "goal_id": "goal-task-state-bde4636ab8314491942f146c375a2027-n",
+      "task_id": "task-002",
+      "criterion_revision": "e10512767c265b311187d6ae89948e37",
+      "request_id": "5169eb4872a5dfc3979fda70639e1b47",
+      "run_id": "01a1734f-a7d4-7000-8e85-2b2358879605",
+      "measurement_id": "5d1f07aa73a3b25b996e1a4de04ff544",
+      "reported_value": "1",
+      "target_value": "1",
+      "captured_task_status": "in_progress",
+      "actual_metric_value": "0",
+      "source_sha256": "4b1f5e01e6ab54933347eafa604f9a691a23fafe7f81d7ee40fe4db011abf482",
+      "source_bytes": 527,
+      "first_provider_request": "request-000006",
+      "lookup_tool_call_id": "call_-7138404730224501424",
+      "next_provider_request": "request-000008",
+      "full_sent_tool_message_bytes": 628,
+      "full_sent_tool_message_sha256": "702992748382d5a8acb47f508c0a1fde71a7f2a3b95a60eb90797dd8d2b1db05",
+      "sent_source_equals_submitted_bytes": true,
+      "registry_lookup_excerpt_bytes": 628,
+      "registry_lookup_excerpt_truncated": false,
+      "structured_verdict": "REJECT",
+      "verdict_tool_call_id": "call_-7138396243369124608",
+      "typed_completion_states": [
+        "reviewed",
+        "committed"
+      ],
+      "primary_proof_state": "proof_refuted",
+      "primary_phase": "executing",
+      "original_prompt_sha256": "25d754776c12ae6eb22202adec1510cd1fde7a7b7d8261940beea57a43e7dd47",
+      "original_prompt_exact_wire_User": true,
+      "original_system_instructions_exact_wire_System": true,
+      "full_reported_measurement_JSON_exact": true,
+      "retained_original_body_sha256": "bb30472e4cf329d5ceb0d21f97721ca6763e522b4e36ad80aca9dd321da92687",
+      "provider_POST_sequence": [
+        6,
+        8,
+        9
+      ]
+    }
+  ],
+  "requirement_response_ko": [
+    "실제 health의 embedded source/binary hash/격리 root가 plan과 일치하고 세 exact lane은 단일 GLM slot/no CLI로 admitted다. 전체 health는 addon_unattached로 degraded이므로 전면 ready라고 주장하지 않는다.",
+    "Positive Task는 제출 artifact45B의 실제 Read와 구조화 APPROVE가 raw wire에 있고, 같은 verification_id의 system_llm_agent/verifier_exact registry 및 primary Done이 뒤따른다. operator producer identity는 모델로 합성하지 않고 unknown으로 보존한다.",
+    "Negative Task는 제출/승인 없이 InProgress이고 두 Goal의 보고값/target은 모두1이다. canonical source는 P done/N in_progress이며 declared metric으로 각각1/0이다.",
+    "각 Goal의 criterion/request/run/measurement/source와 retained Original digest가 맞는다. Original User prompt와 System instructions가 실제 첫 provider 요청과 정확히 같고 reported_measurement 전체 JSON도 일치한다.",
+    "P 원장 excerpt는1024B로 잘렸지만 실제 다음 provider 요청의 Tool message2984B 안 source2561B는 제출 원문과 byte/hash가 같다. N은 Tool628B/source527B가 같으므로 두 모델이 verdict 전에 원본을 전달받았다는 요구를 충족한다.",
+    "구조화 APPROVE/REJECT는 실제 도구 결과·registry reviewed/committed·primary proof/phase와 같은 run/request/criterion으로 결속된다. reviewed/committed 두 행을 독립 네 표본으로 세지 않는다.",
+    "같은 원본을 독립 재검토했으며 새 모델 실행은 없다. wrapper의 resolve/PlainText claim parse 실패와 같은 Task로 resume한 회복은 숨기지 않는다."
+  ],
+  "wire_observation": {
+    "POST_inferences": 9,
+    "catalog_GET_requests": 1,
+    "Task_role_POSTs": [
+      2,
+      3,
+      4
+    ],
+    "Goal_P_POSTs": [
+      5,
+      7,
+      10
+    ],
+    "Goal_N_POSTs": [
+      6,
+      8,
+      9
+    ],
+    "raw_request_and_response_model_all": "glm-5.3",
+    "reported_model_known_POSTs": 9,
+    "reported_model_unknown_POSTs": 0,
+    "same_model_across_roles": true,
+    "actual_unique_goal_review_runs": 2,
+    "actual_auto_Task_reviews": 1,
+    "replayed_tool_history_is_not_fresh_lookup": true,
+    "receipts": [
+      {
+        "request": "request-000001",
+        "method": "GET",
+        "status": 200,
+        "request_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "response_sha256": "2c3b6fe54616a7e666f2bbbeaea2358e9dcecd6980fdda89f8c0b82225719c3c",
+        "reported_model": null
+      },
+      {
+        "request": "request-000002",
+        "method": "POST",
+        "status": 200,
+        "request_sha256": "2c73434da5cb8d90499bf2179b1e0391a515f4bc724b873f4ce77bd3ca96b770",
+        "response_sha256": "d39f32ba4b313a2a26b4de87bdc8c44f04f6a4401dbfdd31466b8abe37452c09",
+        "reported_model": "glm-5.3"
+      },
+      {
+        "request": "request-000003",
+        "method": "POST",
+        "status": 200,
+        "request_sha256": "b24897bb623cf27e74178ba6b6f92c552955700753e145e592ec35a14e081d04",
+        "response_sha256": "c269b23d7f51029ce299439017a4076f21e196c398ca28ff9c91456ba2aa3a22",
+        "reported_model": "glm-5.3"
+      },
+      {
+        "request": "request-000004",
+        "method": "POST",
+        "status": 200,
+        "request_sha256": "12e9d9af92d8e84e8c68acde9e7436c1340ec824b2f27199e1c8bc0bfff23254",
+        "response_sha256": "df8fab7ac3d8de3f4b3eed28893f46d5a0229a59c03ff3ae9dbc3d07710185b9",
+        "reported_model": "glm-5.3"
+      },
+      {
+        "request": "request-000005",
+        "method": "POST",
+        "status": 200,
+        "request_sha256": "060b9c99ff0552e5b4b9944eea40eb5be6ee089e1cbe5acef27669ed5cc53048",
+        "response_sha256": "fa6d023498c2afe69ea8b5793fc1d7be5b286a2c21628c19f7e8987694ca8d40",
+        "reported_model": "glm-5.3"
+      },
+      {
+        "request": "request-000006",
+        "method": "POST",
+        "status": 200,
+        "request_sha256": "26ac034e5a65a62e2e431dd8424dc5a6b841aca0f377bf574b13e27726ef09b4",
+        "response_sha256": "aa0785df136caaf4732fc6f57d525f88b5c99409e06bb522b39fba3b5c08030c",
+        "reported_model": "glm-5.3"
+      },
+      {
+        "request": "request-000007",
+        "method": "POST",
+        "status": 200,
+        "request_sha256": "ef8bddefef683b5cda97540a9807aead6a8d6e87ba0cd5a2fb1d14c3d29ffc50",
+        "response_sha256": "3f1dad81022158688bbcc2fb5457c63158804673327fa6ba4956dcedb70bfa25",
+        "reported_model": "glm-5.3"
+      },
+      {
+        "request": "request-000008",
+        "method": "POST",
+        "status": 200,
+        "request_sha256": "ff9c76f587fb0192433335f865ec23e3180ef7f8baaab10ce2c783400d3ec251",
+        "response_sha256": "d00f5bae707b15c9fe921bfb5bd385bb96640394ddc29f142b9e14c83c65d831",
+        "reported_model": "glm-5.3"
+      },
+      {
+        "request": "request-000009",
+        "method": "POST",
+        "status": 200,
+        "request_sha256": "588ecd3bf0f376f5865c75cd3eca1904e33cf8d128ae0aee8af293b256a27995",
+        "response_sha256": "f70eac76f5a791869a9a92a71770a7d9c312a5a12ca5c18da66509af0437a838",
+        "reported_model": "glm-5.3"
+      },
+      {
+        "request": "request-000010",
+        "method": "POST",
+        "status": 200,
+        "request_sha256": "cafd501278096d9f265226dee11ad112af22047ca45f6367def89ad0895ae8c6",
+        "response_sha256": "c11053076537184e39240804b4a7a3ea6c5beda9638e115bb4bd2c9ad5b189a0",
+        "reported_model": "glm-5.3"
+      }
+    ]
+  },
+  "preserved_instrumentation_recoveries": [
+    {
+      "kind": "prepare_unresolved_path",
+      "receipt_relative_name": "prepare-failed-1/failure.json",
+      "sha256": "e374c837d8f5c484290378dc5a6881b2817642eec0f2d852ebbe9f98af84f83a",
+      "root_empty_when_preserved": true,
+      "runtime_or_proxy_started": false,
+      "provider_calls": 0,
+      "repair": "Resolve wrapper ROOT before helper use; original failure unchanged."
+    },
+    {
+      "kind": "plain_text_claim_reply_parse",
+      "receipt_relative_name": "claim-adapter-failure.json",
+      "sha256": "a10c4ddf04b9340f7425b13a3abd8eb80dde8f2a435a70ba25b8985f5317d727",
+      "Task": "task-001",
+      "readback_status": "claimed",
+      "task_creation_or_claim_retried": false,
+      "repair_receipt_sha256": "06227b718f630a01cb0917a94240e8671de9d420bec2fa30cabf4d070393f93b",
+      "initial_wrapper_sha256": "ccb3b505f5acf1e80f05a5c814b76d18a7350cf4d88060ad07479a2a30d6a4e4",
+      "repaired_wrapper_sha256": "3eb4a1631db3f1ccc56b4b3cedce1724f1ca21a85fc7bc3dbe0c1c1b8b704a94",
+      "harness_only": true,
+      "metric_target_expected_unchanged": true,
+      "resume_scope": "Same claimed Task continues Start/submission through normal APIs."
+    }
+  ],
+  "owner_commit_markers_ko": "보관 owner에는 commit_unknown→commit_retry_observed→commit_observed가 있다. cause는 commit_completion_not_yet_confirmed / original_goal_commit_requires_observation이며 실제 source의 관측 프로토콜과 맞는다. 이를 추가 모델 실행 또는 영구 commit 실패로 세지 않고 최종 authoritative after-state를 따로 확인했다.",
+  "new_findings_P0_P1_P2": [],
+  "closed_delta_ko": "canonical Task source가 실제 모델 입력으로 전달되고 P/N 상태 metric을 구분한 좁은 통합 관측은 이 cohort에서 충족됐다. 앞선 source/native/bundle 증거만 있었던 수준에서 실제 source-read→structured judgment→primary Goal proof/phase로 진전했다.",
+  "remaining_limits_ko": [
+    "P/N 제목·설명은 정답 방향을 드러내는 unblinded controls다. 조회 내용만의 인과 효과나 일반 성공률·신뢰도·모집단 pass rate를 추정하지 않는다.",
+    "operator가 artifact와 Task/Goal을 만든 controlled fixture다. autonomous Keeper 구현, 실제 Edit의 승인 전후 provenance, exact approval attempt의 영구 typed certificate, 외부 acceptance는 여전히 미증명이다.",
+    "Task/Goal은 같은 GLM5.3 모델이다. 역할 분리는 모델 독립성이나 통계적 독립성이 아니다. raw reported model은 provider 응답 사실이며 외부 모델 정체성 인증서는 아니다.",
+    "두 Goal은 proof_proven/awaiting_confirmation과 proof_refuted/executing이다. human confirmation은 하지 않았고 원래 main Goal 완료·production 설치·microVM/SSH 동작은 주장하지 않는다.",
+    "원래 main Goal 불변은 격리 root/소유한 새 ID·harness 범위와 frozen 선언으로 결속했다. 모든 외부 세션의 전역 무변경을 증명하지는 않는다.",
+    "37+3+5는 frozen manifest entries 검증 수이며 독립45실행/고유45증거 사건이 아니다. 동일 실제 cohort의 별도 감사는 추가 모델 실행 sample이 아니다.",
+    "이 검토는 기존 local originals만 읽었다. API/model/Git/source/runtime mutation·provider/native/CI/Docker 실행이나 polling은 없고 이 response 하나만 작성한다. raw reasoning/headers/credential/private absolute path는 공개하지 않는다."
+  ],
+  "authority": {
+    "formal_GitHub_or_stack_approval": false,
+    "original_Goal_completion_proven": false,
+    "human_confirmation_performed": false,
+    "primary_installation": false,
+    "new_execution_by_responder": false
+  }
+}

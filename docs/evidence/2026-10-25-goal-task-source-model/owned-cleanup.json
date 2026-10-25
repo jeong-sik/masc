@@ -1,0 +1,36 @@
+{
+  "schema": "masc.task-source.owned-cleanup-projection.v1",
+  "negative_fixture": {
+    "at_utc": "2026-10-25T13:58:28.863251+00:00",
+    "task_id": "task-002",
+    "before": "in_progress",
+    "after": "cancelled",
+    "submitted_negative_source_status": "in_progress",
+    "submitted_negative_source_sha256": "4b1f5e01e6ab54933347eafa604f9a691a23fafe7f81d7ee40fe4db011abf482",
+    "source_unchanged_after_later_task_cancel": true,
+    "new_model_request_issued": false,
+    "Goal_human_confirmation": false
+  },
+  "owned_processes_exited": {
+    "at_utc": "2026-10-25T14:01:16.028801+00:00",
+    "processes": [
+      {
+        "pid": 83809,
+        "no_process": true
+      },
+      {
+        "pid": 44063,
+        "no_process": true
+      },
+      {
+        "pid": 44045,
+        "no_process": true
+      }
+    ],
+    "all_owned_processes_exited": true,
+    "other_runtime_modified": false
+  },
+  "browser_space_finished": true,
+  "primary_runtime_changed": false,
+  "cleanup_not_a_new_model_execution_or_completion": true
+}

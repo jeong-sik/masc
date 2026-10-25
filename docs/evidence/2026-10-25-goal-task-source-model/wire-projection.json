@@ -1,0 +1,212 @@
+{
+  "schema": "masc.task-source.wire-projection.v1",
+  "not_full_model_messages_or_reasoning": true,
+  "POST_count": 9,
+  "setup_catalog_GET_count": 1,
+  "unique_automatic_Task_reviews": 1,
+  "unique_Goal_reviews": 2,
+  "reviewed_and_committed_are_one_run_each": true,
+  "requests": [
+    {
+      "request": "request-000002",
+      "status": 200,
+      "request_sha256": "2c73434da5cb8d90499bf2179b1e0391a515f4bc724b873f4ce77bd3ca96b770",
+      "response_sha256": "d39f32ba4b313a2a26b4de87bdc8c44f04f6a4401dbfdd31466b8abe37452c09",
+      "requested_model": "glm-5.3",
+      "reported_model": "glm-5.3",
+      "output_tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"file_path\":\"workspace/positive.json\"}",
+            "name": "tool_read_file"
+          },
+          "id": "call_-7138396243369128986",
+          "index": 0,
+          "type": "function"
+        }
+      ],
+      "input_tool_results": []
+    },
+    {
+      "request": "request-000003",
+      "status": 200,
+      "request_sha256": "b24897bb623cf27e74178ba6b6f92c552955700753e145e592ec35a14e081d04",
+      "response_sha256": "c269b23d7f51029ce299439017a4076f21e196c398ca28ff9c91456ba2aa3a22",
+      "requested_model": "glm-5.3",
+      "reported_model": "glm-5.3",
+      "output_tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"verdict\":\"APPROVE\",\"reason\":\"Read the actual submitted artifact directly from the producer tree at workspace/positive.json (45 bytes, untruncated): {\\\"controlled_fixture\\\":true,\\\"actual_value\\\":1}. This matches the typed snapshot artifact byte-for-byte. Contract item verified: controlled_fixture is boolean true and actual_value is integer 1.\"}",
+            "name": "report_review_verdict"
+          },
+          "id": "call_-7138394491022469320",
+          "index": 0,
+          "type": "function"
+        }
+      ],
+      "input_tool_results": [
+        {
+          "tool_call_id": "call_-7138396243369128986",
+          "bytes": 383,
+          "sha256": "9c978bcbb2703e1ae06d7b7ea74c9b56a7f9226d988936e9add50e56581383c9"
+        }
+      ]
+    },
+    {
+      "request": "request-000004",
+      "status": 200,
+      "request_sha256": "12e9d9af92d8e84e8c68acde9e7436c1340ec824b2f27199e1c8bc0bfff23254",
+      "response_sha256": "df8fab7ac3d8de3f4b3eed28893f46d5a0229a59c03ff3ae9dbc3d07710185b9",
+      "requested_model": "glm-5.3",
+      "reported_model": "glm-5.3",
+      "output_tool_calls": [],
+      "input_tool_results": [
+        {
+          "tool_call_id": "call_-7138396243369128986",
+          "bytes": 383,
+          "sha256": "9c978bcbb2703e1ae06d7b7ea74c9b56a7f9226d988936e9add50e56581383c9"
+        },
+        {
+          "tool_call_id": "call_-7138394491022469320",
+          "bytes": 348,
+          "sha256": "4c71e4e84b56eaf1a1e3a099b2d770538d0e4cf759f13ab5fe33102ea07896f7"
+        }
+      ]
+    },
+    {
+      "request": "request-000005",
+      "status": 200,
+      "request_sha256": "060b9c99ff0552e5b4b9944eea40eb5be6ee089e1cbe5acef27669ed5cc53048",
+      "response_sha256": "fa6d023498c2afe69ea8b5793fc1d7be5b286a2c21628c19f7e8987694ca8d40",
+      "requested_model": "glm-5.3",
+      "reported_model": "glm-5.3",
+      "output_tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"task_ids\":[\"task-001\"]}",
+            "name": "keeper_tasks_list"
+          },
+          "id": "call_-7138396449527558395",
+          "index": 0,
+          "type": "function"
+        }
+      ],
+      "input_tool_results": []
+    },
+    {
+      "request": "request-000006",
+      "status": 200,
+      "request_sha256": "26ac034e5a65a62e2e431dd8424dc5a6b841aca0f377bf574b13e27726ef09b4",
+      "response_sha256": "aa0785df136caaf4732fc6f57d525f88b5c99409e06bb522b39fba3b5c08030c",
+      "requested_model": "glm-5.3",
+      "reported_model": "glm-5.3",
+      "output_tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"task_ids\":[\"task-002\"]}",
+            "name": "keeper_tasks_list"
+          },
+          "id": "call_-7138404730224501424",
+          "index": 0,
+          "type": "function"
+        }
+      ],
+      "input_tool_results": []
+    },
+    {
+      "request": "request-000007",
+      "status": 200,
+      "request_sha256": "ef8bddefef683b5cda97540a9807aead6a8d6e87ba0cd5a2fb1d14c3d29ffc50",
+      "response_sha256": "3f1dad81022158688bbcc2fb5457c63158804673327fa6ba4956dcedb70bfa25",
+      "requested_model": "glm-5.3",
+      "reported_model": "glm-5.3",
+      "output_tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"verdict\":\"APPROVE\",\"reason\":\"I read the submitted canonical Task row task-001 via the Task lookup tool: its status field is exactly \\\"done\\\" (completed_at 2026-10-25T13:45:09Z, assignee task-source-controls-operator), matching the reported measurement's observed_value 1. Per the declared metric — 1 exactly when the referenced Task row has status done — the measured value is 1, which equals the target value 1.\"}",
+            "name": "report_review_verdict"
+          },
+          "id": "call_-7138402771719421001",
+          "index": 0,
+          "type": "function"
+        }
+      ],
+      "input_tool_results": [
+        {
+          "tool_call_id": "call_-7138396449527558395",
+          "bytes": 2984,
+          "sha256": "35113670b0b53dff5a0645c4a55d270f3f777208b338157e06da598f398ba51f"
+        }
+      ]
+    },
+    {
+      "request": "request-000008",
+      "status": 200,
+      "request_sha256": "ff9c76f587fb0192433335f865ec23e3180ef7f8baaab10ce2c783400d3ec251",
+      "response_sha256": "d00f5bae707b15c9fe921bfb5bd385bb96640394ddc29f142b9e14c83c65d831",
+      "requested_model": "glm-5.3",
+      "reported_model": "glm-5.3",
+      "output_tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"verdict\":\"REJECT\",\"reason\":\"keeper_tasks_list로 제출된 원문 task:task-002의 canonical Task 행을 직접 읽었고, status는 \\\"in_progress\\\"(started_at 2026-10-25T13:45:37Z)입니다. metric은 status가 done일 때만 1이고 그 외에는 0이므로 측정값은 0이며 target 1에 도달하지 않습니다. reported_measurement의 observed_value \\\"1\\\"은 실제 원문 행과 모순됩니다.\"}",
+            "name": "report_review_verdict"
+          },
+          "id": "call_-7138396243369124608",
+          "index": 0,
+          "type": "function"
+        }
+      ],
+      "input_tool_results": [
+        {
+          "tool_call_id": "call_-7138404730224501424",
+          "bytes": 628,
+          "sha256": "702992748382d5a8acb47f508c0a1fde71a7f2a3b95a60eb90797dd8d2b1db05"
+        }
+      ]
+    },
+    {
+      "request": "request-000009",
+      "status": 200,
+      "request_sha256": "588ecd3bf0f376f5865c75cd3eca1904e33cf8d128ae0aee8af293b256a27995",
+      "response_sha256": "f70eac76f5a791869a9a92a71770a7d9c312a5a12ca5c18da66509af0437a838",
+      "requested_model": "glm-5.3",
+      "reported_model": "glm-5.3",
+      "output_tool_calls": [],
+      "input_tool_results": [
+        {
+          "tool_call_id": "call_-7138404730224501424",
+          "bytes": 628,
+          "sha256": "702992748382d5a8acb47f508c0a1fde71a7f2a3b95a60eb90797dd8d2b1db05"
+        },
+        {
+          "tool_call_id": "call_-7138396243369124608",
+          "bytes": 410,
+          "sha256": "bcb7ee15058a409c14851f805966d09578e9e8e04dcdb2bbf41f8633cbd4692f"
+        }
+      ]
+    },
+    {
+      "request": "request-000010",
+      "status": 200,
+      "request_sha256": "cafd501278096d9f265226dee11ad112af22047ca45f6367def89ad0895ae8c6",
+      "response_sha256": "c11053076537184e39240804b4a7a3ea6c5beda9638e115bb4bd2c9ad5b189a0",
+      "requested_model": "glm-5.3",
+      "reported_model": "glm-5.3",
+      "output_tool_calls": [],
+      "input_tool_results": [
+        {
+          "tool_call_id": "call_-7138396449527558395",
+          "bytes": 2984,
+          "sha256": "35113670b0b53dff5a0645c4a55d270f3f777208b338157e06da598f398ba51f"
+        },
+        {
+          "tool_call_id": "call_-7138402771719421001",
+          "bytes": 423,
+          "sha256": "e578390172886d975c4088454b8b0da592ad820969ec2e93f291a8210e152fee"
+        }
+      ]
+    }
+  ]
+}

@@ -1389,7 +1389,7 @@ let stimulus_of_yojson json =
     | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _ | Schedule_due _
     | Connector_attention _ | Hitl_resolved _ | Ask_answered _ | Completion_authority_rejected _
     | Task_outcome _ | Task_cancelled _ | Workspace_message _ | Delegate_completed _
-    | Composition_completed _ | Owned_job_completed _ -> Ok () in
+    | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ -> Ok () in
   Ok { post_id; urgency; arrived_at; payload }
 
 let schema = "keeper.event_queue.v3"

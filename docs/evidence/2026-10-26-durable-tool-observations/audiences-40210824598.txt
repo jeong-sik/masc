@@ -1,0 +1,12 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40210824598
+Complete raw log SHA256: b63ad439202424fbc9ab8c8368c46ce3377b9293f2c90f264f206b6eadfb6dea
+Complete raw log bytes: 173225
+Selected checkout, changed assertions, failures and summaries only; omitted assertions are not claimed by this excerpt.
+
+test suite	Checkout	2026-10-25T16:15:56.4828521Z HEAD is now at ff9a2aa7 test(agent): verify recursive tool audiences and concurrent canonical order
+test suite	Test	2026-10-25T16:17:26.6163067Z File "packages/agent_core/test/test_pipeline.ml", line 4561, characters 46-51:
+test suite	Test	2026-10-25T16:17:26.6164814Z Error: The value agent has type config:Types.agent_config -> Agent.t
+test suite	Test	2026-10-25T16:17:26.6202887Z File "packages/agent_core/test/dune", lines 67-345, characters 0-6116:
+test suite	Test	2026-10-25T16:17:28.9317752Z Test Successful in 0.468s. 6 tests run.
+test suite	Test	2026-10-25T16:17:30.5414871Z Test Successful in 0.266s. 20 tests run.
+test suite	Test	2026-10-25T16:17:36.4475802Z Test Successful in 4.581s. 22 tests run.

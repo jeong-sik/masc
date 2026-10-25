@@ -51,8 +51,9 @@
 기준 버전, 정규화한 입력의 SHA-256, 저장 시각을 기록합니다.
 
 기존 workspace 읽기 헤더 검사를 통과해야 하며, POST의
-`expected_workspace`도 저장 전에 검사합니다. 모든 응답은
-`Cache-Control: private, no-store`입니다.
+`expected_workspace`도 저장 전에 검사합니다. 저장 API가 만드는 응답에는
+`Cache-Control: private, no-store`를 붙입니다. 이 API에 진입하기 전의
+공통 인증·작업 공간 거절 응답은 기존 HTTP 진입점에서 만듭니다.
 
 ## 파일과 실패
 

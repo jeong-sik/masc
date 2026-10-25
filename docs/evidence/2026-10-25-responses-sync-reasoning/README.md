@@ -63,11 +63,18 @@ array; its old string assertion was unreached in the failed baseline.
 
 ## Validation boundary
 
-Changed OCaml parses, fragment and whitespace pass. A corrected run of the
-new suite plus existing backend codec, phase-replay and capability suites is requested
-separately. Execution at the corrected source has not yet been observed here.
-`source-sha256.json` binds the candidate implementation/fixture, not a new
-execution receipt. No local Dune/typecheck/full build or full regression.
+[Final run40192538692](https://github.com/jeong-sik/masc/actions/runs/40192538692)
+checked out exactly `4373fd876bbbb1d4c54680727807f9d0b5372100` and completed
+SUCCESS: new16 + backend codec64 + phase replay24 + capabilities124 =
+**228 actual cases**. The real file/codec/request assertions and endpoint-bound
+opaque control were reached and passed. The raw-log digest and selected
+checkout/assertion/summary lines are retained in success-40192538692.txt.
+This is the final policy/endpoint source, not the earlier pre-endpoint run.
+
+Changed OCaml parses, fragment,14 source hashes and full whitespace pass.
+Later evidence-only commits preserve these implementation/fixture hashes but
+are not new execution heads. No local Dune/typecheck/full build, root MASC
+runtime consumer compilation, whole-Agent resume or full regression is claimed.
 
 SSE is the next distinct layer: summary and full-text deltas need separate
 provenance before reconciling authoritative item-done/terminal snapshots.

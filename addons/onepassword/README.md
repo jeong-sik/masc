@@ -23,10 +23,25 @@ by `disconnect(revoke)` before claiming the connection is disconnected. A lost
 exchange response requires remote reconciliation rather than blind replay.
 
 The caller must give the backend a dedicated absolute 0700 directory and keep
-it outside retained Lane data and Keeper work disks. Records and lock files are
-0600 regular files owned by the current UID. Directory replacement, symlinks
+it outside retained Lane data and Keeper work disks. Tokens, PKCE state and
+integration keys are encrypted by the operator's macOS Keychain or Linux
+Secret Service, through the pinned `keyring` dependency. No discovered,
+plaintext or third-party fallback is allowed. The directory retains only a
+nonsecret active-slot reference and lock, as owned 0600 regular files.
+Directory replacement, symlinks
 and hard-linked files are refused. Host processes share the operator's OS UID;
 this is not a claim of sandbox isolation or protection against that UID.
+Writes replace the inactive protected slot, verify a read-back and then commit
+the nonsecret reference. A failed inactive write leaves the active recovery authority
+intact. An interrupted reference commit is recovered from the retained reference,
+without replaying OAuth. Missing active items and locked/unavailable protection report unavailable,
+never disconnected. Linux requires an existing unlocked default Secret Service
+collection and the host session D-Bus; this package does not create or unlock it.
+macOS uses the user's default Keychain; OS authorization UI may be required.
+The package never answers that UI or changes the Keychain's lock state.
+An existing plaintext `connection.json` is refused, preserved and not migrated;
+the operator must reconcile/revoke that old connection before removing its
+private plaintext record and starting a new connection.
 
 ## Docking contract still to implement
 

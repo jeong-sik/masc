@@ -9,7 +9,7 @@ import sys
 import time
 from urllib import parse
 
-from oauth import Configuration, ConnectionError, Connector, Phase, PrivateStore
+from oauth import Configuration, ConnectionError, Connector, Phase, PrivateStore, https_url
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from protocol import INPUT_SCHEMA, OUTPUT_SCHEMA, InvalidInput, decode_json, encode_output
@@ -104,12 +104,23 @@ class Worker:
                 configured = parse.urlsplit(connector.configuration.redirect_uri)
                 if (callback.scheme, callback.netloc, callback.path) != (configured.scheme, configured.netloc, configured.path):
                     raise ConnectionError("callback_destination_mismatch")
-                query = parse.parse_qs(callback.query, strict_parsing=True)
-                fragment = parse.parse_qs(callback.fragment, strict_parsing=True)
-                if (set(query) != {"code", "state"} or set(fragment) != {"integration_key"}
-                        or any(len(values) != 1 for values in [*query.values(), *fragment.values()])
+                query = parse.parse_qs(callback.query, strict_parsing=True, keep_blank_values=True)
+                fragment = parse.parse_qs(callback.fragment, strict_parsing=True, keep_blank_values=True)
+                if (not {"code", "state"} <= set(query)
+                        or not set(query) <= {"code", "state", "iss", "base_url"}
+                        or set(fragment) != {"integration_key"}
+                        or any(len(values) != 1 or not values[0] for values in [*query.values(), *fragment.values()])
                         or query["state"][0] != arguments["state"]):
                     raise ConnectionError("invalid_callback")
+                # Optional provider metadata never changes the configured
+                # token endpoint, client binding or redirect authority.
+                for key in {"iss", "base_url"} & set(query):
+                    value = query[key][0]
+                    if any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value):
+                        raise ConnectionError("invalid_callback")
+                    https_url(value)
+                    if key == "base_url" and parse.urlsplit(value).path not in {"", "/"}:
+                        raise ConnectionError("invalid_callback")
                 connector.complete(state=query["state"][0], code=query["code"][0],
                                    integration_key=fragment["integration_key"][0])
             return self.operator_view(connector)

@@ -66,3 +66,32 @@ Changed OCaml parsing, TOML parsing/exact two-row control checks and whitespace
 checks passed locally. No local build/typecheck or new behavior execution is
 claimed here. All four refreshed heads require fresh independent review before
 whole-stack integration; earlier approvals do not certify the rebase.
+
+
+## Actual refreshed-candidate execution
+
+[40217842015](https://github.com/jeong-sik/masc/actions/runs/40217842015)
+checked out `b4a8e78e6529448cf7b62ba7b6c8da1cd154addd` and failed with
+**40 PASS / 2 FAIL** (4 native cases, 16 sync, 22 SSE total). The two new
+omission controls dereferenced absent `reasoning` and raised Yojson Type_error.
+Independent rebase audit found this P2 after two source reviews had missed it;
+those earlier PASS assessments are superseded. It was a fixture defect, not an
+observed provider or production admission failure. The fix checks top-level
+absence directly, preserving the intended omitted-depth wire assertion.
+
+[40218005191](https://github.com/jeong-sik/masc/actions/runs/40218005191)
+checked out exactly `f040ae31b9c6e28695dc97e4d3192ac81bdaa4f1` and completed
+SUCCESS: **42 actual cases PASS** (native4 + sync16 + SSE22). Both stream=false
+and stream=true admission/serialization controls ran: default omission,
+M3's missing-effort rejection and explicit low effort, M3.1 default-on explicit
+enable without invented depth, unsupported efforts and disable rejection.
+The original source/cache/message-file/later-tool-user replay cases passed too.
+Raw log digests, actual checkout, assertions and summaries are retained. The
+new source manifest binds the catalog, fixtures and direct control consumers;
+this evidence-only addition changes none of those executed inputs.
+
+Independent corrected-leaf and review-response source assessments found no
+remaining P0–P2. These are not formal independent GitHub APPROVE. All four
+stack heads still need current-scope integration admission. Neither42 nor the
+historical40 is native HTTP, OS restart, rendered UI, install/deploy or whole
+#27924 completion. No local Dune build/typecheck was run.

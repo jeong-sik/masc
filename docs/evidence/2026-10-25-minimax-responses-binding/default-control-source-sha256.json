@@ -1,0 +1,21 @@
+{
+  "source_head": "f040ae31b9c6e28695dc97e4d3192ac81bdaa4f1",
+  "base": "114b5783b92f8695ae49ac1d0ecb82ad307ebaa7",
+  "run": 40218005191,
+  "actual_cases": {
+    "native": 4,
+    "sync": 16,
+    "SSE": 22
+  },
+  "sha256": {
+    "packages/agent_core/models.toml": "aaa7b97444eaf6a201ec99ffb73107b85ddfd4be9f0c9254c99371566e3183d7",
+    "packages/agent_core/test/test_minimax_responses_binding.ml": "e6eb4eb0dab578cea8cf5956079f22ccff31e8e8ee7b0786241ff840750a9f2e",
+    "packages/agent_core/test/test_responses_reasoning_content.ml": "74c9a4f54b78eccccad22302b84dc72c6e1236d3aeb015b82f09cae6c3c4cb6e",
+    "packages/agent_core/test/test_responses_reasoning_stream.ml": "2379caec918647903832768683e2530ee9abe204f56fea54fe85b75945402ff6",
+    "packages/agent_core/lib/llm_provider/complete_common.ml": "044bf25f36bc826a86c02eeb7326646f09053ca9ae7c230a769c87617d55a4fe",
+    "packages/agent_core/lib/llm_provider/reasoning_dialect.ml": "668aad7ebb01cb0e5742caf4efc73842765ccc97a65293e4464b8223ca5198e8",
+    "packages/agent_core/lib/llm_provider/backend_openai_responses.ml": "d2956c21b4dcb28e2a40b07c4324f82f6db88663ef8d342478d1f0b1deb09af6",
+    "packages/agent_core/lib/llm_provider/capabilities.ml": "27495ac99b8a1587f42cb4d4de256383b738adf01809f83671943885b3c81af0",
+    "packages/agent_core/lib/llm_provider/provider_config.ml": "e3477af3dc1d4d800ee52fed84f68c88adf3dacc724f6e22e6bc8ac6b14a78c5"
+  }
+}

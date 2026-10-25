@@ -61,23 +61,47 @@ incarnation or dashboard credential changes.
 An optional `callback` has `action`, `field`, prefilled `arguments` and `state`.
 `GET /addons/oauth/callback` is a static page with no external resources, a
 script hash CSP, no-store and no-referrer. It captures query plus fragment in
-memory, immediately removes them from browser history and posts only to its
-same-origin opener. The panel admits only its exact original popup, path,
-origin and OAuth state, then sends the return to the authenticated private POST.
+memory and posts only to its original same-origin opener. It keeps the original
+URL and window until the panel acknowledges a matching backend receipt. The
+panel admits only its exact original popup, path, origin and OAuth state, binds
+the original connection ID, then sends the return to the authenticated private POST.
 The package validates the exact configured destination and its durable pending
 transaction again. The GET itself neither authenticates nor exchanges a code.
 Deployment access logs for the registered callback must omit query strings.
 
-If the original popup/opener is lost, no callback is replayed or sent to a
-replacement. Inspect the connection and explicitly cancel that pending attempt
-before starting again. Provider/extension approval links and remote disconnect
-are separate package operations, not implied by this OAuth connection panel.
+An optional private `callback_receipt` has a closed `kind` (`captured` or
+`declined`) and the original `connection_id`. `captured` confirms that the
+original key reached validated protected storage with confirmed publication;
+it does not prove that the code exchange or account connection succeeded.
+Busy, unavailable or unconfirmed storage produces no capture receipt. A
+`declined` receipt comes only from the direct successful cancellation of that
+exact pending attempt; observing a disconnected record cannot reconstruct it.
+
+The original page accepts pending identity and receipt messages only from its
+original opener and origin, matching state and connection ID. Only then does
+it clear query/fragment from history, confirm clearing to that opener and close.
+Absent, malformed or another connection's receipt cannot clear it. The panel
+and original page retain an unconfirmed return for explicit same-request retry;
+they never automatically retry a mutation or retarget it to a new attempt.
+The manual secret callback form follows the same ownership/receipt rule and
+retains its input on failure, without inventing a popup acknowledgement.
+
+Unmount, workspace or credential replacement discards component-owned private
+state and resend authority. An already navigated original popup is left open
+with its unconfirmed return; only a still-blank popup may be closed without a
+receipt. A replacement opener/component cannot adopt it automatically. Losing
+that original authority still requires explicit recovery. Keyless reconnect,
+account-pinned key recovery and remote revocation remain separate package work;
+no old account's key may be borrowed for a different connection.
 
 ## Evidence boundary
 
 Focused dashboard tests exercise original-popup/state/workspace/credential
-admission and a single private transport attempt. Protocol and request-envelope
-tests are present for independent source review; this external coding session
-did not run Dune or an OCaml typecheck. The live development status installation
-predates these host changes. This source does not prove an installed private
-route or a successful provider connection.
+admission, private response decoding, explicit original-return retry and receipt
+fencing. A literal script extracted from the actual OCaml route and the actual
+Dashboard component exchange synthetic window messages using actual Python
+Worker/Connector receipt packets from an owned temporary store and fake provider.
+This crosses an explicit replayed HTTP-response port, not a running HTTP/MCP
+host, browser process or native protected-store backend. The route was parsed;
+there was no local Dune/full build or full OCaml typecheck. This source does not
+prove an installed private route, real account, full Keeper or recovery result.

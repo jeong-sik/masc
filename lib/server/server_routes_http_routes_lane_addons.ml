@@ -466,20 +466,47 @@ let operator_callback _request reqd =
   (* Static page: no query/fragment is interpolated into server HTML or logs.
      Only its original same-origin opener can receive the private return. *)
   let script = {|const returned=window.location.href;
-window.history.replaceState(null,"",window.location.pathname);
-if(window.opener && window.opener!==window){
-  window.opener.postMessage({kind:"masc-addon-oauth-callback",url:returned},window.location.origin);
-  document.getElementById("status").textContent="Return to the connection settings window.";
+const originalOpener=window.opener;
+const query=new URL(returned).searchParams;
+const state=query.getAll("state").length===1?query.get("state"):null;
+const receiptKind=query.get("error")==="access_denied"?"declined":"captured";
+let connectionId=null;
+let cleared=false;
+const status=document.getElementById("status");
+function deliver(){
+  if(cleared || !originalOpener || originalOpener===window || state===null){
+    status.textContent="The original connection window is unavailable. Keep this return open; its capture has not been confirmed.";
+    return;
+  }
+  originalOpener.postMessage({kind:"masc-addon-oauth-callback",url:returned},window.location.origin);
+  status.textContent="Waiting for the original connection to confirm capture. Keep this window open.";
+}
+window.addEventListener("message",event=>{
+  if(cleared || state===null || event.source!==originalOpener || event.origin!==window.location.origin)return;
+  const data=event.data;
+  if(typeof data!=="object" || data===null || data.state!==state
+    || typeof data.connection_id!=="string" || data.connection_id==="")return;
+  if(data.kind==="masc-addon-oauth-pending"){
+    if(connectionId===null)connectionId=data.connection_id;
+    return;
+  }
+  if(data.kind!=="masc-addon-oauth-captured" || connectionId===null
+    || data.connection_id!==connectionId || data.receipt_kind!==receiptKind)return;
+  window.history.replaceState(null,"",window.location.pathname);
+  cleared=true;
+  originalOpener.postMessage({kind:"masc-addon-oauth-cleared",url:returned,connection_id:connectionId},window.location.origin);
+  status.textContent="Return captured by the original connection. You can close this window.";
   window.close();
-}else{
-  document.getElementById("status").textContent="The original connection window is unavailable. Reopen connection settings and cancel this attempt before starting again.";
-}|} in
+});
+document.getElementById("retry").addEventListener("click",deliver);
+deliver();
+|} in
   let hash = Digestif.SHA256.digest_string script |> Digestif.SHA256.to_raw_string |> Base64.encode_string in
   let policy = "default-src 'none'; script-src 'sha256-" ^ hash ^ "'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" in
   Http.Response.html ~headers:(private_headers @ ["content-security-policy",policy;
     "cross-origin-opener-policy","same-origin-allow-popups"])
     ("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>Connection return</title>"
-     ^ "<p id=\"status\">Returning to connection settings…</p><script>" ^ script ^ "</script></html>") reqd
+     ^ "<p id=\"status\">Returning to connection settings…</p><button id=\"retry\" type=\"button\">Retry original return</button><script>" ^ script ^ "</script></html>") reqd
 let operator_control request reqd =
   Http.Response.with_scoped_headers private_headers (fun () ->
   with_private_token_permission_auth ~permission:Masc_domain.CanAdmin (fun state _actor request reqd ->

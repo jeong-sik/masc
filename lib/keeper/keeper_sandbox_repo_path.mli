@@ -10,6 +10,7 @@ val playground_root_no_create :
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> string
 
 val execution_location_json :
+  remote_workspace_root:string option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
@@ -23,5 +24,7 @@ val execution_location_json :
     [playground_root] for playground scopes and [null] when the cwd is outside
     the playground. Docker host-only absolute paths are projected into the
     mounted sandbox namespace or returned as [null]; paths of a tree the
-    endpoint owns retain their host namespace identity. Relative argv paths
-    resolve against the effective cwd. *)
+    endpoint owns use its resolved namespace for SSH. [remote_workspace_root]
+    comes from the actual dispatch target; [None] on SSH means unresolved and
+    yields null paths rather than invented host coordinates. Relative argv
+    paths resolve against the effective cwd. *)

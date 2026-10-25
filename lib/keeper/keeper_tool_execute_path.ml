@@ -14,8 +14,10 @@ type execute_cwd_resolution_error =
   | Cwd_not_directory of { cwd : string }
   | Cwd_rejected of Keeper_path_rejection.keeper_path_rejection
   | Cwd_root_verification_failed of { detail : string }
+  | Cwd_namespace_unavailable of string
 
 let execute_cwd_resolution_error_code = function
+  | Cwd_namespace_unavailable _ -> "remote_ssh_endpoint_unavailable"
   | Cwd_missing _ -> "cwd_missing"
   | Cwd_not_directory _ -> "cwd_not_directory"
   | Cwd_rejected (Outside_sandbox _) -> "cwd_outside_sandbox"
@@ -28,6 +30,7 @@ let execute_cwd_resolution_error_code = function
     "cwd_invalid"
 
 let execute_cwd_resolution_error_public_message = function
+  | Cwd_namespace_unavailable detail -> detail
   | Cwd_missing _ -> "Requested cwd does not exist in the Keeper-visible workspace."
   | Cwd_not_directory _ -> "Requested cwd is not a directory."
   | Cwd_rejected (Outside_sandbox _) -> "Requested cwd is outside the Keeper sandbox."
@@ -41,6 +44,7 @@ let execute_cwd_resolution_error_public_message = function
     "Requested cwd is invalid."
 
 let execute_cwd_resolution_error_private_message = function
+  | Cwd_namespace_unavailable detail -> detail
   | Cwd_missing { cwd } ->
     Printf.sprintf "cwd_not_directory: %s (directory does not exist)" cwd
   | Cwd_not_directory { cwd } ->
@@ -90,10 +94,13 @@ let requested_tool_execute_cwd ~config ~meta ~write_enabled ~args =
    ([Keeper_remote_path.host_to_remote]), and the endpoint's shim chdirs
    into it inside its own jail and answers ENOENT itself. *)
 let resolve_tool_execute_cwd_typed ~config ~meta ~write_enabled ~args =
+  let ( let* ) = Result.bind in
   let raw_path =
     requested_tool_execute_cwd ~config ~meta ~write_enabled ~args
     |> keeper_observation_host_path_of_visible_path ~config ~meta
   in
+  let* raw_path = Keeper_workspace_namespace.project_input ~config ~meta raw_path
+    |> Result.map_error (fun detail -> Cwd_namespace_unavailable detail) in
   (* Execute returns the container-visible cwd. A caller may use that exact
      directory again; project it through the admitted Keeper's own mount
      before applying the same confinement and root-identity checks. *)

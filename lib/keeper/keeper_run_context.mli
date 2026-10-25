@@ -24,6 +24,7 @@ type run_context =
   ; session : Keeper_types.session_context
   ; saved_history : saved_history
   ; base_system_prompt : string
+  ; workspace_root : string
   ; ctx_work : working_context
   ; resume_agent_core_checkpoint : Agent_core.Checkpoint.t option
   ; start_turn_count : int
@@ -32,12 +33,17 @@ type run_context =
   ; runtime_config_path : string option
   }
 
+type base_prompt_error =
+  | Workspace_unavailable of string
+  | Constitution_unreadable of World_constitution_store.read_error
+
+val base_prompt_error_to_string : base_prompt_error -> string
+
 type prepare_error =
   | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
-  | Constitution_unreadable of World_constitution_store.read_error
-      (** The world's constitution ledger exists but could not be read. The
-          turn is refused rather than built without its articles; the next
-          turn reads the ledger again (#38354). *)
+  | Base_prompt_unavailable of base_prompt_error
+      (** Namespace resolution or the constitution ledger prevented building
+          an authoritative prompt. Nothing is dispatched. *)
   | Prompt_unrenderable of string
       (** A prompt slot the base system prompt needs is missing or fails to
           render (partial asset sync, operator edit). The turn is refused
@@ -47,10 +53,11 @@ val build_base_system_prompt :
      config:Workspace.config
   -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> meta:keeper_meta
-  -> (string, World_constitution_store.read_error) result
+  -> (string * string, base_prompt_error) result
 (** Build the keeper base system prompt from the same persisted meta/profile
     inputs used by {!prepare_run_context}. This is the only system prompt a
-    turn sends, direct or autonomous. *)
+    turn sends, direct or autonomous. Returns the resolved workspace root and
+    prompt together; no prompt is built with an unavailable namespace. *)
 
 val prepare_run_context :
      config:Workspace.config
@@ -69,7 +76,7 @@ val prepare_run_context :
     continuation; when supplied it is the history source instead of a second
     disk read. A missing or superseded checkpoint starts fresh; every other
     load failure returns its typed error before prompt construction. An
-    unreadable constitution ledger returns [Constitution_unreadable]. *)
+    unreadable constitution ledger returns [Base_prompt_unavailable]. *)
 
 (** Whether the turn starts from a checkpoint it loaded. *)
 val loaded_checkpoint_present : run_context -> bool

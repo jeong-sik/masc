@@ -70,11 +70,15 @@ Readiness covers reachability, shim major version, git, root and keeper-root
 existence, disk floor, and keeper-scoped `gh auth status`. Every failure is
 named and stops the requested lane.
 
-Keeper-visible logical paths remain host-shaped. One path module translates
-them to `remote_root/<keeper>` and rewrites remote absolute paths in captured
-and streamed output. Remote reads use the same SSH backend. Execute file
-redirects remain fail-closed until typed remote file operations land
-(masc#31442).
+Keeper-visible SSH paths name the endpoint workspace `remote_root/<keeper>`.
+Prompt construction resolves this namespace before dispatch and preserves the
+root in the admitted turn. Execute metadata uses the endpoint carried by that
+call's dispatch target. SSH stdout/stderr, including streamed chunks, retain
+their original path bytes. Endpoint paths passed to structured tools project
+into internal bookkeeping coordinates for containment, then back to the same
+endpoint for I/O. Docker and microVM retain their existing namespace contracts.
+The public Execute `command` form runs shell redirects on the endpoint. Internal
+typed IR file attachments remain fail-closed (masc#31442).
 
 The operator procedure and complete error catalog live in
 [`docs/operations/ssh-endpoints-runbook.md`](../operations/ssh-endpoints-runbook.md).

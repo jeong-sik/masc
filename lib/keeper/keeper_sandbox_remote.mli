@@ -78,6 +78,9 @@ val name : t -> string
 val workspace_root : t -> string
 (** The exact request jail/default cwd used by ordinary payloads. *)
 
+val keeper_root : remote_root:string -> keeper_name:string -> string
+(** Pure per-Keeper endpoint root shared by namespace resolution and transport. *)
+
 val keeper_control_root : t -> string
 (** OpenSSH [<endpoint_root>/<sanitized keeper name>], currently both its
     workspace and Keeper-scoped GitHub control root. The separate name

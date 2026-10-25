@@ -122,6 +122,7 @@ val active_goal_summaries :
     without using or repairing the recovery copy. *)
 
 val build_system_prompt :
+  workspace_root:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
@@ -132,7 +133,8 @@ val build_system_prompt :
     persisted user message, not in a second system-prompt implementation.
 
     [config] is the caller-owned workspace generation admitted for the turn.
-    Prompt construction never resolves a second default config.
+    Prompt construction never resolves a second default config. [workspace_root]
+    is the already resolved model-visible namespace, supplied by the caller.
 
     The world's constitution articles are part of the contract. A world with
     no ledger yet renders none. A ledger that exists but cannot be read is

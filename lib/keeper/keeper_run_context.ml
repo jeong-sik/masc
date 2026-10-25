@@ -24,6 +24,7 @@ type run_context =
   ; session : Keeper_types.session_context
   ; saved_history : saved_history
   ; base_system_prompt : string
+  ; workspace_root : string
   ; ctx_work : working_context
   ; resume_agent_core_checkpoint : Agent_core.Checkpoint.t option
   ; start_turn_count : int
@@ -35,9 +36,17 @@ type run_context =
 (* Why a turn could not be prepared. All three failed before anything was
    dispatched; the caller turns each into the same not-dispatched
    settlement. *)
+type base_prompt_error =
+  | Workspace_unavailable of string
+  | Constitution_unreadable of World_constitution_store.read_error
+
+let base_prompt_error_to_string = function
+  | Workspace_unavailable detail -> detail
+  | Constitution_unreadable error -> World_constitution_store.read_error_to_string error
+
 type prepare_error =
   | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
-  | Constitution_unreadable of World_constitution_store.read_error
+  | Base_prompt_unavailable of base_prompt_error
   | Prompt_unrenderable of string
 
 let build_base_system_prompt
@@ -45,7 +54,17 @@ let build_base_system_prompt
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(meta : keeper_meta)
   =
-  Keeper_unified_prompt.build_system_prompt ~meta ~config ~profile_defaults ()
+  let ( let* ) = Result.bind in
+  let* workspace_root =
+    Keeper_workspace_namespace.resolve ~config ~meta ~profile_defaults
+    |> Result.map_error (fun detail -> Workspace_unavailable detail)
+  in
+  let* prompt =
+    Keeper_unified_prompt.build_system_prompt
+      ~workspace_root ~meta ~config ~profile_defaults ()
+    |> Result.map_error (fun error -> Constitution_unreadable error)
+  in
+  Ok (workspace_root, prompt)
 
 let prepare_run_context
       ~(config : Workspace.config)
@@ -128,12 +147,12 @@ let prepare_run_context
     resolution.Config_dir_resolver.config_root.path
   in
   let runtime_config_path = Runtime.config_path () in
-  let* base_system_prompt =
+  let* workspace_root, base_system_prompt =
     (* Prompt rendering raises [Invalid_argument] when a slot is missing or
        fails to render; that is a typed refusal here, not a crashed cycle. *)
     (try
        build_base_system_prompt ~config ~profile_defaults ~meta
-       |> Result.map_error (fun error -> Constitution_unreadable error)
+       |> Result.map_error (fun error -> Base_prompt_unavailable error)
      with Invalid_argument detail -> Error (Prompt_unrenderable detail))
   in
   (* 4. Create or restore working context, re-apply current prompt *)
@@ -168,6 +187,7 @@ let prepare_run_context
   ; session
   ; saved_history
   ; base_system_prompt
+  ; workspace_root
   ; ctx_work
   ; resume_agent_core_checkpoint
   ; start_turn_count

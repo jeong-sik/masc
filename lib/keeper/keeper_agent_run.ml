@@ -818,10 +818,13 @@ let run_turn
       (* #38354: the turn is not sent without the world's articles. Nothing is
          recorded against the ledger, so the next turn reads it again and
          runs as soon as it is readable. *)
-      | Keeper_run_context.Constitution_unreadable
-          (World_constitution_store.Unreadable { path; detail }) ->
+      | Keeper_run_context.Base_prompt_unavailable
+          (Constitution_unreadable (World_constitution_store.Unreadable { path; detail })) ->
         Agent_core.Error.Io
           (FileOpFailed { op = "load constitution ledger"; path; detail })
+      | Keeper_run_context.Base_prompt_unavailable (Workspace_unavailable detail) ->
+        Agent_core.Error.Config
+          (Agent_core.Error.InvalidConfig { field = "keeper.remote_endpoint"; detail })
       | Keeper_run_context.Prompt_unrenderable detail ->
         Agent_core.Error.Config
           (Agent_core.Error.InvalidConfig { field = "keeper.prompt"; detail }))
@@ -991,6 +994,7 @@ let run_turn
       ~writer:preview ~turn_ref:(Some turn_ref)
       ~phase:Keeper_turn_preview.Tool_preparation (fun () ->
       Keeper_run_tools.prepare_agent_setup
+      ~workspace_root:ctx.workspace_root
       ~approval_admission
       ~answer_source_ids:(match world_observation with
         | None -> []
@@ -1414,9 +1418,7 @@ let run_turn
         ~turn_id:manifest_keeper_turn_id
     in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
-    let keeper_visible_sandbox_root =
-      Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
-    in
+    let keeper_visible_sandbox_root = ctx.workspace_root in
     (* Tool/path confinement stays owned by MASC dispatch. Each filesystem and
        shell operation resolves its concrete target through
        [Keeper_alerting_path] and [Keeper_sandbox_containment]; AGENT_CORE receives no

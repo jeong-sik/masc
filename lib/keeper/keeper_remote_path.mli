@@ -25,6 +25,12 @@ val remote_to_logical : remote_workspace_root:string -> string -> string
     the model uses. The root itself becomes ["."]. Paths outside that root are
     returned unchanged. *)
 
+val endpoint_to_host :
+  base_path:string -> remote_workspace_root:string -> keeper:string ->
+  string -> string option
+(** Project a path at/below the endpoint workspace into internal bookkeeping
+    coordinates. [None] means it is outside that workspace, not a host path. *)
+
 val rewrite_output :
   base_path:string ->
   remote_workspace_root:string ->

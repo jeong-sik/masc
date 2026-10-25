@@ -154,7 +154,7 @@ let test_typed_execute_response_cwd_uses_container_path () =
         Filename.concat host_root "repos/masc/.worktrees/task-cwd-pin"
       in
       let visible_root =
-        Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
+        Keeper_sandbox.container_root meta.name
       in
       let prompt =
         match
@@ -164,15 +164,15 @@ let test_typed_execute_response_cwd_uses_container_path () =
               Keeper_types_profile_defaults.empty_keeper_profile_defaults
             ~meta
         with
-        | Ok prompt -> prompt
-        | Error error -> fail (World_constitution_store.read_error_to_string error)
+        | Ok (_, prompt) -> prompt
+        | Error error -> fail (Keeper_run_context.base_prompt_error_to_string error)
       in
       check bool "Docker prompt does NOT contain host base" false
         (Astring.String.is_infix ~affix:base prompt);
       check bool "Docker prompt contains Keeper-visible sandbox root" true
         (Astring.String.is_infix ~affix:visible_root prompt);
       let response_fields =
-        Keeper_tool_execute_runtime.For_testing.model_execute_location_fields
+        Keeper_tool_execute_runtime.For_testing.model_execute_location_fields ~remote_workspace_root:None
           ~config
           ~meta
           ~args:(`Assoc [ "argv", `List [ `String "find"; `String "." ] ])
@@ -339,24 +339,30 @@ let test_prompt_keeps_caller_owned_workspace_generation () =
           sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
         }
       in
-      let expected_root =
-        Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
+      let declare base remote_root =
+        let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config" in
+        Fs_compat.mkdir_p dir;
+        Fs_compat.save_file_atomic (Filename.concat dir "runtime.toml")
+          (Printf.sprintf "[exec.ssh.endpoints.proof]\nhost = \"fixture.invalid\"\nuser = \"masc\"\nidentity_file = \"key\"\nknown_hosts_file = \"pins\"\nremote_root = %S\n" remote_root)
+        |> function Ok () -> () | Error detail -> fail detail
       in
-      let divergent_root =
-        Filename.concat divergent_base (Keeper_sandbox.host_root_rel_of_meta ~meta)
-      in
+      declare admitted_base "/srv/admitted";
+      declare divergent_base "/srv/divergent";
+      let profile_defaults = { Keeper_types_profile_defaults.empty_keeper_profile_defaults with
+        remote_endpoint = Some "proof" } in
+      let expected_root = "/srv/admitted/caller-config-pin" in
+      let divergent_root = "/srv/divergent/caller-config-pin" in
       with_env "MASC_BASE_PATH" (Some divergent_base) @@ fun () ->
       Workspace.reset_default_config_cache ();
       let prompt =
         match
           Keeper_run_context.build_base_system_prompt
             ~config
-            ~profile_defaults:
-              Keeper_types_profile_defaults.empty_keeper_profile_defaults
+            ~profile_defaults
             ~meta
         with
-        | Ok prompt -> prompt
-        | Error error -> fail (World_constitution_store.read_error_to_string error)
+        | Ok (_, prompt) -> prompt
+        | Error error -> fail (Keeper_run_context.base_prompt_error_to_string error)
       in
       check bool "prompt uses the admitted config sandbox root" true
         (Astring.String.is_infix ~affix:expected_root prompt);

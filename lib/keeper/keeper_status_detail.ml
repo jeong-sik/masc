@@ -705,18 +705,21 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                    (Workspace_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);
            (let sandbox = Keeper_sandbox.of_meta ~config:config ~meta:m in
-           (* The Keeper-facing execution_context carries no host path: a
-              Docker Keeper cannot reach the host root, and a path it cannot
-              open is one it will try to [cd] into. [default_cwd] is the root
-              as the Keeper sees it (container path for Docker, host path for
-              microvm and remote_ssh). *)
-           let keeper_visible_abs = Keeper_sandbox.keeper_visible_root_abs sandbox in
+           let keeper_visible_abs =
+             let ( let* ) = Result.bind in
+             let* profile_defaults =
+               Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+                 ~base_path:config.base_path m.name
+               |> Result.map_error Keeper_types_profile.keeper_toml_load_error_to_string in
+             Keeper_workspace_namespace.resolve ~config ~meta:m ~profile_defaults
+           in
            "execution_context", `Assoc [
              ("sandbox_id", `String sandbox.sandbox_id);
              ("sandbox_backend", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox.backend));
              ("sandbox_root", `String sandbox.root_arg);
              ("sandbox_container_root", Json_util.string_opt_to_json sandbox.container_root);
-             ("default_cwd", `String keeper_visible_abs);
+             ("default_cwd", match keeper_visible_abs with Ok root -> `String root | Error _ -> `Null);
+             ("namespace_error", match keeper_visible_abs with Ok _ -> `Null | Error detail -> `String detail);
              ("sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode", `String (network_mode_to_string m.network_mode));
              ("keeper_last_error",

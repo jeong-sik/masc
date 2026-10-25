@@ -1090,8 +1090,8 @@ let test_open_goal_store_keeps_one_stable_safety_contract () =
           Masc.Keeper_types_profile_defaults.empty_keeper_profile_defaults
         ~meta:meta_with_goal
     with
-    | Ok prompt -> prompt
-    | Error error -> fail (Masc.World_constitution_store.read_error_to_string error)
+    | Ok (_, prompt) -> prompt
+    | Error error -> fail (Masc.Keeper_run_context.base_prompt_error_to_string error)
   in
   check bool "removed per-Keeper goal id is absent" false
     (contains ~needle:"- missing-goal\n" base_system_prompt);

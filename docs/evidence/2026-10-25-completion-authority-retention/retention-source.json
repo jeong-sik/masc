@@ -1,0 +1,34 @@
+{
+  "base": "cc5104805e3963a9ef1a4fcb0013145514466a91",
+  "scope": "whole pure block/layer/assembly modules, actual Safe_ops sanitizer and exact request function; no producer hook, filesystem authority, native HTTP, CI or live model claim",
+  "snapshots": {
+    "before": {
+      "sources": {
+        "lib/types/prompt_block_id.mli": "9f0fb7337a8301265ba0f1624bf5223e874f6c302473608cf45b8ae5e363b59f",
+        "lib/types/prompt_block_id.ml": "41ef23675e52f6422265ad9254df1906f5d01cae3d8a6919be14df4f8063aa68",
+        "lib/keeper/keeper_context_layers.mli": "e1c4e1e44e1ccf629c7709424880a91af6d3c7552709523e1af5ff43fee85741",
+        "lib/keeper/keeper_context_layers.ml": "2fbefab7ec5f8686eb1a0b936646e28569191f1799608b590f9eb14a62db9259",
+        "lib/keeper/keeper_context_assembly.mli": "1d271a068f51a3272e2e8f57fb26d3be9ac0b9dda5f50412e882ed45ecddc3fc",
+        "lib/keeper/keeper_context_assembly.ml": "a4735b6574f7997aa523e4d7aef90383b61b9b9447be26d9555fe61c3aefcd6b"
+      },
+      "request_fragment_sha256": "5389994c9a2395c08910b911655d92ee836049f4962381378fb9e0567075933e",
+      "actual_sanitizer_sha256": "7d474a456047251d9d89ddb3251cc9f3b8b9adc87d61d300388c6de166cf7c6e",
+      "compile_exit": 0,
+      "run_exit": 0
+    },
+    "after": {
+      "sources": {
+        "lib/types/prompt_block_id.mli": "2f4094a70f64f63b852a32b6ce0fdf402f34bf3f3345de343bf17c14bee67eda",
+        "lib/types/prompt_block_id.ml": "29d4f8d8ce8bbf3bf53fd304a4ed95e48ee609d83de2ea2f8946c78d3255268e",
+        "lib/keeper/keeper_context_layers.mli": "e1c4e1e44e1ccf629c7709424880a91af6d3c7552709523e1af5ff43fee85741",
+        "lib/keeper/keeper_context_layers.ml": "2fbefab7ec5f8686eb1a0b936646e28569191f1799608b590f9eb14a62db9259",
+        "lib/keeper/keeper_context_assembly.mli": "3c1e58f3fd6930146c0a219038fe37287023885dea6a9884d450d26b8896b782",
+        "lib/keeper/keeper_context_assembly.ml": "2452346ee72de6c3e6ca29dacc316ee401bcfa152e36ed96846c1e0cde8cf336"
+      },
+      "request_fragment_sha256": "8ec582f9ccaf0f69d28232ae0f85a89cbf05de6ac388c31432bed7a7b20adcca",
+      "actual_sanitizer_sha256": "7d474a456047251d9d89ddb3251cc9f3b8b9adc87d61d300388c6de166cf7c6e",
+      "compile_exit": 0,
+      "run_exit": 0
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "task_id": "task-001",
+  "verification_id": "vrf-5dd15968c9ec601c495335d00cc7b471",
+  "verdict": "reject",
+  "notes": "Controlled operator-proxy rejection: the initial owner explicitly required only alpha=true with beta=false and gamma=false before the first Task approval. The immutable submitted artifact has all three true. Restore beta/gamma=false, reread actual bytes, and resubmit the alpha-only artifact. The narrowed model-authored contract does not erase the original owner requirement. This is a Task verification verdict, not human Goal confirmation."
+}

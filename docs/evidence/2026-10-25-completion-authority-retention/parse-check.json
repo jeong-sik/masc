@@ -1,0 +1,126 @@
+{
+  "scope": "OCaml parse only; not typing, linking, native tests, runtime or vendor execution",
+  "base_head": "cc5104805e3963a9ef1a4fcb0013145514466a91",
+  "checks": [
+    {
+      "file": "bin/masc_tui_context_inspector.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_antigravity_runtime.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_claude_code_runtime.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_codex_runtime.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_assembly.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_assembly.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_submission_link.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_submission_link.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_muse_runtime.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_next_request_forecast.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_official_client_context_projection.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_official_client_host.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_official_client_host.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_prompt_capture.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_run_prompt.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/keeper/keeper_run_prompt.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/types/prompt_block_id.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "lib/types/prompt_block_id.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "test/test_keeper_claude_code_runtime.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "test/test_keeper_direct_goal_provider_wire.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "test/test_keeper_next_request_forecast.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "test/test_keeper_official_client_host.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "test/test_keeper_prompt_capture.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "file": "test/test_turn_record.ml",
+      "exit": 0,
+      "output": ""
+    }
+  ]
+}

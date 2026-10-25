@@ -1444,13 +1444,13 @@ let test_hook_override_to_blank_system_prompt_is_refused () =
    instructions the official lane already requires. The assembly is published
    by the actual hook; reading it before that hook would miss this refusal. *)
 let test_goal_observation_cannot_mask_blank_keeper_instructions () =
-  let prepare_composed ~initial ~override =
+  let prepare_composed ?(source = Keeper_context_layers.Active_goals) ~initial ~override () =
     let issued = ref None in
     let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         let current_params = {current_params with system_prompt_override=override} in
         let base_system_prompt = Option.value ~default:initial current_params.system_prompt_override in
-        let partition = Keeper_context_layers.singleton Active_goals
+        let partition = Keeper_context_layers.singleton source
             "Goal observation: current revision and reported measurement 1/3" in
         let assembly = Keeper_run_prompt.assemble_request_context ~base_system_prompt
             ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
@@ -1465,17 +1465,18 @@ let test_goal_observation_cannot_mask_blank_keeper_instructions () =
       | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
     let result = prepare_prompt ~hooks:(Some hooks)
         ~composed_context:(Some (fun () -> !issued)) initial in
-    check bool "the actual hook issued a Goal carrier" true
+    check bool "the actual hook issued an observation carrier" true
       (match !issued with
-       | Some {system_prompt=Some {goal_text=Some _;_};_} -> true
+       | Some {system_prompt=Some {observations=_ :: _;_};_} -> true
        | Some _ | None -> false);
     result in
-  List.iter (fun (initial, override) -> check_refused_system_prompt
-      "Goal context over blank selected Keeper instructions"
-      (prepare_composed ~initial ~override))
+  List.iter (fun source -> List.iter (fun (initial, override) -> check_refused_system_prompt
+      "observation over blank selected Keeper instructions"
+      (prepare_composed ~source ~initial ~override ()))
     ["",None; " \n\t ",None; "valid configured instructions",Some "";
-     "valid configured instructions",Some " \n\t "];
-  match prepare_composed ~initial:"" ~override:(Some "valid selected instructions") with
+     "valid configured instructions",Some " \n\t "])
+    [Keeper_context_layers.Active_goals; Keeper_context_layers.Completion_authority];
+  match prepare_composed ~initial:"" ~override:(Some "valid selected instructions") () with
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok prepared -> check bool "a valid selected override and its Goal remain admitted" true
       (String.starts_with ~prefix:"valid selected instructions\n\n" prepared.Host.system_prompt)
@@ -2787,11 +2788,136 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
   check bool "held omission retains explicit System source proof" true
     (List.exists (fun proof -> member "source_carrier" proof = `String "system_prompt")
       (omitted |> member "omitted_held" |> to_list));
-  let stale = Keeper_context_submission_link.encoded_system_goal ~assembly:(Some first)
+  let stale = Keeper_context_submission_link.encoded_system_observation ~target:Official_resume_user ~block:Prompt_block_id.Active_goals ~assembly:(Some first)
       (Agent_core.Types.user_msg new_text) in
   check string "an observation cannot borrow an older System receipt" "unavailable"
     (binding stale (Keeper_context_submission_link.text stale)
       |> member "issuer_attribution" |> member "status" |> to_string)
+;;
+
+let test_system_authority_repeats_with_exact_source_on_official_resume () =
+  let module A = Keeper_context_assembly in
+  let block = Prompt_block_id.Completion_authority in
+  let text = "Approved task-approved; verification vrf-approved; authority operator-fixture" in
+  let assembly = A.assemble ~dynamic_context_partition:None
+      ~existing_extra_system_context:None ~blocks:[]
+    |> A.with_system_observations ~base_text:"BASE"
+         ~observations:[A.Completion_authority text] in
+  let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+      Agent_core.Hooks.AdjustParams {current_params with
+        system_prompt_override=A.system_prompt_override ~previous:current_params.system_prompt_override assembly}
+    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+    | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
+  let prepared = match Host.prepare_turn ~runtime_label:"held-authority-fixture"
+      ~composed_context:(Some (fun () -> Some assembly)) ~keeper_name:"held-authority"
+      ~turn_count:1 ~system_prompt:"BASE" ~tools:[]
+      ~initial_messages:[Agent_core.Types.user_msg "OWNER"] ~model_input_projection:None
+      ~hooks:(Some hooks) ~configured_reasoning_effort:None with
+    | Ok prepared -> prepared | Error error -> fail (Agent_core.Error.to_string error) in
+  check string "the fixed Start System contains only standing instructions"
+    "BASE" prepared.system_prompt;
+  check (list string) "authority is absent from the canonical history" ["OWNER"]
+    (List.map Host.encode_history_message prepared.messages
+     |> List.map (fun encoded ->
+       let json = Yojson.Safe.from_string encoded in
+       Yojson.Safe.Util.(json |> member "message" |> member "content_blocks" |> to_list
+         |> List.hd |> member "text" |> to_string)));
+  let start = Host.start_prompt prepared "OWNER" in
+  check string "the initial event is delivered once in current-turn User"
+    ("USER:\n" ^ Host.encode_history_message (Agent_core.Types.user_msg text) ^ "\n\nOWNER")
+    (Keeper_context_submission_link.text start);
+  let held = {Keeper_official_client_session_store.context=Context_block block;
+              sha256=Digestif.SHA256.(digest_string text |> to_hex)}
+             :: Host.start_held_context ~composed_context:assembly prepared.messages in
+  let deliver held = Host.resume_prompt ~goal:"OWNER" ~held ~composed_context:assembly prepared.messages in
+  let first = deliver held in
+  let second = deliver first.held_context in
+  check bool "authority keeps its original Sent_every_resume semantics" true
+    (Prompt_block_id.resent_when_held block);
+  check string "the held authority is sent again with identical bytes" first.prompt second.prompt;
+  check bool "Resume actually contains the authority row" true (contains second.prompt text);
+  let binding = Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write second.context_projection
+      (Runtime_official_client_write.raw second.prompt) in
+  let open Yojson.Safe.Util in
+  let start_binding = Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write start
+      (Runtime_official_client_write.raw (Keeper_context_submission_link.text start)) in
+  let start_source = match start_binding |> member "occurrences" |> to_list with
+    | [occurrence] -> member "source" occurrence | _ -> fail "one Start authority source required" in
+  check string "Start proof names the actual User target" "official_start_user_prompt"
+    (start_source |> member "target_carrier" |> to_string);
+  check string "Start proof describes the canonical issuer, not submitted System"
+    "canonical_issued_system_prompt" (start_source |> member "source_scope" |> to_string);
+  let source = match binding |> member "occurrences" |> to_list with
+    | [occurrence] -> member "source" occurrence | _ -> fail "one authority source occurrence required" in
+  check string "source carrier is System" "system_prompt" (source |> member "source_carrier" |> to_string);
+  let physical = Option.get assembly.system_prompt in
+  let index = match source |> member "source_span_indices" |> to_list with
+    | [index] -> to_int index | _ -> fail "one authority source index required" in
+  let span = List.nth physical.partition.spans index in
+  check bool "proof names the authority span rather than the Goal span" true
+    (span.kind = A.Block block);
+  check string "selected physical bytes equal the repeated observation" text
+    (String.sub physical.text span.offset span.bytes);
+  let missing = Keeper_context_submission_link.encoded_system_observation ~target:Official_resume_user ~block ~assembly:None
+      (Agent_core.Types.user_msg text) in
+  let missing_binding = Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write missing
+      (Runtime_official_client_write.raw (Keeper_context_submission_link.text missing)) in
+  check string "an absent issuer remains unavailable" "unavailable"
+    (missing_binding |> member "issuer_attribution" |> member "status" |> to_string);
+  let prepare observations issuer =
+    let assembly = A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks:[]
+      |> A.with_system_observations ~base_text:"BASE" ~observations in
+    let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (fun _ ->
+      Agent_core.Hooks.AdjustParams {Agent_core.Hooks.default_turn_params with
+        system_prompt_override=Some (A.effective_system_prompt ~base_text:"BASE" assembly)})} in
+    let reads = ref 0 in
+    let prepared = Host.prepare_turn ~runtime_label:"Start-event" ~keeper_name:"fixture"
+      ~turn_count:2 ~system_prompt:"BASE" ~tools:[] ~initial_messages:[Agent_core.Types.user_msg "NEXT"]
+      ~model_input_projection:None ~hooks:(Some hooks) ~configured_reasoning_effort:None
+      ~composed_context:(Some (fun () -> incr reads; issuer assembly)) |> Result.get_ok in
+    check int "issuer acquired once per prepared turn" 1 !reads;
+    assembly, prepared in
+  let goal = A.Active_goals "GOAL revision2 measurement1/4" in
+  let absent, absent_prepared = prepare [goal] Option.some in
+  check string "Goal keeps its existing Start System surface" "BASE\n\nGOAL revision2 measurement1/4"
+    absent_prepared.system_prompt;
+  check string "next turn without an event has no Start User observation" "NEXT"
+    (Keeper_context_submission_link.text (Host.start_prompt absent_prepared "NEXT"));
+  let no_event = Host.resume_prompt ~goal:"NEXT" ~held:second.held_context
+    ~composed_context:absent absent_prepared.messages in
+  check bool "next turn cannot replay the old approval" false (contains no_event.prompt text);
+  let changed_text = "Rejected task-other verification vrf-new authority operator-second" in
+  let changed, changed_prepared = prepare [goal; A.Completion_authority changed_text] Option.some in
+  check string "changed event does not enter fixed System" absent_prepared.system_prompt
+    changed_prepared.system_prompt;
+  let changed_start = Host.start_prompt changed_prepared "NEXT" |> Keeper_context_submission_link.text in
+  check bool "new correlation keys reach first User" true (contains changed_start changed_text);
+  check bool "old correlation keys are not borrowed" false (contains changed_start text);
+  let changed_resume = Host.resume_prompt ~goal:"NEXT" ~held:no_event.held_context
+    ~composed_context:changed changed_prepared.messages in
+  check bool "new correlation keys reach Resume" true (contains changed_resume.prompt changed_text);
+  List.iter (fun issuer ->
+    let selected, unknown = prepare [A.Completion_authority changed_text] issuer in
+    check string "unknown issuer cannot rewrite selected System"
+      (A.effective_system_prompt ~base_text:"BASE" selected) unknown.system_prompt;
+    check string "unknown issuer cannot invent a Start observation" "NEXT"
+      (Host.start_prompt unknown "NEXT" |> Keeper_context_submission_link.text);
+    check string "unknown issuer cannot borrow an old event on Resume" "NEXT"
+      (Host.resume_prompt ~goal:"NEXT" ~held:[] ?composed_context:unknown.composed_context
+        unknown.messages).prompt)
+    [(fun _ -> None); (fun _ -> Some assembly)];
+  List.iter (fun issuer ->
+    let piece = Keeper_context_submission_link.encoded_system_observation
+        ~target:Official_start_user ~block ~assembly:issuer (Agent_core.Types.user_msg changed_text) in
+    let receipt = Keeper_context_submission_link.binding_to_json
+        ~slot:Runtime_official_client_write.Whole_write piece
+        (Runtime_official_client_write.raw (Keeper_context_submission_link.text piece)) in
+    check string "missing/stale Start source remains unknown" "unavailable"
+      (receipt |> member "issuer_attribution" |> member "status" |> to_string)) [None; Some assembly]
 ;;
 
 (* One session: the wiki, the memory ledger and the Board posts stay the same
@@ -3185,6 +3311,8 @@ let () =
     ; ( "World State sections on resume"
       , [ test_case "changed System Goal reaches a held session" `Quick
             test_a_changed_system_goal_reaches_a_held_official_session
+        ; test_case "System authority repeats with its exact source on official Resume" `Quick
+            test_system_authority_repeats_with_exact_source_on_official_resume
         ; test_case
             "a resume sends only the changed sections"
             `Quick

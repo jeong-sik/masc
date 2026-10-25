@@ -21,19 +21,22 @@ val encoded_carrier :
     out of a section it sent in part ({!Keeper_context_layers.Head_and_rows});
     that section then attributes as its head, its other rows and its tail, and
     the proof names the rows left out. *)
-val encoded_system_goal :
+type observation_target = Official_start_user | Official_resume_user
+val encoded_system_observation :
+  target:observation_target -> block:Prompt_block_id.t ->
   assembly:Keeper_context_assembly.t option -> Agent_core.Types.message -> t
-(** Encode an official Resume's User message containing only the exact issued
-    System Goal observation. Its source proof selects the [Active_goals] span
-    of the separate System partition, never the extra-context partition. *)
+(** Encode an official Start or Resume User observation. Its source is the
+    unique typed span in the canonical issued System partition, never an
+    assertion that this partition was submitted as the client's System. The
+    target identifies the actual User prompt receiving the encoded bytes. *)
 val concat : separator:string -> t list -> t
 val trim : t -> t
 val omit_held : assembly:Keeper_context_assembly.t option ->
   blocks:Prompt_block_id.t list option -> Agent_core.Types.message -> t -> t
-val omit_held_system_goal : assembly:Keeper_context_assembly.t option ->
+val omit_held_system_observation : block:Prompt_block_id.t -> assembly:Keeper_context_assembly.t option ->
   Agent_core.Types.message -> t -> t
 (** Record the same explicit System-derived source when the official session
-    already holds this Goal observation and the local Resume omits it. *)
+    already holds this observation and the local Resume omits it. *)
 val binding_to_json : slot:Runtime_official_client_write.slot ->
   t -> Runtime_official_client_write.t -> Yojson.Safe.t
 (** Called only by a completed-write observer. The piece matches when the

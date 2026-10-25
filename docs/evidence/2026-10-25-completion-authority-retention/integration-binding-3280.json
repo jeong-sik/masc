@@ -1,0 +1,83 @@
+{
+  "author": "8266d74301eba653741fe4b0c1fafd7cbe7081f5",
+  "author_parent": "e9f72f1c985761e032e0fef878ce1dc6d0111ad2",
+  "integrated_source": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "files": [
+    {
+      "path": "lib/keeper/keeper_antigravity_runtime.ml",
+      "sha256": "0054db0ef99b0c54963342c9b2fd3deb6e4fdd03e0340f5025055b5bf8aedec7",
+      "author_equal": true
+    },
+    {
+      "path": "lib/keeper/keeper_claude_code_runtime.ml",
+      "sha256": "4e7ec29cdbda805355109f9a6f8cbe067ee273064e975a81bcce19b132759f31",
+      "author_equal": true
+    },
+    {
+      "path": "lib/keeper/keeper_codex_runtime.ml",
+      "sha256": "482e7d3fbb3118bddfed78d0555a8a97a16d895476e567a6685fa8bf32587f02",
+      "author_equal": true
+    },
+    {
+      "path": "lib/keeper/keeper_context_assembly.ml",
+      "sha256": "2452346ee72de6c3e6ca29dacc316ee401bcfa152e36ed96846c1e0cde8cf336",
+      "author_equal": true
+    },
+    {
+      "path": "lib/keeper/keeper_context_assembly.mli",
+      "sha256": "3c1e58f3fd6930146c0a219038fe37287023885dea6a9884d450d26b8896b782",
+      "author_equal": true
+    },
+    {
+      "path": "lib/keeper/keeper_context_submission_link.ml",
+      "sha256": "4fca2f6d32ab5c3e516cef2163664831fad002685c96e19729310577ef2e213d",
+      "author_equal": true
+    },
+    {
+      "path": "lib/keeper/keeper_context_submission_link.mli",
+      "sha256": "2b94dd37de68f913fe074e40f517ce23b84049b244bd8198650eb9e5b59e8be0",
+      "author_equal": true
+    },
+    {
+      "path": "lib/keeper/keeper_muse_runtime.ml",
+      "sha256": "823d74d1bd935c6cda15a772fe9e88a500aa8e33e62db3e5a128118eb9b05a62",
+      "author_equal": true
+    },
+    {
+      "path": "lib/keeper/keeper_official_client_context_projection.ml",
+      "sha256": "c52c032bb4de4b8980e13af90230fdb854a8b3a2e38cb50b79df730206a760bd",
+      "author_equal": true
+    },
+    {
+      "path": "lib/keeper/keeper_official_client_host.ml",
+      "sha256": "178e671841fa46016fbb461a171e030245ec03e7cb73a8b333e0f377c086d1e5",
+      "author_equal": true
+    },
+    {
+      "path": "lib/keeper/keeper_official_client_host.mli",
+      "sha256": "e9f1d83977a02cf30547f276f22e7aa43bda9d7012ffa86c9fc1450d8fd111be",
+      "author_equal": true
+    },
+    {
+      "path": "lib/keeper/keeper_prompt_capture.mli",
+      "sha256": "def1fe2b739b3ef1cae4224d31ffc4f6a33ac5ae22b58f004ff050aea4627d56",
+      "author_equal": true
+    },
+    {
+      "path": "test/test_keeper_claude_code_runtime.ml",
+      "sha256": "67d3433abe96cbcc152b4e28ac8fd3d3a1d21e8e9f344fa545f8569f6b0d1ba6",
+      "author_equal": true
+    },
+    {
+      "path": "test/test_keeper_direct_goal_provider_wire.ml",
+      "sha256": "1d976f494cf32d08745a179ff14eeee2c07263696667161f81a11905648f62f5",
+      "author_equal": true
+    },
+    {
+      "path": "test/test_keeper_official_client_host.ml",
+      "sha256": "6f534f625ecfc8c74536f4fdc1c5a510dce186b41cc88cde54a119a7c52aa910",
+      "author_equal": true
+    }
+  ],
+  "scope": "All changed product/direct-test files match author8266; root preserves earlier failed review/native evidence in docs. Source/API approval separate from native/model success."
+}

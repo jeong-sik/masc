@@ -16,7 +16,7 @@
     },
     {
       "path": "lib/keeper/verifier_review_owner.ml",
-      "sha256": "eb11f090c921a42834291a2a6a5b9a187ea5cae5c578ea45df397b3ad7be8cdf"
+      "sha256": "af69f40b40288005b1eedd18888926ae757e8ae9601677c687002bd390f88256"
     },
     {
       "path": "lib/types/runtime_response_identity.mli",

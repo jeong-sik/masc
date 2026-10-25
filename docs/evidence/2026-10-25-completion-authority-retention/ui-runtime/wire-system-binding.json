@@ -1,0 +1,259 @@
+{
+  "scope": "Only raw request and System hashes; no response, reasoning, history or credentials published",
+  "provider_path": "ordinary Ollama HTTP via private proxy",
+  "capture_turn": 3,
+  "capture_trace": "trace-1792862169652-00000",
+  "api_system_bytes": 25974,
+  "api_system_sha256": "348ef89fc94fd37f07d8dd15e807d0b30f6bf06276fe27760220a83a2345490d",
+  "requests": [
+    {
+      "file": "request-000001.request",
+      "status": "empty_at_observation"
+    },
+    {
+      "file": "request-000002.request",
+      "status": "parsed",
+      "request_sha256": "5e1a02856a1ba4486c6608655b84029df82e3c5b237441923a2418ff752e990e",
+      "request_bytes": 76907,
+      "system_count": 1,
+      "system_sha256": [
+        "b0b943b1be93550d6718c6aa649cc7c35e229cf4e19aba1056ee0538d11ae825"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000003.request",
+      "status": "parsed",
+      "request_sha256": "21ff02797d0928816109f71a11e1febf68065c9edc27ccc7faf48fae369821dc",
+      "request_bytes": 79087,
+      "system_count": 1,
+      "system_sha256": [
+        "b0b943b1be93550d6718c6aa649cc7c35e229cf4e19aba1056ee0538d11ae825"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000004.request",
+      "status": "parsed",
+      "request_sha256": "bced84e1a480eae7c2b27397c0b96aa920a1c7dc30eedec73bdff566485f6606",
+      "request_bytes": 81286,
+      "system_count": 1,
+      "system_sha256": [
+        "b0b943b1be93550d6718c6aa649cc7c35e229cf4e19aba1056ee0538d11ae825"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000005.request",
+      "status": "parsed",
+      "request_sha256": "8551572cd05217536b885d0212f81ebf890f9c6308f9ea73f3093d319174eae6",
+      "request_bytes": 83281,
+      "system_count": 1,
+      "system_sha256": [
+        "b0b943b1be93550d6718c6aa649cc7c35e229cf4e19aba1056ee0538d11ae825"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000006.request",
+      "status": "parsed",
+      "request_sha256": "afc48a93d3fc4519f5eee393448f2d88210b388de3f0d55ece12163fe323d483",
+      "request_bytes": 84630,
+      "system_count": 1,
+      "system_sha256": [
+        "b0b943b1be93550d6718c6aa649cc7c35e229cf4e19aba1056ee0538d11ae825"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000007.request",
+      "status": "parsed",
+      "request_sha256": "8c7791cc1590d1f58ef4414eb4b3fd1fdf37fb685523f5740b28ec39ac013df6",
+      "request_bytes": 85954,
+      "system_count": 1,
+      "system_sha256": [
+        "b0b943b1be93550d6718c6aa649cc7c35e229cf4e19aba1056ee0538d11ae825"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000008.request",
+      "status": "parsed",
+      "request_sha256": "6d301ead7edf98024995182863b153ebe959b5a8426f3d3dadf2ed8c4e212d85",
+      "request_bytes": 89715,
+      "system_count": 1,
+      "system_sha256": [
+        "b0b943b1be93550d6718c6aa649cc7c35e229cf4e19aba1056ee0538d11ae825"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000009.request",
+      "status": "parsed",
+      "request_sha256": "69fd820d559d646bc942ad21b3e60a2a4fb56fdbdb833f14cf62184cca035237",
+      "request_bytes": 92745,
+      "system_count": 1,
+      "system_sha256": [
+        "b0b943b1be93550d6718c6aa649cc7c35e229cf4e19aba1056ee0538d11ae825"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000010.request",
+      "status": "parsed",
+      "request_sha256": "03cfaaae6221a2a1346c32f1b234abcb0286c59759603c5d3e075b06f1e60a92",
+      "request_bytes": 86639,
+      "system_count": 1,
+      "system_sha256": [
+        "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000011.request",
+      "status": "parsed",
+      "request_sha256": "9bc9e6d38da24b6fe922b841755b8ec276b35b29a77d31d5ffb89ec6c5e0e707",
+      "request_bytes": 86670,
+      "system_count": 1,
+      "system_sha256": [
+        "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000012.request",
+      "status": "parsed",
+      "request_sha256": "adafcfc7fc2c6d43defd0c5b30366d7ad5b3c491f1c4bedec04feeb554ffb156",
+      "request_bytes": 88617,
+      "system_count": 1,
+      "system_sha256": [
+        "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000013.request",
+      "status": "parsed",
+      "request_sha256": "ae575df94d40e86a2767ed80dd965c53c68953ca713258b47dee0bbb9c0ebf1b",
+      "request_bytes": 90356,
+      "system_count": 1,
+      "system_sha256": [
+        "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000014.request",
+      "status": "parsed",
+      "request_sha256": "4f4c0074ce32ebdcac62f2b46ad8d54f0c065198ff06be420e118770e3e77c9f",
+      "request_bytes": 93453,
+      "system_count": 1,
+      "system_sha256": [
+        "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000015.request",
+      "status": "parsed",
+      "request_sha256": "f8b35ae7a5c64521815a506b364ea28d5171b09abf441ce8d6bfbd36a983e737",
+      "request_bytes": 96593,
+      "system_count": 1,
+      "system_sha256": [
+        "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000016.request",
+      "status": "parsed",
+      "request_sha256": "5efa35d2f1d2383db6012e8a8a5e4f2cf6972c03a289dfe28cef672486c9795d",
+      "request_bytes": 98622,
+      "system_count": 1,
+      "system_sha256": [
+        "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000017.request",
+      "status": "parsed",
+      "request_sha256": "acfae7a58dbe4a1db05ee04efb16090d95ce6ddfc07d5314ce82abea2ac032fc",
+      "request_bytes": 101419,
+      "system_count": 1,
+      "system_sha256": [
+        "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000018.request",
+      "status": "parsed",
+      "request_sha256": "9d67acdb39eebec237681c61a88d9dc23530d6c900eebbcd266b629b4dac75c7",
+      "request_bytes": 103884,
+      "system_count": 1,
+      "system_sha256": [
+        "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000019.request",
+      "status": "parsed",
+      "request_sha256": "3954aa705db2cfd8a89d7e04f1912d62ea80b5795cd12ece6c03e3c88abdc1f4",
+      "request_bytes": 107176,
+      "system_count": 1,
+      "system_sha256": [
+        "b2157064c3d3e3aee3e5c5fd7405fcbb48de22163e9a070f4d30f64c7470af72"
+      ],
+      "matches_api_system": false
+    },
+    {
+      "file": "request-000020.request",
+      "status": "parsed",
+      "request_sha256": "960b61b065e42051ce6228682c886b4aaf798a9da8b8e5e361065e70b7f313c5",
+      "request_bytes": 93914,
+      "system_count": 1,
+      "system_sha256": [
+        "348ef89fc94fd37f07d8dd15e807d0b30f6bf06276fe27760220a83a2345490d"
+      ],
+      "matches_api_system": true
+    },
+    {
+      "file": "request-000021.request",
+      "status": "empty_at_observation"
+    },
+    {
+      "file": "request-000022.request",
+      "status": "empty_at_observation"
+    },
+    {
+      "file": "request-000023.request",
+      "status": "empty_at_observation"
+    },
+    {
+      "file": "request-000024.request",
+      "status": "empty_at_observation"
+    },
+    {
+      "file": "request-000025.request",
+      "status": "empty_at_observation"
+    },
+    {
+      "file": "request-000026.request",
+      "status": "empty_at_observation"
+    },
+    {
+      "file": "request-000027.request",
+      "status": "empty_at_observation"
+    },
+    {
+      "file": "request-000028.request",
+      "status": "empty_at_observation"
+    },
+    {
+      "file": "request-000029.request",
+      "status": "empty_at_observation"
+    }
+  ]
+}

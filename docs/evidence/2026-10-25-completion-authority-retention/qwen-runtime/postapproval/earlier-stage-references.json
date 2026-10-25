@@ -1,0 +1,17 @@
+{
+  "scope": "Earlier failures remain preserved; this first positive approval is a later controlled stage.",
+  "references": [
+    {
+      "stage": "initial_owner",
+      "path": "/tmp/masc-goal-2be9-qwen-preapproval/diagnosis.json",
+      "sha256": "824311b801867ab39989c2b3389ed229be5e2a7326ad97de685a86b6615977a8"
+    },
+    {
+      "stage": "controlled_rejection_recovery",
+      "path": "/tmp/masc-goal-2be9-qwen-recovery/diagnosis.json",
+      "sha256": "0b9e15b863dd38e81dca2167dc26207c226b289f5b9d446d41b4ca6fad908ec1"
+    }
+  ],
+  "initial_owner": "Goal association passed, alpha-only execution failed; alltrue53B submitted before approval.",
+  "recovery": "One controlled rejection after a malformed operator400 request; intermediate capture failure followed by valid alpha-only55B resubmission; final recovery text incorrectly retained artifact_unreadable error."
+}

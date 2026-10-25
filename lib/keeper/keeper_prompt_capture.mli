@@ -23,7 +23,9 @@
 
     The base prompt is normally assembled on a different path. When a Goal
     observation uses an issued system suffix, this same capture also names
-    that effective system carrier and its separate partition. *)
+    the canonical issued System and its separate partition. Official-client
+    transport may project its current-turn observations to User; this capture
+    is not the actual submitted packet or a vendor-retention observation. *)
 
 type block =
   { id : Prompt_block_id.t
@@ -42,7 +44,8 @@ type capture =
             a block that rendered to nothing. *)
   ; system_prompt : string option
   ; system_prompt_partition : Yojson.Safe.t option
-        (** Separate issued system carrier; never counted as extra context.
+        (** Separate canonical issued System; never counted as extra context
+            or asserted to be an official client's submitted System packet.
             Both [None] mean unrecorded, including an earlier capture without
             these fields. They do not establish the absence of Goals or a
             system prompt. Half-present or malformed carriers fail decoding. *)

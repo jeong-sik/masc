@@ -3092,6 +3092,7 @@ let run_direct_attempt
       ?on_memory_capacity_refusal
       ?required_native_posture ?on_native_task_observation ?on_child_content_observation ?on_event
       ?hooks
+      ?composed_context
       ?argument_source ?librarian_front
       ?(initial_messages = [])
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
@@ -3136,6 +3137,7 @@ let run_direct_attempt
                     | Some timeout_s -> { config with Runtime_execution.timeout_s }
                   in
                   Keeper_claude_code_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "claude-pre-dispatch" })
+                    ?composed_context
                     ?argument_source ?librarian_front
                     ?on_memory_capacity_refusal
                     ?required_native_posture ?on_native_task_observation ?on_child_content_observation
@@ -3174,6 +3176,69 @@ let run_direct_attempt
                     ~on_event
                     ~config
                     ())))))
+;;
+
+(* Capture the actual first-launch System file and stdin User packet at the
+   official process boundary. The fixture CLI does not model vendor System
+   retention: avoiding the standing event is proved by the submitted bytes. *)
+let test_start_authority_is_user_context_not_standing_system () =
+  let module A = Keeper_context_assembly in
+  let module Host = Keeper_official_client_host in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let unread = Keeper_librarian_request_unread.empty in
+    let librarian_front _ = Ok
+      {Keeper_turn_driver_try_provider.point=No_position; unread} in
+    let goal_text = "GOAL revision-current measurement=1/4" in
+    let first_event = "Approved task-first vrf-first human_operator operator-first" in
+    let new_event = "Rejected task-other vrf-new human_operator operator-second" in
+    List.iteri (fun index event ->
+      let system_marker = Filename.concat base_path (Printf.sprintf "authority-system-%d" index) in
+      let prompt_marker = Filename.concat base_path (Printf.sprintf "authority-input-%d" index) in
+      let assembly = A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks:[]
+        |> A.with_system_observations ~base_text:"BASE"
+          ~observations:(A.Active_goals goal_text ::
+            Option.to_list (Option.map (fun text -> A.Completion_authority text) event)) in
+      let reads = ref 0 in
+      let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+        | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+          Agent_core.Hooks.AdjustParams {current_params with
+            system_prompt_override=A.system_prompt_override
+              ~previous:current_params.system_prompt_override assembly}
+        | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+        | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
+      with_fixture ~system_marker ~prompt_marker
+        [Emit (assistant ~turn_id:(string_of_int index) "ANSWER");
+         Emit (result ~turn_id:(string_of_int index) "ANSWER")]
+        (fun cli_path ->
+          let attempt = run_direct_attempt ~hooks ~librarian_front
+            ~composed_context:(fun () -> incr reads; Some assembly)
+            ~system_prompt:"BASE" ~base_path ~cli_path ~goal:"OWNER" ~tools:[] () in
+          (match attempt.result with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok _ -> ());
+          match Option.bind attempt.settled_session (fun state -> state.Keeper_official_client_session_store.context_frontier) with
+          | Some frontier -> check bool "first Start then held Resume" (index > 0)
+              (frontier.delivery = Keeper_official_client_session_store.Held_by_vendor_session)
+          | None -> fail "actual adapter did not settle an input frontier");
+      check int "actual adapter shares one post-hook issuer snapshot" 1 !reads;
+      let system = In_channel.with_open_bin system_marker In_channel.input_all in
+      let raw = In_channel.with_open_bin prompt_marker input_line in
+      let user = content_of_wire_message raw in
+      let standing = "BASE\n\n" ^ goal_text in
+      let expected_system = if index = 0 then
+          String.concat "\n\n" (standing :: List.map Host.encode_history_message
+            (attach_native_unread ~unread []))
+        else standing in
+      check string "complete System keeps the native unread contract and excludes authority"
+        expected_system system;
+      let expected = match event with
+        | None -> "OWNER"
+        | Some text -> "USER:\n" ^ Host.encode_history_message (Agent_core.Types.user_msg text) ^ "\n\nOWNER" in
+      check string "current event delivered once; absent event sends owner only" expected user;
+      if index > 1 then check bool "later owner cannot borrow first approval keys" false
+        (String_util.contains_substring user first_event))
+      [Some first_event; Some first_event; None; Some new_event])
 ;;
 
 let test_task_callback_keeps_closed_native_owner_and_model_content () =
@@ -6384,7 +6449,9 @@ let () =
             test_child_tool_metadata_does_not_replace_root_observation
         ] )
     ; ( "lifecycle"
-      , [ test_case "actual argument Start and held Resume" `Quick test_actual_start_demotes_arguments_but_resume_keeps_them_held
+      , [ test_case "actual Start authority User and later absent/changed Resume" `Quick
+            test_start_authority_is_user_context_not_standing_system
+        ; test_case "actual argument Start and held Resume" `Quick test_actual_start_demotes_arguments_but_resume_keeps_them_held
         ; test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
         ; test_case "blank completion rejects progress but preserves session" `Quick
             test_blank_completion_rejected_without_losing_session

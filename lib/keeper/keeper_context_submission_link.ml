@@ -78,7 +78,7 @@ let selected_block_text assembly ~omitted_sections ~omitted_rows (id, text) =
         else Some (String.concat "" (List.filter_map Fun.id texts))
       else None)
   | Prompt_block_id.(
-      Dynamic_context | Active_goals | Keeper_instructions | Temporal_summary | Memory_os_recall
+      Dynamic_context | Active_goals | Completion_authority | Keeper_instructions | Temporal_summary | Memory_os_recall
       | Librarian_working_context | Operator_note | Skill_compositions) -> Some text
 
 let source assembly selected_blocks ~omitted_sections ~omitted_rows
@@ -162,35 +162,45 @@ let source assembly selected_blocks ~omitted_sections ~omitted_rows
      | (Agent_core.Types.System, [], _)
      | ((Agent_core.Types.User | (Agent_core.Types.Assistant | Agent_core.Types.Tool)), _, _) -> Unavailable Unsupported_carrier)
 
-let system_goal_source assembly (message : Agent_core.Types.message) =
+type observation_target = Official_start_user | Official_resume_user
+
+let system_observation_source ~target ~block assembly (message : Agent_core.Types.message) =
   match message.role, message.content, assembly with
   | User, [Text _], None -> Unavailable Missing_issuer
   | User, [Text actual], Some assembly ->
     (match assembly.Assembly.system_prompt with
-     | None | Some {goal_text = None; _} -> Unavailable Issuer_has_no_carrier
-     | Some {goal_text = Some expected; _} when not (String.equal actual expected) ->
-       Unavailable Stale_issuer
-     | Some ({goal_text = Some _; _} as issued) ->
-       let indices = List.filter_map (fun (index, (span : Assembly.span)) ->
-            match span.kind with
-            | Block Prompt_block_id.Active_goals -> Some index
-            | Block (Keeper_instructions | Dynamic_context | Temporal_summary | Memory_os_recall
-                | Librarian_working_context | Operator_note | Skill_compositions)
-            | Unattributed _ -> None)
-         (List.mapi (fun index span -> index, span) issued.partition.spans) in
-       (match indices with
+     | None -> Unavailable Issuer_has_no_carrier
+     | Some issued ->
+       let selected = List.filter (fun (id, _) -> Prompt_block_id.equal id block)
+           (List.map Assembly.observation_block issued.observations) in
+       (match selected with
+        | [] -> Unavailable Issuer_has_no_carrier
+        | _ :: _ :: _ -> Unavailable Invalid_subset
+        | [(_, expected)] when not (String.equal actual expected) -> Unavailable Stale_issuer
+        | [_] ->
+          let indices = List.filter_map (fun (index, (span : Assembly.span)) ->
+              match span.kind with
+              | Block id when Prompt_block_id.equal id block -> Some index
+              | Block _ | Unattributed _ -> None)
+            (List.mapi (fun index span -> index, span) issued.partition.spans) in
+          (match indices with
            | [index] -> Verified (`Assoc
                [ "assembly", Assembly.receipt_to_json issued.partition
                ; "source_carrier", `String "system_prompt"
+               ; "source_scope", `String "canonical_issued_system_prompt"
                ; "source_span_indices", `List [`Int index]
                ; "rendered_text_bytes", `Int (String.length actual)
                ; "rendered_text_sha256", `String (hash actual)
-               ; "rendering", `String "system_goal_observation_to_official_resume_user"
-               ; "target_carrier", `String "official_resume_user_prompt"
+               ; "rendering", `String (match target with
+                   | Official_start_user -> "system_observation_to_official_start_user"
+                   | Official_resume_user -> "system_observation_to_official_resume_user")
+               ; "target_carrier", `String (match target with
+                   | Official_start_user -> "official_start_user_prompt"
+                   | Official_resume_user -> "official_resume_user_prompt")
                ; "codec_schema", `String Keeper_official_client_context_codec.schema
                ; "codec_text_path", `String "/message/content_blocks/0/text"
                ])
-           | [] | _ :: _ :: _ -> Unavailable Invalid_subset))
+           | [] | _ :: _ :: _ -> Unavailable Invalid_subset)))
   | (System | Assistant | Tool), _, _
   | User, ([] | _ :: _ :: _), _
   | User, [(Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
@@ -207,8 +217,8 @@ let encoded_carrier ~assembly ~selected_blocks ?(omitted_sections = []) ?(omitte
     message =
   encode_with_evidence (source assembly selected_blocks ~omitted_sections ~omitted_rows message) message
 
-let encoded_system_goal ~assembly message =
-  encode_with_evidence (system_goal_source assembly message) message
+let encoded_system_observation ~target ~block ~assembly message =
+  encode_with_evidence (system_observation_source ~target ~block assembly message) message
 
 let concat ~separator pieces =
   let offset = ref 0 in
@@ -244,8 +254,8 @@ let omit_with_evidence evidence piece =
 let omit_held ~assembly ~blocks message piece =
   omit_with_evidence (source assembly blocks ~omitted_sections:[] ~omitted_rows:[] message) piece
 
-let omit_held_system_goal ~assembly message piece =
-  omit_with_evidence (system_goal_source assembly message) piece
+let omit_held_system_observation ~block ~assembly message piece =
+  omit_with_evidence (system_observation_source ~target:Official_resume_user ~block assembly message) piece
 
 let reason_to_string = function
   | Missing_issuer -> "missing_issuer"

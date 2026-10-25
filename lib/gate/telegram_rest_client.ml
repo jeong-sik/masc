@@ -173,3 +173,7 @@ let edit_message_text ?post ?clock ?(timeout_sec=Masc_http_client.default_reques
   else call ?post ?clock ~timeout_sec client "editMessageText"
     ["chat_id",int64_json chat_id;"message_id",`Int message_id;"text",`String text]
     parse_message_response
+
+let get_me ?post ?clock ?(timeout_sec=Masc_http_client.default_request_timeout_sec) client () =
+  call ?post ?clock ~timeout_sec client "getMe" []
+    (fun ~status ~body -> let* json = api_result ~status ~body in user "result" json)

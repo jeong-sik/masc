@@ -7,6 +7,35 @@ describe('keeper config source projection', () => {
     vi.unstubAllGlobals()
   })
 
+  it('preserves a typed workspace prompt failure while rejecting malformed reasons and details', async () => {
+    const unavailable = {
+      state: 'unavailable', reason: 'workspace_unavailable',
+      detail: 'remote SSH workspace cannot be prepared',
+    }
+    const read = async (preview: unknown) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        name: 'rtprobe', activation_mode: 'manual', input_policy: 'small',
+        max_context_override: null, skills: { names: null },
+        config_revision: { manifest: { state: 'missing' }, runtime_assignment: { state: 'runtime_config_missing' } },
+        prompt: { instructions: 'retain keeper instructions', system_prompt: preview },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+      return fetchKeeperConfig('rtprobe')
+    }
+    const config = await read(unavailable)
+    expect(config.prompt.system_prompt).toEqual(unavailable)
+    expect(config.prompt.instructions).toBe('retain keeper instructions')
+    for (const preview of [
+      { state: 'unavailable', reason: 'workspace_unavailable' },
+      { ...unavailable, detail: null },
+      { ...unavailable, detail: 1 },
+      { ...unavailable, reason: 'future_workspace_reason' },
+    ]) {
+      const malformed = await read(preview)
+      expect(malformed.prompt.system_prompt).toMatchObject({ state: 'decode_failed' })
+      expect(malformed.prompt.instructions).toBe('retain keeper instructions')
+    }
+  })
+
   it('keeps endpoint declarations, empty registries and unavailable observations distinct', async () => {
     const endpoint = {
       name: 'builder', host: 'builder.invalid', user: 'masc', port: 22,

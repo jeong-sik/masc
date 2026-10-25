@@ -2,7 +2,7 @@ let normalize_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
-let playground_root_no_create ~(config : Workspace.config) ~(meta : keeper_meta) =
+let playground_root_no_create ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) =
   Keeper_sandbox.host_root_abs_of_meta ~config meta
 
 let safe_repo_component s =

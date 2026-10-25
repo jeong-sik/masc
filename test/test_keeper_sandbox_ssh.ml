@@ -414,7 +414,7 @@ remote_endpoint = "build-box"
       }
   in
   match
-    Keeper_sandbox_shell_ir_target.ssh_target ~base_path ~meta ~timeout_sec:2.0
+    Keeper_sandbox_shell_ir_target.ssh_target ~endpoint ~base_path ~meta ~timeout_sec:2.0
       ~ssh_bin ()
   with
   | Error error -> fail error.message
@@ -450,7 +450,7 @@ let test_endpoint_namespace_roundtrip () =
     "/srv/masc/playground/keeper-a" root;
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> Keeper_alerting_path.normalize_path_for_check_stripped in
-  let cwd = match Keeper_tool_execute_path.resolve_tool_execute_cwd ~config ~meta
+  let cwd = match Keeper_tool_execute_path.resolve_tool_execute_cwd ~remote_workspace_root:(Some root) ~config ~meta
     ~write_enabled:false ~args:(`Assoc [ "cwd", `String root ]) with
     | Ok cwd -> cwd | Error error -> fail error in
   check string "returned absolute cwd resolves through containment" host_root cwd;
@@ -460,12 +460,21 @@ let test_endpoint_namespace_roundtrip () =
     Yojson.Safe.Util.(member "cwd" location |> to_string);
   let remote_file = Filename.concat root "notes.txt" in
   let host_file = Filename.concat host_root "notes.txt" in
+  check string "projection uses the captured namespace" host_file
+    (Keeper_workspace_namespace.project_input ~remote_workspace_root:root ~config ~meta remote_file);
+  save (Filename.concat base_path ".masc/config/runtime.toml")
+    (Exec_ssh_endpoint.to_toml { endpoint with remote_root = "/srv/replaced" });
+  check string "registry replacement cannot retarget a captured path" host_file
+    (Keeper_workspace_namespace.project_input ~remote_workspace_root:root ~config ~meta remote_file);
+  let other_path = "/srv/replaced/keeper-a/notes.txt" in
+  check string "a different endpoint's absolute name is not borrowed" other_path
+    (Keeper_workspace_namespace.project_input ~remote_workspace_root:root ~config ~meta other_path);
   (match Keeper_tool_shared_runtime.resolve_keeper_read_path
-    ~config ~meta ~raw_path:remote_file with
+    ~config ~meta ~raw_path:host_file with
    | Ok path -> check string "absolute Read reuses the endpoint path" host_file path
    | Error refusal -> fail refusal.message);
   (match Keeper_tool_shared_runtime.resolve_keeper_confined_write_path
-    ~config ~meta ~endpoint:Keeper_alerting_path.Lexical_entry ~raw_path:remote_file with
+    ~config ~meta ~endpoint:Keeper_alerting_path.Lexical_entry ~raw_path:host_file with
    | Ok path -> check string "absolute Write reuses the endpoint path" host_file
        (Keeper_alerting_path.confined_host_path path)
    | Error refusal -> fail refusal.message);
@@ -474,7 +483,13 @@ let test_endpoint_namespace_roundtrip () =
       ~config ~meta ~raw_path:"/srv/masc/playground/keeper-b/notes.txt"));
   let missing = { profile_defaults with remote_endpoint = Some "absent" } in
   check bool "unknown endpoint cannot invent a prompt root" true
-    (Result.is_error (Keeper_workspace_namespace.resolve ~config ~meta ~profile_defaults:missing))
+    (Result.is_error (Keeper_workspace_namespace.resolve ~config ~meta ~profile_defaults:missing));
+  (match Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
+    ~remote_workspace_root:None ~config ~meta ~write_enabled:false ~args:(`Assoc []) with
+   | Ok _ -> fail "unresolved SSH namespace was admitted"
+   | Error error -> check bool "namespace failures belong to the dependency" true
+       (Keeper_tool_execute_path.execute_cwd_resolution_error_class error
+        = Tool_result.Dependency_unavailable))
 ;;
 
 let () =

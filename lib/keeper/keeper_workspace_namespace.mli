@@ -10,8 +10,15 @@ val resolve :
     Docker uses its mounted root; microVM retains its bookkeeping namespace. *)
 
 val project_input :
+  remote_workspace_root:string ->
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
-  string -> (string, string) result
+  string -> string
 (** Convert an SSH workspace path to internal containment coordinates. Relative
-    and declared external paths retain their existing interpretation. Endpoint
-    resolution errors are returned, never replaced with a host fallback. *)
+    and declared external paths retain their existing interpretation. The root
+    must come from the same captured endpoint the operation will execute on. *)
+
+val project_file_args :
+  remote_workspace_root:string -> config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta -> Yojson.Safe.t -> Yojson.Safe.t
+(** Project only structured [path] and [cwd] fields against the captured root.
+    Program/script text is never changed. *)

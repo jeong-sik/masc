@@ -350,7 +350,7 @@ let test_execute_own_container_cwd_preserves_containment () =
      retains its literal path contract, asserted above. *)
   List.iter
     (fun write_enabled ->
-      match Keeper_tool_execute_path.resolve_tool_execute_cwd
+      match Keeper_tool_execute_path.resolve_tool_execute_cwd ~remote_workspace_root:None
         ~config ~meta ~write_enabled ~args with
       | Ok cwd ->
         Alcotest.(check string) "own guest cwd maps to the admitted host directory"
@@ -363,7 +363,7 @@ let test_execute_own_container_cwd_preserves_containment () =
   let args = `Assoc ["cwd", `String (Filename.concat container_worktree "escape")] in
   List.iter
     (fun write_enabled ->
-      match Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
+      match Keeper_tool_execute_path.resolve_tool_execute_cwd_typed ~remote_workspace_root:None
         ~config ~meta ~write_enabled ~args with
       | Ok cwd -> Alcotest.fail ("own guest alias followed an escaping symlink: " ^ cwd)
       | Error error ->
@@ -382,7 +382,7 @@ let test_readonly_execute_omitted_cwd_does_not_create_playground () =
   Alcotest.(check bool) "playground starts absent" false (Sys.file_exists playground);
   let args = `Assoc [] in
   (match
-     Keeper_tool_execute_path.resolve_tool_execute_cwd
+     Keeper_tool_execute_path.resolve_tool_execute_cwd ~remote_workspace_root:None
        ~write_enabled:false
        ~config
        ~meta
@@ -438,7 +438,7 @@ let test_docker_other_container_root_stays_blocked () =
       (String_util.contains_substring e.Keeper_alerting_path.message "path_outside_sandbox"));
   List.iter
     (fun write_enabled ->
-      match Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
+      match Keeper_tool_execute_path.resolve_tool_execute_cwd_typed ~remote_workspace_root:None
         ~config ~meta ~write_enabled ~args with
       | Ok cwd -> Alcotest.fail ("foreign guest cwd was admitted: " ^ cwd)
       | Error error ->
@@ -456,7 +456,7 @@ let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
   cleanup_dir playground;
   let args = `Assoc [] in
   match
-    Keeper_tool_execute_path.resolve_tool_execute_cwd
+    Keeper_tool_execute_path.resolve_tool_execute_cwd ~remote_workspace_root:(Some "/srv/fixture/readonly-exec")
       ~config
       ~meta
       ~write_enabled:false
@@ -483,7 +483,7 @@ let test_a_guest_only_cwd_is_the_endpoints_to_check () =
    Alcotest.(check bool) "absent on the host" false (Sys.file_exists guest_only);
    let args = `Assoc [ ("cwd", `String "masc-t1348") ] in
    match
-     Keeper_tool_execute_path.resolve_tool_execute_cwd ~config ~meta ~write_enabled:true ~args
+     Keeper_tool_execute_path.resolve_tool_execute_cwd ~remote_workspace_root:None ~config ~meta ~write_enabled:true ~args
    with
    | Error e -> Alcotest.fail ("guest-only cwd refused on the host: " ^ e)
    | Ok cwd ->
@@ -493,7 +493,7 @@ let test_a_guest_only_cwd_is_the_endpoints_to_check () =
   @@ fun ~base:_ ~config ~meta ~playground:_ ->
   let args = `Assoc [ ("cwd", `String "masc-t1348") ] in
   match
-    Keeper_tool_execute_path.resolve_tool_execute_cwd ~config ~meta ~write_enabled:true ~args
+    Keeper_tool_execute_path.resolve_tool_execute_cwd ~remote_workspace_root:None ~config ~meta ~write_enabled:true ~args
   with
   | Ok cwd -> Alcotest.fail ("a shared-mount tree's missing cwd resolved: " ^ cwd)
   | Error e ->

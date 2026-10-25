@@ -262,8 +262,11 @@ let handle_content_with_endpoint
         | Append | Patch -> Keeper_alerting_path.Follow_referent
       in
       let keeper_tree =
+        let projected_path = Keeper_workspace_namespace.project_input
+          ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
+          ~config ~meta path in
         match
-          resolve_keeper_confined_write_path ~config ~meta ~endpoint:confined_endpoint ~raw_path:path
+          resolve_keeper_confined_write_path ~config ~meta ~endpoint:confined_endpoint ~raw_path:projected_path
         with
         | Error (refusal : Keeper_alerting_path.path_refusal) ->
           Error

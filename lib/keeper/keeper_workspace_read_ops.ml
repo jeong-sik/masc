@@ -70,6 +70,18 @@ let try_handle_with_authority
       ~op
       ~raw_path
   =
+  let authority = match read_authority, meta.sandbox_profile with
+    | Some _, _ | None, (Docker | Micro_vm) -> Ok read_authority
+    | None, Remote_ssh -> Keeper_sandbox_remote_lane.capture_read_authority ~config ~meta () in
+  match authority with
+  | Error detail -> Some (Keeper_tool_execution.failure
+      ~class_:Tool_result.Dependency_unavailable (error_json detail))
+  | Ok read_authority ->
+  let args = match read_authority with
+    | None -> args
+    | Some authority -> Keeper_workspace_namespace.project_file_args
+        ~remote_workspace_root:(Keeper_sandbox_remote_lane.read_authority_workspace_root authority)
+        ~config ~meta args in
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
@@ -160,7 +172,7 @@ let try_handle_with_authority
               ~max_bytes ~timeout_sec ()
           with
           | Error msg -> Error (Tool_result.Runtime_failure, sandbox_read_error ~target msg)
-          | Ok payload -> Ok payload)
+          | Ok payload -> Ok (cpath, payload))
   in
   match op with
   | "rg" ->
@@ -201,7 +213,7 @@ let try_handle_with_authority
                     ()
                 with
                 | Error (class_, response) -> Keeper_tool_execution.failure ~class_ response
-                | Ok (st, out) ->
+                | Ok (cpath, (st, out)) ->
                   let is_ok =
                     match st with
                     | Unix.WEXITED 0 | Unix.WEXITED 1 -> true
@@ -217,7 +229,8 @@ let try_handle_with_authority
                     `Assoc
                         ([ "ok", `Bool is_ok
                          ; "op", `String op
-                         ; "path", `String target
+                         ; "path", `String (match meta.sandbox_profile with
+                             | Remote_ssh -> cpath | Docker | Micro_vm -> target)
                          ; "pattern", `String pattern
                          ; "via", `String (Keeper_sandbox_read_runner.backend_via ~meta)
                          ; "status", Keeper_alerting_path.process_status_to_json st

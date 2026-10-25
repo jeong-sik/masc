@@ -50,9 +50,6 @@ val owned_read_target_refusal : owned_read_target_failure -> path_refusal
     way. *)
 val endpoint_unresolved : tree_refusal:path_refusal -> endpoint_error:string -> path_refusal
 
-val endpoint_unavailable : string -> path_refusal
-(** Endpoint namespace resolution failed before path admission. *)
-
 (** Project a [Workspace.config] to its project root by stripping the
     trailing [.masc] base-path component when present. *)
 val project_root_of_config : Workspace.config -> string

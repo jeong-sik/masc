@@ -2695,6 +2695,18 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     expect(container.querySelector('[data-testid="kcf-system-prompt-decode-failed"]')).toBeNull()
   })
 
+  it('shows a workspace refusal as the producer reported it', async () => {
+    await openSystemPromptPreview({
+      state: 'unavailable',
+      reason: 'workspace_unavailable',
+      detail: 'remote SSH workspace cannot be prepared',
+    })
+    const notice = container.querySelector('[data-testid="kcf-system-prompt-unavailable"]')
+    expect(notice?.textContent).toContain('remote SSH workspace cannot be prepared')
+    expect(notice?.textContent).not.toContain('헌법 원장')
+    expect(container.querySelector('[data-testid="kcf-system-prompt-decode-failed"]')).toBeNull()
+  })
+
   it('shows an undecodable system prompt as a decode failure', async () => {
     await openSystemPromptPreview({ state: 'decode_failed', detail: 'unknown prompt state "later"' })
     const notice = container.querySelector('[data-testid="kcf-system-prompt-decode-failed"]')

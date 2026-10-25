@@ -175,6 +175,12 @@ let resolve_read_file_target
       ~(args : Yojson.Safe.t)
       ~(raw_path : string)
   =
+  let args, raw_path = match read_authority with
+    | None -> args, raw_path
+    | Some authority ->
+      let remote_workspace_root = Keeper_sandbox_remote_lane.read_authority_workspace_root authority in
+      ( Keeper_workspace_namespace.project_file_args ~remote_workspace_root ~config ~meta args
+      , Keeper_workspace_namespace.project_input ~remote_workspace_root ~config ~meta raw_path ) in
   let cwd = string_opt_nonempty "cwd" args in
   let raw_path = String.trim raw_path in
   if raw_path = ""
@@ -225,7 +231,14 @@ type read_file_attempt =
       ; payload : string
       }
 
+let read_authority_for_call ~config ~(meta : keeper_meta) read_authority =
+  match read_authority, meta.sandbox_profile with
+  | Some _, _ | None, (Docker | Micro_vm) -> Ok read_authority
+  | None, Remote_ssh -> Keeper_sandbox_remote_lane.capture_read_authority ~config ~meta ()
+;;
+
 let read_complete_sandbox_bytes ?read_authority ?turn_sandbox_factory ~config ~meta ~path ?cwd () =
+  let* read_authority = read_authority_for_call ~config ~meta read_authority in
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
   let* read_target =
     resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path
@@ -241,6 +254,8 @@ let read_complete_sandbox_bytes ?read_authority ?turn_sandbox_factory ~config ~m
 ;;
 
 let read_sandbox_raw_prefix ?read_authority ?turn_sandbox_factory ~config ~meta ~path ?cwd ~max_bytes () =
+  let* read_authority = read_authority_for_call ~config ~meta read_authority
+    |> Result.map_error (fun detail -> Keeper_sandbox_read_backend.Read_failed detail) in
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
   let* read_target =
     resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path
@@ -334,6 +349,10 @@ let handle_read_file_with_preparation
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(args : Yojson.Safe.t)
   =
+  match read_authority_for_call ~config ~meta read_authority with
+  | Error detail -> Keeper_tool_execution.failure
+      ~class_:Tool_result.Dependency_unavailable (error_json detail)
+  | Ok read_authority ->
   let path = Safe_ops.json_string ~default:"" "path" args in
   let max_bytes =
     Safe_ops.json_int ~default:read_file_default_max_bytes "max_bytes" args
@@ -357,6 +376,15 @@ let handle_read_file_with_preparation
       (error_json refusal.message)
   | Ok (window, read_target) ->
     let target = read_file_target_path read_target in
+    let visible_target = match read_authority, meta.sandbox_profile with
+      | Some authority, Remote_ssh ->
+        Keeper_sandbox_read_backend.container_path_of_host_with_authority
+          ~read_authority:authority ~config ~meta ~host_path:target
+      | Some _, (Docker | Micro_vm) | None, _ -> Ok target in
+    (match visible_target with
+     | Error detail -> Keeper_tool_execution.failure
+         ~class_:Tool_result.Dependency_unavailable (error_json detail)
+     | Ok visible_target ->
     let payload_of_slice ~scan_complete body =
       match
         slice_read_window ~window ~first_line:window.start_line ~max_bytes ~scan_complete body
@@ -395,7 +423,7 @@ let handle_read_file_with_preparation
         Read_succeeded
           (`Assoc
               ([ "ok", `Bool true
-               ; "path", `String target
+               ; "path", `String visible_target
                ; "bytes", `Int (String.length slice.window_content)
                ; "truncated", `Bool slice.window_truncated
                ; "offset", `Int window.start_line
@@ -472,7 +500,7 @@ let handle_read_file_with_preparation
     (match run_read () with
      | Read_succeeded json -> Keeper_tool_execution.success_data json
      | Read_refused { failure_class; payload } ->
-       Keeper_tool_execution.failure ~class_:failure_class payload)
+       Keeper_tool_execution.failure ~class_:failure_class payload))
 ;;
 
 let handle_read_file_with_outcome ~turn_sandbox_factory ~config ~meta ~args =

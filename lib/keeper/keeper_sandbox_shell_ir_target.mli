@@ -80,7 +80,8 @@ val guest_target
   -> (guest_dispatch, target_error) result
 
 val ssh_target
-  :  base_path:string
+  :  endpoint:Exec_ssh_endpoint.t
+  -> base_path:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> timeout_sec:float
   -> ?ssh_bin:string

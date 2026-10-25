@@ -150,8 +150,9 @@ type command = Snapshot | Retire
   | Download_commit of {id:string;actor:string;route:B.route;verb:B.verb;receipt:Yojson.Safe.t}
   | Download_release of {id:string;actor:string;route:B.route;verb:B.verb}
   | Model_requests | Model_result of Yojson.Safe.t
-  | Model_wait of {after:string option} | Poll of {client:B.client_info;window_sec:float}
+  | Model_wait of {after:string option}
   | Extension of Browser_extension_protocol.command
+  | Poll of {client:B.client_info;window_sec:float}
   | Deliver of {client_id:B.client_id;id:string;payload:Yojson.Safe.t}
   | Disconnect of B.client_id
   | Issue of {route:B.route;verb:B.verb;actor:string option;timeout_sec:float;only_if_idle:bool}

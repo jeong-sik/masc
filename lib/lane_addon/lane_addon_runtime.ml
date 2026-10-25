@@ -2380,9 +2380,11 @@ let private_companion_binding ~sw m ~access ~principal provider original provide
 type companion_publication = origin:Lane_addon_companion_origin.record ->
   output_schema:Yojson.Safe.t -> event:Lane_addon_companion_publication.event ->
   (unit,unit) result
+type companion_invocation_admission = Invocation_not_accepted | Invocation_accepted
 
 let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish ~continuation ~(export:tool_export) ~arguments e original invoke =
   let module C=Lane_addon_companion_broker in
+  let module P=Lane_addon_companion_publication in
   let unavailable ()=Error (Lane_addon_call_context.Host_refusal (Unavailable "private companion is unavailable")) in
   let configuration=e.configuration in
   match e.package.execution,e.package.worker_service with
@@ -2418,18 +2420,10 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
           authority; retained origin is evidence, never a replacement grant. *)
        let* ()=confirm_companion_owner m ~access ~principal e original configuration
          |> Result.map_error (fun () -> Lane_addon_call_context.Host_refusal (Unavailable "private companion is unavailable")) in
-       let* publish=match origin,companion_publish,export.tool.output_schema with
+       let* publication=match origin,companion_publish,export.tool.output_schema with
          | None,None,_ -> Ok None
          | Some origin,Some deliver,Some output_schema ->
-             Ok (Some (fun value ->
-               let* ()=confirm_companion_owner m ~access ~principal e original configuration
-                 |> Result.map_error (fun () -> C.Not_started) in
-               let* event=Lane_addon_companion_publication.event ~output_schema value
-                 |> Result.map_error (fun _ -> C.Not_started) in
-               let* ()=deliver ~origin ~output_schema ~event
-                 |> Result.map_error (fun () -> C.Outcome_unknown) in
-               confirm_companion_owner m ~access ~principal e original configuration
-                 |> Result.map_error (fun () -> C.Outcome_unknown)))
+             Ok (Some (origin,deliver,output_schema))
          | (Some _|None),(Some _|None),(Some _|None) -> unavailable () in
        let allocation=match original.companion with
          | Some allocation -> allocation
@@ -2445,6 +2439,43 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
        match Eio.Lazy.force allocation with
        | Error _ -> unavailable ()
        | Ok allocation ->
+         let admission=ref Invocation_not_accepted in
+         let* finish=match publication with
+           | None -> Ok None
+           | Some (origin,deliver,output_schema) ->
+               let* event=P.owner_lost ~publication_id:(Random_id.uuid_v7 ())
+                 |> Result.map_error (fun _ -> Lane_addon_call_context.Host_refusal
+                     (Unavailable "private companion publication is unavailable")) in
+               (* This host sink retains the original source after its provider
+                  ends. It must not call the provider-authenticated publisher or
+                  reenter the allocation's own cleanup. *)
+               Lane_addon_companion_allocation.on_finish allocation (function
+                 | C.Released -> Ok ()
+                 | Abandoned ->
+                     (match !admission with
+                      | Invocation_not_accepted -> Ok ()
+                      | Invocation_accepted ->
+                          deliver ~origin ~output_schema ~event
+                          |> Result.map_error (fun () -> "original companion owner-loss notice unconfirmed")))
+               |> Result.map Option.some
+               |> Result.map_error (fun _ -> Lane_addon_call_context.Host_refusal
+                   (Unavailable "private companion publication is unavailable")) in
+         let finish_unaccepted ()=match !admission with
+           | Invocation_accepted -> ()
+           | Invocation_not_accepted -> Option.iter (fun notify -> notify C.Released) finish in
+         Fun.protect ~finally:finish_unaccepted (fun () ->
+         let publish=Option.map (fun (origin,deliver,output_schema) value ->
+           let* ()=confirm_companion_owner m ~access ~principal e original configuration
+             |> Result.map_error (fun () -> C.Not_started) in
+           let* event=P.event ~output_schema value |> Result.map_error (fun _ -> C.Not_started) in
+           let* ()=deliver ~origin ~output_schema ~event |> Result.map_error (fun () -> C.Outcome_unknown) in
+           (* Durable Terminal admission suppresses owner loss before the next
+              fresh authorization read can yield or observe provider retirement. *)
+           (match event.P.kind with
+            | P.Terminal -> Option.iter (fun notify -> notify C.Released) finish
+            | Attention_required | Effect_submitted | Owner_lost -> ());
+           confirm_companion_owner m ~access ~principal e original configuration
+             |> Result.map_error (fun () -> C.Outcome_unknown)) publication in
          let bind=private_companion_binding ~sw m ~access ~principal e original configuration allocation in
          match C.issue (Lane_addon_companion_allocation.broker allocation) ~publish ~bind with
          | Error _ -> unavailable ()
@@ -2458,17 +2489,17 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
                try let result=invoke companion in
                  (match result with
                   | Ok reply when reply.Mcp_protocol.Mcp_types.is_error<>Some true ->
-                      let admission=
+                      let accepted=
                         let* ()=confirm_companion_owner m ~access ~principal e original configuration in
                         C.accept grant |> Result.map_error (fun _ -> ()) in
-                      (match admission with
-                       | Ok () -> result
+                      (match accepted with
+                       | Ok () -> admission:=Invocation_accepted;result
                        | Error () -> C.cancel_invocation grant;
                            Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown"))
                   | Ok _|Error _ -> C.cancel_invocation grant;result)
                with
                | Eio.Cancel.Cancelled _ as exn -> C.cancel_invocation grant;raise exn
-               | _ -> C.cancel_invocation grant;Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown")))
+               | _ -> C.cancel_invocation grant;Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown"))))
 
 let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
     Fun.protect ~finally:on_complete (fun () ->

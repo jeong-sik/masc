@@ -1,11 +1,12 @@
 let ( let* ) = Result.bind
 module O = Lane_addon_companion_origin
 module A = Lane_addon_action
-type kind = Attention_required | Effect_submitted | Terminal
+type kind = Attention_required | Effect_submitted | Terminal | Owner_lost
 let kind_to_string = function
   | Attention_required -> "attention_required"
   | Effect_submitted -> "effect_submitted"
   | Terminal -> "terminal"
+  | Owner_lost -> "owner_lost"
 type event = {publication_id:string; kind:kind; output:Yojson.Safe.t}
 type error = Invalid_event | Schema_rejected | Binding_conflict | Corrupt
   | Unavailable | Commit_unconfirmed
@@ -51,7 +52,8 @@ let object_ keys = function
 let valid_id id = match Uuidm.of_string id with
   | Some value -> Uuidm.to_string value=id
   | None -> false
-let event ~output_schema value =
+type event_authority = Worker | Host_retention
+let decode_event ~authority ~output_schema value =
   let* ()=validate_output_schema output_schema |> Result.map_error (fun _ -> Schema_rejected) in
   let* value=A.canonical value |> Result.map_error (fun _ -> Invalid_event) in
   let* fields=object_ ["publication_id";"kind";"output"] value in
@@ -61,10 +63,22 @@ let event ~output_schema value =
     | `String "attention_required" -> Ok Attention_required
     | `String "effect_submitted" -> Ok Effect_submitted
     | `String "terminal" -> Ok Terminal
+    | `String "owner_lost" ->
+        (match authority with Worker -> Error Invalid_event | Host_retention -> Ok Owner_lost)
     | _ -> Error Invalid_event in
-  let* output=A.validate_value ~schema:output_schema ~name:"companion publication" (List.assoc "output" fields)
-    |> Result.map_error (fun _ -> Schema_rejected) in
+  let* output=match kind with
+    | Attention_required | Effect_submitted | Terminal ->
+        A.validate_value ~schema:output_schema ~name:"companion publication" (List.assoc "output" fields)
+        |> Result.map_error (fun _ -> Schema_rejected)
+    | Owner_lost ->
+        if List.assoc "output" fields=`Assoc ["outcome",`String "unknown"]
+        then Ok (`Assoc ["outcome",`String "unknown"]) else Error Invalid_event in
   Ok {publication_id;kind;output}
+let event ~output_schema value = decode_event ~authority:Worker ~output_schema value
+let owner_lost ~publication_id =
+  if valid_id publication_id then
+    Ok {publication_id;kind=Owner_lost;output=`Assoc ["outcome",`String "unknown"]}
+  else Error Invalid_event
 let event_json event = `Assoc ["publication_id",`String event.publication_id;
   "kind",`String (kind_to_string event.kind);"output",event.output]
 let encode record = Yojson.Safe.to_string (`Assoc ["version",`Int 1;
@@ -76,7 +90,8 @@ let decode ~origin bytes =
     let* ()=if List.assoc "version" fields=`Int 1 && List.assoc "origin_id" fields=`String origin.O.id
       then Ok () else Error Corrupt in
     let* output_schema=A.canonical (List.assoc "output_schema" fields) |> Result.map_error (fun _ -> Corrupt) in
-    let* event=event ~output_schema (List.assoc "event" fields) |> Result.map_error (fun _ -> Corrupt) in
+    let* event=decode_event ~authority:Host_retention ~output_schema (List.assoc "event" fields)
+      |> Result.map_error (fun _ -> Corrupt) in
     let record={origin;output_schema;event} in
     if encode record=bytes then Ok record else Error Corrupt
   with Yojson.Json_error _ -> Error Corrupt
@@ -128,7 +143,7 @@ let retain ~fs ~config ~origin ~output_schema ~event:notice = protect (fun () ->
   let* current=original ~config origin.O.id in
   let* ()=if current=origin then Ok () else Error Binding_conflict in
   let* output_schema=A.canonical output_schema |> Result.map_error (fun _ -> Schema_rejected) in
-  let* event=event ~output_schema (event_json notice) in
+  let* event=decode_event ~authority:Host_retention ~output_schema (event_json notice) in
   let proposed={origin;output_schema;event} in
   let path=path origin event.publication_id in
   let* _=Keeper_fs_durable_directory.ensure ~before_prepare:(fun () -> ())

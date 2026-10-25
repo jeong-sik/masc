@@ -111,8 +111,10 @@ published account-authentication evidence.
    session/tab and principal pins. Exercise the read/screenshot exclusion and
    original-owner cancellation fences while a real extension call is in flight.
    A lost fill cannot authorize replay or adoption of another Browser.
-4. Add a host-owned unknown notice for detected original-provider loss. An
-   origin record alone is pre-dispatch intent and cannot prove execution.
+4. Exercise the implemented host-owned unknown notice after detected original
+   provider loss. It requires confirmed invocation acceptance; an origin record
+   alone remains pre-dispatch intent and cannot prove execution. Whole-host crash
+   recovery is outside that source implementation's guarantee.
 5. Verify worker publication, durable intake and the original Keeper's resumed
    turn through the connected path. Generic Lane Ask stores question text and
    does not itself resume a Keeper; it must not carry opaque approval links.

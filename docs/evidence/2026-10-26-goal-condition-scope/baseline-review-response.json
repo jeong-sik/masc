@@ -1,0 +1,157 @@
+{
+  "schema": "masc.goal.final-prompt.integration-and-actual-review-response.v1",
+  "status": "FINAL_FROZEN",
+  "frozen_at_utc": "2026-10-25T18:19:49.576736+00:00",
+  "verdict": "INTEGRATION_NOT_ADMITTED_AND_ACTUAL_PROOF_INSUFFICIENT_P2_A1_FOLLOWUP_EFFECT_UNASSESSED",
+  "scope": "Separate response to saved integration/admission facts, later PR comments, one isolated original-evidence replay and a subsequent private prompt proposal/follow-up handoff. No full-stack approval or new actual experiment is performed here.",
+  "integration_response": {
+    "decision": "AGREE_FROZEN_GUARD_REFUSAL_WHOLE_STACK_NOT_ADMITTED",
+    "reviewed_top_head": "4b81e6ad9cd98971bec40eff75ef69782a354d6e",
+    "direct_base": "ce5ae0548c0b3349b57b46755034c444e260db25",
+    "source_diff_sha256": "f41e3e9f87570478ef6b97235f4edc9cad16394a8d265c1fe8ed198c7cbf0a71",
+    "guard": {
+      "returncode": 2,
+      "passed_PRs": [
+        45748,
+        45749,
+        45753,
+        45754
+      ],
+      "refused_PR": 45755,
+      "refused_head": "533c2316919f581803368f04ce4cfa5f67b74510",
+      "open_CR_review_id": 5644102211,
+      "reviewer": "be-sleepers",
+      "later_unchecked_positions": "6 through25",
+      "later_unchecked_members": 20
+    },
+    "basis": "Saved guard stdout/stderr/result and the full current-head CR body agree. The CR identifies missing original-container identity/cancellation/termination/reclamation for a nonterminating candidate grader. This response does not re-audit that entire source unit or reproduce Docker behavior.",
+    "formal_review_boundary": "Saved PR45949 has formal APPROVED for880d092f/base69ba14 with its own exact source scope. The earlier admission snapshot has zero45973/46001 reviews. Local exact4b81 source PASS and Ready status do not create formal approval of those PRs or all25 members.",
+    "limit": "The guard stopped at position5. Removing that CR alone would not prove admission of the unchecked20. These are frozen snapshot facts, not a new live census."
+  },
+  "later_external_COMMENT_response": {
+    "readback_path": "../masc-goal-post-replay-pr-readback-20261026-v1/pr-46001.json",
+    "bytes": 9074,
+    "sha256": "0cf448b7a38c3449f00f7dd9f5756651445ad3cc27fc0e199c576c83ad11366f",
+    "review_ids": [
+      "PRR_kwDOQ7_DYc8AAAABUG-yDQ",
+      "PRR_kwDOQ7_DYc8AAAABUG_WNQ"
+    ],
+    "review_states": [
+      "COMMENTED",
+      "COMMENTED"
+    ],
+    "assessment": "The current-head COMMENT claims6373-to4b81 preserved all file bytes with diff0. That is factually wrong: saved exact delta contains12 files, including the declared-aggregation prompt P2 repair, changelog and10 new evidence files. The current saved PR is Ready/draft=false, so its draft wording is also stale.",
+    "actual_delta_canonical_sha256": "896376597f781bf5fd3051e40b57e34dd4028c2895ff696a7ce24d21cbcf852e",
+    "saved_delta_patch_sha256": "4515936e6bec67d8f45b3f03c621911fc8fc5f023a87f41165d20c0d68e02d05",
+    "disposition": "Reject the unchanged-byte carry premise. Neither COMMENT is APPROVED or has the approval-guard footer. This does not invalidate the separate correct exact4b81 source re-review that actually covers the12-file delta. Earlier zero-review snapshot and later two COMMENTs are different observation times, not contradictory formal-approval counts.",
+    "outside_message_or_correction_posted": false
+  },
+  "actual_replay_response": {
+    "decision": "AGREE_TRACE_INTEGRITY_PASS_AND_PROOF_SUFFICIENCY_FAIL_P2_A1",
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "prompt_sha256": "529f84a6a36146eca2821e02ade8a9467b166b5d1ed25eea4b37493cc5579539",
+    "fixture_revision": "5da1f0ed29c5303ac0ca3edcdcd71c89",
+    "original_main_revision": "306708facbfb9379a9e51b8f7c815678",
+    "request_id": "b41bc5d926f775b815bc09aa2d7e8853",
+    "run_id": "01a17430-cffe-7000-b8ab-59517b23b216",
+    "measurement_id": "636316e31339a514a9789ed7557664ad",
+    "observed_effect": "APPROVE / proof_proven / awaiting_confirmation in the isolated fixture. The recorded effect is preserved; proof-quality disagreement does not rewrite it.",
+    "counts": {
+      "Goal_runs": 1,
+      "provider_POSTs": 11,
+      "unique_tool_calls": 28,
+      "successful_read_pages": 27,
+      "unique_read_paths": 25
+    },
+    "integrity_scope": "The frozen reviewer audits149 originals,76 staged inputs, exact rendered provider context, all call/result/page joins and ACK/native/registry/persisted state. This response selected additional original/wire checks rather than repeating the full149 audit. POSTs and reviewed/committed/retry stages are not independent samples.",
+    "P2": {
+      "case_id": "A1",
+      "severity": "P2",
+      "kind": "Required multi-stage behavior not checked before overall approval",
+      "existing_requirement": "Verify, regression and build execute inside the declared supported sandbox; Docker/microVM boundaries remain explicit.",
+      "read_evidence": "The model read the1380B README and1296B Node observations containing four verify_exit results. The README describes a Python probe command; it is not evidence that the three-stage probe ran. The read root log skips its Docker test.",
+      "unread_available_source": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-playground-bootstrap/coding-boundary/actual-coding-boundary.json",
+      "unread_source_bytes": 29007,
+      "unread_source_sha256": "3a6dc21a39518bf62f303682808609272d4b49d92e2e7b8eba4b15e81016bd9a",
+      "source_scope": "Actual3228 Python Docker fixture verify/regression/build all0 on snapshotb04488ec3ce1be744c8a016f155c2cb6e393b4a01c0b8f525d53143689fb0729; failed initial image and fresh bad-capture7 preserved. Fixture build is not project compilation, and Docker scope is not microVM execution.",
+      "assessment": "The unchanged criterion already requires those behaviors. Overall11/11 approval is unsupported without checking the actual stage observations. This is not a new criterion or a file-count gate. Reviewer access to the unread source cannot retroactively make the model read it.",
+      "not_concluded": [
+        "A1 behavior failed",
+        "required source absent",
+        "all11 historical observations invalid",
+        "microVM must be run to satisfy this existing bounded case"
+      ]
+    },
+    "coverage_and_G1_correction": {
+      "literal_linked_path_count": 10,
+      "same_content_identity_linked_count": 11,
+      "counts_are_not_sufficiency_gates": true,
+      "A4_A5_alias_bytes": 1276,
+      "A4_A5_alias_sha256": "b00ddc965bf4bcd8fc83ea1175d07aa2f9386fa73d6ee50da111a58621cc5db1",
+      "A5": "The actual A4 Tool body contains changed-input/full-run-field resume checks and equals the A5 mirror byte-for-byte. No second path read is required merely to duplicate that content. Seven listed tests comprise six executed tests and one skipped Docker test.",
+      "G1": "The7707B native controlled-HTTP log was actually read. It supports its five Direct/context/serialization cases at pinned7501 scope. It is not autonomous Keeper/live-Ollama success; the separate live projection/context was not read. The earlier uncovered-G1 suspicion is rejected, and omission from the prose reason is not an independent failure gate."
+    },
+    "revision_and_completion_boundary": "This is one replay using the original semantic criterion in a fresh fixture revision, not a rerun of all11 historical behaviors or primary3067 proof/update. Historical source revisions remain provenance. No human confirmation, operational deployment, new-head build, reliability rate, model-weight independence or whole-stack approval follows."
+  },
+  "proposal_and_latest_handoff": {
+    "proposal_review_at_its_time": {
+      "candidate_sha256": "428e2d7fd1db9ea920ff67ac1a959fa9e91867776b0ee40bef8b7f022307a47d",
+      "candidate_bytes": 8143,
+      "review_scope": "Only baseline529f, candidate428e and plan; then unapplied/unexecuted. Scoped source PASS, not baseline P2 adjudication or demonstrated improvement."
+    },
+    "source_assessment": "The complete proposal delta requires each declared stage/condition to match actual observations and permits shared-original reuse. It removes the one-or-two sentence instruction without imposing per-condition file/Read/execution/minimum-length gates. Reported-value exceptions and declared aggregation remain unchanged.",
+    "consumer_boundary": "The parent separately reports checking the existing reason-string schema and Goal reason/registry consumers. This response does not relabel that as a fresh independent API/schema/native audit.",
+    "latest_parent_report": "Because of the actual A1 P2, Root normally created/claimed/started Task2682. An owned private checkout now has428e-identical uncommitted prompt changes; no commit/push or operational change. The published PR head remains4b81.",
+    "new_control_status_as_reported": "A separate isolated runtime has two normal overrides and one normal submission for each new N/P Goal. Six fixture-command exits were preregistered/recorded as N0/0/7 and P0/0/0. Both Goals were pending in the latest handoff; future outcomes are unassessed here.",
+    "time_boundary": "The proposal review correctly described its earlier unapplied state. It would now be inaccurate to say no follow-up was submitted. The latest pending submissions are not improvement success and are not pooled into the completed529f replay.",
+    "new_effectiveness_verdict": "NOT_ASSESSED_NO_FURTHER_RESULT_WAIT_REQUIRED_FOR_THIS_RESPONSE"
+  },
+  "independent_check_scope": [
+    "Full integration, actual149 and proposal reviews read and hashed. The large actual report was read through completion, with a separately reread protocol subsection covering the initial display truncation.",
+    "Saved guard stdout/stderr/rc, formal45949 body, zero-review snapshots and current45755 CR body directly checked.",
+    "Both later46001 COMMENT bodies and saved Ready/head/base fields read. Saved12-file delta inventory and exact prompt-repair hunk independently compared with their false diff0 claim.",
+    "All11 actual provider-response originals were manifest-hash checked for28 call IDs/27 Read calls and absence of the required A1 stage source. Selected actual next-request Tool bodies independently verify A4-root1276B and G1-native7707B.",
+    "The A1 case, read README/Node observations and available29007B source were selected from the149 manifest and hash checked; their requirement/stage scope was inspected. Safe result/protocol/state/stop projections were hash checked.",
+    "Proposal input hashes, full plan and complete text delta checked using the previously fully read529f baseline. No full149 or admission96-PR census re-audit, new provider/runtime call or sufficient-proof claim was added."
+  ],
+  "review_inputs": [
+    {
+      "path": "../masc-goal-integration-boundary-review-20261026-v1/review.json",
+      "bytes": 13925,
+      "sha256": "b0892386652bdfd0bf9217eb4733595aebd797bec9b077559b8d3e9366704595",
+      "read_in_full": true
+    },
+    {
+      "path": "../masc-goal-originals-final-prompt-review-20261026-v1/review.json",
+      "bytes": 50955,
+      "sha256": "bf1a2f942d7361a4af1fc6a2a713faada618297d353988f99980e424ca9eed19",
+      "read_in_full": true
+    },
+    {
+      "path": "../masc-goal-multicondition-prompt-proposal-review-20261026-v1/review.json",
+      "bytes": 5660,
+      "sha256": "a0b533c2c37dbb1b57ba43685260b6e03a26f3d47c24c50089ff2f6f63360df9",
+      "read_in_full": true
+    }
+  ],
+  "additional_input_bindings": [
+    {
+      "path": "../masc-goal-originals-final-prompt-3e0d-20261026/terminal-originals-private/manifest.json",
+      "bytes": 31353,
+      "sha256": "526d578d8500b71168dbcf9b685ed96cc0cdf6ea36e1a341b8bcaf2cf19d2e6b"
+    },
+    {
+      "path": "../masc-goal-originals-final-prompt-3e0d-20261026/lookup-interpretation-correction.json",
+      "bytes": 1493,
+      "sha256": "cbb9040a5a7552413b98920970d37b4d5e529c7d7ae033eba7402b8b41ef2260"
+    }
+  ],
+  "effects": {
+    "API_model_provider_build_native_CI_Docker_process_or_runtime_calls": 0,
+    "Git_source_store_Goal_Task_Board_or_existing_artifact_mutations": 0,
+    "external_messages_or_formal_approval_merge_posts": 0,
+    "agents_spawned": 0,
+    "only_new_output": "response.json"
+  }
+}

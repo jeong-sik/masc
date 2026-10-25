@@ -1,0 +1,488 @@
+{
+  "schema": "masc.goal.provenance.actual-controls.independent-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T17:01:02.221520+00:00",
+  "reviewer": "measurement_publication_review",
+  "main_task_id": "task-2676",
+  "verdict": "PASS_BOUNDED_THREE_ACTUAL_CONTROLS_WITH_SCOPE_LIMITS",
+  "decisive_assessment": "The three actual model controls obeyed their different declared metrics: N read recorded stdout10 and rejected target20; P read the same stdout10 and approved target10; R measured reported_value20 itself and approved target20 without imposing a raw-execution requirement. Exact provider contexts, tool-call/results, structured verdicts, native stages and persisted phases are bound per Goal run. This is one unblinded controlled cohort, not a reliability or causal A/B result.",
+  "identity": {
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "actual_server_binary_readback_SHA_match": true,
+    "same_embedded_source_binary_and_runtime_instance_in_two_frozen_health_observations": true,
+    "candidate_prompt_bytes": 7530,
+    "candidate_prompt_file_sha256": "35b6535650e99ec19a39a13a669e19f3a89067173d9a9dd30deab4dfb459b340",
+    "baseline_prompt_bytes": 6005,
+    "baseline_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "single_configured_admitted_verifier_slot": [
+      "glm-coding.glm-5.3-flash"
+    ],
+    "requested_models": [
+      "glm-5.3-flash"
+    ],
+    "reported_models": [
+      "glm-5.3-flash"
+    ],
+    "unknown_reported_model_POSTs": 0,
+    "bundle_support_scope": "Frozen bundle-check receipt records12 original complete3e bundle files checked. This review reread/hash-verified the server binary and audited the cohort inputs; it did not build a new bundle or promote prompt override bytes into a compiled3e source claim."
+  },
+  "prompt_application": {
+    "actual_mechanism": "Two normal authenticated persisted overrides in the isolated runtime, not file-only template delivery.",
+    "keys": [
+      {
+        "key": "goal_verification.proof",
+        "effective_bytes": 3691,
+        "effective_sha256": "c753437dc9cae1373e8ccd909d1b33fb86dc5a8be02076e828b5c7225e5b1997",
+        "exact_candidate_section": true,
+        "before_source": "file",
+        "after_source": "override",
+        "managed_file_value_unchanged": true,
+        "API_response_ok": true
+      },
+      {
+        "key": "goal_verification.lookup",
+        "effective_bytes": 3433,
+        "effective_sha256": "079d9e9dfe87ba362a0da10130764bc2a4a930e3cbf78a2ac24b358efbe98fde",
+        "exact_candidate_section": true,
+        "before_source": "file",
+        "after_source": "override",
+        "managed_file_value_unchanged": true,
+        "API_response_ok": true
+      }
+    ],
+    "only_two_effective_prompt_values_changed": true,
+    "managed_file_values_unchanged": true,
+    "all_three_provider_first_user_prompts_byte_equal_retained_Original_prompt": true,
+    "all_three_provider_first_system_messages_equal_retained_system_instructions": true,
+    "exact_candidate_sections_bound_to_normal_override_requests_responses_and_after_effective_values": true,
+    "all_nonvariable_candidate_proof_lookup_segments_present_in_order_in_actual_context": true,
+    "initial_preflight_failure": {
+      "before_effective_values_were_baseline_not_candidate": true,
+      "application_plan_records_Goal_submissions_before_application": 0,
+      "initial_file_only_failure_not_a_model_negative_outcome": true,
+      "evidence_limit": "Before/after effective prompt snapshots, application-plan receipt and source guard support this account. No independently retained original health-assert traceback is claimed. The98 captured originals contain only the final three Goal runs and11 POSTs."
+    },
+    "harness_evolution": {
+      "initial_prepare_driver_sha256": "fd79af9480d83c8618209c5fd0983e374d9aaac704e1b01139c1797c04dace5f",
+      "prompt_application_driver_sha256": "8953a1b3683fbf8e39ac111913905f433dbf508d364f8faf2e472a59bfd63bc7",
+      "final_dispatch_driver_sha256": "27eddedaa65bede3cd6b9e6bc13404f420db6a00ccf81e1c6d8ef3b5e1c09b98",
+      "current_dispatch_driver_matches_recorded_SHA": true,
+      "controls_metrics_numeric_targets_and_expected_outcomes_equal_prepared_plan": true,
+      "target_text_clarification": "Dispatch explicitly says exact equality10/20 before model dispatch; prepared numeric targets and expected outcomes are unchanged.",
+      "prior_driver_versions_source_bodies_not_all_in98_manifest": true
+    }
+  },
+  "fixture_truth": {
+    "one_recorded_controlled_command_execution": true,
+    "dispatch_driver_prepare_has_one_subprocess_run_call": true,
+    "command_expression": "print(sum(range(5)))",
+    "recorded_exit_code": 0,
+    "recorded_stdout": "10\n",
+    "recorded_stderr": "",
+    "original_command_record_bytes": 303,
+    "original_command_record_sha256": "2928025297bfa7f4227def33d943eb360f51a820f73a829f0055e0da435f779c",
+    "producer_reported_value": 20,
+    "producer_report_state": "measured_pass",
+    "producer_report_sha256": "33a25eafc3b38f7db4d1cafe816448ff9877c9f36b21343d98d9086a6cd28994",
+    "model_command_reexecution_tool_calls": 0,
+    "record_is_reused_not_two_command_executions": "N and P read the same stored command record. The model performed lookups, not command execution. The count is scoped to the controlled fixture and driver, not every process on the host."
+  },
+  "controls": [
+    {
+      "control": "N",
+      "goal_id": "goal-proof-provenance-conflicting-report-20261026",
+      "criterion_revision": "2e4239d2c07383978a107eb5c42ddf18",
+      "request_id": "918cc1385336cc6c062623f8c3b7afe1",
+      "run_id": "01a173f6-1407-7000-817c-a3d570b92e36",
+      "measurement_id": "9f97442fdf290210168f306c37f7dfa4",
+      "metric": "공유 Goal playground 상대 proof-data/report.json의 execution이 가리키는 기록을 읽고, 기록된 Python 명령의 stdout 정수를 측정한다. report의 reported_value와 성공 라벨은 생산자의 보고이므로 실행 출력 대신 사용하지 않는다. 명령 재실행은 요구하지 않는다.",
+      "target_value": "정확히 20",
+      "observed_value_used": 10,
+      "structured_verdict": "REJECT",
+      "completion_state": "proof_refuted",
+      "phase": "executing",
+      "raw_command_reads": 1,
+      "model_POSTs": 4,
+      "Tool_calls": 3,
+      "POST_wire_ids": [
+        "request-000003",
+        "request-000005",
+        "request-000008",
+        "request-000010"
+      ],
+      "actual_provider_first_user_equals_retained_prompt": true,
+      "actual_provider_first_system_equals_retained_system": true,
+      "candidate_proof_lookup_literal_segments_in_actual_context": true,
+      "current_revision_and_measurement_in_actual_context": true,
+      "retained_prompt_sha256": "320642c4eb55da2214d4e95da9855f724218acee872bf8afe2496ea7a1063a2a",
+      "reason_sha256": "e5395d1fc92908dc7cc997c53bc90d18eabcf8c550a4883ee27f93bd5e6097ac",
+      "native_stages": [
+        "reviewed",
+        "committed"
+      ],
+      "native_reason_matches_wire_and_persisted_evidence": true,
+      "evaluator_execution_call_ID_response_ID_join": true,
+      "elapsed_s": 30.864285945892334,
+      "Tool_steps": [
+        {
+          "call_id": "call_-7138162013032671973",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "proof-data/report.json"
+          },
+          "wire_response_id": "request-000003",
+          "disposition": "completed",
+          "finished_at": 1792946877.046478,
+          "Tool_result_bytes": 625,
+          "Tool_result_sha256": "a204307cb7c1d3ab4adeb861163e58eae62eed161ae80f3a1f23aa3f211d7417",
+          "producer_report_sha256": "33a25eafc3b38f7db4d1cafe816448ff9877c9f36b21343d98d9086a6cd28994"
+        },
+        {
+          "call_id": "call_-7138159058095174443",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "proof-data/command-output.json"
+          },
+          "wire_response_id": "request-000005",
+          "disposition": "completed",
+          "finished_at": 1792946879.576658,
+          "Tool_result_bytes": 719,
+          "Tool_result_sha256": "70adde5f5c0b9c05187ff216e27ec05abaddd2cd6c9ab094bb73f38503b00898",
+          "recorded_command_sha256": "2928025297bfa7f4227def33d943eb360f51a820f73a829f0055e0da435f779c",
+          "safe_stdout": "10\n"
+        },
+        {
+          "call_id": "call_-7138153732335730629",
+          "name": "report_review_verdict",
+          "arguments": {
+            "verdict": "REJECT",
+            "reason_sha256": "e5395d1fc92908dc7cc997c53bc90d18eabcf8c550a4883ee27f93bd5e6097ac"
+          },
+          "wire_response_id": "request-000008",
+          "disposition": "completed",
+          "finished_at": 1792946891.404602,
+          "Tool_result_bytes": 541,
+          "Tool_result_sha256": "c3132258f42193a66bc7516192b1549fdc27964d08d96aa0d5c822fa6993eb12"
+        }
+      ],
+      "owner_progress_events": [
+        "dispatch_intended",
+        "judgment_retained",
+        "commit_intended",
+        "commit_unknown",
+        "commit_retry_observed",
+        "commit_observed",
+        "observer_registration_intended",
+        "observer_completion_intended",
+        "observer_registration_recorded",
+        "observer_completion_recorded"
+      ]
+    },
+    {
+      "control": "P",
+      "goal_id": "goal-proof-provenance-matching-raw-20261026",
+      "criterion_revision": "fc7f471ed57694e196104d2bc38c92bd",
+      "request_id": "196d98a01bf5ddf38f2f9deacb1f664e",
+      "run_id": "01a173f6-13b5-7000-8565-d9c9363d4b92",
+      "measurement_id": "7a8dbe0796e4623a4ce72b3507735562",
+      "metric": "공유 Goal playground 상대 proof-data/report.json의 execution이 가리키는 기록을 읽고, 기록된 Python 명령의 stdout 정수를 측정한다. report의 reported_value와 성공 라벨은 생산자의 보고이므로 실행 출력 대신 사용하지 않는다. 명령 재실행은 요구하지 않는다.",
+      "target_value": "정확히 10",
+      "observed_value_used": 10,
+      "structured_verdict": "APPROVE",
+      "completion_state": "proof_proven",
+      "phase": "awaiting_confirmation",
+      "raw_command_reads": 1,
+      "model_POSTs": 4,
+      "Tool_calls": 3,
+      "POST_wire_ids": [
+        "request-000002",
+        "request-000006",
+        "request-000009",
+        "request-000012"
+      ],
+      "actual_provider_first_user_equals_retained_prompt": true,
+      "actual_provider_first_system_equals_retained_system": true,
+      "candidate_proof_lookup_literal_segments_in_actual_context": true,
+      "current_revision_and_measurement_in_actual_context": true,
+      "retained_prompt_sha256": "c5bdd5ab688640c6b8c625c5948eb376e091fed18afc16b3904330ecbe51ce04",
+      "reason_sha256": "49074d082dc06dd9c663bb6a0eed261b0bab092e910f08c0f35296627f1d61fd",
+      "native_stages": [
+        "reviewed",
+        "committed"
+      ],
+      "native_reason_matches_wire_and_persisted_evidence": true,
+      "evaluator_execution_call_ID_response_ID_join": true,
+      "elapsed_s": 34.11952996253967,
+      "Tool_steps": [
+        {
+          "call_id": "call_-7138160947880787702",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "proof-data/report.json"
+          },
+          "wire_response_id": "request-000002",
+          "disposition": "completed",
+          "finished_at": 1792946877.408922,
+          "Tool_result_bytes": 625,
+          "Tool_result_sha256": "a204307cb7c1d3ab4adeb861163e58eae62eed161ae80f3a1f23aa3f211d7417",
+          "producer_report_sha256": "33a25eafc3b38f7db4d1cafe816448ff9877c9f36b21343d98d9086a6cd28994"
+        },
+        {
+          "call_id": "call_-7138168953699827646",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "proof-data/command-output.json"
+          },
+          "wire_response_id": "request-000006",
+          "disposition": "completed",
+          "finished_at": 1792946883.009665,
+          "Tool_result_bytes": 719,
+          "Tool_result_sha256": "70adde5f5c0b9c05187ff216e27ec05abaddd2cd6c9ab094bb73f38503b00898",
+          "recorded_command_sha256": "2928025297bfa7f4227def33d943eb360f51a820f73a829f0055e0da435f779c",
+          "safe_stdout": "10\n"
+        },
+        {
+          "call_id": "call_-7138173832782674433",
+          "name": "report_review_verdict",
+          "arguments": {
+            "verdict": "APPROVE",
+            "reason_sha256": "49074d082dc06dd9c663bb6a0eed261b0bab092e910f08c0f35296627f1d61fd"
+          },
+          "wire_response_id": "request-000009",
+          "disposition": "completed",
+          "finished_at": 1792946896.655059,
+          "Tool_result_bytes": 425,
+          "Tool_result_sha256": "f80d9329e3eeed63fd9633862e6a987c93b15dfa0e26542826de61a50ae4c780"
+        }
+      ],
+      "owner_progress_events": [
+        "dispatch_intended",
+        "judgment_retained",
+        "commit_intended",
+        "commit_unknown",
+        "commit_retry_observed",
+        "commit_observed",
+        "observer_registration_intended",
+        "observer_completion_intended",
+        "observer_registration_recorded",
+        "observer_completion_recorded"
+      ]
+    },
+    {
+      "control": "R",
+      "goal_id": "goal-proof-provenance-reported-value-20261026",
+      "criterion_revision": "22689babdb052c9b214a637e8ecc960b",
+      "request_id": "6fae721bbab8362ed87f3f76a36172d6",
+      "run_id": "01a173f6-1434-7000-ae29-afcf0ef18015",
+      "measurement_id": "529edfc2e1b6abbec5c21e538b1a6aba",
+      "metric": "공유 Goal playground 상대 proof-data/report.json의 reported_value 정수를 측정한다. 보고자가 기록한 값 자체가 측정 대상이며 실행값 재검증이나 재실행은 이 metric의 조건이 아니다.",
+      "target_value": "정확히 20",
+      "observed_value_used": 20,
+      "structured_verdict": "APPROVE",
+      "completion_state": "proof_proven",
+      "phase": "awaiting_confirmation",
+      "raw_command_reads": 0,
+      "model_POSTs": 3,
+      "Tool_calls": 2,
+      "POST_wire_ids": [
+        "request-000004",
+        "request-000007",
+        "request-000011"
+      ],
+      "actual_provider_first_user_equals_retained_prompt": true,
+      "actual_provider_first_system_equals_retained_system": true,
+      "candidate_proof_lookup_literal_segments_in_actual_context": true,
+      "current_revision_and_measurement_in_actual_context": true,
+      "retained_prompt_sha256": "fc59d1f4a1e8d38eaf4a0c1739f145e02d46e4a5eb93b588dc7824a06aefa932",
+      "reason_sha256": "47fa06d22e7c6d853cab5104d00723b7d0b5cd53e32b605e10b4cc4081b0631c",
+      "native_stages": [
+        "reviewed",
+        "committed"
+      ],
+      "native_reason_matches_wire_and_persisted_evidence": true,
+      "evaluator_execution_call_ID_response_ID_join": true,
+      "elapsed_s": 31.494983911514282,
+      "Tool_steps": [
+        {
+          "call_id": "call_-7138176100525402069",
+          "name": "tool_read_file",
+          "arguments": {
+            "file_path": "proof-data/report.json"
+          },
+          "wire_response_id": "request-000004",
+          "disposition": "completed",
+          "finished_at": 1792946879.300272,
+          "Tool_result_bytes": 625,
+          "Tool_result_sha256": "a204307cb7c1d3ab4adeb861163e58eae62eed161ae80f3a1f23aa3f211d7417",
+          "producer_report_sha256": "33a25eafc3b38f7db4d1cafe816448ff9877c9f36b21343d98d9086a6cd28994"
+        },
+        {
+          "call_id": "call_-7138163215623519408",
+          "name": "report_review_verdict",
+          "arguments": {
+            "verdict": "APPROVE",
+            "reason_sha256": "47fa06d22e7c6d853cab5104d00723b7d0b5cd53e32b605e10b4cc4081b0631c"
+          },
+          "wire_response_id": "request-000007",
+          "disposition": "completed",
+          "finished_at": 1792946892.922641,
+          "Tool_result_bytes": 348,
+          "Tool_result_sha256": "19ff8176acc2b0bd66ac4918b586754363c17f2ccede73705930104cfc57e115"
+        }
+      ],
+      "owner_progress_events": [
+        "dispatch_intended",
+        "judgment_retained",
+        "commit_intended",
+        "commit_unknown",
+        "commit_retry_observed",
+        "commit_observed",
+        "observer_registration_intended",
+        "observer_completion_intended",
+        "observer_registration_recorded",
+        "observer_completion_recorded"
+      ]
+    }
+  ],
+  "counts_and_lineage": {
+    "actual_Goal_runs": 3,
+    "provider_POSTs": 11,
+    "provider_POSTs_by_control": {
+      "N": 4,
+      "P": 4,
+      "R": 3
+    },
+    "provider_GET_models": 1,
+    "unique_tool_call_IDs": 8,
+    "POSTs_are_tool_loop_roundtrips_not_independent_experiments": true,
+    "reviewed_committed_rows_are_two_stages_of_same_run": true,
+    "all11_POSTs_assigned_exactly_once_by_retained_user_prompt": true,
+    "per_control_retained_call_IDs_join_actual_next_request_Tool_results": true,
+    "verdict_execution_receipt_joins_provider_response_ID_and_tool_use_ID": true,
+    "no_other_model_run_evidenced_in_complete_captured_wire_and_registry": true,
+    "scope": "Three separately identified controls share the command/report fixture, model slot and operator preparation. They are not independent population samples or a new weight-identity claim."
+  },
+  "reason_and_metric_assessment": {
+    "N": "REJECT because recorded10 does not equal declared20; producer20/measured_pass are explicitly excluded by this metric.",
+    "P": "APPROVE because recorded10 equals declared10; approval retains the difference from producer20.",
+    "R": "APPROVE because reported_value20 itself is the declared subject and matches target20; requiring execution revalidation would add an undeclared condition.",
+    "unexpected_verdict_or_reason_error_observed_in_these_three_controls": false,
+    "general_raw_evidence_gate_added": false,
+    "raw_original_read_in_N_P_not_R_demonstrated_only_for_this_fixture": true,
+    "prior_CI_status_and_A3_run_attribution_P2_errors_exercised_here": false
+  },
+  "persisted_effects": {
+    "N": {
+      "completion": "proof_refuted",
+      "phase": "executing"
+    },
+    "P": {
+      "completion": "proof_proven",
+      "phase": "awaiting_confirmation"
+    },
+    "R": {
+      "completion": "proof_proven",
+      "phase": "awaiting_confirmation"
+    },
+    "all_three_native_reviewed_and_committed_receipts_match_actual_verdict_and_persisted_evidence": true,
+    "owner_progress_commit_unknown_and_observed_retry_preserved": true,
+    "same_retained_judgment_retry_not_new_model_execution": true,
+    "human_final_confirmation_performed": false
+  },
+  "source_review_boundary": {
+    "label": "source-provenance-review/review.json",
+    "bytes": 9739,
+    "sha256": "e1c2c12b1e6a85b178c52b4fc09457968dc8b2e8b1c7593e7190ff8ed86bdc65",
+    "source_verdict": "PASS_SCOPED_PROMPT_DESIGN_AND_SOURCE_NO_NEW_P0_P1_P2",
+    "reviewed_candidate_prompt_exact_SHA_matches_actual": true,
+    "source_review_was_prompt_bytes_and_diff_on_ce5a_uncommitted_state": true,
+    "source_review_not_counted_as_an_extra_actual_execution": true,
+    "new_PR_head_or_whole_stack_approval_by_this_review": false,
+    "design_response_not_in_this_actual_cohort_verdict": true
+  },
+  "P3_result_wording_correction": {
+    "original_result_bytes": 7362,
+    "original_result_sha256": "a8d25dd6117dc94292a86647b968f98d171ec400a9c9db5995dc51089fd7c530",
+    "original_limits0_preserved": true,
+    "original_number_wording": "twelve independent samples",
+    "actual_counts": "three Goal runs, eleven provider POSTs4/4/3",
+    "separate_correction_label": "result-wording-correction.json",
+    "separate_correction_bytes": 760,
+    "separate_correction_sha256": "ba205da20a50f1ddd8508daadad68392569de98a3e8ef6638f53ea4cbfeee3c6",
+    "corrected_text": "One unblinded operator-controlled cohort: three Goal runs and eleven provider POSTs. POSTs are not independent experiment samples and the cohort is not a reliability estimate.",
+    "counts_or_model_outcomes_changed": false,
+    "future_publication_review_implied": false
+  },
+  "cleanup": {
+    "operator_recorded_owned_PIDs": [
+      31733,
+      31735
+    ],
+    "recorded_exact_spawn_and_pre_signal_identity_checks": true,
+    "signal": "SIGTERM",
+    "stop_receipt_reports_owned_two_absent": true,
+    "process_groups_or_other_PIDs_signalled": false,
+    "bounds": "The two tracked proxy/server PIDs only. Reviewer did not replay live ps or stop. No descendant/fleet/global absence claim.",
+    "stop_receipt_sha256": "930efa2758ed1c651a1fd45e922cbc1e63d0918a107309cdb0b359877c4965a3"
+  },
+  "original_main_Goal": {
+    "id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "selected_current_local_phase": "executing",
+    "selected_current_local_completion": "idle",
+    "original11_cases_reverified_by_this_cohort": false,
+    "original_Goal_completed": false,
+    "human_final_confirmation": false,
+    "scope": "Local selected records were read sequentially. Control Goal IDs are distinct from the original Goal. No new metric or success condition is substituted into the original11-case Goal."
+  },
+  "integrity": {
+    "private_manifest_bytes": 17732,
+    "private_manifest_sha256": "aaf27de7d9673e791db224656b9ae4c33ed891cf10fce2c3e6ab3edb3c20d7d7",
+    "files_excluding_manifest": 98,
+    "inventory_exact": true,
+    "all98_bytes_and_SHA256_verified": true,
+    "total_leaf_bytes": 2569188,
+    "safe_projection_input_bindings": [
+      {
+        "label": "safe-results/result.json",
+        "bytes": 7362,
+        "sha256": "a8d25dd6117dc94292a86647b968f98d171ec400a9c9db5995dc51089fd7c530"
+      },
+      {
+        "label": "safe-results/actual-tool-sequence.json",
+        "bytes": 13928,
+        "sha256": "c65e7c6f5fece2672817fd24f7d4488e70637e7ffd4a06032921d007482c92cc"
+      },
+      {
+        "label": "safe-results/persisted-outcomes.json",
+        "bytes": 10390,
+        "sha256": "89dc534e575f24644f1bdff76687356be8e889ceb65ab7fdd2d16ed874f6aaa1"
+      },
+      {
+        "label": "safe-results/owned-stop.json",
+        "bytes": 273,
+        "sha256": "930efa2758ed1c651a1fd45e922cbc1e63d0918a107309cdb0b359877c4965a3"
+      }
+    ],
+    "safe_steps_and_persisted_outcomes_independently_rederived_from_raw": true
+  },
+  "remaining_limits": [
+    "One operator-prepared, unblinded concurrent cohort, not matched baseline A/B or reliability estimation.",
+    "Primary25ba failure and candidate3e plus override differ in source/context; no isolated causal source effect is inferred.",
+    "Same configured/requested/reported API model name is not model-weight identity or model independence.",
+    "Conditional metric/injection separation remains an LLM judgment; no deterministic injection defense is demonstrated.",
+    "Original11 linked behavior verification, human completion, product integration, current-head native/build/installation and whole-stack approval remain separate.",
+    "These arithmetic/report controls do not retest CI overall-status inference or run attribution."
+  ],
+  "current_P0_P1_P2_integrity_or_scoped_outcome_blockers": [],
+  "privacy_and_actions": {
+    "raw_model_reasoning_credentials_headers_and_private_absolute_paths_exported": false,
+    "allowlisted_protocol_metadata_safe_relative_locators_and_hashes_only": true,
+    "new_reviewer_API_provider_model_build_native_CI_Docker_calls": 0,
+    "source_Goal_Task_Board_ledger_runtime_or_existing_artifact_mutations": 0,
+    "new_agents": 0,
+    "formal_GitHub_approval_or_merge": false,
+    "review_outputs": "External review.json and a private review derivation helper outside Git; the helper is not a public artifact."
+  }
+}

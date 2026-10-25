@@ -1,0 +1,27 @@
+{
+  "schema": "masc.goal.external-review-carry-correction.v1",
+  "old_head": "6373afb2e651d27312886866a2c2a7dd0060a3f3",
+  "current_head": "4b81e6ad9cd98971bec40eff75ef69782a354d6e",
+  "canonical_delta_sha256": "896376597f781bf5fd3051e40b57e34dd4028c2895ff696a7ce24d21cbcf852e",
+  "raw_binary_diff_sha256": "02ce31d43a2587881e3ccc70ed244e702d26fecbbc81764e3d9f91992bfca453",
+  "changed_files": [
+    "changelog.d/46001.md",
+    "config/prompts/goal_verification.md",
+    "docs/evidence/2026-10-26-goal-declared-aggregation/README.md",
+    "docs/evidence/2026-10-26-goal-declared-aggregation/actual-tool-sequence.json",
+    "docs/evidence/2026-10-26-goal-declared-aggregation/cohort-review.json",
+    "docs/evidence/2026-10-26-goal-declared-aggregation/manifest.json",
+    "docs/evidence/2026-10-26-goal-declared-aggregation/owned-stop.json",
+    "docs/evidence/2026-10-26-goal-declared-aggregation/persisted-outcome.json",
+    "docs/evidence/2026-10-26-goal-declared-aggregation/previous-source-fail.json",
+    "docs/evidence/2026-10-26-goal-declared-aggregation/private-originals-manifest.json",
+    "docs/evidence/2026-10-26-goal-declared-aggregation/result.json",
+    "docs/evidence/2026-10-26-goal-declared-aggregation/source-response.json"
+  ],
+  "stat": " changelog.d/46001.md                               |   2 +-\n config/prompts/goal_verification.md                |   6 +-\n .../2026-10-26-goal-declared-aggregation/README.md |  67 ++++\n .../actual-tool-sequence.json                      | 152 +++++++++\n .../cohort-review.json                             | 363 +++++++++++++++++++++\n .../manifest.json                                  |  54 +++\n .../owned-stop.json                                |   9 +\n .../persisted-outcome.json                         |  51 +++\n .../previous-source-fail.json                      | 284 ++++++++++++++++\n .../private-originals-manifest.json                | 284 ++++++++++++++++\n .../result.json                                    |  67 ++++\n .../source-response.json                           |  84 +++++\n 12 files changed, 1420 insertions(+), 3 deletions(-)\n",
+  "prompt_delta": "diff --git a/config/prompts/goal_verification.md b/config/prompts/goal_verification.md\nindex 7feecd48294..bacc7183f5c 100644\n--- a/config/prompts/goal_verification.md\n+++ b/config/prompts/goal_verification.md\n@@ -105,8 +105,10 @@ metric이 관측 가능한 것을 하나도 가리키지 않는다면 그것이\n \n 측정값을 만들어 낼 소스 코드는 실행 관측값이 아닙니다. CI의 전체 상태와\n 개별 검사의 결과도 구분합니다. 일부 검사가 성공하고 다른 검사가 실패한\n-실행의 전체 상태가 실패인 것은 모순이 아닙니다. 서로 다른 실행의 결과는\n-각자의 식별자·범위로 판단하고 합치거나 바꾸어 인용하지 않습니다.\n+실행의 전체 상태가 실패인 것은 모순이 아닙니다. 여러 실행을 집계하는\n+metric이라면 각 실행의 식별자·범위를 보존해 선언된 방식으로 집계합니다.\n+선언된 집계 범위 밖의 결과를 섞거나 한 실행의 결과를 다른 실행의 근거로\n+바꾸어 인용하지 않습니다.\n \n metric이 무언가를 가리켰고, 그것을 열었는데 target에 도달하지 못했다면,\n 읽은 내용을 말하고 REJECT 합니다. 아무도 측정하지 않은 작업에는 \"측정값이\n",
+  "assessment": "The saved external current-head COMMENT claims a restack with byte-preserved files/diff0. Actual exact Git objects change12 files, including the conditional declared-aggregation prompt repair and new evidence. That carry claim is invalid. The COMMENT is not a guarded formal APPROVED. The independent full current-head/base/f41e source review is a separate valid record.",
+  "current_ready_state": true,
+  "no_comment_posted_or_edited": true,
+  "no_head_or_base_mutation": true
+}

@@ -1,0 +1,142 @@
+{
+  "schema": "masc.original-goal.root-index-proof-review-response.v1",
+  "status": "FINAL_FROZEN",
+  "frozen_at_utc": "2026-10-25T16:51:08.863918+00:00",
+  "verdict": "AGREES_P2_VERIFICATION_OMISSION_AND_NORMAL_REOPEN_WITH_P3_CHRONOLOGY_LIMIT",
+  "review_read_in_full": true,
+  "identity": {
+    "source_sha_from_frozen_review": "25ba22387ffe0d71be8e0f8e58cb66b4bfa5237a",
+    "binary_sha256_from_frozen_review": "d282dceb915388bfb9886aa9d49a02336016fe725738aafa6be0ea0dcd2ddf6d",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "request_id": "b698fd712cfeb95c27549460520d610f",
+    "run_id": "01a173e9-ffe9-7000-856a-d284a2cd20a2"
+  },
+  "decision": {
+    "P2": "The declared metric requires reading the cases AND linked original evidence and judging actual behavior. The retained execution records only two canonical-report pages and one delivery-index read, followed by APPROVE. The full reason relies on measured_pass labels and summary counts. That does not discharge the already declared linked-original requirement; no new success condition is introduced.",
+    "recorded_reads": {
+      "canonical_pages": 2,
+      "index": 1,
+      "linked_case_files": 0,
+      "actual_behavior_source_result_leaves": 0,
+      "verdict_tools": 1
+    },
+    "effect": "The native registry records reviewed then committed for the same run; the saved Goal and verification snapshots show proof_proven/awaiting_confirmation. The false positive is an operational proof-quality finding, not inferred merely from registration.",
+    "preserved_nonconclusions": [
+      "The existing eleven source-scoped action observations are not reclassified as failures.",
+      "Required original sources are not declared absent or invalid.",
+      "No current-head, production, microVM, model-independence or approval-certificate condition is added.",
+      "This approval is not sufficient proof of the original criterion or human final Goal completion."
+    ]
+  },
+  "delivery_distinction": {
+    "retained_prompt_bytes": 6433,
+    "retained_prompt_sha256": "35c64258d3b56e0bf5f3468552f008013401b1838fb5f14364f51238e2b8a931",
+    "mirror_filename_in_prompt_and_layout": true,
+    "reported_measurement_rendering_present": false,
+    "submitted_evidence_count": 0,
+    "index_lookup_completed": true,
+    "assessment": "The existing carrier did reach the retained Original and a recorded successful index lookup. Discovery/delivery succeeded at that boundary; it did not cause the judge to inspect the linked originals. The old primary did not acquire the candidate reported_measurement feature.",
+    "limits": "The first three Tool output excerpts are bounded/truncated. No full Tool-body equality or provider-wire delivery claim is made; requested/reported model identity and unique provider-call joins are not established here."
+  },
+  "explanation_storage": {
+    "full_reason_chars": 478,
+    "full_reason_bytes": 692,
+    "full_reason_sha256": "6f41aa77c47a4ecb7cce5ff2dae32685f6f3c435e5df7a2b4953923623740877",
+    "retained_result_reason_equals_persisted_verdict_evidence": true,
+    "pre_reopen_verdict_reason": null,
+    "pre_reopen_goal_last_review_note": null,
+    "assessment": "The full explanation is in verdict.evidence. Null verdict.reason and null pre-reopen last_review_note do not mean that no explanation was retained, and this response does not classify that field distinction as a product defect. The later reopen note is an operator transition note, not the original verifier explanation."
+  },
+  "normal_reopen": {
+    "saved_request_method": "masc_goal_transition",
+    "saved_action": "reopen",
+    "receipt_status": "ok",
+    "receipt_phase": "executing",
+    "receipt_completion": "idle",
+    "receipt_updated_at": "2026-10-25T16:39:42Z",
+    "same_id_title_metric_target_revision": true,
+    "human_completion": false,
+    "assessment": "The saved normal transition request and successful decoded receipt bind the same Goal/criterion and return executing/idle after the preserved approval. This response makes no new API call or live cross-store observation and does not claim an atomic current-state snapshot."
+  },
+  "additional_response_finding": {
+    "severity": "P3",
+    "kind": "Chronology/provenance wording",
+    "finding": "The label pack-integrity-before-terminal and review wording that its receipt verifies73 leaves before terminal overstate the recorded time boundary.",
+    "verdict_tool_finished_at_utc": "2026-10-25T16:36:48.294908+00:00",
+    "proof_recorded_at_utc": "2026-10-25T16:37:09Z",
+    "integrity_receipt_observed_at_utc": "2026-10-25T16:37:17.838135+00:00",
+    "disposition": "Treat this receipt as a later integrity readback, potentially before the operator observed terminal, rather than proof that this specific check preceded the actual verdict/commit. Preserve the frozen file and report. The independent reviewer's73-leaf hash/readability check is likewise review-time evidence, not an atomic run-time snapshot.",
+    "P2_impact": "This correction does not change the omitted-read P2. The judge did not attempt linked-original reads and recorded no missing-source failure. It does not justify a source-absence conclusion; existing prepared-pack evidence remains separately attributable."
+  },
+  "scope_and_handoff": {
+    "same_run_not_multiple_samples": true,
+    "commit_observation_retry_not_model_rerun": true,
+    "model_runtime_limit": "glm-coding.glm-5.3-flash is the retained evaluator-runtime receipt, not independently audited provider-reported weights.",
+    "no_duplicated_full_evidence_audit": "The73-leaf review is attributed to the frozen independent review. This response independently checked the selected original/request/judgment/registry/terminal/reopen artifacts and their hashes rather than repeating the whole pack audit.",
+    "required_next_claim_boundary": "Keep the normal reopen and insufficient proof public scope distinct from the eleven historical action observations. A later prompt repair/control has its own source and execution identity and does not retroactively validate this approval."
+  },
+  "input_bindings": [
+    {
+      "path": "../masc-goal-original-proof-root-index-review-20261026/review.json",
+      "bytes": 12285,
+      "sha256": "be8401c9a93d8fbcabc526bdfb34de29cad9750f8bba299743de9aff6bb61954"
+    },
+    {
+      "path": "../masc-goal-original-proof-root-index-20261026-v1/original-request-private.json",
+      "bytes": 10239,
+      "sha256": "e05cccfb4359e63fda14312972a10d08b5da5bcc6b7d23a04d7b238cf4c45e36"
+    },
+    {
+      "path": "../masc-goal-original-proof-root-index-20261026-v1/retained-judgment-private.json",
+      "bytes": 7583,
+      "sha256": "073760b23781ce25e1279663ccc733b4c696d281616896ec146bfdd4f5748ce9"
+    },
+    {
+      "path": "../masc-goal-original-proof-root-index-20261026-v1/terminal-registry.jsonl",
+      "bytes": 14926,
+      "sha256": "97c28ee63f46af3cf7ae05d6414a5b2b223b84cd6e3a2aa81f863f81636c46a9"
+    },
+    {
+      "path": "../masc-goal-original-proof-root-index-20261026-v1/proof-gap-observation.json",
+      "bytes": 3584,
+      "sha256": "55daac19c75e5aebfbb8cfd70ae087755ddf0ccc1c753e59f950e2f1f04c4e7b"
+    },
+    {
+      "path": "../masc-goal-original-proof-root-index-20261026-v1/goal-terminal.json",
+      "bytes": 1226,
+      "sha256": "65f6662c8ddff4ba62afc3f89501f2ec3c696475304938521fc1b87ac059361d"
+    },
+    {
+      "path": "../masc-goal-original-proof-root-index-20261026-v1/verification-terminal.json",
+      "bytes": 2224,
+      "sha256": "9c775eaaf3373bb233132a5dd4e4b6c16a5af54b2934b8862af5679c86b15c39"
+    },
+    {
+      "path": "../masc-goal-original-proof-root-index-20261026-v1/retained-delivery-observation.json",
+      "bytes": 1445,
+      "sha256": "32962f732b75ae57d7ab17be4a4ce50a689e9bf32e11303cd580ed098abf179b"
+    },
+    {
+      "path": "../masc-goal-original-proof-root-index-20261026-v1/pack-integrity-before-terminal.json",
+      "bytes": 373,
+      "sha256": "4b3ca597c60944fb8e559941a099bda40a792478056dca9008ff65053d74a866"
+    },
+    {
+      "path": "../masc-goal-original-proof-root-index-reopen-20261026-v1/reopen-decoded.json",
+      "bytes": 2343,
+      "sha256": "bd6ec061e4284e585b7f333cf78ccb975d60c4514fee15125a0fc653b8d534c1"
+    },
+    {
+      "path": "../masc-goal-original-proof-root-index-reopen-20261026-v1/reopen-once.request.json",
+      "bytes": 994,
+      "sha256": "22768dd3a8338ffc9001a5a94de9c72d227600f82c3f1ef90dcee813f24016b1"
+    }
+  ],
+  "effects": {
+    "API_model_provider_native_CI_Docker_calls": 0,
+    "source_store_prompt_Board_Goal_Task_runtime_or_Git_mutations": 0,
+    "agents_spawned": 0,
+    "only_new_output": "response.json"
+  }
+}

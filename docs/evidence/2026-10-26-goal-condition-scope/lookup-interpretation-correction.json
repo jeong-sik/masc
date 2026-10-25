@@ -1,0 +1,21 @@
+{
+  "schema": "masc.goal.originals.lookup-interpretation-correction.v1",
+  "correction": "A preliminary progress note suspected G1 was the uncovered case. The exact path-only coverage list actually has no A5 path. G1 native controlled-provider log and server receipt were read. A5 original mirrors equal the read A4 original byte for byte. Path-only10/11 is therefore not missing behavior coverage or proof failure by itself.",
+  "unchanged_frozen_result_path_coverage": 10,
+  "byte_identity_linked_file_coverage": 11,
+  "alias": {
+    "read_path": "originals/A4/masc-goal-cohort-identities-root-check.txt",
+    "A5_path": "originals/A5/masc-goal-cohort-identities-root-check.txt",
+    "bytes": 1276,
+    "sha256": "b00ddc965bf4bcd8fc83ea1175d07aa2f9386fa73d6ee50da111a58621cc5db1",
+    "actual_equal_bytes": true,
+    "observed_tests": "test_frozen_resume_rejects_changed_inputs and test_resume_checks_every_original_run_field both ok; report explicitly preserves one skipped Docker test."
+  },
+  "G1": {
+    "native_controlled_provider_suite_read": true,
+    "native_log_bytes": 7707,
+    "live_Ollama_provider_projection_read": false,
+    "not_inferred": "Reading native controlled-provider evidence does not establish that the verifier read the separate live Ollama projection."
+  },
+  "scope": "Lookup/content equivalence analysis only. Independent review must assess sufficient behavior proof, historical scope, identity and final verdict. No source/prompt/inputs/result/Goal change."
+}

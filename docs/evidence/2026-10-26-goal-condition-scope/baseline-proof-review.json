@@ -1,0 +1,1019 @@
+{
+  "schema": "masc.goal.originals.final-prompt-independent-actual-audit.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T18:13:47.165029+00:00",
+  "reviewer": "measurement_publication_review",
+  "verdict": "FAIL_PROOF_SUFFICIENCY_P2_A1_THREE_STAGE_BEHAVIOR_UNCHECKED",
+  "trace_and_artifact_integrity": "PASS",
+  "observed_model_and_store_outcome": "APPROVE / proof_proven / awaiting_confirmation",
+  "decisive_assessment": "The execution and evidence transport are genuine and consistently recorded, but the model approval does not establish the full unchanged11-case target. A1 requires actual verify/regression/build behavior in the supported sandbox. The model read Node verify observations and a README command description instead of the available same-snapshot three-stage execution source. That is a proof-quality false positive for A1, not evidence that A1 behavior itself failed. A5 is a byte-identical path alias; G1 has actual native controlled-HTTP behavior evidence and is not rejected merely because its separate live Ollama projection was unread.",
+  "identity": {
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "actual_server_binary_readback_SHA_verified": true,
+    "embedded_source_and_binary_in_frozen_health_match": true,
+    "candidate_prompt_bytes": 7672,
+    "candidate_prompt_sha256": "529f84a6a36146eca2821e02ade8a9467b166b5d1ed25eea4b37493cc5579539",
+    "candidate_runtime_mechanism": "Two normal isolated persisted proof/lookup overrides on the frozen3e binary. Normal source_binding identifies the untouched3e managed baseline, not candidate529f compiled into that binary.",
+    "prompt_overrides": [
+      {
+        "key": "goal_verification.proof",
+        "bytes": 3691,
+        "sha256": "c753437dc9cae1373e8ccd909d1b33fb86dc5a8be02076e828b5c7225e5b1997",
+        "normal_API_response_ok": true,
+        "effective_value_exact": true,
+        "managed_file_value_unchanged": true
+      },
+      {
+        "key": "goal_verification.lookup",
+        "bytes": 3575,
+        "sha256": "25a7a2ee1a052c9ed6dd0d4eb7378f60b637524a8b479745e903f4fba0768648",
+        "normal_API_response_ok": true,
+        "effective_value_exact": true,
+        "managed_file_value_unchanged": true
+      }
+    ],
+    "requested_models": [
+      "glm-5.3-flash"
+    ],
+    "reported_models": [
+      "glm-5.3-flash"
+    ],
+    "unknown_reported_models": 0,
+    "same_API_model_name_not_weight_identity": true
+  },
+  "Goal_revision_boundary": {
+    "Goal_id": "goal-outcome-driven-work-20261024",
+    "fixture_revision": "5da1f0ed29c5303ac0ca3edcdcd71c89",
+    "original_primary_revision": "306708facbfb9379a9e51b8f7c815678",
+    "same_metric_title_target_values": true,
+    "fixture_revision_is_distinct_intentionally": true,
+    "fixture_retained_base_matches_isolated_runtime": true,
+    "request_id": "b41bc5d926f775b815bc09aa2d7e8853",
+    "run_id": "01a17430-cffe-7000-b8ab-59517b23b216",
+    "measurement_id": "636316e31339a514a9789ed7557664ad",
+    "current_fixture_revision_and_measurement_in_actual_provider_input": true,
+    "historical_evidence_source_revisions_not_rewritten_to_fixture": true,
+    "primary_Goal_proof_or_update_established": false,
+    "original11_behaviors_rerun": false,
+    "human_final_confirmation": false
+  },
+  "immutable_inputs": {
+    "manifest_bytes": 31353,
+    "manifest_sha256": "526d578d8500b71168dbcf9b685ed96cc0cdf6ea36e1a341b8bcaf2cf19d2e6b",
+    "original_file_count": 149,
+    "total_leaf_bytes": 5734397,
+    "all149_bytes_and_SHA_verified": true,
+    "inventory_exact": true,
+    "staged_input_count": 76,
+    "old_delivery_pack_files_including_manifest": 74,
+    "canonical_and_root_carrier_additional_files": 2,
+    "all76_frozen_copies_match_staged_manifest_and_runtime_bytes": true,
+    "old_delivery_manifest_sha256": "2003ed2a127f1dfdbf9d174685d982632c6af99c42c78deed607ad5e749018a8",
+    "canonical_bytes": 26469,
+    "canonical_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+    "root_carrier_byte_equal_index": true,
+    "inputs_and_reported_labels_not_changed_by_review": true
+  },
+  "actual_provider_and_tools": {
+    "Goal_proof_requests": 1,
+    "actual_Goal_runs": 1,
+    "model_POSTs": 11,
+    "GET_models": 1,
+    "unique_tool_calls": 28,
+    "successful_read_pages": 27,
+    "unique_read_paths": 25,
+    "first_actual_user_byte_equal_retained_Original_prompt": true,
+    "first_actual_system_byte_equal_retained_system": true,
+    "retained_prompt_sha256": "90773a44629d57db5285cb014afe4cc7cdb20a6a4401be0609025bebfa88c99f",
+    "same_original_user_preserved_across_all11_POSTs": true,
+    "rendered_candidate_literal_segments_in_actual_prompt": true,
+    "all28_call_IDs_join_actual_Tool_results_in_following_requests": true,
+    "all27_returned_pages_byte_equal_their_original_line_slices": true,
+    "all_read_source_sizes_hashes_and_offsets_match": true,
+    "paged_lookup_records": [
+      {
+        "call_id": "call_-7138077900393150924",
+        "wire_response_id": "request-000002",
+        "path": "codex-mcp-client/goal-outcomes-20261024/acceptance.json",
+        "offset": 1,
+        "returned_lines": 301,
+        "returned_page_bytes": 19721,
+        "file_bytes": 26469,
+        "total_source_lines": 376,
+        "truncated": true,
+        "next_offset": 302,
+        "page_sha256": "c43996551d398a2a200178059b517e5c6c882199fc5d4351001af1e1342e1f21",
+        "source_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950738.367951
+      },
+      {
+        "call_id": "call_-7138077900393150923",
+        "wire_response_id": "request-000002",
+        "path": "goal-outcome-driven-work-20261024-evidence-index.json",
+        "offset": 1,
+        "returned_lines": 116,
+        "returned_page_bytes": 5086,
+        "file_bytes": 5086,
+        "total_source_lines": 116,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "0e52042fcd450c08024b068a6b139516b2cef8e26dceb9d4d7bf04772086d3c7",
+        "source_sha256": "0e52042fcd450c08024b068a6b139516b2cef8e26dceb9d4d7bf04772086d3c7",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950738.369949
+      },
+      {
+        "call_id": "call_-7138093843311748668",
+        "wire_response_id": "request-000003",
+        "path": "codex-mcp-client/goal-outcomes-20261024/acceptance.json",
+        "offset": 302,
+        "returned_lines": 75,
+        "returned_page_bytes": 6748,
+        "file_bytes": 26469,
+        "total_source_lines": 376,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "4e1cfa548ee673681f7fe17930446fb4021c852d6c205fa800eed41d0de89a12",
+        "source_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950744.626204
+      },
+      {
+        "call_id": "call_-7138093843311748667",
+        "wire_response_id": "request-000003",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/manifest.json",
+        "offset": 1,
+        "returned_lines": 251,
+        "returned_page_bytes": 19912,
+        "file_bytes": 34933,
+        "total_source_lines": 526,
+        "truncated": true,
+        "next_offset": 252,
+        "page_sha256": "93bdfd62a727acbe97e24a5826e6d64d1e9c5cce2ec79f469dac7cf525ab7373",
+        "source_sha256": "2003ed2a127f1dfdbf9d174685d982632c6af99c42c78deed607ad5e749018a8",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950744.627443
+      },
+      {
+        "call_id": "call_-7138096111054485626",
+        "wire_response_id": "request-000004",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/manifest.json",
+        "offset": 252,
+        "returned_lines": 275,
+        "returned_page_bytes": 15021,
+        "file_bytes": 34933,
+        "total_source_lines": 526,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "4add3032f45d2effe0ce5be106c1fedbc4fe76fe6f207bc050c5b2bee8db93df",
+        "source_sha256": "2003ed2a127f1dfdbf9d174685d982632c6af99c42c78deed607ad5e749018a8",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950766.535412
+      },
+      {
+        "call_id": "call_-7138096111054485625",
+        "wire_response_id": "request-000004",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/cases/G2.json",
+        "offset": 1,
+        "returned_lines": 47,
+        "returned_page_bytes": 3982,
+        "file_bytes": 3982,
+        "total_source_lines": 47,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "c44771c5cb4fa322f955e9710c756988e3b524fb36c7253781dfbf4b3c71ab98",
+        "source_sha256": "c44771c5cb4fa322f955e9710c756988e3b524fb36c7253781dfbf4b3c71ab98",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950766.536174
+      },
+      {
+        "call_id": "call_-7138081679964364969",
+        "wire_response_id": "request-000005",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json",
+        "offset": 1,
+        "returned_lines": 249,
+        "returned_page_bytes": 10317,
+        "file_bytes": 10317,
+        "total_source_lines": 249,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "739631556cc1787e6eb647023597f4c2827bc673d9acaa032384f8f1e24b600b",
+        "source_sha256": "739631556cc1787e6eb647023597f4c2827bc673d9acaa032384f8f1e24b600b",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950772.654697
+      },
+      {
+        "call_id": "call_-7138081679964364968",
+        "wire_response_id": "request-000005",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/preapproval/g2-alpha-checkpoint.json",
+        "offset": 1,
+        "returned_lines": 201,
+        "returned_page_bytes": 10858,
+        "file_bytes": 10858,
+        "total_source_lines": 201,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "274853f11422b41e1d34fbff7c3d532f8ac80f3e7d62c99339484eee49d17ae1",
+        "source_sha256": "274853f11422b41e1d34fbff7c3d532f8ac80f3e7d62c99339484eee49d17ae1",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950772.656338
+      },
+      {
+        "call_id": "call_-7138089513984720550",
+        "wire_response_id": "request-000006",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-create.json",
+        "offset": 1,
+        "returned_lines": 47,
+        "returned_page_bytes": 2156,
+        "file_bytes": 2156,
+        "total_source_lines": 47,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "750cc3576bbff1538ef10363ffe54c0f68623078dbe06e439a1183238784d03f",
+        "source_sha256": "750cc3576bbff1538ef10363ffe54c0f68623078dbe06e439a1183238784d03f",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950784.930926
+      },
+      {
+        "call_id": "call_-7138089513984720549",
+        "wire_response_id": "request-000006",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-execution.json",
+        "offset": 1,
+        "returned_lines": 14,
+        "returned_page_bytes": 452,
+        "file_bytes": 452,
+        "total_source_lines": 14,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "b03aec0096728d2a85e51b339d8cc675a923f9173a98c483b6a385de69792a43",
+        "source_sha256": "b03aec0096728d2a85e51b339d8cc675a923f9173a98c483b6a385de69792a43",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950784.93135
+      },
+      {
+        "call_id": "call_-7138089513984720548",
+        "wire_response_id": "request-000006",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-submit.json",
+        "offset": 1,
+        "returned_lines": 42,
+        "returned_page_bytes": 1315,
+        "file_bytes": 1315,
+        "total_source_lines": 42,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "db719b6b9e4c9ee91a44b89aaad9bb381b8a5710ec90ac15b492072e2548c718",
+        "source_sha256": "db719b6b9e4c9ee91a44b89aaad9bb381b8a5710ec90ac15b492072e2548c718",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950784.936291
+      },
+      {
+        "call_id": "call_-7138089513984720547",
+        "wire_response_id": "request-000006",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-approval.json",
+        "offset": 1,
+        "returned_lines": 5,
+        "returned_page_bytes": 118,
+        "file_bytes": 118,
+        "total_source_lines": 5,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "03f878421a564b40272bfffd05d1a9f1f5871e660acec76c2393b7128e0f3112",
+        "source_sha256": "03f878421a564b40272bfffd05d1a9f1f5871e660acec76c2393b7128e0f3112",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950784.936808
+      },
+      {
+        "call_id": "call_-7138089513984720546",
+        "wire_response_id": "request-000006",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G1/server-extraction-receipt.json",
+        "offset": 1,
+        "returned_lines": 17,
+        "returned_page_bytes": 985,
+        "file_bytes": 985,
+        "total_source_lines": 17,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "7a47846aaf6b71abc5ecc67503075a99859dd7ec0cbed6b56165565507ad1325",
+        "source_sha256": "7a47846aaf6b71abc5ecc67503075a99859dd7ec0cbed6b56165565507ad1325",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950784.937239
+      },
+      {
+        "call_id": "call_-7138086696486167884",
+        "wire_response_id": "request-000007",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-boundary/README.md",
+        "offset": 1,
+        "returned_lines": 25,
+        "returned_page_bytes": 1380,
+        "file_bytes": 1380,
+        "total_source_lines": 25,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "8f5ec6dcb340496cede1203690fc3dc4078c99ef8270088fa6acf9d1b511ffcd",
+        "source_sha256": "8f5ec6dcb340496cede1203690fc3dc4078c99ef8270088fa6acf9d1b511ffcd",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950796.474596
+      },
+      {
+        "call_id": "call_-7138086696486167883",
+        "wire_response_id": "request-000007",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-boundary/observations.json",
+        "offset": 1,
+        "returned_lines": 37,
+        "returned_page_bytes": 1296,
+        "file_bytes": 1296,
+        "total_source_lines": 37,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "ec606808c2676a645856c8a2f76d3c2da6f2d90452819c1cdc5c9c63192b6233",
+        "source_sha256": "ec606808c2676a645856c8a2f76d3c2da6f2d90452819c1cdc5c9c63192b6233",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950796.47564
+      },
+      {
+        "call_id": "call_-7138086696486167882",
+        "wire_response_id": "request-000007",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/A4/masc-goal-cohort-identities-root-check.txt",
+        "offset": 1,
+        "returned_lines": 14,
+        "returned_page_bytes": 1276,
+        "file_bytes": 1276,
+        "total_source_lines": 14,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "b00ddc965bf4bcd8fc83ea1175d07aa2f9386fa73d6ee50da111a58621cc5db1",
+        "source_sha256": "b00ddc965bf4bcd8fc83ea1175d07aa2f9386fa73d6ee50da111a58621cc5db1",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950796.476668
+      },
+      {
+        "call_id": "call_-7138087933436750135",
+        "wire_response_id": "request-000008",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-goal-readback.json",
+        "offset": 1,
+        "returned_lines": 1,
+        "returned_page_bytes": 5063,
+        "file_bytes": 5063,
+        "total_source_lines": 1,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "90c42f9359b03096742c84387846247027103ea4e9d2185ba7df137a7d1be79c",
+        "source_sha256": "90c42f9359b03096742c84387846247027103ea4e9d2185ba7df137a7d1be79c",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950805.057975
+      },
+      {
+        "call_id": "call_-7138087933436750134",
+        "wire_response_id": "request-000008",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-approval.json",
+        "offset": 1,
+        "returned_lines": 5,
+        "returned_page_bytes": 121,
+        "file_bytes": 121,
+        "total_source_lines": 5,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "801681d8ae775700997306c0dcc639ae7f863a5d1908740c400a456ac204ab13",
+        "source_sha256": "801681d8ae775700997306c0dcc639ae7f863a5d1908740c400a456ac204ab13",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950805.058531
+      },
+      {
+        "call_id": "call_-7138087933436750133",
+        "wire_response_id": "request-000008",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-execution.json",
+        "offset": 1,
+        "returned_lines": 7,
+        "returned_page_bytes": 247,
+        "file_bytes": 247,
+        "total_source_lines": 7,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "143cb5cebafc3bfec928a2b24544e9c8fd6599a9648050b430ef0995a04165de",
+        "source_sha256": "143cb5cebafc3bfec928a2b24544e9c8fd6599a9648050b430ef0995a04165de",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950805.058928
+      },
+      {
+        "call_id": "call_-7138091231971633735",
+        "wire_response_id": "request-000009",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_runtime_response_identity.log",
+        "offset": 1,
+        "returned_lines": 3,
+        "returned_page_bytes": 190,
+        "file_bytes": 190,
+        "total_source_lines": 3,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "72a516de9b99eba245e896e1b7c51815a40f2c03ef9551ea26b0cdf19f281a1f",
+        "source_sha256": "72a516de9b99eba245e896e1b7c51815a40f2c03ef9551ea26b0cdf19f281a1f",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950810.293342
+      },
+      {
+        "call_id": "call_-7138091231971633734",
+        "wire_response_id": "request-000009",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_eval_calibration.log",
+        "offset": 1,
+        "returned_lines": 81,
+        "returned_page_bytes": 3520,
+        "file_bytes": 3520,
+        "total_source_lines": 81,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "23637f87ab7018e2deaa9ef07c5124827b551ace922ca4189947eef6e6e891f2",
+        "source_sha256": "23637f87ab7018e2deaa9ef07c5124827b551ace922ca4189947eef6e6e891f2",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950810.293787
+      },
+      {
+        "call_id": "call_-7138091231971633733",
+        "wire_response_id": "request-000009",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification_operator_evidence.log",
+        "offset": 1,
+        "returned_lines": 44,
+        "returned_page_bytes": 2212,
+        "file_bytes": 2212,
+        "total_source_lines": 44,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "1391f0eb56991349238cc8ef74eba40b05c22a7c6fe0024144154010f07b9d0f",
+        "source_sha256": "1391f0eb56991349238cc8ef74eba40b05c22a7c6fe0024144154010f07b9d0f",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950810.294292
+      },
+      {
+        "call_id": "call_-7138091231971633732",
+        "wire_response_id": "request-000009",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/G1/test_keeper_direct_goal_provider_wire.log",
+        "offset": 1,
+        "returned_lines": 89,
+        "returned_page_bytes": 7707,
+        "file_bytes": 7707,
+        "total_source_lines": 89,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "f8c42c39b2645ce8f8d1f4516b20711b37d816c2b27402228e81bbf4d05fddab",
+        "source_sha256": "f8c42c39b2645ce8f8d1f4516b20711b37d816c2b27402228e81bbf4d05fddab",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950810.294764
+      },
+      {
+        "call_id": "call_-7138091953526141479",
+        "wire_response_id": "request-000010",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification.log",
+        "offset": 850,
+        "returned_lines": 23,
+        "returned_page_bytes": 1099,
+        "file_bytes": 62709,
+        "total_source_lines": 872,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "0b918bbe41af4db9a70bb177155fa652d6f32aa484de179b4841465b87e068b3",
+        "source_sha256": "da80a8d129024f2cda14559d3fe18f9c365d5f1d68e05a650c820b70d620c5a8",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950815.086106
+      },
+      {
+        "call_id": "call_-7138091953526141478",
+        "wire_response_id": "request-000010",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_verification.log",
+        "offset": 850,
+        "returned_lines": 30,
+        "returned_page_bytes": 1489,
+        "file_bytes": 63713,
+        "total_source_lines": 883,
+        "truncated": true,
+        "next_offset": 880,
+        "page_sha256": "d891a0c44ecc13d9a556eb585ca500bdf98415cdbc60f50297867dcdced74e06",
+        "source_sha256": "b0ffb7a7b7c23ce35c152f78ad306ed48eaf67fbdb7eaebdc93aed8fcf5deaba",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950815.086718
+      },
+      {
+        "call_id": "call_-7138091953526141477",
+        "wire_response_id": "request-000010",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-fitness-reread.json",
+        "offset": 1,
+        "returned_lines": 1,
+        "returned_page_bytes": 2920,
+        "file_bytes": 2920,
+        "total_source_lines": 1,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "fd765483471c471fc3868e1ccfe1382b6c84dd28d65afde3f0ed904c8f5647cf",
+        "source_sha256": "fd765483471c471fc3868e1ccfe1382b6c84dd28d65afde3f0ed904c8f5647cf",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950815.087284
+      },
+      {
+        "call_id": "call_-7138091953526141476",
+        "wire_response_id": "request-000010",
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-eval-cohorts/observations.json",
+        "offset": 1,
+        "returned_lines": 16,
+        "returned_page_bytes": 368,
+        "file_bytes": 368,
+        "total_source_lines": 16,
+        "truncated": false,
+        "next_offset": null,
+        "page_sha256": "8b48855e0fccb58059601958ae1f1dac440b12b1232799b1ea4772b929cd24c1",
+        "source_sha256": "8b48855e0fccb58059601958ae1f1dac440b12b1232799b1ea4772b929cd24c1",
+        "page_byte_equal_original_slice": true,
+        "native_finished_at": 1792950815.087824
+      }
+    ],
+    "partial_file_windows_not_misrepresented_as_full_reads": [
+      {
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification.log",
+        "source_lines": 872,
+        "actually_read_lines": [
+          850,
+          851,
+          852,
+          853,
+          854,
+          855,
+          856,
+          857,
+          858,
+          859,
+          860,
+          861,
+          862,
+          863,
+          864,
+          865,
+          866,
+          867,
+          868,
+          869,
+          870,
+          871,
+          872
+        ]
+      },
+      {
+        "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_verification.log",
+        "source_lines": 883,
+        "actually_read_lines": [
+          850,
+          851,
+          852,
+          853,
+          854,
+          855,
+          856,
+          857,
+          858,
+          859,
+          860,
+          861,
+          862,
+          863,
+          864,
+          865,
+          866,
+          867,
+          868,
+          869,
+          870,
+          871,
+          872,
+          873,
+          874,
+          875,
+          876,
+          877,
+          878,
+          879
+        ]
+      }
+    ],
+    "model_wire_metadata": [
+      {
+        "wire_id": "request-000002",
+        "request_sha256": "5fb18d45aca55247e2b2f38dcce4441cbb4adde6285837c11d7f0cb8246f1c13",
+        "response_sha256": "d4c08b4f4213286127ae8ba546063a9041dd62ff0e716e9fcf93dd798fe350ff",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000003",
+        "request_sha256": "0e483c3c43e38ae765165c279dd69d3d06445dc6b0dda2af862456638e42f23c",
+        "response_sha256": "60185cc39664608df6374d299eb8eea5d7f2d02433efe35ca0de273e93f35edf",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000004",
+        "request_sha256": "f53d144f40cbf08d9299b1bedd7995cd633fdc2954a23f322d274a20617d81a6",
+        "response_sha256": "9272a6cb2e25fdc075ad510bc6bc46ae670f83c15a45402c1984d403ba39736a",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000005",
+        "request_sha256": "d4e69e6381256206516f3e39d28524d6611618b2c83b4666fa5d28dfee668075",
+        "response_sha256": "d2dfb9ac4f9c813f1f2d075366337aeb7f0d7348fa6793a2a28e1fb38e3e0559",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000006",
+        "request_sha256": "bc4b21b4bf62a6dbd892a91642b2aa13d88548e916dd1b5732beec140bc469a0",
+        "response_sha256": "60665b735e529da7ce2f8697756c078a8f9b4acfc07dc70d83d8c805b050ca00",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000007",
+        "request_sha256": "029b11412eef3f4d7fb19b64931c93f309f9faf60da0c23aa8c5ec0f55b7515e",
+        "response_sha256": "c351c813d35caa82ccb91789f7988db616c3c95baa614a9e4c225481b16904d4",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000008",
+        "request_sha256": "e23e9dd7cf9019d808c6a7b11fb63a8627937dd4ea27aede8abce29ef1bde85b",
+        "response_sha256": "6a04c0e15b7a001eb78a0e41735ebff35ead2862c95c204f02f1663899ff8fd2",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000009",
+        "request_sha256": "dee4e69da3f9188ed089c404133f3325947ad1aa6a9d3c3e6576cd0acd60c77f",
+        "response_sha256": "97b22c4c58494c930fa5c5e9b4166bf92077b17ae709f037c7890e16c3855182",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000010",
+        "request_sha256": "b2c132a9de6f6d05b4e3f1ac97029123f3d1a2fc9f79c7c756a7784f354c119f",
+        "response_sha256": "2d1f0ff1d9d3d8c13d1e6d4ff4fe509bf72ecd351e2bb318aa33715c1a636712",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000011",
+        "request_sha256": "63272a985e16d493deb8c96fad9dbb7a63d3f3755feb05ad218ef90640fafc31",
+        "response_sha256": "e57c16789d113c0bd8f96dfbca76e43e78f1b295168320b984513079d83eacf6",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      },
+      {
+        "wire_id": "request-000012",
+        "request_sha256": "a6d507eacd9ef268749b5cbca6346361a739b2be4a4698628a600e1dd87a1826",
+        "response_sha256": "068f952e78b1e1f1c5f076818e1a9c726db44c7c985cb5f2182ffa371ffb162c",
+        "http_status": 200,
+        "requested_model": "glm-5.3-flash",
+        "reported_model": "glm-5.3-flash"
+      }
+    ]
+  },
+  "native_ACK_and_persisted_join": {
+    "structured_verdict": "APPROVE",
+    "structured_reason_sha256": "05694714e69a4692c3cedc654ec510d00a4eed31b02c64e6da4ec21f42355cb1",
+    "verdict_ack_contains_full_structured_reason": true,
+    "evaluated_native_decision": "approved",
+    "native_stages": [
+      "reviewed",
+      "committed"
+    ],
+    "same_run_registration_request_and_revision": true,
+    "native_read_history_matches_actual_lookup_arguments_and_success_results": true,
+    "full_structured_reason_matches_retained_judgment_registry_and_persisted_verdict_evidence": true,
+    "evaluator_execution_joins_tool_use_ID_and_provider_response_ID": true,
+    "elapsed_s": 238.44297409057617,
+    "persisted_completion": "proof_proven",
+    "persisted_Goal_phase": "awaiting_confirmation",
+    "persisted_projection_exact_equal_frozen_stores": true,
+    "authority": {
+      "kind": "system_llm_agent",
+      "actor": "verifier_exact"
+    },
+    "owner_progress_events": [
+      "dispatch_intended",
+      "judgment_retained",
+      "commit_intended",
+      "commit_unknown",
+      "commit_retry_observed",
+      "commit_observed",
+      "observer_registration_intended",
+      "observer_completion_intended",
+      "observer_registration_recorded",
+      "observer_completion_recorded"
+    ],
+    "commit_observation_retry_not_an_additional_model_sample": true,
+    "source_of_truth_is_recorded_effect_not_register_running_alone": true
+  },
+  "P2_finding": {
+    "case_id": "A1",
+    "severity": "P2",
+    "kind": "Approval substituted Node verify observations and command documentation for required actual three-stage sandbox behavior.",
+    "existing_requirement": "Coding verify, regression and build execute inside the declared supported grading sandbox; Docker and microVM support boundaries are explicit",
+    "actually_read": "coding-boundary README1380B describes Node verify/oracle restoration and a Python probe command; observations1296B contains four verify_exit values only. The A4/A5 root log explicitly skips its actual-Docker test.",
+    "missing_from_model_reads": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-playground-bootstrap/coding-boundary/actual-coding-boundary.json",
+    "missing_source_bytes": 29007,
+    "missing_source_sha256": "3a6dc21a39518bf62f303682808609272d4b49d92e2e7b8eba4b15e81016bd9a",
+    "available_source_stage_scope": {
+      "source_commit": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+      "stages": [
+        {
+          "stage": "verify",
+          "exit_code": 0
+        },
+        {
+          "stage": "regression",
+          "exit_code": 0
+        },
+        {
+          "stage": "build",
+          "exit_code": 0
+        }
+      ],
+      "same_snapshot_manifest_sha256": "b04488ec3ce1be744c8a016f155c2cb6e393b4a01c0b8f525d53143689fb0729",
+      "same_mount_for_three_stages": true,
+      "initial_incapable_image_failure_preserved": true,
+      "fresh_bad_capture_returns7": true
+    },
+    "source_scope_limits_preserved": "Python fixture grading/build, not project compilation; separate host Node oracle controls are not relabeled actual Docker Node. Docker supported path and microVM boundary remain explicit. No new criterion is added.",
+    "effect_on_approval": "The overall11/11 proof is insufficient in this replay even though the runtime accepted and persisted it. Reviewer knowledge of the available missing source does not retroactively make the model read it or repair the retained verdict.",
+    "does_not_mean_A1_behavior_failed_or_source_absent": true
+  },
+  "A5_alias_and_coverage_correction": {
+    "literal_path_link_coverage": 10,
+    "content_SHA_link_coverage": 11,
+    "neither_count_is_automatic_behavior_sufficiency": true,
+    "A4_and_A5_original_bytes": 1276,
+    "A4_and_A5_original_sha256": "b00ddc965bf4bcd8fc83ea1175d07aa2f9386fa73d6ee50da111a58621cc5db1",
+    "actual_bytes_identical": true,
+    "changed_input_and_full_original_run_field_tests_in_read_body": true,
+    "root_test_counts": "7 tests listed;6 executed non-skipped tests and1 skipped Docker test. Not7 Docker passes.",
+    "correction_label": "lookup-interpretation-correction.json",
+    "correction_bytes": 1493,
+    "correction_sha256": "cbb9040a5a7552413b98920970d37b4d5e529c7d7ae033eba7402b8b41ef2260",
+    "initial_uncovered_G1_suspicion_not_adopted": true
+  },
+  "G1_transport_evidence_adjudication": {
+    "native_log_fully_read": true,
+    "native_log_bytes": 7707,
+    "native_log_sha256": "f8c42c39b2645ce8f8d1f4516b20711b37d816c2b27402228e81bbf4d05fddab",
+    "native_cases": 5,
+    "native_assertion_scope": [
+      "current Goal ID/revision and measurement ID/value/evidence on received HTTP context",
+      "stale observation excluded after revision change",
+      "measurement source failure explicit without borrowing old observation",
+      "Goal primary failure explicit without mirror borrowing",
+      "independent work invents no Goal context"
+    ],
+    "source_used_to_interpret_test": "test/test_keeper_direct_goal_provider_wire.ml",
+    "pinned_source_commit": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+    "pinned_source_bytes": 10804,
+    "pinned_source_sha256": "0edad89318d9e0ffc45aefcf36b49e02817a2e5f188046f721d1f6353d076163",
+    "source_lines": "19-28,92-155",
+    "native_behavior_scope": "Actual Direct.prepare/context assembler/AGENT_CORE injection and captured HTTP serialization to a deterministic local peer. Not an autonomous Keeper or live Ollama model success test.",
+    "separate_live_Ollama_projection_and_context_read_by_verifier": false,
+    "binary_extraction_receipt_alone_proves_G1_behavior": false,
+    "G1_omitted_from_reason_not_used_as_an_independent_failure_gate": true,
+    "assessment": "The declared context-delivery behavior has scoped native original support; this is not credited as the unread separate live-provider observation."
+  },
+  "normalized11_case_rows": [
+    {
+      "case_id": "G1",
+      "requirement": "Keeper receives current-revision Goal criterion, measurement, evidence and explicit missing/unavailable state",
+      "canonical_source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "direct_linked_paths_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G1/server-extraction-receipt.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/G1/test_keeper_direct_goal_provider_wire.log"
+      ],
+      "linked_source_full_SHA_covered": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G1/server-extraction-receipt.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/G1/test_keeper_direct_goal_provider_wire.log"
+      ],
+      "scope_assessment": "SUPPORTED_NATIVE_CONTROLLED_HTTP_TRANSPORT_SCOPE",
+      "assessment": "The full7707B native original has five actual serialized-HTTP checks for current Goal/revision/measurement/evidence, stale exclusion, unavailable sources and independent work. Pinned7501 test source confirms Direct.prepare, Keeper context assembly, AGENT_CORE injection and a receiving HTTP peer. This supports the declared context-delivery behavior at the existing native scope. The separate live Ollama projection/context was not read or validated by this verifier; the binary extraction receipt alone would not prove transport."
+    },
+    {
+      "case_id": "G2",
+      "requirement": "Keeper chooses a matching Goal for related work and creates a Task with its goal_id",
+      "canonical_source_sha": "32805eb764eab2710262446e925b0ea5c3a44c08",
+      "direct_linked_paths_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/preapproval/g2-alpha-checkpoint.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json"
+      ],
+      "linked_source_full_SHA_covered": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/preapproval/g2-alpha-checkpoint.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json"
+      ],
+      "scope_assessment": "SCOPED_BEHAVIOR_SOURCE_READ",
+      "assessment": "Full GLM checkpoint and actual tool/receipt originals retain matching Goal selection/create association and its historical scope."
+    },
+    {
+      "case_id": "G3",
+      "requirement": "Task approval returns attention to the linked Goal measurement and unmet acceptance, without inferring Goal completion",
+      "canonical_source_sha": "32805eb764eab2710262446e925b0ea5c3a44c08",
+      "direct_linked_paths_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json"
+      ],
+      "linked_source_full_SHA_covered": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json"
+      ],
+      "scope_assessment": "SCOPED_BEHAVIOR_SOURCE_READ",
+      "assessment": "The same full continuation source retains the controlled partial approval,1/3-to3/3 measure and remaining work, with Goal proof/human-pending limits; no final Goal completion is inferred."
+    },
+    {
+      "case_id": "G4",
+      "requirement": "Independent goalless Task creation and execution remain supported",
+      "canonical_source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "direct_linked_paths_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-create.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-execution.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-submit.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-approval.json"
+      ],
+      "linked_source_full_SHA_covered": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-create.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-execution.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-submit.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/G4/goalless-approval.json"
+      ],
+      "scope_assessment": "SCOPED_BEHAVIOR_SOURCE_READ",
+      "assessment": "The independent goalless create/execution/submit/operator-approval originals were read. This remains an isolated external-agent control, not Keeper autonomy."
+    },
+    {
+      "case_id": "A1",
+      "requirement": "Coding verify, regression and build execute inside the declared supported grading sandbox; Docker and microVM support boundaries are explicit",
+      "canonical_source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "direct_linked_paths_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-boundary/README.md"
+      ],
+      "linked_source_full_SHA_covered": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-boundary/README.md"
+      ],
+      "scope_assessment": "INSUFFICIENT_REQUIRED_BEHAVIOR_EVIDENCE",
+      "assessment": "The read README and four Node verify_exit observations establish Node oracle restoration/verify and the explicit Docker/microVM boundary, but do not evidence actual regression and build on the same captured Python snapshot. The README gives a probe command, not that command execution. The available29007B actual-coding-boundary source containing the three stages was not read. The root check explicitly skips its Docker test."
+    },
+    {
+      "case_id": "A2",
+      "requirement": "Changing only Node oracle code with broken solution unchanged cannot pass protected grading",
+      "canonical_source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "direct_linked_paths_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-boundary/observations.json"
+      ],
+      "linked_source_full_SHA_covered": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-boundary/observations.json"
+      ],
+      "scope_assessment": "SCOPED_BEHAVIOR_SOURCE_READ",
+      "assessment": "The four actual Node verify observations retain oracle-only failures with broken code unchanged and reference controls passing."
+    },
+    {
+      "case_id": "A3",
+      "requirement": "Image bytes and length must match stored identity before judge or operator delivery",
+      "canonical_source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+      "direct_linked_paths_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification.log",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification_operator_evidence.log"
+      ],
+      "linked_source_full_SHA_covered": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification_operator_evidence.log"
+      ],
+      "scope_assessment": "SCOPED_NATIVE_BEHAVIOR_SOURCE_READ",
+      "assessment": "The full operator evidence suite and the read native verification tail contain changed-size/digest withholding, symlink and judge/TUI propagation assertions. The large verification file was read only as a tail slice, not in full."
+    },
+    {
+      "case_id": "A4",
+      "requirement": "Model and experiment cohorts retain distinct pass@k, cost and unknown coverage",
+      "canonical_source_sha": "2d92eeb337f6e38cc307211d5c662956b8891299",
+      "direct_linked_paths_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-eval-cohorts/observations.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/A4/masc-goal-cohort-identities-root-check.txt"
+      ],
+      "linked_source_full_SHA_covered": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-coding-eval-cohorts/observations.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/A4/masc-goal-cohort-identities-root-check.txt"
+      ],
+      "scope_assessment": "SCOPED_BEHAVIOR_SOURCE_READ",
+      "assessment": "The collector observations distinguish model pass@k, null/unreported cost and experiment cohorts; the original root checks preserve full run/cohort identity controls. No live multi-provider population claim."
+    },
+    {
+      "case_id": "A5",
+      "requirement": "Changed experiment inputs cannot reuse stale resume evidence",
+      "canonical_source_sha": "2d92eeb337f6e38cc307211d5c662956b8891299",
+      "direct_linked_paths_read": [],
+      "linked_source_full_SHA_covered": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/A5/masc-goal-cohort-identities-root-check.txt"
+      ],
+      "scope_assessment": "CONTENT_IDENTICAL_ALIAS_SUPPORTED",
+      "assessment": "The read A4 root-check original is byte-identical to the A5 mirror and explicitly passes changed-input/stale-resume/full-run-field tests. A missing A5 pathname is not missing source content. Its one skipped Docker test is not counted as executed Docker proof."
+    },
+    {
+      "case_id": "A6",
+      "requirement": "Actual producer and judge identity coverage is represented honestly; unknown is not claimed independent",
+      "canonical_source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "direct_linked_paths_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_runtime_response_identity.log",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_verification.log",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_eval_calibration.log"
+      ],
+      "linked_source_full_SHA_covered": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_runtime_response_identity.log",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_eval_calibration.log"
+      ],
+      "scope_assessment": "SCOPED_NATIVE_BEHAVIOR_SOURCE_READ",
+      "assessment": "The full calibration original contains22 tests including unknown/alias/actual model-pair coverage; the standalone response-identity original reports18 actual-source checks. The native verification file is only a partial window. These are controlled native behavior, not model-weight independence."
+    },
+    {
+      "case_id": "A7",
+      "requirement": "LLM approval, observed external acceptance and human Goal confirmation remain distinct facts",
+      "canonical_source_sha": "7501aec032012869d8b979e0d14e1a9a9464ace7",
+      "direct_linked_paths_read": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-approval.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-execution.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-fitness-reread.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-goal-readback.json"
+      ],
+      "linked_source_full_SHA_covered": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-approval.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-execution.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-fitness-reread.json",
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-goal-readback.json"
+      ],
+      "scope_assessment": "SCOPED_BEHAVIOR_SOURCE_READ",
+      "assessment": "Goal readback, approval, execution and fitness reread retain lifecycle approval versus unobserved external acceptance and separate human Goal confirmation. The original controlled operator approval is not relabeled as an independent LLM verdict."
+    }
+  ],
+  "preparation_and_cleanup": {
+    "preparation_recovery_label": "setup/preparation-recovery.json",
+    "earlier_runtime_launches_reported": 0,
+    "earlier_Goal_submissions_reported": 0,
+    "earlier_model_calls_reported": 0,
+    "preparation_failure": "Helper rejected the unresolved output root before the first candidate write; operator recovery resolved the root.",
+    "original_stderr_independently_frozen": false,
+    "empty_root_evidence_limit": "The recovery receipt is the operator record of an empty root and zero earlier effects; no independent original traceback or immutable pre-recovery directory snapshot is claimed.",
+    "owned_processes": [
+      {
+        "pid": 44435,
+        "original_identity_verified": true,
+        "signal": "SIGTERM",
+        "process_absence_verified": true
+      },
+      {
+        "pid": 44431,
+        "original_identity_verified": true,
+        "signal": "SIGTERM",
+        "process_absence_verified": true
+      }
+    ],
+    "cleanup_bound": "Only the two owned server/proxy processes. Reviewer did not repeat live ps/stop and makes no descendant/fleet/primary-global absence claim."
+  },
+  "safe_projection_bindings": [
+    {
+      "label": "safe-results/result.json",
+      "bytes": 9808,
+      "sha256": "e3a4d69dc47c475a3522177eef39e5f24076c1a7a922e6322f334e640d55821e"
+    },
+    {
+      "label": "safe-results/actual-tool-sequence.json",
+      "bytes": 31025,
+      "sha256": "a0052d9f492a0ed8d54157f402e39761d5646142edc28cb4321f7a8fc9194d07"
+    },
+    {
+      "label": "safe-results/persisted-outcome.json",
+      "bytes": 5795,
+      "sha256": "3ce762b65ab8bc8c45ed4b7a3c6ac4745d5a7e8ff7075b418529aad4586d6a0a"
+    },
+    {
+      "label": "safe-results/owned-stop.json",
+      "bytes": 606,
+      "sha256": "290d539f11f5f1d26d80b6689dba5206a93ce784490816fefb30cd96d0afa9d1"
+    }
+  ],
+  "remaining_and_nonclaims": [
+    "This audit does not alter the observed APPROVE or fixture stores.",
+    "Existing historical11-case behavior observations and canonical measured_pass labels are not rewritten as failures.",
+    "No original11 behavior rerun, primary3067 proof, human final confirmation, production install or formal approval.",
+    "No reliability estimate, matched source-only A/B, model-weight independence or whole-stack approval.",
+    "Separate PR46001 source/diff carry correction is outside this actual cohort verdict."
+  ],
+  "privacy_and_actions": {
+    "raw_Thinking_full_provider_messages_credentials_headers_and_private_absolute_paths_exported": false,
+    "public_allowlist_metadata_relative_locators_and_hashes_only": true,
+    "API_model_provider_build_native_CI_Docker_or_source_store_Board_mutations": 0,
+    "new_agents": 0,
+    "formal_GitHub_review_or_merge": false,
+    "outputs": "External review.json plus private derivation helper outside Git. No existing artifacts changed."
+  }
+}

@@ -1,0 +1,284 @@
+{
+  "schema": "masc.goal.proof-provenance.final-source-publication-capture-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T17:18:24.398815+00:00",
+  "verdict": "FAIL_CURRENT_SOURCE_P2_DECLARED_AGGREGATION_RESTRICTION_PUBLICATION_AND_CAPTURE_INTEGRITY_PASS",
+  "verdict_line": "verdict: FAIL head: 6373afb2e651d27312886866a2c2a7dd0060a3f3 by: repair_eval_metrics",
+  "identity": {
+    "PR": 46001,
+    "head": "6373afb2e651d27312886866a2c2a7dd0060a3f3",
+    "direct_base": "ce5ae0548c0b3349b57b46755034c444e260db25",
+    "canonical_complete_diff_sha256": "e2460860627d5805cc6ad3ab5e2cf83433999d6fc2b6e4060148b4a4d7a5c17e",
+    "changed_files": 17,
+    "REST_state": "open",
+    "draft": true,
+    "stack": {
+      "base": {
+        "ref": "main",
+        "sha": "25ba22387ffe0d71be8e0f8e58cb66b4bfa5237a"
+      },
+      "id": 2561944,
+      "number": 45750,
+      "position": 25,
+      "size": 25
+    },
+    "initial_and_final_head_base_and_stack_equal": true,
+    "body_change_during_review": "auto-synced commit-lineage block only; no head/base/diff change"
+  },
+  "scope_and_method": {
+    "reviewed": "This PR only: single prompt change, changelog and15 public evidence files; direct prompt preparation/authority/retention/registry consumers and actual Task2676 capture.",
+    "GitHub_access": "GitHub plugin fetch_pr first; normalized connector omits stack metadata, so read-only gh REST supplemented exact PR and Stacks metadata.",
+    "whole_Stack_approval": false,
+    "other24_layers_re_reviewed": false,
+    "read_method": "Complete immutable Git delta inventory and file bodies. Known source-review/source-response bytes were compared with previously fully read frozen originals; new review/projection/correction documents were read and JSON fields cross-joined. Public98-entry manifest was inspected; private98 original bodies were not re-audited.",
+    "full_diff_files": "inputs/full-diff.raw and inputs/full-diff.patch",
+    "native_CI_or_new_model_execution": false
+  },
+  "findings_P0_P1_P2": [
+    {
+      "severity": "P2",
+      "path": "config/prompts/goal_verification.md",
+      "line": 109,
+      "kind": "Unqualified cross-run combination ban overrides a legitimate declared aggregate metric",
+      "origin": "Author raised the concern during review; reviewer independently read and adjudicated exact current-head wording.",
+      "text": "서로 다른 실행의 결과는 각자의 식별자·범위로 판단하고 합치거나 바꾸어 인용하지 않습니다.",
+      "trigger_ko": "Goal metric이 서로 다른 기록 A와 B의 관측값을 합산·집계하도록 명시하는 경우다. 예를 들어 각 stdout10인 두 기록의 합계20을 정확히20과 비교하는 계약은 정당하다.",
+      "impact_ko": "이 문장은 집계 범위 밖의 결과 혼합뿐 아니라 모든 서로 다른 실행의 합치기까지 금지하는 것으로 읽힌다. 선언된 측정 절차를 따르라는 앞 문구와 충돌해 정상 집계를 거부하거나 값 하나만 채택하는 false REJECT 위험을 만든다. actual aggregate-control 실패를 관측한 것은 아니다.",
+      "bounded_repair_ko": "각 실행 identity를 보존하면서 metric이 선언한 대상·범위·방식으로 집계하도록 허용하고, 선언 범위 밖 혼합 및 A 실행을 B 실행의 근거로 대체하는 행위만 금지하도록 문구를 좁힌다.",
+      "validation_boundary_ko": "기존 N/P/R은 단일 기록/보고값만 비교하므로 이 분기를 실측하지 않았다. 명시된 두 기록의 합계를 요구하는 단일 양성 control이 새 집계 범위의 유용한 후속 실측이다. ordinary source verdict에 새 CI나 모델 실행을 일률적 gate로 요구하지 않는다."
+    }
+  ],
+  "source_assessment": {
+    "prompt_bytes": 7530,
+    "prompt_sha256": "35b6535650e99ec19a39a13a669e19f3a89067173d9a9dd30deab4dfb459b340",
+    "other_changes_ko": "metric의 측정 절차·필수 근거와 역할/승인 주입을 구분하고, reported-number metric의 예외 및 lookup 실패/측정 부재/불충족 이유를 분리하는 변경은 타당하다. CI 전체 실패와 일부 검사 성공을 구분하는 설명도 타당하다.",
+    "consumer_trace": [
+      "Goal_verifier_original.render_prompt renders existing proof/lookup variables and persists exact prompt/system bytes.",
+      "Verification_authority_tools captures current-criterion measurement as context, outside the authority grant digest.",
+      "Goal_verification_agent reuses retained Originals; template changes apply to fresh preparation and do not retrofit old verdicts.",
+      "Prompt_registry resolves effective persisted overrides before rendering."
+    ],
+    "unchanged_placeholder_names": true,
+    "runtime_permission_or_programmatic_gate_added": false,
+    "earlier_frozen_source_PASS": "Preserved as historical exact35b653 review; it did not detect this aggregation wording. It does not clear the new current-head P2."
+  },
+  "publication_integrity": {
+    "manifest_sha256": "5e5b1b99568af427b4c512f32075a479e2b8f1163ee3f5f18eed1bc234e14ac8",
+    "files_including_manifest": 15,
+    "all14_leaf_bytes_and_hashes_match": true,
+    "inventory_exact": true,
+    "private_safe_results_and_review_mirrors_byte_equal": 9,
+    "cross_projection_joins": "Three distinct Goals/runs,11 POSTs4/4/3,8 unique tool calls; protocol/state/result/cohort-review fields agree on criterion/request/run/measurement identities, reason hashes and persisted phases.",
+    "actual_cohort_scope": "Frozen3e binary plus authenticated isolated-runtime proof/lookup persisted overrides. N raw10→REJECT target20; P raw10→APPROVE target10; R reported20 itself→APPROVE target20 with no raw read. One unblinded cohort; no matched baseline A/B, reliability rate, model independence or new-head build.",
+    "raw98_audit": "Attributed to byte-exact cohort-review; cohort-response selected-original checks are separate. This publication review did not repeat or add an independent98-file raw audit.",
+    "P3_corrections": "Both correction files bind unchanged originals.73-leaf readback is post-commit, not pre-verdict availability proof. Original twelve wording is superseded by3runs/11POSTs without altering frozen results.",
+    "README_and_PR_body_limits": "No original11 reproof, human confirmation, primary override/installation, new-head native build or whole-stack/formal GitHub approval claimed. Prior source PASS statements describe frozen reviews; the new P2 now prevents a current source PASS.",
+    "privacy": "Read public JSON/prose and scanned changed text for absolute host paths, authentication-header values and raw reasoning fields; no such literal payloads found. Only safe projections and relative private-original locators/hashes are public.",
+    "integrity_verdict": "PASS; this does not resolve the source P2"
+  },
+  "Task2676_capture": {
+    "verification_id": "vrf-8fefb5759ecd62a459c395ec3f44ec7d",
+    "request_bytes": 148802,
+    "request_sha256": "7812773bb6f46291549775114f6107801eabfd56f93cc984f4086290454b0b4c",
+    "artifact_count": 16,
+    "note_count": 2,
+    "total_items": 18,
+    "all16_UTF8_bytes_declared_bytes_sha_match_producer": true,
+    "all16_truncated_false": true,
+    "producer_inventory_exact": true,
+    "delivery_manifest_bytes": 2806,
+    "delivery_manifest_sha256": "8e8375d4cd55a6b12c019de62deaaf85affe6efe6cbbfe9d4322e266cb54bd37",
+    "manifest15_leaf_hashes_match": true,
+    "13_capture_files_match_public_Git_files": true,
+    "prompt_source_comparison_before_after_match_exact_base_head": true,
+    "publication_receipt_head_base_diff_match_review": true,
+    "saved_before_after_contract_equal": true,
+    "captured_criteria_and_required_artifacts_equal_saved_contract": true,
+    "normal_capture_diagnostics": [],
+    "saved_status_transition": "in_progress → awaiting_verification",
+    "live_Task_status_or_final_verdict_refreshed": false,
+    "raw98_forwarded_or_read_by_Task_judge_claimed": false,
+    "capture_and_submission_are_Task_Done_or_Goal_completion": false,
+    "capture_verdict": "PASS integrity only. The newly identified source P2 is a separate current-content finding; this reviewer does not substitute for the Task judge."
+  },
+  "validation": {
+    "git_diff_check_exit": 0,
+    "new_tests_or_local_Dune": false,
+    "new_CI_query_or_run": false,
+    "actual_model_or_provider_calls": false,
+    "current_runtime_or_process_queries": false
+  },
+  "remaining_scope": [
+    "Resolve the current prompt aggregation restriction and obtain an exact new-head source re-review.",
+    "The3control evidence remains valid for its declared non-aggregate fixture and does not test the new aggregation case.",
+    "Original11 linked-original Goal proof and final human confirmation remain pending.",
+    "Current-head native/build/installed runtime, wholeStack approval and merge are separate unestablished stages."
+  ],
+  "changed_file_hashes": [
+    {
+      "path": "changelog.d/46001.md",
+      "bytes": 441,
+      "sha256": "1ff0986ae21aa3b9588c1990c3190c4010fed67bcb714e4001a093bbc25d7fd5"
+    },
+    {
+      "path": "config/prompts/goal_verification.md",
+      "bytes": 7530,
+      "sha256": "35b6535650e99ec19a39a13a669e19f3a89067173d9a9dd30deab4dfb459b340"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/README.md",
+      "bytes": 4599,
+      "sha256": "43979d04f10d1df4407178ed159cc0532ce13e8f7467bf04c9e404b89d165519"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/actual-tool-sequence.json",
+      "bytes": 13928,
+      "sha256": "c65e7c6f5fece2672817fd24f7d4488e70637e7ffd4a06032921d007482c92cc"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/cohort-response.json",
+      "bytes": 10256,
+      "sha256": "3a4fd3758ef96a33035f72e1c8f7e3526f272e55d9652808833d18082d84d42f"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/cohort-review.json",
+      "bytes": 23777,
+      "sha256": "d6d15e9b54a9ca4ff2039ab1a1214d146593bd8bb36aeb6e779ac36e5baf3803"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/manifest.json",
+      "bytes": 2764,
+      "sha256": "5e5b1b99568af427b4c512f32075a479e2b8f1163ee3f5f18eed1bc234e14ac8"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/owned-stop.json",
+      "bytes": 273,
+      "sha256": "930efa2758ed1c651a1fd45e922cbc1e63d0918a107309cdb0b359877c4965a3"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/persisted-outcomes.json",
+      "bytes": 10390,
+      "sha256": "89dc534e575f24644f1bdff76687356be8e889ceb65ab7fdd2d16ed874f6aaa1"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/primary-omission-response.json",
+      "bytes": 8718,
+      "sha256": "7c0357eb2e0d47b6db79fbc98e0efe6ffebd94613c327858b780fb2030db9cfa"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/primary-omission-review.json",
+      "bytes": 12285,
+      "sha256": "be8401c9a93d8fbcabc526bdfb34de29cad9750f8bba299743de9aff6bb61954"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/primary-omission-timing-correction.json",
+      "bytes": 3272,
+      "sha256": "ca737c12cb02929f3ca308ed5e1ddac6bd46b22f94ad952cc727f8b781193b5b"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/private-originals-manifest.json",
+      "bytes": 17732,
+      "sha256": "aaf27de7d9673e791db224656b9ae4c33ed891cf10fce2c3e6ab3edb3c20d7d7"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/result-wording-correction.json",
+      "bytes": 760,
+      "sha256": "ba205da20a50f1ddd8508daadad68392569de98a3e8ef6638f53ea4cbfeee3c6"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/result.json",
+      "bytes": 7362,
+      "sha256": "a8d25dd6117dc94292a86647b968f98d171ec400a9c9db5995dc51089fd7c530"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/source-response.json",
+      "bytes": 10036,
+      "sha256": "61b04aaa9ff6f130e064d54f2ce46e4f78c9214146d58327834c25a26f2b02c9"
+    },
+    {
+      "path": "docs/evidence/2026-10-26-goal-proof-provenance/source-review.json",
+      "bytes": 9739,
+      "sha256": "e1c2c12b1e6a85b178c52b4fc09457968dc8b2e8b1c7593e7190ff8ed86bdc65"
+    }
+  ],
+  "direct_context_hashes": [
+    {
+      "path": "docs/constitution.xml",
+      "bytes": 40861,
+      "sha256": "afd95dbc22a2e74fa6b96510c685487ad915260984bd1e1b393fe8eadb544682"
+    },
+    {
+      "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+      "bytes": 20085,
+      "sha256": "03ae9fad1c4e361062b2b405bf1bca8ed77dd01d5613397459aa6ba4541d4ddc"
+    },
+    {
+      "path": "docs/guides/NATIVE-GITHUB-STACKS.md",
+      "bytes": 7988,
+      "sha256": "6b01a6724e9666a73658355cffb3a98877e014743865ee744fce5330acea559d"
+    },
+    {
+      "path": "lib/keeper/goal_verifier_original.ml",
+      "bytes": 8252,
+      "sha256": "3a7628a68dc50c87e9efc192b4f0c1c6756d95caff8feb71462e15b79bdc7147"
+    },
+    {
+      "path": "lib/verification_authority_tools.ml",
+      "bytes": 45204,
+      "sha256": "ed48872fca7eb34471bb667e52c7c315e45cb91a6277196a2014388f82b5b154"
+    },
+    {
+      "path": "lib/goal_verification_agent.ml",
+      "bytes": 40378,
+      "sha256": "bab2de3604da240846d7823d6b3e586eb3fe585889621b38a61fe8082b7dc388"
+    },
+    {
+      "path": "lib/prompt_registry/prompt_registry.ml",
+      "bytes": 52951,
+      "sha256": "ae4f60d767367469561d8cf45d5d73a754932d66a09572a69a0663f64f0ff439"
+    },
+    {
+      "path": "config/prompts/verification.md",
+      "bytes": 13478,
+      "sha256": "e63ec4341cd59f3a4ca2e692969bf19e2a7764ed6c63f3471438ebb83fbc7fa8"
+    }
+  ],
+  "external_input_receipts": [
+    {
+      "path": "inputs/PR46001-REST.json",
+      "bytes": 19980,
+      "sha256": "dd596d99a3c6113fe731cf23a1187abdb6382e8870033bdc647624076f033e0e"
+    },
+    {
+      "path": "inputs/PR46001-final-REST.json",
+      "bytes": 20602,
+      "sha256": "0bd5e989fa8b8fde52130cba8b5396da11e5d4317fdfbb76bc87bbd24c5ea7ed"
+    },
+    {
+      "path": "inputs/Stack45750-REST.json",
+      "bytes": 41506,
+      "sha256": "5ad9da89b69545c4cc8345730df578449b6997c45279a760ac513ccdf994505c"
+    },
+    {
+      "path": "inputs/capture-check.json",
+      "bytes": 4327,
+      "sha256": "2e1940fba0b79fecce0ddddb3b4a5b6d92dbe480e6fc2a2b44422a6f153c9e32"
+    },
+    {
+      "path": "inputs/full-diff.patch",
+      "bytes": 150622,
+      "sha256": "2955eeef3fb151257347994fd961f4be9fc93388f616a9f385231844381097b6"
+    },
+    {
+      "path": "inputs/full-diff.raw",
+      "bytes": 2790,
+      "sha256": "a6479e50f73f11b40540c96cccddd871d0d13cc98b405b2fb06bf87fe4a00753"
+    }
+  ],
+  "effects": {
+    "API_Git_source_store_Backlog_Board_or_existing_artifact_mutations": false,
+    "formal_GitHub_review_approval_or_merge_posted": false,
+    "agents_spawned": false,
+    "only_new_outputs": "External review.json and its read-only input/check receipts under this review directory."
+  }
+}

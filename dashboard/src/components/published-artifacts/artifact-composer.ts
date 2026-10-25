@@ -10,6 +10,15 @@ export type ArtifactPublicationOutcome = { title: string; base?: { id: string; r
   | { kind: 'published'; publication: ArtifactPublication; verified: boolean }
   | { kind: 'unconfirmed'; detail: string }
 )
+export type ArtifactDraftSnapshot = {
+  readonly identity: object;
+  readonly value: ArtifactDraft;
+  readonly base?: { readonly id: string; readonly revision: number };
+}
+export type ArtifactDraftRetention = {
+  remember: (snapshot: ArtifactDraftSnapshot) => void;
+  forget: (identity: object) => void;
+}
 type SaveState = { kind: 'ready'; message?: string } | { kind: 'saving' }
   | { kind: 'conflict'; message: string; latest?: ArtifactDocument }
   | { kind: 'unconfirmed'; message: string; publication?: ArtifactPublication }
@@ -26,13 +35,22 @@ export function downloadArtifactDraft(draft: ArtifactDraft) {
   URL.revokeObjectURL(url)
 }
 
-export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onMutation, onSaved, onCancel }: {
+export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDraftChange, onMutation, onSaved, onCancel }: {
   initial: ArtifactDraft; base?: ArtifactDocument; isCurrent: () => boolean;
   workspaceRoot: string;
+  onDraftChange: (draft: ArtifactDraft) => void;
   onMutation: (outcome: ArtifactPublicationOutcome) => void;
   onSaved: (publication: ArtifactPublication) => void; onCancel: () => void;
 }) {
   const [draft, setDraft] = useState(initial)
+  const latestDraft = useRef(initial)
+  const updateDraft = (change: Partial<ArtifactDraft>) => {
+    const next = { ...latestDraft.current, ...change }
+    latestDraft.current = next
+    setDraft(next)
+    // Capture synchronously: retirement may unmount us before an effect runs.
+    onDraftChange(next)
+  }
   const [state, setState] = useState<SaveState>({ kind: 'ready' })
   const [latestError, setLatestError] = useState('')
   const active = useRef(true)
@@ -106,7 +124,7 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onMu
       if (current()) setLatestError(error instanceof Error ? error.message : '최신 버전을 읽지 못했습니다.')
     }
   }
-  const field = (key: 'title' | 'summary' | 'content', value: string) => setDraft(previous => ({ ...previous, [key]: value }))
+  const field = (key: 'title' | 'summary' | 'content', value: string) => updateDraft({ [key]: value })
   return html`<section aria-label="아티팩트 편집" class="space-y-3 p-4 sm:p-6">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2 class="m-0 text-lg font-semibold">${base ? `문서 편집 · v${base.artifact.revision} 기준` : '새 아티팩트'}</h2>
@@ -117,7 +135,7 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onMu
     <label class="block text-sm">요약<input aria-label="문서 요약" class="mt-1 block w-full rounded border p-2 bg-[var(--color-bg-base)]"
       disabled=${!ready} value=${draft.summary} onInput=${(event: Event) => field('summary', (event.target as HTMLInputElement).value)} /></label>
     <label class="block text-sm">형식 <select aria-label="문서 형식" disabled=${!ready} value=${draft.format}
-      onChange=${(event: Event) => setDraft(previous => ({ ...previous, format: (event.target as HTMLSelectElement).value as ArtifactDraft['format'] }))}>
+      onChange=${(event: Event) => updateDraft({ format: (event.target as HTMLSelectElement).value as ArtifactDraft['format'] })}>
       <option value="markdown">Markdown</option><option value="html">HTML</option></select></label>
     <label class="block text-sm">본문<textarea aria-label="문서 본문" spellcheck=${false}
       class="mt-1 block min-h-80 w-full resize-y rounded border p-3 font-mono text-sm bg-[var(--color-bg-base)]"

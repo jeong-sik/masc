@@ -53,7 +53,7 @@ beforeEach(() => {
   vi.mocked(get).mockImplementation(async path => path === '/health?full=1' ? health : path === list ? { artifacts: [artifact], diagnostics: [] }
     : path === '/api/v1/published-artifact-checks' ? { checks: [], diagnostics: [] } : original)
 })
-afterEach(() => { cleanup(); clearStoredToken(); vi.restoreAllMocks() })
+afterEach(() => { cleanup(); clearStoredToken(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 it('saves the exact edited source against its captured revision, preserving task and goal links, then reads that revision', async () => {
   const reader = await edit()
@@ -76,6 +76,8 @@ it('saves the exact edited source against its captured revision, preserving task
   expect(screen.queryByText('저장 응답 받음 · 내용 확인 필요', { exact: false })).toBeNull()
   expect(post).toHaveBeenCalledWith(list, sent, workspaceHeaders)
   expect(get).toHaveBeenCalledWith(`${list}/${id}?revision=3`, { signal: undefined, extraHeaders: workspaceHeaders })
+  await act(() => setStoredToken('credential-b'))
+  expect(screen.queryByRole('region', { name: '이전 접근 상태의 원고' })).toBeNull()
 })
 
 it('retains a conflicting draft and compares the newest server version without automatically replacing or resending it', async () => {
@@ -208,6 +210,8 @@ it('retains a late committed response under the original workspace without readi
   expect(result.textContent).toContain('이전 접근 상태의 요청 결과')
   expect(get).toHaveBeenCalledTimes(reads)
   expect(post).toHaveBeenCalledTimes(1)
+  const recovery = await screen.findByRole('region', { name: '이전 접근 상태의 원고' })
+  expect(recovery.textContent).toContain(artifact.title)
 })
 
 it('preserves the open draft through a failed document refresh without presenting the retained document as fresh', async () => {
@@ -245,5 +249,81 @@ it('refuses invalid UTF-8 instead of replacing source bytes silently', async () 
   fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file] } })
   await waitFor(() => expect(screen.getByRole('region', { name: '파일 가져오기' }).textContent).toMatch(/encoded|encoding|UTF-8/i))
   expect(screen.queryByLabelText('문서 본문')).toBeNull()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it.each(['credential', 'workspace', 'withdrawal', 'same-root'] as const)('recovers exact inert manuscript after %s authority retirement without publishing', async change => {
+  const reader = await edit()
+  const content = '\uFEFF# 미저장\r\n한글 😀\n'
+  fireEvent.input(reader.getByLabelText('문서 제목'), { target: { value: '보존할 제목' } })
+  fireEvent.input(reader.getByLabelText('문서 본문'), { target: { value: content } })
+  fireEvent.change(reader.getByLabelText('문서 형식'), { target: { value: 'html' } })
+  const blobs: Blob[] = []
+  vi.spyOn(URL, 'createObjectURL').mockImplementation(blob => { blobs.push(blob as Blob); return 'blob:retained-draft' })
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  await act(() => {
+    if (change === 'credential') setStoredToken('credential-b')
+    else if (change === 'withdrawal') workspace.current.value = null
+    else workspace.current.value = { epoch: 'replacement', workspaceRoot: change === 'workspace' ? '/workspace-b' : '/workspace-a', connectionGeneration: 2 }
+  })
+  const recovery = within(await screen.findByRole('region', { name: '이전 접근 상태의 원고' }))
+  expect(recovery.getByText('보존할 제목')).toBeTruthy()
+  expect(recovery.getByText('/workspace-a', { exact: false })).toBeTruthy()
+  expect(recovery.queryByRole('textbox')).toBeNull()
+  fireEvent.click(recovery.getByRole('button', { name: '원고 다운로드' }))
+  expect(blobs).toHaveLength(1)
+  expect(new Uint8Array(await blobs[0]!.arrayBuffer())).toEqual(new TextEncoder().encode(content))
+  expect(blobs[0]!.type).toBe('text/html;charset=utf-8')
+  expect((click.mock.instances[0] as HTMLAnchorElement).download).toBe('artifact-draft.html')
+  expect(post).not.toHaveBeenCalled()
+  vi.stubGlobal('confirm', vi.fn(() => false))
+  fireEvent.click(recovery.getByRole('button', { name: '원고 폐기' }))
+  expect(screen.getByRole('region', { name: '이전 접근 상태의 원고' })).toBeTruthy()
+  vi.mocked(window.confirm).mockReturnValue(true)
+  fireEvent.click(recovery.getByRole('button', { name: '원고 폐기' }))
+  await waitFor(() => expect(screen.queryByRole('region', { name: '이전 접근 상태의 원고' })).toBeNull())
+  expect(post).not.toHaveBeenCalled()
+})
+
+
+it('retains imported source before its first edit and keeps retired owners separate', async () => {
+  render(html`<${ArtifactsSurface} />`)
+  const importFile = async (name: string, content: string) => {
+    fireEvent.click(screen.getByRole('button', { name: '파일 가져오기' }))
+    const file = new File([content], name)
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode(content).buffer })
+    fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file] } })
+    await screen.findByLabelText('문서 본문')
+  }
+  await importFile('first.md', '# first\r\n😀')
+  await act(() => setStoredToken('credential-b'))
+  await screen.findByRole('region', { name: '이전 접근 상태의 원고' })
+  await importFile('second.html', '<p>second</p>')
+  await act(() => setStoredToken('credential-c'))
+  const recovery = within(await screen.findByRole('region', { name: '이전 접근 상태의 원고' }))
+  expect(recovery.getByText('first.md')).toBeTruthy()
+  expect(recovery.getByText('second.html')).toBeTruthy()
+  const blobs: Blob[] = []
+  vi.spyOn(URL, 'createObjectURL').mockImplementation(blob => { blobs.push(blob as Blob); return 'blob:import' })
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  recovery.getAllByRole('button', { name: '원고 다운로드' }).forEach(button => fireEvent.click(button))
+  expect(await blobs[0]!.text()).toBe('# first\r\n😀')
+  expect(await blobs[1]!.text()).toBe('<p>second</p>')
+  vi.stubGlobal('confirm', vi.fn(() => true))
+  fireEvent.click(recovery.getAllByRole('button', { name: '원고 폐기' })[0]!)
+  expect(recovery.queryByText('first.md')).toBeNull()
+  expect(recovery.getByText('second.html')).toBeTruthy()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('removes an explicitly discarded active draft instead of recovering it after retirement', async () => {
+  const reader = await edit()
+  fireEvent.input(reader.getByLabelText('문서 본문'), { target: { value: 'explicitly discarded' } })
+  vi.stubGlobal('confirm', vi.fn(() => true))
+  fireEvent.click(reader.getByRole('button', { name: '편집 닫기' }))
+  await act(() => setStoredToken('credential-b'))
+  expect(screen.queryByRole('region', { name: '이전 접근 상태의 원고' })).toBeNull()
   expect(post).not.toHaveBeenCalled()
 })

@@ -11,7 +11,7 @@ import { ArtifactPreview } from './artifact-preview'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
 import { executionWorkspaceAuthority } from '../../store'
 import { ArtifactImport } from './artifact-import'
-import type { ArtifactPublicationOutcome } from './artifact-composer'
+import { downloadArtifactDraft, type ArtifactDraftRetention, type ArtifactDraftSnapshot, type ArtifactPublicationOutcome } from './artifact-composer'
 
 type Remote<T> = { key: object; kind: 'loaded'; data: T; receivedAt: number }
   | { key: object; kind: 'error'; message: string; data?: T }
@@ -33,10 +33,36 @@ export function ArtifactsSurface() {
   const owner = useMemo(() => ({ mount: ++mounts.current, authRevision, authority }), [authRevision, authority])
   const [receipts, setReceipts] = useState<readonly { owner: typeof owner; outcome: ArtifactCheckOutcome }[]>([])
   const [publications, setPublications] = useState<readonly { owner: typeof owner; outcome: ArtifactPublicationOutcome }[]>([])
+  const [drafts, setDrafts] = useState<readonly { owner: typeof owner; snapshot: ArtifactDraftSnapshot }[]>([])
+  // Callbacks close over the original owner, never the replacement authority.
+  const draftRetention: ArtifactDraftRetention = {
+    remember: snapshot => setDrafts(previous => {
+      const entry = { owner, snapshot }
+      return previous.some(item => item.owner === owner && item.snapshot.identity === snapshot.identity)
+        ? previous.map(item => item.owner === owner && item.snapshot.identity === snapshot.identity ? entry : item)
+        : [...previous, entry]
+    }),
+    forget: identity => setDrafts(previous => previous.filter(item => item.owner !== owner || item.snapshot.identity !== identity)),
+  }
+  const retiredDrafts = drafts.filter(entry => entry.owner !== owner)
   const current = () => owner.authority !== null
     && currentStoredTokenRevision() === owner.authRevision
     && executionWorkspaceAuthority.peek() === owner.authority
   return html`<div>
+    ${retiredDrafts.length ? html`<section aria-label="이전 접근 상태의 원고" class="space-y-3 p-4">
+      <h2>이전 접근 상태의 원고</h2>
+      <p>접근 상태가 바뀌어 편집을 중단했습니다. 이 원고는 현재 권한으로 저장할 수 없습니다. 화면을 떠나기 전에 다운로드해 주세요.</p>
+      ${retiredDrafts.map(({ owner: original, snapshot }) => html`<article key=${snapshot.identity}>
+        <h3>${snapshot.value.title}</h3>
+        <p>원래 작업 공간 ${original.authority?.workspaceRoot}${snapshot.base ? ` · ${snapshot.base.id} · v${snapshot.base.revision} 기준` : ' · 새 문서'}</p>
+        <button type="button" onClick=${() => downloadArtifactDraft(snapshot.value)}>원고 다운로드</button>
+        <button type="button" onClick=${() => {
+          if (window.confirm('보관한 원고를 폐기할까요? 다운로드하지 않은 내용은 사라집니다.')) {
+            setDrafts(previous => previous.filter(entry => entry.owner !== original || entry.snapshot.identity !== snapshot.identity))
+          }
+        }}>원고 폐기</button>
+      </article>`)}
+    </section>` : null}
     ${publications.length ? html`<section aria-label="문서 저장 요청 결과">
       ${publications.map(({ owner: original, outcome }, index) => html`<p key=${index}>
         ${outcome.title} · 원래 작업 공간 ${original.authority?.workspaceRoot}
@@ -61,7 +87,7 @@ export function ArtifactsSurface() {
     </section>` : null}
     ${authority === null ? html`<p role="status">현재 작업 공간을 확인한 뒤 아티팩트를 읽습니다.</p>`
       : html`<${ArtifactsObservation} key=${owner.mount} authRevision=${authRevision} isCurrent=${current}
-          workspaceRoot=${authority.workspaceRoot}
+          workspaceRoot=${authority.workspaceRoot} draftRetention=${draftRetention}
           onPublication=${(outcome: ArtifactPublicationOutcome) => setPublications(previous => {
             const index = outcome.kind === 'published' ? previous.findIndex(entry => entry.owner === owner
               && entry.outcome.kind === 'published'
@@ -74,10 +100,11 @@ export function ArtifactsSurface() {
   </div>`
 }
 
-function ArtifactsObservation({ authRevision, workspaceRoot, isCurrent, onMutation, onPublication }: {
+function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, isCurrent, onMutation, onPublication }: {
   authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void
   onPublication: (outcome: ArtifactPublicationOutcome) => void
   workspaceRoot: string
+  draftRetention: ArtifactDraftRetention
 }) {
   const { artifact: selectedId, revision } = route.value.params
   const [refresh, setRefresh] = useState(0)
@@ -176,7 +203,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, isCurrent, onMutati
         <div class="flex gap-4"><button type="button" onClick=${() => setImporting(true)}>파일 가져오기</button>
           <button type="button" onClick=${() => setRefresh(n => n + 1)}>새로고침</button></div>
       </header>
-      ${importing ? html`<${ArtifactImport} workspaceRoot=${workspaceRoot} isCurrent=${current} onMutation=${onPublication} onSaved=${published}
+      ${importing ? html`<${ArtifactImport} draftRetention=${draftRetention} workspaceRoot=${workspaceRoot} isCurrent=${current} onMutation=${onPublication} onSaved=${published}
         onCancel=${() => setImporting(false)} />` : null}
       <div class="min-w-0 space-y-4">
         <aside class="min-w-0 space-y-3" aria-label="아티팩트 목록">
@@ -241,7 +268,7 @@ function ArtifactsObservation({ authRevision, workspaceRoot, isCurrent, onMutati
           : doc === null ? html`<p role="status">문서를 불러오고 있습니다.</p>`
           : !doc.data ? html`<p role="alert">${doc.kind === 'error' ? doc.message : '문서를 읽지 못했습니다.'}</p>`
           : html`<${ArtifactReader} key=${documentKey.visit} doc=${doc.data} fixedRevision=${revision !== undefined}
-              workspaceRoot=${workspaceRoot}
+              draftRetention=${draftRetention} workspaceRoot=${workspaceRoot}
               readError=${doc.kind === 'error' ? doc.message : undefined}
               checkState=${checkState(doc.data.artifact)} authRevision=${authRevision} isCurrent=${current} onMutation=${onMutation} onCheckChanged=${checkChanged}
               onPublication=${onPublication} onPublished=${published}

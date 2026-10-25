@@ -36,7 +36,7 @@ let () =
         {Masc.Browser_addon_wire.incarnation;command=Retire} with
       | Receipt -> ()
       | Service_refusal {message;_} -> Printf.eprintf "browser cleanup unconfirmed: %s\n%!" message
-      | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ ->
+      | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Issue_result _ ->
           Printf.eprintf "browser cleanup returned no settlement receipt\n%!");
     let downloads=Eio_unix.run_in_systhread (fun () ->
       Masc.Browser_addon_downloads.create ~directory:(Filename.dirname socket_path)) in

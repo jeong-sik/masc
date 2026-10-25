@@ -1673,7 +1673,7 @@ let backend ~store ~artifact_store () = match !override with
                 | Some client ->
                     (match Browser_addon_client.call client ~on_cancel_after_dispatch:(fun () -> ()) Browser_addon_wire.Snapshot with
                      | Ok (Browser_addon_wire.Snapshot_result snapshot) -> Ok (Some snapshot)
-                     | Ok (Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _) -> Error "browser service readiness was refused"
+                     | Ok (Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _) -> Error "browser service readiness was refused"
                      | Error (Browser_addon_client.Unavailable detail|Outcome_unknown detail) -> Error detail) in
               let* ()=if ready then browser_snapshot () |> Result.map (fun _ -> ()) else Ok () in
               let* resource = Option.to_result ~none:"native child identity is unavailable"
@@ -1698,7 +1698,7 @@ let backend ~store ~artifact_store () = match !override with
                         match reply with
                         | Browser_addon_wire.Model_reply value -> Ok value
                         | Service_refusal {message;_} -> Error message
-                        | Snapshot_result _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> Error "unexpected model broker receipt" in
+                        | Snapshot_result _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> Error "unexpected model broker receipt" in
                       Some {list_requests=(fun () -> call Browser_addon_wire.Model_requests);
                         deliver=(fun ~arguments -> call (Browser_addon_wire.Model_result arguments));
                         await_change=Some (fun ~after ->
@@ -2051,8 +2051,8 @@ let browser_services ~config ~access = (browser_service_reading ~config ~access)
 (* Runs on the owner domain; both callers enter it through [with_tool_call_owner]. *)
 let call_manager_browser_service m ~access ~(service:browser_service) ~command =
     let* ()=match command with
-      | Browser_addon_wire.Retire | Download_claim _|Download_commit _|Download_release _|Model_requests | Model_result _ | Model_wait _ ->
-          Error (Browser_addon_client.Unavailable "browser lifecycle and model ports belong to their host owner")
+      | Browser_addon_wire.Retire | Download_claim _|Download_commit _|Download_release _|Model_requests | Model_result _ | Model_wait _ | Extension _ ->
+          Error (Browser_addon_client.Unavailable "browser lifecycle, model and extension ports belong to their host owner")
       | Snapshot|Upload_stage _|Upload_discard _|Poll _|Deliver _|Disconnect _|Issue _ -> Ok () in
     let* e,client=match Hashtbl.find_opt m.entries service.instance_id with
       | Some ({connection=Some connection;_} as e)
@@ -2062,7 +2062,7 @@ let call_manager_browser_service m ~access ~(service:browser_service) ~command =
            | (Attached|Observing),Some client -> Ok (e,client)
            | Failed _,Some client when (match command with
                | Browser_addon_wire.Deliver _|Disconnect _|Upload_discard _ -> true
-               | Snapshot|Retire|Upload_stage _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Issue _ -> false) -> Ok (e,client)
+               | Snapshot|Retire|Upload_stage _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Issue _ -> false) -> Ok (e,client)
            | (Attached|Observing|Failed _|Detaching|Detached),(None|Some _) ->
                Error (Browser_addon_client.Unavailable "original browser Add-on is unavailable"))
       | None|Some _ -> Error (Browser_addon_client.Unavailable "original browser Add-on was retired") in
@@ -2084,7 +2084,7 @@ let call_manager_browser_service m ~access ~(service:browser_service) ~command =
         (match persist m e with Ok () -> () | Error detail ->
           Log.Misc.error "Cancelled browser Add-on state persistence: %s" detail);
         stop_entry ~sw ~backend:(backend ~store:m.store ~artifact_store:m.artifact_store ()) m e
-      | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> () in
+      | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Deliver _|Disconnect _ -> () in
     e.active_tool_calls<-e.active_tool_calls+1;
     Fun.protect ~finally:(fun () -> e.active_tool_calls<-e.active_tool_calls-1) (fun () ->
       let result=Browser_addon_client.call client ~on_cancel_after_dispatch command in
@@ -2094,8 +2094,8 @@ let call_manager_browser_service m ~access ~(service:browser_service) ~command =
              | Browser_addon_wire.Poll_result {state_id;_} -> Browser_addon_client.notice_poll_state client ~state_id
              | Issue_result _ -> not changes_nothing
              | Receipt -> (match command with Browser_addon_wire.Disconnect _ -> true
-                 | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Issue _ -> false)
-             | Snapshot_result _|Model_reply _|Download_reply _|Service_refusal _ -> false in
+                 | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Deliver _|Issue _ -> false)
+             | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Service_refusal _ -> false in
            if changed && not e.stopping then wake e
        | Error (Browser_addon_client.Unavailable _) -> ()
        | Error (Browser_addon_client.Outcome_unknown detail) ->
@@ -2143,7 +2143,7 @@ let read_browser_document m ~access ~visibility ~route ~tab_id =
          | Ok (Browser_addon_wire.Issue_result (Error error)) -> Error (Browser_lane.selection_error_message error)
          | Ok (Browser_addon_wire.Service_refusal {message;disposition=Browser_addon_wire.(Not_started|Outcome_unknown)}) ->
              Error message
-         | Ok (Browser_addon_wire.(Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt)) ->
+         | Ok (Browser_addon_wire.(Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt)) ->
              Error "the browser Add-on answered the document read with another kind of reply"
          (* Transport detail names host sockets and exceptions; it goes to
             the operator log, and the reader gets the kind of failure. *)

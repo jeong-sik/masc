@@ -144,12 +144,12 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
           (match Eio.Promise.await retired with
            | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
            | W.Service_refusal {disposition=W.Not_started;_}
-           | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+           | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
         check bool "the retired owner refuses a fresh claim" true
           (match Owner.dispatch owner {W.incarnation;command=Download_claim {id;actor;route;verb}} with
            | W.Service_refusal {disposition=W.Not_started;_} -> true
            | W.Service_refusal {disposition=W.Outcome_unknown;_}
-           | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+           | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
         check bool "revocation still fences fresh claims" true
           (Result.is_error (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
             (W.Download_claim {id;actor;route;verb})));

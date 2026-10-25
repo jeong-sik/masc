@@ -76,6 +76,15 @@ val execute : 'session t -> ?actor:string -> Browser_lane.verb -> Browser_lane.a
 
 type private_error = Private_not_started | Private_session_fenced | Private_outcome_unknown
 type 'session private_session
+val fence_private_session : 'session t -> session:'session private_session -> unit
+(** Nonblocking owner-domain notification that the pinned companion went away.
+    Fences only the original opened resource, never a successor. An active page
+    verb is cancelled and its cleanup joined before its serializer slot returns.
+    Every subsequent call and result publication rechecks that exact session:
+    a result returned during cancellation or synchronously with the fence is
+    discarded with a fixed refusal, including reads and captures. Explicit close
+    remains available while cleanup joins; new pages in a reopened browser wait
+    for the original verb to release its slot. *)
 val capture_private_session : 'session t -> ('session private_session, private_error) result
 (** Trusted host-only capture of this exact opened session. Does not open a
     browser, adopt a replacement or send a page/extension operation. The opaque
@@ -96,8 +105,8 @@ val execute_private : 'session t -> session:'session private_session -> tab_id:i
     no callback prose, and further page/companion work is fenced until explicit
     close and confirmed original-session retirement. Cancellation before the
     callback begins sends nothing; cancellation after entry fences before the
-    page slot is released. Confirmed termination of the original session also
-    cancels the callback and joins its cleanup before releasing that slot. A
+    page slot is released. Companion loss or confirmed termination of the original
+    session also cancels the callback and joins its cleanup before releasing that slot. A
     reopened browser never inherits the callback or its late fence. The callback
     must allow cancellation and finish its cleanup without waiting for a reply
     from the terminated browser. No automatic retry or replacement-session lookup.

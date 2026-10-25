@@ -33,14 +33,14 @@ let scenario () =
               (match ok (W.reply_of_json (Yojson.Safe.from_string raw)) with
                | W.Snapshot_result _ -> true
                | W.Poll_result _|Receipt|Issue_result _|Service_refusal _
-               | Model_reply _|Download_reply _ -> false);
+               | Model_reply _|Extension_reply _|Download_reply _ -> false);
             let malformed = connect path in
             Eio.Flow.copy_string "{\"private\":PRIVATE_FRAME_MARKER}\n" malformed;
             let reply = Eio.Buf_read.line (Eio.Buf_read.of_flow malformed ~max_size:4096) in
             check bool "JSON parser fragments never enter the private transport reply" true
               (match ok (W.reply_of_json (Yojson.Safe.from_string reply)) with
                | W.Service_refusal {disposition=W.Not_started;message="invalid browser worker JSON"} -> true
-               | Snapshot_result _|Poll_result _|Receipt|Issue_result _|Service_refusal _|Model_reply _|Download_reply _ -> false);
+               | Snapshot_result _|Poll_result _|Receipt|Issue_result _|Service_refusal _|Model_reply _|Extension_reply _|Download_reply _ -> false);
             Eio.Fiber.first
               (fun () -> Service.serve ~net ~owner ~socket_path:small ~max_message_bytes:1)
               (fun () ->

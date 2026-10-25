@@ -359,7 +359,7 @@ jobs:
           scripts/check-version-truth.sh
           opam exec -- dune build --release \
             bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
-            bin/deployment_preflight_helper.exe
+            bin/deployment_preflight_helper.exe bin/masc_exec_ssh_bootstrap.exe
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git diff --exit-code HEAD --
       - name: Bundle relocatable runtime with release filenames
@@ -369,6 +369,7 @@ jobs:
           cp _build/default/bin/masc_tui.exe "$PROBE_OUT/masc-tui-macos-arm64"
           cp _build/default/bin/masc_browser_host.exe "$PROBE_OUT/masc-browser-host-macos-arm64"
           cp _build/default/bin/deployment_preflight_helper.exe "$PROBE_OUT/masc-deployment-preflight-helper-macos-arm64"
+          cp _build/default/bin/masc_exec_ssh_bootstrap.exe "$PROBE_OUT/masc-exec-ssh-bootstrap-macos-arm64"
           cp scripts/check-runtime-deployment-preflight.sh "$PROBE_OUT/masc-check-runtime-deployment-preflight-macos-arm64"
           python3 scripts/package-macos-runtime.py --dist "$PROBE_OUT" \
             --stage "$PROBE_STAGE" --platform macos-arm64 --source-commit "$SOURCE_SHA"
@@ -384,6 +385,9 @@ jobs:
           "$PROBE_STAGE/masc" --version > "$PROBE_OUT/server-version.txt"
           cmp "$PROBE_OUT/tui-version.txt" "$PROBE_OUT/server-version.txt"
           test "$("$PROBE_STAGE/masc" build-commit)" = "$SOURCE_SHA"
+          "$PROBE_STAGE/masc-exec-ssh-bootstrap" --help > "$PROBE_OUT/ssh-bootstrap-help.txt"
+          grep -q -- '--endpoint' "$PROBE_OUT/ssh-bootstrap-help.txt"
+          grep -q -- '--keeper' "$PROBE_OUT/ssh-bootstrap-help.txt"
           cp "$PROBE_STAGE/runtime-provenance.json" "$PROBE_OUT/"
           {
             uname -a

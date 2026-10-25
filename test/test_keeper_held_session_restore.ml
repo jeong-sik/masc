@@ -15,6 +15,23 @@ let require_session registry name =
   | Some session -> session
   | None -> Alcotest.failf "missing session %s" name
 
+let write_agent ~agents_path name =
+  let now = Types_core.now_iso () in
+  let agent : Types_core.agent =
+    { id = None
+    ; name
+    ; agent_type = "test"
+    ; status = Types_core.Active
+    ; capabilities = []
+    ; current_task = None
+    ; session_bound_at = now
+    ; last_seen = now
+    ; meta = None
+    }
+  in
+  write_file (Filename.concat agents_path (name ^ ".json"))
+    (Yojson.Safe.to_string (Types_core.agent_to_yojson agent))
+
 let test_keeper_boots_while_real_restore_is_held () =
   let base_path = Filename.temp_dir "keeper-held-restore-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
@@ -57,6 +74,20 @@ let test_keeper_boots_while_real_restore_is_held () =
         (Printf.sprintf
            "[keeper]\nname = %S\ninstructions = \"held restore fixture\"\nactivation_mode = \"autonomous\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n"
            keeper_name);
+      let prompts_dir = Config_dir_resolver.prompts_dir_for_base_path ~base_path in
+      Fs_compat.mkdir_p prompts_dir;
+      let prompt_sync =
+        Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
+          ~edit_layer:Managed_asset_sync.No_edit_layer
+          ~read:Embedded_config.read ~files:Embedded_config.file_list
+          ~dest_dir:prompts_dir ()
+      in
+      (match prompt_sync.failed with
+       | [] -> ()
+       | failures ->
+           Alcotest.fail
+             (String.concat "; "
+                (List.map (fun (file, reason) -> file ^ ": " ^ reason) failures)));
       let meta =
         Masc_test_deps.meta_of_json_fixture
           (`Assoc [ "name", `String keeper_name; "trace_id", `String "held-restore-trace" ])
@@ -77,6 +108,8 @@ let test_keeper_boots_while_real_restore_is_held () =
       ignore
         (Prompt_defaults.bootstrap_runtime
            ~workspace_path:config.workspace_path ~base_path : string);
+      Alcotest.(check bool) "shipped Keeper system prompt is available" true
+        (String.length (Keeper_prompt.system_prompt_body ()) > 0);
       Keeper_approval_queue.install_persistence ~base_path
       |> require_ok Keeper_approval_queue_result.install_error_to_string
       |> ignore;
@@ -100,8 +133,7 @@ let test_keeper_boots_while_real_restore_is_held () =
       let event = `Assoc [ "payload", `String "live notification" ] in
       ignore (Session.push_notification_to_active_agents registry ~event);
       let agents_path = Workspace.agents_dir config in
-      List.iter
-        (fun name -> write_file (Filename.concat agents_path (name ^ ".json")) "{}")
+      List.iter (write_agent ~agents_path)
         [ "live"; "retired"; "restored-peer" ];
       Server_startup_state.reset ();
       Server_startup_state.prepare_lazy_tasks ~tasks:[ "restore_sessions" ]

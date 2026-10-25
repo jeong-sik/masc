@@ -37,3 +37,21 @@ advancement or latency assertion. The standard targeted runner already supplies
 its outer process hang backstop; no duplicate fixture timeout is added.
 Adversarial review caught missing Eio_guard activation, now corrected. No local Dune/typecheck/executed success is claimed. The new
 source parses and whitespace passes; actual execution will be requested separately.
+
+## Observed earlier execution and stronger fixture inputs
+
+Run40158656336 checked out aab2135c694aa7eb78c29a88ff77b0048d3b11cc and
+completed SUCCESS: one actual component scenario passed in3.462s. Actual logs
+show the Keeper lane boundary while restoration was held, pending remained
+without a false failure, and release preserved live queue/object/removal state.
+That measured duration is not a performance criterion or deployment proof.
+
+The same logs exposed weaker inputs: the names-only agent files held `{}`, so
+workspace readers rejected them for missing last_seen, and the fresh config
+contained no shipped prompts. The current fixture writes agent rows through the
+real typed codec and unpacks/checks shipped prompt assets before actual prompt
+bootstrap, with a real system-prompt availability assertion. This strengthens
+fixture fidelity without production changes. The earlier run proves its exact
+old fixture, not successful execution of these updated inputs. New execution is
+required; no current-head typecheck/test success is claimed yet. Its cancelled
+parent cleanup log also is not a successful model-turn verdict.

@@ -13,3 +13,7 @@ Two feature scenarios are defined in the existing wake suite: four computed term
 The counter counts process-local returned projection attempts, including retries, not unique runs. Exceptions before a sink return and earlier failures remain outside its completion coverage. Seat-level candidate failures, official-client tool gaps, missing usage, latency and full Librarian observability remain separate. This change does not resolve all #25913 requirements and the issue stays open.
 
 Native Stack registration was attempted through gh stack init but refused its global editing lock; unrelated live submit processes were verified. No existing stack, process or lock was altered. Until REST membership confirms otherwise, a published draft is not claimed as a registered Native Stack.
+
+## First selected execution and repair
+
+[Run40161691391](https://github.com/jeong-sik/masc/actions/runs/40161691391) checked out `3d64d9d0327df2d360b444745f3acd381053dbe7` and FAILED at fixture compilation before selected test execution: `Panels_unavailable` expects `skip_reason`, not a string. The test now supplies the existing `No_panel_answers { total = 0 }` constructor, matching its empty prepared panel. Production code is unchanged. Initial SOURCE COMMENT5641477670 missed the blocker and is superseded for compilability. Actual error excerpt is retained; five source hashes refreshed. Repaired-head execution remains unproved.

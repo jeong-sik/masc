@@ -448,7 +448,7 @@ let test_projection_metrics_preserve_judge_result () =
     [ "synthesized", Ok synthesis, [successful]
     ; "synthesized_with_failures", Ok synthesis, [successful; failed]
     ; "failed", Error (Fusion_types.Parse_error "private parse failure"), [failed]
-    ; "not_attempted", Error (Fusion_types.Panels_unavailable "quorum not met"), []
+    ; "not_attempted", Error (Fusion_types.Panels_unavailable (Fusion_types.No_panel_answers { total = 0 })), []
     ] in
   let counter outcome judge_result =
     Otel_metric_store.metric_value_or_zero

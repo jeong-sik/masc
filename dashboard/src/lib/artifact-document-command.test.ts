@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest'
+import * as Y from 'yjs'
 import { runArtifactDocumentCommand as run } from './artifact-document-command'
 
 function accepted(input: unknown) {
@@ -6,6 +7,19 @@ function accepted(input: unknown) {
   if (!result.ok) throw new Error(result.code + ': ' + result.message)
   return result
 }
+
+it('refuses a genuine same-root map update without returning a committed state', () => {
+  const first = accepted({ kind: 'seed', content: 'safe text' }), remote = new Y.Doc()
+  try {
+    Y.applyUpdate(remote, Uint8Array.from(atob(first.state!), value => value.charCodeAt(0)))
+    remote.getMap('content').set('actor', 'trusted-keeper')
+    const update = btoa(String.fromCharCode(...Y.encodeStateAsUpdate(remote)))
+    const refused = run({ kind: 'merge', state: first.state, updates: [update] })
+    expect(refused).toMatchObject({ ok: false, code: 'invalid_document' })
+    expect(refused).not.toHaveProperty('state')
+    expect(accepted({ kind: 'merge', state: first.state, updates: [] }).content).toBe('safe text')
+  } finally { remote.destroy() }
+})
 
 it('roundtrips Korean, emoji, BOM and CRLF through the worker protocol and returns an anchored Keeper edit', () => {
   const first = accepted({ kind: 'seed', content: '\uFEFF한글 😀\r\n본문\r\n' })

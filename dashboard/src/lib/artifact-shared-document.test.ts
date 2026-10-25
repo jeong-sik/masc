@@ -52,13 +52,21 @@ it('keeps the selection direction and excludes concurrent insertions at its boun
   expect(sharedSource(doc)).toBe('앞수정추가뒤')
 })
 
-it('rejects invalid ranges and positions from a different document instead of guessing a location', () => {
+it('rejects invalid ranges and interior item positions whose IDs do not exist in the document', () => {
   const doc = seed('가😀나'), other = seed('다른 문서')
   for (const point of [-1, 2, 5, 0.5, NaN]) {
     expect(() => selectSharedSource(doc, { anchor: point, head: point })).toThrow()
   }
   expect(resolveSharedSelection(other, selectSharedSource(doc, { anchor: 1, head: 3 }))).toBeNull()
   expect(resolveSharedSelection(doc, { anchor: [256], head: [] })).toBeNull()
+})
+
+it('leaves document and generation identity to the caller envelope for root-anchored boundary positions', () => {
+  const doc = seed('원고'), other = seed('다른 원고')
+  const end = selectSharedSource(doc, { anchor: 2, head: 2 })
+  // Yjs end positions identify the root, not a unique document. Callers must
+  // bind selections to a document and generation before resolving them.
+  expect(resolveSharedSelection(other, end)).toEqual({ anchor: 5, head: 5 })
 })
 
 it('refuses arbitrary client-controlled metadata or rich-text objects in a source document', () => {
@@ -69,4 +77,33 @@ it('refuses arbitrary client-controlled metadata or rich-text objects in a sourc
   const rich = seed('원고')
   rich.getText('content').format(0, 1, { bold: true })
   expect(() => sharedState(rich)).toThrow('본문 텍스트만')
+})
+
+it.each(['actor', 'arbitrary metadata key', '__proto__'])('refuses same-root map metadata named %s from a genuine alternative view', key => {
+  const source = seed('safe text'), state = sharedState(source)
+  const remote = keep(new Y.Doc())
+  Y.applyUpdate(remote, state)
+  remote.getMap('content').set(key, 'trusted-keeper')
+  const update = Y.encodeStateAsUpdate(remote)
+  const observed = keep(new Y.Doc())
+  Y.applyUpdate(observed, update)
+  expect(observed.getMap('content').get(key)).toBe('trusted-keeper')
+  expect(() => mergeSharedUpdates(state, [update])).toThrow('본문 텍스트만')
+  expect(() => restoreSharedDocument(update)).toThrow('본문 텍스트만')
+  expect(sharedSource(source)).toBe('safe text')
+})
+
+it('preserves a dependent update across persisted restore when it arrives before its predecessor', () => {
+  const source = seed('source'), remote = copy(source), state = sharedState(source)
+  const before = Y.encodeStateVector(remote)
+  remote.getText('content').insert(0, 'first ')
+  const first = Y.encodeStateAsUpdate(remote, before), between = Y.encodeStateVector(remote)
+  remote.getText('content').insert(0, 'second ')
+  const second = Y.encodeStateAsUpdate(remote, between)
+  const pending = mergeSharedUpdates(state, [second])
+  expect(pending.content).toBe('source')
+  const restored = copy(keep(restoreSharedDocument(pending.state)))
+  const merged = mergeSharedUpdates(sharedState(restored), [first])
+  expect(merged.content).toBe('second first source')
+  expect(sharedSource(keep(restoreSharedDocument(merged.state)))).toBe(sharedSource(remote))
 })

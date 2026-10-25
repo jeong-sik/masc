@@ -20,7 +20,17 @@ function requireUnicode(content: string): void {
 
 function textOf(doc: Y.Doc): Y.Text {
   const text = doc.getText(contentKey)
-  if (doc.share.size !== 1 || text.toDelta().some((part: { insert?: unknown; attributes?: unknown }) => typeof part.insert !== 'string' || part.attributes !== undefined)) {
+  // A Y.Map view can write attributes onto the same root without adding a
+  // shared type or changing its text delta. Use its public map size: the plain
+  // object returned by getAttributes() loses keys such as a string __proto__.
+  const mapView = new Y.Doc()
+  let hasMetadata: boolean
+  try {
+    Y.applyUpdate(mapView, Y.encodeStateAsUpdate(doc))
+    hasMetadata = mapView.getMap(contentKey).size !== 0
+  } finally { mapView.destroy() }
+  if (doc.share.size !== 1 || hasMetadata
+    || text.toDelta().some((part: { insert?: unknown; attributes?: unknown }) => typeof part.insert !== 'string' || part.attributes !== undefined)) {
     throw new SharedDocumentError('invalid_document', '공동 편집 원고에는 본문 텍스트만 저장할 수 있습니다.')
   }
   requireUnicode(text.toString())

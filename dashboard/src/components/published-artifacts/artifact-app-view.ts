@@ -79,6 +79,8 @@ export function ArtifactAppView({doc,workspaceRoot,authRevision,isCurrent,onPend
           <details><summary>서버에 저장된 입력 보기</summary><pre class="whitespace-pre-wrap">${JSON.stringify(state.server.data,null,2)}</pre></details>`:null}
         ${state.recovery?html`<span>${state.recovery.persisted?'저장 전 입력을 이 브라우저에 보관했습니다.':'저장 전 입력이 이 창에만 있습니다.'}</span><button type="button" onClick=${()=>download(state.recovery!)}>입력 사본 내려받기</button>`:null}
       </div>
+      ${origins!==policy.origins?html`<p role="status">연결 설정은 저장됐습니다. 적용하기 전에 문서의 마지막 입력을 기다리고 있습니다.</p>
+        <button type="button" onClick=${()=>{if(currentStoredTokenRevision()!==authRevision||!isCurrent())return;const reopen=window.confirm('아직 받지 못한 문서 입력은 사라질 수 있습니다. 보관된 입력으로 문서를 다시 열까요?');if(reopen&&currentStoredTokenRevision()===authRevision&&isCurrent())setPolicy({origins:desired.current})}}>마지막 입력을 받지 않고 다시 열기</button>`:null}
       <${ResourceSettings} key=${origins} origins=${resourceOrigins(state.server.data)} disabled=${state.mode!=='ready'} apply=${(values:readonly string[])=>void session.current?.setResources(values)} />
       ${state.copies.length?html`<details><summary>이전에 저장하지 못한 입력 ${state.copies.length}개</summary>${state.copies.map(copy=>html`<div key=${copy.revision} class="flex flex-wrap gap-3">
         <span>${new Date(copy.at).toLocaleString()}</span><button type="button" disabled=${state.pending||state.mode!=='ready'} onClick=${()=>session.current?.restore(copy)}>이전 입력 복원</button>

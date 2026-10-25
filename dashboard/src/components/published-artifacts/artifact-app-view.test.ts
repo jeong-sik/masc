@@ -145,3 +145,34 @@ it('refuses malformed stored resource authority instead of opening the frame',as
   await screen.findByRole('alert')
   expect(screen.queryByTitle('메모')).toBeNull();expect(post).not.toHaveBeenCalled()
 })
+
+it('lets the host apply revocation explicitly when the child does not acknowledge suspension',async()=>{
+  server={...initial,data:{resource_origins:['https://api.example.com']}}
+  const {iframe,frame,send}=await open()
+  await send({type:'masc.artifact.inputs.change.v1',change:1,commit:false,data:{forms:{},app:{memo:'부모에 보관한 입력'}}})
+  fireEvent.input(screen.getByRole('textbox',{name:'허용할 외부 출처'}),{target:{value:''}})
+  fireEvent.click(screen.getByRole('button',{name:'연결 설정 저장'}))
+  await screen.findByText('연결 설정은 저장됐습니다. 적용하기 전에 문서의 마지막 입력을 기다리고 있습니다.')
+  expect(iframe.srcdoc).toBe(frame.document)
+  Object.defineProperty(window,'confirm',{configurable:true,value:vi.fn(()=>false)})
+  const force=screen.getByRole('button',{name:'마지막 입력을 받지 않고 다시 열기'})
+  fireEvent.click(force);expect(iframe.srcdoc).toBe(frame.document)
+  Object.defineProperty(window,'confirm',{configurable:true,value:vi.fn(()=>true)})
+  fireEvent.click(force)
+  await waitFor(()=>expect(iframe.srcdoc).toContain("connect-src 'none';"))
+  expect(server.data).toEqual({forms:{},app:{memo:'부모에 보관한 입력'},resource_origins:[]})
+  expect(post).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('button',{name:'마지막 입력을 받지 않고 다시 열기'})).toBeNull()
+})
+
+it('withdraws force reopen authority when credentials change during confirmation',async()=>{
+  server={...initial,data:{resource_origins:['https://api.example.com']}}
+  const {iframe,frame}=await open()
+  fireEvent.input(screen.getByRole('textbox',{name:'허용할 외부 출처'}),{target:{value:''}})
+  fireEvent.click(screen.getByRole('button',{name:'연결 설정 저장'}))
+  const force=await screen.findByRole('button',{name:'마지막 입력을 받지 않고 다시 열기'})
+  Object.defineProperty(window,'confirm',{configurable:true,value:()=>{setStoredToken('new-user-during-confirm');return true}})
+  fireEvent.click(force)
+  expect(iframe.srcdoc).toBe(frame.document)
+  expect(iframe.style.visibility).toBe('hidden');expect(post).toHaveBeenCalledTimes(1)
+})

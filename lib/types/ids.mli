@@ -35,8 +35,9 @@ end
     store that records that execution (tool_calls JSONL, trajectory;
     agent_core-event join lands in RFC-0233 PR-2), so one physical execution
     renders as one logical row regardless of how many stores observed
-    it. Timestamp-prefixed ([exec-<ms>-<seq>]) — lexicographic order
-    within a process tracks mint order. *)
+    it. Journalled calls use their canonical Core invocation-node identifier;
+    non-journalled calls mint [exec-<ms>-<seq>]. Ordering comes from the source
+    journal cursor, never the identifier's spelling. *)
 module Execution_id : sig
   type t
   val of_string : string -> t

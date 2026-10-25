@@ -445,6 +445,7 @@ let open_invocation provider ~invocation ~tool_name ~input =
     |> Result.map_error (fun error -> Settlement_failed error)
 ;;
 
+let bound_invocation invocation = invocation.durable.invocation
 let invocation_locator invocation = invocation.locator
 
 let rebind_invocation scope locator =

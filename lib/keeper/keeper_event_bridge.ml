@@ -344,9 +344,8 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
     in
     Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
   | Agent_core.Event_bus.ToolCompleted { invocation; agent_name; tool_name; _ } ->
-    (* RFC-0233 PR-2: the keeper post_tool_use hook registered this exact
-       immutable invocation before AGENT_CORE published the event. Physical
-       invocation identity keeps blank/repeated provider ids distinct. *)
+    (* Durable occurrences carry canonical run/node identity before Gate and
+       execution. Non-journalled calls use their live product association. *)
     let execution_id_fields =
       match Keeper_execution_join.take ~invocation with
       | Some execution_id -> [ "execution_id", `String execution_id ]

@@ -34,13 +34,17 @@ let with_invocation_execution_ids_lock f =
     f
 
 let invocation_execution_id ~invocation =
-  with_invocation_execution_ids_lock (fun () ->
-    match Invocation_table.find_opt invocation_execution_ids invocation with
-    | Some execution_id -> execution_id
-    | None ->
-        let execution_id = Ids.Execution_id.generate () in
-        Invocation_table.add invocation_execution_ids invocation execution_id;
-        execution_id)
+  match Agent_core.Tool_contract.Invocation.occurrence invocation with
+  | Some occurrence ->
+    Ids.Execution_id.of_string (Agent_core.Tool_contract.Occurrence.node_id occurrence)
+  | None ->
+    with_invocation_execution_ids_lock (fun () ->
+      match Invocation_table.find_opt invocation_execution_ids invocation with
+      | Some execution_id -> execution_id
+      | None ->
+          let execution_id = Ids.Execution_id.generate () in
+          Invocation_table.add invocation_execution_ids invocation execution_id;
+          execution_id)
 
 (** Pre-truncation info, keyed by the exact Agent Core occurrence. Set by the
     tool handler wrapper and consumed by the on-tool-result hook. The weak key

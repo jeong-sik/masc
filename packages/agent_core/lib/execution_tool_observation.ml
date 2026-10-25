@@ -41,7 +41,12 @@ let project ~find_node event =
             if not (String.equal tool_name use.name) then invalid ()
             else
               let* agent_name,turn=ancestry None view in
-              let invocation=Tool_contract.Invocation.create ~tool_use_id:use.id ~turn ~schedule ~completion in
+              let* occurrence=Tool_contract.Occurrence.of_strings
+                  ~run_id:(Event.Run_id.to_string (Event.run_id event))
+                  ~node_id:(Event.Node_id.to_string node)
+                  |> Result.map_error (fun _ -> Invalid_tool_fact node) in
+              let invocation=Tool_contract.Invocation.of_occurrence occurrence
+                  ~tool_use_id:use.id ~turn ~schedule ~completion in
               Ok (agent_name,invocation,tool_name,use.input)
           | None | Some (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
               | ToolResult _ | Image _ | Document _ | Audio _) -> invalid ())

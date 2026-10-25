@@ -232,6 +232,7 @@ val provider_settled_invocations
 (** Stable opaque coordinates for rebinding after the writer is reopened.
     The locator contains no copied Tool name, input, turn, or schedule; those
     values are reconstructed from the journal's exact durable topology. *)
+val bound_invocation : invocation -> Tool_contract.Invocation.t
 val invocation_locator : invocation -> invocation_locator
 
 val invocation_locator_to_yojson : invocation_locator -> Yojson.Safe.t

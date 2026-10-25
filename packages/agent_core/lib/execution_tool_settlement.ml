@@ -98,11 +98,14 @@ let rebind ~writer ~invocation_node =
   match Event.node_kind turn_view.node with
   | Event.Agent_turn { ordinal }
     when Event.Run_id.equal run_id (Event.node_run_id turn_view.node) ->
+    let* occurrence=Tool_contract.Occurrence.of_strings
+        ~run_id:(Event.Run_id.to_string run_id) ~node_id:(Event.Node_id.to_string invocation_node)
+        |> Result.map_error (fun _ -> Invocation_identity_mismatch) in
     Ok
       { authority = { writer; invocation_node }
       ; run_id
       ; invocation =
-          Tool_contract.Invocation.create ~tool_use_id ~turn:ordinal ~schedule ~completion
+          Tool_contract.Invocation.of_occurrence occurrence ~tool_use_id ~turn:ordinal ~schedule ~completion
       ; tool_name
       ; input
       }

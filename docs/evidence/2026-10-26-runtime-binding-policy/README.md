@@ -55,8 +55,38 @@ selection and MASC Provider_tool_support → `test_pipeline` and
 [40219173989](https://github.com/jeong-sik/masc/actions/runs/40219173989) was
 dispatched for corrected8f294 source with exactly those three suites. Its result
 is not yet verified here. Intermediate40218944547 targets sourcecf4 and cannot
-certify the final authority or new full-admission controls. The ten source and
-direct-consumer hashes bind the corrected request; evidence-only additions do
-not change them. Changed OCaml parsing and whitespace passed locally. No local
+certify the final authority or new full-admission controls. The initial ten source and direct-consumer hashes bind that historical8f
+request; the refreshed request and fixture correction are recorded below. Changed OCaml parsing and whitespace passed locally. No local
 Dune build/typecheck, provider HTTP, installed-runtime, whole-catalog hard cut,
 full regression, formal independent approval, merge or issue completion claimed.
+
+
+## Fixture correction and current request
+
+Actual intermediate [40218944547](https://github.com/jeong-sik/masc/actions/runs/40218944547)
+checked outcf4b708c48ecea2edf121116e34fd5b27b7f47ae and ran binding27 with
+**26 PASS / 1 FAIL**, Pipeline **68 PASS**, and the MASC direct-consumer suite
+**3 PASS**. The beta shared-endpoint fixture still copied a raw provider id
+then expected it to activate a provider overlay. That is exactly the fallback
+this hard cut removes. Identity/alias lookup remains checked; policy assertions
+now project both already-validated bindings through `to_provider_config` and
+also verify that the raw beta id does not grant reasoning.
+
+A later independent source review found a separate stale Gemini whole-record
+comparison after8f's conservative forcing flags. The fixture now independently
+checks native tools, all three forcing flags and public admission refusal for
+anonymous and unknown identities while retaining the declared-alias control.
+These are fixture corrections; production is byte-identical to8f. Earlier
+SOURCE PASS assessments that missed them are superseded. Two corrected full
+fixture source reviews atc891 found no remaining P0–P2. They are not execution
+results or formal GitHub approvals.
+
+[40219615509](https://github.com/jeong-sik/masc/actions/runs/40219615509) was
+dispatched for exactly `c891e4aa26830a1622d96d3ca5f7525c6d24300b` and the
+same three explicit suites. Its result is unverified. Intermediate requests
+40219173989 and40219425794 precede one or both fixture corrections; do not
+reuse their outcome as final-fixture acceptance. `corrected-source-sha256.json`
+binds all ten current source/fixture/direct-consumer inputs and preserves the
+original8f manifest as history. No build, HTTP, installation, merge, full
+regression or whole-issue completion follows from the source reviews or earlier
+partial execution results.

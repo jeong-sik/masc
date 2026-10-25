@@ -57,8 +57,9 @@ in
 Capability_manifest.set_global manifest
 ```
 
-Any model whose ID starts with `my-llama-q4` (case-insensitive) will now use
-these capabilities when no model catalog row matches the requested model.
+The exact model `my-llama-q4` (ASCII case-insensitive) can use this declaration
+when no model catalog row matches. Other release or quantization IDs need their
+own explicit declarations.
 
 ## Schema Reference
 
@@ -119,7 +120,7 @@ must update the parser and this schema together.
 
 The `base` field names a provider preset from
 `Capabilities.capabilities_for_provider_label`.  When `base` is absent, agent_core uses
-`default_capabilities` (all flags false, no limits).  Unrecognised `base` values
+`default_capabilities`; undeclared fields keep that base's values.  Unrecognised `base` values
 are rejected when the manifest is parsed.
 
 | Label | Description |
@@ -161,26 +162,17 @@ let caps = Capabilities.for_model_id "my-llama-q4"
 ### Apply a manifest entry directly
 
 ```ocaml
-let base_label =
-  match Capability_manifest.base_label_of_string "openai_chat" with
-  | Ok label -> label
-  | Error msg -> invalid_arg msg
+let manifest =
+  Capability_manifest.of_json (Yojson.Safe.from_string
+    {|{"schema_version":2,"models":[{"model_id":"my-model","base":"openai_chat","max_context_tokens":65536,"supports_tools":true}]}|})
+  |> Result.get_ok
 in
+let id = Model_identifiers.Model_id.of_string_exn "my-model" in
+let caps =
+  match Capability_manifest.lookup manifest id with
+  | Some entry -> Capabilities.apply_manifest_entry entry
+  | None -> invalid_arg "model is not declared"
 
-let entry : Capability_manifest.entry =
-  { model_id = Model_identifiers.Model_id.of_string_exn "my-model"
-  ; base_label = Some base_label
-  ; max_context_tokens = Some 65536
-  ; supports_tools = Some true
-  ; (* all other fields: None = inherit from base *)
-    supports_tool_choice = None
-  ; supports_required_tool_choice = None
-  ; supports_named_tool_choice = None
-  ; supports_parallel_tool_calls = None
-  ; (* ... *)
-  }
-in
-let caps = Capabilities.apply_manifest_entry entry
 ```
 
 ## Bundling with a Model Deployment
@@ -207,5 +199,6 @@ Capability_manifest.set_global manifest
   reload policy, and error handling belong to the embedding application.
 - `load_file` returns an explicit `Result`; install only a successfully parsed
   manifest with `set_global`.
-- The embedded model catalog remains the primary capability source. A manifest
-  supplies facts only when no model-catalog row matches.
+- Global `Capabilities.for_model_id` lookup keeps the model catalog primary.
+  The explicit `for_model_id_with_manifest` API instead checks the supplied
+  exact manifest entry first, then falls back to the catalog on a miss.

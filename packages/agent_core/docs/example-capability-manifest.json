@@ -107,7 +107,7 @@
       "supports_native_streaming": true
     },
     {
-      "_comment": "qwen — generic alias, capability 모델 따라 다름. base inherit. downstream qwen3.5 / qwen-local-35b-a3b entries 가 더 정확.",
+      "_comment": "qwen — exact deployment alias with only its declared base capabilities. qwen3.5 and qwen-local-35b-a3b are independent exact declarations; no family inheritance applies.",
       "model_id": "qwen",
       "base": "openai_chat",
       "supports_native_streaming": true

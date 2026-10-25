@@ -87,6 +87,56 @@ let test_complete_original () =
     (L.observations_for_absorption original=L.observations_for_absorption restored
      && C.prompt_json original.working_context=C.prompt_json restored.working_context)
 
+let legacy_message metadata =
+  let metadata =
+    List.map
+      (fun (key, value) ->
+         `Assoc [ "key", `String key; "value", value ])
+      metadata
+  in
+  Capture.message_of_json
+    (`Assoc
+       [ "role", `String "user"
+       ; "content", `List []
+       ; "name", `Null
+       ; "tool_call_id", `Null
+       ; "metadata", `List metadata
+       ])
+  |> get
+;;
+
+let test_legacy_message_origin () =
+  let provenance_key = "agent_core.extra_system_context.v1" in
+  let classify metadata = (legacy_message metadata).T.origin in
+  check (testable T.pp_message_origin ( = ))
+    "legacy context metadata maps to typed origin"
+    T.System_context
+    (classify [ provenance_key, `Bool true ]);
+  check (testable T.pp_message_origin ( = ))
+    "legacy historical context metadata maps to typed origin"
+    T.Historical_system_context
+    (classify [ provenance_key, `String "historical" ]);
+  check (testable T.pp_message_origin ( = ))
+    "invalid provenance remains system context"
+    T.System_context
+    (classify [ provenance_key, `Bool false ]);
+  check (testable T.pp_message_origin ( = ))
+    "duplicate provenance remains system context"
+    T.System_context
+    (classify [ provenance_key, `Bool true; provenance_key, `String "historical" ]);
+  check (testable T.pp_message_origin ( = ))
+    "unmarked legacy message remains conversation"
+    T.Conversation
+    (classify []);
+  check (testable T.pp_message_origin ( = ))
+    "instruction metadata takes precedence"
+    T.Agent_instruction
+    (classify
+       [ "masc.librarian_working_state.v1", `Bool false
+       ; provenance_key, `String "historical"
+       ])
+;;
+
 let test_absence_and_failure () =
   let original=input () in
   List.iter (fun goal_context ->
@@ -109,5 +159,6 @@ let test_refused_envelope () =
 
 let () = run "Original Librarian input retention" ["retention",[
   test_case "complete original survives restart with nested tool payloads and provenance" `Quick test_complete_original;
+  test_case "legacy message origin is inferred from metadata" `Quick test_legacy_message_origin;
   test_case "unavailable authority is distinct from no Task or empty goals" `Quick test_absence_and_failure;
   test_case "malformed retained envelopes refuse without defaults" `Quick test_refused_envelope]]

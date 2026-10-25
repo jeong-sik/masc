@@ -138,10 +138,15 @@ let infer_legacy_origin metadata =
      || List.assoc_opt "masc.model_input_tail_window.v1" metadata = Some (`Bool true)
   then A.Agent_instruction
   else
-    match A.Extra_system_context_provenance.classify metadata with
-    | Present | Invalid | Duplicate -> A.System_context
-    | Historical -> A.Historical_system_context
-    | Absent -> A.Conversation
+    match
+      List.filter_map
+        (fun (key, value) ->
+           if String.equal key "agent_core.extra_system_context.v1" then Some value else None)
+        metadata
+    with
+    | [] -> A.Conversation
+    | [ `String "historical" ] -> A.Historical_system_context
+    | _ -> A.System_context
 let message_of_json json =
   let* f, has_origin =
     match fields ["role";"origin";"content";"name";"tool_call_id";"metadata"] json with

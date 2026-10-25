@@ -51,6 +51,13 @@ and five publication fixtures passed, along with the allocation and protocol
 suites. The extension and broker fixtures still had two failures repaired by
 the later candidate. Build success did not make that run successful.
 
+[Run 40149926239](https://github.com/jeong-sik/masc/actions/runs/40149926239)
+subsequently built source `60303e6d5c3334df8a4827448e2a2fc6b84c5071` and
+passed all seven selected suites, 108 tests. A later artifact-copy step failed
+when overwriting an already retained read-only executable, so the real Chromium
+probe was skipped and the overall run failed. These results do not cover the
+new invocation-acceptance and detected-owner-loss changes above that source.
+
 The retained server and 1Password package from that same source were run in a
 separate temporary workspace. The executable's embedded commit and effective
 runtime roots were checked. The declaration API attached its native worker,
@@ -76,6 +83,15 @@ the assistant row was persisted. The original Task was null, and no actual
 1Password account, extension fill or website authentication was exercised.
 The [continuation contract](lane-addon-keeper-continuation.md#observed-isolated-failure-continuation)
 records the evidence scope.
+
+A further isolated run of that same source established a non-null Task path.
+An actual Keeper claimed and auto-started `task-001`, invoked `onepassword_login`
+in `trace-1792893853333-00000#2`, then received the canonical failure in `#3`.
+The original record, queue receipt, both tool contexts and resumed turn retained
+`task-001`. Its actual `keeper_surface_post` persisted message
+`msg-1792893883329673-7` in the original Dashboard conversation, and the Task
+remained in progress. This is controlled failure continuation; it does not
+establish successful sign-in or work on an authenticated website.
 
 ## Earlier status installation
 

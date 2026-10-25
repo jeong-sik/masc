@@ -3,7 +3,7 @@
 module PC = Llm_provider.Provider_catalog
 module PR = Llm_provider.Provider_registry
 module PConfig = Llm_provider.Provider_config
-module MC = Llm_provider.Model_catalog
+module PD = Llm_provider.Provider_declarations
 
 type provider_kind = PConfig.provider_kind
 type capabilities = Llm_provider.Capabilities.capabilities
@@ -35,172 +35,39 @@ let trim_non_empty value =
   if trimmed = "" then None else Some trimmed
 ;;
 
-let auth_of_catalog = function
-  | PC.No_auth -> No_auth
-  | PC.Api_key_env _ -> Api_key
-  | PC.Setup_token_env _ -> Setup_token
+let binding_of_declaration (entry : PD.entry) =
+  let auth = match entry.authentication with
+    | PD.No_auth -> No_auth
+    | Caller_api_key | Api_key_env _ -> Api_key
+    | Setup_token_env _ -> Setup_token in
+  { id=entry.id;aliases=entry.aliases;kind=entry.kind;base_url=entry.base_url;
+    request_path=entry.request_path;
+    requires_api_key=PD.requires_api_key entry.authentication;auth;
+    default_model=entry.default_model;max_context=entry.max_context;
+    capabilities=entry.capabilities;
+    available=PR.authentication_available entry.authentication;
+    credential_scope=entry.credential_scope }
 ;;
 
-let auth_of_defaults (defaults : PR.provider_defaults) =
-  if defaults.requires_api_key then Api_key else No_auth
+let all_from_declarations declarations =
+  PD.entries declarations |> List.map binding_of_declaration
+  |> List.sort (fun a b -> String.compare a.id b.id)
 ;;
 
-let registry_lookup_available registry id =
-  match PR.find registry (normalize id) with
-  | Some entry -> entry.is_available ()
-  | None -> false
+let find_in_declarations declarations label =
+  PD.find declarations label |> Option.map binding_of_declaration
 ;;
 
-let registry_lookup_max_context registry id fallback =
-  match PR.find registry (normalize id) with
-  | Some entry -> entry.max_context
-  | _ -> fallback
-;;
-
-let binding_of_catalog_entry registry (entry : PC.entry) =
-  { id = normalize entry.id
-  ; aliases = List.map normalize entry.aliases
-  ; kind = entry.kind
-  ; base_url = entry.base_url
-  ; request_path = entry.request_path
-  ; requires_api_key =
-      (match entry.auth with
-       | PC.Api_key_env _ | PC.Setup_token_env _ -> true
-       | PC.No_auth -> false)
-  ; auth = auth_of_catalog entry.auth
-  ; default_model = entry.default_model
-  ; max_context = registry_lookup_max_context registry entry.id entry.max_context
-  ; capabilities = entry.capabilities
-  ; available = registry_lookup_available registry entry.id
-  ; credential_scope = entry.credential_scope
-  }
-;;
-
-let binding_of_registry_entry (entry : PR.entry) =
-  { id = normalize entry.name
-  ; aliases = []
-  ; kind = entry.defaults.kind
-  ; base_url = entry.defaults.base_url
-  ; request_path = entry.defaults.request_path
-  ; requires_api_key = entry.defaults.requires_api_key
-  ; auth = auth_of_defaults entry.defaults
-  ; default_model = None
-  ; max_context = entry.max_context
-  ; capabilities = entry.capabilities
-  ; available = entry.is_available ()
-  ; credential_scope = None
-  }
-;;
-
-let embedded_provider_entries () =
-  match MC.global () with
-  | None -> []
-  | Some catalog -> MC.provider_entries catalog
-;;
-
-let binding_of_embedded_entry registry (entry : MC.provider_entry) =
-  let registry_entry = PR.find registry entry.id in
-  let capabilities =
-    match registry_entry with
-    | Some registered -> registered.capabilities
-    | None -> Llm_provider.Capabilities.default_capabilities
-  in
-  { id = normalize entry.id
-  ; aliases = List.map normalize entry.aliases
-  ; kind = entry.kind
-  ; base_url = entry.base_url
-  ; request_path = entry.request_path
-  ; requires_api_key = entry.requires_api_key
-  ; auth = if entry.requires_api_key then Api_key else No_auth
-  ; default_model = entry.default_model
-  ; max_context = registry_lookup_max_context registry entry.id None
-  ; capabilities
-  ; available = registry_lookup_available registry entry.id
-  ; credential_scope = None
-  }
-;;
-
-let catalog_entries () =
-  match PC.global () with
-  | None -> []
-  | Some catalog -> PC.entries catalog
-;;
-
-let catalog_names entries =
-  entries
-  |> List.concat_map (fun (entry : PC.entry) -> entry.id :: entry.aliases)
-  |> List.map normalize
-;;
-
-let embedded_names entries =
-  entries
-  |> List.concat_map (fun (entry : MC.provider_entry) -> entry.id :: entry.aliases)
-  |> List.map normalize
-;;
-
-let find_embedded_entry entries normalized =
-  List.find_opt
-    (fun (entry : MC.provider_entry) ->
-       String.equal (normalize entry.id) normalized
-       || List.exists
-            (fun alias -> String.equal (normalize alias) normalized)
-            entry.aliases)
-    entries
-;;
-
-let sort_bindings bindings = List.sort (fun a b -> String.compare a.id b.id) bindings
-
-let binding_by_exact_label registry normalized =
-  match PC.global () with
-  | Some catalog ->
-    (match PC.lookup catalog normalized with
-     | Some entry -> Some (binding_of_catalog_entry registry entry)
-     | None ->
-       (match find_embedded_entry (embedded_provider_entries ()) normalized with
-        | Some entry -> Some (binding_of_embedded_entry registry entry)
-        | None -> Option.map binding_of_registry_entry (PR.find registry normalized)))
-  | None ->
-    (match find_embedded_entry (embedded_provider_entries ()) normalized with
-     | Some entry -> Some (binding_of_embedded_entry registry entry)
-     | None -> Option.map binding_of_registry_entry (PR.find registry normalized))
-;;
-
-let all () =
-  let registry = PR.default () in
-  let catalog = catalog_entries () in
-  let embedded = embedded_provider_entries () in
-  let declared_name_set = catalog_names catalog @ embedded_names embedded in
-  let from_catalog = List.map (binding_of_catalog_entry registry) catalog in
-  let from_embedded =
-    embedded
-    |> List.filter (fun (entry : MC.provider_entry) ->
-      not (List.mem (normalize entry.id) (catalog_names catalog)))
-    |> List.map (binding_of_embedded_entry registry)
-  in
-  let from_registry =
-    PR.all registry
-    |> List.filter (fun (entry : PR.entry) ->
-      not (List.mem (normalize entry.name) declared_name_set))
-    |> List.map binding_of_registry_entry
-  in
-  sort_bindings (from_catalog @ from_embedded @ from_registry)
-;;
-
-let find label =
-  let normalized = normalize label in
-  if normalized = "" then None else binding_by_exact_label (PR.default ()) normalized
-;;
+let all () = all_from_declarations (PD.current ())
+let find label = find_in_declarations (PD.current ()) label
 
 let find_catalog label =
-  let normalized = normalize label in
-  if normalized = ""
-  then None
-  else (
-    let registry = PR.default () in
-    match PC.global () with
-    | Some catalog ->
-      Option.map (binding_of_catalog_entry registry) (PC.lookup catalog normalized)
-    | None -> None)
+  match PC.global () with
+  | None -> None
+  | Some providers ->
+    (match PD.of_catalogs ~models:None ~providers:(Some providers) with
+     | Ok declarations -> find_in_declarations declarations label
+     | Error error -> raise (PD.Invalid_declarations error))
 ;;
 
 let binding_for_provider_config (cfg : PConfig.t) = Option.bind cfg.provider_id find

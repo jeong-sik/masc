@@ -51,12 +51,15 @@ let cancel_invocation grant =
   Option.iter (Hashtbl.remove grant.broker.publications) grant.publication_id;
   ignore (Eio.Promise.try_resolve grant.decide ());
   ignore (Eio.Promise.try_resolve grant.cancel_publication ())
-let accept grant = match grant.decision with
-  | Awaiting_decision when grant.broker.live ->
+let accept grant =
+  if not grant.broker.live then Error Unavailable else
+  match grant.decision with
+  | Awaiting_decision ->
       grant.decision<-Admitted;
       (match grant.phase with Pending -> grant.phase<-Accepted | Accepted|Claimed|Withdrawn -> ());
-      ignore (Eio.Promise.try_resolve grant.decide ())
-  | Awaiting_decision | Admitted | Rejected -> ()
+      ignore (Eio.Promise.try_resolve grant.decide ());Ok ()
+  | Admitted -> Ok ()
+  | Rejected -> Error Not_started
 let end_invocation grant = match grant.decision with
   | Awaiting_decision | Rejected -> cancel_invocation grant
   | Admitted -> ()

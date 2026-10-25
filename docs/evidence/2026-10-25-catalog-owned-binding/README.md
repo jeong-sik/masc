@@ -43,3 +43,14 @@ Local gh-stack init and remote link both refused because another live gh-stack
 submit owns its global editing lock. Its process was not stopped or its lock
 removed. This candidate can be published as a draft branch chain based on the
 current #45876 branch; Native Stack membership must be confirmed separately.
+
+## Initial execution failure and repair
+
+Run 40153805828 actually checked out `20724a6803bdc6aa9b113a2791db98112c1f5133`
+and FAILED before selected tests. A remaining inline negative case referenced
+`test_catalog_entries` after that raw fixture list was removed. It now reads
+`Model_catalog.model_entries test_catalog`, so it preserves the same declared
+rows through the strict constructor. The initial runtime suite name was also
+wrong; the actual direct runtime consumer suite is `test/test_runtime_per_keeper_routing`.
+The retained compile-failure log records both, and the prior source verdict was
+explicitly invalidated. No baseline or repaired execution success is inferred.

@@ -13,7 +13,7 @@
   },
   {
     "file": "packages/agent_core/lib/llm_provider/capabilities.ml",
-    "sha256": "d8883c069730766ef24945bdae6a3e7b63c47aa57f0fbbf39165157fd5762c32",
+    "sha256": "5cd08e96d6a8668633aa87c52d6910fb6d68261ceb9337a4a5ef053627bdba65",
     "exit": 0,
     "diagnostic": ""
   },

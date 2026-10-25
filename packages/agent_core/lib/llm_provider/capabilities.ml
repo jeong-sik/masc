@@ -2516,7 +2516,7 @@ let%test "undeclared model variants do not inherit catalog policies" =
     List.for_all (fun (entry : Model_catalog.model_entry) ->
       let raw = Model_identifiers.Model_id.to_string entry.model_id in
       List.for_all (fun variant -> Option.is_none (for_model_id_catalog variant))
-        [raw ^ ".undeclared"; "undeclared-provider/" ^ raw]) test_catalog_entries)
+        [raw ^ ".undeclared"; "undeclared-provider/" ^ raw]) (Model_catalog.model_entries test_catalog))
 ;;
 
 (* ── Capability drift detection ────────────────────────── *)

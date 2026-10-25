@@ -7438,6 +7438,20 @@ let test_shipped_browser_composition_refuses_text_mode skill_name arguments () =
          (call_through_agent_core tools tool_name (input "text")))
 ;;
 
+(* Native tool failures carry metadata, so Tool_projection preserves the
+   composition diagnostic in its failure envelope's message. An artifact
+   marker/envelope, when present, is verified by the existing helper first. *)
+let composition_failure_output_exn ~base_path content =
+  let payload = structured_tool_output_exn ~base_path content in
+  let payload = match Yojson.Safe.Util.(member "masc.tool_disposition" payload, member "message" payload) with
+    | `String "failed", `String message -> parse_json message
+    | `Null, `Null -> payload
+    | _ -> failf "invalid composition failure envelope: %s" (Yojson.Safe.to_string payload) in
+  match Yojson.Safe.Util.member "effect_disposition" payload with
+  | `String _ -> payload
+  | _ -> failf "composition failure has no effect evidence: %s" (Yojson.Safe.to_string payload)
+;;
+
 let test_composition_read_failure_preserves_same_turn
     ?(break_evidence = false) ~observe ~break_receipt ~terminal ~unknown_write () =
   let reads = ref 0 and navigations = ref 0 in
@@ -7515,7 +7529,7 @@ value = {surface="dashboard", content="must not run"}
         let result = (find "keeper_compose_navigate-read-recovery").call
           ~call_id:"composition-read-failure" (`Assoc []) in
         check bool "composition still reports failure" false result.success;
-        let payload = structured_tool_output_exn ~base_path:config.base_path result.content in
+        let payload = composition_failure_output_exn ~base_path:config.base_path result.content in
         check string "aggregate effect evidence is unchanged"
           (if unknown_write then "effect_outcome_unknown" else "proven_post_effect")
           Yojson.Safe.Util.(payload |> member "effect_disposition" |> to_string);
@@ -7638,7 +7652,7 @@ id = "second"
         check bool "the composition reports its failure" false result.success;
         check int "the navigation ran once" 1 !navigations;
         check int "the second node ran once" 1 !seconds;
-        let payload = structured_tool_output_exn ~base_path:config.base_path result.content in
+        let payload = composition_failure_output_exn ~base_path:config.base_path result.content in
         check string "the completed navigation keeps the aggregate post-effect"
           "proven_post_effect"
           Yojson.Safe.Util.(payload |> member "effect_disposition" |> to_string);

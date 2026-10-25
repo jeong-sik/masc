@@ -54,14 +54,25 @@ The broad native browser output probe passed. The deadlock is no longer present,
 but this is not whole-suite success. Earlier SOURCE PASS did not identify two
 additional stale test assumptions now exposed by execution.
 
-The recovery cases now read the canonical durable structured result through the
-existing structured_tool_output_exn helper. It validates marker/envelope, fetches
-the actual manifest, checks its byte length and, for an inline envelope, checks
-its equality with that manifest. Native browser results contain retained artifact
-references, so the composition result can be reference-only on the provider wire;
-parsing that reference as the composition payload lost effect_disposition.
-The BrowserAct control now sends the supported reload action rather than click,
-which belongs to BrowserInteract and was refused during plan input validation.
-It still requires exactly one actual navigation and failed second-node call and
-the original terminal boundary; no expected effect or receipt assertion is removed.
-Selected execution for these corrections is pending.
+The recovery cases now validate any durable marker/envelope using the existing
+structured_tool_output_exn helper, then unwrap Tool_projection's actual failed
+result envelope. Native browser failures supply metadata; the public failure
+wire is consequently an object containing message (the serialized composition
+diagnostic), masc.tool_disposition=failed and masc.payload (producer metadata).
+The old callbacks supplied no metadata, so the diagnostic was inline at root.
+The helper only accepts that failed envelope or a direct diagnostic, then
+requires effect_disposition and reports the actual payload if it is missing.
+No production projection, metadata, effect or terminal decision is changed.
+
+The BrowserAct control sends supported reload rather than click, which belongs
+to BrowserInteract and was refused during plan input validation. It still
+requires exactly one actual navigation and failed second-node call and the
+original terminal boundary; no effect, receipt or counter assertion is removed.
+
+Run [40236254385](https://github.com/jeong-sik/masc/actions/runs/40236254385)
+at ac44a02e916fee376a78b6f08abd7367d1f12b73 completed with 120 executed:
+112 PASS, eight FAIL; 15 separately skipped. The reload counters now passed,
+but the durable helper alone did not unwrap the ordinary failure metadata
+envelope, so effect assertions still saw null. The previous artifact-only
+explanation was incomplete; earlier SOURCE PASS also missed this layer.
+Selected execution for the failure-envelope correction is pending.

@@ -1732,112 +1732,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
       boot_stage "owner_publication.end";
-      (* The owner and HTTP listener initialize independently. A successful
-         start requires both before publishing caller-owned startup effects. *)
-      (match on_ready with
-       | None -> ()
-       | Some on_ready ->
-         boot_stage "listener_wait.begin";
-         Eio.Promise.await listener_bound;
-         on_ready ();
-         boot_stage "listener_wait.end");
-      (* The lag probe forks here, on the main domain, so its ring reports
-         the scheduler every handler on this domain shares. It starts at the
-         readiness boundary rather than at process start so the boot replay
-         is not counted as steady-state lag. *)
-      (match Eio_context.get_mono_clock_opt () with
-       | Some mono_clock ->
-         Scheduler_lag.start ~sw ~mono_clock Scheduler_lag.global;
-         Log.Server.info
-           "scheduler lag probe started on the main domain: interval=%.0fms window=%.0fs"
-           (Scheduler_lag.default_interval_s *. 1000.0)
-           (Scheduler_lag.default_interval_s
-            *. Float.of_int Scheduler_lag.default_window)
-       | None ->
-         Log.Server.warn
-           "scheduler lag probe not started: Eio_context has no monotonic clock");
-      (* Full-health has its own off-domain worker, timeout, and warm delay.
-         Start it at the owner-readiness boundary so post-ready lanes and
-         auxiliary prewarms cannot leave current diagnostics requested-but-idle. *)
-      Server_routes_http_runtime.start_full_health_snapshot_refresh_loop
-        ~sw
-        ~clock
-        ~request_authority:background_request_authority;
-      (* Roots for GET /api/v1/diagnostics/heap-roots. Registered here, after
-         owner readiness, because every store named below is installed by
-         now; a walk before that would size the empty initial registries.
-         Each root receives the walker and calls it itself, so a table that
-         has a lock is walked under it. *)
-      List.iter
-        (fun (name, value) ->
-           match Heap_roots.register ~name value with
-           | Ok () -> ()
-           | Error `Duplicate ->
-             Log.Server.warn
-               "heap root %S was already registered; the first registration stands"
-               name)
-        [ ("exact_lane_runs", fun walk -> walk (Some (Obj.repr (Exact_lane_run_registry.global ()))))
-        ; ("verification_runs", fun walk -> walk (Some (Obj.repr (Verification_run_registry.global ()))))
-        ; ( "goal_verification_runs"
-          , fun walk -> walk (Some (Obj.repr (Goal_verification_run_registry.global ()))) )
-        ; ("fusion_runs", fun walk -> walk (Some (Obj.repr (Fusion_run_registry.global ()))))
-        ; ("sse_clients", fun walk -> walk (Some (Obj.repr (Atomic.get Sse.clients))))
-        ; ("dashboard_snapshot", fun walk -> walk (Option.map Obj.repr (Dashboard_snapshot.current ())))
-        ; ( "keeper_registry"
-          , fun walk -> walk (Some (Obj.repr (Atomic.get Keeper_registry_setup.registry))) )
-        ; ( "keeper_owner_pools"
-          , fun walk -> Keeper_owner_registry.heap_root (fun value -> walk (Some value)) )
-        ; ( "board_attention_partition_caches"
-          , fun walk -> Keeper_board_attention_partition.heap_root (fun value -> walk (Some value)) )
-        ; ( "activity_graph_caches"
-          , fun walk -> Activity_graph.heap_root (fun value -> walk (Some value)) )
-        ; ( "telemetry_trajectory_summaries"
-          , fun walk -> Telemetry_unified.heap_root (fun value -> walk (Some value)) )
-        ];
-      let path_diagnostics = activated_owner.path_diagnostics in
-      boot_stage "post_ready_lanes.begin";
-      let resolved_base, masc_dir =
-        start_post_ready_owner_lanes ~sw ~clock ~env state
-      in
-      boot_stage "post_ready_lanes.end";
-      (* RFC-0203 Phase 3: in-process Discord gateway replaces the
-         deleted sidecars/discord-bot/ Python connector. Always-on:
-         if DISCORD_BOT_TOKEN is unset the start function logs a
-         warning and skips, leaving the server otherwise unaffected. *)
-      boot_stage "discord_gateway.begin";
-      Server_discord_in_process_gateway.start ~sw ~env ~clock ~state;
-      boot_stage "discord_gateway.end";
-      (* RFC-0317 PR-3: in-process Slack Socket Mode gateway, mirroring the
-         Discord one. Off unless SLACK_APP_TOKEN is set; the start function
-         logs a warning and skips otherwise, leaving the server unaffected. *)
-      boot_stage "slack_gateway.begin";
-      Server_slack_in_process_gateway.start ~sw ~env ~state;
-      boot_stage "slack_gateway.end";
-      (* slack-lane (task-1418): in-process collection fiber for bound
-         channels without app event subscriptions. Off unless
-         [slack] poll_enabled is set in runtime.toml; the start function
-         logs and skips otherwise, leaving the server unaffected. *)
-      boot_stage "slack_poll.begin";
-      Server_slack_poll_lane.start ~sw ~env ~state;
-      boot_stage "slack_poll.end";
-      (* In-process iMessage connector, replacing the deleted
-         sidecars/imessage-bot/ Python connector. Off unless Messages.app's
-         chat.db is readable — on Linux it never is, and the start function
-         records the reason and skips, leaving the server unaffected. *)
-      boot_stage "imessage_gateway.begin";
-      Server_imessage_in_process_gateway.start ~sw ~env ~state;
-      boot_stage "imessage_gateway.end";
-      boot_stage "telegram_gateway.begin";
-      Server_telegram_in_process_gateway.start ~sw ~env ~state;
-      boot_stage "telegram_gateway.end";
-      boot_stage "listening_banner.begin";
-      Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
-        ~masc_dir ~path_diagnostics;
-      boot_stage "listening_banner.end";
-      (* Auxiliary transports start after owner readiness and report their own
-         availability. They must not gain lifecycle authority over HTTP or
-         unrelated Keeper lanes. *)
-      (* gRPC workspace transport (default-off, opt-in via MASC_GRPC_ENABLED=1) *)
       let tool_dispatcher tool_name args_json =
       Server_grpc_tool_dispatch.dispatch args_json ~dispatch:(fun arguments ->
           let workspace_scope = Mcp_server.workspace_scope state in
@@ -1857,19 +1751,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
               tool_name (String.length result_str);
           if success then Ok result_str else Error result_str)
       in
-      Masc_grpc_server.start ~sw ~env ~workspace_config:(Mcp_server.workspace_config state)
-        ~tool_dispatcher;
-      (* Initialize gRPC client for keeper heartbeat when transport is gRPC *)
-      (match configured_agent_transport with
-       | Masc_grpc_transport.Grpc ->
-           (try
-              let client = Masc_grpc_client.create_from_env ~sw ~env in
-              Keeper_grpc_heartbeat.set_grpc_client ~env client;
-              Log.Server.info "gRPC keeper client initialized"
-            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              Log.Server.warn "gRPC keeper client init failed: %s"
-                (Printexc.to_string exn))
-       | Http | Ws | Local -> ());
       let dispatch_ws_inbound_message ws_session_id body_str =
           let jsonrpc_id_opt body =
             match Yojson.Safe.from_string body with
@@ -1963,80 +1844,192 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store
                     | exn ->
                       Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn)))
       in
-      Server_mcp_transport_ws.set_inbound_message_handler
-        dispatch_ws_inbound_message;
-      (* WebSocket rides the HTTP listener's same-origin /ws upgrade
-         (enabled by default, opt-out via MASC_WS_ENABLED=0). *)
-      Transport_metrics.set_ws_same_origin_runtime_ready true;
-      (* Register transport providers for unified bridge *)
-      Transport_bridge.register_provider (module struct
-        let name = "sse"
-        let protocol = Transport.Sse
-        let is_enabled () = true  (* SSE is always enabled *)
-        let session_count () = Sse.client_count ()
-      end);
-      Transport_bridge.register_provider (module struct
-        let name = "ws"
-        let protocol = Transport.Ws
-        let is_enabled () = Transport_metrics.ws_enabled ()
-        let session_count () = Server_mcp_transport_ws.session_count ()
-      end);
-      Transport_bridge.register_provider (module struct
-        let name = "grpc"
-        let protocol = Transport.Grpc
-        let is_enabled () = Masc_grpc_server.is_enabled ()
-        let session_count () = 0  (* gRPC uses per-call, no persistent sessions *)
-      end);
-      Transport_bridge.seal ();
-      (* Cold-start warm-cache stagger is handled by warm_delay_s in each
-         Proactive_refresh config. Heavy surfaces delay their initial warm
-         compute to avoid concurrent CPU/PG contention.  Lightweight surfaces
-         (execution, transport_health) start immediately. *)
-      Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
-      Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
-      Server_dashboard_http.start_execution_trust_refresh_loop ~state ~sw ~clock;
-      Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
-      Server_dashboard_http.start_operator_snapshot_refresh_loop
-        ~state
-        ~sw
-        ~clock
-        ~broadcast_snapshot:
-          Server_dashboard_http_execution_surfaces.broadcast_refreshed_operator_snapshot;
-      Server_dashboard_http.start_operator_digest_refresh_loop
-        ~state
-        ~sw
-        ~clock
-        ~broadcast_digest:
-          Server_dashboard_http_execution_surfaces.broadcast_operator_digest;
-      (* Pre-warm primary dashboard surfaces in parallel across worker
-         domains in a separate fiber so it cannot block lazy startup tasks
-         or later keeper loop startup (#keeper-bootstrap-stuck). *)
-      Atomic.set Server_dashboard_http.shell_warming true;
-      Eio.Fiber.fork ~sw (fun () ->
-        Eio.Switch.run ~name:"dashboard-shell-prewarm" @@ fun _ ->
-        let outer_timeout_sec =
-          Env_config_runtime.Dashboard.shell_prewarm_outer_timeout_sec
-        in
-        try
-           (* A pre-warm that finished as its window closed has finished. *)
-           match
-             Watched_work.run
-               ~watcher:(fun () ->
-                 Eio.Time.sleep clock outer_timeout_sec;
-                 Error `Timeout)
-               (fun () ->
-                  Server_dashboard_http.warm_dashboard_surfaces state;
-                  Ok ())
-           with
-           | Ok () -> ()
-           | Error `Timeout ->
-             Log.Dashboard.warn "dashboard surfaces pre-warm timed out (%.1fs)"
-               outer_timeout_sec
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-             Log.Dashboard.warn "dashboard surfaces pre-warm failed: %s"
-             (Printexc.to_string exn));
+      (* Each synchronous start owns its attempt outcome. Returning can mean
+         a worker was forked or disabled configuration was skipped; actual
+         transport/gateway readiness remains with its existing owner. *)
+      let failures =
+        Server_auxiliary_startup.run_all Server_auxiliary_startup.global
+        { Server_auxiliary_startup.ready_notification = (fun () ->
+            (* Caller-owned effects still wait for both owner and HTTP bind. *)
+            (match on_ready with
+             | None -> ()
+             | Some on_ready ->
+               boot_stage "listener_wait.begin";
+               Eio.Promise.await listener_bound;
+               on_ready ();
+               boot_stage "listener_wait.end"))
+        ; scheduler_probe = (fun () ->
+            (match Eio_context.get_mono_clock_opt () with
+             | Some mono_clock ->
+               Scheduler_lag.start ~sw ~mono_clock Scheduler_lag.global;
+               Log.Server.info
+                 "scheduler lag probe started on the main domain: interval=%.0fms window=%.0fs"
+                 (Scheduler_lag.default_interval_s *. 1000.0)
+                 (Scheduler_lag.default_interval_s
+                  *. Float.of_int Scheduler_lag.default_window)
+             | None ->
+               Log.Server.warn
+                 "scheduler lag probe not started: Eio_context has no monotonic clock"))
+        ; full_health_refresh = (fun () ->
+            Server_routes_http_runtime.start_full_health_snapshot_refresh_loop
+              ~sw
+              ~clock
+              ~request_authority:background_request_authority)
+        ; heap_roots = (fun () ->
+            List.iter
+              (fun (name, value) ->
+                 match Heap_roots.register ~name value with
+                 | Ok () -> ()
+                 | Error `Duplicate ->
+                   Log.Server.warn
+                     "heap root %S was already registered; the first registration stands"
+                     name)
+              [ ("exact_lane_runs", fun walk -> walk (Some (Obj.repr (Exact_lane_run_registry.global ()))))
+              ; ("verification_runs", fun walk -> walk (Some (Obj.repr (Verification_run_registry.global ()))))
+              ; ( "goal_verification_runs"
+                , fun walk -> walk (Some (Obj.repr (Goal_verification_run_registry.global ()))) )
+              ; ("fusion_runs", fun walk -> walk (Some (Obj.repr (Fusion_run_registry.global ()))))
+              ; ("sse_clients", fun walk -> walk (Some (Obj.repr (Atomic.get Sse.clients))))
+              ; ("dashboard_snapshot", fun walk -> walk (Option.map Obj.repr (Dashboard_snapshot.current ())))
+              ; ( "keeper_registry"
+                , fun walk -> walk (Some (Obj.repr (Atomic.get Keeper_registry_setup.registry))) )
+              ; ( "keeper_owner_pools"
+                , fun walk -> Keeper_owner_registry.heap_root (fun value -> walk (Some value)) )
+              ; ( "board_attention_partition_caches"
+                , fun walk -> Keeper_board_attention_partition.heap_root (fun value -> walk (Some value)) )
+              ; ( "activity_graph_caches"
+                , fun walk -> Activity_graph.heap_root (fun value -> walk (Some value)) )
+              ; ( "telemetry_trajectory_summaries"
+                , fun walk -> Telemetry_unified.heap_root (fun value -> walk (Some value)) )
+              ])
+        ; owner_lanes = (fun () ->
+            boot_stage "post_ready_lanes.begin";
+            ignore (start_post_ready_owner_lanes ~sw ~clock ~env state : string * string);
+            boot_stage "post_ready_lanes.end")
+        ; discord_gateway = (fun () ->
+            boot_stage "discord_gateway.begin";
+            Server_discord_in_process_gateway.start ~sw ~env ~clock ~state;
+            boot_stage "discord_gateway.end")
+        ; slack_gateway = (fun () ->
+            boot_stage "slack_gateway.begin";
+            Server_slack_in_process_gateway.start ~sw ~env ~state;
+            boot_stage "slack_gateway.end")
+        ; slack_poll = (fun () ->
+            boot_stage "slack_poll.begin";
+            Server_slack_poll_lane.start ~sw ~env ~state;
+            boot_stage "slack_poll.end")
+        ; imessage_gateway = (fun () ->
+            boot_stage "imessage_gateway.begin";
+            Server_imessage_in_process_gateway.start ~sw ~env ~state;
+            boot_stage "imessage_gateway.end")
+        ; telegram_gateway = (fun () ->
+            boot_stage "telegram_gateway.begin";
+            Server_telegram_in_process_gateway.start ~sw ~env ~state;
+            boot_stage "telegram_gateway.end")
+        ; startup_banner = (fun () ->
+            boot_stage "listening_banner.begin";
+            let workspace_config = Mcp_server.workspace_config state in
+            Server_bootstrap_http.print_startup_banner ~config
+              ~resolved_base:workspace_config.base_path ~base_path
+              ~masc_dir:(Workspace.masc_dir workspace_config)
+              ~path_diagnostics:activated_owner.path_diagnostics;
+            boot_stage "listening_banner.end")
+        ; grpc_listener = (fun () ->
+            Masc_grpc_server.start ~sw ~env
+              ~workspace_config:(Mcp_server.workspace_config state) ~tool_dispatcher)
+        ; grpc_client = (fun () ->
+            match configured_agent_transport with
+            | Masc_grpc_transport.Grpc ->
+                let client = Masc_grpc_client.create_from_env ~sw ~env in
+                Keeper_grpc_heartbeat.set_grpc_client ~env client;
+                Log.Server.info "gRPC keeper client initialized"
+            | Http | Ws | Local -> ())
+        ; websocket_handler = (fun () ->
+            Server_mcp_transport_ws.set_inbound_message_handler dispatch_ws_inbound_message;
+            Transport_metrics.set_ws_same_origin_runtime_ready true)
+        ; transport_providers = (fun () ->
+            Transport_bridge.register_provider (module struct
+              let name = "sse"
+              let protocol = Transport.Sse
+              let is_enabled () = true  (* SSE is always enabled *)
+              let session_count () = Sse.client_count ()
+            end);
+            Transport_bridge.register_provider (module struct
+              let name = "ws"
+              let protocol = Transport.Ws
+              let is_enabled () = Transport_metrics.ws_enabled ()
+              let session_count () = Server_mcp_transport_ws.session_count ()
+            end);
+            Transport_bridge.register_provider (module struct
+              let name = "grpc"
+              let protocol = Transport.Grpc
+              let is_enabled () = Masc_grpc_server.is_enabled ()
+              let session_count () = 0  (* gRPC uses per-call, no persistent sessions *)
+            end);
+            Transport_bridge.seal ())
+        ; execution_refresh = (fun () ->
+            Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock)
+        ; transport_health_refresh = (fun () ->
+            Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock)
+        ; execution_trust_refresh = (fun () ->
+            Server_dashboard_http.start_execution_trust_refresh_loop ~state ~sw ~clock)
+        ; mission_refresh = (fun () ->
+            Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock)
+        ; operator_snapshot_refresh = (fun () ->
+            Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock
+              ~broadcast_snapshot:Server_dashboard_http_execution_surfaces.broadcast_refreshed_operator_snapshot)
+        ; operator_digest_refresh = (fun () ->
+            Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock
+              ~broadcast_digest:Server_dashboard_http_execution_surfaces.broadcast_operator_digest)
+        ; shell_prewarm = (fun () ->
+            Atomic.set Server_dashboard_http.shell_warming true;
+            Eio.Fiber.fork ~sw (fun () ->
+              Eio.Switch.run ~name:"dashboard-shell-prewarm" @@ fun _ ->
+              let outer_timeout_sec =
+                Env_config_runtime.Dashboard.shell_prewarm_outer_timeout_sec
+              in
+              try
+                 (* A pre-warm that finished as its window closed has finished. *)
+                 match
+                   Watched_work.run
+                     ~watcher:(fun () ->
+                       Eio.Time.sleep clock outer_timeout_sec;
+                       Error `Timeout)
+                     (fun () ->
+                        Server_dashboard_http.warm_dashboard_surfaces state;
+                        Ok ())
+                 with
+                 | Ok () -> ()
+                 | Error `Timeout ->
+                   Log.Dashboard.warn "dashboard surfaces pre-warm timed out (%.1fs)"
+                     outer_timeout_sec
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                   Log.Dashboard.warn "dashboard surfaces pre-warm failed: %s"
+                   (Printexc.to_string exn)))
+        }
+      in
+      (match failures with
+       | [] -> ()
+       | _ :: _ ->
+           let names =
+             List.map
+               (fun (component, _) -> Server_auxiliary_startup.component_name component)
+               failures
+           in
+           Server_startup_state.mark_degraded
+             ~error:("Auxiliary starts failed: " ^ String.concat ", " names);
+           Server_routes_http_runtime.invalidate_full_health_snapshot ();
+           (* Diagnostics follow every eligible start, so a failing observer or
+              logger cannot skip unrelated components. Private causes stay out
+              of the health projection. *)
+           List.iter
+             (fun (component, failure) ->
+               Log.Server.error "Auxiliary startup failed component=%s: %s"
+                 (Server_auxiliary_startup.component_name component)
+                 (Printexc.to_string failure.Server_auxiliary_startup.cause))
+             failures);
       ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

@@ -1,0 +1,38 @@
+{
+  "base": "f0f4f30c859eee320a3d1facbd487028813d9e46",
+  "checks": [
+    "ocamlc -stop-after parsing",
+    "git diff --check"
+  ],
+  "typecheck": false,
+  "executed_tests": false,
+  "files": {
+    "lib/server/server_auxiliary_startup.mli": "f11ab00853bfecdedc71d1a839243dc227bbf8a619a14826a42e3401fefdc70f",
+    "lib/server/server_auxiliary_startup.ml": "9d29ba830dc00d55021df8346cf6b234eb2aa64a24e5d248b2270371a4e633aa",
+    "lib/server/server_runtime_bootstrap.ml": "20698c37924d825bddd30612261d46b83acee57cd92c2d87b1c7da621b59c672",
+    "lib/server/server_routes_http_runtime.mli": "c1b99b6c5a02ec601d6d48ef0996f58dc5a4438fc3ba19127623c49b7ef0de3e",
+    "lib/server/server_routes_http_runtime.ml": "0d01999d002c867b3138d61fa80b7b896dd5b34209e30b5009ac06725a897c0e",
+    "lib/server/server_health_rollup.ml": "33fbeabb64d34cb9c7fd23958ee40dad4cab23d191425cad660ec1659fdfb40d",
+    "test/test_server_auxiliary_startup.ml": "1304ad5f5941a7b96433df58a31eb03f871bc49eae74015d8b53bf485214cd55"
+  },
+  "requested_suites": [
+    "test/test_server_auxiliary_startup",
+    "test/test_server_health_rollup",
+    "test/test_grpc_listener"
+  ],
+  "full_regression": "not run on this candidate",
+  "baseline_component_run": {
+    "run": 40159365784,
+    "head": "f0f4f30c859eee320a3d1facbd487028813d9e46",
+    "conclusion": "success",
+    "cases": 1,
+    "scope": "held Session restoration plus Keeper lane boundary only; not this auxiliary startup change"
+  },
+  "prior_failed_run": {
+    "run": 40161241877,
+    "head": "115078e0d6d24b72fa596255ed6fdd27e3bf5171",
+    "result": "FAILURE",
+    "stage": "compile before selected execution",
+    "error": "test called private make_health_probe_json; use public make_health_response_json /health instead"
+  }
+}

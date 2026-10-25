@@ -151,7 +151,13 @@ val make_health_json :
     [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
     [keeper_config_schema_status] / [keeper_config_schema_blocking] /
     [keeper_config_schema_terminal_reason] /
-    [keeper_config_operator_action_required].
+    [keeper_config_operator_action_required] / [auxiliary_startup].
+
+    [auxiliary_startup] records synchronous startup attempts. Its [returned]
+    phase is not transport readiness or worker liveness. Private exceptions
+    and backtraces never enter this projection. The default probe reads the
+    current attempt snapshot; full-health retains its snapshot freshness
+    contract and rolls up observed startup failures.
 
     [status] is the HTTP OK envelope/readiness status.  Full-health
     operator diagnostics are summarized by [overall_status],

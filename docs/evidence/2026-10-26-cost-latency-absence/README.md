@@ -46,3 +46,9 @@ recorded as a failed full check rather than a passing or proven pre-existing one
 Corrected selected server run:
 https://github.com/jeong-sik/masc/actions/runs/40236647411
 at a3d6cd09380529b2fa8e36e146b1e18db7421cd0, outcome unverified.
+
+Both initial server runs 40236517831/40236647411 failed compilation before any
+case ran: a local `open Yojson.Safe.Util` shadowed the control's `path` filename
+with the library function. The fixture now names that file `decisions_file`.
+Earlier source reviews missed this type error and do not establish execution.
+Corrected test-only baseline and corrected producer runs must be read separately.

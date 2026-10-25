@@ -1263,7 +1263,7 @@ let test_public_runtime_lane_label_is_stable_across_windows () =
 let test_cost_latency_json_preserves_unreported_usage_and_cost () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
-    let path = make_keeper_dir base "cost_latency_absence" in
+    let decisions_file = make_keeper_dir base "cost_latency_absence" in
     let ts = now_unix () in
     let omit fields = function
       | `Assoc top -> `Assoc (List.map (function
@@ -1271,7 +1271,7 @@ let test_cost_latency_json_preserves_unreported_usage_and_cost () =
             "telemetry", `Assoc (List.filter (fun (key, _) -> not (List.mem key fields)) telemetry)
           | field -> field) top)
       | _ -> fail "decision fixture must be an object" in
-    write_decisions path [
+    write_decisions decisions_file [
       success_entry ~model:"cost-only" ~ts:(ts -. 10.) ~cost_usd:0.03 ()
         |> omit ["input_tokens"; "output_tokens"];
       success_entry ~model:"tokens-only" ~ts:(ts -. 9.) () |> omit ["cost_usd"];
@@ -1305,7 +1305,7 @@ let test_cost_latency_json_preserves_unreported_usage_and_cost () =
       if model = `String (runtime_lane_label_for_test "tokens-only")
          || model = `String (runtime_lane_label_for_test "partial")
       then null "matrix preserves unreported or partial cost" cost) models costs;
-    write_decisions path [success_entry ~model:"reported-zero" ~ts ~input_tokens:0 ~output_tokens:0 ~cost_usd:0. ()];
+    write_decisions decisions_file [success_entry ~model:"reported-zero" ~ts ~input_tokens:0 ~output_tokens:0 ~cost_usd:0. ()];
     check (float 0.) "complete explicit zero global cost stays zero" 0.
       (compute_cost_latency_json ~base_path:base ~window_minutes:60 |> member "total_cost_usd" |> to_float))
 ;;

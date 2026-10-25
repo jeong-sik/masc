@@ -167,7 +167,7 @@ let from_admission admission ~turn_ref =
              | Bootstrap | Fusion_completed _ | Schedule_due _ | Connector_attention _
              | Hitl_resolved _ | Ask_answered _ | Completion_authority_rejected _
              | Task_cancelled _ | Workspace_message _ | Delegate_completed _
-             | Composition_completed _ | Owned_job_completed _ | Task_outcome _ -> None
+             | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ -> None
            in
            let* source = admitted_source
                ~snapshot_ref:(Keeper_event_queue_state.source_snapshot_ref selection.source)

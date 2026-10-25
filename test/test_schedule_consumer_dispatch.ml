@@ -3255,6 +3255,8 @@ let test_retry_before_terminal_reconciliation_retains_wake () =
        selection
    with
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired ->
+     Alcotest.fail "unexpected tool-result selection"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "schedule selection was reconciled as a spent grant replay"
    | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
@@ -4127,6 +4129,8 @@ let test_consumed_grant_without_outcome_stays_actionable () =
        selection
    with
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired ->
+     Alcotest.fail "unexpected tool-result selection"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "consumed replay was discarded before its outcome became durable"
    | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
@@ -4182,6 +4186,8 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
        selection
    with
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired ->
+     Alcotest.fail "unexpected tool-result selection"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "replay drained before the continuation turn was recorded"
    | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
@@ -4209,6 +4215,8 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
        ~keeper_name
        selection
    with
+   | Ok Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired ->
+     Alcotest.fail "unexpected tool-result selection"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
      fail "durable replay outcome was left at the queue head"
@@ -4310,6 +4318,8 @@ let test_rejected_resolution_projection_precedes_turn_intake () =
        selection
    with
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired ->
+     Alcotest.fail "unexpected tool-result selection"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "rejection was drained before its Keeper turn consumed it"
    | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->
@@ -4343,6 +4353,8 @@ let test_rejected_resolution_projection_precedes_turn_intake () =
        ~keeper_name
        selection
    with
+   | Ok Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired ->
+     Alcotest.fail "unexpected tool-result selection"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
      fail "recorded rejection continuation was delivered to a second turn"
@@ -4371,6 +4383,8 @@ let test_unconsumed_grant_replay_stays_actionable () =
        selection
    with
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired ->
+     Alcotest.fail "unexpected tool-result selection"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "an unconsumed grant was discarded before its Keeper could use it"
    | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired { approval_id; _ }) ->

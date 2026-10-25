@@ -334,6 +334,7 @@ let projected_source_kind_to_string = function
   | Source_delegate_completed -> "keeper_delegate_completed"
   | Source_composition_completed -> "keeper_composition_completed"
   | Source_owned_job_completed -> "owned_job_completed"
+  | Source_tool_result_ready -> "tool_result_ready"
 ;;
 
 let source_kind_of_string = function
@@ -352,6 +353,7 @@ let source_kind_of_string = function
   | "keeper_delegate_completed" -> Ok Source_delegate_completed
   | "keeper_composition_completed" -> Ok Source_composition_completed
   | "owned_job_completed" -> Ok Source_owned_job_completed
+  | "tool_result_ready" -> Ok Source_tool_result_ready
   | other -> Error (Printf.sprintf "unknown projected source kind: %s" other)
 ;;
 
@@ -518,6 +520,7 @@ let witness_of_yojson json =
     | (Projected_fusion_terminal, Source_task_cancelled)
     | (Projected_fusion_terminal, Source_workspace_message)
     | (Projected_fusion_terminal, Source_delegate_completed)
+    | (Projected_fusion_terminal, Source_tool_result_ready)
     | (Projected_fusion_terminal, Source_owned_job_completed)
     | (Projected_fusion_terminal, Source_composition_completed) -> true
     | Projected_cancel _, _

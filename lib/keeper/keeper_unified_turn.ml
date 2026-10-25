@@ -171,7 +171,7 @@ let make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name =
              | Keeper_event_queue.Ask_answered _
              | Keeper_event_queue.Completion_authority_rejected _
              | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-             | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
+             | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
              | Keeper_event_queue.Task_outcome _ -> None)
       |> List.sort_uniq String.compare
     in
@@ -225,7 +225,7 @@ let make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name =
                | Keeper_event_queue.Completion_authority_rejected _
                | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
                | Keeper_event_queue.Delegate_completed _
-               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> true)
+               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> true)
         |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
 ;;
 
@@ -300,7 +300,7 @@ let hitl_replay_preemption_request ~resolution_deliverable ~now pending =
          | Keeper_event_queue.Workspace_message _
          | Keeper_event_queue.Delegate_completed _
          | Keeper_event_queue.Composition_completed _
-         | Keeper_event_queue.Owned_job_completed _
+         | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
          | Keeper_event_queue.Task_outcome _ -> false)
       stimuli
   with
@@ -402,7 +402,7 @@ let connector_attention_preemption_request ~now pending =
          | Keeper_event_queue.Workspace_message _
          | Keeper_event_queue.Delegate_completed _
          | Keeper_event_queue.Composition_completed _
-         | Keeper_event_queue.Owned_job_completed _ ->
+         | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ ->
            false)
       stimuli
   with

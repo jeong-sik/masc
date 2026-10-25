@@ -926,6 +926,7 @@ let () =
     | Some Masc.Keeper_world_observation.Task_outcome_stimulus -> true
     | Some
         ( Masc.Keeper_world_observation.Bootstrap_stimulus
+        | Masc.Keeper_world_observation.Tool_result_ready_stimulus
         | Masc.Keeper_world_observation.Scheduled_automation_stimulus
         | Masc.Keeper_world_observation.Connector_attention_stimulus
         | Masc.Keeper_world_observation.Ask_answered_stimulus

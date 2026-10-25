@@ -95,6 +95,10 @@ type stimulus_payload =
           opaque [candidate_id] is the producer-owned durable event identity;
           queue deduplication never derives it from post text or metadata. *)
   | Bootstrap
+  | Tool_result_ready of string
+      (** SHA256 pointer to a completed dynamic-tool receipt in the Keeper's
+          durable outbox. This requests result delivery only, never execution.
+          The receipt body remains in the outbox until client settlement. *)
   | Fusion_completed of fusion_completion
   | Schedule_due of scheduled_wake
       (** A scheduled automation request has reached its due time and directly

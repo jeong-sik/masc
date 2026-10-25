@@ -28,6 +28,7 @@ type keeper_cycle_channel =
 
 type event_queue_trigger =
   | Bootstrap_stimulus
+  | Tool_result_ready_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
       (** RFC-connector-ambient-attention-wake P1: an ambient connector message
@@ -66,6 +67,7 @@ type turn_reason =
   | Board_event_pending
   | Scope_message_pending
   | Bootstrap_stimulus_pending
+  | Tool_result_ready_pending
   | Connector_attention_pending
   | Ask_answered_pending
   | Hitl_resolved_pending
@@ -100,6 +102,7 @@ let turn_reason_to_string = function
   | Board_event_pending -> "board_event_pending"
   | Scope_message_pending -> "scope_message_pending"
   | Bootstrap_stimulus_pending -> "bootstrap_stimulus_pending"
+  | Tool_result_ready_pending -> "tool_result_ready_pending"
   | Connector_attention_pending -> "connector_attention_pending"
   | Ask_answered_pending -> "ask_answered_pending"
   | Hitl_resolved_pending -> "hitl_resolved_pending"
@@ -117,6 +120,7 @@ let turn_reason_to_string = function
 
 let turn_reason_of_event_queue_trigger = function
   | Bootstrap_stimulus -> Bootstrap_stimulus_pending
+  | Tool_result_ready_stimulus -> Tool_result_ready_pending
   | Scheduled_automation_stimulus -> Scheduled_automation_due
   | Connector_attention_stimulus -> Connector_attention_pending
   | Ask_answered_stimulus -> Ask_answered_pending

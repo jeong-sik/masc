@@ -338,6 +338,7 @@ type keeper_cycle_channel =
 type event_queue_trigger =
   Keeper_world_observation_turn_types.event_queue_trigger =
   | Bootstrap_stimulus
+  | Tool_result_ready_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
   | Ask_answered_stimulus
@@ -352,6 +353,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Board_event_pending
   | Scope_message_pending
   | Bootstrap_stimulus_pending
+  | Tool_result_ready_pending
   | Connector_attention_pending
   | Ask_answered_pending
   | Hitl_resolved_pending
@@ -1270,7 +1272,7 @@ let pending_board_event_of_stimulus
      nothing is injected here and the text lives in one place. *)
   | Keeper_event_queue.Ask_answered _
   (* Job authority has its own typed retry contract in stimulus intake. *)
-  | Keeper_event_queue.Owned_job_completed _
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
   | Keeper_event_queue.Workspace_message _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
        fires via the trigger itself; [Hitl_resolved] carries no observation to
@@ -1741,6 +1743,7 @@ let keeper_cycle_decision
       | Board_event_pending
       | Scope_message_pending
       | Bootstrap_stimulus_pending
+      | Tool_result_ready_pending
       | Connector_attention_pending
       | Ask_answered_pending
       | Hitl_resolved_pending
@@ -1775,6 +1778,7 @@ let keeper_cycle_decision
                  | Board_event_pending
                  | Scope_message_pending
                  | Bootstrap_stimulus_pending
+                 | Tool_result_ready_pending
                  | Connector_attention_pending
                  | Ask_answered_pending
                  | Hitl_resolved_pending

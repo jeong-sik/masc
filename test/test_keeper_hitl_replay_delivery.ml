@@ -529,6 +529,8 @@ let test_reconcile_retires_resolution_without_record () =
        (Masc.Keeper_approval_queue_result.resolution_absence_to_string absence)
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
      fail "a wake with no record was left to spend a turn"
+   | Ok Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired ->
+     Alcotest.fail "unexpected tool-result selection"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "a wake with no record was acknowledged as a spent grant"
    | Error message -> fail message);
@@ -601,6 +603,8 @@ let test_reconcile_retires_wake_after_failed_continuation () =
        (pending_selection_exn ~base_path ~keeper_name)
    with
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+   | Ok Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired ->
+     Alcotest.fail "unexpected tool-result selection"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
      fail "an unsettled continuation was acknowledged"
    | Ok (Keeper_heartbeat_stimulus_intake.Absent_grant_retired _) ->
@@ -615,6 +619,8 @@ let test_reconcile_retires_wake_after_failed_continuation () =
        ~keeper_name
        (pending_selection_exn ~base_path ~keeper_name)
    with
+   | Ok Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired ->
+     Alcotest.fail "unexpected tool-result selection"
    | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
    | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable ->
      fail "a failed continuation left the wake to spend another turn"

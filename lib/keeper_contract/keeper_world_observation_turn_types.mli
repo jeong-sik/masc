@@ -6,6 +6,8 @@ type keeper_cycle_channel =
 
 type event_queue_trigger =
   | Bootstrap_stimulus
+  | Tool_result_ready_stimulus
+      (** A validated unread dynamic-tool result requests its continuation. *)
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
       (** RFC-connector-ambient-attention-wake P1: ambient connector message
@@ -37,6 +39,7 @@ type turn_reason =
   | Board_event_pending
   | Scope_message_pending
   | Bootstrap_stimulus_pending
+  | Tool_result_ready_pending
   | Connector_attention_pending
   | Ask_answered_pending
   | Hitl_resolved_pending

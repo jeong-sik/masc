@@ -57,6 +57,7 @@ type stimulus_payload =
   | Board_signal of board_stimulus
   | Board_attention of board_attention
   | Bootstrap
+  | Tool_result_ready of string
   | Fusion_completed of fusion_completion
       (* RFC-0266: an async [masc_fusion] deliberation finished. Wakes the
          calling keeper so the resolved answer arrives as actionable turn
@@ -322,7 +323,7 @@ let scheduled_wake (stimulus : stimulus) =
   | Workspace_message _
   | Delegate_completed _
   | Composition_completed _
-  | Owned_job_completed _ -> None
+  | Tool_result_ready _ | Owned_job_completed _ -> None
 ;;
 
 type t =
@@ -356,7 +357,7 @@ let identity_payload = function
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Ask_answered _
     | Completion_authority_rejected _ | Workspace_message _
-    | Delegate_completed _ | Composition_completed _ | Owned_job_completed _ | Task_outcome _
+    | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _
     ) as payload ->
     payload
 
@@ -426,7 +427,7 @@ let stimulus_identity_equal a b =
       | Bootstrap | Fusion_completed _
       | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
       | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-      | Delegate_completed _ | Composition_completed _ | Owned_job_completed _ | Task_outcome _ )
+      | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ )
     , ( Board_signal
           { kind =
               ( Post_created | Post_updated _ | Comment_added _
@@ -445,7 +446,7 @@ let stimulus_identity_equal a b =
       | Bootstrap | Fusion_completed _
       | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
       | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-      | Delegate_completed _ | Composition_completed _ | Owned_job_completed _ | Task_outcome _ ) ) ->
+      | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ ) ) ->
     identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =
@@ -533,6 +534,7 @@ let payload_kind_label = function
   | Workspace_message _ -> "workspace_message"
   | Delegate_completed _ -> "keeper_delegate_completed"
   | Composition_completed _ -> "keeper_composition_completed"
+  | Tool_result_ready _ -> "tool_result_ready"
   | Owned_job_completed _ -> "owned_job_completed"
   | Task_outcome _ -> "task_outcome"
 
@@ -550,7 +552,7 @@ let connector_attention_channel = function
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-  | Delegate_completed _ | Composition_completed _ | Owned_job_completed _ | Task_outcome _ ->
+  | Delegate_completed _ | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ ->
     None
 
 let summary (queue : t) : string =
@@ -732,6 +734,8 @@ let payload_to_yojson = function
        ]
        @ board_stimulus_fields attention.signal)
   | Bootstrap -> `Assoc [ "kind", `String "bootstrap" ]
+  | Tool_result_ready receipt_id ->
+    `Assoc [ "kind", `String "tool_result_ready"; "receipt_id", `String receipt_id ]
   | Fusion_completed fusion ->
     let terminal =
       match fusion.terminal with
@@ -952,6 +956,13 @@ let payload_of_yojson json =
     else
       let* signal = parse_board_stimulus () in
       Ok (Board_attention { candidate_id; signal })
+  | "tool_result_ready" ->
+    let* () = exact_fields ~context ~expected:[ "kind"; "receipt_id" ] fields in
+    let* receipt_id = string_field ~context "receipt_id" fields in
+    if String.length receipt_id = 64 && String.for_all
+        (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) receipt_id
+    then Ok (Tool_result_ready receipt_id)
+    else Error "tool result receipt_id must be a lowercase SHA256"
   | "bootstrap" -> Ok Bootstrap
   | "fusion_completed" ->
     let* () =
@@ -1377,6 +1388,7 @@ let continuation_channel_of_payload = function
      rather than wherever its own state last left it. *)
   | Ask_answered answered -> Some answered.channel
   | Owned_job_completed completion -> Some completion.oj_channel
+  | Tool_result_ready _ -> None
   | Schedule_due wake -> wake.result_delivery
   | Board_signal _
   | Board_attention _

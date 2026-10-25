@@ -318,14 +318,14 @@ streaming = true
 let runtime_route_model_catalog =
   {|
 [[models]]
-id_prefix = "qwen"
+model_id = "qwen"
 provider_name = "runpod_mtp"
 base = "openai_chat"
 max_context_tokens = 128000
 supports_tools = true
 
 [[models]]
-id_prefix = "gpt"
+model_id = "gpt"
 provider_name = "openai"
 base = "openai_chat"
 max_context_tokens = 64000
@@ -334,7 +334,7 @@ supports_response_format_json = true
 supports_structured_output = true
 
 [[models]]
-id_prefix = "small"
+model_id = "small"
 provider_name = "openai"
 base = "openai_chat"
 max_context_tokens = 32000
@@ -2780,7 +2780,7 @@ auth = "none"
 supports_parallel_tool_suppression = true
 
 [[models]]
-id_prefix = "qwen36-35b-a3b-mtp"
+model_id = "qwen36-35b-a3b-mtp"
 provider_name = "ollama_cloud"
 base = "openai_chat"
 max_context_tokens = 131072
@@ -2812,7 +2812,7 @@ supports_seed = true
 ignored_sampling_parameters = ["temperature", "top_p", "presence_penalty", "frequency_penalty"]
 
 [[models]]
-id_prefix = "reasoning-small-out"
+model_id = "reasoning-small-out"
 provider_name = "ollama_cloud"
 base = "openai_chat"
 max_context_tokens = 131072
@@ -2821,7 +2821,7 @@ supports_tools = true
 supports_reasoning = true
 
 [[models]]
-id_prefix = "reasoning-big-out"
+model_id = "reasoning-big-out"
 provider_name = "ollama_cloud"
 base = "openai_chat"
 max_context_tokens = 1000000

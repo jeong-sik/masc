@@ -1241,7 +1241,7 @@ let test_ollama_chat_template_token_uses_catalog_token () =
   with_catalog_toml
     {|
 [[models]]
-id_prefix = "local-token-model"
+model_id = "local-token-model"
 base = "ollama"
 supports_reasoning = true
 thinking_control_format = "chat_template_token"
@@ -1271,7 +1271,7 @@ thinking_control_token = "<|custom_think|>"
 let test_ollama_chat_template_token_missing_token_fails_closed () =
   (* The token is part of the [Chat_template_token] constructor, so a
      chat_template_token row with no thinking_control_token now fails closed at
-     catalog LOAD naming the offending id_prefix — not per request. *)
+     catalog LOAD naming the offending model_id — not per request. *)
   let path = Filename.temp_file "agent_core-tokenless-template" ".toml" in
   let oc = open_out path in
   Fun.protect
@@ -1284,7 +1284,7 @@ let test_ollama_chat_template_token_missing_token_fails_closed () =
          oc
          {|
 [[models]]
-id_prefix = "tokenless-template-model"
+model_id = "tokenless-template-model"
 base = "ollama"
 supports_reasoning = true
 thinking_control_format = "chat_template_token"
@@ -1294,7 +1294,7 @@ thinking_control_format = "chat_template_token"
        | Error msg ->
          check
            bool
-           "names the offending id_prefix"
+           "names the offending model_id"
            true
            (string_contains_sub msg "tokenless-template-model");
          check

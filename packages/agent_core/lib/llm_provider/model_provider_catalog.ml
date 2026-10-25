@@ -24,7 +24,7 @@ type entry =
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
   ; supports_parallel_tool_suppression : bool
-  ; serves_bare_rows : Model_identifiers.Id_prefix.t list
+  ; serves_bare_models : Model_identifiers.Model_id.t list
   }
 
 let find_string_field ~entry_id key toml =
@@ -114,7 +114,7 @@ let known_keys =
   ; "capabilities_base_by_identity_kind"
   ; "identity_hosts"
   ; "supports_parallel_tool_suppression"
-  ; "serves_bare_rows"
+  ; "serves_bare_models"
   ]
 ;;
 
@@ -323,18 +323,18 @@ let parse_entry provider_toml =
       Error (Printf.sprintf
         "provider entry %S field \"supports_parallel_tool_suppression\" expected bool" id)
   in
-  let* serves_bare_rows =
-    let* families = string_list_field ~entry_id:id "serves_bare_rows" provider_toml in
+  let* serves_bare_models =
+    let* models = string_list_field ~entry_id:id "serves_bare_models" provider_toml in
     let rec parse acc = function
       | [] -> Ok (List.rev acc)
       | raw :: rest ->
-        let* family = Model_identifiers.Id_prefix.of_string raw in
-        if List.exists (Model_identifiers.Id_prefix.equal family) acc
+        let* model = Model_identifiers.Model_id.of_string raw in
+        if List.exists (Model_identifiers.Model_id.equal model) acc
         then Error (Printf.sprintf
-          "provider entry %S field \"serves_bare_rows\" must not contain duplicate families" id)
-        else parse (family :: acc) rest
+          "provider entry %S field \"serves_bare_models\" must not contain duplicate model ids" id)
+        else parse (model :: acc) rest
     in
-    parse [] (Option.value families ~default:[])
+    parse [] (Option.value models ~default:[])
   in
   let* aliases = string_list_field ~entry_id:id "aliases" provider_toml in
   let* identity_hosts = string_list_field ~entry_id:id "identity_hosts" provider_toml in
@@ -350,7 +350,7 @@ let parse_entry provider_toml =
     ; capabilities_base
     ; capabilities_base_by_identity_kind
     ; supports_parallel_tool_suppression
-    ; serves_bare_rows
+    ; serves_bare_models
     ; identity_hosts =
         Option.value identity_hosts ~default:[] |> List.map String.lowercase_ascii
     }

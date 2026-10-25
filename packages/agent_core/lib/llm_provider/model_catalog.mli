@@ -3,8 +3,13 @@
     Integrates per-model capability and pricing overrides from TOML configurations,
     replacing hardcoded code-level registries. *)
 
+type suggested_client = Claude_code | Codex
+(** Presentation-only official-client suggestions. This is not provider
+    ownership, capability admission or account entitlement. *)
+
 type model_entry =
-  { id_prefix : Model_identifiers.Id_prefix.t
+  { model_id : Model_identifiers.Model_id.t
+  ; suggested_clients : suggested_client list
   ; base_label : string option
     (** Registry provider identity for OpenAI-compatible model families whose
         wire kind alone would otherwise collapse to [openai_compat]. This is
@@ -88,7 +93,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
   ; supports_parallel_tool_suppression : bool
-  ; serves_bare_rows : Model_identifiers.Id_prefix.t list
+  ; serves_bare_models : Model_identifiers.Model_id.t list
   }
 
 type t
@@ -99,7 +104,8 @@ type t
 exception Invalid_embedded_catalog of string
 
 val empty : t
-val of_model_entries : model_entry list -> t
+val of_model_entries : model_entry list -> (t, string) result
+(** Reject duplicate exact model/provider identities before indexing. *)
 val model_entries : t -> model_entry list
 val provider_entries : t -> provider_entry list
 
@@ -131,17 +137,15 @@ val load_file : string -> (t, string) result
     silently. *)
 val load_default : unit -> (t, string) result
 
-(** Longest-prefix lookup across provider-independent rows using the
-    catalog's exact declared [id_prefix] syntax. Provider-scoped rows are
-    excluded. The id is already parsed ({!Model_identifiers.Model_id.of_string}),
-    so a malformed id is the caller's parse error, not a lookup outcome; [None]
-    is a valid id with no matching row. *)
+(** Exact ASCII-case-insensitive lookup across provider-independent rows.
+    Provider-scoped rows are excluded. [None] means the exact valid model ID
+    is undeclared; no family, suffix or qualified-name reconstruction occurs. *)
 val lookup : t -> Model_identifiers.Model_id.t -> model_entry option
 
 (** Exact normalized lookup across provider-scoped rows. [provider_name] is
     trimmed and ASCII case-folded. The parsed [model_id] (no leading or
     trailing whitespace, by {!Model_identifiers.Model_id.of_string}) equals the
-    row's declared [id_prefix] after ASCII case-folding. There is no family/prefix match on the model identity. The
+    row's declared [model_id] after ASCII case-folding. There is no family/prefix match on the model identity. The
     provider and model remain separate values; AGENT_CORE never synthesizes slash,
     colon, or dot-qualified model ids.
 
@@ -158,8 +162,7 @@ val lookup : t -> Model_identifiers.Model_id.t -> model_entry option
     synthesize, and an alias claiming one would capture every anonymous
     config of that wire kind.
 
-    Provider-independent family matching remains exclusively in
-    {!lookup}. *)
+    Provider-independent exact lookup remains exclusively in {!lookup}. *)
 val lookup_for_provider
   :  t
   -> provider_name:string
@@ -178,8 +181,7 @@ val lookup_for_provider_reference
 
 val serves_bare_row : t -> provider_reference -> model_entry -> bool
 (** Whether this original bare catalog row describes the provider. A declared
-    provider must list a family covering the row's [id_prefix], rather than
-    only the requested model id. Anonymous native wires permit bare rows;
+    provider must list the row's exact [model_id]. Anonymous native wires permit bare rows;
     anonymous OpenAI-compatible endpoints do not. Scoped rows return [false].
     This grants no authority to read a replacement capability manifest. *)
 
@@ -188,9 +190,8 @@ val lookup_model_for_provider
   -> provider:provider_reference
   -> model_id:Model_identifiers.Model_id.t
   -> model_entry option
-(** Exact scoped rows first, then the original longest-matching bare row only
-    when {!serves_bare_row} permits it. A denied bare row does not fall back to
-    a shorter row. A scoped row shadows the entire bare row, including fields
+(** Exact scoped rows first, then the exact provider-independent row only
+    when {!serves_bare_row} permits it. No prefix or shorter-row fallback occurs. A scoped row shadows the entire bare row, including fields
     that it leaves undeclared. *)
 
 val model_entries_for_provider
@@ -201,7 +202,7 @@ val model_entries_for_provider
 (** Visible rows from the supplied immutable model snapshot. Verbatim scoped
     rows precede canonical scoped rows, then permitted bare rows; a row with
     the same whole id in an earlier scope shadows the later row. Model ids
-    remain verbatim. Enumeration does not turn family rows into exact ids. *)
+    remain verbatim. Enumeration preserves declared exact identities. *)
 
 (** Return the catalog-declared provider identity for a concrete endpoint.
 

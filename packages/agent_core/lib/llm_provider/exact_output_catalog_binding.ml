@@ -141,7 +141,7 @@ let normalize_identity value = String.lowercase_ascii (String.trim value)
 let model_identity_key (entry : Model_catalog.model_entry) =
   normalize_identity (Option.value entry.provider_name ~default:"")
   ^ "\x00"
-  ^ (Model_identifiers.Id_prefix.equality_key entry.id_prefix :> string)
+  ^ (Model_identifiers.Model_id.equality_key entry.model_id :> string)
 ;;
 
 let model_identities_unique entries =
@@ -164,15 +164,16 @@ let resolve_exact ~catalog ~model_entries ~provider_ref ~model_id =
   with
   | None -> Error Provider_missing
   | Some provider ->
+    let requested = Model_identifiers.Model_id.of_string model_id in
     (match
        Model_catalog.model_entries_for_provider catalog
          ~provider:(Model_catalog.Declared_provider provider.id) ~model_entries
        |>
        List.find_opt
          (fun (entry : Model_catalog.model_entry) ->
-            String.equal
-                 (Model_identifiers.Id_prefix.to_string entry.id_prefix)
-                 model_id)
+            match requested with
+            | Ok requested -> Model_identifiers.Model_id.equal entry.model_id requested
+            | Error _ -> false)
      with
      | None -> Error Model_missing
      | Some model -> Ok (provider, model))
@@ -471,7 +472,7 @@ let%test "exact catalog binding preserves reasoning efforts and thinking control
      auth = \"none\"\n\
      capabilities_base = \"openai_chat_extended\"\n\
      [[models]]\n\
-     id_prefix = \"deepseek/deepseek-v4-flash\"\n\
+     model_id = \"deepseek/deepseek-v4-flash\"\n\
      provider_name = \"openrouter\"\n\
      accepted_reasoning_efforts = [\"none\", \"low\", \"high\"]\n\
      thinking_control_format = \"reasoning_effort\"\n\
@@ -500,7 +501,7 @@ let%test "exact catalog binding clears reasoning efforts when reasoning is unsup
      auth = \"none\"\n\
      capabilities_base = \"openai_chat_extended\"\n\
      [[models]]\n\
-     id_prefix = \"non-reasoning-model\"\n\
+     model_id = \"non-reasoning-model\"\n\
      provider_name = \"openrouter\"\n\
      accepted_reasoning_efforts = [\"low\", \"high\"]\n\
      supports_reasoning = false\n"
@@ -526,7 +527,7 @@ let%test "exact catalog binding gates forced tool choice on supports_tool_choice
      auth = \"none\"\n\
      capabilities_base = \"openai_chat\"\n\
      [[models]]\n\
-     id_prefix = \"no-tools-model\"\n\
+     model_id = \"no-tools-model\"\n\
      provider_name = \"ollama\"\n\
      supports_tool_choice = false\n\
      supports_required_tool_choice = true\n\

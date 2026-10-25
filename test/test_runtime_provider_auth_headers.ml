@@ -1229,7 +1229,7 @@ let test_provider_scoped_catalog_row_resolves_for_declared_provider () =
   with_model_catalog
     {|
 [[models]]
-id_prefix = "qwen"
+model_id = "qwen"
 provider_name = "runpod_mtp"
 max_context_tokens = 160000
 |}
@@ -1249,7 +1249,7 @@ let test_bare_catalog_row_stays_fail_closed_for_declared_provider () =
   with_model_catalog
     {|
 [[models]]
-id_prefix = "qwen"
+model_id = "qwen"
 max_context_tokens = 160000
 |}
     (fun () ->
@@ -1266,7 +1266,7 @@ let test_declared_thinking_capabilities_override_catalog () =
   with_model_catalog
     {|
 [[models]]
-id_prefix = "qwen"
+model_id = "qwen"
 provider_name = "runpod_mtp"
 supports_system_prompt = true
 max_output_tokens = 32768
@@ -3029,7 +3029,7 @@ auth = "none"
   | Ok _ -> fail "provider contract silently accepted a string"
 
 (* #37849. A config that names a provider reads bare rows only when that
-   provider declares serves_bare_rows. The runtime mirrors the Terminal-Bench
+   provider declares serves_bare_models. The runtime mirrors the Terminal-Bench
    anthropic lane: reasoning-effort = "high" and a capabilities block that keeps
    the binding on the catalogued branch. The model id carries a date suffix that
    only the bare row's prefix covers, since a scoped row would need the exact
@@ -3066,7 +3066,7 @@ max-tokens = 4096
 
 let test_declared_provider_reads_bare_rows_only_when_it_serves_them () =
   let cfg, binding = bare_rows_runtime ~provider_id:"fixture-provider"
-      ~model_id:"fixture-model-20260901" in
+      ~model_id:"fixture-model" in
   let catalog declaration = Printf.sprintf {|[[providers]]
 id = "fixture-provider"
 kind = "anthropic"
@@ -3077,7 +3077,7 @@ auth = "none"
 %s
 
 [[models]]
-id_prefix = "fixture-model"
+model_id = "fixture-model"
 base = "anthropic"
 accepted_reasoning_efforts = ["low", "high"]
 |} declaration in
@@ -3093,29 +3093,29 @@ accepted_reasoning_efforts = ["low", "high"]
           serves
           (Result.is_ok
              (Llm_provider.Provider_config.validate_reasoning_effort_request config)))
-  ) [ "", false; "serves_bare_rows = []", false;
-      "serves_bare_rows = [\"foreign-model\"]", false;
-      "serves_bare_rows = [\"fixture-model\"]", true ];
+  ) [ "", false; "serves_bare_models = []", false;
+      "serves_bare_models = [\"foreign-model\"]", false;
+      "serves_bare_models = [\"fixture-model\"]", true ];
   List.iter (fun declaration ->
     match Llm_provider.Model_catalog.of_toml_string ~source:"serves-bare-rows-type"
         (catalog declaration) with
     | Error error -> check string "the declaration requires a family array"
-        "provider entry \"fixture-provider\" field \"serves_bare_rows\" expected string array"
+        "provider entry \"fixture-provider\" field \"serves_bare_models\" expected string array"
         error
-    | Ok _ -> fail "serves_bare_rows silently accepted a non-array")
-    ["serves_bare_rows = true"; "serves_bare_rows = false";
-     "serves_bare_rows = \"fixture-model\""; "serves_bare_rows = [1]"];
+    | Ok _ -> fail "serves_bare_models silently accepted a non-array")
+    ["serves_bare_models = true"; "serves_bare_models = false";
+     "serves_bare_models = \"fixture-model\""; "serves_bare_models = [1]"];
   List.iter (fun (declaration, expected) ->
     match Llm_provider.Model_catalog.of_toml_string ~source:"serves-bare-rows-family"
         (catalog declaration) with
     | Error error -> check string "invalid family declaration is rejected" expected error
-    | Ok _ -> fail "serves_bare_rows accepted an invalid family")
-    [ "serves_bare_rows = [\"\"]",
-      "provider entry \"fixture-provider\" field \"serves_bare_rows\" must not contain empty strings"
-    ; "serves_bare_rows = [\" fixture-model\"]",
-      "provider entry \"fixture-provider\" field \"serves_bare_rows\" must not contain padded strings"
-    ; "serves_bare_rows = [\"fixture-model\", \"FIXTURE-MODEL\"]",
-      "provider entry \"fixture-provider\" field \"serves_bare_rows\" must not contain duplicate families"
+    | Ok _ -> fail "serves_bare_models accepted an invalid family")
+    [ "serves_bare_models = [\"\"]",
+      "provider entry \"fixture-provider\" field \"serves_bare_models\" must not contain empty strings"
+    ; "serves_bare_models = [\" fixture-model\"]",
+      "provider entry \"fixture-provider\" field \"serves_bare_models\" must not contain padded strings"
+    ; "serves_bare_models = [\"fixture-model\", \"FIXTURE-MODEL\"]",
+      "provider entry \"fixture-provider\" field \"serves_bare_models\" must not contain duplicate model ids"
     ]
 
 (* #37086. The fixture above proves the mechanism; this proves the shipped

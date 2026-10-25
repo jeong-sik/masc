@@ -711,7 +711,7 @@ let test_openai_compat_bare_tool_capability_is_not_inferred () =
   with_model_catalog_toml
     {|
 [[models]]
-id_prefix = "raw-tool-only-model"
+model_id = "raw-tool-only-model"
 base = "openai_chat"
 supports_tools = true
 supports_tool_choice = true
@@ -734,7 +734,7 @@ let test_openai_compat_bare_template_dialect_is_not_inferred () =
   with_model_catalog_toml
     {|
 [[models]]
-id_prefix = "raw-template-model"
+model_id = "raw-template-model"
 base = "openai_chat"
 supports_tools = true
 supports_tool_choice = true
@@ -766,7 +766,7 @@ request_path = "/v1/chat/completions"
 auth = "api-key"
 
 [[models]]
-id_prefix = "qwen36-35b-a3b-mtp"
+model_id = "qwen36-35b-a3b-mtp"
 base = "openai_chat"
 provider_name = "vllm-qwen3-mtp"
 supports_tools = true
@@ -806,7 +806,7 @@ let test_openai_compat_bare_model_does_not_resolve_unknown_provider_scoped_row (
   with_model_catalog_toml
     {|
 [[models]]
-id_prefix = "qwen36-35b-a3b-mtp"
+model_id = "qwen36-35b-a3b-mtp"
 base = "openai_chat"
 provider_name = "vllm-qwen3-mtp"
 supports_tools = true
@@ -832,7 +832,7 @@ let test_openai_compat_encoded_model_id_does_not_synthesize_provider () =
   with_model_catalog_toml
     {|
 [[models]]
-id_prefix = "qwen36-35b-a3b-mtp"
+model_id = "qwen36-35b-a3b-mtp"
 base = "openai_chat"
 provider_name = "vllm-qwen3-mtp"
 supports_tools = true
@@ -857,7 +857,7 @@ let test_bare_capabilities_are_not_inferred_across_hosts () =
   with_model_catalog_toml
     {|
 [[models]]
-id_prefix = "host-independent-model"
+model_id = "host-independent-model"
 base = "openai_chat"
 supports_tools = true
 supports_reasoning = true
@@ -2676,15 +2676,15 @@ base_url = "https://example.invalid"
 request_path = ""
 auth = "none"
 capabilities_base = "openai_chat_extended"
-serves_bare_rows = ["identity-model"]
+serves_bare_models = ["identity-model"]
 %s
 [[models]]
-id_prefix = "identity-model"
+model_id = "identity-model"
 base = "gemini"
 max_context_tokens = 22222
 
 [[models]]
-id_prefix = "identity-model"
+model_id = "identity-model"
 provider_name = "proxy"
 max_context_tokens = 77777
 %s
@@ -2693,7 +2693,7 @@ max_context_tokens = 77777
        "capabilities_base_by_identity_kind = { gemini = \"openai_chat_extended\" }"
      else "")
     (if verbatim then Printf.sprintf {|[[models]]
-id_prefix = "identity-model"
+model_id = "identity-model"
 provider_name = "gemini"
 max_context_tokens = 33333
 %s
@@ -2764,7 +2764,7 @@ let test_manifest_authority_and_frozen_missing_policy () =
         let frozen = Provider_config.freeze_for_request unknown in
         Model_catalog.set_global (Model_catalog.of_toml_string ~source:"later"
           {|[[models]]
-id_prefix = "manifest-only"
+model_id = "manifest-only"
 provider_name = "unknown"
 max_context_tokens = 55555
 |} |> Result.get_ok);
@@ -2814,7 +2814,7 @@ let test_catalog_policy_native_and_proxy () =
     let frozen = Provider_config.freeze_for_request proxy in
     Model_catalog.set_global (Model_catalog.of_toml_string ~source:"replacement"
       {|[[models]]
-id_prefix = "claude-fable-5"
+model_id = "claude-fable-5"
 provider_name = "deepseek-anthropic"
 anthropic_thinking_control = "always_adaptive"
 |} |> Result.get_ok);
@@ -2831,15 +2831,15 @@ kind = "anthropic"
 base_url = "https://example.invalid"
 request_path = "/v1/messages"
 auth = "none"
-serves_bare_rows = ["shared"]
+serves_bare_models = ["shared"]
 [[models]]
-id_prefix = "shared"
+model_id = "shared"
 base = "anthropic"
 anthropic_thinking_control = "always_adaptive"
 input_per_million = 10.0
 output_per_million = 50.0
 [[models]]
-id_prefix = "shared"
+model_id = "shared"
 provider_name = "native"
 max_context_tokens = 7777
 |} in
@@ -2863,9 +2863,9 @@ kind = "openai_compat"
 base_url = "https://example.invalid"
 request_path = "/v1/chat/completions"
 auth = "none"
-serves_bare_rows = ["shared"]
+serves_bare_models = ["shared"]
 [[models]]
-id_prefix = "shared"
+model_id = "shared"
 input_per_million = 1.0
 output_per_million = 2.0
 |} in

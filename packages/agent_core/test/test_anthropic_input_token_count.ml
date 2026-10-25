@@ -636,7 +636,7 @@ let thinking_catalog anthropic_thinking_control =
     Printf.sprintf
       {|
 [[models]]
-id_prefix = "frozen-catalog-model"
+model_id = "frozen-catalog-model"
 base = "anthropic"
 anthropic_thinking_control = "%s"
 max_context_tokens = 512
@@ -660,7 +660,7 @@ let with_preserved_catalog f =
 let request_policy_catalog ~model_id ~base ~max_output_tokens ~replay ~thinking =
   let contents = Printf.sprintf
       {|[[models]]
-id_prefix = "%s"
+model_id = "%s"
 base = "%s"
 max_context_tokens = 512
 max_output_tokens = %d
@@ -759,7 +759,7 @@ let test_response_policy_survives_catalog_reload ~stream () =
             | Provider_config.Anthropic -> {|anthropic_thinking_control = "adaptive_default"|}
             | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> "" in
           let contents = Printf.sprintf {|[[models]]
-id_prefix = "%s"
+model_id = "%s"
 provider_name = "policy-response-provider"
 base = "%s"
 max_context_tokens = %d

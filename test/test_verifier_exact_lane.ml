@@ -616,7 +616,7 @@ auth = "none"
 capabilities_base = "openai_chat_extended"
 
 [[models]]
-id_prefix = "verifier-model"
+model_id = "verifier-model"
 provider_name = "verifier_provider"
 max_context_tokens = 8192
 max_output_tokens = 1024

@@ -1,24 +1,8 @@
-(* Identifier boundary — regression suite.  Prefix matching lives inside
-   the opaque boundary with the same semantics as [equal]: [of_string]
-   stores the outside system's spelling verbatim, [to_string] returns it
-   unchanged, and [equal] / [starts_with] fold ASCII case at comparison
-   time.  The catalog-lookup cases check that the lookup path folds query
-   case while row bytes retain their declared spelling. *)
+(** Exact identifier admission, catalog matching and provider ownership. *)
 open Llm_provider
 
-let prefix_of entry = Model_identifiers.Id_prefix.of_string_exn entry
-
-let starts_with ~prefix raw =
-  Model_identifiers.Id_prefix.starts_with
-    ~prefix:(prefix_of prefix)
-    (prefix_of raw)
-;;
-
-let matches_model_id ~prefix raw =
-  Llm_provider.Model_identifiers.Model_id.starts_with
-    ~prefix:(prefix_of prefix)
-    (Llm_provider.Model_identifiers.Model_id.of_string_exn raw)
-;;
+let model_of = Model_identifiers.Model_id.of_string_exn
+let same_model left right = Model_identifiers.Model_id.equal (model_of left) (model_of right)
 
 let check_error
     ~of_string
@@ -29,44 +13,34 @@ let check_error
   | Ok value -> Alcotest.failf "of_string %S should be rejected, got %S" raw (show value)
 ;;
 
-let test_starts_with_exact () =
-  Alcotest.(check bool) "claude- matches exactly" true
-    (starts_with ~prefix:"claude-" "claude-opus-5-5");
-  Alcotest.(check bool) "gpt- matches exactly" true
-    (starts_with ~prefix:"gpt-" "gpt-5.6-sol");
-  Alcotest.(check bool) "unrelated prefix" false
-    (starts_with ~prefix:"gpt-" "claude-opus-5-5")
+let test_exact_identity () =
+  Alcotest.(check bool) "exact declaration" true
+    (same_model "claude-opus-5-5" "claude-opus-5-5");
+  Alcotest.(check bool) "ASCII case equality" true
+    (same_model "CLAUDE-OPUS-5-5" "claude-opus-5-5");
+  Alcotest.(check string) "producer spelling retained" "GLM-5.3"
+    (Model_identifiers.Model_id.to_string (model_of "GLM-5.3"))
 ;;
 
-let test_starts_with_normalization () =
-  Alcotest.(check bool) "case-different prefix now matches" true
-    (starts_with ~prefix:"CLAUDE-" "claude-opus-5-5");
-  Alcotest.(check bool) "case-different value matches" true
-    (starts_with ~prefix:"claude-" "CLAUDE-opus-5-5");
-  Alcotest.(check bool) "catalog prefix matches a typed model id" true
-    (matches_model_id ~prefix:"CLAUDE-" "claude-opus-5-5");
-  Alcotest.(check string) "of_string preserves the original spelling"
-    "GLM-5.3"
-    (Llm_provider.Model_identifiers.Id_prefix.to_string (prefix_of "GLM-5.3"))
-;;
-
-let test_starts_with_not_suffix () =
-  Alcotest.(check bool) "suffix is not a prefix" false
-    (starts_with ~prefix:"opus-5-5" "claude-opus-5-5")
+let test_identity_does_not_infer_variants () =
+  List.iter (fun other -> Alcotest.(check bool) "undeclared identity differs" false
+      (same_model "claude-opus-5-5" other))
+    ["claude-"; "opus-5-5"; "claude-opus-5-5-new";
+     "provider/claude-opus-5-5"; "claude-opus-5-5:q4"]
 ;;
 
 (* Construction-time validation: the TOML loaders' invariants and their
    byte-for-byte messages, exercised through the one public constructor. *)
 let test_of_string_rejects_padded_and_empty () =
-  let of_string = Model_identifiers.Id_prefix.of_string in
-  let show = Model_identifiers.Id_prefix.to_string in
+  let of_string = Model_identifiers.Model_id.of_string in
+  let show = Model_identifiers.Model_id.to_string in
   check_error ~of_string ~show
-    ~expected:"model entry field \"id_prefix\" must not be empty" "";
+    ~expected:"model_id must not be empty" "";
   check_error ~of_string ~show
-    ~expected:"model entry field \"id_prefix\" must not have leading or trailing whitespace"
+    ~expected:"model_id must not have leading or trailing whitespace"
     " claude-opus-5-5";
   check_error ~of_string ~show
-    ~expected:"model entry field \"id_prefix\" must not have leading or trailing whitespace"
+    ~expected:"model_id must not have leading or trailing whitespace"
     "claude-opus-5-5\t"
 ;;
 
@@ -80,7 +54,7 @@ module type STRINGY = sig
   val to_string : t -> string
 end
 
-let test_three_modules_share_one_rule () =
+let test_two_modules_share_one_rule () =
   let open Llm_provider.Model_identifiers in
   List.iter
     (fun ((module M : STRINGY), empty_message) ->
@@ -95,8 +69,7 @@ let test_three_modules_share_one_rule () =
            (M.to_string value)
        | Error message, _ | _, Error message ->
          Alcotest.failf "plain id must parse: %s" message)
-    [ (module Id_prefix : STRINGY), "model entry field \"id_prefix\" must not be empty"
-    ; (module Api_name : STRINGY), "api_name must not be empty"
+    [ (module Api_name : STRINGY), "api_name must not be empty"
     ; (module Model_id : STRINGY), "model_id must not be empty" ]
 ;;
 
@@ -114,7 +87,7 @@ let test_lookup_folds_case_and_rejects_padding () =
    | None -> Alcotest.fail "case-different query must still find its row"
    | Some (entry : Model_catalog.model_entry) ->
      Alcotest.(check string) "row bytes come back as declared" "claude-opus-5-5"
-       (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix));
+       (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id));
   Alcotest.(check bool) "padded query is not a model id" true
     (Result.is_error (Model_identifiers.Model_id.of_string "  gpt-5.6-sol\t"));
   (match
@@ -126,7 +99,7 @@ let test_lookup_folds_case_and_rejects_padding () =
    | None -> Alcotest.fail "provider-scoped query must fold the model_id case"
    | Some entry ->
      Alcotest.(check string) "provider-scoped row found through case" "gpt-5.6-terra"
-       (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix));
+       (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id));
   Alcotest.(check bool) "provider-scoped padded query is not a model id" true
     (Result.is_error (Model_identifiers.Model_id.of_string "  GPT-5.6-TERRA\t"))
 ;;
@@ -148,7 +121,7 @@ let test_lookup_misses_stay_misses () =
 (* #37074: ollama.com serves "deepseek-v4.1-flash" under both the bare name
    and a ":cloud" suffix, but the catalog carried only the bare row while
    [lookup_for_provider] (and, separately,
-   [Exact_output_catalog_binding.resolve_exact]) compare id_prefix with exact
+   [Exact_output_catalog_binding.resolve_exact]) compare model_id with exact
    equality, never a prefix -- so a deployment whose runtime binding named
    the ":cloud" spelling resolved to no catalog row and the target was
    excluded from every exact-output lane (librarian_exact, hitl_auto_judge,
@@ -160,7 +133,7 @@ let test_ollama_cloud_deepseek_cloud_suffix_resolves () =
     Model_catalog_test_support.load_repo_model_catalog
       ~suite:"model_identifiers deepseek :cloud suffix (#37074)"
   in
-  let expect_row ~model_id ~expected_id_prefix =
+  let expect_row ~model_id ~expected_model_id =
     match
       Model_catalog.lookup_for_provider
         catalog
@@ -171,13 +144,13 @@ let test_ollama_cloud_deepseek_cloud_suffix_resolves () =
     | Some (entry : Model_catalog.model_entry) ->
       Alcotest.(check string)
         (model_id ^ " resolves to its own row")
-        expected_id_prefix
-        (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+        expected_model_id
+        (Model_identifiers.Model_id.to_string entry.model_id)
   in
-  expect_row ~model_id:"deepseek-v4.1-flash" ~expected_id_prefix:"deepseek-v4.1-flash";
+  expect_row ~model_id:"deepseek-v4.1-flash" ~expected_model_id:"deepseek-v4.1-flash";
   expect_row
     ~model_id:"deepseek-v4.1-flash:cloud"
-    ~expected_id_prefix:"deepseek-v4.1-flash:cloud"
+    ~expected_model_id:"deepseek-v4.1-flash:cloud"
 ;;
 
 (* Two identifiers have equal keys exactly when their bytes are equal once
@@ -219,7 +192,7 @@ let test_equality_key_folds_ascii_case_only () =
               (Printf.sprintf "row %S and model id %S have one key" a b)
               expected
               (Model_identifiers.Equality_key.equal
-                 (Model_identifiers.Id_prefix.equality_key (prefix_of a))
+                 (Model_identifiers.Model_id.equality_key (model_of a))
                  (Model_identifiers.Model_id.equality_key model_b)))
          cases)
     cases
@@ -237,7 +210,7 @@ let scan_scoped_rows rows ~provider_name ~model_id =
          String.equal (label declared) (label provider_name)
          && String.equal
               (String.lowercase_ascii
-                 (Model_identifiers.Id_prefix.to_string entry.id_prefix))
+                 (Model_identifiers.Model_id.to_string entry.model_id))
               (String.lowercase_ascii model_id)
        | None -> false)
     rows
@@ -260,7 +233,7 @@ let test_scoped_lookup_matches_a_scan_of_the_rows () =
   in
   List.iter
     (fun (provider, (entry : Model_catalog.model_entry)) ->
-       let id = Model_identifiers.Id_prefix.to_string entry.id_prefix in
+       let id = Model_identifiers.Model_id.to_string entry.model_id in
        List.iter
          (fun (provider_name, model_id) ->
             let label = Printf.sprintf "%s / %s" provider_name model_id in
@@ -287,44 +260,21 @@ let test_scoped_lookup_matches_a_scan_of_the_rows () =
      | Some _ -> Alcotest.fail "a model id no row declares must miss")
 ;;
 
-(* Two rows with one provider and one id: the lookup answers with the first,
-   as the scan did. A loaded catalog refuses such a pair; a catalog built from
-   entries does not. *)
-let test_scoped_lookup_answers_with_the_first_of_equal_rows () =
-  let catalog =
-    Model_catalog_test_support.load_repo_model_catalog
-      ~suite:"model_identifiers scoped lookup first row"
-  in
-  match
-    List.find_opt
+(* Every construction path rejects ambiguous exact identities. *)
+let test_scoped_lookup_rejects_duplicate_rows () =
+  let catalog = Model_catalog_test_support.load_repo_model_catalog
+      ~suite:"model identifiers duplicate constructor" in
+  match List.find_opt
       (fun (entry : Model_catalog.model_entry) -> Option.is_some entry.provider_name)
-      (Model_catalog.model_entries catalog)
-  with
-  | None -> Alcotest.fail "the catalog has no row that names a provider"
+      (Model_catalog.model_entries catalog) with
+  | None -> Alcotest.fail "the catalog has no scoped row"
   | Some first ->
     let second = { first with max_context_tokens = Some 1 } in
-    let provider_name =
-      match first.provider_name with
-      | Some provider -> provider
-      | None -> Alcotest.fail "the chosen row names a provider"
-    in
-    let model_id = Model_identifiers.Id_prefix.to_string first.id_prefix in
-    let answer entries =
-      match
-        Model_catalog.lookup_for_provider
-          (Model_catalog.of_model_entries entries) ~provider_name
-          ~model_id:(Model_identifiers.Model_id.of_string_exn model_id)
-      with
-      | Some entry -> entry
-      | None -> Alcotest.fail "the lookup missed a row that names its provider and id"
-    in
-    Alcotest.(check bool) "the first row answers" true (answer [ first; second ] == first);
-    Alcotest.(check bool) "order decides, not the row" true
-      (answer [ second; first ] == second);
-    (* The row's provider label is trimmed and case-folded like the query's. *)
-    let spelled = { first with provider_name = Some (" " ^ String.uppercase_ascii provider_name ^ " ") } in
-    Alcotest.(check bool) "a row's provider label is folded as the query's is" true
-      (answer [ spelled ] == spelled)
+    List.iter (fun rows -> Alcotest.(check bool) "duplicate exact identity rejected" true
+      (Result.is_error (Model_catalog.of_model_entries rows)))
+      [[first; second]; [second; first];
+       [first; {second with model_id = Model_identifiers.Model_id.of_string_exn
+         (String.uppercase_ascii (Model_identifiers.Model_id.to_string first.model_id))}]]
 ;;
 
 (* A catalog of the given TOML, or the test fails with the loader's message. *)
@@ -357,12 +307,12 @@ let test_scoped_lookup_folds_row_ids_and_keeps_providers_apart () =
   let catalog =
     catalog_of_toml ~source:"scoped lookup row ids"
       "[[models]]\n\
-       id_prefix = \"Fixture-Model-ID\"\n\
+       model_id = \"Fixture-Model-ID\"\n\
        provider_name = \"provider-a\"\n\
        max_context_tokens = 1\n\
        \n\
        [[models]]\n\
-       id_prefix = \"other-model\"\n\
+       model_id = \"other-model\"\n\
        provider_name = \"provider-b\"\n\
        max_context_tokens = 2\n"
   in
@@ -394,17 +344,17 @@ let test_scoped_lookup_retries_under_the_canonical_provider () =
        auth = \"none\"\n\
        \n\
        [[models]]\n\
-       id_prefix = \"alias-model\"\n\
+       model_id = \"alias-model\"\n\
        provider_name = \"alias-fixture\"\n\
        max_context_tokens = 1\n\
        \n\
        [[models]]\n\
-       id_prefix = \"verbatim-model\"\n\
+       model_id = \"verbatim-model\"\n\
        provider_name = \"alias-fixture\"\n\
        max_context_tokens = 2\n\
        \n\
        [[models]]\n\
-       id_prefix = \"verbatim-model\"\n\
+       model_id = \"verbatim-model\"\n\
        provider_name = \"alias-fixture-old\"\n\
        max_context_tokens = 3\n"
   in
@@ -435,11 +385,11 @@ let test_the_loader_refuses_rows_that_fold_to_one_id () =
   match
     Model_catalog.of_toml_string ~source:"rows that fold to one id"
       "[[models]]\n\
-       id_prefix = \"Dup-Model\"\n\
+       model_id = \"Dup-Model\"\n\
        provider_name = \"provider-a\"\n\
        \n\
        [[models]]\n\
-       id_prefix = \"dup-model\"\n\
+       model_id = \"dup-model\"\n\
        provider_name = \"provider-a\"\n"
   with
   | Ok _ -> Alcotest.fail "a catalog with two rows that fold to one id loaded"
@@ -455,7 +405,7 @@ let test_the_binding_folds_row_ids_as_the_index_does () =
   let catalog =
     catalog_of_toml ~source:"binding row ids"
       "[[models]]\n\
-       id_prefix = \"Fold-Model\"\n\
+       model_id = \"Fold-Model\"\n\
        provider_name = \"provider-a\"\n\
        max_context_tokens = 1\n"
   in
@@ -463,7 +413,7 @@ let test_the_binding_folds_row_ids_as_the_index_does () =
   | [ base ] ->
     let lower =
       { base with
-        id_prefix = Model_identifiers.Id_prefix.of_string_exn "fold-model"
+        model_id = Model_identifiers.Model_id.of_string_exn "fold-model"
       }
     in
     Alcotest.(check bool) "rows whose ids differ only in case are one identity" false
@@ -471,15 +421,72 @@ let test_the_binding_folds_row_ids_as_the_index_does () =
   | rows -> Alcotest.failf "the fixture loaded %d rows, not one" (List.length rows)
 ;;
 
+let test_exact_lookup_and_ownership_do_not_expand_names () =
+  let owner = {|[[providers]]
+id = "owner"
+aliases = ["owner-alias"]
+kind = "anthropic"
+base_url = "https://example.invalid"
+request_path = "/v1/messages"
+auth = "none"
+serves_bare_models = ["family"]
+|} in
+  let broad = {|[[models]]
+model_id = "family"
+supports_tools = true
+|} in
+  let specific = {|[[models]]
+model_id = "family-v1"
+supports_tools = false
+suggested_clients = ["codex"]
+|} in
+  List.iter (fun declarations ->
+    let catalog = catalog_of_toml ~source:"exact catalog identity" (owner ^ declarations) in
+    let lookup raw = Model_catalog.lookup catalog (model_of raw) in
+    (match lookup "FAMILY-V1" with
+     | Some row -> Alcotest.(check (option bool)) "exact row owns its policy" (Some false) row.supports_tools
+     | None -> Alcotest.fail "casefold exact row missing");
+    List.iter (fun raw -> Alcotest.(check bool) "undeclared name has no inherited row" true
+      (Option.is_none (lookup raw)))
+      ["family-v2"; "family-v1:q4"; "owner/family"; "owner.family"; "owner:family"];
+    let permitted raw = Model_catalog.lookup_model_for_provider catalog
+      ~provider:(Declared_provider "owner-alias") ~model_id:(model_of raw) in
+    Alcotest.(check bool) "declared alias retains exact permission" true (Option.is_some (permitted "FAMILY"));
+    Alcotest.(check bool) "a declared model does not inherit provider permission" true
+      (Option.is_none (permitted "family-v1"));
+    let row = match lookup "family-v1" with
+      | Some row -> row | None -> Alcotest.fail "declared row absent" in
+    Alcotest.(check bool) "suggestion metadata remains explicit" true
+      (row.suggested_clients = [Model_catalog.Codex]);
+    let visible = Model_catalog.model_entries_for_provider catalog
+      ~provider:(Declared_provider "owner-alias") ~model_entries:(Model_catalog.model_entries catalog) in
+    Alcotest.(check (list string)) "enumeration and lookup share exact ownership" ["family"]
+      (List.map (fun (row : Model_catalog.model_entry) -> Model_identifiers.Model_id.to_string row.model_id) visible))
+    [broad ^ specific; specific ^ broad]
+;;
+
+let test_retired_prefix_keys_and_invalid_client_tags_are_rejected () =
+  List.iter (fun contents -> Alcotest.(check bool) "invalid/legacy declaration rejected" true
+    (Result.is_error (Model_catalog.of_toml_string ~source:"exact catalog invalid" contents)))
+    [ "[[models]]\nid_prefix = \"legacy\"\n"
+    ; "[[models]]\nmodel_id = \"m\"\nsuggested_clients = [\"unknown\"]\n"
+    ; "[[models]]\nmodel_id = \"m\"\nsuggested_clients = [\"codex\", \"codex\"]\n"
+    ; "[[providers]]\nid=\"owner\"\nkind=\"anthropic\"\nbase_url=\"https://example.invalid\"\nrequest_path=\"/v1/messages\"\nauth=\"none\"\nserves_bare_rows=[\"family\"]\n"
+    ]
+;;
+
 let () =
   Alcotest.run "model_identifiers"
-    [ ( "Id_prefix.starts_with"
-      , [ Alcotest.test_case "exact" `Quick test_starts_with_exact
-        ; Alcotest.test_case "normalization" `Quick test_starts_with_normalization
-        ; Alcotest.test_case "not_suffix" `Quick test_starts_with_not_suffix ] )
-    ; ( "Id_prefix.of_string properties"
+    [ ( "exact catalog authority"
+      , [ Alcotest.test_case "lookup and provider permission do not expand" `Quick test_exact_lookup_and_ownership_do_not_expand_names
+        ; Alcotest.test_case "legacy keys and invalid suggestions rejected" `Quick test_retired_prefix_keys_and_invalid_client_tags_are_rejected
+        ] )
+    ; ( "Model_id exact equality"
+      , [ Alcotest.test_case "exact and casefold" `Quick test_exact_identity
+        ; Alcotest.test_case "variants are distinct" `Quick test_identity_does_not_infer_variants ] )
+    ; ( "Model_id.of_string properties"
       , [ Alcotest.test_case "rejects_padded_and_empty" `Quick test_of_string_rejects_padded_and_empty
-        ; Alcotest.test_case "three_modules_share_one_rule" `Quick test_three_modules_share_one_rule ] )
+        ; Alcotest.test_case "two_modules_share_one_rule" `Quick test_two_modules_share_one_rule ] )
     ; ( "Model_catalog.lookup case properties"
       , [ Alcotest.test_case "query_case_fold_and_padding_rejection" `Quick test_lookup_folds_case_and_rejects_padding
         ; Alcotest.test_case "misses_stay_misses" `Quick test_lookup_misses_stay_misses
@@ -490,8 +497,8 @@ let () =
             test_equality_key_folds_ascii_case_only
         ; Alcotest.test_case "scoped_lookup_matches_a_scan_of_the_rows" `Quick
             test_scoped_lookup_matches_a_scan_of_the_rows
-        ; Alcotest.test_case "scoped_lookup_answers_with_the_first_of_equal_rows" `Quick
-            test_scoped_lookup_answers_with_the_first_of_equal_rows
+        ; Alcotest.test_case "scoped_lookup_rejects_duplicate_rows" `Quick
+            test_scoped_lookup_rejects_duplicate_rows
         ; Alcotest.test_case "scoped_lookup_folds_row_ids_and_keeps_providers_apart" `Quick
             test_scoped_lookup_folds_row_ids_and_keeps_providers_apart
         ; Alcotest.test_case "scoped_lookup_retries_under_the_canonical_provider" `Quick

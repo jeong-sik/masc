@@ -1231,7 +1231,7 @@ let test_observed_boundary_forecast ~marks ~samples ~expected_front () =
   let config = Workspace.default_config base_path in
   let catalog_path = Filename.concat base_path "models.toml" in
   write catalog_path
-    "[[models]]\nid_prefix = \"forecast-model\"\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 4096\nmax_output_tokens = 128\nsupports_tools = true\n";
+    "[[models]]\nmodel_id = \"forecast-model\"\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 4096\nmax_output_tokens = 128\nsupports_tools = true\n";
   Llm_provider.Model_catalog.load_file catalog_path |> unwrap
   |> Llm_provider.Model_catalog.set_global;
   let config_path = Filename.concat base_path "runtime.toml" in

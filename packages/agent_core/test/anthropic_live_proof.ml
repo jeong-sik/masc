@@ -52,7 +52,7 @@ let lookup_prompt =
 ;;
 
 (* "claude" is the catalog's [[providers]] entry for Anthropic's own API. It
-   declares serves_bare_rows, which is what lets a config that names a provider
+   declares serves_bare_models, which is what lets a config that names a provider
    read the claude-* rows; under any other label the row is not read and the
    run proves nothing about it. *)
 let base_config ~api_key ~model_id =

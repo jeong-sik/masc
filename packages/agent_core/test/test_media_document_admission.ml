@@ -305,11 +305,11 @@ let test_catalog_row_can_declare_document_input () =
      failure mode the sibling refactor hit. *)
   let toml =
     "[[models]]\n\
-     id_prefix = \"doc-declared\"\n\
+     model_id = \"doc-declared\"\n\
      max_context_tokens = 8192\n\
      supports_document_input = true\n\n\
      [[models]]\n\
-     id_prefix = \"doc-silent\"\n\
+     model_id = \"doc-silent\"\n\
      max_context_tokens = 8192\n"
   in
   let catalog =

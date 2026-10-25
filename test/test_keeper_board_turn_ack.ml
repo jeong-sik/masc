@@ -16,7 +16,7 @@ let initialize_runtime ~base_path (server : Exact_output_fixture.test_server) =
   let model_id = "board-ack-protocol-fixture" in
   let catalog_path = Filename.concat base_path "model-catalog.toml" in
   save catalog_path (Printf.sprintf
-    "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = true\n"
+    "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = true\n"
     model_id);
   Llm_provider.Model_catalog.load_file catalog_path |> get Fun.id
   |> Llm_provider.Model_catalog.set_global;

@@ -1091,7 +1091,7 @@ let with_response_cache_catalog f =
 let response_cache_catalog ~ceiling ~replay =
   match Model_catalog.of_toml_string ~source:"response cache projection fixture"
       (Printf.sprintf {|[[models]]
-id_prefix = "response-cache-model"
+model_id = "response-cache-model"
 base = "anthropic"
 max_context_tokens = 4096
 max_output_tokens = %d

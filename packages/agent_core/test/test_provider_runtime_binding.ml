@@ -419,14 +419,14 @@ auth = "api-key"
 capabilities_base = "ollama_cloud"
 
 [[models]]
-id_prefix = "kimi-k2.6"
+model_id = "kimi-k2.6"
 base = "kimi"
 supports_tools = true
 supports_tool_choice = true
 thinking_control_format = "none"
 
 [[models]]
-id_prefix = "kimi-k2.6"
+model_id = "kimi-k2.6"
 base = "ollama_cloud"
 provider_name = "ollama_cloud"
 supports_tools = true
@@ -489,7 +489,7 @@ let test_capabilities_for_provider_config_uses_exact_provider_model_tuple () =
        with_model_catalog
          {|
 [[models]]
-id_prefix = "qwen36-35b-a3b-mtp"
+model_id = "qwen36-35b-a3b-mtp"
 base = "openai_chat"
 provider_name = "vllm-qwen3-mtp"
 supports_tools = true
@@ -636,7 +636,7 @@ auth = "api-key"
 capabilities_base = "ollama_cloud"
 
 [[models]]
-id_prefix = "claude-opus-5-5"
+model_id = "claude-opus-5-5"
 base = "anthropic"
 supports_tools = true
 supports_tool_choice = true
@@ -644,7 +644,7 @@ supports_required_tool_choice = true
 supports_named_tool_choice = true
 
 [[models]]
-id_prefix = "glm-5.1"
+model_id = "glm-5.1"
 base = "glm"
 supports_tools = true
 supports_tool_choice = true
@@ -652,7 +652,7 @@ supports_required_tool_choice = false
 supports_named_tool_choice = false
 
 [[models]]
-id_prefix = "minimax-m3"
+model_id = "minimax-m3"
 base = "openai_chat"
 provider_name = "minimax"
 supports_tools = true
@@ -661,7 +661,7 @@ supports_required_tool_choice = false
 supports_named_tool_choice = false
 
 [[models]]
-id_prefix = "minimax-m3"
+model_id = "minimax-m3"
 base = "ollama_cloud"
 provider_name = "ollama_cloud"
 supports_tools = true

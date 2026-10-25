@@ -325,7 +325,7 @@ let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
     (fun (entry : Llm_provider.Model_catalog.model_entry) ->
        let provider_label = Option.value entry.provider_name ~default:"" in
        let model_id =
-         Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
+         Llm_provider.Model_identifiers.Model_id.to_string entry.model_id
        in
        let label = provider_label ^ "/" ^ model_id in
        match
@@ -646,7 +646,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
    | None -> fail "expected exact Ollama Cloud deepseek-v4-pro catalog row"
    | Some entry ->
      check string "deepseek pro exact model" "deepseek-v4-pro"
-       (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix);
+       (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id);
      check (option string) "deepseek pro exact provider" (Some "ollama_cloud")
        entry.provider_name;
      check (option int) "deepseek pro context" (Some 1048576)
@@ -897,8 +897,8 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
        | None -> ()
        | Some raw ->
          let expected =
-           let id_prefix =
-             Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
+           let model_id =
+             Llm_provider.Model_identifiers.Model_id.to_string entry.model_id
            in
            match String.lowercase_ascii (String.trim raw) with
            | "visual_first" | "visual-first" -> Llm_provider.Modality.Visual_first
@@ -909,29 +909,29 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
                "unsupported modality_priority %S (normalized %S) in %s"
                raw
                normalized
-               id_prefix
+               model_id
          in
          let capabilities =
            match entry.provider_name with
            | None ->
              Llm_provider.Capabilities.for_model_id_catalog
-               (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+               (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
            | Some provider_label ->
              Llm_provider.Capabilities.for_provider_model_id
                ~wire:None
                ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
                ~model_id:
-                 (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+                 (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
          in
          (match capabilities with
           | None ->
             failf
               "modality_priority row %s must resolve through deployment AGENT_CORE catalog"
-              (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+              (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
           | Some caps ->
             check
               bool
-              (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
+              (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id
                ^ " modality_priority resolves")
               true
               (caps.modality_priority = expected)))
@@ -3129,7 +3129,7 @@ let with_model_catalog_content content f =
    These cap/official-client cases declare their synthetic HTTP models too. *)
 let with_config_save_model_catalog f =
   let row id = Printf.sprintf
-    "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"openai_chat\"\nmax_context_tokens = 1024\n" id in
+    "[[models]]\nmodel_id = %S\nprovider_name = \"local\"\nbase = \"openai_chat\"\nmax_context_tokens = 1024\n" id in
   with_model_catalog_content (String.concat "\n" (List.map row ["sample"; "lane"; "dormant"])) f
 
 (* An official-client runtime loads with only its window declared. *)
@@ -3835,22 +3835,22 @@ let with_temp_runtime_toml content f =
 let with_fake_runtime_model_catalog f =
   let content =
     "[[models]]\n\
-     id_prefix = \"chat\"\n\
+     model_id = \"chat\"\n\
      base = \"ollama\"\n\
      max_context_tokens = 1024\n\
      \n\
      [[models]]\n\
-     id_prefix = \"libr\"\n\
+     model_id = \"libr\"\n\
      base = \"ollama\"\n\
      max_context_tokens = 1024\n\
      \n\
      [[models]]\n\
-     id_prefix = \"no-cap\"\n\
+     model_id = \"no-cap\"\n\
      base = \"openai_chat\"\n\
      max_context_tokens = 1024\n\
      \n\
      [[models]]\n\
-     id_prefix = \"capped\"\n\
+     model_id = \"capped\"\n\
      base = \"openai_chat\"\n\
      max_context_tokens = 1024\n"
   in
@@ -3920,7 +3920,7 @@ let test_runtime_locality_uses_provider_schema () =
 let test_runtime_capability_gate_uses_provider_qualified_catalog () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"shared-thinking\"\n\
+     model_id = \"shared-thinking\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 1024\n\
@@ -3969,18 +3969,18 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
    catalog row exists, the first lookup found that row and returned [None]
    (no runtime override to lay over it), so the retry then materialized the
    bare "gemini-probe" row as the override and shadowed the operator's
-   provider-qualified row. Two rows share one id_prefix here and differ only
+   provider-qualified row. Two rows share one model_id here and differ only
    in max_context_tokens: 1024 bare, 4096 under my_gemini. On origin/main the
    runtime reports 1024; with the retry deleted it reports 4096. *)
 let test_gemini_provider_resolves_capabilities_under_its_own_label () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"gemini-probe\"\n\
+     model_id = \"gemini-probe\"\n\
      base = \"gemini\"\n\
      max_context_tokens = 1024\n\
      \n\
      [[models]]\n\
-     id_prefix = \"gemini-probe\"\n\
+     model_id = \"gemini-probe\"\n\
      provider_name = \"my_gemini\"\n\
      base = \"gemini\"\n\
      max_context_tokens = 4096\n"
@@ -4067,7 +4067,7 @@ let test_anthropic_runtime_replays_only_the_latest_turn_tool_loop () =
 let test_anthropic_catalog_row_replay_stays_authoritative () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"claude-sonnet-5-5\"\n\
+     model_id = \"claude-sonnet-5-5\"\n\
      provider_name = \"my_claude\"\n\
      base = \"anthropic\"\n\
      reasoning_replay = \"preserve_always\"\n"
@@ -4115,7 +4115,7 @@ let anthropic_operator_own_policy_runtime_toml ~policy_line =
    deployment override answered rather than a leaked bare row. *)
 let bare_sonnet_row_without_a_readable_provider =
   "[[models]]\n\
-   id_prefix = \"claude-sonnet-5-5\"\n\
+   model_id = \"claude-sonnet-5-5\"\n\
    base = \"anthropic\"\n\
    anthropic_thinking_control = \"adaptive_between_tools\"\n\
    max_context_tokens = 1000000\n"
@@ -4171,7 +4171,7 @@ let test_operator_own_anthropic_without_policy_still_refuses_explicit_thinking (
 let test_operator_own_anthropic_policy_admitted_without_a_catalog_policy () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"claude-sonnet-5-5\"\n\
+     model_id = \"claude-sonnet-5-5\"\n\
      provider_name = \"my_claude\"\n\
      base = \"anthropic\"\n\
      max_context_tokens = 200000\n"
@@ -4194,7 +4194,7 @@ let test_operator_own_anthropic_policy_admitted_without_a_catalog_policy () =
 let test_operator_own_anthropic_policy_restatement_is_refused () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"claude-sonnet-5-5\"\n\
+     model_id = \"claude-sonnet-5-5\"\n\
      provider_name = \"my_claude\"\n\
      base = \"anthropic\"\n\
      anthropic_thinking_control = \"adaptive_default\"\n\
@@ -4215,7 +4215,7 @@ let test_operator_own_anthropic_policy_restatement_is_refused () =
 let test_anthropic_thinking_control_on_foreign_wire_is_refused () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"probe-model\"\n\
+     model_id = \"probe-model\"\n\
      provider_name = \"local\"\n\
      base = \"openai_chat\"\n\
      max_context_tokens = 1024\n"
@@ -5072,7 +5072,7 @@ let test_routing_reference_domains_stay_distinct () =
 let test_strict_init_rejects_assigned_runtime_absent_from_agent_core_catalog () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"chat\"\n\
+     model_id = \"chat\"\n\
      base = \"ollama\"\n\
      max_context_tokens = 1024\n"
   in
@@ -5117,7 +5117,7 @@ let test_strict_init_rejects_assigned_runtime_absent_from_agent_core_catalog () 
 let test_runtime_capability_gate_reports_missing_catalog_models () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"other-family\"\n\
+     model_id = \"other-family\"\n\
      base = \"openai_chat\"\n\
      max_context_tokens = 1024\n"
   in
@@ -5176,7 +5176,7 @@ let test_degraded_assignment_isolation_preserves_routing_and_recovers () =
       (Exact_output_fixture.Reply
          (Exact_output_fixture.openai_response (`Assoc ["answer", `String "route reached"]))) in
   let catalog_row id = Printf.sprintf
-    "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 1024\nsupports_tools = true\nsupports_native_streaming = false\n" id in
+    "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 1024\nsupports_tools = true\nsupports_native_streaming = false\n" id in
   let catalog = catalog_row "good" in
   let runtime_toml = Printf.sprintf {|[runtime]
 default = "fixture.good"
@@ -5320,7 +5320,7 @@ streaming = false
 let test_fully_dropped_lane_refuses_degraded_boot_and_names_the_lane () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"good\"\n\
+     model_id = \"good\"\n\
      provider_name = \"fixture\"\n\
      base = \"openai_chat\"\n\
      max_context_tokens = 8192\n\
@@ -5378,7 +5378,7 @@ streaming = false
 let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"good\"\n\
+     model_id = \"good\"\n\
      provider_name = \"ollama\"\n\
      base = \"ollama\"\n\
      max_context_tokens = 1024\n"
@@ -5438,7 +5438,7 @@ let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
 let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"good\"\n\
+     model_id = \"good\"\n\
      provider_name = \"ollama\"\n\
      base = \"ollama\"\n\
      max_context_tokens = 1024\n"
@@ -5525,7 +5525,7 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
 let test_server_degraded_init_rejects_uncatalogued_default () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"good\"\n\
+     model_id = \"good\"\n\
      provider_name = \"ollama\"\n\
      base = \"ollama\"\n\
      max_context_tokens = 1024\n"
@@ -5743,7 +5743,7 @@ let test_structured_judge_runtime_key_is_rejected () =
 
 let test_save_config_text_commits_exact_registry_with_runtime_state () =
   let catalog_row id = Printf.sprintf
-    "[[models]]\nid_prefix = %S\nprovider_name = \"local\"\nbase = \"ollama\"\nmax_context_tokens = 1024\n" id in
+    "[[models]]\nmodel_id = %S\nprovider_name = \"local\"\nbase = \"ollama\"\nmax_context_tokens = 1024\n" id in
   with_model_catalog_content (catalog_row "chat" ^ catalog_row "libr") @@ fun () ->
   let targets : Exact_output_fixture.target_fixture list =
     [ { id = "slot-a"; base_url = "http://127.0.0.1:9" }
@@ -6028,7 +6028,7 @@ reasoning-streaming-format = "none"|}
 let test_runtime_max_context_capability_only_uses_catalog_cap () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"cap-only-model\"\n\
+     model_id = \"cap-only-model\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 4096\n"
@@ -6067,7 +6067,7 @@ let test_runtime_max_context_capability_only_uses_catalog_cap () =
 let test_runtime_max_context_override_below_cap_wins_as_override () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"override-under-cap\"\n\
+     model_id = \"override-under-cap\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 8192\n"
@@ -6107,7 +6107,7 @@ let test_runtime_max_context_override_below_cap_wins_as_override () =
 let test_runtime_max_context_override_above_cap_is_clamped () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"override-over-cap\"\n\
+     model_id = \"override-over-cap\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 8192\n"
@@ -6186,13 +6186,13 @@ let test_runtime_max_context_override_above_cap_is_clamped () =
 let test_lane_budget_is_bound_by_smallest_candidate_window () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"lane-big\"\n\
+     model_id = \"lane-big\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 1048576\n\
      \n\
      [[models]]\n\
-     id_prefix = \"lane-small\"\n\
+     model_id = \"lane-small\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 203000\n"
@@ -6269,19 +6269,19 @@ let test_lane_budget_is_bound_by_smallest_candidate_window () =
 let test_deferred_budget_is_bound_by_a_later_candidate_window () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"deferred-big\"\n\
+     model_id = \"deferred-big\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 1048576\n\
      \n\
      [[models]]\n\
-     id_prefix = \"deferred-mid\"\n\
+     model_id = \"deferred-mid\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 300000\n\
      \n\
      [[models]]\n\
-     id_prefix = \"deferred-small\"\n\
+     model_id = \"deferred-small\"\n\
      provider_name = \"ollama_cloud\"\n\
      base = \"ollama_cloud\"\n\
      max_context_tokens = 203000\n"
@@ -7161,7 +7161,7 @@ let test_context_declarations_reject_nonpositive_and_wrong_type () =
 
 let test_context_scopes_preserve_genuine_catalog_cap () =
   with_model_catalog_content
-    "[[models]]\nid_prefix = \"scoped-context-fixture\"\nprovider_name = \"scoped\"\nbase = \"openai_chat\"\nmax_context_tokens = 500000\n"
+    "[[models]]\nmodel_id = \"scoped-context-fixture\"\nprovider_name = \"scoped\"\nbase = \"openai_chat\"\nmax_context_tokens = 500000\n"
     (fun () ->
       List.iter (fun (provider_context, binding_context, provenance) ->
         let runtime = scoped_context_runtime

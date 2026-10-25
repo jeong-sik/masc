@@ -14,12 +14,12 @@ for model-specific feature and limit facts.
 `Capabilities.for_model_id` resolves model facts from the model catalog first,
 then from the capability manifest. The manifest layer is still useful for
 custom deployments and local variants, but it cannot override an authoritative
-catalog row for the same model prefix.
+catalog row for the same exact model ID.
 
 ## Priority
 
 ```
-Explicit model catalog override or embedded agent_core model catalog row (prefix match)
+Explicit model catalog override or embedded agent_core model catalog row (exact match)
     ↓ miss
 Explicitly installed manifest entry (exact model ID, ASCII case-insensitive)
     ↓ miss

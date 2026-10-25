@@ -33,8 +33,8 @@ let test_none_accepting_rows_declare_a_control_format () =
            Option.exists (List.exists (String.equal "none")) efforts
            && entry.Llm_provider.Model_catalog.thinking_control_format = None)
     |> List.map (fun entry ->
-           Llm_provider.Model_identifiers.Id_prefix.to_string
-             entry.Llm_provider.Model_catalog.id_prefix)
+           Llm_provider.Model_identifiers.Model_id.to_string
+             entry.Llm_provider.Model_catalog.model_id)
   in
   Alcotest.(check (list string))
     "every OpenRouter row accepting effort none declares thinking_control_format"

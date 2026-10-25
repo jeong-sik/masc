@@ -1830,7 +1830,7 @@ let test_complete_propagates_exact_provider_to_cost_annotation () =
   let catalog =
     {|
 [[models]]
-id_prefix = "shared-priced-model"
+model_id = "shared-priced-model"
 base = "openai_chat"
 input_per_million = 9.0
 output_per_million = 90.0
@@ -1838,7 +1838,7 @@ cache_write_multiplier = 1.0
 cache_read_multiplier = 1.0
 
 [[models]]
-id_prefix = "shared-priced-model"
+model_id = "shared-priced-model"
 provider_name = "pricing-provider"
 base = "openai_chat"
 input_per_million = 1.0

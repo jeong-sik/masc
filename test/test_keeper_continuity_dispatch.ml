@@ -43,7 +43,7 @@ let with_dispatch_fixture ?(refused_behavior = Fixture.Reply overflow_reply) bod
     (Fixture.Reply (Fixture.openai_response (`Assoc ["answer", `String "Await approval."]))) in
   let catalog_path = Filename.concat base_path "models.toml" in
   let row provider = Printf.sprintf
-    "[[models]]\nid_prefix = \"continuity-model\"\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" provider in
+    "[[models]]\nmodel_id = \"continuity-model\"\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" provider in
   write catalog_path (row "refused" ^ row "accepted");
   (match Llm_provider.Model_catalog.load_file catalog_path with
    | Ok catalog -> Llm_provider.Model_catalog.set_global catalog | Error detail -> fail detail);

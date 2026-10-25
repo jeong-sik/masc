@@ -36,7 +36,7 @@ let () =
     exit 1
   | Ok catalog ->
     Model_catalog.set_global catalog;
-    print_endline "id_prefix\tlabel\trow_efforts\tresolved";
+    print_endline "model_id\tlabel\trow_efforts\tresolved";
     List.iter
       (fun (row : Model_catalog.model_entry) ->
         (* The label this row would be asked under: the provider it names, or
@@ -47,7 +47,7 @@ let () =
           | None, Some b -> b
           | None, None -> "?"
         in
-        let model_id = Llm_provider.Model_identifiers.Id_prefix.to_string row.id_prefix in
+        let model_id = Llm_provider.Model_identifiers.Model_id.to_string row.model_id in
         let resolved = match row.provider_name with
           | Some provider_id ->
             Capabilities.for_provider_model_id ~wire:None
@@ -56,7 +56,7 @@ let () =
         in
         Printf.printf
           "%s\t%s\t%s\t%s\n"
-          (Llm_provider.Model_identifiers.Id_prefix.to_string row.id_prefix)
+          (Llm_provider.Model_identifiers.Model_id.to_string row.model_id)
           label
           (match row.accepted_reasoning_efforts with
            | None -> "-"

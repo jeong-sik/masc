@@ -858,7 +858,7 @@ let with_runtime_catalog f =
   let previous_catalog = Llm_provider.Model_catalog.global () in
   let previous_runtime = Runtime.For_testing.snapshot () in
   let catalog = or_fail (Llm_provider.Model_catalog.of_toml_string ~source:"preset activity fixture"
-    "[[models]]\nid_prefix = \"qwen\"\nprovider_name = \"runpod_mtp\"\nbase = \"openai_chat\"\nmax_context_tokens = 128000\n\n[[models]]\nid_prefix = \"gpt\"\nprovider_name = \"openai\"\nbase = \"openai_chat\"\nmax_context_tokens = 64000\n") in
+    "[[models]]\nmodel_id = \"qwen\"\nprovider_name = \"runpod_mtp\"\nbase = \"openai_chat\"\nmax_context_tokens = 128000\n\n[[models]]\nmodel_id = \"gpt\"\nprovider_name = \"openai\"\nbase = \"openai_chat\"\nmax_context_tokens = 64000\n") in
   Fun.protect ~finally:(fun () ->
     Runtime.For_testing.restore previous_runtime;
     match previous_catalog with

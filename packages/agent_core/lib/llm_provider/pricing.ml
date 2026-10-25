@@ -133,9 +133,10 @@ let[@warning "-32"] test_catalog_entry
       ?output
       ?cache_write
       ?cache_read
-      id_prefix
+      model_id
   =
-  { Model_catalog.id_prefix = Model_identifiers.Id_prefix.of_string_exn id_prefix
+  { Model_catalog.model_id = Model_identifiers.Model_id.of_string_exn model_id
+  ; suggested_clients = []
   ; base_label = None
   ; provider_name
   ; max_context_tokens = None
@@ -186,7 +187,7 @@ let[@warning "-32"] test_catalog_entry
 
 let[@warning "-32"] with_catalog entries f =
   let original = Model_catalog.global () in
-  Model_catalog.set_global (Model_catalog.of_model_entries entries);
+  Model_catalog.set_global (Model_catalog.of_model_entries entries |> Result.get_ok);
   Fun.protect
     ~finally:(fun () ->
       match original with

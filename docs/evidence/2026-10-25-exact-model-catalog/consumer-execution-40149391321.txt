@@ -1,0 +1,56 @@
+Run https://github.com/jeong-sik/masc/actions/runs/40149391321
+Actual checkout23e6d4d262038e12c2e113ec8e709817a6053e99; overall FAILURE.
+6 suites pass262 cases. Catalog26/27; capabilities114/124. No full regression or provider execution.
+
+test suite	Checkout	2026-10-25T01:07:51.1817491Z HEAD is now at 23e6d4d2 docs: identify exact model catalog hard cut
+test suite	Test	2026-10-25T01:08:52.9136985Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+test suite	Test	2026-10-25T01:08:52.9160881Z [targeted] @@packages/agent_core/test/runtest-test_model_identifiers: start 2026-10-25T01:08:52Z (dune alias)
+test suite	Test	2026-10-25T01:09:21.4249386Z Test Successful in 0.088s. 16 tests run.
+test suite	Test	2026-10-25T01:09:21.4461470Z [targeted] @@packages/agent_core/test/runtest-test_model_identifiers: OK in 29s
+test suite	Test	2026-10-25T01:09:21.4483976Z [targeted] @@packages/agent_core/test/runtest-test_model_catalog_default: start 2026-10-25T01:09:21Z (dune alias)
+test suite	Test	2026-10-25T01:09:22.9173985Z │ [FAIL]        embedded catalog         18   subscription models admit th...  │
+test suite	Test	2026-10-25T01:09:22.9174911Z FAIL gemini-4-argon-high resolves to no catalog row
+test suite	Test	2026-10-25T01:09:22.9177446Z 1 failure! in 0.341s. 27 tests run.
+test suite	Test	2026-10-25T01:09:22.9372600Z [targeted] @@packages/agent_core/test/runtest-test_model_catalog_default: FAIL exit 1 in 1s
+test suite	Test	2026-10-25T01:09:22.9393233Z [targeted] @@packages/agent_core/test/runtest-test_capabilities: start 2026-10-25T01:09:22Z (dune alias)
+test suite	Test	2026-10-25T01:09:24.1199805Z │ [FAIL]        presets                            5   openai compat reaso...  │
+test suite	Test	2026-10-25T01:09:24.1200397Z FAIL qwen3.5 should resolve capabilities
+test suite	Test	2026-10-25T01:09:24.1202967Z │ [FAIL]        model_lookup                       5   kimi-k2 native clou...  │
+test suite	Test	2026-10-25T01:09:24.1203542Z FAIL should match Kimi K2.7 highspeed route
+test suite	Test	2026-10-25T01:09:24.1206332Z │ [FAIL]        model_lookup                       6   qwen3.                  │
+test suite	Test	2026-10-25T01:09:24.1207035Z FAIL should match qwen3
+test suite	Test	2026-10-25T01:09:24.1209681Z │ [FAIL]        model_lookup                       7   qwen gguf name.         │
+test suite	Test	2026-10-25T01:09:24.1210556Z FAIL should match qwen3.6 model id
+test suite	Test	2026-10-25T01:09:24.1214004Z │ [FAIL]        model_lookup                      10   local ollama gemma4...  │
+test suite	Test	2026-10-25T01:09:24.1214619Z FAIL bare lookup should match local Gemma4 E2B QAT
+test suite	Test	2026-10-25T01:09:24.1217479Z │ [FAIL]        model_lookup                      17   glm-4.6v vision.        │
+test suite	Test	2026-10-25T01:09:24.1218034Z FAIL should match glm-4.6v
+test suite	Test	2026-10-25T01:09:24.1220553Z │ [FAIL]        model_lookup                      33   frontier grouped to...  │
+test suite	Test	2026-10-25T01:09:24.1221298Z FAIL Qwen3.6 RunPod/self-hosted should resolve capabilities
+test suite	Test	2026-10-25T01:09:24.1223821Z │ [FAIL]        model_lookup                      36   qwen3 thinking cont...  │
+test suite	Test	2026-10-25T01:09:24.1224369Z FAIL should match qwen3
+test suite	Test	2026-10-25T01:09:24.1226643Z │ [FAIL]        manifest                          64   manifest catalog co...  │
+test suite	Test	2026-10-25T01:09:24.1227208Z FAIL expected parity model catalog lookup
+test suite	Test	2026-10-25T01:09:24.1231331Z │ [FAIL]        prefix_ordering                    0   shadow pairs all re...  │
+test suite	Test	2026-10-25T01:09:24.1232126Z FAIL an undeclared variant has no inherited policy
+test suite	Test	2026-10-25T01:09:24.1234969Z 10 failures! in 0.029s. 124 tests run.
+test suite	Test	2026-10-25T01:09:24.1371362Z [targeted] @@packages/agent_core/test/runtest-test_capabilities: FAIL exit 1 in 2s
+test suite	Test	2026-10-25T01:09:24.1393741Z [targeted] @@packages/agent_core/test/runtest-test_provider_config: start 2026-10-25T01:09:24Z (dune alias)
+test suite	Test	2026-10-25T01:09:25.9781463Z Test Successful in 0.427s. 140 tests run.
+test suite	Test	2026-10-25T01:09:25.9957886Z [targeted] @@packages/agent_core/test/runtest-test_provider_config: OK in 1s
+test suite	Test	2026-10-25T01:09:25.9980679Z [targeted] @@packages/agent_core/test/runtest-test_provider_catalog_coverage: start 2026-10-25T01:09:25Z (dune alias)
+test suite	Test	2026-10-25T01:09:26.9085392Z Test Successful in 0.002s. 17 tests run.
+test suite	Test	2026-10-25T01:09:26.9216269Z [targeted] @@packages/agent_core/test/runtest-test_provider_catalog_coverage: OK in 1s
+test suite	Test	2026-10-25T01:09:27.0372277Z [targeted] dune build packages/agent_core/test/test_exact_output_resolver_snapshot.exe test/test_runtime_provider_auth_headers.exe test/test_model_catalog_thinking_control.exe
+test suite	Test	2026-10-25T01:11:49.7832606Z [targeted] packages/agent_core/test/test_exact_output_resolver_snapshot: stanza env
+test suite	Test	2026-10-25T01:11:49.7855763Z [targeted] packages/agent_core/test/test_exact_output_resolver_snapshot: start 2026-10-25T01:11:49Z
+test suite	Test	2026-10-25T01:11:49.8219605Z Test Successful in 0.028s. 17 tests run.
+test suite	Test	2026-10-25T01:11:49.8257744Z [targeted] packages/agent_core/test/test_exact_output_resolver_snapshot: OK in 0s
+test suite	Test	2026-10-25T01:11:49.8875431Z [targeted] test/test_runtime_provider_auth_headers: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-25T01:11:49.8895700Z [targeted] test/test_runtime_provider_auth_headers: start 2026-10-25T01:11:49Z
+test suite	Test	2026-10-25T01:11:50.0576850Z Test Successful in 0.108s. 71 tests run.
+test suite	Test	2026-10-25T01:11:50.0639591Z [targeted] test/test_runtime_provider_auth_headers: OK in 1s
+test suite	Test	2026-10-25T01:11:50.1255213Z [targeted] test/test_model_catalog_thinking_control: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-25T01:11:50.1277280Z [targeted] test/test_model_catalog_thinking_control: start 2026-10-25T01:11:50Z
+test suite	Test	2026-10-25T01:11:50.1478487Z Test Successful in 0.015s. 1 test run.
+test suite	Test	2026-10-25T01:11:50.1510353Z [targeted] test/test_model_catalog_thinking_control: OK in 0s

@@ -14,7 +14,7 @@
 ## 0. Summary
 
 > Current contract: provider identity and model id are separate typed/configured
-> values. A model row may declare `provider_name` plus its bare `id_prefix`;
+> values. A model row may declare `provider_name` plus its bare `model_id`;
 > agent_core does not synthesize `/`, `:`, or `.`-qualified model ids. Provider identity
 > is carried as the explicit provider selector / `Provider_config.provider_id`;
 > endpoint URLs and request paths never select it, even when they happen to
@@ -64,7 +64,7 @@ capability(MTP, tool_choice, reasoning dialect, structured output)를 결정하�
 규칙:
 
 1. **capability provenance = 명시적 provider/model 선언.** generic host·URL 또는 model-id 문법 유도 금지.
-   - provider-scoped row는 `provider_name`과 bare `id_prefix`를 별도 필드로 선언한다.
+   - provider-scoped row는 `provider_name`과 bare `model_id`를 별도 필드로 선언한다.
    - serving-contract identity가 필요하면 provider catalog id로 선언하고 model id에 namespace를 덧붙이지 않는다.
 2. **endpoint → provider identity는 provider catalog 선언으로만 허용.** canonical URL, optional declared environment override, and exact identity host are data; OCaml vendor-host branches are forbidden.
 3. **path → wire-protocol**(Responses vs Chat)은 path가 실제 API envelope를 결정하는 경우에만, 정확 문자열 등가 + 비대상 kind는 catch-all 없는 exhaustive match로 fail-closed (`request_path_targets_responses_api`/`validate_request_path`가 정답례).

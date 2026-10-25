@@ -7006,7 +7006,7 @@ let with_direct_assignment_model_catalog f =
     match
       Catalog.of_toml_string ~source:"direct-assignment-fixture"
         {|[[models]]
-id_prefix = "test-model"
+model_id = "test-model"
 provider_name = "test_provider"
 base = "openai_chat"
 max_context_tokens = 8192

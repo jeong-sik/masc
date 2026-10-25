@@ -1890,7 +1890,7 @@ let test_undeclared_ollama_cloud_rows_replay_within_the_user_turn_on_both_wires 
   in
   List.iter
     (fun (entry : Model_catalog.model_entry) ->
-       let model_id = Model_identifiers.Id_prefix.to_string entry.id_prefix in
+       let model_id = Model_identifiers.Model_id.to_string entry.model_id in
        List.iter
          (fun (wire, kind, base_url, request_path) ->
             let config =

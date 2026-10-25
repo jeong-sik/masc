@@ -1452,7 +1452,7 @@ let apply_catalog_entry ~provider_entry ~wire
     catalog discovery.
 
     Returns [None] when no catalog is available or when the catalog has
-    no entry whose [id_prefix] matches [model_id]. There is no in-code
+    no entry whose [model_id] matches [model_id]. There is no in-code
     fallback table: the former built-in static table was removed when
     model specifications were externalized to the TOML catalog. *)
 
@@ -1680,8 +1680,9 @@ let%test "for_model_id glm-4.5-flash has GLM-4.5 thinking limits" =
    then sets only the capability-relevant fields, mirroring the
    corresponding [models.toml] entries at the time of writing. The fixture
    is a deterministic snapshot, not auto-synced with [models.toml]. *)
-let test_catalog_entry id_prefix : Model_catalog.model_entry =
-  { id_prefix = Model_identifiers.Id_prefix.of_string_exn id_prefix
+let test_catalog_entry model_id : Model_catalog.model_entry =
+  { model_id = Model_identifiers.Model_id.of_string_exn model_id
+  ; suggested_clients = []
   ; base_label = None
   ; provider_name = None
   ; max_context_tokens = None
@@ -1778,8 +1779,8 @@ let%test "named tool choice cannot outlive tool choice" =
     (apply_catalog_entry ~provider_entry:None ~wire:None entry).supports_named_tool_choice
 ;;
 
-let qwen3_family_test_entry id_prefix : Model_catalog.model_entry =
-  { (test_catalog_entry id_prefix) with
+let qwen3_family_test_entry model_id : Model_catalog.model_entry =
+  { (test_catalog_entry model_id) with
     base_label = Some "openai_chat"
   ; max_context_tokens = Some 262_144
   ; max_output_tokens = Some 81_920
@@ -1794,8 +1795,8 @@ let qwen3_family_test_entry id_prefix : Model_catalog.model_entry =
   }
 ;;
 
-let glm_thinking_test_entry id_prefix ~ctx ~out : Model_catalog.model_entry =
-  { (test_catalog_entry id_prefix) with
+let glm_thinking_test_entry model_id ~ctx ~out : Model_catalog.model_entry =
+  { (test_catalog_entry model_id) with
     base_label = Some "glm"
   ; max_context_tokens = Some ctx
   ; max_output_tokens = Some out
@@ -1808,8 +1809,8 @@ let glm_thinking_test_entry id_prefix ~ctx ~out : Model_catalog.model_entry =
   }
 ;;
 
-let deepseek_v4_test_entry id_prefix : Model_catalog.model_entry =
-  { (test_catalog_entry id_prefix) with
+let deepseek_v4_test_entry model_id : Model_catalog.model_entry =
+  { (test_catalog_entry model_id) with
     base_label = Some "openai_chat"
   ; max_context_tokens = Some 1_000_000
   ; max_output_tokens = Some 384_000
@@ -1829,8 +1830,8 @@ let deepseek_v4_test_entry id_prefix : Model_catalog.model_entry =
   }
 ;;
 
-let gemma4_openai_test_entry id_prefix : Model_catalog.model_entry =
-  { (test_catalog_entry id_prefix) with
+let gemma4_openai_test_entry model_id : Model_catalog.model_entry =
+  { (test_catalog_entry model_id) with
     base_label = Some "openai_chat"
   ; max_context_tokens = Some 262_144
   ; supports_tools = Some true
@@ -1847,6 +1848,9 @@ let gemma4_openai_test_entry id_prefix : Model_catalog.model_entry =
 
 let test_catalog_entries =
   [ qwen3_family_test_entry "qwen3"
+  ; qwen3_family_test_entry "qwen3-32b"
+  ; qwen3_family_test_entry "qwen3.5"
+  ; qwen3_family_test_entry "qwen36-35b-a3b-mtp"
   ; qwen3_family_test_entry "qwen-3"
   ; qwen3_family_test_entry "qwen/qwen3.6"
   ; glm_thinking_test_entry "glm-5.1" ~ctx:200_000 ~out:128_000
@@ -1962,7 +1966,7 @@ let test_catalog_entries =
   ]
 ;;
 
-let test_catalog : Model_catalog.t = Model_catalog.of_model_entries test_catalog_entries
+let test_catalog : Model_catalog.t = Model_catalog.of_model_entries test_catalog_entries |> Result.get_ok
 
 (* Installs [test_catalog] as the runtime override for the duration of [f],
    then clears the override so subsequent lookups use the embedded catalog. *)
@@ -2041,7 +2045,7 @@ let%test "Anthropic thinking policy resolves from the model catalog declaration"
        [ { (test_catalog_entry "declared-anthropic-model") with
            anthropic_thinking_control = Some Capability_vocab.Adaptive_default
          }
-       ]);
+       ] |> Result.get_ok);
   Fun.protect ~finally:Model_catalog.clear_global (fun () ->
     anthropic_thinking_control_for_model_id "declared-anthropic-model"
     = Some Anthropic_adaptive_default)
@@ -2073,7 +2077,7 @@ let%test "Anthropic thinking policy on a provider-qualified row resolves by prov
            provider_name = Some "deepseek-anthropic";
            anthropic_thinking_control = Some Capability_vocab.Always_adaptive
          }
-       ]);
+       ] |> Result.get_ok);
   Fun.protect ~finally:Model_catalog.clear_global (fun () ->
     anthropic_thinking_control_for_provider_model_id
       ~provider:(Model_catalog.Declared_provider "deepseek-anthropic")
@@ -2225,15 +2229,7 @@ let%test "capabilities_for_provider_label: nvidia" =
   | None -> false
 ;;
 
-(* ── Prefix ordering invariant ──────────────────── *)
-
-(* Each case is a model_id and the expected capability fingerprint.
-   Prefix dispatch now lives in [Model_catalog.lookup], which must pick the
-   LONGEST matching [id_prefix]. If that ordering regressed, these specific
-   models would be matched by a more general prefix (e.g. [glm-4] instead
-   of [glm-4.7-flashx]) and return wrong capabilities. The test catches
-   that against the explicit [test_catalog] fixture, which contains both
-   the general and the specific prefixes. *)
+(* Exact declarations keep their capability fingerprints without inheritance. *)
 let%test
     "for_model_id_catalog: specific model IDs get correct (not shadowed) capabilities"
   =
@@ -2245,54 +2241,45 @@ let%test
     in
     List.for_all
       (fun (m, e) -> check m e)
-      [ ( "glm-4.7-flash-turbo"
+      [ ( "glm-4.7-flash"
         , fun c -> c.max_output_tokens = Some 128_000 )
-      ; ( "glm-4.5-flash-test"
+      ; ( "glm-4.5-flash"
         , fun c -> c.max_output_tokens = Some 96_000 )
-      ; ( "glm-5-turbo-latest"
+      ; ( "glm-5-turbo"
         , fun c -> c.max_output_tokens = Some 128_000 )
-      ; ( "glm-5-turbo-latest"
+      ; ( "glm-5-turbo"
         , fun c -> c.max_output_tokens = Some 128_000 )
-      ; ("glm-4.6v-plus", fun c -> c.supports_image_input && c.supports_reasoning)
-      ; ( "glm-4.7-flash-test"
+      ; ("glm-4.6v", fun c -> c.supports_image_input && c.supports_reasoning)
+      ; ( "glm-4.7-flash"
         , fun c -> c.max_output_tokens = Some 128_000 && c.supports_reasoning )
       ; ( "glm-4.7-flashx"
         , fun c -> c.max_output_tokens = Some 128_000 && c.supports_reasoning )
-      ; ( "glm-4-flash-mini"
+      ; ( "glm-4-flash"
         , fun c -> c.max_output_tokens = Some 4_096 && not c.supports_reasoning )
-      ; ("glm-4v-plus", fun c -> c.supports_image_input)
-      ; ( "glm-4.5-air-test"
+      ; ("glm-4v", fun c -> c.supports_image_input)
+      ; ( "glm-4.5-air"
         , fun c -> c.max_output_tokens = Some 96_000 && c.supports_reasoning )
-      ; ( "glm-4.5-air-test"
+      ; ( "glm-4.5-air"
         , fun c -> c.max_output_tokens = Some 96_000 && c.supports_reasoning )
-      ; ( "glm-5v-turbo-latest"
+      ; ( "glm-5v-turbo"
         , fun c ->
             c.supports_image_input
             && c.supports_reasoning
             && c.max_output_tokens = Some 128_000 )
-      ; ( "glm-5v-turbo-latest"
+      ; ( "glm-5v-turbo"
         , fun c ->
             c.supports_image_input
             && c.supports_reasoning
             && c.max_output_tokens = Some 128_000 )
-      ; ("glm-ocr-test", fun c -> c.supports_image_input && not c.supports_tools)
-      ; ("glm-ocr-test", fun c -> c.supports_image_input && not c.supports_tools)
-      ; ("claude-opus-5-5-20260101", fun c -> c.max_output_tokens = Some 128_000)
-      ; ("gpt-4.1-mini", fun c -> c.max_output_tokens = Some 32_000)
-        (* Agent Core contract: the real provider model ids ([deepseek-v4-flash],
-         [deepseek-v4-pro]) must resolve to the DeepSeek capability route.
-         Before the de-anonymization these matched only the anon
-         [deepseek-v4-*] prefixes, so the concrete ids missed the lookup
-         and silently fell back to provider-default capabilities. The
-         anon prefixes are retained as aliases and asserted here too. The
-         fingerprint ([Thinking_object] + [384_000] output cap) is specific
-         to the DeepSeek record, so a fall-through to defaults fails the
-         test. *)
+      ; ("glm-ocr", fun c -> c.supports_image_input && not c.supports_tools)
+      ; ("glm-ocr", fun c -> c.supports_image_input && not c.supports_tools)
+      ; ("claude-opus-5-5", fun c -> c.max_output_tokens = Some 128_000)
+      ; ("gpt-4.1", fun c -> c.max_output_tokens = Some 32_000)
       ; ( "deepseek-v4-flash"
         , fun c ->
             c.thinking_control_format = Thinking_object
             && c.max_output_tokens = Some 384_000 )
-      ; ( "deepseek-v4-flash-test"
+      ; ( "deepseek-v4-flash"
         , fun c ->
             c.thinking_control_format = Thinking_object
             && c.max_output_tokens = Some 384_000 )
@@ -2308,38 +2295,46 @@ let%test
         , fun c ->
             c.thinking_control_format = Thinking_object
             && c.max_output_tokens = Some 384_000 )
-      ; ( "Qwen/Qwen3.6-35B-A3B"
+      ; ( "qwen/qwen3.6"
         , fun c ->
             c.thinking_control_format = Chat_template_kwargs
             )
-      ; ( "deepseek-v4-pro-test"
+      ; ( "deepseek-v4-pro"
         , fun c ->
             c.thinking_control_format = Thinking_object
             && c.max_output_tokens = Some 384_000 )
-      ; ( "nvidia-ultra-253b"
+      ; ( "nvidia"
         , fun c ->
             c.thinking_control_format = Chat_template_kwargs && c.supports_tool_choice )
-      ; ( "nvidia/nvidia-ultra-253b"
+      ; ( "nvidia/nvidia"
         , fun c ->
             c.thinking_control_format = Chat_template_kwargs && c.supports_tool_choice )
       ; ("nvidia-vl", fun c -> c.supports_image_input && c.supports_multimodal_inputs)
-      ; ( "google/gemma-4-26B-A4B-it"
+      ; ( "google/gemma-4-26b-a4b"
         , fun c ->
             c.supports_tools
             && c.supports_image_input
             && c.supports_seed
             && c.modality_priority = Modality.Visual_first
             && c.max_context_tokens = Some 262_144 )
-      ; ( "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+      ; ( "hf.co/unsloth/gemma-4"
         , fun c ->
             c.supports_reasoning
             && c.thinking_control_format = Chat_template_token "<|think|>" )
-      ; ( "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+      ; ( "hf.co/unsloth/gemma-4-e2b-it-qat-gguf"
         , fun c ->
             c.supports_audio_input
             && c.thinking_control_format = Chat_template_token "<|think|>"
             && c.max_context_tokens = Some 131_072 )
       ])
+;;
+
+let%test "undeclared model variants do not inherit catalog policies" =
+  with_test_catalog (fun () ->
+    List.for_all (fun (entry : Model_catalog.model_entry) ->
+      let raw = Model_identifiers.Model_id.to_string entry.model_id in
+      List.for_all (fun variant -> Option.is_none (for_model_id_catalog variant))
+        [raw ^ ".undeclared"; "undeclared-provider/" ^ raw]) test_catalog_entries)
 ;;
 
 (* ── Capability drift detection ────────────────────────── *)

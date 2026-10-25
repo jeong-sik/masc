@@ -19,5 +19,20 @@
   "production_installed_by_this_work": false,
   "main_goal_mutated": false,
   "human_confirmation_performed": false,
-  "overall_objective_complete": false
+  "overall_objective_complete": false,
+  "previous_observation": {
+    "observed_at": "2026-10-25T10:56:55.325465+00:00",
+    "main_runtime": {
+      "binary_commit": "d98835aec86ae8c302b4cc43474c249ef1425d29",
+      "executable_sha256": "8ea247894bc801bf68907294479e641fde3c4e3813dec42b625a4dc179ca8f4d",
+      "runtime_instance_id": "01a1727d-c326-7000-a9a8-13dad8142d5f",
+      "started_at": "2026-10-25T09:56:47Z"
+    },
+    "original_goal": {
+      "id": "goal-outcome-driven-work-20261024",
+      "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+      "phase": "executing",
+      "updated_at": "2026-10-25T08:58:22Z"
+    }
+  }
 }

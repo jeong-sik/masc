@@ -21,7 +21,7 @@
 |---|---|
 | 첫 Task | alpha만 true; beta/gamma는 false; 자동 reviewer가 실제 원문을 읽고 승인 |
 | 남은 성과 | Keeper가 `1/3` 기록 후 두 번째 Task로 beta/gamma를 수정하고 `3/3` 기록 |
-| 승인 순서 | beta/gamma 수정은 첫 Task 승인 뒤 59.716103초; 원본 tool trace로 확인 |
+| 승인 순서 | beta/gamma 수정은 reviewer approve tool 종료 뒤 59.716103초이며, primary Done 원장 시각 뒤이기도 함; 두 시각 기준은 chronology-observation.json에서 구분 |
 | 별도 Goal | factorial `40320`을 저장하고 관련 Goal에 별도 Task 연결 |
 | 최종 Task | 자동 검증으로 3개 Done; Task 개수 자체는 Goal 성과가 아님 |
 | Goal 증명 | 두 exact request의 retained Original, 실제 Read, 모델 verdict, primary proof commit 결속 |
@@ -47,7 +47,7 @@ Docker grading은 구현된 경로다. microVM·SSH grading은 명시적으로 �
 - 시간순 Task 계약의 reviewer가 이전 승인 원장을 직접 읽지는 않았다. 이번 실제 순서는 별도 원본 trace로 확인했으며, 일반 보장으로 확대하지 않는다.
 - 없는 artifact 3회 재시도, 최종 측정 설명의 오래된 Task002 상태, factorial proof의 보조 Read 1회 실패, MCP status session 404 후 client 재초기화를 보존한다.
 - 원래 Goal의 성공조건·기존 acceptance·측정은 바꾸지 않았다. 원래 필수 G1–G4/A1–A7 전체를 한 current head에서 재검증한 결과가 아니다. 일반 외부 acceptance 성공률도 아직 미측정이다.
-- main 관측은 `main-observation.json`의 d988 실행물이며 이 후보를 설치하지 않았다. 두 실험 Goal의 사람 확인과 원래 Goal 완료는 남아 있다.
+- main 첫 관측은 d988이었고 다른 세션의 설치로 마지막 관측은 2e36766f로 바뀌었다. `main-observation.json`에 두 시점을 보존한다. 마지막 binary commit의 source를 직접 대조하면 새 bootstrap 변경과 coding sandbox helper는 포함돼 있지 않다. source 비교를 새 운영 동작 실측으로 바꾸지 않는다. 저는 운영 설치·재시작을 하지 않았다. 두 실험 Goal의 사람 확인과 원래 Goal 완료는 남아 있다.
 - 이번 새 실행의 browser/TUI 렌더링 캡처는 추가하지 않았다. 이전 P/N 대조 실험의 실제 화면 증거와 구분한다.
 
 공개 파일은 허용한 식별자·해시·관측값만 포함한다. 인증값, 사설 경로, 전체 모델/도구 원문과 thinking은 공개하지 않는다. 각 nested manifest는 해당 하위 폴더에, 최상위 manifest는 이 증거 묶음 전체에 적용된다. 독립 source/실측 리뷰는 GitHub formal approval이나 스택 전체 병합 승인을 대체하지 않는다.

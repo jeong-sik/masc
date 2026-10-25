@@ -2594,6 +2594,23 @@ let remove_exact_source
       ~subject:(Area (area, store.owner))
       (area_directory store area)
   with
+  | Eio.Cancel.Cancelled reason ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    let original_reason, prior_effect, cleanup_failures =
+      match reason with
+      | Recovery_store_cancelled (original_reason, prior_store_effect, cleanup_failures) ->
+        original_reason, prior_store_effect, cleanup_failures
+      | original_reason -> original_reason, effect_before, []
+    in
+    let store_effect =
+      if !removed
+      then Source_removal_durability_unknown removal_transition
+      else prior_effect
+    in
+    Printexc.raise_with_backtrace
+      (Eio.Cancel.Cancelled
+         (Recovery_store_cancelled (original_reason, store_effect, cleanup_failures)))
+      backtrace
   | Store_failure failure ->
     let store_effect =
       if !removed
@@ -2646,6 +2663,10 @@ let run_mutation ~initial_effect f =
     Eio.Fiber.check ();
     Ok value
   with
+  | Eio.Cancel.Cancelled (Recovery_store_cancelled _) as cancellation ->
+    (* An inner effect boundary knows more than this transaction's last
+       completed step. Preserve its exact mutation and original authority. *)
+    Printexc.raise_with_backtrace cancellation (Printexc.get_raw_backtrace ())
   | Eio.Cancel.Cancelled reason as cancellation ->
     let backtrace = Printexc.get_raw_backtrace () in
     if !observed_effect = No_record_change

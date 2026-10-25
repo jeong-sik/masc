@@ -66,7 +66,7 @@ type positions = {current:P.t option;selection:P.t option;counterpart:P.t option
 type t = {root:string;read_extent:R.extent;original_boundaries:boundary_lines;original_positions:positions;
   original_source:source;original_counterparts:S.counterpart_snapshot;before:E.observation;prepared:E.observation;
   revision:int option;atom_receipt:M.durable_range_id option;official_receipt:M.official_range_id option;
-  original_input:Keeper_librarian.input}
+  original_input:Keeper_librarian.input;include_message_origin:bool}
 let input original = original.original_input
 let expected_revision original = original.revision
 let range_id original = original.atom_receipt
@@ -141,10 +141,11 @@ let boundaries_json lines = `List (List.map (fun (line,value) ->
 let boundaries_of_json = list (pair int (result_of_json (fun json -> wire (B.record_of_json json)) boundary_error_of_json))
 let turn_of_json json = let* value=text json in
   match Ids.Turn_ref.of_string value with Some reference -> Ok reference | None -> refuse "Invalid captured turn reference"
-let fragment_json = function
+let fragment_json ~include_origin = function
   | F.Message {turn_ref;recorded_at;source;message} -> `Assoc ["kind",`String "message";
       "turn_ref",Ids.Turn_ref.to_yojson turn_ref;"recorded_at",`Float recorded_at;
-      "source",optional (fun value -> `String value) source;"message",I.message_json message]
+      "source",optional (fun value -> `String value) source;
+      "message",I.message_json_with_origin ~include_origin message]
   | F.Tool_observation {turn_ref;recorded_at;observation} -> `Assoc ["kind",`String "tool";
       "turn_ref",Ids.Turn_ref.to_yojson turn_ref;"recorded_at",`Float recorded_at;
       "tool_name",`String observation.tool_name;"outcome",`String (match observation.outcome with
@@ -178,13 +179,15 @@ let fragment_error_of_json = function
   | `List [`String "message_rejected";`String detail] -> Ok (F.Message_rejected detail)
   | `List [`String "incomplete"] -> Ok F.Incomplete_line
   | _ -> refuse "Unknown captured fragment rejection"
-let fragment_line_json = function F.Untagged -> `List [`String "untagged"] | Fragment fragment -> `List [`String "fragment";fragment_json fragment]
+let fragment_line_json ~include_origin = function
+  | F.Untagged -> `List [`String "untagged"]
+  | Fragment fragment -> `List [`String "fragment";fragment_json ~include_origin fragment]
 let fragment_line_of_json = function
   | `List [`String "untagged"] -> Ok F.Untagged
   | `List [`String "fragment";fragment] -> let+ fragment=fragment_of_json fragment in F.Fragment fragment
   | _ -> refuse "Unknown captured fragment row"
-let fragment_rows_json rows = `List (List.map (fun (line,value) -> pair_json (`Int line)
-  (result_json fragment_line_json fragment_error_json value)) rows)
+let fragment_rows_json ~include_origin rows = `List (List.map (fun (line,value) -> pair_json (`Int line)
+  (result_json (fragment_line_json ~include_origin) fragment_error_json value)) rows)
 let fragment_rows_of_json = list (pair int (result_of_json fragment_line_of_json fragment_error_of_json))
 
 let range_json (range:R.range) = `Assoc ["history_start_boundary_line",`Int range.history_start_boundary_line;
@@ -194,9 +197,40 @@ let range_of_json json =
   let* history_start_boundary_line=int (field "history_start_boundary_line" f) in
   let* start_atom=int (field "start_atom" f) in let* end_atom=int (field "end_atom" f) in
   let+ last_atom_digest=text (field "last_atom_digest" f) in {R.history_start_boundary_line;start_atom;end_atom;last_atom_digest}
-let checkpoint_json source = `Assoc ["trace_id",`String (Keeper_id.Trace_id.to_string source.reference.trace_id);
+let unique_assoc_field name fields =
+  match List.filter_map (fun (k, v) -> if String.equal k name then Some v else None) fields with
+  | [value] -> Some value
+  | [] | _ :: _ :: _ -> None
+let persisted_message_json ~include_origin message =
+  match Agent_core.Checkpoint.message_to_json message with
+  | `Assoc fields when not include_origin ->
+    `Assoc (List.filter (fun (name, _) -> not (String.equal name "origin")) fields)
+  | json -> json
+let persisted_messages_json ~include_origin messages =
+  `List (List.map (persisted_message_json ~include_origin) messages)
+let json_list_first_has_origin = function
+  | `List (first :: _) -> Some (I.message_json_has_origin first)
+  | `List []
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> None
+let checkpoint_uses_message_origin (checkpoint : checkpoint) =
+  match Yojson.Safe.from_string checkpoint.canonical_bytes with
+  | `Assoc fields ->
+    let from_messages =
+      Option.bind (unique_assoc_field "messages" fields) json_list_first_has_origin
+    in
+    (match from_messages with
+     | Some has_origin -> has_origin
+     | None ->
+       (match unique_assoc_field "version" fields with
+        | Some (`Int version) -> version >= 14
+        | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)
+        | None -> true))
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+  | exception Yojson.Json_error _ -> true
+let checkpoint_json ~include_origin source = `Assoc ["trace_id",`String (Keeper_id.Trace_id.to_string source.reference.trace_id);
   "turn_count",`Int source.reference.turn_count;"sha256",`String source.reference.sha256;
-  "canonical_bytes",`String source.canonical_bytes;"messages",`List (List.map I.message_json source.messages);
+  "canonical_bytes",`String source.canonical_bytes;
+  "messages",`List (List.map (I.message_json_with_origin ~include_origin) source.messages);
   "range",range_json source.range;"boundary_lines_seen",`Int source.boundary_lines_seen;"end_boundary_line",`Int source.end_boundary_line]
 let checkpoint_of_json json =
   let* f=fields ["trace_id";"turn_count";"sha256";"canonical_bytes";"messages";"range";"boundary_lines_seen";"end_boundary_line"] json in
@@ -205,25 +239,71 @@ let checkpoint_of_json json =
   let* reference=Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count ~sha256
     |> Result.map_error (fun error -> Inconsistent_source (C.checkpoint_ref_create_error_to_string error)) in
   let* canonical_bytes=text (field "canonical_bytes" f) in
-  let* decoded=C.exact_snapshot_of_canonical_bytes ~expected_session_id:reference.trace_id canonical_bytes
-    |> Result.map_error (fun error -> Inconsistent_source (C.checkpoint_ref_load_error_to_string error)) in
-  let* ()=check (Keeper_checkpoint_ref.equal reference (C.exact_snapshot_reference decoded))
-    "Restored checkpoint bytes differ from the original reference" in
   let* messages=list (fun json -> string_error (I.message_of_json json)) (field "messages" f) in
   (* Lineage values can retain richer ToolResult JSON than the checkpoint
      codec persists. Bind every persisted message field to the original bytes,
      while keeping that richer complete value in the separate input codec. *)
-  let persisted messages=`List (List.map Agent_core.Checkpoint.message_to_json messages) in
-  let* ()=check (Yojson.Safe.equal (persisted messages) (persisted (C.exact_snapshot_messages decoded)))
-    "Restored checkpoint messages differ from the original canonical bytes" in
+  let* () =
+    match C.exact_snapshot_of_canonical_bytes ~expected_session_id:reference.trace_id canonical_bytes with
+    | Ok decoded ->
+      let* ()=check (Keeper_checkpoint_ref.equal reference (C.exact_snapshot_reference decoded))
+        "Restored checkpoint bytes differ from the original reference" in
+      check
+        (Yojson.Safe.equal
+           (persisted_messages_json ~include_origin:true messages)
+           (persisted_messages_json ~include_origin:true (C.exact_snapshot_messages decoded)))
+        "Restored checkpoint messages differ from the original canonical bytes"
+    | Error (C.Ref_read_failed (C.Superseded_version _)) ->
+      let actual_sha256 = Keeper_checkpoint_ref.sha256_of_canonical_bytes canonical_bytes in
+      let* () =
+        check
+          (String.equal actual_sha256 reference.sha256)
+          "Restored checkpoint bytes differ from the original reference"
+      in
+      (match Yojson.Safe.from_string canonical_bytes with
+       | exception Yojson.Json_error detail -> refuse detail
+       | `Assoc cb_fields ->
+         let expected_trace = Keeper_id.Trace_id.to_string reference.trace_id in
+         let* () =
+           check
+             (unique_assoc_field "session_id" cb_fields = Some (`String expected_trace)
+              && unique_assoc_field "turn_count" cb_fields = Some (`Int reference.turn_count))
+             "Restored checkpoint bytes differ from the original reference"
+         in
+         (match unique_assoc_field "messages" cb_fields with
+          | Some cb_messages ->
+            let cb_has_origin =
+              Option.value ~default:false (json_list_first_has_origin cb_messages)
+            in
+            check
+              (Yojson.Safe.equal (persisted_messages_json ~include_origin:cb_has_origin messages) cb_messages)
+              "Restored checkpoint messages differ from the original canonical bytes"
+          | None -> refuse "Restored checkpoint canonical bytes have no messages array")
+       | _ -> refuse "Restored checkpoint canonical bytes are not an object")
+    | Error
+        ( C.Ref_read_failed
+            ( C.Not_found
+            | C.Newer_version _
+            | C.Parse_error _
+            | C.Store_error _
+            | C.Io_error _
+            | C.Read_failed _
+            | C.Agent_core_error _ )
+        | C.Ref_not_found
+        | C.Ref_identity_invalid _
+        | C.Ref_session_mismatch _
+        | C.Ref_lock_failed _ as error ) ->
+      Error (Inconsistent_source (C.checkpoint_ref_load_error_to_string error))
+  in
   let* range=range_of_json (field "range" f) in
   let* boundary_lines_seen=int (field "boundary_lines_seen" f) in
   let+ end_boundary_line=int (field "end_boundary_line" f) in
   {reference;canonical_bytes;messages;range;boundary_lines_seen;end_boundary_line}
-let official_json source = `Assoc ["selected",`List (List.map (fun (line:R.official_line) ->
+let official_json ~include_origin source = `Assoc ["selected",`List (List.map (fun (line:R.official_line) ->
   `Assoc ["line",`Int line.line;"turn_ref",Ids.Turn_ref.to_yojson line.turn_ref;"recorded_at",`Float line.recorded_at]) source.selected);
   "traces",`List (List.map (fun trace -> `Assoc ["trace_id",`String trace.trace_id;
-    "main",fragment_rows_json trace.main;"internal",fragment_rows_json trace.internal]) source.traces)]
+    "main",fragment_rows_json ~include_origin trace.main;
+    "internal",fragment_rows_json ~include_origin trace.internal]) source.traces)]
 let official_of_json json =
   let* f=fields ["selected";"traces"] json in
   let* selected=list (fun json -> let* f=fields ["line";"turn_ref";"recorded_at"] json in
@@ -233,10 +313,10 @@ let official_of_json json =
     let* trace_id=text (field "trace_id" f) in let* main=fragment_rows_of_json (field "main" f) in
     let+ internal=fragment_rows_of_json (field "internal" f) in {trace_id;main;internal}) (field "traces" f) in
   {selected;traces}
-let source_json = function
-  | Checkpoint_only checkpoint -> `List [`String "checkpoint";checkpoint_json checkpoint]
-  | Official_only official -> `List [`String "official";official_json official]
-  | Mixed (checkpoint,official) -> `List [`String "mixed";checkpoint_json checkpoint;official_json official]
+let source_json ~include_origin = function
+  | Checkpoint_only checkpoint -> `List [`String "checkpoint";checkpoint_json ~include_origin checkpoint]
+  | Official_only official -> `List [`String "official";official_json ~include_origin official]
+  | Mixed (checkpoint,official) -> `List [`String "mixed";checkpoint_json ~include_origin checkpoint;official_json ~include_origin official]
 let source_of_json = function
   | `List [`String "checkpoint";value] -> let+ value=checkpoint_of_json value in Checkpoint_only value
   | `List [`String "official";value] -> let+ value=official_of_json value in Official_only value
@@ -303,8 +383,9 @@ let project_source ~boundaries source =
   let* atom_steps=match atom with
     | None -> Ok []
     | Some atom ->
+      let include_origin=checkpoint_uses_message_origin atom in
       let trace_id=Keeper_id.Trace_id.to_string atom.reference.trace_id in
-      let cuts=R.cut_lines ~trace_id ~lines:boundaries ~messages:atom.messages atom.range in
+      let cuts=R.cut_lines ~include_origin ~trace_id ~lines:boundaries ~messages:atom.messages atom.range in
       let* cuts=match cuts with
         | _::_ -> Ok cuts
         | [] -> (match B.witness_line ~trace_id ~end_atom:atom.range.end_atom
@@ -324,9 +405,10 @@ let project_source ~boundaries source =
     let* prev_end,count,tool_count,messages,tools,contexts=result in
     match step with
     | Atom_cut (atom,cut) ->
+      let include_origin=checkpoint_uses_message_origin atom in
       let trace_id=Keeper_id.Trace_id.to_string atom.reference.trace_id in
       let scopes=Historical.atom_spans ~trace_id
-        ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest atom.messages)
+        ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest ~include_origin atom.messages)
         ~start_atom:prev_end ~end_atom:cut.cut_end_atom ~boundary:(Line_map.find_opt cut.cut_line records) in
       let count,tool_count,messages,tools,contexts=List.fold_left
         (fun (count,tool_count,messages,tools,contexts) scope ->
@@ -384,8 +466,9 @@ let validate original =
   let* atom_pieces=match atom,original.atom_receipt with
     | None,None -> Ok []
     | Some checkpoint,Some receipt ->
+      let include_origin=checkpoint_uses_message_origin checkpoint in
       let trace_id=Keeper_id.Trace_id.to_string checkpoint.reference.trace_id in
-      let* ()=match R.select ~trace_id ~lines:original.original_boundaries
+      let* ()=match R.select ~include_origin ~trace_id ~lines:original.original_boundaries
           ~progress:positions.selection ~messages:checkpoint.messages original.read_extent with
         | R.Read {range;boundary_lines_seen} ->
           check (range=checkpoint.range && boundary_lines_seen=checkpoint.boundary_lines_seen)
@@ -403,7 +486,7 @@ let validate original =
           ~last_atom_digest:checkpoint.range.last_atom_digest original.original_boundaries with
         | Some (line,_,_) -> check (line=checkpoint.end_boundary_line) "Durable atom endpoint boundary changed"
         | None -> refuse "Durable atom endpoint has no original boundary" in
-      let cuts=R.cut_lines ~trace_id ~lines:original.original_boundaries ~messages:checkpoint.messages checkpoint.range in
+      let cuts=R.cut_lines ~include_origin ~trace_id ~lines:original.original_boundaries ~messages:checkpoint.messages checkpoint.range in
       let cuts=match cuts with
         | [] -> [{R.cut_line=checkpoint.end_boundary_line;cut_end_atom=checkpoint.range.end_atom;
             cut_recorded_at=0.;cut_turn_ref=input.turn_ref}]
@@ -470,28 +553,78 @@ let validate original =
   let* ()=check (input.goal_context=Keeper_librarian.No_task) "Durable history cannot borrow the current task's Goal context" in
   Ok ()
 
-let create ~runtime_keepers_dir ~extent ~boundaries ~positions ~source ~counterparts
-    ~external_before ~external_prepared ~expected_revision ~range_id ~official_range_id input =
+let create_with_origin_format ~include_message_origin ~runtime_keepers_dir ~extent ~boundaries ~positions
+    ~source ~counterparts ~external_before ~external_prepared ~expected_revision ~range_id ~official_range_id input =
   let original={root=runtime_keepers_dir;read_extent=extent;original_boundaries=boundaries;
     original_positions=positions;original_source=source;original_counterparts=counterparts;
     before=external_before;prepared=external_prepared;revision=expected_revision;
-    atom_receipt=range_id;official_receipt=official_range_id;original_input=input} in
+    atom_receipt=range_id;official_receipt=official_range_id;original_input=input;
+    include_message_origin} in
   let+ ()=validate original in original
+let create ~runtime_keepers_dir ~extent ~boundaries ~positions ~source ~counterparts
+    ~external_before ~external_prepared ~expected_revision ~range_id ~official_range_id input =
+  create_with_origin_format ~include_message_origin:true ~runtime_keepers_dir ~extent ~boundaries ~positions
+    ~source ~counterparts ~external_before ~external_prepared ~expected_revision ~range_id ~official_range_id input
 let with_current ~expected_revision ~current original =
   let original={original with revision=expected_revision;
     original_input={original.original_input with current}} in
   let+ ()=validate original in original
-let to_json original = `Assoc ["schema",`Int 1;"purpose",`String "durable_history";
-  "runtime_keepers_dir",`String original.root;"extent",`String (match original.read_extent with
-    | R.All_unread -> "all_unread" | To_first_cut_point -> "first_cut");
-  "boundaries",boundaries_json original.original_boundaries;"positions",positions_json original.original_positions;
-  "source_text",json_text (source_json original.original_source);
-  "counterparts_text",json_text (S.counterpart_snapshot_to_json original.original_counterparts);
-  "external_before",E.observation_to_json original.before;"external_prepared",E.observation_to_json original.prepared;
-  "expected_revision",optional (fun value -> `Int value) original.revision;
-  "range_id",optional M.durable_range_id_to_json original.atom_receipt;
-  "official_range_id",optional M.official_range_id_to_json original.official_receipt;
-  "input_text",json_text (I.to_json original.original_input)]
+let to_json original =
+  let include_origin=original.include_message_origin in
+  `Assoc ["schema",`Int 1;"purpose",`String "durable_history";
+    "runtime_keepers_dir",`String original.root;"extent",`String (match original.read_extent with
+      | R.All_unread -> "all_unread" | To_first_cut_point -> "first_cut");
+    "boundaries",boundaries_json original.original_boundaries;"positions",positions_json original.original_positions;
+    "source_text",json_text (source_json ~include_origin original.original_source);
+    "counterparts_text",json_text (S.counterpart_snapshot_to_json original.original_counterparts);
+    "external_before",E.observation_to_json original.before;"external_prepared",E.observation_to_json original.prepared;
+    "expected_revision",optional (fun value -> `Int value) original.revision;
+    "range_id",optional M.durable_range_id_to_json original.atom_receipt;
+    "official_range_id",optional M.official_range_id_to_json original.official_receipt;
+    "input_text",json_text (I.to_json_with_origin ~include_origin original.original_input)]
+let fragment_rows_message_origin rows =
+  List.find_map
+    (function
+      | `List [_; `List [`String "ok"; `List [`String "fragment"; `Assoc f]]] ->
+        (match List.assoc_opt "kind" f, List.assoc_opt "message" f with
+         | Some (`String "message"), Some msg -> Some (I.message_json_has_origin msg)
+         | Some _, (Some _ | None) | None, (Some _ | None) -> None)
+      | _ -> None)
+    rows
+let official_json_message_origin = function
+  | `Assoc f ->
+    (match List.assoc_opt "traces" f with
+     | Some (`List traces) ->
+       List.find_map
+         (function
+           | `Assoc tf ->
+             (match List.assoc_opt "main" tf, List.assoc_opt "internal" tf with
+              | Some (`List main), Some (`List internal) ->
+                (match fragment_rows_message_origin main with
+                 | Some _ as result -> result
+                 | None -> fragment_rows_message_origin internal)
+              | Some _, (Some _ | None) | None, (Some _ | None) -> None)
+           | _ -> None)
+         traces
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _)
+     | None -> None)
+  | _ -> None
+let checkpoint_json_message_origin = function
+  | `Assoc f ->
+    Option.bind (List.assoc_opt "messages" f) json_list_first_has_origin
+  | _ -> None
+let source_json_message_origin = function
+  | `List [`String "checkpoint"; cp] -> checkpoint_json_message_origin cp
+  | `List [`String "official"; off] -> official_json_message_origin off
+  | `List [`String "mixed"; cp; off] ->
+    (match checkpoint_json_message_origin cp with
+     | Some _ as result -> result
+     | None -> official_json_message_origin off)
+  | _ -> None
+let input_json_message_origin = function
+  | `Assoc f ->
+    Option.bind (List.assoc_opt "messages" f) json_list_first_has_origin
+  | _ -> None
 let of_json json =
   let* f=fields ["schema";"purpose";"runtime_keepers_dir";"extent";"boundaries";"positions";
     "source_text";"counterparts_text";"external_before";"external_prepared";"expected_revision";"range_id";"official_range_id";"input_text"] json in
@@ -502,13 +635,20 @@ let of_json json =
     | _ -> refuse "Unknown durable selection extent" in
   let* boundaries=boundaries_of_json (field "boundaries" f) in
   let* positions=positions_of_json (field "positions" f) in
-  let* source=decode_text source_of_json (field "source_text" f) in
+  let* source_raw=decode_text Result.ok (field "source_text" f) in
+  let* source=source_of_json source_raw in
   let* counterparts=decode_text (fun json -> string_error (S.counterpart_snapshot_of_json json)) (field "counterparts_text" f) in
   let* external_before=string_error (E.observation_of_json (field "external_before" f)) in
   let* external_prepared=string_error (E.observation_of_json (field "external_prepared" f)) in
   let* expected_revision=option int (field "expected_revision" f) in
   let* range_id=option (fun value -> wire (M.durable_range_id_of_json value)) (field "range_id" f) in
   let* official_range_id=option (fun value -> wire (M.official_range_id_of_json value)) (field "official_range_id" f) in
-  let* input=decode_text (fun json -> string_error (I.of_json json)) (field "input_text" f) in
-  create ~runtime_keepers_dir ~extent ~boundaries ~positions ~source ~counterparts
+  let* input_raw=decode_text Result.ok (field "input_text" f) in
+  let* input=string_error (I.of_json input_raw) in
+  let include_message_origin =
+    match input_json_message_origin input_raw with
+    | Some has_origin -> has_origin
+    | None -> Option.value ~default:true (source_json_message_origin source_raw)
+  in
+  create_with_origin_format ~include_message_origin ~runtime_keepers_dir ~extent ~boundaries ~positions ~source ~counterparts
     ~external_before ~external_prepared ~expected_revision ~range_id ~official_range_id input

@@ -190,10 +190,10 @@ val begin_input_checkpoint : base_path:string -> keeper_name:string -> trace_id:
   (Keeper_owner.input_checkpoint_writer, command_error) result
 val input_checkpoint : base_path:string -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
   (Keeper_chat_operation_store.input_checkpoint_observation, command_error) result
-val advance_autonomous_input_checkpoint : base_path:string -> keeper_name:string ->
+val advance_autonomous_input_checkpoint : allow_turn_reset:bool -> base_path:string -> keeper_name:string ->
   writer:Keeper_owner.input_checkpoint_writer -> checkpoint:Keeper_checkpoint_ref.t ->
   (Keeper_owner.input_checkpoint_writer, command_error) result
-val advance_direct_input_checkpoint : base_path:string -> keeper_name:string ->
+val advance_direct_input_checkpoint : allow_turn_reset:bool -> base_path:string -> keeper_name:string ->
   writer:Keeper_owner.input_checkpoint_writer -> operation_id:Keeper_chat_operation.Operation_id.t ->
   execution_digest:string -> call_id:string -> observed:Keeper_checkpoint_ref.t ->
   checkpoint:Keeper_checkpoint_ref.t -> (Keeper_owner.input_checkpoint_writer, command_error) result

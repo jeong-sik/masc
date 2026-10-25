@@ -44,6 +44,7 @@ val execute : plan -> (receipt, error) result
     Retry requires a fresh explicit operator clear and a newly prepared plan. *)
 val belongs_to : receipt -> authority -> bool
 val checkpoint : receipt -> Keeper_checkpoint_ref.t option
+val allows_turn_reset : receipt -> bool
 val history : receipt -> history
 val append_marker : receipt -> keepers_dir:string -> keeper_name:string ->
   (unit, string) result

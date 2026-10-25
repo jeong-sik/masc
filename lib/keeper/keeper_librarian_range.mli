@@ -107,7 +107,8 @@ val has_completed_atom_boundary
     selection whatever trace it may have belonged to. A trailing fragment with
     no newline is not a line. *)
 val select
-  :  trace_id:string
+  :  ?include_origin:bool
+  -> trace_id:string
   -> lines:
        (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result)
          list
@@ -240,7 +241,8 @@ type atom_cut =
     must be the ones {!select} was given; the range's own end is then among
     the cuts. *)
 val cut_lines
-  :  trace_id:string
+  :  ?include_origin:bool
+  -> trace_id:string
   -> lines:
        (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result)
          list

@@ -295,7 +295,7 @@ let first_blocking ~own lines =
   List.find_opt (fun (line, _) -> not (dead_line ~own line)) (unreadable_lines lines)
 ;;
 
-let select ~trace_id ~lines ~progress ~messages extent =
+let select ?(include_origin = true) ~trace_id ~lines ~progress ~messages extent =
   let own = lines_of_trace ~trace_id lines in
   match first_blocking ~own lines with
   | Some (line, error) -> Stop (Unreadable_line { line; error })
@@ -311,7 +311,7 @@ let select ~trace_id ~lines ~progress ~messages extent =
      | None ->
        let boundary_lines_seen = complete_line_count lines in
        let _labelled, atom_count = Window.annotate messages in
-       let digest_at = Window.atom_opening_digest messages in
+       let digest_at = Window.atom_opening_digest ~include_origin messages in
        let current_history = current_history_lines own in
        let history_start_boundary_line =
          match current_history with
@@ -531,9 +531,9 @@ type atom_cut =
   ; cut_turn_ref : Ids.Turn_ref.t
   }
 
-let cut_lines ~trace_id ~lines ~messages (range : range) =
+let cut_lines ?(include_origin = true) ~trace_id ~lines ~messages (range : range) =
   let _labelled, atom_count = Window.annotate messages in
-  let digest_at = Window.atom_opening_digest messages in
+  let digest_at = Window.atom_opening_digest ~include_origin messages in
   stated_positions ~trace_id (current_history_lines (lines_of_trace ~trace_id lines))
   |> List.filter_map (fun stated ->
     match cut_point ~digest_at ~atom_count stated with

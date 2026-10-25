@@ -1029,18 +1029,20 @@ let install_input_checkpoint_with_db store ~previous checkpoint =
     Atomic.set store.dropped (Atomic.get store.dropped @ [reference]);
     Ok ()
 
-let check_input_predecessor ~observed ~checkpoint =
+let check_input_predecessor ~allow_turn_reset ~observed ~checkpoint =
   match observed with
   | Some previous when not (Keeper_id.Trace_id.equal previous.Keeper_checkpoint_ref.trace_id
         checkpoint.Keeper_checkpoint_ref.trace_id) ->
     Error (Invalid_input "input checkpoint predecessor belongs to another trace")
-  | Some previous when checkpoint.Keeper_checkpoint_ref.turn_count < previous.Keeper_checkpoint_ref.turn_count ->
+  | Some previous
+    when not allow_turn_reset
+         && checkpoint.Keeper_checkpoint_ref.turn_count < previous.Keeper_checkpoint_ref.turn_count ->
     Error (Invalid_input "input checkpoint turn regressed")
   | Some _ | None -> Ok ()
 
-let update_input_checkpoint store ~observed ~checkpoint =
+let update_input_checkpoint ?(allow_turn_reset = false) store ~observed ~checkpoint =
   let* () = ensure_open store in
-  let* () = check_input_predecessor ~observed ~checkpoint in
+  let* () = check_input_predecessor ~allow_turn_reset ~observed ~checkpoint in
   with_transaction store (fun () ->
     let* previous = input_observation_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
     if not (input_predecessor_matches observed previous) then
@@ -1075,14 +1077,14 @@ let history_clear_input_checkpoint store ~trace_id =
     | Prior_input_unavailable -> Error (Invalid_input
         "prior input history is unavailable; reconcile before clearing history"))
 
-let commit_history_clear_input_checkpoint store ~trace_id ~observed ~checkpoint =
+let commit_history_clear_input_checkpoint ?(allow_turn_reset = false) store ~trace_id ~observed ~checkpoint =
   let* () = match checkpoint,observed with
     | None,Some _ -> Error (Invalid_input "history clear cannot forget an observed input")
     | None,None -> Ok ()
     | Some checkpoint,(Some _ | None) ->
       if not (Keeper_id.Trace_id.equal trace_id checkpoint.Keeper_checkpoint_ref.trace_id)
       then Error (Invalid_input "history clear checkpoint belongs to another trace")
-      else check_input_predecessor ~observed ~checkpoint in
+      else check_input_predecessor ~allow_turn_reset ~observed ~checkpoint in
   with_transaction store (fun () ->
     let* () = require_history_clear_quiescence store in
     let* previous = input_observation_with_db store.db ~trace_id in
@@ -2868,14 +2870,14 @@ let update_direct_native_call store ~now ~operation_id ~execution_digest change 
     expected_commit := Some (next, ()); Ok ()) in
   confirm_semantic_transition store expected_commit result
 
-let update_direct_input_checkpoint store ~now ~operation_id ~execution_digest
+let update_direct_input_checkpoint ?(allow_turn_reset = false) store ~now ~operation_id ~execution_digest
     ~call_id ~observed ~observed_input ~checkpoint =
   let* () = ensure_open store in
   (* Unlike the legacy native-only update, an uncertain commit stays Error.
      Semantic readback alone cannot certify the input-owner relation. The
      caller must reread both authorities before reconciling; its old input CAS
      cannot replay an installed transition, and no files are released. *)
-  let* () = check_input_predecessor ~observed:observed_input ~checkpoint in
+  let* () = check_input_predecessor ~allow_turn_reset ~observed:observed_input ~checkpoint in
   with_transaction store (fun () ->
     let* previous = input_observation_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
     if not (input_predecessor_matches observed_input previous) then
@@ -2891,7 +2893,7 @@ let update_direct_input_checkpoint store ~now ~operation_id ~execution_digest
 let bind_direct_input_checkpoint store ~now ~operation_id ~execution_digest
     ~observed ~call ~observed_input ~checkpoint =
   let* () = ensure_open store in
-  let* () = check_input_predecessor ~observed:observed_input ~checkpoint in
+  let* () = check_input_predecessor ~allow_turn_reset:false ~observed:observed_input ~checkpoint in
   with_transaction store (fun () ->
     let* previous = input_observation_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
     if not (input_predecessor_matches observed_input previous) then

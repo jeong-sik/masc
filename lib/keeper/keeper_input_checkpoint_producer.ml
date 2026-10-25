@@ -4,7 +4,8 @@ let ( let* ) = Result.bind
 
 type t =
   { base_path : string; keeper_name : string; session_dir : string
-  ; trace_id : Keeper_id.Trace_id.t; writer : Keeper_owner.input_checkpoint_writer }
+  ; trace_id : Keeper_id.Trace_id.t; writer : Keeper_owner.input_checkpoint_writer
+  ; allow_turn_reset : bool }
 
 type error =
   | Owner_failed of Registry.command_error
@@ -39,20 +40,33 @@ let rec preserves_messages prefix messages = match prefix, messages with
 let prepare ~base_path ~keeper_name ~session_dir ~trace_id ~source =
   let* writer = Registry.begin_input_checkpoint ~base_path ~keeper_name ~trace_id
     |> Result.map_error (fun error -> Owner_failed error) in
-  let* () = match Keeper_owner.input_checkpoint_reference writer with
-    | None -> Ok ()
+  let* allow_turn_reset = match Keeper_owner.input_checkpoint_reference writer with
+    | None -> Ok false
     | Some reference ->
-      let* snapshot = Store.load_retained_exact_snapshot ~session_dir ~reference
+      let* snapshot = Store.load_retained_snapshot ~session_dir ~reference
         |> Result.map_error (fun error -> Source_read_failed error) in
-      match source with
-      | None -> Error Source_missing
-      | Some (source : Agent_core.Checkpoint.t) ->
-        let observed = Store.exact_snapshot_checkpoint snapshot in
-        if source.Agent_core.Checkpoint.session_id = Keeper_id.Trace_id.to_string trace_id
-            && same_pending observed.pending_input source.pending_input
-            && preserves_messages observed.messages source.messages then Ok ()
-        else Error Source_changed in
-  Ok {base_path;keeper_name;session_dir;trace_id;writer}
+      match snapshot with
+      | Store.Retained_current snapshot ->
+        (match source with
+         | None -> Error Source_missing
+         | Some (source : Agent_core.Checkpoint.t) ->
+           let observed = Store.exact_snapshot_checkpoint snapshot in
+           if source.Agent_core.Checkpoint.session_id = Keeper_id.Trace_id.to_string trace_id
+               && same_pending observed.pending_input source.pending_input
+               && preserves_messages observed.messages source.messages then Ok false
+           else Error Source_changed)
+      | Store.Retained_superseded { pending_input = Some _; _ } ->
+        (match source with
+         | None -> Error Source_missing
+         | Some _ -> Error Source_changed)
+      | Store.Retained_superseded { pending_input = None; _ } ->
+        (match source with
+         | None -> Ok true
+         | Some (source : Agent_core.Checkpoint.t) ->
+           if source.Agent_core.Checkpoint.session_id = Keeper_id.Trace_id.to_string trace_id
+               && Option.is_none source.pending_input then Ok true
+           else Error Source_changed) in
+  Ok {base_path;keeper_name;session_dir;trace_id;writer;allow_turn_reset}
 
 let retain t checkpoint =
   let* snapshot = Store.exact_snapshot_of_value ~expected_session_id:t.trace_id checkpoint
@@ -72,18 +86,19 @@ let bind_retired_input_cut t ~cut ~seed ~operation_id ~execution_digest ~observe
   let* writer=Registry.bind_retired_input_cut ~base_path:t.base_path ~keeper_name:t.keeper_name
     ~writer:t.writer ~operation_id ~execution_digest ~observed ~call ~cut:binding
     |> Result.map_error (fun error -> Owner_failed error) in
-  Ok {t with writer}
+  Ok {t with writer;allow_turn_reset=false}
 
 let publish_autonomous t checkpoint =
   let* checkpoint = retain t checkpoint in
-  let* writer = Registry.advance_autonomous_input_checkpoint ~base_path:t.base_path
-    ~keeper_name:t.keeper_name ~writer:t.writer ~checkpoint
+  let* writer = Registry.advance_autonomous_input_checkpoint ~allow_turn_reset:t.allow_turn_reset
+    ~base_path:t.base_path ~keeper_name:t.keeper_name ~writer:t.writer ~checkpoint
     |> Result.map_error (fun error -> Owner_failed error) in
-  Ok {t with writer}
+  Ok {t with writer;allow_turn_reset=false}
 
 let publish_direct t ~operation_id ~execution_digest ~call_id ~observed checkpoint =
   let* checkpoint = retain t checkpoint in
-  let* writer = Registry.advance_direct_input_checkpoint ~base_path:t.base_path
-    ~keeper_name:t.keeper_name ~writer:t.writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint
+  let* writer = Registry.advance_direct_input_checkpoint ~allow_turn_reset:t.allow_turn_reset
+    ~base_path:t.base_path ~keeper_name:t.keeper_name ~writer:t.writer
+    ~operation_id ~execution_digest ~call_id ~observed ~checkpoint
     |> Result.map_error (fun error -> Owner_failed error) in
-  Ok ({t with writer}, checkpoint)
+  Ok ({t with writer;allow_turn_reset=false}, checkpoint)

@@ -1,0 +1,47 @@
+{
+  "schema": "masc.task-source.native-result.v1",
+  "source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "run": 40196376497,
+  "job": 121177983287,
+  "result": "PASS_SELECTED_2_SUITES",
+  "executed_cases": 20,
+  "passed_cases": 20,
+  "failed_cases": 0,
+  "suites": {
+    "test_verification_collaboration_evidence": 9,
+    "test_tui_evidence_link": 11
+  },
+  "raw": {
+    "bytes": 138210,
+    "sha256": "283320f9142ab2ad8511fc8080d1a017e637581c6a4c8968707077b2a96f3bcb"
+  },
+  "log_url": "https://github.com/jeong-sik/masc/actions/runs/40196376497/job/121177983287",
+  "original_raw_case_rows": [
+    "2026-10-25T13:13:41.9372074Z   [OK]          submission          0   Task and Goal submission preserve exa...",
+    "2026-10-25T13:13:41.9453395Z   [OK]          submission          1   Task source rejects corruption, wrong...",
+    "2026-10-25T13:13:41.9559227Z   [OK]          submission          2   submission freezes author, comments a...",
+    "2026-10-25T13:13:41.9617497Z   [OK]          submission          3   capture authority, corruption and per...",
+    "2026-10-25T13:13:41.9755759Z   [OK]          submission          4   original Fusion advice and separately...",
+    "2026-10-25T13:13:41.9809279Z   [OK]          submission          5   original Fusion producer survives pre...",
+    "2026-10-25T13:13:41.9909049Z   [OK]          submission          6   Goal request owns source before compl...",
+    "2026-10-25T13:13:42.0016980Z   [OK]          submission          7   Task request owns snapshot before com...",
+    "2026-10-25T13:13:42.1364994Z   [OK]          submission          8   full Board and Fusion bytes survive a...",
+    "2026-10-25T13:13:42.1814947Z   [OK]          web urls          0   a note yields the urls it names.",
+    "2026-10-25T13:13:42.1815946Z   [OK]          web urls          1   sentence punctuation is not the address.",
+    "2026-10-25T13:13:42.1816971Z   [OK]          web urls          2   only http addresses with a host.",
+    "2026-10-25T13:13:42.1817350Z   [OK]          web urls          3   a control sequence ends the address.",
+    "2026-10-25T13:13:42.1818103Z   [OK]          web urls          4   text attached to an address is not part...",
+    "2026-10-25T13:13:42.1818902Z   [OK]          web urls          5   parentheses around and inside an address.",
+    "2026-10-25T13:13:42.1819258Z   [OK]          web urls          6   an address is shown as it is written.",
+    "2026-10-25T13:13:42.1821947Z   [OK]          items             0   a source links to its object.",
+    "2026-10-25T13:13:42.1822615Z   [OK]          items             1   urls come from the text inside a source.",
+    "2026-10-25T13:13:42.1823102Z   [OK]          items             2   an artifact's path is not a link.",
+    "2026-10-25T13:13:42.1823561Z   [OK]          items             3   items without text carry no links."
+  ],
+  "prior_passing_56_cases_at_head": "0f72a33d9530195a2a3e721ed375974cc7952266",
+  "prior_56_not_relabelled_current_execution": true,
+  "full_regression": "not_run",
+  "actual_model": "not_run",
+  "production_installation": false,
+  "original_goal_complete": false
+}

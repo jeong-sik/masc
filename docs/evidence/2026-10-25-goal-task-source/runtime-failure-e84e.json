@@ -1,0 +1,20 @@
+{
+  "schema": "masc.task-source.runtime-build-failure.v1",
+  "candidate_source": "e84eb71c4e31ba8440e5506015b603681dc23136",
+  "workflow_head": "e6c426173a55a0100b6c8c763091e7b5e3601545",
+  "run": 40195108277,
+  "job": 121174159526,
+  "result": "COMPILE_FAILURE_NO_BUNDLE",
+  "diagnostic": {
+    "file": "bin/masc_tui_evidence_link.ml",
+    "lines": "77-82",
+    "kind": "warning8_partial_match_as_error",
+    "missing_case": "Some(Task_source,_)"
+  },
+  "raw": {
+    "bytes": 94029,
+    "sha256": "bd439d0ee295b73d0e40b8140933f2e4cfdb7d7faa0fde1b6396942fa69a013e"
+  },
+  "model_executed": false,
+  "installed": false
+}

@@ -1,0 +1,90 @@
+{
+  "schema": "masc.task-source.runtime-bundle.v1",
+  "source_commit": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "workflow_head": "f5c5fb447e60b79172d4a8ae411f391e3774f561",
+  "run": 40196379288,
+  "job": 121177992022,
+  "artifact_id": 12600167778,
+  "artifact_name": "macos-arm64-probe-3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6-attempt-1",
+  "artifact_api_declared_archive_digest": "sha256:1ced9bf5b955cd87ec2b89a9fe097caa77737d5a014cefbda04e72e201559cd1",
+  "archive_digest_locally_checked": false,
+  "complete_artifact_received": true,
+  "sha256sums_locally_verified": [
+    {
+      "path": "dependencies.txt",
+      "bytes": 17629,
+      "sha256": "5d26dcc87840275bd5bd2bb6b91951078b48ecdad9ccc7b61052072c656d9f8a"
+    },
+    {
+      "path": "masc-browser-host-macos-arm64",
+      "bytes": 44034304,
+      "sha256": "0a1be4f9f208f92883f06c2499915c06bc482e056c33e54a2aab425152abfdcd"
+    },
+    {
+      "path": "masc-check-runtime-deployment-preflight-macos-arm64",
+      "bytes": 17019,
+      "sha256": "af7b33ec59d5e73c2998323a1a89afe4e6f3dbc7448fb7765d2c00b481c829d5"
+    },
+    {
+      "path": "masc-deployment-preflight-helper-macos-arm64",
+      "bytes": 103722896,
+      "sha256": "7f9ed9b8e40868778336edc6734feeff42ebda7a948f2cf3e61bcd85755bee0f"
+    },
+    {
+      "path": "masc-macos-arm64",
+      "bytes": 105922464,
+      "sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8"
+    },
+    {
+      "path": "masc-runtime-macos-arm64.tar.gz",
+      "bytes": 57196198,
+      "sha256": "67cf6644e22398526e74486c30212f56947eac201d30ac37af9ae5895a1288cc"
+    },
+    {
+      "path": "masc-tui-macos-arm64",
+      "bytes": 103201632,
+      "sha256": "8b7f34f3d41e0cd94de92a1395129c210e40dbd5cc5d0be0c8cc3443c3f2e321"
+    },
+    {
+      "path": "probe.json",
+      "bytes": 319,
+      "sha256": "9f13fe60a6d0632901ae89e6650ef281187e99783d56bac28d7500d5fff0306a"
+    },
+    {
+      "path": "runtime-provenance.json",
+      "bytes": 1224,
+      "sha256": "6713d740b2866ad237c7d925909663ea64b5b131142ad7ca4258b87956777148"
+    },
+    {
+      "path": "server-version.txt",
+      "bytes": 7,
+      "sha256": "0963c6ddb93cb05b8fb8ff7ae804c0b82decc8d9c0db894d2df69a146930a437"
+    },
+    {
+      "path": "tui-build-commit.txt",
+      "bytes": 41,
+      "sha256": "59c66135e9715f10683b0b8c7e6a90ff64622a4d42df261fd4b8acd763b0d4ee"
+    },
+    {
+      "path": "tui-version.txt",
+      "bytes": 7,
+      "sha256": "0963c6ddb93cb05b8fb8ff7ae804c0b82decc8d9c0db894d2df69a146930a437"
+    }
+  ],
+  "same_artifact_support_archive_unpacked": true,
+  "support_provenance_byte_equal": true,
+  "server_embedded_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "tui_embedded_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "server_tui_versions": [
+    "0.64.0",
+    "0.64.0"
+  ],
+  "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+  "local_runtime_identity_commands": "build-commit and --version only",
+  "local_build": false,
+  "provider_calls": 0,
+  "installed_primary_runtime": false,
+  "release_verified": false,
+  "actual_model": "not_run",
+  "original_goal_complete": false
+}

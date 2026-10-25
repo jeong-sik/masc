@@ -1,0 +1,532 @@
+{
+  "schema": "masc.task-source.independent-source-rereview.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T13:14:51.192411+00:00",
+  "reviewer": "repair_eval_metrics",
+  "first_line": "verdict: PASS head: 3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6 by: repair_eval_metrics",
+  "verdict": "PASS_SOURCE_ONLY",
+  "head": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "base": "975c4751ca41e4e458c9e22103d7c50ba625f716",
+  "canonical_complete_diff_sha256": "a90d4456630859ab54a4317d2e1e5a3676384e284cec1ea1635e0afca4bfdab1",
+  "full_binary_patch_sha256": "96bacf4a349bcd7408c433911b611e50b101a80ced24965c93a153f9621c09ff",
+  "raw_diff_sha256": "4f8bf32ec38a9c89818cfb48c162ea42b3e58dec7348e7dd23cee45e0c4379c1",
+  "repair_delta_from_0f72_sha256": "0a6a09fe1eb2598f5c98b3243f9ef98a753ccb37303bf448b88c628447049895",
+  "scope": {
+    "complete_current_diff_bound": true,
+    "changed_files": 23,
+    "insertions": 329,
+    "deletions": 48,
+    "delta_from_prior_files": [
+      "bin/masc_tui_evidence_link.ml",
+      "bin/masc_tui_evidence_link.mli",
+      "test/test_tui_evidence_link.ml",
+      "test/test_verification_collaboration_evidence.ml"
+    ],
+    "delta_insertions": 18,
+    "delta_deletions": 8,
+    "method": "Prior exact20-file source review preserved; all unchanged recorded files byte-compared to current; entire4-file delta and direct fixture/Board/TUI consumers read; tracked OCaml constructor consumers searched using immutable git grep including bin.",
+    "tracked_author_repairs_excluded": false,
+    "untracked_author_changelog_evidence_excluded": true,
+    "whole_stack_approval": false
+  },
+  "findings_P0_P1_P2": [],
+  "prior_review": {
+    "head": "0f72a33d9530195a2a3e721ed375974cc7952266",
+    "path": "review-0f72.json",
+    "sha256": "8330e753b460f0ac9130d5b6a17c45891f820a2115e843724fbf8f628fc7611f",
+    "verdict": "PASS_SOURCE_ONLY",
+    "preserved_unmodified": true,
+    "scope_correction": "Prior source/caller review missed the bin TUI exhaustive consumer because initial inspection used a sparse checkout and lib-focused constructor search. That omission is retained as a review coverage failure, not explained away by later source PASS. The new search includes tracked bin regardless of sparse paths."
+  },
+  "repair_assessment": [
+    {
+      "id": "FIXTURE-TASK-SUBMIT",
+      "location": "test/test_verification_collaboration_evidence.ml:111",
+      "verdict": "PASS_SOURCE",
+      "evidence": "Workspace default verification_submit_request_fn is an explicit Error until runtime registration. The fixture now passes Verification_protocol.create_submit_request ~config through the existing prepare_verification_request argument to the real Workspace Task FSM. It creates the actual durable request before Task transition commit; it neither fakes request persistence nor bypasses ownership/FSM validation. Errors now include action and Masc_error detail, and assertions after submission are unchanged."
+    },
+    {
+      "id": "FIXTURE-DIRECT-BOARD",
+      "location": "test/test_verification_collaboration_evidence.ml:275",
+      "verdict": "PASS_SOURCE",
+      "evidence": "Only two Direct source fixtures opt into Human_post. Board_audience intentionally ignores addresses in System_post evidence text, so the original System_post had no typed target and failed validation. Human_post parses the existing @recipient/@peer into Targets through actual Board_addressing. Default helper post_kind remains System_post for the other fixtures. Direct visibility, author checks, private-source refusal and immutable paging assertions remain unchanged; no Board policy is weakened."
+    },
+    {
+      "id": "PRODUCT-TUI-TASK-SOURCE",
+      "location": "bin/masc_tui_evidence_link.ml:82",
+      "verdict": "PASS_SOURCE",
+      "evidence": "The new Task_source branch constructs existing Masc_reference with Masc_tui_link.Task. Existing shared reference maps this typed kind to overview/tasks and percent-encodes ID. The functional Link.of_item test now expects that exact Task reference. The .mli states navigation opens the current object while submitted body stays immutable. No submitted bytes, hash, source capture or Task authority changes are introduced."
+    },
+    {
+      "id": "CONSTRUCTOR-CONSUMERS",
+      "verdict": "PASS_SOURCE_SEARCH",
+      "evidence": "Immutable Git grep of tracked *.ml/*.mli for Board_source/Fusion_source includes bin and all defining/matching modules. The TUI match now covers Board/Fusion/Task/None; previous lib matches cover Task_source explicitly. This closes the reported missing branch at source, not a current package-build execution claim.",
+      "scan_artifact": "constructor-scan-3e0d.txt",
+      "scan_sha256": "83f3baf3df19ac04aae28eecae6af330fdb2a5f3d8171ea2896221394193c54c"
+    },
+    {
+      "id": "PRIOR-SOURCE-REPAIRS",
+      "verdict": "UNCHANGED_AND_RECONFIRMED",
+      "evidence": "All lib/config source from0f72, including one-primary-per-Task-batch, submission-bound optional Task lookup authority, strict-primary/hash/paging behavior and Task/Goal Original identity guards, is byte-identical. Previous twoP2/P3 and canonical identity constructor fixes remain as reviewed. The changed Task/Board fixture setup affects test admission only."
+    }
+  ],
+  "native_counterevidence": {
+    "source": "0f72a33d9530195a2a3e721ed375974cc7952266",
+    "run": 40195449903,
+    "result": "65_CASES_62_PASS_3_FAIL",
+    "raw_bytes": 293142,
+    "raw_sha256": "14fed94bae852047ac2b6fe0261c3eea3a7a3e27eceb697c4554145e5f4c9e36",
+    "independent_raw_case_row_count": {
+      "total": 65,
+      "PASS": 62,
+      "FAIL": 3
+    },
+    "suite_outcomes_at_0f72": [
+      {
+        "suite": "verification_authority_tools",
+        "PASS": 30,
+        "FAIL": 0
+      },
+      {
+        "suite": "goal_verifier_original",
+        "PASS": 8,
+        "FAIL": 0
+      },
+      {
+        "suite": "verifier_review_worker",
+        "PASS": 18,
+        "FAIL": 0
+      },
+      {
+        "suite": "verification_collaboration_evidence",
+        "PASS": 6,
+        "FAIL": 3
+      }
+    ],
+    "failed_boundaries": [
+      "case0 prior transition setup; old helper reduced the error to a label",
+      "case3 Direct System_post has no typed target",
+      "case8 Direct System_post has no typed target"
+    ],
+    "current_head_execution_claim": false,
+    "method": "Already retained local raw log read and row/suite counts checked; no new CI query or native execution."
+  },
+  "runtime_build_counterevidence": {
+    "source": "e84eb71c4e31ba8440e5506015b603681dc23136",
+    "run": 40195108277,
+    "result": "COMPILE_FAILURE_NO_BUNDLE",
+    "raw_bytes": 94029,
+    "raw_sha256": "bd439d0ee295b73d0e40b8140933f2e4cfdb7d7faa0fde1b6396942fa69a013e",
+    "failure": "bin/masc_tui_evidence_link.ml:77-82 warning8 nonexhaustive Task_source match",
+    "current_bundle_success_claim": false,
+    "run_source_identity": "Parent-supplied source/run binding; the local raw compiler failure and missing case were read independently."
+  },
+  "validation": {
+    "git_diff_check_exit": 0,
+    "output_bytes": 0,
+    "requested_canonical_hash_matched": true,
+    "prior_recorded_files_byte_equal_current": 45,
+    "tracked_constructor_scan_includes_bin": true,
+    "native_tests_executed_by_reviewer": 0,
+    "local_Dune_OCaml_compile_or_parse": false,
+    "API_CI_Docker_provider_calls": 0,
+    "product_or_fixture_edits": 0,
+    "current_native": "Parent re-requesting only collaboration-source and TUI-link suites; results not queried/observed here. The3 passing0f72 suites remain0f72 evidence, not current-head executions."
+  },
+  "limitations": [
+    "PASS_SOURCE_ONLY does not certify current compilation, package bundle, native suites, live model lookup, installed runtime, browser/TUI rendering or Goal completion.",
+    "The62/3 native result is source0f72, and runtime no-bundle failure is sourcee84e. No earlier passing suite or repaired fixture is relabelled as an actual current3e0d test execution.",
+    "Prior source reviews failed to identify the sparse-excluded bin exhaustive consumer; its actual build failure and narrow repair are preserved. Tracked source search is not a substitute for package compilation.",
+    "The Task fixture supplies the production request adapter but does not test application startup hook installation. Direct Board Human_post fixtures test valid addressed source authority rather than a System_post target bypass.",
+    "TUI reference construction does not demonstrate a rendered/activated live navigation. It opens current Task state, while source evidence remains the submitted immutable snapshot.",
+    "Prior quiescent-batch/old-executable Original-resume and canonical-state-not-approval-certificate limitations remain in force. Source state does not prove complete approval history, edit ordering or external acceptance.",
+    "No API/CI/native/provider/Docker/approval/merge, Task/Goal mutation or source/publication edit occurred in this review; only external review artifacts were written."
+  ],
+  "source_and_context_files": [
+    {
+      "path": "bin/masc_tui_evidence_link.ml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "a453b2398feb0b755be79d1345c609993fbb8c1e",
+      "sha256": "081397ad04412e4791b9b34b8f32ec4eabadd088b80961762a7d0e9d627912e6",
+      "bytes": 4277
+    },
+    {
+      "path": "bin/masc_tui_evidence_link.mli",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "a2b8953e5076e13e3637f9e532503529f989b15e",
+      "sha256": "d3d7bf0d0af31e6acff22a267f804c5c288832967c84878d2dbfb8f91fb0dc01",
+      "bytes": 1586
+    },
+    {
+      "path": "config/prompts/keeper.md",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "1c7d6226aa8ba905b33f5afd735c1c332d437d51",
+      "sha256": "ba3fd5964f8e448cc01dfcfa2e9949a7c67d8c578d38a07f413f4ee20844ebab",
+      "bytes": 60472
+    },
+    {
+      "path": "config/prompts/verification.md",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "7513c087ff308b04c39815f0166ab742aef5e862",
+      "sha256": "e63ec4341cd59f3a4ca2e692969bf19e2a7764ed6c63f3471438ebb83fbc7fa8",
+      "bytes": 13478
+    },
+    {
+      "path": "config/tools/keeper_task_done.toml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "73f03343c414c172cd1e4ad272d4d9c1aa55b470",
+      "sha256": "78a361be5810ecd6dd8aa5a83a4c26fdc0f35ec7357f71c958fbc6f090ed7ce3",
+      "bytes": 3342
+    },
+    {
+      "path": "config/tools/keeper_task_release.toml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "ad24e7113eec90eb2e5dedfefbd269c019eea4ff",
+      "sha256": "38c874a5fb2c000a7df5bb5e135bac0f7ca04231552cdfd876d2123a59519552",
+      "bytes": 3368
+    },
+    {
+      "path": "config/tools/masc_goal_measure.toml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "339f5e1826123d9058d94cde7e67f308aff5129c",
+      "sha256": "e745b8986b3822005bff3d8f681b5d34483531c79dc43f917156d7a6f16ed160",
+      "bytes": 1215
+    },
+    {
+      "path": "config/tools/masc_goal_transition.toml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "498eb4e5018bba4f2dd8ba37284f026856c687cc",
+      "sha256": "9b8e7e9b2106c37cb1fcec522db815ce388a9a87b9e77349a92b237c177552c2",
+      "bytes": 1976
+    },
+    {
+      "path": "config/tools/masc_transition.toml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "b65e77d7c3dabf5ad60ea170ef4425919a9633fa",
+      "sha256": "4151eee86a665f44d6573a2565a73b24a559b6bbc05dcd5163f0425a770470cb",
+      "bytes": 4539
+    },
+    {
+      "path": "lib/verification_authority_tools.ml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "872f4163ad33fa3fa6a037eb4b88922b1d266b63",
+      "sha256": "ed48872fca7eb34471bb667e52c7c315e45cb91a6277196a2014388f82b5b154",
+      "bytes": 45204
+    },
+    {
+      "path": "lib/verification_authority_tools.mli",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "80d71c83cb925c3e84bac6eb722d318eb35bbf12",
+      "sha256": "1ba9d633ee8d3d6cbd9029936ee1d827cf633e1751a6efd5ce7e34464f52b406",
+      "bytes": 8173
+    },
+    {
+      "path": "lib/verification_collaboration_evidence.ml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "d7da5c34d1630d88ef5a92ae890e0a3202891a7e",
+      "sha256": "6056bc8f0ac4f543f1018f5e947d151843cde66fc6d36e2834fb42a843cdddcc",
+      "bytes": 14482
+    },
+    {
+      "path": "lib/verification_collaboration_evidence.mli",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "46009861fc76bd6512d7eb1423a633f23123c36c",
+      "sha256": "69bf4c1dce3d7429fce7d749613f9494ee15afeaa8f6bfa77099c86cba98851e",
+      "bytes": 2453
+    },
+    {
+      "path": "lib/workspace/workspace_verification_snapshot.ml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "8d03be09f6cdd566637c2f739ddb3814f1d2cd46",
+      "sha256": "3ad0792480c776327958867f367899df8c7597b1f84f6d6447f74fb4c666d1fa",
+      "bytes": 30879
+    },
+    {
+      "path": "lib/workspace/workspace_verification_snapshot.mli",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "76eefe70f9a4cbbba6b7c691e4daab678153004f",
+      "sha256": "bf4e40d90602092713b21e4daa9dc0b135a97b09fb593570eb1d5b2757828528",
+      "bytes": 3316
+    },
+    {
+      "path": "lib/workspace/workspace_verification_store.ml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "436af10cccee606abd4776046b1d9c951ff1f925",
+      "sha256": "b29a2a041f8014d32d3e421c7b97511bec1f5d6555833139b88c747396856255",
+      "bytes": 20369
+    },
+    {
+      "path": "lib/workspace/workspace_verification_store.mli",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "cd726df97843f0d8efa2b01a0737d129681b0455",
+      "sha256": "104eaec35c51d7610f027f68517f95d9d30fad65e53c37a0523f500fb247dda5",
+      "bytes": 11935
+    },
+    {
+      "path": "lib/workspace_goals.ml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "eeb3414a94845f8b76dd1c8199d39d260570a4f5",
+      "sha256": "f3f2ecc236af665099949e96aadede0b39401ee5b320de11f9d5f9f97940d2c5",
+      "bytes": 57026
+    },
+    {
+      "path": "lib/workspace_goals.mli",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "3e02ab85cfc0a65265b4159cca19b935ca71582e",
+      "sha256": "64e9a018a3309692de9a8f174026b5145a44db915d7a64216a68b498bb9aca38",
+      "bytes": 8655
+    },
+    {
+      "path": "test/test_goal_verifier_original.ml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "664650d20c4c5913c1ce671dec77a00cbc21e7da",
+      "sha256": "80d377268cae8edaf8e2b931a86e4e0d0dd7e98c7e2d7df6577125f1726c6181",
+      "bytes": 21036
+    },
+    {
+      "path": "test/test_tui_evidence_link.ml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "c93ed707266f55cd97f1a1abe21bf7a14255c737",
+      "sha256": "ce0b97c2367167703fb67f96f52e0f8ae0f6294ed96f0f1258baa8fca146341b",
+      "bytes": 7646
+    },
+    {
+      "path": "test/test_verification_collaboration_evidence.ml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "3d7e8f9d6722c9287905c7b21bb1918eb45d17bf",
+      "sha256": "b6db01f83da0e0619c9212a7ce4db569b26e2eaeb04bed3649b1be82a1ef84c4",
+      "bytes": 35812
+    },
+    {
+      "path": "test/test_verifier_review_worker.ml",
+      "role": "changed_diff_read_or_unchanged_prior_range_compared",
+      "git_blob": "8ab3c9ac4398ac1853a5be52a37f903dba83a5b3",
+      "sha256": "4b3221c0ac16b7374a443334dc533affa34cba470965b9ba12237e90e4e94443",
+      "bytes": 63264
+    },
+    {
+      "path": "docs/constitution.xml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "7d2ff0b1e8121da7156f6c34df9445740475a3c7",
+      "sha256": "afd95dbc22a2e74fa6b96510c685487ad915260984bd1e1b393fe8eadb544682",
+      "bytes": 40861
+    },
+    {
+      "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "aaf68625654f83f0bfd9130c7028813d8711b10c",
+      "sha256": "03ae9fad1c4e361062b2b405bf1bca8ed77dd01d5613397459aa6ba4541d4ddc",
+      "bytes": 20085
+    },
+    {
+      "path": "docs/guides/NATIVE-GITHUB-STACKS.md",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "fc856a5f8050fe4f2c4d7d558301b62fbe51bec8",
+      "sha256": "6b01a6724e9666a73658355cffb3a98877e014743865ee744fce5330acea559d",
+      "bytes": 7988
+    },
+    {
+      "path": "lib/workspace/workspace_backlog.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "063482e3391a31c7e1016638f41f43df00275e8e",
+      "sha256": "4203b94aa9a2b03bfb96b7e70eb83d8298f525eaed997ffdd8ce73206cdf10d7",
+      "bytes": 18957
+    },
+    {
+      "path": "lib/types/types_core.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "1d07ceac280a5d59802e67689487bd9cfaba737a",
+      "sha256": "7d8b9f7794ef97b25053c42308ef16a85fba601347cf4757be82a019aeb7a11c",
+      "bytes": 59217
+    },
+    {
+      "path": "lib/verification_protocol.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "a150ef8a8d0cc9b7b28a1643b59ea6fef3ef2d4e",
+      "sha256": "ac5e8ac491e1b8985aa9dbb9e14b03ed88615bba4bd183716842246af59c316c",
+      "bytes": 28805
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "dc2acf81b6c4101db5b072c159938d440419fcfb",
+      "sha256": "4f66ec9447b4d5aacebe01281d5e6cf01a6d7962bd0b7988cedaacead210ddaa",
+      "bytes": 58281
+    },
+    {
+      "path": "lib/task/tool_task.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "d661a8f587b0003c93ccdde98ffa7d7cad00e99e",
+      "sha256": "5a0a781102924e909934d28720a981d7203c2a6586d67be247f59232bf1cece5",
+      "bytes": 25322
+    },
+    {
+      "path": "lib/workspace_metric_hooks.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "8ec6fff0d5b5f16c942f87af22abfb83f9342ebf",
+      "sha256": "b100f19285d9f3c43e9384b23c6ff1de483a162865fdb07174e1d49ddf86b07e",
+      "bytes": 22160
+    },
+    {
+      "path": "lib/keeper/keeper_tool_descriptor.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "448c49e3502d44faf6ec424f904f9d39ca2e784a",
+      "sha256": "ad2d11134025862a1599bede690f338cc6dbcaba1be3d9562db940a7355237cd",
+      "bytes": 143445
+    },
+    {
+      "path": "lib/keeper/keeper_tool_descriptor_resolution.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "a61212efc3a6f53f6fba07f9fffe7be4cf29ef7e",
+      "sha256": "174768c4c885447da6eec61e313dfbbd0f8f20f8e84c745af5fa4e89bfdb75a9",
+      "bytes": 6260
+    },
+    {
+      "path": "lib/keeper/goal_verifier_original.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "c132a2e7bc869487253307aa4006424bafac5772",
+      "sha256": "3a7628a68dc50c87e9efc192b4f0c1c6756d95caff8feb71462e15b79bdc7147",
+      "bytes": 8252
+    },
+    {
+      "path": "lib/keeper/goal_verifier_worker.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "d28b0a2154376844bc751dcabfa097d33d7d4326",
+      "sha256": "7875e0d0b57a5ab9be7f182166f04b3e156be2280150c8faabe2db788cb55873",
+      "bytes": 35673
+    },
+    {
+      "path": "lib/keeper/verifier_review_worker.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "9935e286add0e9e97e98ad2b2584675bfd1dfb94",
+      "sha256": "d22865afdbe70c79d705b962d765f75cf355788302091a4e2fc43c7f2c344ed2",
+      "bytes": 13602
+    },
+    {
+      "path": "lib/keeper/verifier_review_original.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "41c08e8d6f021a36dce858456eb3252e5027d9f0",
+      "sha256": "4d4769457e38ecb36d6593274b13a161097f243ff3779e748b2491cdd2caee65",
+      "bytes": 19493
+    },
+    {
+      "path": "lib/goal_verification_agent.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "6baab2dd0600a23598d3013236e9186d8c907e62",
+      "sha256": "bab2de3604da240846d7823d6b3e586eb3fe585889621b38a61fe8082b7dc388",
+      "bytes": 40378
+    },
+    {
+      "path": "config/tools/keeper_tasks_list.toml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "4467ac64784bf0ca6544f3efec39497707d55b94",
+      "sha256": "118a671d25c7b5efed760397ae2985c8b491f37a1d9485bf29715a5c4f3d8261",
+      "bytes": 4909
+    },
+    {
+      "path": "lib/fs_compat/fs_compat.mli",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "9ab5cf648db5a1de0571ab92a8f0a6f170ee6160",
+      "sha256": "3366056552f75fa5cda5eaeb89b6253a4cba138116f8832d2fd77f9b54d17da2",
+      "bytes": 81323
+    },
+    {
+      "path": "lib/goal/goal_store.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "014c3449831d9ceea4a66403842b270d00cccf67",
+      "sha256": "b5caacccf3003b337f48f555f4284b0a49a368e86db1a7246273816ca483e5f9",
+      "bytes": 40065
+    },
+    {
+      "path": "test/test_verification_authority_tools.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "30f39ddeaa30dc375e59290f201757dcb1738b20",
+      "sha256": "5c771571d5488b02bf9d8dad75dcc0488177ff599c067942b7eda093661316d7",
+      "bytes": 74660
+    },
+    {
+      "path": "lib/types/runtime_response_identity.mli",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "a4c68a82139e5693fe5f55727ead7f646c2835dc",
+      "sha256": "409ee065a57a41d139e2f5952b09597d66e1d174d53faa6aa8c8fa0dfc016750",
+      "bytes": 2360
+    },
+    {
+      "path": "lib/types/runtime_response_identity.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "a546f72f56744b64f0f837f766cc9ff6d038c7fe",
+      "sha256": "e008f7c6b24d543c7d6f0b5aaca8c52459d79640bd6ab915fef38f89072f4c3e",
+      "bytes": 5623
+    },
+    {
+      "path": "lib/types/dune",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "80d5aa93887d232dbb8b4ecc581a35f508dee0ff",
+      "sha256": "821d9d5448d7a8e2e4ff4763a5b0e17e5fd19a9c0de6a8e25e3d56d456dd6ab9",
+      "bytes": 890
+    },
+    {
+      "path": "lib/dune",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "b5f5725386c3d3d35371e3d6fdf2094ab90fa10e",
+      "sha256": "58de602aa17a901b96c1206fd1a37e7aa54aa1118903c864ee1f25960b40f681",
+      "bytes": 6820
+    },
+    {
+      "path": "test/dune",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "d089edd81e00abfc47e18cb2b631d29730f38392",
+      "sha256": "935e9021d93c7a7d2b2417447d7d83bc7ff09ecdbb5b57df99c752e8125ca081",
+      "bytes": 211244
+    },
+    {
+      "path": "test/test_runtime_response_identity.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "41dc9fff92a4b95a53f341cc4221d6b1ba430a03",
+      "sha256": "43db3b4819ca92d4f609f0a12acddd762129565d99551163ca158ee36721a124",
+      "bytes": 4353
+    },
+    {
+      "path": "lib/workspace/workspace_hooks.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "06da07ba4f2d02d9dad3d54471aa509b996baf40",
+      "sha256": "d1cf0a0ca649d791d00e89e66e197eae62c80d8e190d11d549e21403a6eec80f",
+      "bytes": 16065
+    },
+    {
+      "path": "lib/board/board_audience.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "77a8256a8e35c8c644c4dfa09cb6d66a40de5b3e",
+      "sha256": "149232f90639a541f67e39f128c94f636625e1387b9216f4dc7953a4900b1691",
+      "bytes": 7162
+    },
+    {
+      "path": "bin/masc_tui_link.ml",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "eb815a32373d0d5e4a6dd202561fba7e80474a1d",
+      "sha256": "ec1fdd52ce77f13137cf62d1e674358b77f3eeb42732f851660ec2922bd57924",
+      "bytes": 4273
+    },
+    {
+      "path": "bin/masc_tui_link.mli",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "93f791057c126b2afaed06b4b3284a2ee3d217b8",
+      "sha256": "3c37c90fc04447c6fb05fb430e00dffdf2e93712fdff60a92686223ce1981ca2",
+      "bytes": 1552
+    },
+    {
+      "path": "bin/dune",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "067e28e14e0ec88d536d019d2c54abb0104b27c7",
+      "sha256": "1d02be53bb605f4b6c728c105ff5f161b5a83dfb7594fb54fa03b8d375390cbd",
+      "bytes": 91336
+    },
+    {
+      "path": "test/stanzas/test_tui_evidence_link.inc",
+      "role": "targeted_context_read_or_compared",
+      "git_blob": "0788d210dcdb98077ac86fdd8d936973b044bf7f",
+      "sha256": "b8ac8ed5bbc6d82b3af5715d777b5e3ed5780e42f378778ac2313a799a3d564f",
+      "bytes": 143
+    }
+  ]
+}

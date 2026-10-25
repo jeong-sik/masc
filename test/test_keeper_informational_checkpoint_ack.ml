@@ -127,6 +127,10 @@ let run base_path prompt_root =
   Eio_context.set_mono_clock env#mono_clock;
   Process_eio.init ~cwd_default:Eio.Path.(env#fs / base_path)
     ~proc_mgr:env#process_mgr ~clock:env#clock;
+  (* This fixture drives a real native request without server bootstrap.
+     Its application switch must own the same durable execution capability. *)
+  Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+    |> get Runtime_agent_execution_runtime.initialization_error_to_string;
   Masc_test_deps.ensure_rng_initialized ();
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Model_catalog.global () in

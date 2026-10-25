@@ -1,0 +1,25 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40186573395
+Head: 9a79e6f6ab55db9c856ca704691e6eda5bf97fc9
+Full log SHA256: 80d69a68b48b6a4924ecbaebd7b2d6e269ef40dc1bc6f1a4a34fe45fd8df5e65
+Excerpt (trailing whitespace normalized):
+test suite	Checkout	2026-10-25T10:53:50.3544390Z   ref: 9a79e6f6ab55db9c856ca704691e6eda5bf97fc9
+test suite	Checkout	2026-10-25T10:53:50.5307736Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 9a79e6f6ab55db9c856ca704691e6eda5bf97fc9
+test suite	Checkout	2026-10-25T10:54:00.1085553Z  * branch              9a79e6f6ab55db9c856ca704691e6eda5bf97fc9 -> FETCH_HEAD
+test suite	Checkout	2026-10-25T10:54:00.1093465Z [command]/usr/bin/git rev-parse --verify --quiet 9a79e6f6ab55db9c856ca704691e6eda5bf97fc9^{object}
+test suite	Checkout	2026-10-25T10:54:00.1115851Z 9a79e6f6ab55db9c856ca704691e6eda5bf97fc9
+test suite	Checkout	2026-10-25T10:54:00.1192886Z [command]/usr/bin/git checkout --progress --force 9a79e6f6ab55db9c856ca704691e6eda5bf97fc9
+test suite	Checkout	2026-10-25T10:54:01.9773207Z Note: switching to '9a79e6f6ab55db9c856ca704691e6eda5bf97fc9'.
+test suite	Checkout	2026-10-25T10:54:01.9842278Z HEAD is now at 9a79e6f6 docs: normalize compiler receipt excerpt whitespace
+test suite	Checkout	2026-10-25T10:54:01.9900852Z 9a79e6f6ab55db9c856ca704691e6eda5bf97fc9
+test suite	Test	2026-10-25T10:56:04.7968395Z [targeted] dune build test/test_keeper_informational_checkpoint_ack.exe test/test_keeper_failed_selection_disposition.exe
+test suite	Test	2026-10-25T10:58:31.4240942Z [targeted] test/test_keeper_informational_checkpoint_ack: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-25T10:58:31.4264302Z [targeted] test/test_keeper_informational_checkpoint_ack: start 2026-10-25T10:58:31Z
+test suite	Test	2026-10-25T10:58:31.5501000Z [2026-10-25 10:58:31] [WARN] [Keeper/informational-checkpoint-probe] informational-checkpoint-probe: turn terminal (non-exhaustion error) — err=Internal error: native request journal runtime is unavailable runtime=fixture.sample
+test suite	Test	2026-10-25T10:58:31.5511873Z [2026-10-25 10:58:31] [WARN] [Keeper/informational-checkpoint-probe] keeper_turn_error incident_id=trace-informational-checkpoint-probe#1 detail=Internal error: native request journal runtime is unavailable
+test suite	Test	2026-10-25T10:58:31.5534532Z [2026-10-25 10:58:31] [ERROR] [Keeper/informational-checkpoint-probe] informational-checkpoint-probe: keeper cycle FAILED runtime=fixture.sample lane=fixture.sample error_origin=fixture.sample#0 attempts=[fixture.sample@dispatched=Internal error: native request journal runtime is unavailable] deferred_next_runtime=none max_context=1048576 context_budget=1048576 primary_budget=1048576 requested_override=none system_and_user_bytes=25687 cycle_latency=27ms error=Internal error: native request journal runtime is unavailable
+test suite	Test	2026-10-25T10:58:31.5550686Z [2026-10-25 10:58:31] [WARN] [Keeper] informational-checkpoint-probe: turn failure observed (consecutive=1); Keeper lifecycle remains active: Internal error: native request journal runtime is unavailable
+test suite	Test	2026-10-25T10:58:31.5701788Z actual checkpoint did not ACK informational batch
+test suite	Test	2026-10-25T10:58:31.5767872Z [targeted] test/test_keeper_informational_checkpoint_ack: FAIL exit 1 in 0s
+test suite	Test	2026-10-25T10:58:31.6372439Z [targeted] test/test_keeper_failed_selection_disposition: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-25T10:58:31.6966260Z Test Successful in 0.001s. 16 tests run.
+test suite	Test	2026-10-25T10:58:31.7009607Z [targeted] test/test_keeper_failed_selection_disposition: OK in 0s

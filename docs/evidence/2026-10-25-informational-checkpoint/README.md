@@ -43,8 +43,8 @@ scope; their presence is not a passing execution.
 ## Validation state
 
 Changed OCaml parses with `ocamlc -stop-after parsing`; committed diff whitespace
-passes. Independent adversarial SOURCE PASS at the candidate; response review is
-completed at that historical head. These are source checks, not type-check/build/runtime results.
+passes. Historical source reviews did not establish fixture execution; both subsequently
+failed runs below qualify those verdicts. Source review is not execution evidence.
 
 [Explicit run40185754758](https://github.com/jeong-sik/masc/actions/runs/40185754758)
 requests only `test/test_keeper_informational_checkpoint_ack` and
@@ -54,5 +54,19 @@ nonexistent `Q.High`. The complete diagnostic was read; the failed receipt is
 retained in failed-run40185754758.txt. Both prior source verdicts at2c295963
 are invalidated by this compile evidence. Current correction uses the actual
 `Keeper_event_queue.Normal` constructor at all three sites; it does not change
-any production urgency or ACK policy. Corrected execution is requested separately. No local Dune/build/typecheck was run. #26165 remains open
-until its current acceptance is actually verified.
+any production urgency or ACK policy. The corrected run40186573395 at9a79e6f6ab55db9c856ca704691e6eda5bf97fc9
+compiled both selected executables. Its new scenario then FAILED before reaching
+the provider: the fixture omitted the application-owned native request journal
+runtime installed by server bootstrap. The existing failed-selection suite
+actually passed all16 cases. The second failed receipt is retained in
+failed-run40186573395.txt; this failure is not evidence of a production ACK bug.
+
+The fixture now explicitly initializes `Runtime_agent_execution_runtime` with
+its application switch and Eio domain manager, using the same public capability
+as server bootstrap and existing native integration fixtures. Scope release
+cleans up that capability; the fresh-process reader only reads checkpoint and
+queue state and needs no native execution runtime. No production code or ACK
+assertion was weakened. Execution after this correction is pending.
+
+No local Dune/build/typecheck was run. #26165 remains open until its current
+acceptance is actually verified.

@@ -107,5 +107,43 @@ let native_replay model family =
   Alcotest.(check bool) "explicit disable follows the declared control semantics" can_disable
     (Complete_common.thinking_control_request_rejection ~caps {config with enable_thinking=Some false}=None)
 
+(* Admission must honor the native default before final wire serialization. *)
+let native_default_control model family =
+  let config = config model in
+  let request stream config =
+    Alcotest.(check bool) "full public admission" true
+      (Result.is_ok (Complete_common.validate_all config));
+    match Complete_common.serialize_http_request ~stream ~config
+        ~messages:[make_message ~role:User [Text "Compare receipts"]] ~tools:[] with
+    | Ok serialized -> Yojson.Safe.from_string serialized.Complete_common.body
+    | Error _ -> Alcotest.fail "admitted native control failed serialization" in
+  List.iter (fun stream ->
+    let body = request stream config in
+    Alcotest.(check bool) "omitted depth stays omitted" true
+      (body |> member "reasoning" |> member "effort" = `Null);
+    match family with
+    | Toggle_only ->
+      Alcotest.(check bool) "M3 enable requires a non-none effort" true
+        (Result.is_error (Complete_common.validate_all
+          {config with enable_thinking=Some true}));
+      let body = request stream {config with enable_thinking=Some true;
+        reasoning_effort=Some Reasoning_effort.Low} in
+      Alcotest.(check string) "M3 explicit enable carries its effort" "low"
+        (body |> member "reasoning" |> member "effort" |> to_string)
+    | Effort_depth ->
+      let body = request stream {config with enable_thinking=Some true} in
+      Alcotest.(check bool) "default-on enable does not invent a depth" true
+        (body |> member "reasoning" |> member "effort" = `Null);
+      Alcotest.(check bool) "no competing thinking object" true
+        (member "thinking" body = `Null);
+      List.iter (fun effort ->
+        Alcotest.(check bool) "unsupported M3.1 effort fails full admission" true
+          (Result.is_error (Complete_common.validate_all
+            {config with reasoning_effort=Some effort}))) [Reasoning_effort.None_;Minimal];
+      Alcotest.(check bool) "M3.1 cannot disable thinking" true
+        (Result.is_error (Complete_common.validate_all
+          {config with enable_thinking=Some false}))) [false;true]
+
 let () = Alcotest.run "minimax_responses_binding"
-  ["native models",List.map (fun (model,family) -> model,`Quick,(fun () -> native_replay model family)) models]
+  ["native models",List.map (fun (model,family) -> model,`Quick,(fun () -> native_replay model family)) models;
+   "default control",List.map (fun (model,family) -> model,`Quick,(fun () -> native_default_control model family)) models]

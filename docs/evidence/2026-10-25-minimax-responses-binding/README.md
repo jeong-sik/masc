@@ -40,3 +40,29 @@ Native HTTP, exact M2 Responses availability, current-main combination, whole Ag
 [Run40199608144](https://github.com/jeong-sik/masc/actions/runs/40199608144) checked out exactly `fe5060711754abcb42188d6c7188eec33074d283` and completed SUCCESS: native binding2 + generic sync16 + generic SSE22 = **40 actual cases**. Both documented models reached all public registry/source-contract, sync/SSE/cache/message-file/replay/final-serializer, tool-choice, effort and disable assertions. The retained checkout/assertions/summaries and raw digest identify that execution.
 
 The three source/fixture hashes are unchanged in later evidence-only heads. The earlier nine-case failures remain distinct; this is a corrected two-model fixture, not certification of nine Responses identities. M2 availability remains open. No live HTTP or whole-issue closure follows from40 selected cases.
+
+
+## 2026-10-26 whole-stack refresh and omitted depth repair
+
+REST now confirms Native Stack #45978 contains #45932, #45950, #45962 and
+#45969 in that order. Earlier disabled/null observations above are historical.
+The complete local stack was rebased onto main
+`114b5783b92f8695ae49ac1d0ecb82ad307ebaa7`, which includes #45972's typed
+`reasoning_effort_default_on` control. Duplicate historical parent patches were
+resolved by preserving the final source; the owned-delivery production,
+110-case fixture and evidence files remain byte-identical to the old leaf.
+
+The M3.1 Responses row now uses that existing default-on control. An explicit
+enable with no effort can pass full `Complete_common.validate_all` admission;
+wire effort stays omitted so the vendor chooses its default. M3 retains its
+explicit-effort toggle semantics. New controls exercise admission and final
+serialization for stream=false/true, M3's missing-effort rejection, its explicit
+low effort, and M3.1's rejected none/minimal/disable requests. These are offline
+contract fixtures based on the linked official Responses schema, not native HTTP.
+
+The old 40-case execution above predates this new base, catalog and fixture.
+Its source hashes are historical and do not certify this refreshed candidate.
+Changed OCaml parsing, TOML parsing/exact two-row control checks and whitespace
+checks passed locally. No local build/typecheck or new behavior execution is
+claimed here. All four refreshed heads require fresh independent review before
+whole-stack integration; earlier approvals do not certify the rebase.

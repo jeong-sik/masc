@@ -1045,7 +1045,8 @@ supports_tool_choice = true
 supports_required_tool_choice = false
 supports_named_tool_choice = false
 supports_reasoning = true
-thinking_control_format = "reasoning_effort"
+# Always on; omitted effort leaves the vendor default depth intact.
+thinking_control_format = "reasoning_effort_default_on"
 preserve_thinking_control_format = "always_preserved"
 reasoning_replay = "preserve_responses_text"
 accepted_reasoning_efforts = ["low","medium","high","xhigh","max"]

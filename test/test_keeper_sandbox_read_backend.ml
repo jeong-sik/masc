@@ -2129,7 +2129,7 @@ exit %d
   Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
   let meta = { meta with sandbox_image = Some "base" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  ensure_dir (Keeper_sandbox.host_root_abs_of_meta ~config ~meta);
+  ensure_dir (Keeper_sandbox.host_root_abs_of_meta ~config meta);
   match Masc.Keeper_workspace_read_ops.try_handle_with_outcome
       ~turn_sandbox_factory:None ~config ~meta ~op:"rg" ~raw_path:"."
       ~args:(`Assoc ["path", `String "."; "pattern", `String "needle"]) with

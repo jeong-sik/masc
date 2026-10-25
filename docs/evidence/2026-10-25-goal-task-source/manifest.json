@@ -115,6 +115,11 @@
       "sha256": "83e099a1f869598bb6a750fb294a1e37ee113c6cfd4999e368c7990bcafcfbb8"
     },
     {
+      "path": "source-review/manifest.json",
+      "bytes": 695,
+      "sha256": "7e36827a04558b4ccb6c9e6b511b6c2a82ea90164c5503094396227903e8e3c9"
+    },
+    {
       "path": "source-review/repair-0f72.diff",
       "bytes": 1044,
       "sha256": "188a2dc3a02d60e09d0e0929ad205a576313a0c0a482d20bda7a960e229d1ec3"

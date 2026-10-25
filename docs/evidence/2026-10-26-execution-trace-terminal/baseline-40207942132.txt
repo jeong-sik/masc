@@ -1,0 +1,19 @@
+run: https://github.com/jeong-sik/masc/actions/runs/40207942132
+raw_sha256: 8c0a972a19206d903f415e1853c0da46f3215979b6c5c077a217187b4673b55b
+raw_bytes: 162424
+selected_lines: 12
+Only changed-scenario assertions and suite/checkout summaries retained.
+ANSI and trailing whitespace removed from selected lines.
+
+test suite	Checkout	2026-10-25T15:39:23.1102255Z HEAD is now at 86d40fd7 test(agent): expose trace failure after committed execution
+test suite	Test	2026-10-25T15:40:20.8373159Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
+test suite	Test	2026-10-25T15:40:20.8391934Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: start 2026-10-25T15:40:20Z (dune alias)
+test suite	Test	2026-10-25T15:40:46.6326799Z ^[[33mASSERT^[[0m canonical success committed before trace fault
+test suite	Test	2026-10-25T15:40:46.6342979Z ^[[33mASSERT^[[0m external effect executed once
+test suite	Test	2026-10-25T15:40:46.6343378Z ^[[33mASSERT^[[0m fault occurs after canonical terminal observation
+test suite	Test	2026-10-25T15:40:46.6357650Z ^[[33mASSERT^[[0m observer relabeled committed success: File append failed on /tmp/build_0a2b62_dune/agent_core-terminal-observer-1d88df.jsonl: /tmp/build_0a2b62_dune/agent_core-terminal-observer-1d88df.jsonl: Is a directory
+test suite	Test	2026-10-25T15:40:46.6358272Z   ^[[31m[FAIL]^[[0m        ^[[36mprovider_mock_extra^[[0m         20   trace failure preserves comm...
+test suite	Test	2026-10-25T15:40:46.7049062Z ^[[2m│ ^[[0m^[[31m[FAIL]^[[0m        ^[[36mprovider_mock_extra^[[0m         20   trace failure preserves c...^[[2m  │^[[0m
+test suite	Test	2026-10-25T15:40:46.7050256Z ^[[31mFAIL^[[0m observer relabeled committed success: File append failed on /tmp/build_0a2b62_dune/agent_core-terminal-observer-1d88df.jsonl: /tmp/build_0a2b62_dune/agent_core-terminal-observer-1d88df.jsonl: Is a directory
+test suite	Test	2026-10-25T15:40:46.7057085Z ^[[31m1 failure!^[[0m in 0.710s. 69 tests run.
+test suite	Test	2026-10-25T15:40:46.7259317Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: FAIL exit 1 in 26s

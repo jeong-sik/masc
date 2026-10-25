@@ -245,6 +245,63 @@ class OperatorTests(unittest.TestCase):
         self.assertTrue(self.connector.status()["connected"])
         self.assertEqual(len(self.calls), 1)
 
+    def test_capture_receipt_survives_exchange_failure_and_same_return_does_not_exchange_again(self):
+        begun = self.call("connect")
+        arguments = self.callback_arguments(begun)
+        self.fail_exchange = True
+        first = self.call("complete", arguments)
+        expected = {"kind": "captured", "connection_id": arguments["connection_id"]}
+        self.assertEqual(first["callback_receipt"], expected)
+        self.assertEqual(self.connector.status()["phase"], "reconnect_required")
+        self.assertEqual(self.call("complete", arguments)["callback_receipt"], expected)
+        self.assertEqual(len(self.calls), 1)
+        public = json.dumps([self.worker.status(), self.worker.observe({"binding": {"sources": []}, "sources": []})])
+        for private in ["callback_receipt", "INTEGRATION_MARKER", arguments["connection_id"], arguments["state"]]:
+            self.assertNotIn(private, public)
+
+    def test_return_before_capture_failure_can_retry_the_same_original_attempt(self):
+        begun = self.call("connect")
+        arguments = self.callback_arguments(begun)
+        write = self.connector.store.write
+
+        def fail_before_capture(root, record):
+            if record["phase"] == "exchanging":
+                raise OSError("PRIVATE_CAPTURE_FAILURE")
+            return write(root, record)
+
+        with patch.object(self.connector.store, "write", side_effect=fail_before_capture):
+            rejected = self.call("complete", arguments)
+        self.assertNotIn("callback_receipt", rejected)
+        self.assertNotIn("PRIVATE_CAPTURE_FAILURE", json.dumps(rejected))
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.connector.authorization_identity(), begun["callback"]["arguments"])
+        completed = self.call("complete", arguments)
+        self.assertEqual(completed["callback_receipt"], {"kind": "captured", "connection_id": arguments["connection_id"]})
+        self.assertEqual(len(self.calls), 1)
+
+    def test_receipt_fsync_failure_is_unknown_even_when_the_record_is_visible(self):
+        begun = self.call("connect")
+        arguments = self.callback_arguments(begun)
+        self.call("complete", arguments)
+        with patch.object(oauth.os, "fsync", side_effect=OSError("PRIVATE_SYNC_FAILURE")):
+            uncertain = self.call("view")
+        self.assertNotIn("callback_receipt", uncertain)
+        self.assertNotIn("PRIVATE_SYNC_FAILURE", json.dumps(uncertain))
+        confirmed = self.call("view")
+        self.assertEqual(confirmed["callback_receipt"]["connection_id"], arguments["connection_id"])
+        self.assertEqual(len(self.calls), 1)
+
+    def test_decline_receipt_is_only_the_direct_exact_cancel_result(self):
+        begun = self.call("connect")
+        identity = begun["callback"]["arguments"]
+        arguments = {**identity, "callback_url": self.connector.configuration.redirect_uri + "?" + urlencode({
+            "state": identity["state"], "error": "access_denied"})}
+        self.assertEqual(self.call("complete", arguments)["callback_receipt"], {
+            "kind": "declined", "connection_id": identity["connection_id"]})
+        self.assertNotIn("callback_receipt", self.call("complete", arguments))
+        self.assertNotIn("callback_receipt", self.call("view"))
+        self.assertEqual(self.calls, [])
+
     def test_connect_does_not_open_a_cancelled_attempt(self):
         begin = self.connector.begin
 

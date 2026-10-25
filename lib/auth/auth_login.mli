@@ -101,6 +101,15 @@ val read_persisted_token :
     should find its own credential where login wrote it rather than require
     the operator to re-export it into every shell. *)
 
+val read_persisted_http_token :
+  base_path:string -> agent_name:string -> string option
+(** Read a token file for an HTTP bearer client, removing surrounding file
+    whitespace. This does not verify or publish a credential and does not alter
+    the exact-byte contracts of {!read_persisted_token} or {!Auth.load_raw_token}.
+    Missing, nonregular, unreadable and blank files return [None]; cancellation
+    propagates. Explicitly supplied CLI or environment tokens are not handled
+    here. *)
+
 val mint :
   base_path:string ->
   host:string ->
@@ -152,6 +161,26 @@ val mint :
     {!Env_config_core.normalize_masc_base_path_input} before any
     file-system access, so callers may pass user-typed paths (with
     or without trailing slash, with [~] expansion). *)
+
+val ensure_local_operator :
+  base_path:string ->
+  host:string ->
+  port:int ->
+  agent_name:string ->
+  token_env_var:string ->
+  token_lifetime:token_lifetime ->
+  unit ->
+  (t option, Masc_error.t) result
+(** Reuse a persisted, currently verified Admin credential, returning [Ok None]
+    without changing its token, metadata, expiry or file representation. Exact
+    opaque bytes are verified first; if their verification fails, surrounding
+    file whitespace is removed and that candidate must independently verify as
+    Admin. The raw-token readers and verification API retain their exact-byte
+    contracts. If neither candidate verifies, use {!mint} with role [Admin] and
+    return [Ok (Some report)], or propagate its error. This is the local setup
+    and previous-owner-stop login policy; it does not refresh other clients or
+    promise atomicity between verification and the caller's later operation.
+    Cancellation propagates. *)
 
 (** {1 Rendering} *)
 

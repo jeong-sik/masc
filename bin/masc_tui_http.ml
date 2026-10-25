@@ -117,7 +117,7 @@ let credential_workspace : (string * string * int) option ref = ref None
    is left for the server to make, whose refusal names [masc login]. *)
 let stored_operator_token ~base_path : Masc_tui_credential.stored_token =
   match
-    Auth_login.read_persisted_token ~base_path ~agent_name:default_agent_name
+    Auth_login.read_persisted_http_token ~base_path ~agent_name:default_agent_name
   with
   | None -> Masc_tui_credential.Not_stored
   | Some token -> (

@@ -312,6 +312,145 @@ let test_persisted_token_round_trips () =
       check (option string) "another agent's file is not borrowed" None
         (Auth_login.read_persisted_token ~base_path ~agent_name:"other-agent")
 
+let ensure_local_operator base_path agent_name =
+  Auth_login.ensure_local_operator ~base_path ~host:"127.0.0.1" ~port:8935
+    ~agent_name ~token_env_var:"MASC_TOKEN"
+    ~token_lifetime:Auth_login.With_expiry ()
+
+let local_operator_snapshot base_path agent_name =
+  [ Auth.raw_token_file base_path agent_name;
+    Auth.credential_file base_path agent_name;
+    Auth.auth_config_file base_path;
+    Auth.workspace_secret_file base_path ]
+  |> List.map (fun path ->
+      if Sys.file_exists path then
+        let stat = Unix.stat path in
+        let bytes = In_channel.with_open_bin path In_channel.input_all in
+        Some (bytes, stat.Unix.st_perm, stat.Unix.st_ino, stat.Unix.st_mtime)
+      else None)
+
+let test_local_operator_reuses_formatted_admin () =
+  List.iter (fun (prefix, suffix) ->
+    with_temp_dir "auth-operator-file" @@ fun base_path ->
+    let agent_name = "operator-fixture" in
+    match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+        ~agent_name ~role:Masc_domain.Admin ~token_env_var:"MASC_TOKEN"
+        ~token_lifetime:Auth_login.Long_lived () with
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+    | Ok report ->
+        let file_bytes = prefix ^ report.bearer_token ^ suffix in
+        Auth.save_private_text_file report.raw_token_file file_bytes;
+        check bool "raw reader retains exact file bytes" true
+          (Auth.load_raw_token base_path ~agent_name = Some file_bytes);
+        check bool "login reader retains exact file bytes" true
+          (Auth_login.read_persisted_token ~base_path ~agent_name = Some file_bytes);
+        if not (String.equal file_bytes report.bearer_token) then
+          check bool "old exact-byte decision would reject the formatted file" true
+            (Result.is_error (Auth.verify_token base_path ~agent_name ~token:file_bytes));
+        let before = local_operator_snapshot base_path agent_name in
+        (match ensure_local_operator base_path agent_name with
+         | Ok None -> ()
+         | Ok (Some _) -> fail "valid persisted Admin must not mint a replacement"
+         | Error error -> fail (Masc_domain.masc_error_to_string error));
+        check bool "reuse preserves token, metadata, modes and expiry" true
+          (local_operator_snapshot base_path agent_name = before);
+        let http_token = match Auth_login.read_persisted_http_token ~base_path ~agent_name with
+          | Some token -> token
+          | None -> fail "reused Admin has no HTTP bearer" in
+        check bool "HTTP consumer reads the unchanged canonical bearer" true
+          (String.equal http_token report.bearer_token);
+        (match Auth.verify_token base_path ~agent_name ~token:report.bearer_token with
+         | Ok credential -> check bool "same bearer remains Admin" true
+             (credential.role = Masc_domain.Admin)
+         | Error error -> fail (Masc_domain.masc_error_to_string error)))
+    [ ("", ""); ("", "\n"); ("", "\r\n"); (" \t", "\r\n ") ]
+
+let test_local_operator_preserves_exact_opaque_admin () =
+  with_temp_dir "auth-operator-opaque" @@ fun base_path ->
+  let agent_name = "opaque-operator" in
+  let token = " opaque-local-admin-fixture\t" in
+  (match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name ~role:Masc_domain.Admin ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:Auth_login.Long_lived () with
+   | Ok _ -> ()
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  (match Auth.save_raw_token_credential base_path ~agent_name
+      ~role:Masc_domain.Admin ~raw_token:token with
+   | Error error -> fail (Masc_domain.masc_error_to_string error)
+   | Ok _ -> ());
+  Auth.save_private_text_file (Auth.raw_token_file base_path agent_name) token;
+  Auth.disable_auth base_path;
+  let before = local_operator_snapshot base_path agent_name in
+  (match ensure_local_operator base_path agent_name with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "an exact opaque Admin must be verified before trimming"
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  check bool "opaque credential files are unchanged" true
+    (local_operator_snapshot base_path agent_name = before)
+
+let test_local_operator_refuses_corrupt_owner () =
+  with_temp_dir "auth-operator-corrupt" @@ fun base_path ->
+  let agent_name = "operator-corrupt" in
+  (match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name ~role:Masc_domain.Admin ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:Auth_login.Long_lived () with
+   | Ok report -> Auth.save_private_text_file report.raw_token_file (report.bearer_token ^ "\n")
+   | Error error -> fail (Masc_domain.masc_error_to_string error));
+  Auth.save_private_text_file (Auth.credential_file base_path agent_name) "{";
+  let before = local_operator_snapshot base_path agent_name in
+  (match ensure_local_operator base_path agent_name with
+   | Error _ -> ()
+   | Ok None | Ok (Some _) -> fail "corrupt named ownership must refuse reuse and mint");
+  check bool "corrupt ownership and bearer are preserved" true
+    (local_operator_snapshot base_path agent_name = before)
+
+let test_local_operator_replaces_ineligible_credential () =
+  List.iter (fun reason ->
+    with_temp_dir "auth-operator-renew" @@ fun base_path ->
+    let agent_name = "operator-renew" in
+    let role = match reason with `Worker -> Masc_domain.Worker
+      | `Expired | `Mismatch | `Blank -> Masc_domain.Admin in
+    match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+        ~agent_name ~role ~token_env_var:"MASC_TOKEN"
+        ~token_lifetime:Auth_login.Long_lived () with
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+    | Ok first ->
+        (match reason with
+         | `Worker -> ()
+         | `Expired ->
+             (match Auth.load_credential base_path agent_name with
+              | None -> fail "missing minted credential"
+              | Some credential -> Auth.save_credential base_path
+                  { credential with expires_at = Some "2000-01-01T00:00:00Z" })
+         | `Mismatch -> Auth.save_private_text_file first.raw_token_file "wrong-fixture\n"
+         | `Blank -> Auth.save_private_text_file first.raw_token_file " \t\r\n");
+        (match ensure_local_operator base_path agent_name with
+         | Ok None -> fail "an ineligible credential must not be reused"
+         | Error error -> fail (Masc_domain.masc_error_to_string error)
+         | Ok (Some report) ->
+             check bool "replacement changes bearer" false
+               (String.equal first.bearer_token report.bearer_token);
+             check bool "replacement is the persisted bearer" true
+               (Auth_login.read_persisted_token ~base_path ~agent_name = Some report.bearer_token);
+             match Auth.verify_token base_path ~agent_name ~token:report.bearer_token with
+             | Ok credential -> check bool "replacement verifies as Admin" true
+                 (credential.role = Masc_domain.Admin)
+             | Error error -> fail (Masc_domain.masc_error_to_string error)))
+    [ `Worker; `Expired; `Mismatch; `Blank ]
+
+let test_local_operator_refuses_occupied_raw_path () =
+  with_temp_dir "auth-operator-occupied" @@ fun base_path ->
+  let agent_name = "operator-occupied" in
+  let path = Auth.raw_token_file base_path agent_name in
+  let _secret = Auth.init_workspace_secret base_path in
+  Unix.mkdir path 0o700;
+  (match ensure_local_operator base_path agent_name with
+   | Error _ -> ()
+   | Ok None | Ok (Some _) -> fail "an occupied raw-token path must not claim success");
+  check bool "nonregular raw path is preserved" true (Sys.is_directory path);
+  check bool "refused login publishes no credential" false
+    (Sys.file_exists (Auth.credential_file base_path agent_name))
+
 (* masc-tui decides whether to re-mint by asking [Auth.verify_token] about the
    bearer login persisted, and acts only on [Token_expired]. Both halves of that
    contract live here: an expired record is reported as expired rather than as
@@ -458,6 +597,16 @@ let () =
             test_login_urls_do_not_advertise_a_bind_wildcard;
           test_case "persisted token round-trips" `Quick
             test_persisted_token_round_trips;
+          test_case "local operator reuses formatted Admin without rotation" `Quick
+            test_local_operator_reuses_formatted_admin;
+          test_case "local operator preserves exact opaque Admin" `Quick
+            test_local_operator_preserves_exact_opaque_admin;
+          test_case "local operator replaces ineligible credentials" `Quick
+            test_local_operator_replaces_ineligible_credential;
+          test_case "local operator refuses occupied raw-token path" `Quick
+            test_local_operator_refuses_occupied_raw_path;
+          test_case "local operator refuses corrupt ownership" `Quick
+            test_local_operator_refuses_corrupt_owner;
           test_case "an expired persisted token is reported and replaced" `Quick
             test_an_expired_persisted_token_is_reported_and_replaced;
           test_case "a bearer file that cannot be written is an error" `Quick

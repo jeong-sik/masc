@@ -43,6 +43,9 @@ let single_quote_shell value =
 let read_persisted_token ~base_path ~agent_name =
   Auth.load_raw_token base_path ~agent_name
 
+let read_persisted_http_token ~base_path ~agent_name =
+  read_persisted_token ~base_path ~agent_name |> Option.map String.trim
+
 (* Two flags can name a lifetime, and they name different ones. Both at once is
    refused rather than resolved by precedence: whichever one lost would hand the
    operator a credential they did not ask for, and a bearer's lifetime is not a
@@ -99,6 +102,32 @@ let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
               mcp_url;
               mcp_token_env_var = token_env_var;
             })
+
+let ensure_local_operator ~base_path ~host ~port ~agent_name ~token_env_var
+    ~token_lifetime () =
+  let base_path = normalize_base_path base_path in
+  let verifies_admin token =
+    match Auth.verify_token base_path ~agent_name ~token with
+    | Ok credential ->
+        (match credential.role with Admin -> true | Worker | Player -> false)
+    | Error _ -> false
+  in
+  let reusable =
+    match read_persisted_token ~base_path ~agent_name with
+    | None -> false
+    | Some token ->
+        (match Auth.verify_token base_path ~agent_name ~token with
+         | Ok credential ->
+             (match credential.role with Admin -> true | Worker | Player -> false)
+         | Error _ ->
+             let candidate = String.trim token in
+             not (String.equal candidate token) && verifies_admin candidate)
+  in
+  if reusable then Ok None
+  else
+    mint ~base_path ~host ~port ~agent_name ~role:Admin ~token_env_var
+      ~token_lifetime ()
+    |> Result.map Option.some
 
 let to_yojson report =
   Tool_args.ok_assoc

@@ -169,3 +169,29 @@ autonomy, current-main execution and production installation remain unverified.
 The final Execute repeats the redirect writes after restart; only the unchanged
 notes file is read without being recreated then. The independent before/after
 shutdown comparison is the redirect files' persistence evidence.
+
+## Reported cwd reuse inside a script
+
+A separate actual a317 Keeper run reproduced the narrower consumer defect in
+#38593. Its first Execute created `ssh-proof.json` and printed the process cwd.
+The next Execute copied exactly that returned cwd into a Python string literal.
+Reading the file through that absolute path returned errno 2 (ENOENT), while
+reading it relatively in the same process returned the correct fresh marker.
+Base64 of `os.getcwd()` identified `/srv/masc/playground/ssh-proof-20261025-e`;
+the reported cwd was the host-shaped `.masc/playground` path instead.
+
+`cwd-replay-receipt.json` labels this result **REPRODUCED**, separate from the
+surrounding file workflow's PASS. That workflow completed nine calls and eleven
+scripted model requests across two server instances. The two selected tool
+results and their canonical ledger rows are retained with independent endpoint
+readback. `cwd-replay-driver.py` is the frozen, actually executed experiment,
+including its historical absolute test paths; it is evidence, not a portable
+operator command. Its hash and the imported harness hash are in the receipt.
+
+The existing path interface intentionally exposes logical host bookkeeping
+paths. This experiment establishes that such an output cannot be reused as an
+OS path inside opaque remote Python code. It does not establish that the public
+Execute `cwd` field or every absolute tool argument fails. No repair is claimed;
+the [endpoint namespace proposal](../../superpowers/specs/2026-10-25-remote-ssh-endpoint-namespace.md)
+records the required implementation boundary. An earlier attempt stopped at
+workspace provisioning and is excluded from this reproduction.

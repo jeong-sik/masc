@@ -2456,8 +2456,16 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
                let companion={Lane_addon_worker_protocol.context;
                  admit=(fun () -> Result.is_ok (confirm_companion_owner m ~access ~principal e original configuration))} in
                try let result=invoke companion in
-                 (match result with Ok result when result.Mcp_protocol.Mcp_types.is_error<>Some true -> C.accept grant
-                  | Ok _|Error _ -> C.cancel_invocation grant);result
+                 (match result with
+                  | Ok reply when reply.Mcp_protocol.Mcp_types.is_error<>Some true ->
+                      let admission=
+                        let* ()=confirm_companion_owner m ~access ~principal e original configuration in
+                        C.accept grant |> Result.map_error (fun _ -> ()) in
+                      (match admission with
+                       | Ok () -> result
+                       | Error () -> C.cancel_invocation grant;
+                           Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown"))
+                  | Ok _|Error _ -> C.cancel_invocation grant;result)
                with
                | Eio.Cancel.Cancelled _ as exn -> C.cancel_invocation grant;raise exn
                | _ -> C.cancel_invocation grant;Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown")))

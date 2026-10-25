@@ -622,7 +622,8 @@ let reasoning_effort_request_rejection_to_message = function
    admit a request whose wire value the ladder never saw. *)
 let wire_reasoning_effort (config : t) ~(caps : Capabilities.capabilities) =
   match caps.Capabilities.thinking_control_format with
-  | Capabilities.Reasoning_effort ->
+  | Capabilities.Reasoning_effort
+  | Capabilities.Reasoning_effort_default_on ->
     Reasoning_effort.under_explicit_toggle
       ~enable_thinking:config.enable_thinking
       config.reasoning_effort
@@ -665,8 +666,8 @@ let validate_reasoning_effort_request_typed (config : t) =
   | Some effort ->
     let explicit_disable_on_categorical_wire =
       match caps.Capabilities.thinking_control_format, config.enable_thinking with
-      | Capabilities.Reasoning_effort, Some false -> true
-      | Capabilities.Reasoning_effort, (Some true | None)
+      | (Capabilities.Reasoning_effort | Capabilities.Reasoning_effort_default_on), Some false -> true
+      | (Capabilities.Reasoning_effort | Capabilities.Reasoning_effort_default_on), (Some true | None)
       | ( ( Capabilities.No_thinking_control
           | Capabilities.Thinking_object
           | Capabilities.Thinking_object_adaptive

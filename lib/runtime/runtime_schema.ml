@@ -220,6 +220,7 @@ type thinking_control_format =
   | Chat_template_token of string
   | Ollama_think
   | Reasoning_effort
+  | Reasoning_effort_default_on
 [@@deriving show, eq]
 
 type reasoning_streaming_format =

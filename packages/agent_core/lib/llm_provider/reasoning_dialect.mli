@@ -78,6 +78,9 @@ type explicit_enable_receipt =
   | Explicit_enable_not_requested
   | Explicit_enable_encoded of explicit_enable_encoding
   | Explicit_enable_not_encoded
+  | Explicit_enable_satisfied_by_default
+  (** The declared categorical wire already reasons when depth is omitted;
+      no activation field was encoded. *)
 
 (** Immutable request-control projection. [fields] are the exact JSON members
     for the selected OpenAI-compatible envelope; the receipts are derived in

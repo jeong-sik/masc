@@ -530,6 +530,17 @@ let test_minimax_m31_native_effort () =
       ~model_id:"MiniMax-M3.1-Flash" ~base_url:entry.defaults.base_url
       ~request_path:entry.defaults.request_path ~max_tokens:128 () in
   let accepted = [Reasoning_effort.Low;Medium;High;XHigh;Max] in
+  let caps = match Provider_config.capabilities_for_config_model config with
+    | Some caps -> caps | None -> Alcotest.fail "native M3.1 model is absent" in
+  let dialect = Reasoning_dialect.of_capabilities caps in
+  (match Reasoning_dialect.request_control_fields Chat_completions dialect
+      ~enable_thinking:(Some true) ~preserve_thinking:None ~reasoning_effort:None () with
+   | Ok {explicit_enable_receipt=Explicit_enable_satisfied_by_default;_} -> ()
+   | Ok _ | Error _ -> Alcotest.fail "omitted depth lacks a declared default-on receipt");
+  let ordinary = {config with enable_thinking=Some true;
+    model_capabilities_override=Some {caps with thinking_control_format=Capabilities.Reasoning_effort}} in
+  check_bool "ordinary categorical effort still requires an explicit depth" true
+    (Result.is_error (Complete_common.validate_all ordinary));
   let messages = [msg User [Text "Compare the receipts"]] in
   let request stream config =
     check_bool "native request passes full public admission" true

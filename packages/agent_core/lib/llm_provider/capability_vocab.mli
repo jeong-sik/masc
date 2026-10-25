@@ -9,6 +9,9 @@ type thinking_control_format =
   | Chat_template_token of string
   | Ollama_think
   | Reasoning_effort
+  | Reasoning_effort_default_on
+  (** Categorical depth with reasoning enabled when effort is omitted.
+      Explicit enable is already satisfied; disable still requires an accepted [none]. *)
 
 type preserve_thinking_control_format =
   | No_preserve_thinking_control

@@ -894,7 +894,7 @@ let read_page t ~after ?through ~limit () =
   ; has_more=page.source_more
   }
 
-type tool_observation = {event:Event_bus.event;through:cursor}
+type tool_observation = {run_id:Run_id.t;event:Event_bus.event;through:cursor}
 type tool_observation_page =
   {observations:tool_observation list;next_cursor:cursor;high_watermark:cursor;has_more:bool}
 
@@ -916,6 +916,6 @@ let read_tool_observations t ?run ~after ?through ~limit () =
               {seq=Event.seq source;detail=Execution_tool_observation.error_to_string error}) in
         match observation with
         | None -> project acc rest
-        | Some event -> project ({event;through={scope_id=t.scope_id;seq=Event.seq source}}::acc) rest in
+        | Some event -> project ({run_id=Event.run_id source;event;through={scope_id=t.scope_id;seq=Event.seq source}}::acc) rest in
   let+ observations=project [] page.source_events in
   { observations;next_cursor=page.source_next;high_watermark=page.source_high;has_more=page.source_more }

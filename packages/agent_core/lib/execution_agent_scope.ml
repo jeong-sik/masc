@@ -917,7 +917,7 @@ let provider_response provider =
       (Resume_topology_mismatch "provider attempt has an incompatible materialized state")
 ;;
 
-type tool_observation = {event:Event_bus.event;through:Journal.cursor}
+type tool_observation = {run_id:Event.Run_id.t;event:Event_bus.event;through:Journal.cursor}
 type tool_observation_page =
   { observations:tool_observation list
   ; next_cursor:Journal.cursor
@@ -944,6 +944,6 @@ let read_tool_observations scope ~after ~limit =
              ~scope_id:(Execution_event_store.cursor_scope_id page.next_cursor)
              ~seq:(Event.seq source)
              |> Result.map_error (fun detail -> Resume_topology_mismatch detail) in
-         project ({event;through}::acc) rest) in
+         project ({run_id=Event.run_id source;event;through}::acc) rest) in
   let+ observations=project [] page.events in
   {observations;next_cursor=page.next_cursor;high_watermark=page.high_watermark;has_more=page.has_more}

@@ -278,7 +278,8 @@ val terminal_recovery_action : t -> (recovery_action, error) result
 (** Read-only committed Tool attempt/result observations, across the complete
     recursive journal. Each observation includes its exact source cursor. *)
 type tool_observation =
-  { event : Event_bus.event
+  { run_id : Execution_event.Run_id.t
+  ; event : Event_bus.event
   ; through : Execution_journal.cursor
   }
 type tool_observation_page =

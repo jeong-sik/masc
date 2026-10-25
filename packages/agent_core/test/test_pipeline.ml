@@ -4441,6 +4441,135 @@ let test_text_response_persists_actual_provider_binding () =
       (List.exists(fun snapshot -> same (snapshot : Agent.checkpoint_snapshot).checkpoint.provider_binding) !snapshots)
 ;;
 
+type nested_tool_audience = Shared_tool_bus | Distinct_tool_bus | No_child_tool_bus
+
+let test_nested_tool_observation_audiences audience ~concurrent () =
+  with_execution_test_dir "agent_core-tool-audiences-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let root_bus=Event_bus.create () and child_bus=Event_bus.create () in
+  let subscribe bus=let config=match Event_bus.subscription_config ~capacity:32 ~overflow:Event_bus.Drop_newest with
+    | Ok config->config |Error _->Alcotest.fail "invalid audience fixture" in
+    Event_bus.subscribe ~config ~filter:Event_bus.filter_tools_only bus in
+  let root_sub=subscribe root_bus and child_sub=subscribe child_bus in
+  let child_target=match audience with Shared_tool_bus->Some root_bus
+    | Distinct_tool_bus->Some child_bus |No_child_tool_bus->None in
+  let parent_calls=ref 0 and child_calls=ref 0 in
+  let both_started,release_both=Eio.Promise.create () in
+  let local_agent name bus tools responses =
+    let responses=ref responses in
+    let next ()=match !responses with response::rest->responses:=rest;Ok response
+      | []->Alcotest.fail "nested provider retried completed work" in
+    let transport=Llm_provider.Llm_transport.custom
+      {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
+       complete_stream=(fun ?on_telemetry:_ ~on_event:_ _->next ())} in
+    Agent.create ~net:(Eio.Stdenv.net env) ~tools
+      ~config:{(Types.default_config ~model:"test-model") with name}
+      ~options:{Agent.default_options with transport=Some transport;event_bus=bus;
+        provider_config=Some (Provider_mock.to_provider_config ())} () in
+  let parent_tool=Tool.create
+      ~descriptor:(Tool.ordinary_descriptor (if concurrent then Concurrent else Serial))
+      ~name:"same_tool" ~description:"recursively invoke child with its own audience" ~parameters:[]
+      (fun _ ->
+        incr parent_calls;
+        let child_tool=Tool.create ~name:"same_tool" ~description:"child effect" ~parameters:[]
+            (fun _ ->
+              incr child_calls;
+              if concurrent then (
+                if !child_calls=2 then Eio.Promise.resolve release_both ();
+                Eio.Promise.await both_started);
+              Ok {Types.content="child settled";content_blocks=None;_meta=None}) in
+        (* Provider tool-use IDs, names and schedules deliberately overlap
+           across recursive Agent runs. Only canonical run/node authority joins. *)
+        let child=local_agent "child-audience" child_target [child_tool]
+            [durable_tool_response ["same-provider-id","same_tool",`Assoc []];
+             Provider_mock.text_response "child done" []] in
+        match Agent.run ~sw child "child" with
+        | Ok _->Ok {Types.content="parent settled";content_blocks=None;_meta=None}
+        | Error error->Alcotest.fail (Error.to_string error)) in
+  let roots=if concurrent then ["same-provider-id";"second-parent-id"] else ["same-provider-id"] in
+  let root=local_agent "root-audience" (Some root_bus) [parent_tool]
+      [durable_tool_response (List.map (fun id->id,"same_tool",`Assoc []) roots);
+       Provider_mock.text_response "root done" []] in
+  let locator=ref None in
+  let store=Agent.execution_store ~runtime ~dir
+      ~on_scope_ready:(fun value->locator:=Some value;Ok ()) () in
+  (match Agent.run ~sw ~execution_store:store root "root" with
+   | Ok _->() |Error error->Alcotest.fail (Error.to_string error));
+  let count=List.length roots in
+  Alcotest.(check int) "each parent effect runs once" count !parent_calls;
+  Alcotest.(check int) "each recursive child effect runs once" count !child_calls;
+  let root_events=Event_bus.drain root_sub and child_events=Event_bus.drain child_sub in
+  let agent_name (event:Event_bus.event)=match event.payload with
+    | ToolCalled {agent_name;_} | ToolCompleted {agent_name;_}->agent_name
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | TurnStarted _ | TurnReady _ | TurnCompleted _ | HandoffRequested _ | HandoffCompleted _
+    | ElicitationCompleted _ | ToolApprovalCompleted _ | InferenceTelemetry _ | Custom _ ->
+      Alcotest.fail "non-tool event escaped audience filter" in
+  let expected_root=match audience with Shared_tool_bus->4*count
+    | Distinct_tool_bus | No_child_tool_bus->2*count in
+  let expected_child=match audience with Distinct_tool_bus->2*count
+    | Shared_tool_bus | No_child_tool_bus->0 in
+  Alcotest.(check int) "root bus keeps explicit audience" expected_root (List.length root_events);
+  Alcotest.(check int) "child bus keeps explicit audience" expected_child (List.length child_events);
+  (match audience with
+   | Shared_tool_bus->()
+   | Distinct_tool_bus | No_child_tool_bus->
+     Alcotest.(check bool) "child observations never leak to root audience" true
+       (List.for_all (fun event->agent_name event="root-audience") root_events));
+  let ordered events =
+    let rec loop previous = function
+      | []->true
+      | (event:Event_bus.event)::rest->match event.meta.seq with
+        | Some seq when seq>previous->loop seq rest
+        | None | Some _->false in loop 0 events in
+  Alcotest.(check bool) "shared audience preserves global canonical order" true (ordered root_events);
+  Alcotest.(check bool) "distinct audience preserves canonical order" true (ordered child_events);
+  let locator=match !locator with Some locator->locator |None->Alcotest.fail "nested locator missing" in
+  let projection=match Agent.open_execution_projection ~runtime ~dir locator with
+    | Ok projection->projection |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let page=match Agent.Execution_projection.read_tool_observations projection
+      ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+    | Ok page->page |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  Alcotest.(check int) "canonical source retains every child regardless of audience" (4*count)
+    (List.length page.observations);
+  let delivered=root_events@child_events in
+  List.iter (fun (event:Event_bus.event)->
+    Alcotest.(check bool) "audience event is the exact committed source observation" true
+      (List.exists (fun (source:Agent.Execution_projection.tool_observation)->source.event=event) page.observations)) delivered
+;;
+
+let test_unattempted_tool_has_no_bus_execution_observation () =
+  with_execution_test_dir "agent_core-tool-blocked-observation-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let bus=Event_bus.create () in
+  let subscription=Event_bus.subscribe ~filter:Event_bus.filter_tools_only
+      ~config:(Result.get_ok (Event_bus.subscription_config ~capacity:16 ~overflow:Drop_newest)) bus in
+  let effects=ref 0 and locator=ref None in
+  let tool=Tool.create ~name:"blocked_tool" ~description:"must not run" ~parameters:[]
+      (fun _->incr effects;Ok {Types.content="wrong";content_blocks=None;_meta=None}) in
+  let responses=ref [durable_tool_response ["blocked","blocked_tool",`Assoc []];Provider_mock.text_response "blocked" []] in
+  let next ()=match !responses with response::rest->responses:=rest;Ok response
+    | []->Alcotest.fail "blocked provider fixture exhausted" in
+  let transport=Llm_provider.Llm_transport.custom
+    {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
+     complete_stream=(fun ?on_telemetry:_ ~on_event:_ _->next ())} in
+  let agent=Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool]
+      ~options:{Agent.default_options with transport=Some transport;event_bus=Some bus;
+        provider_config=Some (Provider_mock.to_provider_config ());
+        hooks={Hooks.empty with pre_tool_use=Some (fun _->Block "not admitted")}} () in
+  let store=Agent.execution_store ~runtime ~dir ~on_scope_ready:(fun value->locator:=Some value;Ok ()) () in
+  (match Agent.run ~sw ~execution_store:store agent "blocked" with
+   | Ok _->() |Error error->Alcotest.fail (Error.to_string error));
+  Alcotest.(check int) "blocked effect is never invoked" 0 !effects;
+  Alcotest.(check int) "blocked effect invents no execution bus event" 0 (List.length (Event_bus.drain subscription));
+  let projection=match Agent.open_execution_projection ~runtime ~dir (Option.get !locator) with
+    | Ok projection->projection |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  match Agent.Execution_projection.read_tool_observations projection
+      ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+  | Ok page->Alcotest.(check int) "public reader invents no unattempted execution" 0 (List.length page.observations)
+  | Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error)
+;;
+
 let () =
   Alcotest.run
     "Pipeline"
@@ -4640,6 +4769,16 @@ let () =
             "durable tool partial delivery retains source cursor"
             `Quick
             (test_durable_tool_bus_uses_canonical_facts ~delivery_fault:true)
+        ; Alcotest.test_case "nested tool observations use shared audience" `Quick
+            (test_nested_tool_observation_audiences Shared_tool_bus ~concurrent:false)
+        ; Alcotest.test_case "nested tool observations use distinct audiences" `Quick
+            (test_nested_tool_observation_audiences Distinct_tool_bus ~concurrent:false)
+        ; Alcotest.test_case "nested tool observations preserve absent audience" `Quick
+            (test_nested_tool_observation_audiences No_child_tool_bus ~concurrent:false)
+        ; Alcotest.test_case "concurrent recursive tool observations keep journal order" `Quick
+            (test_nested_tool_observation_audiences Shared_tool_bus ~concurrent:true)
+        ; Alcotest.test_case "unattempted tools have no bus execution observation" `Quick
+            test_unattempted_tool_has_no_bus_execution_observation
         ; Alcotest.test_case
             "terminal disposition observes cancellation"
             `Quick

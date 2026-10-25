@@ -814,8 +814,8 @@ describe('KeeperConversationPanel', () => {
     })
   })
 
-  it('renders and mutates queued chat operations by singular operation id', async () => {
-    shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
+  it.each(['worker', 'admin'] as const)('renders and mutates queued chat operations for %s by singular operation id', async (role) => {
+    shellAuthSummary.value = { effective_role: role } as typeof shellAuthSummary.value
     const operation = {
       operationId: 'kmsg-operation-1',
       sequence: '7',
@@ -870,8 +870,8 @@ describe('KeeperConversationPanel', () => {
     })
   })
 
-  it('keeps operation controls closed for a Worker session', async () => {
-    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
+  it('keeps operation controls closed for a Reader session', async () => {
+    shellAuthSummary.value = { effective_role: 'reader' } as typeof shellAuthSummary.value
     render(
       html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
       container,

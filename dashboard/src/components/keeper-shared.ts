@@ -386,10 +386,10 @@ function ServerOperationStatus({
         type="button"
         class="font-semibold text-[var(--color-accent-fg)] underline decoration-dotted underline-offset-2"
         disabled=${!inspectAllowed}
-        title=${inspectAllowed ? '채팅 작업 상세 및 제어' : inspectReason ?? 'Admin 권한이 필요합니다.'}
+        title=${inspectAllowed ? '채팅 작업 상세 및 제어' : inspectReason ?? 'Worker 권한이 필요합니다.'}
         onClick=${onInspect}
         data-open-keeper-operation-control
-      >${inspectAllowed ? '채팅 작업 상세/제어' : '채팅 작업 상세/제어 · Admin 권한 필요'}</button>
+      >${inspectAllowed ? '채팅 작업 상세/제어' : '채팅 작업 상세/제어 · Worker 권한 필요'}</button>
       ${busy
         ? html`<span class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5">Running</span>`
         : null}
@@ -691,7 +691,7 @@ export function KeeperConversationPanel({
     if (newestEntryTsUnix !== null) advanceKeeperLastSeen(keeperName, newestEntryTsUnix)
   }
   const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
-  const queueControlAccess = dashboardAuthAccess(shellAuthSummary.value, 'admin')
+  const queueControlAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   // Stable action object so the memoized ChatMessageBubble's shallow prop
   // compare can skip unchanged messages — an inline `{ ...onClick }` literal
   // would be a new reference each render and defeat the memo.

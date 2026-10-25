@@ -20,6 +20,7 @@ import {
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperChatOperation,
+  listQueuedKeeperChatOperations,
   editQueuedKeeperChatOperation,
   fetchKeeperChatHistory,
   fetchKeeperChatHistoryPage,
@@ -643,6 +644,64 @@ describe('fetchKeeperChatOperation', () => {
       '/api/v1/keepers/sangsu/chat/operations/kmsg-restart-1',
       expect.any(Object),
     )
+  })
+})
+
+describe('listQueuedKeeperChatOperations', () => {
+  const row = (sequence: string, operationId = `kmsg-${sequence}`) => ({
+    schema: 'masc.keeper_chat_operation.v1', operation_id: operationId,
+    sequence, created_at: 42, source: {}, state: 'Queued',
+    input: { schema: 'masc.keeper_chat_operation.input.v1', message: `pending ${sequence}`,
+      user_blocks: [{ type: 'text', text: `pending ${sequence}` }],
+      turn_instructions: null, surface_context: null, attachments: [] },
+  })
+  const page = (operations: ReturnType<typeof row>[]) => new Response(JSON.stringify({
+    schema: 'masc.keeper_chat_operations.list.v1', state: 'Queued', operations,
+  }), { status: 200 })
+
+  it('reconstructs every page beyond the server 100-row boundary from a fresh client', async () => {
+    const first = Array.from({ length: 100 }, (_, i) => row(String(i + 1)))
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(page(first))
+      .mockResolvedValueOnce(page([row('101')]))
+      .mockResolvedValueOnce(page([]))
+    vi.stubGlobal('fetch', fetchMock)
+    const operations = await listQueuedKeeperChatOperations('echo')
+    expect(operations).toHaveLength(101)
+    expect(operations.at(-1)?.input?.message).toBe('pending 101')
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/keepers/echo/chat/operations?state=queued',
+      '/api/v1/keepers/echo/chat/operations?state=queued&after_sequence=100',
+      '/api/v1/keepers/echo/chat/operations?state=queued&after_sequence=101',
+    ])
+  })
+
+  it('preserves int64 cursor precision and keeps a moved operation once at its new position', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(page([row('9007199254740992', 'moved'), row('9007199254740993')]))
+      .mockResolvedValueOnce(page([row('9007199254740994', 'moved')]))
+      .mockResolvedValueOnce(page([]))
+    vi.stubGlobal('fetch', fetchMock)
+    const operations = await listQueuedKeeperChatOperations('echo')
+    expect(operations.map(operation => operation.sequence)).toEqual(['9007199254740993', '9007199254740994'])
+    expect(fetchMock.mock.calls[1][0]).toContain('after_sequence=9007199254740993')
+  })
+
+  it('rejects a nonadvancing page instead of looping or publishing partial results', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(page([row('7')]))
+      .mockResolvedValueOnce(page([row('7')]))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(listQueuedKeeperChatOperations('echo')).rejects.toThrow('sequence')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not publish a truncated queue when a later page fails', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(page([row('7')]))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'store unavailable' }), { status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(listQueuedKeeperChatOperations('echo')).rejects.toThrow()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
 

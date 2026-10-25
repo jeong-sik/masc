@@ -120,10 +120,12 @@ class OperatorTests(unittest.TestCase):
     def test_optional_metadata_never_changes_the_actual_token_request_authority(self):
         begun = self.call("connect")
         captured = []
+        timeouts = []
 
         class Opener:
-            def open(_, request):
+            def open(_, request, *, timeout):
                 captured.append(request)
+                timeouts.append(timeout)
                 return io.BytesIO(json.dumps({"access_token": "ACCESS_MARKER", "refresh_token": "REFRESH_MARKER",
                                               "token_type": "Bearer", "expires_in": 900}).encode())
 
@@ -133,6 +135,7 @@ class OperatorTests(unittest.TestCase):
                 ("iss", "https://issuer.example/tenant"), ("base_url", "https://metadata.example:8443")]))
         self.assertEqual(self.connector.status()["phase"], "connected")
         self.assertEqual(len(captured), 1)
+        self.assertEqual(timeouts, [oauth.OAUTH_SOCKET_TIMEOUT_S])
         self.assertEqual(captured[0].full_url, oauth.API_ORIGIN + "/v1/oauth/token")
         self.assertEqual(captured[0].get_method(), "POST")
         self.assertTrue(captured[0].get_header("Authorization").startswith("Basic "))

@@ -282,7 +282,8 @@ let wire_json_of_schema schema =
     match Wire_schema_cache.find_opt wire_schema_cache schema with
     | Some cached -> cached
     | None ->
-      Wire_schema_cache.clean wire_schema_cache;
+      (* [add] cleans dead bindings during automatic resizing. Sweeping here
+         would rebuild every live bucket on each miss under the mutex. *)
       let json = wire_json_of_schema_uncached schema in
       Wire_schema_cache.add wire_schema_cache schema json;
       json)

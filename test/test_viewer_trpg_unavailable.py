@@ -86,9 +86,10 @@ function inspect() {
     };
     document.querySelector('[data-mode="monitor"]').click();
   }
-  if (rejected && document.body.className === 'mode-monitor') {
+  if (rejected && document.body.className === 'mode-monitor' && document.querySelector('#monitor-panel')?.classList.contains('active')) {
     const result = {...rejected,
       recoveredMode: document.body.className,
+      recoveredPanelActive: document.querySelector('#monitor-panel').classList.contains('active'),
       unavailableCleared: !document.body.hasAttribute('data-mode-unavailable'),
       noticeHiddenAfterRecovery: document.querySelector('#mode-unavailable').hidden,
       requestedAfterRecovery: [...requested],
@@ -165,7 +166,7 @@ window.dispatchEvent(new Event('TrunkApplicationStarted'));
                 assert observed["modeQuery"] == ("trpg" if case == "query" else None), observed
                 assert observed["storage"] == ("trpg" if case == "storage" else None), observed
                 assert not any("/api/v1/trpg/" in url for url in observed["requested"]), observed
-                assert observed["recoveredMode"] == "mode-monitor", observed
+                assert observed["recoveredMode"] == "mode-monitor" and observed["recoveredPanelActive"], observed
                 assert observed["unavailableCleared"] and observed["noticeHiddenAfterRecovery"], observed
                 assert not any("/api/v1/trpg/" in url for url in observed["requestedAfterRecovery"]), observed
                 receipts.append(observed)

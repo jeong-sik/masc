@@ -92,7 +92,9 @@ pub enum ModeUnavailable {
 
 impl ModeUnavailable {
     pub fn code(self) -> &'static str {
-        match self { Self::TrpgProducerAbsent => "trpg_producer_absent" }
+        match self {
+            Self::TrpgProducerAbsent => "trpg_producer_absent",
+        }
     }
 
     pub fn message(self) -> &'static str {
@@ -105,7 +107,9 @@ impl ModeUnavailable {
 fn admit_mode(mode: ViewerMode) -> Result<ViewerMode, ModeUnavailable> {
     match mode {
         ViewerMode::Trpg => Err(ModeUnavailable::TrpgProducerAbsent),
-        ViewerMode::Home | ViewerMode::Monitor | ViewerMode::Social | ViewerMode::Experiment => Ok(mode),
+        ViewerMode::Home | ViewerMode::Monitor | ViewerMode::Social | ViewerMode::Experiment => {
+            Ok(mode)
+        }
     }
 }
 

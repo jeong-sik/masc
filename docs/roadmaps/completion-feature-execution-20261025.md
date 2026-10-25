@@ -1,6 +1,9 @@
 # Research-backed completion features
 
-Status: implementation plan; no product improvement measurement is claimed.
+Status: plan and work records published; the first feature's controlled
+[execution evidence](../evidence/goal-original-body-isolation-20261025.md) records
+the reproduced failure and passing repair. No broader completion-rate improvement
+is claimed.
 Source census: `6505bd4fedb7e78121fda9a2195ced0a03f2c629`, 2026-10-25.
 
 The requested outcome is a product that finishes the user's original work,

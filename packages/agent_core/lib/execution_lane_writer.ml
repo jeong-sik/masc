@@ -98,6 +98,7 @@ type page =
   ; next_cursor : Journal.cursor
   ; high_watermark : Journal.cursor
   ; has_more : bool
+  ; snapshot : Journal.snapshot
   }
 
 type 'a ticket =
@@ -937,6 +938,7 @@ let read_page writer ~after ?through ~limit () =
         ; next_cursor = page.next_cursor
         ; high_watermark = page.high_watermark
         ; has_more = page.has_more
+        ; snapshot = page.snapshot
         }
     | Error error -> Error (Journal_read_failed error))
 ;;

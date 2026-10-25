@@ -980,7 +980,7 @@ let execute_scheduled_tool
     | Some callback -> callback ~invocation ~tool_name ~input
     | None -> ()
   in
-  let begin_effect ~tool_name ~input =
+  let begin_effect ~publish_event_bus ~tool_name ~input =
     let pending =
       find_and_execute_tool_with_index
         ~context
@@ -992,7 +992,7 @@ let execute_scheduled_tool
         ?correlation_id
         ?run_id
         ?on_hook_invoked
-        ~publish_event_bus:true
+        ~publish_event_bus
         ~invocation
         ?prepared_call:tool_use.prepared_call
         tool_name
@@ -1024,11 +1024,13 @@ let execute_scheduled_tool
       Execution_agent_scope.execute_phased
         durable_invocation
         ~invoke:(fun ~start_child ~tool_name ~input ->
+          Execution_context.flush_tool_observations ();
           observe_before_completion (fun () -> observe_started ~tool_name ~input);
           Execution_context.with_child_scope_factory start_child (fun () ->
-            let pending = begin_effect ~tool_name ~input in
+            let pending = begin_effect ~publish_event_bus:false ~tool_name ~input in
             ( (pending.result.content, pending.result.content_blocks, pending.result.outcome)
             , fun () ->
+                Execution_context.flush_tool_observations ();
                 let (_ : tool_dispatch) = finish_effect pending ~tool_name in
                 () )))
     with
@@ -1042,6 +1044,7 @@ let execute_scheduled_tool
       raise Abort_tool_dispatch
     | Ok (Execution_agent_scope.Executed (result, _, _))
     | Ok (Execution_agent_scope.Replayed result) ->
+      Execution_context.flush_tool_observations ();
       let dispatch =
         match !completed_dispatch with
         | Some dispatch -> dispatch
@@ -1163,7 +1166,7 @@ let execute_scheduled_tool
                  | Ok durable_invocation -> execute_durable durable_invocation)
               | None ->
                 observe_before_completion (fun () -> observe_started ~tool_name:name ~input);
-                let pending = begin_effect ~tool_name:name ~input in
+                let pending = begin_effect ~publish_event_bus:true ~tool_name:name ~input in
                 finish_effect pending ~tool_name:name)
 
           in

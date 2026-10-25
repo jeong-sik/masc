@@ -274,7 +274,7 @@ let run_with_execution_scope ~sw ?execution_store agent run =
             (Error.Internal
                ("durable child scope: " ^ Execution_agent_scope.error_to_string error)))
      | Ok execution_scope ->
-       Agent_execution_runner.with_scope execution_scope (fun () -> run ~sw))
+       Agent_execution_runner.with_scope ~event_bus:agent.options.event_bus execution_scope (fun () -> run ~sw))
   | Some _, Some _ ->
     Error
       (detailed_error_of_core_error

@@ -237,7 +237,7 @@ type page =
 type validated_snapshot =
   { durable : Durable.snapshot
   ; reducer : Journal.Reducer.t
-  ; events : event Sequence_map.t
+  ; events : Event.t Sequence_map.t
   }
 
 type refresh_outcome = (validated_snapshot, error) result option
@@ -523,7 +523,7 @@ let validate_snapshot ~locator_run_id ?previous (durable : Durable.snapshot) =
       (match Journal.Reducer.apply reducer value with
        | Ok reducer ->
          let seq = Event.seq value in
-         reduce reducer (Sequence_map.add seq (event value) events) rest
+         reduce reducer (Sequence_map.add seq value events) rest
        | Error violation ->
          Error
            (Semantic_failure
@@ -832,7 +832,15 @@ let events_slice events ~first_seq ~count =
   collect first_seq count []
 ;;
 
-let read_page t ~after ?through ~limit () =
+type source_page =
+  { source_events:Event.t list
+  ; source_next:cursor
+  ; source_high:cursor
+  ; source_more:bool
+  ; source_snapshot:validated_snapshot
+  }
+
+let read_source_page t ~after ?through ~limit () =
   if limit <= 0
   then Error (Invalid_limit limit)
   else if not (cursor_matches t.scope_id after)
@@ -870,9 +878,44 @@ let read_page t ~after ?through ~limit () =
       let count = min limit (high_watermark - after.seq) in
       let next_seq = after.seq + count in
       let+ events = events_slice snapshot.events ~first_seq:(after.seq + 1) ~count in
-      { events
-      ; next_cursor = { scope_id = t.scope_id; seq = next_seq }
-      ; high_watermark = { scope_id = t.scope_id; seq = high_watermark }
-      ; has_more = next_seq < high_watermark
+      { source_events=events
+      ; source_next={scope_id=t.scope_id;seq=next_seq}
+      ; source_high={scope_id=t.scope_id;seq=high_watermark}
+      ; source_more=next_seq < high_watermark
+      ; source_snapshot=snapshot
       })
 ;;
+
+let read_page t ~after ?through ~limit () =
+  let+ page=read_source_page t ~after ?through ~limit () in
+  { events=List.map event page.source_events
+  ; next_cursor=page.source_next
+  ; high_watermark=page.source_high
+  ; has_more=page.source_more
+  }
+
+type tool_observation = {event:Event_bus.event;through:cursor}
+type tool_observation_page =
+  {observations:tool_observation list;next_cursor:cursor;high_watermark:cursor;has_more:bool}
+
+let read_tool_observations t ?run ~after ?through ~limit () =
+  let* page=read_source_page t ~after ?through ~limit () in
+  let* ()=match run with
+    | None -> Ok ()
+    | Some run -> match Journal.Reducer.find_run page.source_snapshot.reducer run with
+      | Some _ -> Ok () | None -> Error (Locator_not_found run) in
+  let rec project acc = function
+    | [] -> Ok (List.rev acc)
+    | source::rest ->
+      if Option.fold ~none:false ~some:(fun run -> not (Event.Run_id.equal run (Event.run_id source))) run
+      then project acc rest
+      else
+        let* observation=Execution_tool_observation.project
+            ~find_node:(Journal.Reducer.find_node page.source_snapshot.reducer) source
+            |> Result.map_error (fun error -> Semantic_failure
+              {seq=Event.seq source;detail=Execution_tool_observation.error_to_string error}) in
+        match observation with
+        | None -> project acc rest
+        | Some event -> project ({event;through={scope_id=t.scope_id;seq=Event.seq source}}::acc) rest in
+  let+ observations=project [] page.source_events in
+  { observations;next_cursor=page.source_next;high_watermark=page.source_high;has_more=page.source_more }

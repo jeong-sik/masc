@@ -180,6 +180,144 @@ let test_an_unwritable_store_root_fails_the_export_not_the_dispatch () =
     (String_util.contains_substring said "Not a directory")
 ;;
 
+let with_materialization f =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> remove_tree base) @@ fun () ->
+  let expected = "binary\000\255payload" in
+  let blob = Tool_blob_store.put_durable
+      (Tool_blob_store.create ~base_path:base) ~bytes:expected ~mime:"application/octet-stream" in
+  let artifact = match Masc.Keeper_peer_artifact_ref.make ~blob ~filename:"proof.bin" ~purpose:"handoff" with
+    | Ok reference -> reference | Error detail -> Alcotest.fail detail in
+  let state = ref (Error (Masc.Keeper_sandbox_read_backend.Missing_file "absent")) in
+  let reads = ref 0 and writes = ref 0 in
+  let read ~max_bytes =
+    incr reads;
+    Alcotest.(check int) "observe one byte beyond expected size" (String.length expected + 1) max_bytes;
+    Result.map (fun bytes -> String.sub bytes 0 (min (String.length bytes) max_bytes)) !state in
+  let invoke write = Keeper_peer_artifact.materialize ~artifact ~path:"proof.bin"
+      ~fetch:(fun () -> Ok expected) ~read ~write:(fun () -> incr writes; write ()) in
+  f ~expected ~state ~reads ~writes ~invoke
+;;
+
+let completed result =
+  match result.Keeper_tool_execution.disposition with
+  | Tool_result.Completed () -> ()
+  | Tool_result.Deferred () | Tool_result.Failed _ -> Alcotest.fail result.raw_output
+;;
+
+let test_materialize_verifies_recipient_and_repeat_does_not_write () =
+  with_materialization @@ fun ~expected ~state ~reads:_ ~writes ~invoke ->
+  let write () = state := Ok expected; Keeper_tool_execution.success_data (`Assoc ["ok", `Bool true]) in
+  completed (invoke write);
+  completed (invoke write);
+  Alcotest.(check int) "one write, verified repeat only reads" 1 !writes
+;;
+
+let test_materialize_does_not_accept_a_matching_prefix () =
+  with_materialization @@ fun ~expected ~state ~reads:_ ~writes ~invoke ->
+  state := Ok (expected ^ "extra");
+  completed (invoke (fun () -> state := Ok expected; Keeper_tool_execution.success "written"));
+  Alcotest.(check int) "longer target must be replaced" 1 !writes
+;;
+
+let test_materialize_recovers_lost_write_response_without_replay () =
+  with_materialization @@ fun ~expected ~state ~reads ~writes ~invoke ->
+  let result = invoke (fun () ->
+    state := Ok expected;
+    Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure "response lost") in
+  completed result;
+  Alcotest.(check int) "uncertain write is never replayed" 1 !writes;
+  Alcotest.(check int) "read reconciles the uncertain result" 2 !reads;
+  Alcotest.(check bool) "completion is verified" true
+    Yojson.Safe.Util.(member "verified" (Option.get result.data) |> to_bool);
+  Alcotest.(check bool) "recovery is explicit" true
+    Yojson.Safe.Util.(member "recovered" (Option.get result.data) |> to_bool)
+;;
+
+let test_materialize_does_not_trust_success_without_bytes () =
+  with_materialization @@ fun ~expected:_ ~state ~reads:_ ~writes ~invoke ->
+  let result = invoke (fun () -> state := Ok "partial"; Keeper_tool_execution.success "written") in
+  Alcotest.(check bool) "mismatching write is not completion" true
+    (result.disposition = Tool_result.Failed Tool_result.Runtime_failure);
+  Alcotest.(check bool) "write effect remains recorded" true
+    (result.failure_effect_disposition = Tool_result.Proven_post_effect);
+  Alcotest.(check int) "no blind corrective write" 1 !writes
+;;
+
+let test_materialize_preserves_gate_deferral () =
+  with_materialization @@ fun ~expected ~state ~reads ~writes:_ ~invoke ->
+  let deferred = Keeper_tool_execution.deferred_external_effect_data ~approval_id:"exact-approval" (`Assoc []) in
+  let result = invoke (fun () -> state := Ok expected; deferred) in
+  Alcotest.(check bool) "Gate receipt is unchanged" true (result == deferred);
+  Alcotest.(check int) "no post-read turns a Gate decision into success" 1 !reads
+;;
+
+let test_materialize_preserves_pre_effect_failure () =
+  with_materialization @@ fun ~expected ~state ~reads ~writes:_ ~invoke ->
+  let refused = Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Proven_pre_effect "writer refused before mutation" in
+  let result = invoke (fun () -> state := Ok expected; refused) in
+  Alcotest.(check bool) "producer phase remains authoritative" true (result == refused);
+  Alcotest.(check int) "no readback after pre-effect failure" 1 !reads
+;;
+
+let test_materialize_transport_failure_does_not_launch_write () =
+  with_materialization @@ fun ~expected:_ ~state ~reads:_ ~writes ~invoke ->
+  state := Error (Masc.Keeper_sandbox_read_backend.Read_failed "guest unavailable");
+  let result = invoke (fun () -> Alcotest.fail "must not write on unknown target state") in
+  Alcotest.(check int) "no write" 0 !writes;
+  Alcotest.(check bool) "not classified as missing" true
+    (result.disposition = Tool_result.Failed Tool_result.Runtime_failure);
+  Alcotest.(check bool) "this call did not mutate" true
+    (result.failure_effect_disposition = Tool_result.Proven_pre_effect)
+;;
+
+let test_materialize_verification_loss_does_not_repeat_effect () =
+  with_materialization @@ fun ~expected:_ ~state ~reads:_ ~writes ~invoke ->
+  let result = invoke (fun () ->
+    state := Error (Masc.Keeper_sandbox_read_backend.Read_failed "read response lost");
+    Keeper_tool_execution.success "written") in
+  Alcotest.(check bool) "unverified result remains failure" true
+    (result.disposition = Tool_result.Failed Tool_result.Runtime_failure);
+  Alcotest.(check bool) "completed write phase retained" true
+    (result.failure_effect_disposition = Tool_result.Proven_post_effect);
+  Alcotest.(check int) "no write replay" 1 !writes
+;;
+
+let test_materialize_preserves_original_writer_evidence () =
+  List.iter (fun recover ->
+    with_materialization @@ fun ~expected ~state ~reads:_ ~writes:_ ~invoke ->
+    let root = match Tool_output.make_artifact_ref ~sha256:(String.make 64 'b')
+        ~bytes:3 ~preview:"prior" ~mime:"text/plain" with
+      | Ok reference -> reference
+      | Error error -> Alcotest.fail (Tool_output.make_error_to_string error) in
+    let data_root = match Tool_output.make_artifact_ref ~sha256:(String.make 64 'c')
+        ~bytes:5 ~preview:"after" ~mime:"text/plain" with
+      | Ok reference -> reference
+      | Error error -> Alcotest.fail (Tool_output.make_error_to_string error) in
+    let metadata = `Assoc ["gate", `String "authorized-original-write"] in
+    let data = `Assoc ["snapshot", Tool_output.normalized_artifact_ref_to_json data_root] in
+    let original = (if recover then
+        Keeper_tool_execution.failure_data ~class_:Tool_result.Runtime_failure
+          ~metadata ~message:"write response lost" data
+      else Keeper_tool_execution.success_data ~metadata data
+        |> Keeper_tool_execution.with_file_change_evidence (Masc.Keeper_file_change_evidence.written expected))
+      |> Keeper_tool_execution.with_retained_artifacts [root] in
+    let result = invoke (fun () -> state := Ok (if recover then expected else "partial"); original) in
+    Alcotest.(check bool) "original authorization metadata retained" true (result.metadata = Some metadata);
+    Alcotest.(check bool) "original private roots retained" true (List.mem root result.retained_artifacts);
+    let actual = match result.data with Some data -> data | None -> Alcotest.fail "lost typed result" in
+    Alcotest.(check bool) "original typed data retained" true
+      (Yojson.Safe.Util.member "write_result" actual = data);
+    Alcotest.(check bool) "roots carried only by original typed data remain discoverable" true
+      (List.mem data_root (Tool_output.normalized_artifact_refs_in_json actual));
+    if recover then completed result
+    else Alcotest.(check bool) "completed write line evidence survives failed verification" true
+      (Yojson.Safe.Util.member "write_evidence" actual =
+       Masc.Keeper_file_change_evidence.to_yojson (Masc.Keeper_file_change_evidence.written expected)))
+    [false; true]
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -197,6 +335,17 @@ let () =
             test_an_oversize_export_is_refused_rather_than_shortened
         ; Alcotest.test_case "an unwritable store root fails the export" `Quick
             test_an_unwritable_store_root_fails_the_export_not_the_dispatch
+        ] )
+    ; ( "recipient reconciliation"
+      , [ Alcotest.test_case "verified repeat writes once" `Quick test_materialize_verifies_recipient_and_repeat_does_not_write
+        ; Alcotest.test_case "matching prefix is not whole artifact" `Quick test_materialize_does_not_accept_a_matching_prefix
+        ; Alcotest.test_case "lost response recovers without replay" `Quick test_materialize_recovers_lost_write_response_without_replay
+        ; Alcotest.test_case "writer success requires recipient bytes" `Quick test_materialize_does_not_trust_success_without_bytes
+        ; Alcotest.test_case "Gate deferral remains authoritative" `Quick test_materialize_preserves_gate_deferral
+        ; Alcotest.test_case "pre-effect failure remains authoritative" `Quick test_materialize_preserves_pre_effect_failure
+        ; Alcotest.test_case "transport fault is not missing target" `Quick test_materialize_transport_failure_does_not_launch_write
+        ; Alcotest.test_case "verification loss never replays write" `Quick test_materialize_verification_loss_does_not_repeat_effect
+        ; Alcotest.test_case "writer authorization and artifact evidence survive reconciliation" `Quick test_materialize_preserves_original_writer_evidence
         ] )
     ]
 ;;

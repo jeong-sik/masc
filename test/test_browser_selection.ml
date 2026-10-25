@@ -52,6 +52,22 @@ let test_explicit_binding () =
   selected {route=Lane.Live_route None;reason=Selection.Explicit_browser}
     (Selection.choose ~verb:Lane.Tabs_list ~bound:false ~snapshot:empty unnamed)
 
+let test_native_workflow_binding () =
+  let workflow = match Lane.Native_workflow.of_json (`Assoc ["tabId",`Int 7;
+    "expectedUrl",`String "https://example.org";"steps",`List [];"maxChars",`Int 1000]) with
+    | Ok workflow -> workflow | Error detail -> fail detail in
+  let verb=Lane.Page_native_workflow workflow in
+  let first=client "1" Lane.Ego_task_space and second=client "2" Lane.Ego_task_space in
+  let snapshot={empty with live_clients=[first;second]} in
+  let bound=Selection.bound verb in
+  check bool "a workflow's tab requires its original browser" true bound;
+  List.iter (fun preference ->
+    check bool "observed clients cannot supply a missing workflow browser identity" true
+      (Selection.choose ~verb ~bound ~snapshot preference=Error Selection.Binding_required))
+    [Selection.Automatic;Selection.Exact (Lane.Live_route None)];
+  selected {route=route second;reason=Selection.Explicit_browser}
+    (Selection.choose ~verb ~bound ~snapshot (Selection.Exact (route second)))
+
 let test_work_lifecycle () =
   let open_=Lane.Session_open {headless=None} in
   selected {route=Lane.Stagehand_route;reason=Selection.Preferred_work_browser} (choose ~verb:open_ empty);
@@ -163,6 +179,7 @@ let test_target_from_snapshot () =
 let () = run "browser selection" ["policy",[
   test_case "connected login and actual owned sessions" `Quick test_connections_and_sessions;
   test_case "exact browser binding" `Quick test_explicit_binding;
+  test_case "native workflow retains its original browser" `Quick test_native_workflow_binding;
   test_case "work session lifecycle" `Quick test_work_lifecycle;
   test_case "capability and activity eligibility" `Quick test_eligibility;
   test_case "inactive owned session inspection and cleanup" `Quick test_inactive_session_cleanup;

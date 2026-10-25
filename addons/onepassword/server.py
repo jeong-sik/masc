@@ -16,6 +16,8 @@ from protocol import INPUT_SCHEMA, OUTPUT_SCHEMA, InvalidInput, decode_json, enc
 
 
 EMPTY = {"type": "object", "properties": {}, "additionalProperties": False}
+COMPANION_SCHEMA = {"type": "object", "properties": {"version": {"type": "integer", "enum": [2]}},
+                    "required": ["version"], "additionalProperties": False}
 PHASES = ["not_configured", "unavailable", *(phase.value for phase in Phase)]
 STATUS_SCHEMA = {"type": "object", "additionalProperties": False,
                  "properties": {"phase": {"type": "string", "enum": PHASES},
@@ -264,7 +266,7 @@ def serve(worker):
                                         {"name": "lane_operator", "description": "Private authenticated operator controls.",
                                          "inputSchema": OPERATOR_SCHEMA},
                                         {"name": "lane_companion", "description": "Private host companion protocol negotiation.",
-                                         "inputSchema": EMPTY}]}
+                                         "inputSchema": COMPANION_SCHEMA}]}
                 case "tools/call":
                     try:
                         match params.get("name"):
@@ -275,11 +277,12 @@ def serve(worker):
                             case "lane_operator":
                                 value = worker.operator(params.get("arguments"))
                             case "lane_companion":
-                                if params.get("arguments") != {}:
+                                if (params.get("arguments") != {"version": 2}
+                                        or type(params["arguments"]["version"]) is not int):
                                     raise InvalidInput("invalid private companion handshake")
                                 # Login exports opt in when their lifecycle is
                                 # connected. Safe status never receives a grant.
-                                value = {"version": 1, "tools": []}
+                                value = {"version": 2, "tools": []}
                             case _:
                                 raise InvalidInput("use the host-admitted exported tool")
                         result = (tool_result(value) if params.get("name") not in {"lane_operator", "lane_companion"} else

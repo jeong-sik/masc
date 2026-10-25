@@ -2412,7 +2412,7 @@ let invoke_companion_export ~sw m ~access ~principal e original invoke =
                let companion={Lane_addon_worker_protocol.context;
                  admit=(fun () -> Result.is_ok (confirm_companion_owner m ~access ~principal e original configuration))} in
                try let result=invoke companion in
-                 (match result with Ok result when result.Mcp_protocol.Mcp_types.is_error<>Some true -> ()
+                 (match result with Ok result when result.Mcp_protocol.Mcp_types.is_error<>Some true -> C.accept grant
                   | Ok _|Error _ -> C.cancel grant);result
                with
                | Eio.Cancel.Cancelled _ as exn -> C.cancel grant;raise exn

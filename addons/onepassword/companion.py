@@ -1,9 +1,10 @@
-"""Private, single-connection host bridge. Never a model tool or secret store.
+"""Private original-operation bridge and credentialless grant disposal.
 
 The host supplies the endpoint in its private invocation context. This module
-never discovers a replacement endpoint, reconnects, retries or logs a payload.
+never discovers a replacement endpoint, replays Browser work or logs a payload.
 Construct the handle before calling bind so the login job can cancel even while
-the original handshake is blocked. Release on normal completion; cancel on abort.
+the original handshake is blocked. Withdraw cancels the original IO and disposes
+its nonce on a separate socket. Close permanently seals both socket admissions.
 """
 from __future__ import annotations
 
@@ -87,14 +88,19 @@ class _Phase(Enum):
     BINDING = auto()
     BOUND = auto()
     CANCELLED = auto()
+    CLOSED = auto()
 
 
 class Companion:
     def __init__(self, descriptor):
         self._endpoint = Endpoint.decode(descriptor)
         self._io_lock, self._state_lock = threading.Lock(), threading.Lock()
+        self._withdraw_lock = threading.Lock()
         self._phase = _Phase.NEW
         self._socket = None
+        self._withdraw_socket = None
+        self._withdrawn = False
+        self._cancel_epoch = 0
         self._operation_id = None
         self._tab_id = None
 
@@ -121,7 +127,7 @@ class Companion:
         try:
             flow.connect(self._endpoint.socket_path)
         except OSError:
-            self.cancel()
+            self.interrupt()
             raise BridgeError("unavailable") from None
         try:
             bound = self._exchange({"invocation_id": self._endpoint.invocation_id,
@@ -135,7 +141,7 @@ class Companion:
                 self._operation_id = operation_id
                 self._phase = _Phase.BOUND
         except (BridgeError, ValueError, TypeError, KeyError, AttributeError):
-            self.cancel()
+            self.interrupt()
             raise BridgeError("outcome_unknown") from None
 
     @property
@@ -143,13 +149,11 @@ class Companion:
         with self._state_lock:
             return self._operation_id
 
-    def cancel(self):
-        # Independent of the I/O lock: cancellation must interrupt a blocked
-        # recv and wake the host's original-operation disconnect watcher.
-        with self._state_lock:
-            self._phase = _Phase.CANCELLED
-            flow, self._socket = self._socket, None
-        if flow is not None:
+    @staticmethod
+    def _close_flows(*flows):
+        for flow in flows:
+            if flow is None:
+                continue
             try:
                 flow.shutdown(socket.SHUT_RDWR)
             except OSError:
@@ -159,14 +163,112 @@ class Companion:
             except OSError:
                 pass
 
+    def interrupt(self):
+        """Stop original bind/command IO while preserving nonce disposal IO."""
+        # An original call's late error handler must not cancel an independent
+        # disposal request that already interrupted that original socket.
+        with self._state_lock:
+            if self._phase is not _Phase.CLOSED:
+                self._phase = _Phase.CANCELLED
+            flow, self._socket = self._socket, None
+        self._close_flows(flow)
+
+    def cancel(self):
+        """Interrupt original and active disposal IO without either IO lock."""
+        with self._state_lock:
+            if self._phase is not _Phase.CLOSED:
+                self._phase = _Phase.CANCELLED
+            self._cancel_epoch += 1
+            flow, self._socket = self._socket, None
+            withdrawal, self._withdraw_socket = self._withdraw_socket, None
+        self._close_flows(flow, withdrawal)
+
+    def close(self):
+        """Permanently seal this handle before closing either original socket."""
+        with self._state_lock:
+            self._phase = _Phase.CLOSED
+            self._cancel_epoch += 1
+            flow, self._socket = self._socket, None
+            withdrawal, self._withdraw_socket = self._withdraw_socket, None
+        self._close_flows(flow, withdrawal)
+
+    def _encode(self, value):
+        try:
+            raw = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        except (ValueError, TypeError, UnicodeError, RecursionError):
+            raise BridgeError("not_started") from None
+        if len(raw) > self._endpoint.max_message_bytes:
+            raise BridgeError("not_started")
+        return raw
+
+    def _roundtrip(self, flow, raw):
+        # A partial send is uncertain; this method never reconnects or retries.
+        flow.sendall(raw + b"\n")
+        reply = bytearray()
+        while b"\n" not in reply:
+            chunk = flow.recv(min(4096, self._endpoint.max_message_bytes + 2 - len(reply)))
+            if not chunk:
+                raise ValueError("departed host")
+            reply.extend(chunk)
+            if len(reply) > self._endpoint.max_message_bytes + 1:
+                raise ValueError("oversized reply")
+        line, trailing = bytes(reply).split(b"\n", 1)
+        if trailing:
+            raise ValueError("unexpected pipelined reply")
+        return json.loads(line.decode("utf-8"), object_pairs_hook=_object,
+                          parse_constant=_constant, parse_float=_finite_float)
+
+    def withdraw(self):
+        """Dispose only the original nonce; retry an unknown result explicitly.
+
+        A strict acknowledged withdrawal is cached, including after close.
+        Cancellation interrupts this attempt; a later explicit call may dispose
+        the nonce again. A sealed, unacknowledged handle cannot create a socket.
+        """
+        with self._state_lock:
+            if self._withdrawn:
+                return
+            if self._phase is _Phase.CLOSED:
+                raise BridgeError("not_started")
+            epoch = self._cancel_epoch
+        with self._withdraw_lock:
+            with self._state_lock:
+                if self._withdrawn:
+                    return
+                if self._phase is _Phase.CLOSED or epoch != self._cancel_epoch:
+                    raise BridgeError("not_started")
+            self.interrupt()
+            raw = self._encode({"invocation_id": self._endpoint.invocation_id, "withdraw": True})
+            with self._state_lock:
+                if self._phase is _Phase.CLOSED or epoch != self._cancel_epoch:
+                    raise BridgeError("not_started")
+                try:
+                    flow = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                except OSError:
+                    raise BridgeError("outcome_unknown") from None
+                # Close/cancel must see this socket before connect can block.
+                self._withdraw_socket = flow
+            try:
+                flow.connect(self._endpoint.socket_path)
+                result = self._roundtrip(flow, raw)
+                if not isinstance(result, dict) or set(result) != {"withdrawn"} or result["withdrawn"] is not True:
+                    raise ValueError("invalid withdrawal acknowledgement")
+                with self._state_lock:
+                    if (self._phase is _Phase.CLOSED or epoch != self._cancel_epoch
+                            or self._withdraw_socket is not flow):
+                        raise ValueError("cancelled withdrawal")
+                    self._withdrawn = True
+            except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
+                raise BridgeError("outcome_unknown") from None
+            finally:
+                with self._state_lock:
+                    if self._withdraw_socket is flow:
+                        self._withdraw_socket = None
+                self._close_flows(flow)
+
     def _exchange(self, value, *, binding):
         with self._io_lock:
-            try:
-                raw = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
-            except (ValueError, TypeError, UnicodeError, RecursionError):
-                raise BridgeError("not_started") from None
-            if len(raw) > self._endpoint.max_message_bytes:
-                raise BridgeError("not_started")
+            raw = self._encode(value)
             with self._state_lock:
                 expected = _Phase.BINDING if binding else _Phase.BOUND
                 if self._phase is not expected:
@@ -175,26 +277,12 @@ class Companion:
             if flow is None:
                 raise BridgeError("not_started")
             try:
-                # A partial send has an uncertain outcome. There is no retry.
-                flow.sendall(raw + b"\n")
-                reply = bytearray()
-                while b"\n" not in reply:
-                    chunk = flow.recv(min(4096, self._endpoint.max_message_bytes + 2 - len(reply)))
-                    if not chunk:
-                        raise ValueError("departed host")
-                    reply.extend(chunk)
-                    if len(reply) > self._endpoint.max_message_bytes + 1:
-                        raise ValueError("oversized reply")
-                line, trailing = bytes(reply).split(b"\n", 1)
-                if trailing:
-                    raise ValueError("unexpected pipelined reply")
-                result = json.loads(line.decode("utf-8"), object_pairs_hook=_object,
-                                    parse_constant=_constant, parse_float=_finite_float)
+                result = self._roundtrip(flow, raw)
                 if isinstance(result, dict) and set(result) == {"error"}:
                     error = result["error"]
                     if error not in ("unavailable", "not_started", "outcome_unknown"):
                         error = "outcome_unknown"
-                    self.cancel()
+                    self.interrupt()
                     raise BridgeError(error)
                 with self._state_lock:
                     if self._phase is not expected or self._socket is not flow:
@@ -203,7 +291,7 @@ class Companion:
             except BridgeError:
                 raise
             except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
-                self.cancel()
+                self.interrupt()
                 raise BridgeError("outcome_unknown") from None
 
     def _command(self, command):
@@ -213,7 +301,7 @@ class Companion:
             operation_id = self._operation_id
         result = self._exchange({**command, "operation_id": operation_id}, binding=False)
         if not isinstance(result, dict) or set(result) != {"value"} or not isinstance(result["value"], dict):
-            self.cancel()
+            self.interrupt()
             raise BridgeError("outcome_unknown")
         return result["value"]
 
@@ -225,7 +313,7 @@ class Companion:
         result = self._command({"kind": "prepare", "tab_id": tab_id, "extension_id": extension_id,
                                 "directory": directory, "program": program, "arguments": arguments})
         if set(result) != {"prepared"} or result["prepared"] is not True:
-            self.cancel()
+            self.interrupt()
             raise BridgeError("outcome_unknown")
 
     def invoke(self, *, program, arguments):
@@ -234,6 +322,6 @@ class Companion:
     def release(self):
         result = self._command({"kind": "release"})
         if set(result) != {"released"} or result["released"] is not True:
-            self.cancel()
+            self.interrupt()
             raise BridgeError("outcome_unknown")
-        self.cancel()
+        self.interrupt()

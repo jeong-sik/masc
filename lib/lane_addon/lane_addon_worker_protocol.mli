@@ -42,8 +42,9 @@ val action_schema : t -> Yojson.Safe.t option
 type operator_error = Operator_unavailable | Operator_rejected | Operator_outcome_unknown
 val operator_schema : t -> Yojson.Safe.t option
 val companion_tools : t -> string list
-(** Ready-only negotiated export names. The private handshake is exact, optional
-    and requires host-context invocation. No grant is given to other tools. *)
+(** Ready-only negotiated export names. The optional version-2 handshake requires
+    host context and supports binding after a validated public reply. No grant
+    is given to other tools; unsupported hosts cannot silently negotiate it. *)
 val call_operator : t -> admit:(unit -> (unit, operator_error) result) ->
   arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result
 (** Private [lane_operator] port. Only the authenticated operator HTTP boundary

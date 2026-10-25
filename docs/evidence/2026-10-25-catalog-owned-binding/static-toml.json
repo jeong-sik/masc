@@ -1,0 +1,16 @@
+{
+  "capability_rows": 36,
+  "capability_toml_sha256": "777dca32576410191dcbdfe56bf92cbac43975e79a00713a42c5b4b2e01921c9",
+  "pricing_numeric_values": [
+    0.0,
+    0.1,
+    1.0,
+    1.25,
+    2.0,
+    3.0,
+    9.0,
+    15.0,
+    90.0
+  ],
+  "scope": "Python TOML syntax inspection only; no production OCaml execution"
+}

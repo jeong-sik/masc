@@ -402,7 +402,7 @@ let test_the_loader_refuses_rows_that_fold_to_one_id () =
 ;;
 
 (* Binding and enumeration must read the rows owned by their catalog. *)
-let test_the_binding_folds_row_ids_as_the_index_does () =
+let test_binding_and_enumeration_retain_catalog_owned_rows () =
   let catalog context =
     catalog_of_toml ~source:"binding owned rows"
       (Printf.sprintf {|[[providers]]
@@ -522,5 +522,5 @@ let () =
             test_scoped_lookup_retries_under_the_canonical_provider
         ; Alcotest.test_case "the_loader_refuses_rows_that_fold_to_one_id" `Quick
             test_the_loader_refuses_rows_that_fold_to_one_id
-        ; Alcotest.test_case "the_binding_folds_row_ids_as_the_index_does" `Quick
-            test_the_binding_folds_row_ids_as_the_index_does ] ) ]
+        ; Alcotest.test_case "binding_and_enumeration_retain_catalog_owned_rows" `Quick
+            test_binding_and_enumeration_retain_catalog_owned_rows ] ) ]

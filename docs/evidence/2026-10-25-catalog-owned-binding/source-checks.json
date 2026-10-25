@@ -31,7 +31,7 @@
   },
   {
     "file": "packages/agent_core/lib/llm_provider/exact_output_catalog_binding.mli",
-    "sha256": "246d90ccc38b6c5c93135384a0899a59c44087d246bdb102870d1873b36053a3",
+    "sha256": "3817c1bffd3d642d2334b27ac91a2dc5db8d0105ce3e8584cbdb6290a9524dbe",
     "exit": 0,
     "diagnostic": ""
   },
@@ -73,7 +73,7 @@
   },
   {
     "file": "packages/agent_core/test/test_model_identifiers.ml",
-    "sha256": "02ff46d2a803bce6f1799c0af23fd3a3cfc3a6199fbed3d52bebaa0c5db6de28",
+    "sha256": "91d191d085e5aa1d5ba063453618f26ae5bd20c405c3316ea4a251f15d9acb0d",
     "exit": 0,
     "diagnostic": ""
   }

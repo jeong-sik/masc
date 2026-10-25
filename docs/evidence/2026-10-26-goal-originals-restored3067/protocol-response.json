@@ -1,0 +1,181 @@
+{
+  "schema": "masc.goal.restored3067.protocol-review-response.v1",
+  "status": "FINAL_FROZEN",
+  "verdict": "AGREE_SCOPED_PROTOCOL_PASS_NO_NEW_P0_P2",
+  "reviewed_at_utc": "2026-10-25T21:21:08.402881+00:00",
+  "input_review": {
+    "label": "restored3067-protocol-review/review.json",
+    "bytes": 11524,
+    "sha256": "1250719ed7f3ee9e36ec3b884c92a6ca76447676ded41f2b70d26ee6fb734fe8",
+    "verdict": "PASS_PROTOCOL_INTEGRITY_ACTUAL_ISOLATED_APPROVE_SEMANTICS_UNASSESSED"
+  },
+  "identity": {
+    "task_id": "task-2688",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "restored_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "existing_measurement_id": "ada74682d5887de03fae493a8690a4c2",
+    "request_id": "ca40f5934e4b849dafd0c0f414254029",
+    "run_id": "01a174db-7962-7000-a964-2e11d67a800f",
+    "candidate_source_head": "4edcba731f79a4e0297c98cc5df3960b4d5263d1",
+    "candidate_prompt_bytes": 9182,
+    "candidate_prompt_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "execution_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "execution_binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "managed_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "boundary": "Actual binary file, saved embedded-source health and private base match. Same restored Goal/revision/measurement IDs do not identify the primary workspace. No Git/current-ref, primary-postrun-state or native4edc-build observation is made."
+  },
+  "scope": "Read the full frozen protocol review and selected actual restore/install/request, final wire/ACK/native/store and owned-cleanup records. Do not repeat all203 protocol hashing or the completed all11 semantic audit.",
+  "agreement": true,
+  "direct_checks": {
+    "inventory": "Manifest itself matches8f2bb92d… and contains203 unique leaf rows,10,222,243 declared bytes; its group counts match the reviewed inventory. Complete leaf hashing is attributed to the independent protocol reviewer, not rerun here. The selected19 files below were directly byte/hash checked.",
+    "restore": "Saved primary selected before/after Goal and isolated normal readback equal. Raw bootstrap Goal/verification equal those values; API measurement.reported.record equals the raw preserved ada746 measurement. Its bytes are unchanged in the final store. Fresh envelopes and empty outboxes do not claim whole-workspace atomic restoration.",
+    "prestart_and_request": "Install receipt hashes match bootstrap including last-good. Frozen launch code orders install before proxy/server spawn. Saved request is normal request_complete; complete submission-inventory no-upsert/no-measure claim is attributed to the protocol audit. Existing unused helper code alone is not evidence of calling it.",
+    "verdict": "Actual response000020 report_review_verdict APPROVE supplies4005B reason SHA12228db7…; next request000021 contains ACK SHAba29fd69… and that entire reason. Register/reviewed/committed native records retain matching run; both completion rows have53 Tool observations and the identical full evaluated reason.",
+    "bounded_native_input": "Both native Tool input reason values are526B/SHA0d25003b… visibly truncated prefixes. Full4005B equality applies to wire argument, ACK, evaluated verdict and stored evidence, not those input summaries.",
+    "stores": "Exact safe projection equals the three retained stores. Isolated phase awaiting_confirmation/completion proof_proven preserve full reason under verdict.evidence while verdict.reason is null. Existing measurement remains unchanged.",
+    "cleanup": "Saved10 ps observations support two owned identities, matching their saved spawn identities after stdout.strip() normalization; each original untrimmed stdout SHA matches its receipt. Same-birth rows precede rc1/empty stdout+stderr for both PIDs. Saved code and receipts record one TERM each. No new process call was made."
+  },
+  "inventory_metadata": {
+    "manifest_bytes": 40587,
+    "manifest_sha256": "8f2bb92dce336dc13c29c9873fffd34b06c07596f5caf12de227ddebace7f5fb",
+    "leaf_count": 203,
+    "leaf_declared_bytes": 10222243,
+    "group_counts": {
+      "setup": 20,
+      "wire": 64,
+      "submission": 9,
+      "prompt-application": 6,
+      "inputs": 76,
+      "bootstrap": 4,
+      "harness": 9,
+      "postrun-harness": 2,
+      "primary-capture": 6,
+      "snapshot": 7
+    }
+  },
+  "findings": {
+    "new_P0": [],
+    "new_P1": [],
+    "new_P2": [],
+    "blocking_disagreement": [],
+    "P3_wording_qualification": "Cleanup identity equality is whitespace-normalized (before.stdout.strip()==saved identity), not raw stdout byte equality. The original stdout digest is independently receipt-bound. This does not weaken the observed ownership/absence conclusion."
+  },
+  "scope_limits": [
+    "203 complete hashes/all20 Original/provider joins and all52 page-slice joins belong to the attributed protocol review. This bounded response checks selected joins and finds no contradiction; it does not claim duplicate full-audit execution.",
+    "20 POSTs comprise one Goal proof Tool loop, not20 independent samples. GET /models is setup, not verifier inference. API-reported glm-5.3-flash does not attest hidden model weights or model independence.",
+    "Same restored3067/ada746 IDs identify data in a different isolated workspace, not a primary Goal proof/update or current operating-primary state. Awaiting confirmation is not human confirmation.",
+    "Candidate4edc/0dc is a normal persisted prompt override on frozen3e binary. No native4edc build, whole-stack approval, merge, install or new11-behavior execution is established.",
+    "Actual APPROVE/proof_proven/awaiting_confirmation is preserved. Protocol integrity does not decide semantics. The separately frozen all11 semantic report has its own scoped PASS and A7 controlled operator-proxy wording qualification.",
+    "Earlier159/109/154 cohorts remain immutable and separate. Removal of the clone-revision mismatch here is not retroactive backfill, causal A/B or population reliability.",
+    "Cleanup supports recorded absence of only two owned PIDs at those observations; no descendant/fleet/future absence conclusion. Other private Goal records, headers, credentials and hidden reasoning are excluded."
+  ],
+  "selected_file_bindings": [
+    {
+      "path": "terminal-originals-private/setup/primary-goal-before-private.json",
+      "bytes": 3594,
+      "sha256": "0b625ef27c4c1adca1e9078f63bd9182502a096caca68d1e10ab104411494437"
+    },
+    {
+      "path": "terminal-originals-private/setup/primary-goal-after-private.json",
+      "bytes": 3594,
+      "sha256": "0b625ef27c4c1adca1e9078f63bd9182502a096caca68d1e10ab104411494437"
+    },
+    {
+      "path": "terminal-originals-private/submission/restored-api-readback.json",
+      "bytes": 3594,
+      "sha256": "0b625ef27c4c1adca1e9078f63bd9182502a096caca68d1e10ab104411494437"
+    },
+    {
+      "path": "terminal-originals-private/bootstrap/goals.json",
+      "bytes": 2204,
+      "sha256": "c5828fef99e3feab880a404b72f23f9ea674e3a7c48f8dfe5c4bed3574068f66"
+    },
+    {
+      "path": "terminal-originals-private/bootstrap/goal_measurements.json",
+      "bytes": 1366,
+      "sha256": "41ca4fd4388cab10bf9977718546a5a55ef90114589d1265ab1f57dfd723b496"
+    },
+    {
+      "path": "terminal-originals-private/bootstrap/goal_verifications.json",
+      "bytes": 275,
+      "sha256": "8c7d2669a0eeb7321acd43b4deef98a7a60f41619698a36adefdfaeb2fbdaa4c"
+    },
+    {
+      "path": "terminal-originals-private/setup/prestart-fixture-install-private.json",
+      "bytes": 779,
+      "sha256": "c162424aa507c258c8f8efa12beff53275b0b6733596b12d782d6a14c1bff31d"
+    },
+    {
+      "path": "terminal-originals-private/submission/request-once.request-private.json",
+      "bytes": 188,
+      "sha256": "133ad907855d03832feebeab3fa3550947385bdef3d4a937b7babeb47a60f89f"
+    },
+    {
+      "path": "terminal-originals-private/wire/request-000020.response",
+      "bytes": 13606,
+      "sha256": "10fdbe4612cfb07b6649afff11c5aa0a9891eeb90b8002a6fa3edd05baa0a3c0"
+    },
+    {
+      "path": "terminal-originals-private/wire/request-000021.request",
+      "bytes": 405433,
+      "sha256": "25a3b4b420f4be682cbd23d607629621daedd6952bc4de6b1ea743c50e54ef1b"
+    },
+    {
+      "path": "terminal-originals-private/snapshot/goal-verification-runs.jsonl",
+      "bytes": 161474,
+      "sha256": "ef247ea26aa95f4cf998eba9aebd78fad9fb26d8ee87f8837b933854700cd50f"
+    },
+    {
+      "path": "terminal-originals-private/snapshot/goals.json",
+      "bytes": 1413,
+      "sha256": "2a762f82674a4061f9c53865bd779e59ee288bf1e981a312d5267bc284a9972c"
+    },
+    {
+      "path": "terminal-originals-private/snapshot/goal_verifications.json",
+      "bytes": 5727,
+      "sha256": "56890c5a6cc03a2e2ec2a32e4de99e64564a8e1707f999c8d0e92a4e2f3b4723"
+    },
+    {
+      "path": "terminal-originals-private/snapshot/goal_measurements.json",
+      "bytes": 1366,
+      "sha256": "41ca4fd4388cab10bf9977718546a5a55ef90114589d1265ab1f57dfd723b496"
+    },
+    {
+      "path": "terminal-originals-private/setup/stop-receipt.json",
+      "bytes": 1231,
+      "sha256": "6433f5557a6cd68819808d5bde402340bf067bd04a123889c3e703b998f41a04"
+    },
+    {
+      "path": "terminal-originals-private/setup/stop-observations-private.json",
+      "bytes": 3642,
+      "sha256": "2810b6f59b99ff82a4e307386214c439d26037570dec56b2ed693592f3bde0f3"
+    },
+    {
+      "path": "terminal-originals-private/setup/spawn-identity-observed.json",
+      "bytes": 794,
+      "sha256": "459387e437f98ecdab4888264843bdcf1958b58c2f9576e5eb52f430d357d88b"
+    },
+    {
+      "path": "terminal-originals-private/harness/masc-goal-restored3067-canary-20261026.py",
+      "bytes": 24356,
+      "sha256": "a4b0cc9a88f3a7f303b620270dc29af45e4f4c8f0d20a04b68221ef128010b6d"
+    },
+    {
+      "path": "terminal-originals-private/postrun-harness/masc-stop-originals-restored3067-20261026.py",
+      "bytes": 2365,
+      "sha256": "3578b920c243afb79309b6831f554e542264e64316091bf5fd94f142c09e2f97"
+    }
+  ],
+  "separate_semantic_review": {
+    "label": "restored3067-sufficiency-review/review.json",
+    "bytes": 16456,
+    "sha256": "d9348dc29be9a6be76e9e28ad6553d688d517582d59751df23308566e0da1ba1",
+    "use": "Keep its scope separate; semantic audit was not repeated."
+  },
+  "effects": {
+    "API_model_Git_build_test_CI_process_Docker_Board_calls": 0,
+    "Task_Goal_source_store_existing_artifact_mutations": 0,
+    "new_agents": 0,
+    "only_new_output": "protocol-response/response.json"
+  }
+}

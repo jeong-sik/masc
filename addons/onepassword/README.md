@@ -46,8 +46,14 @@ intact. An interrupted reference commit is recovered from the retained reference
 without replaying OAuth. Missing active items and locked/unavailable protection report unavailable,
 never disconnected. Linux requires an existing unlocked default Secret Service
 collection and the host session D-Bus; this package does not create or unlock it.
-macOS uses the user's default Keychain; OS authorization UI may be required.
-The package never answers that UI or changes the Keychain's lock state.
+macOS uses the user's default Keychain without opening authorization UI. Each
+native record read/write suppresses file-based Keychain interaction under a
+process-wide lock and restores the preceding policy before releasing it. A
+locked item, required approval, or failed policy change reports unavailable.
+Unlock or authorize access through macOS, then inspect the original connection
+before retrying. The package does not change the Keychain's lock state. This
+prevents waiting for an authorization dialog; it does not bound Security daemon
+IPC response time.
 An existing plaintext `connection.json` is refused, preserved and not migrated;
 the operator must reconcile/revoke that old connection before removing its
 private plaintext record and starting a new connection.

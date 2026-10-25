@@ -158,6 +158,35 @@ def validate_record(value: dict):
         raise ConnectionError("invalid_connection_record")
 
 
+_macos_interaction_lock = threading.RLock()
+
+
+def _macos_record_operation(api, operation):
+    """Suppress file-based Keychain UI only while this record call owns it."""
+    from ctypes import POINTER, byref, c_ubyte
+
+    # SecItem authentication options do not cover the file-based Keychain.
+    # Its interaction policy belongs to the process, so connection and login
+    # records share this lock through native work and restoration.
+    with _macos_interaction_lock:
+        get_allowed = api._sec.SecKeychainGetUserInteractionAllowed
+        get_allowed.argtypes = [POINTER(c_ubyte)]
+        get_allowed.restype = api.OS_status
+        set_allowed = api._sec.SecKeychainSetUserInteractionAllowed
+        set_allowed.argtypes = [c_ubyte]
+        set_allowed.restype = api.OS_status
+        previous = c_ubyte()
+        if get_allowed(byref(previous)) != 0:
+            raise ConnectionError("protected_store_unavailable")
+        try:
+            if set_allowed(False) != 0:
+                raise ConnectionError("protected_store_unavailable")
+            return operation()
+        finally:
+            if set_allowed(previous.value) != 0:
+                raise ConnectionError("protected_store_unavailable")
+
+
 class ProtectedRecords:
     """Only the OS credential store; never a discovered or plaintext backend."""
 
@@ -170,13 +199,21 @@ class ProtectedRecords:
     def _backend_class():
         try:
             if platform.system() == "Darwin":
-                from keyring.backends.macOS import Keyring
+                from keyring.backends.macOS import Keyring, api
 
                 class NativeKeyring(Keyring):
                     keychain = None
 
                     def set_properties_from_env(self):
                         pass
+
+                    def get_password(self, service, username):
+                        read = super().get_password
+                        return _macos_record_operation(api, lambda: read(service, username))
+
+                    def set_password(self, service, username, password):
+                        write = super().set_password
+                        return _macos_record_operation(api, lambda: write(service, username, password))
             elif platform.system() == "Linux":
                 from keyring.backends.SecretService import Keyring, secretstorage
                 from keyring.errors import KeyringLocked

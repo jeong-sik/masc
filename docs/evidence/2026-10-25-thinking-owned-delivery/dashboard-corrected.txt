@@ -1,0 +1,11 @@
+Command: pnpm --dir dashboard exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/keeper-stream.test.ts
+Raw SHA256: c277ddbc01312922bb9852aea9b6c83703856589aa04cc79854d34a965fb1eb8
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-responses-reasoning-delivery-20261025/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  139 passed (139)
+   Start at  22:15:26
+   Duration  1.25s (transform 40%, environment 27%, setup 23%, import 5%, tests 4%)

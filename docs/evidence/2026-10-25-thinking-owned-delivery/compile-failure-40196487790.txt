@@ -1,0 +1,6 @@
+Raw workflow log SHA256: c48d0929c9835f1be58b32ab10def84ceeb16cf2b07ec33ac084a3d328941a4f
+Source: https://github.com/jeong-sik/masc/actions/runs/40196487790
+
+test suite	Checkout	2026-10-25T13:11:54.4324510Z HEAD is now at f2393a6e test(keeper): join redacted thinking replacement with durable TUI replay
+test suite	Test	2026-10-25T13:15:30.0934555Z File "test/test_tui_keeper_chat_transcript.ml", line 3084, characters 2-6:
+test suite	Test	2026-10-25T13:15:30.0936138Z Error: Unbound module Unix

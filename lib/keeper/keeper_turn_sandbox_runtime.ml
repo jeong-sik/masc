@@ -30,37 +30,34 @@ let microvm_identity_snapshots :
   Atomic.make []
 ;;
 
-(* Stable guest names make concurrent turn starts converge on one VM. Keep
-   the name probe, snapshot claim, and VM start/stop in one Eio critical
-   section so a losing starter cannot release a snapshot while the winner is
-   still mounting it. VM execs do not take this lock. *)
-let microvm_lifecycle_mutex = Eio.Mutex.create ()
+(* A Keeper's guest names and volumes share lifecycle ownership. Different
+   Keepers must not wait behind an unrelated slow container CLI or boot.
+   Inventory maintenance still excludes all owners from listing to deletion,
+   preserving the stable-name adoption boundary. *)
+let microvm_lifecycle = Keeper_microvm_lifecycle.create ()
 
-let with_microvm_lifecycle_lock f =
+let with_microvm_lifecycle_lock ~keeper_name ~operation f =
   match Eio_context.get_root_switch_opt () with
   | None -> f ()
-  | Some _ -> Eio.Mutex.use_rw ~protect:true microvm_lifecycle_mutex f
+  | Some _ ->
+    let requested_at = Time_compat.now () in
+    Keeper_microvm_lifecycle.with_keeper microvm_lifecycle ~keeper_name (fun () ->
+      Log.Keeper.debug "microvm lifecycle admitted keeper=%s operation=%s wait_ms=%.3f"
+        keeper_name operation ((Time_compat.now () -. requested_at) *. 1000.0);
+      f ())
+;;
+
+let with_microvm_inventory_lock f =
+  match Eio_context.get_root_switch_opt () with
+  | None -> f ()
+  | Some _ -> Keeper_microvm_lifecycle.with_inventory microvm_lifecycle f
 ;;
 
 let sweep_abandoned_microvm_guests
       ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv =
-  (* A CLI exception leaves an inventory to re-read, not a broken in-memory
-     invariant. Release the mutex before re-raising so an optional maintenance
-     failure cannot poison every subsequent boot and teardown. *)
-  match
-    with_microvm_lifecycle_lock (fun () ->
-      try
-        Ok (Keeper_sandbox_microvm.sweep_abandoned_guests
-          ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv)
-      (* This catch carries the exception out of the lock and the [Error] arm
-         below re-raises it with its backtrace, so cancellation propagates
-         rather than being absorbed. It is
-         caught here only because [use_rw ~protect:true] poisons the mutex for
-         every later boot and teardown if the body raises. *)
-      with exn -> Error (exn, Printexc.get_raw_backtrace ())) (* re-raised below *)
-  with
-  | Ok outcomes -> outcomes
-  | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+  with_microvm_inventory_lock (fun () ->
+    Keeper_sandbox_microvm.sweep_abandoned_guests
+      ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv)
 ;;
 
 let microvm_identity_snapshot container_name =
@@ -1887,7 +1884,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
 ;;
 
 let start_microvm_container ?timeout_sec t =
-  with_microvm_lifecycle_lock (fun () ->
+  with_microvm_lifecycle_lock ~keeper_name:t.meta.name ~operation:"start_adopt" (fun () ->
     start_microvm_container_unlocked ?timeout_sec t
     |> Result.map_error microvm_start_failure_message)
 ;;
@@ -1960,7 +1957,7 @@ let teardown_keeper_sandbox_by_name
               microvm_container_name ~config ~keeper_name ~network_mode)
            Keeper_types_profile_sandbox.all_network_modes
        in
-       with_microvm_lifecycle_lock (fun () ->
+       with_microvm_lifecycle_lock ~keeper_name ~operation:"teardown" (fun () ->
          (* A killed server cannot run its release callback. Teardown owns
             the same stable helper, even if no persistent guest was started. *)
          let trim_cleanup = match microvm_backend with
@@ -2024,7 +2021,7 @@ let remove_keeper_volumes_by_name
              cannot be removed without the runtime that created them"
             keeper_name)
      | Some Keeper_microvm_backend.Apple_container ->
-       with_microvm_lifecycle_lock (fun () ->
+       with_microvm_lifecycle_lock ~keeper_name ~operation:"remove_volumes" (fun () ->
          Keeper_sandbox_microvm.remove_apple_keeper_volumes
            ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
            ~timeout_sec
@@ -2526,7 +2523,7 @@ let retire_current_github_identity_snapshot t =
 let stop_container_for_github_identity_refresh ?timeout_sec t =
   if is_microvm t
   then
-    with_microvm_lifecycle_lock (fun () ->
+    with_microvm_lifecycle_lock ~keeper_name:t.meta.name ~operation:"identity_refresh" (fun () ->
       let container_name = keeper_vm_name t in
       match
         Result.bind (microvm_backend_of t) (fun backend ->

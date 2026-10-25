@@ -3575,10 +3575,131 @@ let test_unbooted_microvm_guest_is_not_booted_and_skips_freshness_scan () =
     (Masc.Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ())
 ;;
 
+let test_unrelated_keeper_prepares_while_one_guest_is_slow () =
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let lifecycle = Lifecycle.create () in
+    let release, signal = Eio.Promise.create () in
+    let events = ref [] in
+    let record event = events := event :: !events in
+    Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_keeper lifecycle ~keeper_name:"Alpha" (fun () ->
+      record "alpha-start";
+      Eio.Promise.await release;
+      record "alpha-finish"));
+    Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_keeper lifecycle ~keeper_name:"alpha" (fun () ->
+      record "alpha-next"));
+    Lifecycle.with_keeper lifecycle ~keeper_name:"beta" (fun () ->
+      record "beta-ready";
+      Eio.Promise.resolve signal ());
+    Lifecycle.with_inventory lifecycle (fun () ->
+      Alcotest.(check (list string)) "different Keeper progresses; same Keeper stays ordered"
+        ["alpha-start"; "beta-ready"; "alpha-finish"; "alpha-next"] (List.rev !events))))
+;;
+
+let test_inventory_excludes_adoption_until_deletion_finishes () =
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let lifecycle = Lifecycle.create () in
+    let release_guest, signal_guest = Eio.Promise.create () in
+    let inventory_started, signal_inventory_started = Eio.Promise.create () in
+    let release_inventory, signal_inventory = Eio.Promise.create () in
+    let guest_done = ref false in
+    let next_started = ref false in
+    Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_keeper lifecycle ~keeper_name:"alpha" (fun () ->
+      Eio.Promise.await release_guest;
+      guest_done := true));
+    Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_inventory lifecycle (fun () ->
+      Alcotest.(check bool) "listing waits for earlier guest lifecycle" true !guest_done;
+      Eio.Promise.resolve signal_inventory_started ();
+      Eio.Promise.await release_inventory;
+      Alcotest.(check bool) "adoption cannot race deletion" false !next_started));
+    Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_keeper lifecycle ~keeper_name:"beta" (fun () ->
+      next_started := true));
+    Eio.Promise.resolve signal_guest ();
+    Eio.Promise.await inventory_started;
+    Alcotest.(check bool) "new guest remains outside inventory ownership" false !next_started;
+    Eio.Promise.resolve signal_inventory ()))
+;;
+
+let test_cancelled_waiter_does_not_strand_inventory () =
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let lifecycle = Lifecycle.create () in
+    let release, signal = Eio.Promise.create () in
+    let waiting, signal_waiting = Eio.Promise.create () in
+    let cancelled, signal_cancelled = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_keeper lifecycle ~keeper_name:"alpha" (fun () ->
+      Eio.Promise.await release));
+    Eio.Fiber.fork ~sw (fun () ->
+      (try Eio.Cancel.sub (fun context ->
+        Eio.Promise.resolve signal_waiting context;
+        Lifecycle.with_keeper lifecycle ~keeper_name:"alpha" (fun () ->
+          Alcotest.fail "cancelled waiter entered guest lifecycle"))
+       with Eio.Cancel.Cancelled _ -> ());
+      Eio.Promise.resolve signal_cancelled ());
+    Eio.Cancel.cancel (Eio.Promise.await waiting) Exit;
+    Eio.Promise.await cancelled;
+    Eio.Promise.resolve signal ();
+    Lifecycle.with_inventory lifecycle (fun () -> ());
+    Lifecycle.with_keeper lifecycle ~keeper_name:"alpha" (fun () -> ())))
+;;
+
+let test_cancelled_inventory_wait_reopens_keeper_admission () =
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let lifecycle = Lifecycle.create () in
+    let release, signal = Eio.Promise.create () in
+    let waiting, signal_waiting = Eio.Promise.create () in
+    let cancelled, signal_cancelled = Eio.Promise.create () in
+    let next_ready, signal_next_ready = Eio.Promise.create () in
+    let inventory_ran = ref false in
+    let next_started = ref false in
+    Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_keeper lifecycle ~keeper_name:"alpha" (fun () ->
+      Eio.Promise.await release));
+    Eio.Fiber.fork ~sw (fun () ->
+      (try Eio.Cancel.sub (fun context ->
+        Eio.Promise.resolve signal_waiting context;
+        Lifecycle.with_inventory lifecycle (fun () -> inventory_ran := true))
+       with Eio.Cancel.Cancelled _ -> ());
+      Eio.Promise.resolve signal_cancelled ());
+    Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_keeper lifecycle ~keeper_name:"beta" (fun () ->
+      next_started := true;
+      Eio.Promise.resolve signal_next_ready ()));
+    Eio.Cancel.cancel (Eio.Promise.await waiting) Exit;
+    Eio.Promise.resolve signal ();
+    Eio.Promise.await cancelled;
+    Alcotest.(check bool) "cancelled inventory never lists or deletes" false !inventory_ran;
+    Eio.Promise.await next_ready;
+    Lifecycle.with_inventory lifecycle (fun () ->
+      Alcotest.(check bool) "Keeper admission reopens after cancellation" true !next_started)))
+;;
+
+let test_failed_lifecycle_releases_its_keeper_and_inventory () =
+  let module Lifecycle = Masc.Keeper_microvm_lifecycle in
+  Eio_main.run (fun _ ->
+    let lifecycle = Lifecycle.create () in
+    (try Lifecycle.with_keeper lifecycle ~keeper_name:"alpha" (fun () -> raise Exit)
+     with Exit -> ());
+    Lifecycle.with_keeper lifecycle ~keeper_name:"alpha" (fun () -> ());
+    (try Lifecycle.with_inventory lifecycle (fun () -> raise Exit) with Exit -> ());
+    Lifecycle.with_keeper lifecycle ~keeper_name:"beta" (fun () -> ()))
+;;
+
 let () =
   Alcotest.run
     "keeper_sandbox_microvm"
-    [ ( "argv"
+    [ ( "lifecycle"
+      , [ Alcotest.test_case "unrelated Keeper bypasses a slow guest" `Quick
+            test_unrelated_keeper_prepares_while_one_guest_is_slow
+        ; Alcotest.test_case "inventory excludes adoption through deletion" `Quick
+            test_inventory_excludes_adoption_until_deletion_finishes
+        ; Alcotest.test_case "cancelled waiter does not strand inventory" `Quick
+            test_cancelled_waiter_does_not_strand_inventory
+        ; Alcotest.test_case "cancelled inventory wait reopens admission" `Quick
+            test_cancelled_inventory_wait_reopens_keeper_admission
+        ; Alcotest.test_case "failed lifecycle releases ownership" `Quick
+            test_failed_lifecycle_releases_its_keeper_and_inventory ])
+    ; ( "argv"
       , [ Alcotest.test_case "omits flags container rejects" `Quick
             test_omits_flags_container_rejects
         ; Alcotest.test_case "keeps the hardening container accepts" `Quick

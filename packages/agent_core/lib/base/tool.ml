@@ -255,7 +255,11 @@ end
 
 module Wire_schema_cache = Ephemeron.K1.Make (Wire_schema_key)
 
-let wire_schema_cache : Yojson.Safe.t Wire_schema_cache.t = Wire_schema_cache.create 0
+type wire_schema_entry =
+  | Json_only of Yojson.Safe.t
+  | Json_and_compact of Yojson.Safe.t * string
+
+let wire_schema_cache : wire_schema_entry Wire_schema_cache.t = Wire_schema_cache.create 0
 let wire_schema_cache_mutex = Stdlib.Mutex.create ()
 
 (** Schema to JSON *)
@@ -277,15 +281,42 @@ let wire_json_of_schema_uncached (schema : Types.tool_schema) =
      | None -> [])
 ;;
 
-let wire_json_of_schema schema =
+(* The caller holds [wire_schema_cache_mutex]. Preserve the existing miss
+   policy for both the initial lookup and a publication recheck. *)
+let wire_schema_entry_locked schema =
+  match Wire_schema_cache.find_opt wire_schema_cache schema with
+  | Some cached -> cached
+  | None ->
+    Wire_schema_cache.clean wire_schema_cache;
+    let entry = Json_only (wire_json_of_schema_uncached schema) in
+    Wire_schema_cache.add wire_schema_cache schema entry;
+    entry
+;;
+
+let wire_schema_entry schema =
   Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
-    match Wire_schema_cache.find_opt wire_schema_cache schema with
-    | Some cached -> cached
-    | None ->
-      Wire_schema_cache.clean wire_schema_cache;
-      let json = wire_json_of_schema_uncached schema in
-      Wire_schema_cache.add wire_schema_cache schema json;
-      json)
+    wire_schema_entry_locked schema)
+;;
+
+let wire_json_of_schema schema =
+  match wire_schema_entry schema with
+  | Json_only json | Json_and_compact (json, _) -> json
+;;
+
+let wire_string_of_schema schema =
+  match wire_schema_entry schema with
+  | Json_and_compact (_, compact) -> compact
+  | Json_only json ->
+    let compact = Yojson.Safe.to_string json in
+    Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
+      match wire_schema_entry_locked schema with
+      | Json_and_compact (_, published) -> published
+      | Json_only canonical ->
+        Wire_schema_cache.replace
+          wire_schema_cache
+          schema
+          (Json_and_compact (canonical, compact));
+        compact)
 ;;
 ;;
 
@@ -295,7 +326,7 @@ let wire_json_of_schema schema =
    provider receives, which put masc's Execute at 10,396 bytes against the
    7,239 it sends. *)
 let wire_bytes_of_schema schema =
-  String.length (Yojson.Safe.to_string (wire_json_of_schema schema))
+  String.length (wire_string_of_schema schema)
 ;;
 
 let schema_to_json tool = wire_json_of_schema tool.schema

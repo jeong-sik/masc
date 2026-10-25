@@ -497,7 +497,19 @@ let test_wire_schema_cache_keyed_on_identity_not_name () =
     string
     "second body survives its own lookup"
     "second body"
-    (second |> member "description" |> to_string)
+    (second |> member "description" |> to_string);
+  check
+    string
+    "first compact body survives a colliding name"
+    "first body"
+    (Tool.wire_string_of_schema first_schema |> Yojson.Safe.from_string
+     |> member "description" |> to_string);
+  check
+    string
+    "second compact body survives a colliding name"
+    "second body"
+    (Tool.wire_string_of_schema second_schema |> Yojson.Safe.from_string
+     |> member "description" |> to_string)
 ;;
 
 let test_wire_schema_cache_shared_with_tool_schema_to_json () =
@@ -515,6 +527,115 @@ let test_wire_schema_cache_shared_with_tool_schema_to_json () =
     "byte measurement sees the same cached tree"
     (String.length (Yojson.Safe.to_string via_schema))
     (Tool.wire_bytes_of_schema schema)
+;;
+
+let test_wire_compact_preserves_bytes_and_json_identity () =
+  let input_schema =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties",
+        `Assoc
+          [ "q",
+            `Assoc
+              [ "type", `String "string"
+              ; "default", `String "한글\n\"q\"\\tail"
+              ]
+          ]
+      ; "required", `List [ `String "q" ]
+      ; "additionalProperties", `Bool false
+      ]
+  in
+  let schema =
+    match
+      Types.tool_schema_of_input_schema
+        ~strict:false ~name:"compact_wire" ~description:"Exact bytes" ~input_schema ()
+    with
+    | Ok schema -> schema
+    | Error detail -> Alcotest.fail detail
+  in
+  let expected =
+    {|{"name":"compact_wire","description":"Exact bytes","input_schema":{"type":"object","properties":{"q":{"type":"string","default":"한글\n\"q\"\\tail"}},"required":["q"],"additionalProperties":false},"strict":false}|}
+  in
+  let json = Tool.wire_json_of_schema schema in
+  let compact = Tool.wire_string_of_schema schema in
+  check string "ordered authoritative schema and escaping remain exact" expected compact;
+  check int "UTF-8 compact length counts bytes" (String.length expected)
+    (Tool.wire_bytes_of_schema schema);
+  check bool "compact upgrade retains the original canonical JSON" true
+    (json == Tool.wire_json_of_schema schema);
+  check bool "compact requests share the published immutable string" true
+    (compact == Tool.wire_string_of_schema schema)
+;;
+
+let test_wire_compact_failure_leaves_json_available () =
+  List.iter
+    (fun value ->
+       let input_schema =
+         `Assoc [ "type", `String "object"; "default", `Float value ]
+       in
+       let schema =
+         match
+           Types.tool_schema_of_input_schema
+             ~name:"nonfinite_wire" ~description:"" ~input_schema ()
+         with
+         | Ok schema -> schema
+         | Error detail -> Alcotest.fail detail
+       in
+       let json = Tool.wire_json_of_schema schema in
+       let compact_refused () =
+         match Tool.wire_string_of_schema schema with
+         | _ -> Alcotest.fail "nonfinite compact encoding unexpectedly succeeded"
+         | exception Yojson.Json_error _ -> ()
+       in
+       compact_refused ();
+       check bool "failed text encoding preserves JSON-only lookup" true
+         (json == Tool.wire_json_of_schema schema);
+       compact_refused ())
+    [ Float.nan; Float.infinity; Float.neg_infinity ]
+;;
+
+let test_wire_compact_concurrent_publication () =
+  let schema =
+    Types.tool_schema_of_params
+      ~name:"concurrent_compact" ~description:(String.make 8192 'x') ~parameters:[] ()
+  in
+  let json = Tool.wire_json_of_schema schema in
+  let ready = Atomic.make 0 in
+  let start = Atomic.make false in
+  let workers =
+    Array.init 4 (fun _ ->
+      Domain.spawn (fun () ->
+        Atomic.incr ready;
+        while not (Atomic.get start) do Domain.cpu_relax () done;
+        Tool.wire_string_of_schema schema, Tool.wire_json_of_schema schema))
+  in
+  while Atomic.get ready < Array.length workers do Domain.cpu_relax () done;
+  Atomic.set start true;
+  let returned = Array.map Domain.join workers in
+  let canonical = Tool.wire_string_of_schema schema in
+  Array.iter
+    (fun (compact, observed_json) ->
+       check bool "concurrent calls return the published winner" true (compact == canonical);
+       check bool "concurrent publication retains canonical JSON" true (observed_json == json))
+    returned
+;;
+
+let test_wire_compact_does_not_retain_schema_key () =
+  let weak = Weak.create 1 in
+  let[@inline never] populate () =
+    let schema =
+      Types.tool_schema_of_params
+        ~name:(String.make 16 'w') ~description:"weak compact" ~parameters:[] ()
+    in
+    Weak.set weak 0 (Some schema);
+    Tool.wire_json_of_schema schema, Tool.wire_string_of_schema schema
+  in
+  let retained = populate () in
+  Gc.full_major ();
+  Gc.full_major ();
+  check bool "retained JSON/text cache values do not hold the schema key" false
+    (Weak.check weak 0);
+  ignore (Sys.opaque_identity retained)
 ;;
 
 let () =
@@ -584,6 +705,14 @@ let () =
             "tool and schema entry points share the memo"
             `Quick
             test_wire_schema_cache_shared_with_tool_schema_to_json
+        ; test_case "compact bytes and JSON identity" `Quick
+            test_wire_compact_preserves_bytes_and_json_identity
+        ; test_case "compact failure leaves JSON available" `Quick
+            test_wire_compact_failure_leaves_json_available
+        ; test_case "concurrent compact publication" `Quick
+            test_wire_compact_concurrent_publication
+        ; test_case "compact values do not retain schema keys" `Quick
+            test_wire_compact_does_not_retain_schema_key
         ] )
     ; ( "with_defaults"
       , [ test_case "injects missing args" `Quick (fun () ->

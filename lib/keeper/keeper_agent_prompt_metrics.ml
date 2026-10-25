@@ -413,7 +413,9 @@ let build_ctx_segments
      two turns of one keeper whose fingerprints differ are two turns that
      could not share a cached prefix. *)
   let tool_schema_json =
-    List.map (fun tool -> Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)) tools
+    List.map
+      (fun (tool : Agent_core.Tool.t) -> Agent_core.Tool.wire_string_of_schema tool.schema)
+      tools
   in
   let tool_schema_bytes =
     List.fold_left (fun total json -> total + String.length json) 0 tool_schema_json

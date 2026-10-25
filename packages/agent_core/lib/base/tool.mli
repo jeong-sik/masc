@@ -224,12 +224,21 @@ val descriptor_to_yojson : descriptor option -> Yojson.Safe.t
 
     Memoized on physical schema identity: a schema is immutable, so two calls
     on the same schema return the same value — the second call does not
-    rebuild the tree. *)
+    rebuild the tree. The shared cache holds schemas weakly. This accessor
+    constructs only JSON; compact encoding is deferred until requested. *)
 val wire_json_of_schema : Types.tool_schema -> Yojson.Safe.t
+
+val wire_string_of_schema : Types.tool_schema -> string
+(** Exact default compact [Yojson.Safe.to_string] encoding of
+    {!wire_json_of_schema}, memoized in the same weak physical-schema entry.
+    Encoding runs outside the cache mutex. Concurrent first requests may
+    encode independently, then return the published winner. Encoding errors
+    propagate without preventing JSON-only access or caching an error. *)
 
 val wire_bytes_of_schema : Types.tool_schema -> int
 (** Compact byte length of {!wire_json_of_schema}: what this one tool costs
-    every request that carries it.
+    every request that carries it. Reads the cached compact encoding from
+    {!wire_string_of_schema}; the length counts bytes, not characters.
 
     Named here so a caller measuring the tool surface has a right answer
     within reach. Measuring {!Types.tool_schema_to_yojson} instead counts

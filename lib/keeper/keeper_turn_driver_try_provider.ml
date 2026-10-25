@@ -941,10 +941,8 @@ let offload_model_input_cpu f = Domain_pool_ref.submit_cpu_or_inline f
 let declared_request_reserve_bytes ~system_prompt ~tools =
   let tool_schema_bytes =
     List.fold_left
-      (fun acc tool ->
-         acc
-         + String.length
-             (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)))
+      (fun acc (tool : Agent_core.Tool.t) ->
+         acc + Agent_core.Tool.wire_bytes_of_schema tool.schema)
       0
       tools
   in

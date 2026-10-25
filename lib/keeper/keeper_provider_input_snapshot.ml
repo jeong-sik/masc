@@ -395,7 +395,7 @@ let message_payload (message : Agent_core.Types.message) =
 ;;
 
 let tool_schema_payload (tool : Agent_core.Tool.t) =
-  Agent_core.Tool.schema_to_json tool |> Yojson.Safe.to_string |> payload_of_string
+  Agent_core.Tool.wire_string_of_schema tool.schema |> payload_of_string
 ;;
 
 let store_artifact store ~reusable ~mime { payload_bytes = bytes; payload_sha256 = sha256 } =

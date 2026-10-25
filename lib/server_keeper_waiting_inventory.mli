@@ -52,6 +52,7 @@ type wake_producer =
   | Keeper_delegate
   | Keeper_composition
   | Keeper_job
+  | Keeper_addon
   | Read_model_reader
 
 type waiting_row =

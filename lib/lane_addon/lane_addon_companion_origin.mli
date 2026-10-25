@@ -50,3 +50,7 @@ val reserve : fs:Eio.Fs.dir_ty Eio.Path.t ->
 val lookup : config:Workspace.config -> source:source -> (record option, error) result
 (** Strict read of that original key. No directory, binding or effect is created.
     A changed source or workspace cannot borrow an existing record. *)
+val find : config:Workspace.config -> id:string -> (record option, error) result
+(** Strict host-side lookup of an immutable origin by its canonical digest.
+    The record still verifies its original source, identity and workspace.
+    Reading it grants no companion or execution authority. *)

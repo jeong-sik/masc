@@ -63,6 +63,13 @@ type pending_board_event_kind =
           ordinary durable user turn, independently of the display preview. *)
   | Composition_completed
   | Owned_job_completed of Keeper_event_queue.owned_job_completion
+  | Addon_operation_changed of {
+      source:Keeper_event_queue.addon_operation_change;
+      publication:Lane_addon_companion_publication.event;
+    }
+      (** Complete schema-validated public state, read from the canonical host
+          record, accompanies its immutable source in memory. Prompt metadata
+          carries it losslessly even when the ordinary preview is shortened. *)
       (** A turn this Keeper asked another Keeper to run has ended. Like
           {!Fusion_completed} the row carries the answer itself, because the
           asker has nowhere else to read it mid-cycle. *)
@@ -470,6 +477,11 @@ val pending_board_event_of_owned_job_completion :
   base_path:string -> keeper_name:string -> arrived_at:float ->
   Keeper_event_queue.owned_job_completion ->
   (pending_board_event, Keeper_owned_job_store.error) result
+
+val pending_board_event_of_addon_operation_change :
+  base_path:string -> keeper_name:string -> arrived_at:float ->
+  Keeper_event_queue.addon_operation_change ->
+  (pending_board_event, Lane_addon_companion_publication.error) result
 
 val pending_board_event_of_stimulus :
   base_path:string ->

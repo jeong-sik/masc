@@ -440,7 +440,7 @@ let pending_asks ~base_path ~keeper_name =
           | Keeper_event_queue.Ask_answered payload -> Some (source, payload)
           | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
           | Fusion_completed _ | Composition_completed _ | Schedule_due _
-          | Tool_result_ready _ | Owned_job_completed _
+          | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _
           | Connector_attention _ | Hitl_resolved _ | Completion_authority_rejected _
           | Task_outcome _ | Task_cancelled _ | Workspace_message _ | Delegate_completed _ -> None)
 ;;
@@ -1231,6 +1231,7 @@ let test_followup_matches_committed_answer_input_tool_rows () =
     | Board_post_created | Board_post_updated | Board_comment_added _
     | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
     | Delegate_completed _ | Composition_completed | Owned_job_completed _
+    | Addon_operation_changed _
     | Schedule_due _ | External_attention _ | Completion_authority_rejected _
     | Task_outcome _ | Task_cancelled _ -> fail "canonical answer input did not retain its exact source" in
   let other_source = Keeper_ask.answer_source_id ~ask_id:ask.ask_id ~answered_at:(answered_at+.1.)

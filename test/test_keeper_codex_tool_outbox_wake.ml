@@ -77,7 +77,7 @@ let test_restart_discovers_and_deduplicates () =
      | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
      | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
      | Delegate_completed _ | Composition_completed _ | Owned_job_completed _
-     | Task_outcome _ -> fail "recovery must enqueue a typed result pointer");
+     | Task_outcome _ | Addon_operation_changed _ -> fail "recovery must enqueue a typed result pointer");
     let encoded = Keeper_event_queue.stimulus_to_yojson selection.source in
     let decoded = get (Keeper_event_queue.stimulus_of_yojson encoded) in
     check bool "typed pointer survives durable queue wire format" true
@@ -180,7 +180,7 @@ let test_route_change_preserves_unrelated_work_and_receipt ?(corrupt=false) ?(mi
       | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
       | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
       | Delegate_completed _ | Composition_completed _ | Owned_job_completed _
-      | Task_outcome _ -> fail "expected original result pointer" in
+      | Task_outcome _ | Addon_operation_changed _ -> fail "expected original result pointer" in
     let session_path = get (Keeper_official_client_session_store.path
       ~base_path:config.Workspace.base_path ~keeper_name) in
     let receipt_path = Filename.concat (Filename.concat (Filename.dirname session_path)

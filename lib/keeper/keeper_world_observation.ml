@@ -43,6 +43,10 @@ type pending_board_event_kind =
           content is a wake it cannot act on. *)
   | Composition_completed
   | Owned_job_completed of Keeper_event_queue.owned_job_completion
+  | Addon_operation_changed of {
+      source:Keeper_event_queue.addon_operation_change;
+      publication:Lane_addon_companion_publication.event;
+    }
   | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention of Keeper_counterpart_observation.t
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
@@ -82,13 +86,13 @@ let same_board_event_identity (left : pending_board_event) (right : pending_boar
      | ( ( Board_post_created | Board_post_updated | Board_comment_added _
          | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
          | Delegate_completed _ | Ask_answered_row _ | Composition_completed
-         | Owned_job_completed _
+         | Owned_job_completed _ | Addon_operation_changed _
          | Schedule_due _ | External_attention _ | Completion_authority_rejected _
          | Task_outcome _ | Task_cancelled _ )
        , ( Board_post_created | Board_post_updated | Board_comment_added _
          | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
          | Delegate_completed _ | Ask_answered_row _ | Composition_completed
-         | Owned_job_completed _
+         | Owned_job_completed _ | Addon_operation_changed _
          | Schedule_due _ | External_attention _ | Completion_authority_rejected _
          | Task_outcome _ | Task_cancelled _ ) ) -> left.event_kind = right.event_kind
 ;;
@@ -111,7 +115,7 @@ let is_board_activity_event (event : pending_board_event) =
      that renders the row, so leaving it out would wake the Keeper with an
      empty pending-events list. *)
   | Composition_completed
-  | Owned_job_completed _
+  | Owned_job_completed _ | Addon_operation_changed _
   (* Ask stays reactive activity for intake/decision classification. Its typed
      payload is rendered once as ordinary user input rather than Board context. *)
   | Ask_answered_row _
@@ -128,7 +132,7 @@ let is_answered_ask_event (event : pending_board_event) =
   | Ask_answered_row _ -> true
   | Board_post_created | Board_post_updated | Board_comment_added _
   | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
-  | Delegate_completed _ | Composition_completed | Owned_job_completed _
+  | Delegate_completed _ | Composition_completed | Owned_job_completed _ | Addon_operation_changed _
   | Schedule_due _ | External_attention _ | Completion_authority_rejected _
   | Task_outcome _ | Task_cancelled _ -> false
 ;;
@@ -148,7 +152,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Fusion_completed
   | Delegate_completed _
   | Composition_completed
-  | Owned_job_completed _
+  | Owned_job_completed _ | Addon_operation_changed _
   | Ask_answered_row _
   | External_attention _
   | Completion_authority_rejected _
@@ -167,7 +171,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Fusion_completed
   | Delegate_completed _
   | Composition_completed
-  | Owned_job_completed _
+  | Owned_job_completed _ | Addon_operation_changed _
   | Ask_answered_row _
   | Schedule_due _
   | External_attention _
@@ -188,7 +192,7 @@ let is_task_outcome_event (event : pending_board_event) =
   | Fusion_completed
   | Delegate_completed _
   | Composition_completed
-  | Owned_job_completed _
+  | Owned_job_completed _ | Addon_operation_changed _
   | Ask_answered_row _
   | Schedule_due _
   | External_attention _
@@ -204,7 +208,7 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Task_cancelled _ -> true
   | Delegate_completed _
   | Composition_completed
-  | Owned_job_completed _
+  | Owned_job_completed _ | Addon_operation_changed _
   | Ask_answered_row _
   | Board_post_created
   | Board_post_updated
@@ -811,6 +815,24 @@ let pending_board_event_of_composition_completion
   }
 ;;
 
+let pending_board_event_of_addon_operation_change ~base_path ~keeper_name ~arrived_at change =
+  let module P=Lane_addon_companion_publication in
+  let ( let* )=Result.bind in
+  let* record=P.find ~config:(Workspace.default_config base_path)
+      ~origin_id:change.Keeper_event_queue.ao_origin_id ~publication_id:change.ao_publication_id in
+  if not (P.matches_queue ~keeper_name change record) then Error P.Binding_conflict else
+  let preview=`Assoc ["origin_id",`String change.ao_origin_id;
+    "source",Keeper_owned_job_identity.source_to_json change.ao_source;
+    "channel",Keeper_continuation_channel.to_yojson change.ao_channel;
+    "tool",`String record.origin.destination.tool;"publication",P.event_json record.event] in
+  Ok {event_kind=Addon_operation_changed {source=change;publication=record.event};
+    post_id=Keeper_event_queue.addon_operation_change_post_id change;author=keeper_name;
+    title="Add-on " ^ record.origin.destination.tool ^ " state";
+    preview=Yojson.Safe.to_string preview;hearth=None;post_kind=Board.System_post;
+    updated_at=arrived_at;explicit_mention=false;matched_targets=[];replies_after_own_comment=None;
+    latest_external_author=None;latest_external_preview=None}
+;;
+
 let pending_board_event_of_owned_job_completion ~base_path ~keeper_name ~arrived_at completion =
   let result = Keeper_owned_job_completion_result.read ~base_path ~keeper_name completion in
   Result.map (fun () ->
@@ -1272,7 +1294,7 @@ let pending_board_event_of_stimulus
      nothing is injected here and the text lives in one place. *)
   | Keeper_event_queue.Ask_answered _
   (* Job authority has its own typed retry contract in stimulus intake. *)
-  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
   | Keeper_event_queue.Workspace_message _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
        fires via the trigger itself; [Hitl_resolved] carries no observation to

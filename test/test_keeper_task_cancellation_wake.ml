@@ -105,7 +105,7 @@ let queued_cancellations ~base_path ~keeper_name =
     | Event_queue.Task_outcome _
     | Event_queue.Workspace_message _
     | Event_queue.Delegate_completed _
-    | Event_queue.Tool_result_ready _ | Event_queue.Owned_job_completed _
+    | Event_queue.Tool_result_ready _ | Event_queue.Owned_job_completed _ | Event_queue.Addon_operation_changed _
     | Event_queue.Composition_completed _ -> None)
 ;;
 

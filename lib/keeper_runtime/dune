@@ -67,5 +67,6 @@
   str
   time_compat
   uri
+  uuidm
   unix
   yojson))

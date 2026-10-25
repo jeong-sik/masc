@@ -34,34 +34,6 @@ type t = {
 }
 let ( let* ) = Result.bind
 
-let companion_output_schema schema =
-  (* General value schemas deliberately accept open objects; action schemas
-     additionally require a specific action envelope. Keep the general schema
-     validator, then close every supported object container on this boundary. *)
-  let* () = Lane_addon_action.validate_value_schema schema in
-  let invalid () = Error "private companion output schema must be recursively closed" in
-  let rec node = function
-    | `Assoc fields ->
-      let* () =
-        if List.assoc_opt "type" fields = Some (`String "object")
-          && List.mem_assoc "properties" fields
-          && List.assoc_opt "additionalProperties" fields <> Some (`Bool false)
-        then invalid () else Ok () in
-      let* () = match List.assoc_opt "properties" fields with
-        | None -> Ok ()
-        | Some (`Assoc properties) ->
-          List.fold_left (fun checked (_, child) -> let* () = checked in node child) (Ok ()) properties
-        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> invalid () in
-      let* () = match List.assoc_opt "items" fields with
-        | None -> Ok () | Some child -> node child in
-      (match List.assoc_opt "oneOf" fields with
-       | None -> Ok ()
-       | Some (`List children) ->
-         List.fold_left (fun checked child -> let* () = checked in node child) (Ok ()) children
-       | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) -> invalid ())
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> invalid () in
-  node schema
-
 let companion_public_result (result : Mcp_protocol.Mcp_types.tool_result) =
   let module S = Mcp_protocol.Mcp_types in
   let is_error = result.is_error = Some true in
@@ -199,7 +171,7 @@ let initialize t client =
             let* checks = result in
             let* () = if List.mem tool.name companion_tools then
                 (match tool.output_schema with
-                 | Some schema -> companion_output_schema schema
+                 | Some schema -> Lane_addon_companion_publication.validate_output_schema schema
                    |> Result.map_error (fun _ -> Protocol_failed "private companion output schema must be recursively closed")
                  | None -> Error (Protocol_failed "private companion output schema is required"))
               else Ok () in

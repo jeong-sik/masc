@@ -118,7 +118,7 @@ let schedule_occurrence_of_witness (witness : projected_disposition_witness) =
   | Source_delegate_completed
   | Source_composition_completed
   | Source_tool_result_ready
-  | Source_owned_job_completed -> None
+  | Source_owned_job_completed | Source_addon_operation_changed -> None
 ;;
 
 let schedule_occurrences state =

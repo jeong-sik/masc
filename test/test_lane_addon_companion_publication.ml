@@ -28,8 +28,18 @@ let notice ?(kind="attention_required") ?(phase="approval_ready") ?(submitted=fa
     "kind",`String kind;"output",output phase submitted]) |> pub_ok
 let with_origin run () = Eio_main.run (fun env ->
   let root=Filename.temp_dir "companion-publication-" "" |> Unix.realpath in
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+  let fs=Eio.Stdenv.fs env in
+  Fs_compat.set_fs fs;
+  Fun.protect ~finally:(fun () ->
+    Keeper_registry.For_testing.unregister ~base_path:root keeper;
+    Fs_compat.clear_fs ();
+    Fs_compat.remove_tree root) (fun () ->
     let config=Workspace.default_config root in
+    ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+    let meta=Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name",`String keeper;"activation_mode",`String "manual"]) |> string_ok in
+    ignore (Keeper_meta_store.replace_snapshot config meta |> string_ok);
+    ignore (Keeper_registry.register_offline ~base_path:root keeper meta);
     let trace=Random_id.uuid_v7 () in
     let turn=Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:42 in
     let context=Keeper_tool_call_log_context.{empty_turn_context with agent_name=Some keeper;
@@ -39,7 +49,6 @@ let with_origin run () = Eio_main.run (fun env ->
       ~trace_id:(Some trace) ~source_context:(Some context) ~channel:(Some channel) |> origin_ok in
     let destination=O.{instance_id="original-provider";package_id="onepassword";package_revision="0.1.0";
       tool="onepassword_login";declaration_id=Some "original-declaration";configuration_revision=Some "original-revision"} in
-    let fs=Eio.Stdenv.fs env in
     let origin=match O.reserve ~fs ~config ~source ~destination
       ~arguments:(`Assoc ["goal",`String "PRIVATE_INPUT_MARKER"]) |> origin_ok with
       | O.Fresh r -> r | Existing _ -> fail "fixture did not create original source" in

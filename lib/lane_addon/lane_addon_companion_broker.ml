@@ -176,16 +176,26 @@ let serve_connection t flow =
       | None -> () in
     Watched_work.run run ~watcher:(fun () -> Eio.Promise.await grant.publication_cancelled)
   | Ok (Binding (grant,selection)) ->
-    Fun.protect ~finally:(fun () -> withdraw_browser grant) (fun () ->
+    let owned_binding=ref None in
+    Fun.protect ~finally:(fun () ->
+      withdraw_browser grant;
+      Option.iter (fun (binding,completion) -> binding.finish !completion) !owned_binding) (fun () ->
       let run () =
         if not (admitted grant) then write t flow (error_json Not_started) else
-        let binding,departed=while_peer_waits ~admit:(fun () -> admitted grant) reader (fun () -> grant.bind selection) in
+        let binding,departed=while_peer_waits ~admit:(fun () -> admitted grant) reader (fun () ->
+          match grant.bind selection with
+          | Error error -> Error error
+          | Ok binding ->
+              let completion=ref Abandoned in
+              (* Register ownership before the watched factory can lose its
+                 result to invocation cancellation. The outer finalizer runs
+                 only after that work and its cancellation cleanup join. *)
+              owned_binding:=Some (binding,completion);
+              Ok (binding,completion)) in
         match binding with
         | None -> ()
         | Some (Error error) -> if not departed && admitted grant then write t flow (error_json error)
-        | Some (Ok binding) ->
-          let completion=ref Abandoned in
-          Fun.protect ~finally:(fun () -> binding.finish !completion) (fun () ->
+        | Some (Ok (binding,completion)) ->
             if departed || not (admitted grant) then () else (
             write t flow (`Assoc ["bound",`Bool true;"operation_id",`String grant.operation_id]);
             let rec loop () =
@@ -196,10 +206,6 @@ let serve_connection t flow =
                 | Error () -> write t flow (error_json Not_started)
                 | Ok command when not (admitted grant && matches grant selection command) -> write t flow (error_json Not_started)
                 | Ok command ->
-                  (* A departed provider cannot leave an extension effect
-                     running behind a released host scope. Clients send one
-                     command and await its reply; pipelined bytes also abandon
-                     the current uncertain operation. *)
                   let result,departed=while_peer_waits ~admit:(fun () -> admitted grant) reader (fun () -> binding.execute command) in
                   if departed || not (admitted grant) then () else
                   match result with
@@ -213,7 +219,7 @@ let serve_connection t flow =
                            completion:=Released;write t flow (`Assoc ["value",value]))
                          else write t flow (error_json Outcome_unknown)
                      | P.Prepare _|P.Invoke _ -> write t flow (`Assoc ["value",value]);loop ()) in
-            loop ())) in
+            loop ()) in
       Watched_work.run run ~watcher:(fun () -> Eio.Promise.await grant.cancelled))
 let private_listener ~sw ~socket_path ~shutdown =
   Eio.Cancel.protect (fun () ->

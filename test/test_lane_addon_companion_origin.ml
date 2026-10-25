@@ -126,7 +126,10 @@ let concurrent_first_writer () = with_root (fun _root config ->
       let byte=Bytes.create 1 in
       let count=Unix.read read_fd byte 0 1 in
       Unix.close read_fd;
-      let _,status=Unix.waitpid [] child in
+      let rec reap () = match Unix.waitpid [] child with
+        | result -> result
+        | exception Unix.Unix_error (Unix.EINTR,_,_) -> reap () in
+      let _,status=reap () in
       check bool "child completed its original reservation" true (status=Unix.WEXITED 0 && count=1);
       check bool "only one process receives a fresh origin" true
         (match parent,Bytes.get byte 0 with

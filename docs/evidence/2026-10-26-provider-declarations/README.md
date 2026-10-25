@@ -66,3 +66,46 @@ binds twelve current production/fixture/dependency inputs. Native stack submit
 reported disabled; REST membership is checked independently. Formal approval,
 merge, native HTTP, installed runtime, deployment, full regression and whole
 #27898 completion are not claimed.
+
+
+## Actual execution and removal of duplicate inventory
+
+[40220623907](https://github.com/jeong-sik/masc/actions/runs/40220623907)
+checked out exactly17fabe839cc3c0cdbeb7c0094490f228052a3959. The workflow
+FAILED with **100 PASS / 1 FAIL** across101 actual cases: registry45 PASS/1 FAIL
+(out of46), new snapshot8 PASS, runtime binding28 PASS, model labels15 PASS,
+auth4 PASS. Failure was the old fixed production provider-name list, which
+omitted already-declared MiniMax. It was a test/data duplicate, not an observed
+provider omission or snapshot projection defect. Parent source already iterates
+all admitted provider rows and declares MiniMax; that is a source comparison,
+not an executed parent-registry baseline.
+
+The duplicated26-provider inventory and its snapshot assertion were removed.
+Semantic shipped-provider capability/endpoint checks and exact overlay/key/alias
+checks remain. A new independent two-provider fixture constructs explicit seed
+and overlay declarations, retains both through registry/runtime projection and
+actual config construction, and checks distinct identities, endpoints and
+reasoning policies. Nine snapshot cases and45 registry cases are now requested;
+the changed fixture counts do not relabel the old46-case failure as success.
+Two source reviews confirmed the removal/functional coverage and found no
+remaining P0–P2. Prior source PASS missed the inherited inventory assertion and
+is superseded. Production remains byte-identical to17fabe.
+
+[40221415380](https://github.com/jeong-sik/masc/actions/runs/40221415380)
+was dispatched at exact8e9c17904710dc1ccc7822ac321bb3b62b5e3650 for the
+same five explicit suites. Its result is unverified. The new corrected manifest
+binds13 direct source/fixture/data inputs, including models.toml. The original
+12-input manifest remains historical; it does not certify the changed fixtures.
+
+## Actual parent correction success
+
+[40220868585](https://github.com/jeong-sik/masc/actions/runs/40220868585)
+checked out exactly49d7861c95dff413810fbab99f70b2f3d95637ff and completed
+SUCCESS: **99 actual cases PASS** (binding28 + Pipeline68 + MASC consumer3).
+The actual native/sync selection assertions executed twice inside the Pipeline
+case: declared streaming carried the exact trace id; undeclared support used
+one synchronous call and no native stream. This repairs the earlier Pipeline
+fixture failure, which remains recorded above. It is a parent execution,
+separate from the provider-snapshot five-suite request. No provider HTTP,
+installed runtime, whole build/regression, formal approval, merge or issue
+completion follows from99 focused parent cases.

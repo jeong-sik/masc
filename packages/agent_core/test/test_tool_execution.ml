@@ -39,7 +39,6 @@ let execute_result_with_tools_in_env
       ?elicitation
       ?tool_approval
       ?event_bus
-      ?journal
       ?before_tool_execution
       ?on_tool_execution_started
       ?on_tool_execution_finished
@@ -68,7 +67,6 @@ let execute_result_with_tools_in_env
     ~hooks:opts.hooks
     ?tool_approval:opts.tool_approval
     ~event_bus
-    ?journal
     ~tracer:opts.tracer
     ~agent_name:(Agent.state agent).config.name
     ~turn_count:(Agent.state agent).turn_count
@@ -583,99 +581,6 @@ let test_error_hooks_run_after_prior_hook_failure () =
     "later error hooks still run"
     [ "post_tool_use"; "post_tool_use_failure"; "on_tool_error" ]
     (List.rev !observed)
-;;
-
-let test_concurrent_journal_failure_retains_sibling_results () =
-  Eio_main.run
-  @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  let first_started, resolve_first = Eio.Promise.create () in
-  let sibling_started, resolve_sibling = Eio.Promise.create () in
-  let later_serial_runs = ref 0 in
-  let finished_ids = ref [] in
-  let journal =
-    Durable_event.create
-      ~on_append:(function
-        | Durable_event.Tool_completed { tool_name = "first"; _ } ->
-          failwith "journal observer boom"
-        | _ -> ())
-      ()
-  in
-  let concurrent_tool name resolve_self await_other =
-    Tool.create
-      ~descriptor:(descriptor_with Tool_contract.Concurrent)
-      ~name
-      ~description:""
-      ~parameters:[]
-      (fun _ ->
-         Eio.Promise.resolve resolve_self ();
-         Eio.Time.with_timeout_exn clock 0.05 (fun () -> Eio.Promise.await await_other);
-         Eio.Time.sleep clock 0.005;
-         Ok { Types.content = name; content_blocks = None; _meta = None })
-  in
-  let later_serial =
-    Tool.create
-      ~descriptor:(descriptor_with Tool_contract.Serial)
-      ~name:"later_serial"
-      ~description:""
-      ~parameters:[]
-      (fun _ ->
-         incr later_serial_runs;
-         Ok { Types.content = "must not run"; content_blocks = None; _meta = None })
-  in
-  let result =
-    execute_result_with_tools_in_env
-      env
-      ~tools:
-        [ concurrent_tool "first" resolve_first sibling_started
-        ; concurrent_tool "sibling" resolve_sibling first_started
-        ; later_serial
-        ]
-      ~hooks:Hooks.empty
-      ~journal
-      ~on_tool_execution_finished:(fun ~invocation ~tool_name:_ ~content:_ ~is_error:_ ->
-        finished_ids := Tool_contract.Invocation.tool_use_id invocation :: !finished_ids)
-      [ ToolUse { id = "t1"; name = "first"; input = `Assoc [] }
-      ; ToolUse { id = "t2"; name = "sibling"; input = `Assoc [] }
-      ; ToolUse { id = "t3"; name = "later_serial"; input = `Assoc [] }
-      ]
-  in
-  (match result with
-   | Error
-       { Agent_tools.completed_results = [ first; sibling ]
-       ; cause = Agent_tools.Observer_failure { invocation; exception_; _ }
-       } ->
-     check string "first result order" "t1" (result_id first);
-     check string "sibling result order" "t2" (result_id sibling);
-     check string "first result retained" "first" first.content;
-     check string "sibling result retained" "sibling" sibling.content;
-     check
-       string
-       "observer failure exact occurrence"
-       "t1"
-       (Tool_contract.Invocation.tool_use_id invocation);
-     check
-       string
-       "original observer exception retained"
-       "Failure(\"journal observer boom\")"
-       (Printexc.to_string exception_)
-   | Ok _ -> fail "observer failure must remain terminal"
-   | Error _ -> fail "unexpected concurrent execution failure");
-  check
-    (list string)
-    "both concurrent completion observers ran"
-    [ "t1"; "t2" ]
-    (List.sort String.compare !finished_ids);
-  check int "later serial batch was not started" 0 !later_serial_runs;
-  check
-    int
-    "journal retained both Tool_completed events"
-    2
-    (Durable_event.events journal
-     |> List.filter (function
-       | Durable_event.Tool_completed _ -> true
-       | _ -> false)
-     |> List.length)
 ;;
 
 let test_block_emits_no_execution_lifecycle () =
@@ -1639,10 +1544,6 @@ let () =
             "post-hook observer propagates after completion"
             `Quick
             test_post_hook_observer_exception_propagates_after_completion
-        ; test_case
-            "concurrent journal failure retains sibling results"
-            `Quick
-            test_concurrent_journal_failure_retains_sibling_results
         ] )
     ; ( "hook_failures"
       , [ test_case

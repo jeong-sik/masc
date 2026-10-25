@@ -209,26 +209,11 @@ val with_skill_registry : Skill_registry.t -> t -> t
     @since 0.110.0 *)
 val with_on_run_complete : (bool -> unit) -> t -> t
 
-(** Attach an event-sourced journal for crash recovery and replay.
-    @since 0.133.0 *)
-val with_journal : Durable_event.journal -> t -> t
-
 (** Attach a caller-owned turn-boundary checkpoint sink. The sink is stored
     on the built {!Agent.t}, not in {!Agent.options}, so existing callers that
     construct options records remain source-compatible.
     @since 0.193.9 *)
 val with_checkpoint_sink : Agent.checkpoint_sink -> t -> t
-
-(** Install an [on_run_complete] callback that persists the journal
-    to [path] whenever the agent run finishes (success or failure).
-    Equivalent to attaching a journal and then calling
-    {!Agent.save_journal} in a callback, but bundled so consumers
-    declare the intent in one line.
-
-    If a journal is not explicitly attached, this builder also
-    creates a fresh one so the dump is non-empty.
-    @since 0.135.0 *)
-val with_auto_dump_journal : path:string -> t -> t
 
 (** {2 Build} *)
 

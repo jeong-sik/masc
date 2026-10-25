@@ -158,7 +158,6 @@ type payload =
 
           Reserved prefixes (AGENT_CORE-internal):
           - [runtime.*] — bridged from [Runtime] session protocol.
-          - [durable.*] — bridged from [Durable_event] journal.
           - [provider.*] — provider-specific escape hatch
             (e.g. [provider.anthropic.cache_hit],
             [provider.openai.reasoning_tokens]).

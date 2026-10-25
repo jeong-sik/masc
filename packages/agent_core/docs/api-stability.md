@@ -99,23 +99,24 @@ this tier live under internal subdirectories such as `lib/agent/`,
 `lib/protocol/`, and `lib/llm_provider/`, plus parser/transport helpers that
 external consumers should not depend on directly.
 
-#### Execution-journal migration boundary
+#### Execution-journal interface boundary
 
-`Execution_event` and `Execution_journal` are private implementation modules.
-They are not re-exported by `Agent_core`, are not an external extension point,
-and have no supported writer API. Their repository-local regression suite uses
-Dune's internal library alias; that alias is not a supported external API
-contract.
+Execution store, lane writer, reducer, transaction, settlement and scope modules
+are private engine machinery. They are not re-exported by `Agent_core`, are not
+an external extension point, and have no supported public writer API. Their
+repository-local regression suites use Dune's internal library alias; that
+alias is not a supported external API contract.
 
-This classification does not claim a runtime behavior upgrade. The single-writer
-hard cut this section used to describe as future work has landed (#2683): the
-agent_core execution path (`Agent_execution_runner` / `Execution_agent_scope`) owns
-occurrence creation, surfaced through the public `Agent.execution_store` API.
-`Durable_event` remains as the journal type and idempotency-key foundation
-(`agent_execution_event_writer`, `agent_tools`) — not as an independent second
-writer. Event_bus, Raw_trace, durable persistence, and downstream dashboard
-data consume read projections. There must be no interval in which two
-components independently author the same execution history.
+The public composition boundary is `Agent.execution_store` on the execution
+entrypoints. `Agent_execution_runner` and `Execution_agent_scope` own occurrence
+creation. `Agent.open_execution_projection` exposes committed event identity, scoped
+cursors and immutable read pages without exposing Store/WAL/reconciliation.
+Caller-owned checkpoint sinks remain typed conversation snapshot boundaries.
+
+This API classification is not proof that every Event_bus/Raw_trace callback is
+already a cursor-bound post-commit projection. That integration and finite-scope
+retention acceptance remain tracked in masc#27890. Ordinary transient Agent use
+without a store does not provide durable replay.
 
 ## Verification
 

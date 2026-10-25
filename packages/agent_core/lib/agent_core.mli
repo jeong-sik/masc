@@ -128,8 +128,6 @@ module Runtime_store = Runtime_store
 module Plan = Plan
 module Tool_input_validation = Tool_input_validation
 module Tool_middleware = Tool_middleware
-module Durable_event = Durable_event
-module Journal_bridge = Journal_bridge
 
 (** {1 Version} *)
 

@@ -239,12 +239,6 @@ let stage_parse ?raw_trace_run ?clock ~turn agent =
        ; payload = TurnStarted { agent_name = agent.state.config.name; turn }
        }
    | None -> ());
-  (match agent.options.journal with
-   | Some j ->
-     Agent_execution_event_writer.append
-       j
-       (Turn_started { turn; timestamp = Pipeline_common.timestamp_now ?clock () })
-   | None -> ());
   let* prep = prepare_turn_for_agent agent ~turn_params in
   let ready_tool_names = prep.visible_tool_names in
   (* TurnReady reports the exact caller-supplied tool list the LLM will see

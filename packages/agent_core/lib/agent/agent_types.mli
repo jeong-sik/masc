@@ -178,12 +178,6 @@ type options =
         updated.  Intended for emitting eval metrics, flushing OTel
         spans, or other end-of-run side effects.
         @since 0.110.0 *)
-  ; journal : Durable_event.journal option
-    (** Optional event-sourced journal for crash recovery and replay.
-        When provided, lifecycle events are appended alongside
-        [Event_bus] publishes, enabling offline replay via
-        {!Durable_event.replay_summary}.
-        @since 0.133.0 *)
   ; transport : Llm_provider.Llm_transport.t option
     (** Optional non-HTTP transport override.  Required for CLI provider
         kinds ([Claude_code], [Codex], [Gemini], [Kimi])

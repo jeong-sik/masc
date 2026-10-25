@@ -25,10 +25,11 @@ relevance.
 |---|---------|--------|-----------|---------|
 | 1 | **Event_bus** | `Event_bus` | In-process pub/sub | Library consumers (subscribers) |
 | 2 | **Hooks** | `Hooks` | Synchronous callback | Library consumers (interception/audit) |
-| 3 | **Durable journal** | `Durable_event` | In-memory append-only + JSONL | Crash recovery + event-sourced replay |
+| 3 | **Execution history** | `Agent.Execution_projection` | Cursor reads from the scoped durable execution store | Occurrence audit and recovery |
 | 4 | **LLM wire stream** | `Types.sse_event` | Provider-specific SSE → normalized | Internal (streaming accumulation) |
 
-Surface 3 **bridges into** Surface 1 via `Journal_bridge` (see §4.2).
+Surface 3 is read through `Agent.open_execution_projection`; subscriptions to Surface 1
+do not establish durable occurrence or effect-replay authority.
 
 Surface 4 is independent and does not flow to Event_bus.
 
@@ -108,7 +109,6 @@ identifier.** The following prefixes are reserved:
 | Prefix | Owner | Purpose |
 |--------|-------|---------|
 | `runtime.*` | AGENT_CORE | Events from `Runtime` session protocol (§5) |
-| `durable.*` | AGENT_CORE | Events from `Durable_event` journal (§4) |
 | `provider.*` | AGENT_CORE | Provider-specific escape hatch — e.g. `provider.anthropic.cache_hit`, `provider.openai.reasoning_tokens`, `provider.gemini.safety_rating` |
 | `agent_core.*` | AGENT_CORE | Reserved for future AGENT_CORE use |
 | `<downstream>.*` | Downstream | Any other prefix; pick one and stick to it |
@@ -195,72 +195,35 @@ See `lib/base/hooks.mli` for the full decision contract.
 
 ---
 
-## 4. Surface 3: Durable journal
+## 4. Surface 3: Scoped execution history
 
-**Header**: `lib/durable_event.mli`. Stability: Evolving. @since 0.89.0.
+**Header**: `lib/agent/agent.mli` and
+`lib/agent/agent_execution_projection_intf.mli`.
 
-Event-sourced record of everything needed to reconstruct agent state on
-crash recovery. Events are immutable; append-only.
+`Agent.execution_store` attaches caller-owned durable storage to one finite Agent
+execution. The engine's typed execution scope owns run, turn, provider, output,
+Tool invocation and exact Tool attempt occurrences. Nested work belongs to the
+creating attempt. A provider-supplied tool-use id or a name/input digest is not
+an external-effect receipt.
 
-`Durable_event` remains the only production durable-journal authority. AGENT_CORE has
-no second public execution journal and external consumers must not dual-write
-an alternative occurrence history. Any internal execution-topology work is
-outside this public catalog until a production single-writer hard cut is
-implemented.
+`Agent.open_execution_projection` opens the public read-only projection for a saved
+execution locator. Pages retain the journal's event identity and scoped cursor;
+`through` freezes a committed prefix while later events are appended. The
+writer's Store/WAL/reducer/transaction machinery is private. Public consumers
+cannot append a parallel execution history.
 
-This journal is the SSOT for committed effects and replay idempotency, not for
-exact model-tool occurrence correlation. Its tool key intentionally remains a
-name-and-input projection. Exact occurrence audit belongs to the canonical
-`Tool.Invocation.t` carried by typed events and projected into raw trace.
+Tool settlement commits the attempt before entering its external effect and
+commits the result afterward. Recovery replays a settled result; an admitted
+attempt without a result is an explicit unknown outcome, not permission to
+repeat the effect. Caller-owned checkpoint sinks remain typed conversation
+snapshot boundaries; a failed sink does not certify a later mutation stage.
 
-### 4.1 Journal variants
-
-| Variant | Purpose |
-|---------|---------|
-| `Turn_started` | New agent turn |
-| `Llm_request` | LLM call issued (turn, model, input_tokens) |
-| `Llm_response` | LLM call returned (output_tokens, stop_reason, duration_ms) |
-| `Tool_called` | Tool invoked with idempotency key + input hash |
-| `Tool_completed` | Tool finished; output recorded for replay skip |
-| `State_transition` | Agent state machine change |
-| `Checkpoint_saved` | Persistence milestone |
-| `Error_occurred` | Error recorded with domain + detail |
-
-### 4.2 Projection onto Event_bus
-
-When a journal is created with `Journal_bridge.make ~bus ()`, each append
-is mirrored to the Event_bus as a `Custom("durable.<kind>", json)` event
-— one name per journal variant, dot-separated.
-
-| Journal variant | Custom name |
-|-----------------|-------------|
-| `Turn_started` | `durable.turn_started` |
-| `Llm_request` | `durable.llm_request` |
-| `Llm_response` | `durable.llm_response` |
-| `Tool_called` | `durable.tool_called` |
-| `Tool_completed` | `durable.tool_completed` |
-| `State_transition` | `durable.state_transition` |
-| `Checkpoint_saved` | `durable.checkpoint_saved` |
-| `Error_occurred` | `durable.error_occurred` |
-
-**Correlation**: `Journal_bridge.make` accepts `?correlation_id` and
-`?run_id` so durable events can be attached to the same envelope chain
-as the surrounding agent run.
-
-**Failure contract**: the bridge does not absorb publication exceptions.
-The journal append commits first; an ordinary projection failure is returned
-as `Durable_event.append_error`, while reserved runtime exceptions and
-cancellation propagate with their original backtrace.
-
-### 4.3 Deduplication advisory
-
-`agent/agent_tools.ml` publishes native `ToolCalled`/`ToolCompleted`
-events AND appends to the journal. If you attach `Journal_bridge` to the
-journal AND subscribe to Event_bus, **both** native and `durable.*`
-versions will arrive for the same tool call. This is intentional — the
-native variants are provider-agnostic snapshots, the `durable.*` variants
-carry replay metadata (idempotency keys). Downstream code that counts
-tool calls from Event_bus should filter on one or the other.
+Event_bus and Raw_trace expose observational callbacks as well. They do not
+supply replay or external-effect authority. Their complete conversion to
+cursor-bound, read-only post-commit projections, and finite-scope retention
+acceptance, remain explicit integration requirements in masc#27890; removing a
+writer API alone does not prove those requirements. A transient Agent run
+without an execution store has no durable history to recover.
 
 ---
 
@@ -338,7 +301,8 @@ provider. Missing credentials / endpoints skip gracefully.
 1. **Decide the surface**. Is this:
    - A general agent lifecycle signal (≥2 providers)? → `Event_bus` native variant.
    - An audit/interception point? → `Hooks` callback.
-   - A replay-relevant record? → `Durable_event` variant.
+   - A replay-relevant record? → the engine-owned typed execution transaction,
+     with a read-only `Agent.Execution_projection` representation.
    - Provider-specific? → `Custom("provider.<name>.<event>", json)`.
    - Downstream domain event? → downstream's own Event_bus, not AGENT_CORE's.
 

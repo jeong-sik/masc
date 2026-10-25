@@ -31,8 +31,7 @@
   pipeline_execution_scope
   pipeline_execution_resume
   pipeline_terminal_tool
-  pipeline_terminal_resume
-  agent_execution_event_writer)
+  pipeline_terminal_resume)
  (libraries
   llm_provider
   (re_export agent_core_base)

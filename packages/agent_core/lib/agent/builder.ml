@@ -3,8 +3,6 @@
 
 open Types
 
-let _log = Log.create ~module_name:"builder" ()
-
 type t =
   { net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   ; model : model
@@ -50,7 +48,6 @@ type t =
   ; yield_on_tool : bool
   ; max_tool_rounds : int option
   ; on_run_complete : (bool -> unit) option
-  ; journal : Durable_event.journal option
   ; checkpoint_sink : Agent.checkpoint_sink option
   ; transport : Llm_provider.Llm_transport.t option
   }
@@ -109,39 +106,16 @@ let create ~net ~model =
   ; yield_on_tool = false
   ; max_tool_rounds = None
   ; on_run_complete = None
-  ; journal = None
   ; checkpoint_sink = None
   ; transport = None
   }
 ;;
-
-let with_journal journal b = { b with journal = Some journal }
 
 let with_checkpoint_sink checkpoint_sink b =
   { b with checkpoint_sink = Some checkpoint_sink }
 ;;
 
 let with_transport transport b = { b with transport = Some transport }
-
-let with_auto_dump_journal ~path b =
-  let journal =
-    match b.journal with
-    | Some j -> j
-    | None -> Durable_event.create ()
-  in
-  let dump _ok =
-    match Durable_event.save_to_file journal path with
-    | Ok () -> ()
-    | Error err ->
-      (* Best-effort diagnostic: consumers that need hard guarantees should
-         provide their own [on_run_complete] callback. *)
-      Log.warn
-        _log
-        "auto_dump_journal save failed"
-        [ Log.S ("path", path); Log.S ("error", err) ]
-  in
-  { b with journal = Some journal; on_run_complete = Some dump }
-;;
 
 let with_system_prompt prompt b = { b with system_prompt = Some prompt }
 let with_name name b = { b with name }
@@ -275,7 +249,6 @@ let build b =
     ; description = b.description
     ; periodic_callbacks = b.periodic_callbacks
     ; on_run_complete = b.on_run_complete
-    ; journal = b.journal
     ; transport = b.transport
     }
   in

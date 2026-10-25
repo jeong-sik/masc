@@ -94,7 +94,6 @@ let execute_tools_with_trace agent active_run ~turn ?before_tool_execution tool_
     ~hooks:agent.options.hooks
     ?tool_approval:agent.options.tool_approval
     ~event_bus:agent.options.event_bus
-    ?journal:agent.options.journal
     ~tracer:agent.options.tracer
     ~agent_name:agent.state.config.name
     ~turn_count:turn

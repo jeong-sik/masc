@@ -79,7 +79,6 @@ type options = Agent_types.options =
   ; description : string option
   ; periodic_callbacks : periodic_callback list
   ; on_run_complete : (bool -> unit) option
-  ; journal : Durable_event.journal option
   ; transport : Llm_provider.Llm_transport.t option
   }
 
@@ -698,10 +697,3 @@ val set_lifecycle
   -> unit
 
 val base_messages : t -> Types.message list
-
-(** Dump the agent's Durable_event journal to [path] as JSONL.
-    Returns [Error "no journal"] when the agent was built without
-    {!Builder.with_journal}.  Thin wrapper over
-    {!Durable_event.save_to_file}.
-    @since 0.135.0 *)
-val save_journal : t -> string -> (unit, string) result

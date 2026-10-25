@@ -21,13 +21,6 @@ let persist_for_state agent stage ~pending_input state =
     let snapshot = { stage; turn; checkpoint; timestamp } in
     (match sink snapshot with
      | Ok () ->
-       (match agent.options.journal with
-        | Some journal ->
-          Agent_execution_event_writer.append
-            journal
-            (Checkpoint_saved
-               { checkpoint_id = Printf.sprintf "%s-%d" stage_label turn; timestamp })
-        | None -> ());
        (* Three checkpoint stages per turn are bookkeeping, not events an
           operator reads: at Info they were 493 of 9,119 lines in 41 minutes
           (2026-09-09), three lines under every turn summary. The sink

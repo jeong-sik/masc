@@ -1164,9 +1164,3 @@ let run_turn_stream ~sw ?clock ~on_event ?on_telemetry ?execution_store agent =
   run_turn_stream_detailed ~sw ?clock ~on_event ?on_telemetry ?execution_store agent
   |> project_detailed_error
 ;;
-
-let save_journal agent path =
-  match agent.options.journal with
-  | Some j -> Durable_event.save_to_file j path
-  | None -> Error "no journal"
-;;

@@ -895,7 +895,6 @@ let execute_scheduled_tool
       ~(hooks : Hooks.hooks)
       ~event_bus
       ?tool_approval
-      ?journal
       ~tracer
       ~agent_name
       ~turn_count
@@ -982,7 +981,6 @@ let execute_scheduled_tool
     | None -> ()
   in
   let begin_effect ~tool_name ~input =
-    let t0_tool = Unix.gettimeofday () in
     let pending =
       find_and_execute_tool_with_index
         ~context
@@ -1002,7 +1000,7 @@ let execute_scheduled_tool
     in
     completed_dispatch
     := Some ({ result = pending.result; deferred_failure = None } : tool_dispatch);
-    pending, (Unix.gettimeofday () -. t0_tool) *. 1000.0
+    pending
   in
   let finish_effect pending ~tool_name =
     let dispatch = pending.finish_observers () in
@@ -1028,7 +1026,7 @@ let execute_scheduled_tool
         ~invoke:(fun ~start_child ~tool_name ~input ->
           observe_before_completion (fun () -> observe_started ~tool_name ~input);
           Execution_context.with_child_scope_factory start_child (fun () ->
-            let pending, _duration_ms = begin_effect ~tool_name ~input in
+            let pending = begin_effect ~tool_name ~input in
             ( (pending.result.content, pending.result.content_blocks, pending.result.outcome)
             , fun () ->
                 let (_ : tool_dispatch) = finish_effect pending ~tool_name in
@@ -1149,7 +1147,6 @@ let execute_scheduled_tool
     | Ok None ->
       let execute_admitted () =
         require_preparation ();
-        let idem_key = Durable_event.make_idempotency_key ~tool_name:name ~input in
         try
           let dispatch =
             with_tool_span (fun () ->
@@ -1165,39 +1162,10 @@ let execute_scheduled_tool
                  | Error error -> durability_failure error
                  | Ok durable_invocation -> execute_durable durable_invocation)
               | None ->
-                observe_before_completion (fun () ->
-                  observe_started ~tool_name:name ~input;
-                  match journal with
-                  | Some j ->
-                    Agent_execution_event_writer.append
-                      j
-                      (Tool_called
-                         { turn = Tool_contract.Invocation.turn invocation
-                         ; tool_name = name
-                         ; idempotency_key = idem_key
-                         ; input_hash = Digest.string (Yojson.Safe.to_string input)
-                         ; timestamp = Unix.gettimeofday ()
-                         })
-                  | None -> ());
-                let pending, duration_ms_tool = begin_effect ~tool_name:name ~input in
-                let dispatch = finish_effect pending ~tool_name:name in
-                observe_after_completion (fun () ->
-                  match journal with
-                  | Some j ->
-                    Agent_execution_event_writer.append
-                      j
-                      (Tool_completed
-                         { turn = Tool_contract.Invocation.turn invocation
-                         ; tool_name = name
-                         ; idempotency_key = idem_key
-                         ; output_json = `String dispatch.result.content
-                         ; is_error =
-                             Types.tool_result_outcome_is_error dispatch.result.outcome
-                         ; duration_ms = duration_ms_tool
-                         ; timestamp = Unix.gettimeofday ()
-                         })
-                  | None -> ());
-                dispatch)
+                observe_before_completion (fun () -> observe_started ~tool_name:name ~input);
+                let pending = begin_effect ~tool_name:name ~input in
+                finish_effect pending ~tool_name:name)
+
           in
           completed_dispatch := Some dispatch;
           outcome ()
@@ -1228,7 +1196,6 @@ let execute_tools
       ~(hooks : Hooks.hooks)
       ?tool_approval
       ~event_bus
-      ?journal
       ~tracer
       ~agent_name
       ~turn_count
@@ -1264,7 +1231,6 @@ let execute_tools
       ~hooks
       ~event_bus
       ?tool_approval
-      ?journal
       ~tracer
       ~agent_name
       ~turn_count

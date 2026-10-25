@@ -9422,30 +9422,29 @@ let test_composable_task_page_alternatives () =
        check int "one row on each page" 1 (List.length (rows first));
        check int "one final row" 1 (List.length (rows last));
        check bool "continuation does not repeat the first row" true (rows first <> rows last);
-       (* Remove the cursor declaration from the actual descriptor, recreating
-          the historical schema drift while keeping the real producer value. *)
-       let descriptors = KTD.all_descriptors () |> List.map (fun (descriptor : KTD.t) ->
-         if List.mem "keeper_tasks_list" (KTD.keeper_model_names descriptor) then
-           match descriptor.composable_output with
-           | KTD.Opaque_output -> fail "tasks lost its composable declaration"
-           | KTD.Json_output { schema = `Assoc fields } ->
-             let properties = fields |> List.assoc "properties" |> to_assoc in
-             check bool "cursor declaration exists before negative mutation" true
-               (List.mem_assoc "next_cursor" properties);
-             let schema = `Assoc (("properties", `Assoc (List.remove_assoc "next_cursor" properties))
-               :: List.remove_assoc "properties" fields) in
-             { descriptor with composable_output = KTD.Json_output { schema } }
-           | KTD.Json_output _ -> fail "tasks output schema is not an object"
-         else descriptor) in
+       (* Descriptor identity is canonicalized by Plan.create; mutating its
+          supplied record cannot change production authority. Instead mutate
+          only the observed conditional field of the actual producer value. *)
        let node_id = match Plan.Node_id.make "tasks" with
          | Ok id -> id | Error Plan.Node_id.Empty -> fail "empty node" in
        let node = Plan.node ~id:node_id ~tool_name:"keeper_tasks_list"
          ~input:(Plan.Json_template.literal (`Assoc [])) () in
-       let plan = match Plan.create ~descriptors [ node ] with
+       let plan = match Plan.create ~descriptors:(KTD.all_descriptors ()) [ node ] with
          | Ok plan -> plan | Error error -> fail (Plan.error_to_string error) in
-       match Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id first with
-       | Error (Plan.Output_validation_failed { error = Plan.Unexpected_field { field = "next_cursor"; path = [] }; _ }) -> ()
-       | Error _ | Ok _ -> fail "real paged producer value did not expose the removed cursor declaration")
+       let fields = first |> to_assoc in
+       let unexpected = "producer_cursor_without_declaration" in
+       let renamed = `Assoc ((unexpected, `String cursor) :: List.remove_assoc "next_cursor" fields) in
+       (match Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id renamed with
+        | Error (Plan.Output_validation_failed
+            { error = Plan.Unexpected_field { field; path = [] }; _ }) ->
+          check string "undeclared producer cursor is rejected exactly" unexpected field
+        | Error _ | Ok _ -> fail "real page with an undeclared cursor field was not rejected");
+       let mistyped = `Assoc (("next_cursor", `Int 1) :: List.remove_assoc "next_cursor" fields) in
+       match Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id mistyped with
+       | Error (Plan.Output_validation_failed
+           { error = Plan.Type_mismatch { path = [ "next_cursor" ]; expected = Plan.String_type;
+               actual = Plan.Integer_type }; _ }) -> ()
+       | Error _ | Ok _ -> fail "real page with a mistyped cursor was not rejected")
 ;;
 
 let test_composable_metric_observation_alternatives () =

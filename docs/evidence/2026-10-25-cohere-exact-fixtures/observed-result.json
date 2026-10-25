@@ -1,0 +1,457 @@
+{
+  "schema": "masc.cohere-parser-component.v1",
+  "recorded_at": "2026-10-25T11:56:07.450637+00:00",
+  "verdict": "PASS",
+  "before_ref": "0ccb01b6ac91e47950fd3e74bdf9c38c95aefa92",
+  "after_ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+  "toolchain": {
+    "python": "3.14.4",
+    "ocaml": "5.5.1",
+    "git": "git version 2.50.1 (Apple Git-155)",
+    "packages": {
+      "yojson": "3.0.0",
+      "otoml": "1.0.5",
+      "ppx_deriving.show": "6.1.1",
+      "ppx_deriving.eq": "6.1.1",
+      "ppx_deriving_yojson.runtime": "3.10.0"
+    }
+  },
+  "inputs": [
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/reasoning_effort.ml",
+      "blob": "773b219a1c7c9354f64ba13fad69ad2dafbc3984",
+      "sha256": "143a311cbd071ba7834b5d9e83f910afe12ad2d6b77033477b06454a2d4fc601"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/reasoning_effort.mli",
+      "blob": "11193a0669e9409b78f7554cee6ef07aed95b596",
+      "sha256": "302d79716c15353863683fb278b09b3948d96729074027269efc489e2d93e666"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/model_identifiers.ml",
+      "blob": "5981ed9f8a0542606060fc251d56a24101a1e8b1",
+      "sha256": "8a99fb4a5f89cb0477dedda45bef198d4b26c6cf8e1e644cd9d1b1a658c8359e"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/model_identifiers.mli",
+      "blob": "6102a75d5bc5605851cb31085be44f6c1d7d9f3e",
+      "sha256": "3996db7078599fdd814c520de59d5b875575b22c6c477c5487bad8131b815d3c"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/serving_constraint.ml",
+      "blob": "93f2b7ec5d406dcbf8c9384fa69df707e49bda76",
+      "sha256": "2eb722bd2f2381835f9a59576e37088b5b65a146672b9e5458f709e08a7e0c55"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/serving_constraint.mli",
+      "blob": "e4890025f3666040c3e8d88aa8ef59f468560cce",
+      "sha256": "7f897391bb231ec08bb766fcccdaada70b5e1b01ce9d7ad9bbaded2cd998dbb4"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/provider_kind.ml",
+      "blob": "7064ac97dd7eb0ba9846dc78b717cee3b94b3548",
+      "sha256": "fffc5db7246ab06882c9832c99e395a19e7edc21836bda6093d3ade1fee7e5b6"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/provider_kind.mli",
+      "blob": "3b94e221525741df999858d5c2d25107b54ae274",
+      "sha256": "29a1c58543a11e3baed31d6ea598c32b5e5d5e6d0ab3f3a4f36c75387b1374c4"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/capability_vocab.ml",
+      "blob": "e95d4d1933c255bb57f3f9f0f4e8a9cf7a613a81",
+      "sha256": "77eba8441d635d2627e67692a9839e22edeae3c0be8e455379ce1e9de080e4b9"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/capability_vocab.mli",
+      "blob": "8c986a8cde61546720239e52670f6d9c078d6ec4",
+      "sha256": "acc574c9a4dd5beb2dbb172ce8029b2ad424b691f08fd09423b464283a35f3d3"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/model_provider_catalog.ml",
+      "blob": "5391056bc955527975572d69a74c227697921e63",
+      "sha256": "81d4ecae5237ec63a12e4a7ee90b59cc271056dcb1cb0c114e709727edc9d328"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/model_provider_catalog.mli",
+      "blob": "d84e1fa0810d30a25799d989e8cf8d20ce81aca0",
+      "sha256": "159104f7d4196a087ceba5e1e9b18eef9e9e24086defecc14513b00aaed9d581"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/serving_constraint_catalog.ml",
+      "blob": "22b6ca73b4e19cc6ac5838c67f380489c141646b",
+      "sha256": "dc15afcc61b30bc9cae89f51bd235d8de48c384c16c915ab5821c299df291f19"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/serving_constraint_catalog.mli",
+      "blob": "cb4e2e5056467a9cdf9fcafc1efcff033c5abc40",
+      "sha256": "de09dfb8996299d48b6c17260f1ad77cfe6e5262694e81dc6555701f042b804b"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/capability_manifest.ml",
+      "blob": "a759dcb213d9eb8a17f7ba5998bb0cb75241cb07",
+      "sha256": "1d8211e7b3226e82dfc36541c42b5a5aab87df9a145e891ba2159ea98b9f4fe7"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/capability_manifest.mli",
+      "blob": "7bed49aa031eb1728ba9ded427278b00cb0c537f",
+      "sha256": "52d14da27ec3e5ab81cf306eed13611067b66ac8238d72e8929e256f9f176f5b"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/model_catalog.ml",
+      "blob": "eeb8206ed870c8973d5ad7dd7b26c4fd52c27453",
+      "sha256": "2d632196590f5645ae8b2b3b58f77be598698c41fdbe8e8268f60dd2e70046f0"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/lib/llm_provider/model_catalog.mli",
+      "blob": "fe59ecebaabe5328d0982c52a0bcb2a26596014f",
+      "sha256": "57fdd3619ed754e426b50c4ad1168ab85614853371daa6a1f77e63059c129e1f"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/models.toml",
+      "blob": "8b7d93fff5837278efe017b13a7a17eafd98a02e",
+      "sha256": "6c8ea8751c94061c0654b19fd666ad6d799c957da6705581779a5b18eb046999"
+    },
+    {
+      "ref": "0ccb01b6ac91e47950fd3e74bdf9c38c95aefa92",
+      "path": "packages/agent_core/test/test_cohere_schema_wire.ml",
+      "blob": "1eb2a829f91072e850fd7d2627ad42ed2849ac51",
+      "sha256": "e7130308c2fef66aede86b125f0f80bb5fe6f1a7137819bdc9ce3cc7a93135dd"
+    },
+    {
+      "ref": "cee9238b935ad1b019232627256e0efac64b36f7",
+      "path": "packages/agent_core/test/test_cohere_schema_wire.ml",
+      "blob": "521a8924f4dca83486cc12faa0e95c4f10cfce79",
+      "sha256": "171782d9ed32d5dd01954b1eb7ebdb2cd20d2ed524066159ba641b20afaa9eb9"
+    }
+  ],
+  "support_sha256": {
+    "prepare_parser.ml": "b4c6513721b6cfc8d94108fd1cf714e0a3b5875c63fce74a6db931c428004c8e",
+    "probe.ml": "98794437bf11aab970c2709ffaa5ed7c5edea30e3c3744fe7d4e563ac7f1f948"
+  },
+  "runner_sha256": "19ede19f97691e494baddfa4d2f691e9739630454a8fab8efbf16e8d2bd67d7a",
+  "extracted_AST_sha256": {
+    "before_helpers": "01f3648f125c070df47638fc6251bc49b66b0d43fdd37db410ae3bb66123b65a",
+    "before_exact": "3ab695c530c7e75444b414235c243da7cb5e48fbf4336c0e39f254c5aad82e9d",
+    "after_helpers": "5ae66d065841c9d63ef0dfb1af517cd73c65c9f52acb588133762cb1572e3c27",
+    "after_exact": "e965b80eb9fc27dce40f683b765d2692ab5651e0acef204dd5d762f0bc137cf5"
+  },
+  "exact_frozen_function_AST_unchanged": false,
+  "preprocessing": [
+    "source/reasoning_effort.ml: removed 0 inline-test extensions only",
+    "source/model_identifiers.ml: removed 0 inline-test extensions only",
+    "source/serving_constraint.ml: removed 0 inline-test extensions only",
+    "source/provider_kind.ml: removed 0 inline-test extensions only",
+    "source/capability_vocab.ml: removed 19 inline-test extensions only",
+    "source/model_provider_catalog.ml: removed 0 inline-test extensions only",
+    "source/serving_constraint_catalog.ml: removed 0 inline-test extensions only",
+    "source/capability_manifest.ml: removed 18 inline-test extensions only",
+    "source/model_catalog.ml: removed 14 inline-test extensions only"
+  ],
+  "compilation": [
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "reasoning_effort.mli"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "reasoning_effort.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "model_identifiers.mli"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "model_identifiers.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "serving_constraint.mli"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "serving_constraint.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "provider_kind.mli"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "provider_kind.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "capability_vocab.mli"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "capability_vocab.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "model_provider_catalog.mli"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "model_provider_catalog.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "serving_constraint_catalog.mli"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "serving_constraint_catalog.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "capability_manifest.mli"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "capability_manifest.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "model_catalog_embedded.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "model_catalog.mli"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "model_catalog.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "before_helpers.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-c",
+        "after_helpers.ml"
+      ],
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "ocamlfind",
+        "ocamlc",
+        "-package",
+        "yojson,otoml,ppx_deriving.show,ppx_deriving.eq,ppx_deriving_yojson.runtime",
+        "-linkpkg",
+        "reasoning_effort.cmo",
+        "model_identifiers.cmo",
+        "serving_constraint.cmo",
+        "provider_kind.cmo",
+        "capability_vocab.cmo",
+        "model_provider_catalog.cmo",
+        "serving_constraint_catalog.cmo",
+        "capability_manifest.cmo",
+        "model_catalog_embedded.cmo",
+        "model_catalog.cmo",
+        "before_helpers.cmo",
+        "after_helpers.cmo",
+        "probe.ml",
+        "-o",
+        "probe"
+      ],
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "observed": {
+    "probe_count": 14,
+    "exit": 0,
+    "stdout": "BEFORE_REJECT original TOML json_object_schema: model entry missing required \"model_id\" field\nBEFORE_REJECT original manifest json_object_schema: unsupported capability manifest schema_version: 1 (expected 2)\nPASS fixed TOML typed row json_object_schema\nPASS fixed manifest typed row json_object_schema\nBEFORE_REJECT original TOML openai_json_schema: model entry missing required \"model_id\" field\nBEFORE_REJECT original manifest openai_json_schema: unsupported capability manifest schema_version: 1 (expected 2)\nPASS fixed TOML typed row openai_json_schema\nPASS fixed manifest typed row openai_json_schema\nPASS unknown TOML dialect \"unknown\": model entry \"same-model\" field \"json_schema_dialect\" has unknown value \"unknown\" (canonical: openai_json_schema, json_object_schema)\nPASS unknown manifest dialect \"unknown\": entry field \"json_schema_dialect\" has unknown value \"unknown\" (canonical: openai_json_schema, json_object_schema)\nPASS unknown TOML dialect \"\": model entry \"same-model\" field \"json_schema_dialect\" has unknown value \"\" (canonical: openai_json_schema, json_object_schema)\nPASS unknown manifest dialect \"\": entry field \"json_schema_dialect\" has unknown value \"\" (canonical: openai_json_schema, json_object_schema)\nPASS actual candidate embedded catalog remains parseable\nPASS provider helper v1 preserved\nCOMPONENT_PROBES 14 PASS\n",
+    "stderr": ""
+  },
+  "scope": "Actual selected production parser component and existing fixture helper ASTs. Whole Cohere suite, Exact_output execution, Provider_catalog runtime parsing, full project build/typecheck, Dune, CI, installation and runtime unexecuted."
+}

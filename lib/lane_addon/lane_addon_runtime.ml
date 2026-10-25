@@ -2337,6 +2337,7 @@ let private_companion_binding ~sw m ~access ~principal provider original provide
     | Some pair -> Ok pair | None -> Error C.Not_started in
   let* client=Option.to_result ~none:C.Not_started browser_owner.worker.browser in
   let browser_configuration=browser.configuration in
+  let browser_authority=browser.authority in
   let original_browser ()=match Hashtbl.find_opt m.entries browser.instance_id,browser.connection with
     | Some current,Some connection when current==browser
         && Lane_addon_tool_export.equal_owner connection.export_owner browser_owner.export_owner ->
@@ -2376,6 +2377,15 @@ let private_companion_binding ~sw m ~access ~principal provider original provide
        Invoke refusal cannot discard a previously prepared binding. *)
     if previously_unbound && result=Error P.Not_started then operation:=None;
     result in
+  let join_original_browser () =
+    (* A revoked client or stopping entry does not prove Browser settlement.
+       Join only the captured worker; its stop receipt must match the original
+       execution authority and resource, even after the entry is replaced. *)
+    Browser_addon_client.revoke client;
+    let* release=browser_owner.worker.stop () in
+    check_release ~instance_id:browser.instance_id ~authority:browser_authority
+      ~resource:(Some browser_owner.worker.resource) release
+    |> Result.map (fun _ -> ()) in
   let* finish=Lane_addon_companion_allocation.on_finish allocation (function
     | C.Released -> Ok ()
     | Abandoned ->
@@ -2387,7 +2397,9 @@ let private_companion_binding ~sw m ~access ~principal provider original provide
            (match execute (P.Release operation_id) with
             | Ok (`Assoc [("released",`Bool true)]) -> Ok ()
             | Ok _|Error (P.Not_started|Outcome_unknown) -> Error "private browser settlement unconfirmed")
-       | Some _ -> Error "private browser settlement unconfirmed")) |> Result.map_error (fun _ -> C.Not_started) in
+       | Some _ -> join_original_browser ()
+           |> Result.map_error (fun _ -> "private browser settlement unconfirmed")))
+    |> Result.map_error (fun _ -> C.Not_started) in
   Ok {C.execute;finish}
 
 type companion_publication = origin:Lane_addon_companion_origin.record ->

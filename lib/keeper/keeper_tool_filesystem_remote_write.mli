@@ -56,6 +56,10 @@ val handle_with_endpoint :
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
+(** OpenSSH success responses name the captured endpoint path, including an
+    unchanged patch. Other transports retain their bookkeeping-path response.
+    Internal leases, audit records and Gate decisions retain their resolved
+    target independently of this success-response projection. *)
 
 type content_mode =
   | Replace_whole

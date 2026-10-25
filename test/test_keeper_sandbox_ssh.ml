@@ -454,6 +454,19 @@ let test_endpoint_namespace_roundtrip () =
     ~write_enabled:false ~args:(`Assoc [ "cwd", `String root ]) with
     | Ok cwd -> cwd | Error error -> fail error in
   check string "returned absolute cwd resolves through containment" host_root cwd;
+  let overlap_root = Filename.concat base_path "keeper-a" in
+  let overlap_config = Workspace.default_config (Filename.concat overlap_root "workspace") in
+  let overlap_host = Keeper_sandbox.host_root_abs_of_meta ~config:overlap_config meta
+    |> Keeper_alerting_path.normalize_path_for_check_stripped in
+  List.iter (fun (label, args, expected) ->
+    match Keeper_tool_execute_path.resolve_tool_execute_cwd
+      ~remote_workspace_root:(Some overlap_root) ~config:overlap_config ~meta
+      ~write_enabled:false ~args with
+    | Ok actual -> check string label expected actual
+    | Error error -> fail error)
+    [ "omitted cwd is not projected twice", `Assoc [], overlap_host
+    ; "relative cwd is not projected twice", `Assoc [ "cwd", `String "subdir" ],
+      Filename.concat overlap_host "subdir" ];
   let location = Keeper_sandbox_repo_path.execution_location_json
     ~remote_workspace_root:(Some root) ~config ~meta ~args:(`Assoc []) ~cwd in
   check string "metadata and process use the same namespace" root

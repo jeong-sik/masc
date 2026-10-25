@@ -230,6 +230,9 @@ class LocalBuildInstall(unittest.TestCase):
                  "--base-path", str(base)],
                 env=unnamed_env(root), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+            bootstrap = prefix / "masc-exec-ssh-bootstrap"
+            self.assertEqual(bootstrap.read_bytes(), (build / "masc_exec_ssh_bootstrap.exe").read_bytes())
+            self.assertTrue(os.access(bootstrap, os.X_OK))
             for program in BROWSER_ADDON_PROGRAMS:
                 installed = prefix / program.replace("_", "-")
                 self.assertEqual(installed.read_bytes(), (build / f"{program}.exe").read_bytes())

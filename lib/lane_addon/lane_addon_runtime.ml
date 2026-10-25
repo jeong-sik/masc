@@ -2374,7 +2374,7 @@ let private_companion_binding ~sw m ~access ~principal provider original provide
            (match execute (P.Release operation_id) with
             | Ok (`Assoc [("released",`Bool true)]) -> Ok ()
             | Ok _|Error (P.Not_started|Outcome_unknown) -> Error "private browser settlement unconfirmed")
-       | Some _ -> Ok ())) |> Result.map_error (fun _ -> C.Not_started) in
+       | Some _ -> Error "private browser settlement unconfirmed")) |> Result.map_error (fun _ -> C.Not_started) in
   Ok {C.execute;finish}
 
 let invoke_companion_export ~sw m ~access ~principal e original invoke =

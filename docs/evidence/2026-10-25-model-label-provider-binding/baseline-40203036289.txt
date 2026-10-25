@@ -1,0 +1,25 @@
+run: 40203036289
+url: https://github.com/jeong-sik/masc/actions/runs/40203036289
+head: 70af248f3ef65b221f025b9f6f4ad79dbf973c62
+raw_sha256: b672e1518e22eac0bcde899df79700c6ef23a867cfb4af9ed7da1452b852539c
+raw_bytes: 114610
+
+test suite	Checkout	2026-10-25T14:36:55.5831418Z HEAD is now at 70af248f test(runtime): make provider label baseline executable
+test suite	Test	2026-10-25T14:38:30.9597676Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T14:38:30.9603261Z   [FAIL]        provider authority          0   identity.
+test suite	Test	2026-10-25T14:38:30.9603982Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T14:38:30.9604348Z   [FAIL]        provider authority          1   context.
+test suite	Test	2026-10-25T14:38:30.9604774Z ASSERT provider model capabilities disappeared
+test suite	Test	2026-10-25T14:38:30.9605172Z   [FAIL]        provider authority          2   policy and wire.
+test suite	Test	2026-10-25T14:38:30.9606642Z │ [FAIL]        provider authority          0   identity.                      │
+test suite	Test	2026-10-25T14:38:30.9607800Z FAIL explicit provider survives label resolution
+test suite	Test	2026-10-25T14:38:30.9608089Z    Expected: `Some "label-a"'
+test suite	Test	2026-10-25T14:38:30.9608306Z    Received: `None'
+test suite	Test	2026-10-25T14:38:30.9613259Z │ [FAIL]        provider authority          1   context.                       │
+test suite	Test	2026-10-25T14:38:30.9614327Z FAIL context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T14:38:30.9614589Z    Expected: `Some 8192'
+test suite	Test	2026-10-25T14:38:30.9614969Z    Received: `Some 1000000'
+test suite	Test	2026-10-25T14:38:30.9622519Z │ [FAIL]        provider authority          2   policy and wire.               │
+test suite	Test	2026-10-25T14:38:30.9623662Z FAIL provider model capabilities disappeared
+test suite	Test	2026-10-25T14:38:30.9628841Z 3 failures! in 0.021s. 3 tests run.
+test suite	Test	2026-10-25T14:38:30.9640121Z [targeted] test/test_runtime_model_label_binding: FAIL exit 1 in 0s

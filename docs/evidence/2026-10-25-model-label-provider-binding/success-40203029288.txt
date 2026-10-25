@@ -1,0 +1,26 @@
+run: 40203029288
+url: https://github.com/jeong-sik/masc/actions/runs/40203029288
+head: 97f5295e2481755c168f244ca6bf8e6216a4ea7c
+raw_sha256: 49e7f8af6c460c2e491a279231adfd449a511614fdf24e70f2190aacf685e09f
+raw_bytes: 109154
+
+test suite	Checkout	2026-10-25T14:36:48.6603806Z HEAD is now at 97f5295e test(runtime): declare model label fixture JSON dependency
+test suite	Test	2026-10-25T14:38:19.7483792Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T14:38:19.7484573Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T14:38:19.7485511Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T14:38:19.7486015Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T14:38:19.7486540Z   [OK]          provider authority          0   identity.
+test suite	Test	2026-10-25T14:38:19.7489482Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T14:38:19.7490356Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T14:38:19.7490977Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T14:38:19.7491606Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T14:38:19.7492181Z   [OK]          provider authority          1   context.
+test suite	Test	2026-10-25T14:38:19.7494668Z ASSERT A rejects forcing despite the bare row allowing it
+test suite	Test	2026-10-25T14:38:19.7495359Z ASSERT B retains its separate forcing declaration
+test suite	Test	2026-10-25T14:38:19.7495952Z ASSERT endpoint override preserves selected provider
+test suite	Test	2026-10-25T14:38:19.7496550Z ASSERT endpoint override cannot borrow B's policy
+test suite	Test	2026-10-25T14:38:19.7497116Z ASSERT A rejects required choice before dispatch
+test suite	Test	2026-10-25T14:38:19.7497622Z ASSERT B admits required choice
+test suite	Test	2026-10-25T14:38:19.7498060Z ASSERT B forcing reaches final Chat body
+test suite	Test	2026-10-25T14:38:19.7498582Z   [OK]          provider authority          2   policy and wire.
+test suite	Test	2026-10-25T14:38:19.7499330Z Test Successful in 0.027s. 3 tests run.

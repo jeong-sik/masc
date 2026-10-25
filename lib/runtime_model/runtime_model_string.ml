@@ -148,31 +148,28 @@ let make_registry_config
       | Llm_provider.Provider_kind.Ollama | Llm_provider.Provider_kind.Gemini
       | Llm_provider.Provider_kind.Glm -> defaults.request_path
     in
+    let config =
+      Llm_provider.Provider_config.make
+        ~kind:defaults.kind
+        ~provider_id:entry.name
+        ~model_id:resolved_model_id
+        ~base_url
+        ~api_key
+        ~headers
+        ~request_path
+        ?temperature
+        ?max_tokens
+        ?system_prompt
+        ?keep_alive
+        ?num_ctx
+        ()
+    in
     let max_context =
-      let caps =
-        Option.value
-          ~default:entry.capabilities
-          (Llm_provider.Capabilities.for_model_id resolved_model_id)
-      in
-      match caps.max_context_tokens with
-      | Some n -> Some n
+      match Llm_provider.Provider_config.context_window config with
+      | Some _ as declared -> declared
       | None -> entry.max_context
     in
-    Some
-      (Llm_provider.Provider_config.make
-         ~kind:defaults.kind
-         ~model_id:resolved_model_id
-         ~base_url
-         ~api_key
-         ~headers
-         ~request_path
-         ?temperature
-         ?max_tokens
-         ?max_context
-         ?system_prompt
-         ?keep_alive
-         ?num_ctx
-         ())
+    Some { config with max_context }
 ;;
 
 (** Resolve a ["provider:model"] / ["custom:model@url"] label to a hot-path

@@ -46,7 +46,10 @@ type t =
   }
 
 let prepare ~(entry : Keeper_approval_queue_rules_types.pending_approval) =
-  let context_bundle = Hitl_summary_request.capture_context_bundle ~entry in
+  let* context_bundle =
+    Hitl_summary_request.capture_context_bundle ~entry
+    |> Lane_addon_action.canonical
+  in
   let* system_prompt =
     system_prompt ()
     |> Result.map_error (fun detail -> "HITL Gate judgment prompt unavailable: " ^ detail)
@@ -125,13 +128,16 @@ let of_json json =
         | `Int value when value >= 0 -> Ok value
         | _ -> Error "HITL judge original sequence must be a non-negative integer"
       in
+      let* context_bundle =
+        Lane_addon_action.canonical (List.assoc "context_bundle" fields)
+      in
       Ok
         { approval_id
         ; input_hash
         ; sequence
         ; system_prompt
         ; output_contract
-        ; context_bundle = List.assoc "context_bundle" fields
+        ; context_bundle
         })
   | _ -> Error "HITL judge original must be an object"
 ;;

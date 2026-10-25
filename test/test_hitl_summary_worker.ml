@@ -8,6 +8,7 @@ module QT = Keeper_approval_queue_rules_types
 module Schema = Masc.Keeper_structured_output_schema
 module Worker = Masc.Hitl_summary_worker
 module Request = Masc.Hitl_summary_request
+module Original = Masc.Hitl_judge_original
 let http_flow_evidence prepared =
   match Worker.For_testing.flow_evidence prepared with
   | Some evidence -> evidence
@@ -16,6 +17,14 @@ let http_flow_evidence prepared =
 
 
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
+
+let original_message_texts original =
+  Original.messages original
+  |> List.map (fun (message : Agent_core.Types.message) ->
+    match message.content with
+    | [ Agent_core.Types.Text text ] -> text
+    | _ -> fail "judge original did not produce its three text messages")
+;;
 
 let judgment_json judgment =
   `Assoc
@@ -912,6 +921,11 @@ let test_json_syntax_request_is_prompt_only_and_carries_canonical_domain_schema 
             ~source:"hitl-json-syntax-contract"
             [ { id = "hitl-json-syntax-contract"; base_url = server.base_url } ]);
        let entry = pending_entry ~base_path () in
+       let original =
+         match Original.prepare ~entry with
+         | Ok original -> original
+         | Error detail -> fail detail
+       in
        (* The sink is what carries the branch to the run registry. Running the
           real flow inside one proves the worker's own [record_outcome] calls
           reach it -- a direct call to the codec would not. *)
@@ -942,13 +956,15 @@ let test_json_syntax_request_is_prompt_only_and_carries_canonical_domain_schema 
             false
             (List.mem_assoc "response_format" fields)
         | _ -> fail "prompt-only request body is not an object");
-       let message_text =
+       let message_texts =
          request_body
          |> member "messages"
          |> to_list
          |> List.map (fun message -> message |> member "content" |> to_string)
-         |> String.concat "\n"
        in
+       check (list string) "HTTP request uses the retained original message bytes"
+         (original_message_texts original) message_texts;
+       let message_text = String.concat "\n" message_texts in
        List.iter
          (fun field ->
             check bool
@@ -3000,9 +3016,20 @@ let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
           | Ok () -> ()
           | Error detail -> fail detail);
        let entry = pending_entry ~base_path () in
+       let original =
+         match Original.prepare ~entry with
+         | Ok original -> original
+         | Error detail -> fail detail
+       in
+       let expected_prompt =
+         Original.output_contract original ^ "\n\n"
+         ^ Yojson.Safe.to_string (Original.context_bundle original)
+       in
        let seen_runtime = ref None in
        let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt =
          seen_runtime := Some runtime_id;
+         check string "CLI prompt uses the retained original context bytes"
+           expected_prompt prompt;
          check bool
            "the cli prompt carries the judgment contract"
            true
@@ -3330,8 +3357,6 @@ let test_outcome_labels_are_distinct () =
 
 (* ── Immutable judge original ──────────────────── *)
 
-module Original = Masc.Hitl_judge_original
-
 let original_fields =
   [ "schema", `String Original.schema
   ; "approval_id", `String "approval-1"
@@ -3364,7 +3389,38 @@ let test_judge_original_round_trips_and_ignores_key_order () =
   check string "the digest does not depend on the key order read"
     (digest original)
     (digest (original_of_fields (List.rev original_fields)));
-  check int "a judgment request is three messages" 3 (List.length (Original.messages original))
+  check int "a judgment request is three messages" 3 (List.length (Original.messages original));
+  let with_context context =
+    original_of_fields
+      (("context_bundle", context) :: List.remove_assoc "context_bundle" original_fields)
+  in
+  let nested_left =
+    with_context
+      (`Assoc
+         [ "z", `Assoc [ "b", `Float 1.0; "a", `String "exact text\n" ]
+         ; "a", `List [ `String "second"; `String "first" ]
+         ])
+  in
+  let nested_right =
+    with_context
+      (`Assoc
+         [ "a", `List [ `String "second"; `String "first" ]
+         ; "z", `Assoc [ "a", `String "exact text\n"; "b", `Int 1 ]
+         ])
+  in
+  check (list string) "nested key and numeric forms preserve exact message bytes"
+    (original_message_texts nested_left) (original_message_texts nested_right);
+  check string "equivalent nested originals retain the same digest"
+    (digest nested_left) (digest nested_right);
+  let reordered_array =
+    with_context
+      (`Assoc
+         [ "a", `List [ `String "first"; `String "second" ]
+         ; "z", `Assoc [ "a", `String "exact text\n"; "b", `Int 1 ]
+         ])
+  in
+  check bool "array order remains part of model input" true
+    (original_message_texts nested_left <> original_message_texts reordered_array)
 ;;
 
 let test_judge_original_refuses_loose_shapes () =
@@ -3381,7 +3437,15 @@ let test_judge_original_refuses_loose_shapes () =
     (`Assoc (("approval_id", `String " ") :: List.remove_assoc "approval_id" original_fields));
   refused "a negative sequence"
     (`Assoc (("sequence", `Int (-1)) :: List.remove_assoc "sequence" original_fields));
-  refused "not an object" (`List [])
+  refused "not an object" (`List []);
+  refused "duplicate nested context keys"
+    (`Assoc
+       (("context_bundle", `Assoc [ "same", `Int 1; "same", `Int 2 ])
+        :: List.remove_assoc "context_bundle" original_fields));
+  refused "non-finite context number"
+    (`Assoc
+       (("context_bundle", `Assoc [ "number", `Float Float.nan ])
+        :: List.remove_assoc "context_bundle" original_fields))
 ;;
 
 (* ── Durable judge original ────────────────────── *)
@@ -3416,6 +3480,10 @@ let test_judge_owner_retains_and_restores_the_original () =
     | Ok (Some record, Some restored) ->
       check bool "the restored original is the retained one" true
         (Original.to_json restored = Original.to_json original);
+      check (list string) "owner-store reload preserves the exact model message bytes"
+        (original_message_texts original) (original_message_texts restored);
+      check string "owner-store reload preserves the original digest"
+        (owner_ok (Original.digest original)) (owner_ok (Original.digest restored));
       check string "the record belongs to the judge tool" Judge_owner.tool record.Masc.Lane_addon_tool_request_owner.tool;
       check bool "another sequence is another attempt" true
         (owner_ok (Judge_owner.load ~store ~approval_id:"approval-1" ~sequence:4) = (None, None))

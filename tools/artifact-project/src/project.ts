@@ -6,11 +6,14 @@ import { build, version as esbuildVersion } from 'esbuild'
 import { parse, serialize, html as htmlNames, defaultTreeAdapter as tree, type DefaultTreeAdapterMap } from 'parse5'
 import * as css from 'css-tree'
 import type { BuildOptions, Loader, Plugin } from 'esbuild'
+import { collectSite } from './site.ts'
 
 type Element = DefaultTreeAdapterMap['element']
 type Node = DefaultTreeAdapterMap['node']
+export type ProjectBuild = { kind: 'browser_modules'; entry_html: string }
+  | { kind: 'package_script'; script: string; output_directory: string; entry_html: string }
 export type ProjectRequest = {
-  schema: 'masc.artifact_project.v1'; entry_html: string; install_scripts: boolean;
+  schema: 'masc.artifact_project.v1'; build: ProjectBuild; install_scripts: boolean;
   files: { path: string; content_base64: string }[];
 }
 export class ProjectError extends Error {
@@ -33,7 +36,7 @@ function path(value: unknown): string {
   return value
 }
 export function decodeProject(value: unknown): ProjectRequest {
-  const record = object(value, ['schema', 'entry_html', 'install_scripts', 'files'])
+  const record = object(value, ['schema', 'build', 'install_scripts', 'files'])
   if (record.schema !== 'masc.artifact_project.v1' || typeof record.install_scripts !== 'boolean' || !Array.isArray(record.files)) throw new ProjectError('input', 'Invalid project contract')
   const files = record.files.map(value => {
     const file = object(value, ['path', 'content_base64']), name = path(file.path)
@@ -42,23 +45,36 @@ export function decodeProject(value: unknown): ProjectRequest {
     return { path: name, content_base64: file.content_base64 }
   })
   if (new Set(files.map(file => file.path)).size !== files.length) throw new ProjectError('input', 'Duplicate project path')
-  const entry_html = path(record.entry_html)
-  if (!files.some(file => file.path === entry_html) || !files.some(file => file.path === 'package.json')) throw new ProjectError('input', 'Project must contain entry HTML and package.json')
-  return { schema: 'masc.artifact_project.v1', entry_html, install_scripts: record.install_scripts, files }
+  if (!files.some(file => file.path === 'package.json')) throw new ProjectError('input', 'Project must contain package.json')
+  if (!record.build || typeof record.build !== 'object' || Array.isArray(record.build)) throw new ProjectError('input', 'Expected a build selection')
+  const kind = (record.build as Record<string, unknown>).kind
+  let selected: ProjectBuild
+  if (kind === 'browser_modules') {
+    const build = object(record.build, ['kind', 'entry_html'])
+    const entry_html = path(build.entry_html)
+    if (!files.some(file => file.path === entry_html)) throw new ProjectError('input', 'Project must contain entry HTML')
+    selected = { kind, entry_html }
+  } else if (kind === 'package_script') {
+    const build = object(record.build, ['kind', 'script', 'output_directory', 'entry_html'])
+    if (typeof build.script !== 'string' || !build.script || build.script.includes('\0')) throw new ProjectError('input', 'Expected an exact package script name')
+    selected = { kind, script: build.script, output_directory: path(build.output_directory), entry_html: path(build.entry_html) }
+  } else throw new ProjectError('input', 'Unknown build kind')
+  return { schema: 'masc.artifact_project.v1', build: selected, install_scripts: record.install_scripts, files }
+
 }
 
 // The caller dispatches this process through its existing Keeper execution lane.
 // This worker is not a sandbox. Even install hooks run only in that lane.
-function install(cwd: string, home: string, locked: boolean, scripts: boolean): Promise<void> {
+function runNpm(cwd: string, home: string, args: readonly string[], stage: 'install' | 'build'): Promise<void> {
   return new Promise((ok, fail) => {
-    const child = spawn('npm', [locked ? 'ci' : 'install', '--include=dev', '--no-audit', '--no-fund', `--ignore-scripts=${!scripts}`], {
+    const child = spawn('npm', args, {
       cwd, stdio: ['ignore', 'pipe', 'pipe'],
       env: { PATH: process.env.PATH, HOME: home, TMPDIR: home, npm_config_cache: join(home, 'cache'),
         npm_config_userconfig: join(home, 'npmrc'), npm_config_globalconfig: join(home, 'global-npmrc'), CI: 'true' },
     })
     child.stdout.pipe(process.stderr, { end: false }); child.stderr.pipe(process.stderr, { end: false })
-    child.once('error', error => fail(new ProjectError('install', error.message)))
-    child.once('close', (code, signal) => code === 0 ? ok() : fail(new ProjectError('install', `npm exited with ${signal ?? code}`)))
+    child.once('error', error => fail(new ProjectError(stage, error.message)))
+    child.once('close', (code, signal) => code === 0 ? ok() : fail(new ProjectError(stage, `npm exited with ${signal ?? code}`)))
   })
 }
 function elements(node: Node): Element[] {
@@ -95,17 +111,42 @@ export async function buildProject(input: unknown, workspace: string) {
   }
   const packageJSON = JSON.parse(await readFile(join(source, 'package.json'), 'utf8')) as unknown
   if (!packageJSON || typeof packageJSON !== 'object' || Array.isArray(packageJSON)) throw new ProjectError('input', 'Invalid package.json')
+  if (request.build.kind === 'package_script') {
+    const scripts = (packageJSON as Record<string, unknown>).scripts
+    if (!scripts || typeof scripts !== 'object' || Array.isArray(scripts) || !Object.hasOwn(scripts, request.build.script)
+      || typeof (scripts as Record<string, unknown>)[request.build.script] !== 'string') throw new ProjectError('input', 'Requested script is not defined in package.json')
+  }
   const locked = request.files.some(file => file.path === 'package-lock.json' || file.path === 'npm-shrinkwrap.json')
-  await install(source, home, locked, request.install_scripts)
+  const lockPath = request.files.some(file => file.path === 'npm-shrinkwrap.json') ? 'npm-shrinkwrap.json' : 'package-lock.json'
+  if (!locked) await runNpm(source, home, ['install', '--package-lock-only', '--ignore-scripts', '--include=dev', '--no-audit', '--no-fund'], 'install')
+  // Freeze the exact lock before installation hooks or build scripts can change
+  // it. npm ci validates and resolves this lock before its preinstall hooks.
+  const lock = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await readFile(join(source, lockPath)))
+  await runNpm(source, home, ['ci', '--include=dev', '--no-audit', '--no-fund', `--ignore-scripts=${!request.install_scripts}`], 'install')
+  const finish = async <B, O>(build: B, output: O) => {
+    const result = {
+      schema: 'masc.artifact_project_result.v1', runtime: { node: process.version, platform: process.platform, arch: process.arch }, run_directory: run,
+      source_files: request.files.map(file => ({ path: file.path, sha256: digest(Buffer.from(file.content_base64, 'base64')) })),
+      install: { mode: 'ci' as const, lock_source: locked ? 'supplied' as const : 'resolved' as const, scripts: request.install_scripts, lockfile: lockPath, lock_sha256: digest(lock), lock_content: lock },
+      build, output,
+    }
+    await writeFile(join(run, 'result.json'), JSON.stringify(result) + '\n', { mode: 0o600, flag: 'wx' })
+    return result
+  }
+  if (request.build.kind === 'package_script') {
+    await runNpm(source, home, ['run', '--', request.build.script], 'build')
+    const site = await collectSite(source, request.build.output_directory, request.build.entry_html)
+    return await finish({ ...request.build }, site)
+  }
   // No source is executed in the Dashboard/server process. Compile in the same
   // lane as npm, resolve only that installed project and retain all run files.
-  const entry = join(source, request.entry_html)
+  const entry = join(source, request.build.entry_html)
   const page = parse(await readFile(entry, 'utf8'))
   const nodes = elements(page), body = nodes.find(node => node.tagName === 'body')!, head = nodes.find(node => node.tagName === 'head')!
   const imports: string[] = [], modules = new Map<string, { code: string; directory: string }>()
   const externalResources = new Set<string>()
   async function local(url: string): Promise<string | null> {
-    const base = new URL('https://artifact.invalid/' + request.entry_html.split('/').map(encodeURIComponent).join('/'))
+    const base = new URL('https://artifact.invalid/' + request.build.entry_html.split('/').map(encodeURIComponent).join('/'))
     const resolved = new URL(url, base)
     if (resolved.origin !== base.origin || resolved.protocol !== 'https:') {
       if (resolved.protocol === 'https:' || resolved.protocol === 'http:') externalResources.add(url)
@@ -224,20 +265,13 @@ export async function buildProject(input: unknown, workspace: string) {
     else if (file.path.endsWith('.css')) append(head, 'style', file.text.replace(/<\/style/gi, '<\\/style'))
     else throw new ProjectError('build', `Unembedded build output: ${file.path}`)
   }
-  const html = serialize(page), lockPath = request.files.some(file => file.path === 'npm-shrinkwrap.json') ? 'npm-shrinkwrap.json' : 'package-lock.json'
-  const lock = await readFile(join(source, lockPath), 'utf8')
-  const result = {
-    schema: 'masc.artifact_project_result.v1', runtime: { node: process.version, platform: process.platform, arch: process.arch }, run_directory: run, entry_html: request.entry_html,
-    source_files: request.files.map(file => ({ path: file.path, sha256: digest(Buffer.from(file.content_base64, 'base64')) })),
-    install: { mode: locked ? 'ci' : 'install', scripts: request.install_scripts, lockfile: lockPath, lock_sha256: digest(lock), lock_content: lock },
-    build: { esbuild: esbuildVersion, inputs: [...inputs], warnings, external_resources: [...externalResources] },
-    artifact: { format: 'html', content: html, sha256: digest(html) },
-  }
-  await writeFile(join(run, 'result.json'), JSON.stringify(result) + '\n', { mode: 0o600, flag: 'wx' })
-  return result
+  const html = serialize(page)
+  return await finish({ kind: 'browser_modules' as const, esbuild: esbuildVersion, inputs: [...inputs], warnings, external_resources: [...externalResources] },
+    { kind: 'html' as const, artifact: { format: 'html' as const, content: html, sha256: digest(html) } })
   } catch (error) {
     const failure = new ProjectError(error instanceof ProjectError ? error.stage : 'build', error instanceof Error ? error.message : String(error), run)
-    await writeFile(join(run, 'failure.json'), JSON.stringify({ stage: failure.stage, message: failure.message }) + '\n', { mode: 0o600, flag: 'wx' })
+    try { await writeFile(join(run, 'failure.json'), JSON.stringify({ stage: failure.stage, message: failure.message }) + '\n', { mode: 0o600, flag: 'wx' }) }
+    catch (recordError) { throw new ProjectError(failure.stage, `${failure.message}; failed to store failure record: ${recordError instanceof Error ? recordError.message : String(recordError)}`, run) }
     throw failure
   }
 }

@@ -5911,6 +5911,30 @@ describe('fetchCostLatency', () => {
     expect(result.matrix.models).toEqual(['runtime_lane_7'])
   })
 
+  it('keeps missing, partial and explicit zero readings distinct', async () => {
+    const raw = {
+      perAgent: [
+        { agent: 'runtime_lane_1', in_tok: null, out_tok: null, cost: 0.03 },
+        { agent: 'runtime_lane_2', in_tok: 100, out_tok: 50, cost: null },
+        { agent: 'runtime_lane_3', in_tok: 0, out_tok: 0, cost: 0 },
+      ],
+      matrix: {
+        providers: ['a', 'b'],
+        models: ['runtime_lane_1', 'runtime_lane_2', 'runtime_lane_3'],
+        grid: [[0.03, null, 0], [null, 0.01, 0]],
+      },
+      total_cost_usd: null,
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(raw), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })))
+    const result = await fetchCostLatency(60)
+    expect(result.perAgent.map(({ in_tok, out_tok, cost }) => ({ in_tok, out_tok, cost })))
+      .toEqual(raw.perAgent.map(({ in_tok, out_tok, cost }) => ({ in_tok, out_tok, cost })))
+    expect(result.total_cost_usd).toBeNull()
+    expect(result.matrix.grid).toEqual([[null, null, 0]])
+  })
+
   it('marks unlabeled cost-matrix lanes as unknown instead of synthetic runtime lanes', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

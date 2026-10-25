@@ -1,0 +1,28 @@
+{
+  "source_parent": "47d9f1c8346062650464c48915c8485a4b9b6e1f",
+  "native_fixture_author": "e079b1835facfc0ebe1850f42b26d637ad40fb04",
+  "native_fixture_author_base": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "changes": "Author Claude fixture patch replayed onto current frozen parent. New parent reviewer callback/API adaptations retained. Submission fixture scheduling callback collects observations; callback-external assertions verify exact call count, same immutable snapshot and committed handoff so isolated callback exceptions cannot hide failures.",
+  "source_files": [
+    {
+      "path": "test/test_keeper_claude_code_runtime.ml",
+      "sha256": "d4f007816c8d21a9910350c412a8112cd35824f46e7c9abb2266a6b19883d81e"
+    },
+    {
+      "path": "test/test_verification.ml",
+      "sha256": "0d9461963076e2ea6dda13f47b4df54ee113ca13da3c18584688a9fac35cd730"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-native-lifecycle-fixtures/probe_fixture_protocol.py",
+      "sha256": "5ed7050bf3c499923ad2d2c593d2e1d50a1bba6663ced93ed44641ba2590f6f5"
+    }
+  ],
+  "checks": {
+    "current_claude_parse": "PASS",
+    "current_verification_parse": "PASS",
+    "actual_generator_protocol": "PASS before3calls0terminal, after3calls1terminal, auth cut/valid/terminal",
+    "native_execution": "not yet run"
+  },
+  "historical_receipt_field_note": "Original fixture-protocol-check.json preserves authored compiled_generator_sha256; its value hashes generator source. The script and new current-parent receipt name it generator_source_sha256. No executable hash is inferred.",
+  "current_remote_scope": "Parent16 continues moving in another session. Frozen47d source review is not approval of current REST full diff or all Native Stack members."
+}

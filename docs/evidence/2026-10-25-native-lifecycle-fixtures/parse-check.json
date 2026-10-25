@@ -1,0 +1,9 @@
+{
+  "scope": "Changed OCaml source parse and whitespace only; not native MASC typing or execution",
+  "file": "test/test_keeper_claude_code_runtime.ml",
+  "file_sha256": "df97f87f2c61708a68f0fb76a01d37312f77bbb6a98f4164e7e2b1821c60e618",
+  "parse_exit": 0,
+  "parse_output": "",
+  "diff_check_exit": 0,
+  "diff_check_output": ""
+}

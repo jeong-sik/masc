@@ -179,7 +179,7 @@ let test_direct_executor_enforces_profile_before_hooks () =
       let raw_token = create_admin_token base_path in
       let name = "masc_tool_help" in
       let call profile internal_keeper_runtime name =
-        Mcp_eio.execute_tool_eio ~sw ~clock:env#clock
+        Masc.Mcp_server_eio_execute.execute_tool_eio ~sw ~clock:env#clock
           ~workspace_scope:(Mcp_server.workspace_scope state)
           ~profile ~auth_token:raw_token ~internal_keeper_runtime state ~name
           ~arguments:(`Assoc ["tool_name", `String "masc_status"]) in

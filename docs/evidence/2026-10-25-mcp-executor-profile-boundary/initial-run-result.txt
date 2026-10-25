@@ -1,0 +1,17 @@
+test suite	Checkout	2026-10-25T04:33:54.3755928Z   ref: 62fb1c616785a4fe723bf02f5ca4c54371861bff
+test suite	Checkout	2026-10-25T04:33:54.6100843Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 62fb1c616785a4fe723bf02f5ca4c54371861bff
+test suite	Checkout	2026-10-25T04:34:03.1737950Z  * branch              62fb1c616785a4fe723bf02f5ca4c54371861bff -> FETCH_HEAD
+test suite	Checkout	2026-10-25T04:34:03.1747758Z [command]/usr/bin/git rev-parse --verify --quiet 62fb1c616785a4fe723bf02f5ca4c54371861bff^{object}
+test suite	Checkout	2026-10-25T04:34:03.1772785Z 62fb1c616785a4fe723bf02f5ca4c54371861bff
+test suite	Checkout	2026-10-25T04:34:03.1863321Z [command]/usr/bin/git checkout --progress --force 62fb1c616785a4fe723bf02f5ca4c54371861bff
+test suite	Checkout	2026-10-25T04:34:05.6789771Z Note: switching to '62fb1c616785a4fe723bf02f5ca4c54371861bff'.
+test suite	Checkout	2026-10-25T04:34:05.6935440Z 62fb1c616785a4fe723bf02f5ca4c54371861bff
+test suite	Test	2026-10-25T04:43:48.9093466Z ^[[32mTest Successful^[[0m in 2.614s. 12 tests run.
+test suite	Test	2026-10-25T04:43:49.0290892Z [targeted] @@test/runtest-test_mcp_seat_profile: OK in 521s
+test suite	Test	2026-10-25T04:43:59.2473552Z File "test/test_mcp_server_eio_tool_dispatch.ml", line 192, characters 28-35:
+test suite	Test	2026-10-25T04:43:59.2474419Z 192 |           let result = call profile internal name in
+test suite	Test	2026-10-25T04:43:59.2474976Z                                   ^^^^^^^
+test suite	Test	2026-10-25T04:43:59.2475607Z Error: The value profile has type Masc.Mcp_server_eio_types.tool_profile
+test suite	Test	2026-10-25T04:43:59.2476423Z        but an expression was expected of type Mcp_eio.tool_profile
+test suite	Test	2026-10-25T04:44:04.9204940Z ##[error]Process completed with exit code 1.
+test suite	Upload equipped portrait HTTP evidence	﻿2026-10-25T04:44:04.9262755Z ##[group]Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

@@ -31,3 +31,10 @@ merge, installation or deployment is claimed. Focused consumer checks are
 requested separately. Issue #27898 stays open for immutable catalog/manifest
 consolidation, remaining provider-independent API/high-level binding cleanup
 and integration.
+
+Parent catalog execution is now observed separately: run40149897587 at the
+exact parent e9ae207275e0e3d2b1f1d25385158ce39048472f succeeded with catalog27,
+capabilities124, modality7 and provider coverage115 cases (273 total). This
+proves the corrected parent fixtures, not this deletion layer. Earlier six
+suites262 passed at23e6 in an overall failed run. No combined current-head
+execution or full-regression result is inferred from those separate runs.

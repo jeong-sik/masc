@@ -1,4 +1,4 @@
-Source parse checks: 8 changed OCaml files PASS.
+Source parse checks: 9 changed OCaml files PASS.
 TOML payload comparison: all models and non-host provider fields identical.
 No local Dune or executable result.
 

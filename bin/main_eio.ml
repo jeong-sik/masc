@@ -916,7 +916,8 @@ let run_cmd ?(record_default = false) ~executable_path host port cli_base_path a
         Log.Server.info
           "MASC MCP: Background fibers finished, shutdown complete (with benign in-flight cancellations)."
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
-        Log.Server.error "[FATAL] Port %d is already in use; startup refused" port;
+        Log.Server.error "[FATAL] Listener bind refused: port=%d errno=EADDRINUSE (%s)"
+          port (Unix.error_message Unix.EADDRINUSE);
         exit 1
     | Unix.Unix_error (Unix.EACCES, _, _) ->
         Log.Server.error "[FATAL] Permission denied binding to port %d" port;

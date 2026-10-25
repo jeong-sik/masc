@@ -232,11 +232,6 @@ let base_path_lock_digest_of_stats (stat : Unix.stats) =
   |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex
 ;;
 
-let close_quietly fd =
-  try Unix.close fd with
-  | Unix.Unix_error _ -> ()
-;;
-
 let base_path_owner_pid = function
   | Owner_this_process pid | Owner_recorded pid ->
     Some pid

@@ -36,9 +36,15 @@ let take_resume_once () =
 
 type tool_observer =
   { register:run_id:Execution_event.Run_id.t -> event_bus:Event_bus.t option -> unit
+  ; settled_observers:Tool_contract.Occurrence.t -> unit
   ; flush:unit -> unit
   }
 let tool_observer_key : tool_observer Eio.Fiber.key = Eio.Fiber.create_key ()
 let with_tool_observer observer run = Eio.Fiber.with_binding tool_observer_key observer run
 let tool_observer () = Eio.Fiber.get tool_observer_key
 let flush_tool_observations () = match tool_observer () with None -> () | Some observer -> observer.flush ()
+
+let settle_tool_observers invocation =
+  match tool_observer (),Tool_contract.Invocation.occurrence invocation with
+  | Some observer,Some occurrence -> observer.settled_observers occurrence
+  | None,_ | Some _,None -> ()

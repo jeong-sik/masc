@@ -805,7 +805,7 @@ let run_real_tool_bridge ~durable inspect =
   let subscription=Core.Event_bus.subscribe
       ~config:(Result.get_ok (Core.Event_bus.subscription_config ~capacity:16 ~overflow:Drop_newest))
       ~filter:Core.Event_bus.filter_tools_only bus in
-  let during_hook=ref [] and hook_invocation=ref None and effects=ref 0 in
+  let during_hook=ref [] and hook_invocation=ref None and effects=ref 0 and expected_id=ref None in
   let tool=Core.Tool.create ~name:"joined_tool" ~description:"real joined Tool effect" ~parameters:[]
       (fun _->incr effects;Ok {Core.Types.content="settled";content_blocks=None;_meta=None}) in
   let response content stop_reason : Core.Types.api_response =
@@ -824,7 +824,10 @@ let run_real_tool_bridge ~durable inspect =
     during_hook:=Core.Event_bus.drain subscription;
     Option.iter (fun invocation->
       hook_invocation:=Some invocation;
-      Join.record ~invocation ~execution_id:"exec-real-joined") (Core.Hooks.invocation_of_event event);
+      let execution_id=Masc.Keeper_tool_call_log.invocation_execution_id ~invocation
+          |> Masc.Ids.Execution_id.to_string in
+      expected_id:=Some execution_id;
+      Join.record ~invocation ~execution_id) (Core.Hooks.invocation_of_event event);
     Core.Hooks.Continue)} in
   let agent=Core.Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool]
       ~config:{(Core.Types.default_config ~model:"test-model") with name="real-joined"}
@@ -835,7 +838,7 @@ let run_real_tool_bridge ~durable inspect =
    | Ok _->() |Error error->fail (Core.Error.to_string error));
   check int "real Tool effect once" 1 !effects;
   let source=match !hook_invocation with Some source->source |None->fail "post hook did not observe invocation" in
-  check (option string) "producer association exists before bridge consume" (Some "exec-real-joined")
+  check (option string) "producer association exists before bridge consume" !expected_id
     (Join.peek ~invocation:source);
   let completed (event:Core.Event_bus.event)=match event.payload with
     | ToolCompleted _->true |ToolCalled _->false
@@ -846,19 +849,19 @@ let run_real_tool_bridge ~durable inspect =
   let delivered= !during_hook @ Core.Event_bus.drain subscription in
   let completion=List.find completed delivered in
   let json=Bridge.native_event_to_json completion |> Option.get in
-  inspect early json
+  inspect !expected_id early json
 
 let test_durable_completion_waits_for_product_observer () =
-  run_real_tool_bridge ~durable:true (fun early _json->
+  run_real_tool_bridge ~durable:true (fun _expected early _json->
     check bool "post-hook row commit precedes completion delivery" false early)
 let test_durable_completion_keeps_product_occurrence_association () =
-  run_real_tool_bridge ~durable:true (fun _early json->
+  run_real_tool_bridge ~durable:true (fun expected _early json->
     check (option string) "real bridge resolves the completed canonical occurrence"
-      (Some "exec-real-joined") (string_of_field (payload_member "execution_id" json)))
+      expected (string_of_field (payload_member "execution_id" json)))
 let test_transient_completion_keeps_product_occurrence_association () =
-  run_real_tool_bridge ~durable:false (fun early json->
+  run_real_tool_bridge ~durable:false (fun expected early json->
     check bool "transient post-hook still precedes completion" false early;
-    check (option string) "transient bridge control" (Some "exec-real-joined")
+    check (option string) "transient bridge control" expected
       (string_of_field (payload_member "execution_id" json)))
 
 let () =

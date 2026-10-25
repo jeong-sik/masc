@@ -183,6 +183,14 @@ let test_rejection_with_no_keeper_returns_the_task_to_todo () =
     prepare_submission config verification_id;
     commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
     check_pending config 1;
+    (match pending config with
+     | [ rejection ] ->
+       Alcotest.(check string) "typed rejection retains verification correlation"
+         verification_id rejection.D.verification_id;
+       Alcotest.(check string) "typed rejection retains its reason" reason rejection.reason;
+       Alcotest.(check bool) "typed rejection retains its authority" true
+         (rejection.authority = system)
+     | _ -> Alcotest.fail "rejection must have one durable typed obligation");
     reconcile config ~delivered:0 ~unroutable:1 ~retained:0;
     check_pending config 0;
     Alcotest.(check int) "no queue is written under a name no Keeper reads" 0
@@ -191,8 +199,8 @@ let test_rejection_with_no_keeper_returns_the_task_to_todo () =
      | { task_status = D.Todo; handoff_context = Some handoff; _ } ->
        Alcotest.(check (option string)) "the verdict's reason stays on the Task"
          (Some reason) handoff.reason;
-       Alcotest.(check (list string)) "the verification id travels with it"
-         [ verification_id ] handoff.evidence_refs;
+       Alcotest.(check (list string)) "verification correlation is not submitted evidence"
+         [] handoff.evidence_refs;
        Alcotest.(check (option string)) "the deciding authority is the releaser"
          (Some "repair-verifier-run") handoff.updated_by;
        (* The three fields above are also what the verdict's own rejection
@@ -209,6 +217,27 @@ let test_rejection_with_no_keeper_returns_the_task_to_todo () =
      | { task_status; _ } ->
        Alcotest.failf "a rejection with no Keeper must release the Task, found %s"
          (D.task_status_to_string task_status));
+    let events = Dated_jsonl.Store.at
+      (Dated_jsonl.Store.root_of_base_path ~base_path:config.W.base_path)
+      Dated_jsonl.Store.Root.Events |> Dated_jsonl.open_store in
+    let event = match Dated_jsonl.find_latest_entry_result events (function
+      | Dated_jsonl.Parsed (`Assoc _ as json) ->
+        let open Yojson.Safe.Util in
+        if member "type" json = `String "task_completion_verdict"
+           && member "verification_id" json = `String verification_id
+        then Some json else None
+      | Dated_jsonl.Parsed _ -> None
+      | Dated_jsonl.Malformed_json {detail; _} -> Alcotest.fail detail) with
+      | Ok (Some event) -> event
+      | Ok None -> Alcotest.fail "unroutable release lost its verdict audit"
+      | Error error -> Alcotest.fail (Dated_jsonl.read_error_to_string error) in
+    let open Yojson.Safe.Util in
+    List.iter (fun (field, expected) ->
+      Alcotest.(check string) ("durable verdict audit retains " ^ field)
+        expected (event |> member field |> to_string))
+      [ "task_id", task_id; "verification_id", verification_id; "reason", reason
+      ; "verdict", "rejected"; "authority_kind", "system_llm_agent"
+      ; "authority_actor", "repair-verifier-run" ];
     reconcile config ~delivered:0 ~retained:0)
 
 (* An exact rejection relation for an impossible Task state is corrupt

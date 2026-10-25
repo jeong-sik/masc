@@ -11,6 +11,33 @@ module W = Workspace_core
 module VP = Masc.Verification_protocol
 module CA = Masc.Completion_authority_agent
 
+(* Completion publication uses the same replayed durable registry as server
+   bootstrap. The process-global default is deliberately volatile. *)
+let verification_registry_path =
+  let directory = Filename.temp_dir "verification-review-registry-" "" in
+  at_exit (fun () -> Fs_compat.clear_fs (); Fs_compat.remove_tree directory);
+  let path = Filename.concat directory Masc.Verification_run_registry.storage_filename in
+  (match Masc.Verification_run_registry.install_global
+      (Masc.Verification_run_registry.replay path) with
+   | Ok () -> ()
+   | Error Already_installed -> Alcotest.fail "verification fixture registry already installed");
+  path
+
+let check_durable_approved_run verification_id =
+  let module R = Masc.Verification_run_registry in
+  let require_run registry = match R.get registry ~verification_id with
+    | Some run -> run
+    | None -> Alcotest.fail "confirmed review is absent from the registry" in
+  let current = require_run (R.global ()) in
+  let restored = require_run (R.replay verification_registry_path) in
+  Alcotest.(check string) "confirmed review survives an independent history replay"
+    (Yojson.Safe.to_string (R.run_to_yojson current))
+    (Yojson.Safe.to_string (R.run_to_yojson restored));
+  match restored.status with
+  | R.Completed {outcome=R.Approved _; _} -> ()
+  | R.Running -> Alcotest.fail "replayed review is still running"
+  | R.Completed {outcome; _} -> Alcotest.fail (R.outcome_label outcome)
+
 let persistence_surface = "verification"
 
 let persistence_counter reason =
@@ -1951,6 +1978,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            | Some { status = Masc.Verification_run_registry.Running; _ } ->
              Alcotest.fail "verification run stayed running after verdict commit"
            | None -> Alcotest.fail "verification run record was not persisted");
+          check_durable_approved_run verification_id;
           match W.get_tasks_raw config with
           | [ { task_status = Masc_domain.Done _; _ } ] -> ()
           | [ task ] ->
@@ -2333,6 +2361,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
              (Masc.Verification_run_registry.global ()) ~verification_id:request_id with
            | Some { status = Masc.Verification_run_registry.Completed _; _ } -> ()
            | _ -> Alcotest.fail "review run did not settle");
+          check_durable_approved_run request_id;
           (match !captured_prompt with
            | None -> Alcotest.fail "system LLM reviewer did not receive a prompt"
            | Some prompt ->

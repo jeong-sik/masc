@@ -122,7 +122,7 @@ class PublicationTests(unittest.TestCase):
     def test_exact_ack_is_idempotent_and_never_changes_snapshot_or_grants_caller_authority(self):
         operation = self.start()
         envelope = self.pending(operation)[0]
-        before = self.path.read_bytes()
+        before = active_raw(self.journal).encode()
         for caller in [{"kind": "operator"}, {"kind": "keeper", "name": "other"}]:
             with self.assertRaises(LoginError):
                 self.engine.acknowledge_publication(operation, caller, envelope)
@@ -137,13 +137,13 @@ class PublicationTests(unittest.TestCase):
         for changed in variants:
             with self.assertRaises(LoginError):
                 self.engine.acknowledge_publication(operation, CALLER, changed)
-        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(active_raw(self.journal).encode(), before)
         self.engine.acknowledge_publication(operation, CALLER, envelope)
-        acknowledged = self.path.read_bytes()
+        acknowledged = active_raw(self.journal).encode()
         self.assertEqual(self.pending(operation), [])
         self.assertEqual(self.engine.status(operation, CALLER), envelope["output"])
         self.engine.acknowledge_publication(operation, CALLER, envelope)
-        self.assertEqual(self.path.read_bytes(), acknowledged)
+        self.assertEqual(active_raw(self.journal).encode(), acknowledged)
         self.assertTrue(self.record()["publications"][0]["host_accepted"])
 
     def test_restart_retains_original_envelopes_and_records_owner_loss_without_rebind(self):
@@ -178,12 +178,12 @@ class PublicationTests(unittest.TestCase):
         with mock.patch.object(self.journal, "write", side_effect=fail):
             with self.assertRaisesRegex(LoginError, "^outcome_unknown$"):
                 self.engine.advance(operation, CALLER)
-            preserved = self.path.read_bytes()
+            preserved = active_raw(self.journal).encode()
             for call in [lambda: self.pending(operation), lambda: self.engine.status(operation, CALLER),
                          lambda: self.engine.cancel(operation, CALLER)]:
                 with self.assertRaisesRegex(LoginError, "^outcome_unknown$"):
                     call()
-            self.assertEqual(self.path.read_bytes(), preserved)
+            self.assertEqual(active_raw(self.journal).encode(), preserved)
         self.assertEqual(attempted[-1], "fill_submitted")
         self.assertEqual(attempted.count("fill_submitted"), 1)
         snapshot = self.record()
@@ -247,11 +247,11 @@ class PublicationTests(unittest.TestCase):
         variants.append(changed)
         for value in variants:
             replace_active_raw(self.journal, json.dumps(value))
-            before = self.path.read_bytes()
+            before = active_raw(self.journal).encode()
             with self.journal.locked() as root:
                 with self.assertRaises(ConnectionError):
                     self.journal.read(root)
-            self.assertEqual(self.path.read_bytes(), before)
+            self.assertEqual(active_raw(self.journal).encode(), before)
 
     def test_publication_identity_cannot_be_reused_across_operations(self):
         self.start()

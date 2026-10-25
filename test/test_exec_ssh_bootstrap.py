@@ -43,14 +43,48 @@ class BootstrapTest(unittest.TestCase):
             'env_allowlist = ["LANG"]\n'
         )
         self.shim = self.root / "shim"
-        self.shim.write_text('#!/bin/sh\nexit "${PROBE_EXIT:-0}"\n')
+        # The probe intentionally ignores config, as the real shim does. Only
+        # framed execution can expose a same-major, incompatible configuration.
+        self.shim_mode = self.root / "shim-mode"
+        self.shim_mode.write_text("ready")
+        self.shim.write_text("#!" + sys.executable + "\n" +
+                             "mode_path = " + repr(str(self.shim_mode)) + "\n" +
+                             "config_path = " + repr(str(self.config)) + "\n" + '''
+import json, os, pathlib, struct, subprocess, sys
+if sys.argv[1:] == ["--probe"]:
+    if os.environ.get("PROBE_EXIT"):
+        raise SystemExit(int(os.environ["PROBE_EXIT"]))
+    print(json.dumps(dict(name="masc-exec-shim", version="3.0", capabilities=[])))
+    raise SystemExit(0)
+header = sys.stdin.buffer.read(8)
+request = json.loads(sys.stdin.buffer.read(struct.unpack(">Q", header)[0]))
+mode = pathlib.Path(mode_path).read_text()
+if mode == "config-error":
+    print('remote_ssh_shim_config_error: unknown key "env_file"', file=sys.stderr)
+    raise SystemExit(1)
+if mode == "malformed":
+    print("not a framed response", file=sys.stderr)
+    raise SystemExit(0)
+config = dict(line.split("=", 1) for line in pathlib.Path(config_path).read_text().splitlines())
+assert request["remote_root"] == config["remote_root"]
+assert request["cwd"] == config["remote_root"]
+assert request["argv"] == ["test", "-d", config["remote_root"]]
+result = subprocess.run(request["argv"], cwd=request["cwd"])
+trailer = dict(v=request["v"], exit=result.returncode, signal=None,
+               timed_out=False, shim_error=None)
+sys.stderr.write("\\x1e" + json.dumps(dict(masc_exec_result=trailer)) + "\\x1e")
+''')
         self.make_command("ssh-keyscan", "printf '%s\\n' 'fixture ssh-ed25519 test'\n")
         self.make_command("ssh-keygen", "printf '%s\\n' '256 SHA256:fixture fixture'\n")
         self.make_command("ssh-copy-id", "exit 0\n")
         transport = self.root / "transport.py"
-        transport.write_text('''import json, os, pathlib, subprocess, sys
-root = pathlib.Path(os.environ["FAKE_REMOTE"])
-with open(os.environ["FAKE_EVENTS"], "a") as f:
+        # Process_eio scrubs arbitrary host environment keys. The fixture owns
+        # these paths directly instead of weakening the product allowlist.
+        transport.write_text("root_path = " + repr(str(self.remote)) + "\n" +
+                             "events_path = " + repr(str(self.events)) + "\n" + '''
+import json, pathlib, subprocess, sys
+root = pathlib.Path(root_path)
+with open(events_path, "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\\n")
 command = sys.argv[-1]
 for old, new in [
@@ -67,8 +101,7 @@ sys.exit(subprocess.run(["/bin/sh", "-c", command]).returncode)
         self.make_command("sudo", 'shift\nif [ "$1" = chown ]; then exit 0; fi\nexec "$@"\n')
         self.env = dict(os.environ,
                         PATH=str(self.bin) + os.pathsep + str(self.remote)
-                        + os.pathsep + os.environ.get("PATH", ""),
-                        FAKE_REMOTE=str(self.remote), FAKE_EVENTS=str(self.events))
+                        + os.pathsep + os.environ.get("PATH", ""))
         # Resolve the explicitly supplied base instead of an operator override.
         self.env.pop("MASC_CONFIG_DIR", None)
         self.env.pop("MASC_BASE_PATH", None)
@@ -133,6 +166,24 @@ sys.exit(subprocess.run(["/bin/sh", "-c", command]).returncode)
         result = self.run_bootstrap("--keeper", "keeper-a")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("provisioned.", result.stdout)
+
+    def test_same_major_config_refusal_is_not_success(self):
+        self.shim_mode.write_text("config-error")
+        result = self.run_bootstrap("--keeper", "keeper-a")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("remote_ssh_preflight_unavailable:", result.stderr)
+        self.assertIn('unknown key "env_file"', result.stderr)
+        self.assertNotIn("remote_ssh_root_missing:", result.stderr)
+        self.assertNotIn("provisioned.", result.stdout)
+        self.assertFalse((self.workspace / "keeper-a").exists())
+
+    def test_probe_success_without_framed_receipt_is_not_success(self):
+        self.shim_mode.write_text("malformed")
+        result = self.run_bootstrap("--keeper", "keeper-a")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("remote_ssh_preflight_unavailable:", result.stderr)
+        self.assertNotIn("provisioned.", result.stdout)
+        self.assertFalse((self.workspace / "keeper-a").exists())
 
     def assert_directory_alias_refused(self, link):
         outside = self.root / "outside"

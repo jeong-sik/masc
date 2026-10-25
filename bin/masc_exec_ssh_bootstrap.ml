@@ -609,6 +609,9 @@ let run base_path endpoint_name shim_path replace_host_key keepers keeper_tokens
       Keeper_sandbox_ssh.create ~base_path ~keeper_name:"bootstrap" ~endpoint ()
     in
     let* () = install_shim ssh endpoint shim_path in
+    (* --probe alone does not load the shim configuration. Execute the framed
+       endpoint check before reporting success or creating Keeper workspaces. *)
+    let* () = Keeper_sandbox_remote.check_endpoint_preflight ssh in
     let* () =
       List.fold_left
         (fun acc keeper -> let* () = acc in provision_keeper_workspace ssh endpoint keeper)
@@ -672,4 +675,13 @@ let command =
 
 let () =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  exit (Cmd.eval command)
+  let status =
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Process_eio.init
+      ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+      ~proc_mgr:(Eio.Stdenv.process_mgr env)
+      ~clock:(Eio.Stdenv.clock env);
+    Cmd.eval command
+  in
+  exit status

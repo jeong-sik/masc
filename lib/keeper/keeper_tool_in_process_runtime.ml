@@ -1415,6 +1415,7 @@ let replay_connector_post_with_outcome
 let handle_surface_post_with_outcome
       ~config
       ~(meta : keeper_meta)
+      ?turn_ref
       ?continuation_channel
       ?gate_context
       ?gate_grant
@@ -1625,6 +1626,7 @@ let handle_surface_post_with_outcome
              ~keeper_name:meta.name
              ~content:safe_content
              ~surface:(Surface_ref.Dashboard { session_id = None })
+             ?turn_ref
              ()
          with
          | Error detail ->

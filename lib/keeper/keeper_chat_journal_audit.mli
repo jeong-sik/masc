@@ -19,7 +19,8 @@ type mismatch_kind =
       (** The terminal assistant row's content differs from the journal's
           [Reply_details.reply] (both sides are the post-redaction view), or
           the journal carries a non-empty reply that no store row persists.
-          A settled Dashboard effect instead requires its assistant post row
+          A settled outcome with a matching typed Dashboard effect event
+          instead requires its assistant post row
           on the exact original turn and surface, without terminal delivery
           provenance; its body is independent of the suppressed model reply. *)
   | Tool_rows

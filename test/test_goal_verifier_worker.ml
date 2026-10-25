@@ -1,9 +1,24 @@
 open Masc
+
+type restart_probe = {base_path : string; goal_id : string; request_id : string; attempt : int}
+let restart_argument = "--recover-goal-body-fixture"
+let restart_probe =
+  if Array.length Sys.argv > 1 && Sys.argv.(1) = restart_argument then (
+    if Array.length Sys.argv <> 6 then invalid_arg "Goal restart probe requires base, Goal, request and attempt";
+    Some {base_path=Sys.argv.(2); goal_id=Sys.argv.(3); request_id=Sys.argv.(4);
+      attempt=int_of_string Sys.argv.(5)})
+  else None
+
 (* Exercise host publication against an actual replayed durable registry.
-   The global registry is process-wide, as in the production bootstrap. *)
+   The restart child uses the workspace's real registry path; normal Alcotest
+   cases retain their process-wide private registry. *)
 let () =
-  let directory = Filename.temp_dir "goal-review-registry-" "" in
-  at_exit (fun () -> Fs_compat.clear_fs (); Fs_compat.remove_tree directory);
+  let directory = match restart_probe with
+    | Some probe -> Common.masc_dir_from_base_path ~base_path:probe.base_path
+    | None ->
+      let directory = Filename.temp_dir "goal-review-registry-" "" in
+      at_exit (fun () -> Fs_compat.clear_fs (); Fs_compat.remove_tree directory);
+      directory in
   let registry = Goal_verification_run_registry.replay
     (Filename.concat directory Goal_verification_run_registry.storage_filename) in
   match Goal_verification_run_registry.install_global registry with
@@ -28,7 +43,7 @@ let proof = function
   | Error (Workspace_goals.Store e) -> Alcotest.fail (Goal_store.write_error_to_string e)
   | Error (Workspace_goals.Refused {message; _}) -> Alcotest.fail message
 
-let with_workspace f =
+let with_workspace_directory f =
   let path = Filename.temp_dir "goal-worker-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.clear_fs (); Fs_compat.remove_tree path;
     Config_dir_resolver.reset ()) (fun () ->
@@ -36,16 +51,23 @@ let with_workspace f =
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key
     (Some (Filename.concat path ".masc/config")) (fun () ->
     Config_dir_resolver.reset ();
+    f path)))
+
+let with_workspace_context ~initialize path f =
+  Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Workspace.default_config path in
-      ignore (Workspace.init config ~agent_name:(Some "planner"));
+      if initialize then ignore (Workspace.init config ~agent_name:(Some "planner"));
       let root = Filename.concat (Workspace_verification_store.project_root_of_base_path path)
         (Playground_paths.bundle_root "measurement-owner") in
-      Fs_compat.mkdir_p root;
+      if initialize then Fs_compat.mkdir_p root;
       Prompt_registry.set_markdown_dir (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts");
       let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-      f config store root))))
+      f config store root))
+
+let with_workspace f =
+  with_workspace_directory (fun path -> with_workspace_context ~initialize:true path f)
 
 let measurement_path = "measurement-owner/measurement.json"
 let measurement_reference = "artifact:" ^ measurement_path
@@ -420,7 +442,7 @@ let corrupt_host_original_body store retained =
   assert_preserved ();
   assert_preserved
 
-let assert_host_proof_published config store original =
+let assert_host_proof_published ?(registry=R.global ()) config store original =
   let subject = V.subject original in
   let retained = host_load store original in
   let receipt = match checked (W.restored_receipt retained) with
@@ -433,7 +455,7 @@ let assert_host_proof_published config store original =
      Alcotest.(check string) "proof belongs to the original request" subject.request_id verdict.request_id;
      Alcotest.(check string) "proof belongs to the original run" receipt.run.run_id verdict.verification_run_id
    | None | Some _ -> Alcotest.fail "healthy Goal has no actual committed proof");
-  (match R.get (R.global ()) ~run_id:receipt.run.run_id with
+  (match R.get registry ~run_id:receipt.run.run_id with
    | Some (R.Review {status=R.Completed {outcome=R.Committed; tools; _}; started_at; _}) ->
      Alcotest.(check bool) "terminal publication keeps the actual original observations" true
        (tools <> [] && tools = receipt.tools && started_at = receipt.run.started_at)
@@ -449,6 +471,83 @@ let assert_host_proof_published config store original =
     | Lane_addon_request_receipt.Acknowledged _ -> ()
     | Unobserved | Pending _ -> Alcotest.fail "healthy Goal publication was not acknowledged")
     [observer.registration; observer.completion]
+
+let proof_record_snapshot config goal_id =
+  match get (Goal_verification.get_record_authoritative config ~goal_id) with
+  | Some ({completion=Goal_verification.Proof_proven _; _} as record) ->
+    Yojson.Safe.to_string (Goal_verification.record_to_yojson record)
+  | None | Some _ -> Alcotest.fail "restart fixture has no actual committed proof"
+
+let write_proof_before_publication config original (receipt : W.receipt) =
+  let subject = V.subject original in
+  let verdict : Goal_verification.verdict = {outcome=Goal_verification.Proven;
+    request_id=subject.request_id; criterion=subject.criterion; verification_run_id=receipt.run.run_id;
+    authority=Workspace_goals.verifier_authority; evidence="actual target measured";
+    recorded_at=Masc_domain.now_iso ()} in
+  (* Stop after the real proof write and phase reconciliation, before host
+     commit/publication ACK. This Goal is no longer in the Verifying scan. *)
+  ignore (stored (Goal_store.transact_goal config ~goal_id:subject.goal_id (fun goal ->
+    Result.map (fun record -> goal, record) (Goal_verification.record_proof_verdict
+      ~before_commit:(fun () -> Candle_snapshot.before_proof_commit config goal verdict)
+      config ~goal_id:subject.goal_id verdict))));
+  ignore (stored (Workspace_goals.reconcile_committed_proof config ~goal_id:subject.goal_id));
+  Alcotest.(check bool) "healthy Goal has left the ordinary pending scan" true
+    (phase config subject.goal_id = Goal_phase.Awaiting_confirmation);
+  Alcotest.(check bool) "terminal publication was not fabricated before restart" true
+    (R.get (R.global ()) ~run_id:receipt.run.run_id = None);
+  verdict
+
+let recover_body_fixture (probe : restart_probe) =
+  with_workspace_context ~initialize:false probe.base_path (fun config store _ ->
+    (* No parent registry object can survive exec. Start from the workspace's
+       empty durable registry and read the judgment/run only from its owner. *)
+    Alcotest.(check int) "fresh process starts with no published runs" 0
+      (List.length (R.list_runs (R.global ())));
+    let retained = match checked (W.load ~store ~installation_id:W.host_installation_id
+        ~package_id:W.host_package_id ~goal_id:probe.goal_id ~request_id:probe.request_id
+        ~attempt:probe.attempt) with
+      | Some retained -> retained
+      | None -> Alcotest.fail "fresh process cannot find the serialized Goal original" in
+    let original = W.original retained in
+    (match P.phase (W.progress retained) with
+     | Judged _ -> ()
+     | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+       Alcotest.fail "fresh process did not reopen the uncommitted actual judgment");
+    Alcotest.(check bool) "recovery is required despite the phase having moved" true
+      (hosted (H.needs_recovery ~registry:(R.global ()) retained));
+    Alcotest.(check bool) "fresh process sees the committed proof phase" true
+      (phase config probe.goal_id = Goal_phase.Awaiting_confirmation);
+    let before = proof_record_snapshot config probe.goal_id in
+    let calls = ref 0 in
+    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      incr calls;
+      Alcotest.fail "fresh-process recovery must not dispatch a reviewer") (fun () ->
+      drain config;
+      drain config;
+      Alcotest.(check int) "fresh-process recovery makes no model call" 0 !calls;
+      assert_host_proof_published config store original;
+      Alcotest.(check string) "fresh-process recovery preserves the complete proof record"
+        before (proof_record_snapshot config probe.goal_id);
+      Alcotest.(check bool) "durable publication leaves no recovery work" false
+        (hosted (H.needs_recovery ~registry:(R.global ()) (host_load store original)))))
+
+let run_restart_process (probe : restart_probe) =
+  let executable = Unix.realpath Sys.executable_name in
+  let child = Unix.create_process executable
+    [|executable; restart_argument; probe.base_path; probe.goal_id; probe.request_id;
+      string_of_int probe.attempt|] Unix.stdin Unix.stdout Unix.stderr in
+  let rec wait () =
+    match Unix.waitpid [] child with
+    | _, status -> status
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait () in
+  match wait () with
+  | Unix.WEXITED 0 -> ()
+  | WEXITED code -> Alcotest.failf "Goal recovery child exited %d" code
+  | WSIGNALED signal -> Alcotest.failf "Goal recovery child was killed by signal %d" signal
+  | WSTOPPED signal -> Alcotest.failf "Goal recovery child stopped on signal %d" signal
 
 let test_actual_pending_goal_survives_foreign_body_corruption () =
   with_workspace (fun config store _ ->
@@ -490,22 +589,7 @@ let test_actual_boot_publication_survives_foreign_body_corruption () =
     let calls = ref 0 in
     with_reviewer (actual_approve calls) (fun () ->
       let receipt = checked (run store healthy authority) in
-      let verdict : Goal_verification.verdict = {outcome=Goal_verification.Proven;
-        request_id=subject.request_id; criterion=subject.criterion; verification_run_id=receipt.run.run_id;
-        authority=Workspace_goals.verifier_authority; evidence="actual target measured";
-        recorded_at=Masc_domain.now_iso ()} in
-      (* Stop after the real proof write and phase reconciliation, before host
-         commit/publication ACK. B is no longer in the Verifying scan, so only
-         retained-original boot discovery can recover its publication. *)
-      ignore (stored (Goal_store.transact_goal config ~goal_id:subject.goal_id (fun goal ->
-        Result.map (fun record -> goal, record) (Goal_verification.record_proof_verdict
-          ~before_commit:(fun () -> Candle_snapshot.before_proof_commit config goal verdict)
-          config ~goal_id:subject.goal_id verdict))));
-      ignore (stored (Workspace_goals.reconcile_committed_proof config ~goal_id:subject.goal_id));
-      Alcotest.(check bool) "healthy Goal has left the ordinary pending scan" true
-        (phase config subject.goal_id = Goal_phase.Awaiting_confirmation);
-      Alcotest.(check bool) "terminal publication was not fabricated before restart" true
-        (R.get (R.global ()) ~run_id:receipt.run.run_id = None);
+      let verdict = write_proof_before_publication config original receipt in
       let assert_damaged = corrupt_host_original_body store damaged in
       let reopened_store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
       let reopened_config = Workspace.default_config config.base_path in
@@ -524,6 +608,35 @@ let test_actual_boot_publication_survives_foreign_body_corruption () =
         Alcotest.(check string) "boot recovery preserves the first committed proof timestamp"
           verdict.recorded_at restored.recorded_at
       | None | Some _ -> Alcotest.fail "boot recovery lost the actual proof"))
+
+let test_actual_process_restart_survives_foreign_body_corruption () =
+  with_workspace_directory (fun path ->
+    let probe, original, before, assert_damaged =
+      with_workspace_context ~initialize:true path (fun config store _ ->
+        let _, damaged = host_prepared config store in
+        let authority, healthy = host_prepared config store in
+        let original = W.original healthy in
+        let subject = V.subject original in
+        let calls = ref 0 in
+        with_reviewer (actual_approve calls) (fun () ->
+          let receipt = checked (run store healthy authority) in
+          ignore (write_proof_before_publication config original receipt);
+          Alcotest.(check int) "parent performed one actual review before exiting its context" 1 !calls;
+          let assert_damaged = corrupt_host_original_body store damaged in
+          let probe = {base_path=config.base_path; goal_id=subject.goal_id;
+            request_id=subject.request_id; attempt=V.attempt original} in
+          probe, original, proof_record_snapshot config subject.goal_id, assert_damaged)) in
+    (* The Eio context and reviewer override have both ended before a fresh
+       executable reopens the private durable state. *)
+    run_restart_process probe;
+    with_workspace_context ~initialize:false path (fun config store _ ->
+      assert_damaged ();
+      Alcotest.(check string) "child preserved the parent's complete committed proof"
+        before (proof_record_snapshot config probe.goal_id);
+      let registry = R.replay (Filename.concat (Workspace.masc_dir config) R.storage_filename) in
+      assert_host_proof_published ~registry config store original;
+      Alcotest.(check bool) "child completion ACK survives registry replay" false
+        (hosted (H.needs_recovery ~registry (host_load store original)))))
 
 let test_actual_host_refuses_own_body_corruption () =
   with_workspace (fun config store _ ->
@@ -903,7 +1016,9 @@ let test_raised_review_retains_actual_tool_observation () = with_workspace (fun 
        | Ok _ | Error _ -> Alcotest.fail "raised review redispatched its unknown original");
       Alcotest.(check int) "raised reviewer is never replayed" 1 !calls))
 
-let () = Alcotest.run "retained Goal worker" ["execution", [
+let () = match restart_probe with
+| Some probe -> recover_body_fixture probe
+| None -> Alcotest.run "retained Goal worker" ["execution", [
   Alcotest.test_case "actual retained visual lookup and restart receipt" `Quick test_actual_retained_lookup_and_restored_receipt;
   Alcotest.test_case "unknown and cancellation never redispatch" `Quick test_unknown_and_cancellation_never_redispatch;
   Alcotest.test_case "same-original pre-admission repair" `Quick test_pre_admission_repair_keeps_original;
@@ -914,6 +1029,8 @@ let () = Alcotest.run "retained Goal worker" ["execution", [
     test_actual_pending_goal_survives_foreign_body_corruption;
   Alcotest.test_case "actual boot publication survives foreign original body corruption" `Quick
     test_actual_boot_publication_survives_foreign_body_corruption;
+  Alcotest.test_case "actual process restart survives foreign original body corruption" `Quick
+    test_actual_process_restart_survives_foreign_body_corruption;
   Alcotest.test_case "actual host refuses its own original body corruption" `Quick
     test_actual_host_refuses_own_body_corruption;
   Alcotest.test_case "actual integral receipt commits after restart and rejects alteration" `Quick test_actual_integral_receipt_commits_after_restart;

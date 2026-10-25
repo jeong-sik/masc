@@ -8,7 +8,12 @@ module P=Browser_extension_protocol
 module W=Browser_stagehand_wire
 module L=Browser_lane
 let answered = function
-  | L.Answered value -> value
+  | L.Answered (`Assoc fields)
+      when List.sort String.compare (List.map fst fields)=["data";"ok"] ->
+      (match List.assoc "ok" fields with
+       | `Bool true -> List.assoc "data" fields
+       | _ -> fail "fixture browser lifecycle did not succeed")
+  | L.Answered _ -> fail "fixture browser lifecycle returned an invalid envelope"
   | Rejected_before_effect _ | Lane_absent | Timed_out | Refused _ -> fail "fixture browser lifecycle refused"
 let operation_id="0b000000-0000-4000-8000-000000000019"
 let extension_id=String.make 32 'a'

@@ -207,9 +207,11 @@ val batch_disposition_of_cycle_outcome :
     yet; #34666 tracks that projection. Every typed checkpoint (durable stimulus arrived, loop guard,
     Gate-deferred tool call, queued chat operation) ACKs attention-only
     sources after preserving the continuation, because each one is produced
-    after a model round ran with the admitted batch projected (the agent-core
-    checkpoint carries it; an official-client vendor session carries it
-    unless that session restarts before the resume); Connector_attention
+    after a model round ran with the admitted batch projected. Continuation
+    persistence does not imply that every provider retains dynamic observation
+    text in canonical history: OpenAI-compatible context is request-only, and
+    official-client session replacement may lose its prior context. Delivery
+    ACK does not certify model-level answer continuity. Connector_attention
     stays pending until the resumed turn completes, and a HITL resolution
     stays pending until its continuation receipt is recorded. Every failed,
     cancelled, input-required, or skipped outcome leaves the whole batch

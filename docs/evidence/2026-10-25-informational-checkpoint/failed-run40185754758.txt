@@ -1,0 +1,10 @@
+Actual failed run40185754758 at2c29596384be4f99cc7d8edbd7da33af1593fd38
+Full fetched log SHA-256 103b06806353e5e0527001d1dcc36e1f757a6a1dfc6001e0f8c64a0481675398
+Selected tests did not run: grouped build failed before execution.
+
+test suite	Checkout	2026-10-25T10:42:16.1183803Z HEAD is now at 2c295963 test(keeper): exercise informational ACK after a real checkpoint
+test suite	Test	2026-10-25T10:44:28.0553584Z [targeted] dune build test/test_keeper_informational_checkpoint_ack.exe test/test_keeper_failed_selection_disposition.exe
+test suite	Test	2026-10-25T10:47:52.8524854Z File "test/test_keeper_informational_checkpoint_ack.ml", line 74, characters 64-70:
+test suite	Test	2026-10-25T10:47:52.8525487Z 74 |   [ { Q.post_id = Q.fusion_completion_post_id fusion; urgency = Q.High
+test suite	Test	2026-10-25T10:47:52.8526252Z Error: Unbound constructor Q.High
+test suite	Test	2026-10-25T10:47:57.1187452Z ##[error]Process completed with exit code 1.

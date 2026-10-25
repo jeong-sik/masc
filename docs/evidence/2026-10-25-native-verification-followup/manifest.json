@@ -1,11 +1,16 @@
 {
-  "recorded_at": "2026-10-25T01:12:12.930526+00:00",
-  "scope": "This directory excluding this current manifest. Historical receipts remain original bytes.",
+  "recorded_at": "2026-10-25T01:17:23.647178+00:00",
+  "scope": "This directory excluding this manifest. Historical receipts remain original bytes.",
   "files": [
     {
       "path": "README.md",
-      "bytes": 3600,
-      "sha256": "d54a778b2cd49a16e04a7bc79f02291cdfa4ce1bd00b5484670e87b6cfc2038b"
+      "bytes": 4202,
+      "sha256": "aec047f6bc942dd5d246f17ed55d5e23992bd321fd58f6060bec2176d8222a8e"
+    },
+    {
+      "path": "candidate-ledger.json",
+      "bytes": 995,
+      "sha256": "6432d77d262be2ed89cc85d54fae9fd80906f11235af8cd5d5ffdc3ece27c7fc"
     },
     {
       "path": "claude-author-repair.json",
@@ -21,6 +26,16 @@
       "path": "followup-17583b00-dispatch.json",
       "bytes": 911,
       "sha256": "ec4fc2e331ae33c2a8282c2123b26b78e903b1290e6c0efef1ec5dc6d28095ee"
+    },
+    {
+      "path": "independent-audit-docs-review.json",
+      "bytes": 11026,
+      "sha256": "fcd9fbb8148b6f609978021131869b252bab93b77cd83eaf80b7bb22c2d6dc38"
+    },
+    {
+      "path": "independent-code-17583b00-review.json",
+      "bytes": 10354,
+      "sha256": "bec7eb93e2799d9f368525c4b2c48b32f884d83c0257fea51351453f03e26da9"
     },
     {
       "path": "local-parse-links.json",

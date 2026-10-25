@@ -46,6 +46,12 @@ Goal 상태 기계는 측정3/3만으로 Completed가 되지 않는다. 이번 �
 
 실패 데이터가 남는다. 첫 수리의 P2, 중간 캡처 진단, 틀린 최종 보고, 네이티브의 일부 성공과 미완료가 모두 원본 scope로 유지된다. 이것이 다음 모델과 다음 변경에도 재사용할 수 있는 자산이다.
 
+## 개선 우선순위
+
+1. **평가의 무결성부터 확보한다.** 호스트 실행·검사기 변조·증거 교체를 막은 후보와 실제 실행 결과를 결속한다. 콜백 안의 assertion처럼 오류 격리가 검사 실패까지 숨기는 경로를 함께 점검한다. 이번 native 실패를 fixture만 고쳐 재실행하는 이유다.
+2. **통지 전달과 자율 수행의 신뢰성을 따로 측정한다.** 승인 이벤트가 정확히 도착해도 Qwen은 남은 일을 하지 않은 사례가 있다. GLM 한 번의 성공으로 이를 일반 해결이라 부를 수 없다. 같은 입력·승인 조건을 고정한 반복 실험에서 모델별 실제 변경, 중간 측정, 최종 보고를 각각 집계해야 한다. Task 개수나 연결 비율로 대체하지 않는다.
+3. **격리 실행의 증거를 운영 성공으로 확장하지 않는다.** main API의 timeout·connection refusal과 proof_pending은 현재 관측된 경계다. 실제 Official 세션, microVM grader, 운영 설치와 연속 실행은 각각 직접 확인할 후속 범위다. 모델을 더 오래 돌리거나 임의 횟수 제한을 추가하는 것으로 이 증거를 대신할 수 없다.
+
 ## Docker와 microVM
 
 이 캠페인의 재현된 호스트 채점 결함과 구현된 grading driver는 Docker 범위다. microVM 실행은 별도 guest/shim 경로이며 같은 호스트 채점 경로로 확인되지 않았다. microVM end-to-end grader는 실행하지 않았다. guest에서 내보낸 후보를 호스트에서 실행한다면 같은 경계 결함이 생긴다. microVM 이름만으로 검사기·artifact·실험 identity의 무결성이 확보되지는 않는다.
@@ -58,4 +64,4 @@ be9a 후보의 [최소 native 실행](../evidence/2026-10-25-native-verification
 
 후속 소스는 기존16개 Native Stack을 다른 세션이 재배치하는 동안 별도 exact candidate로 보존한다. source review, 최소 native 검사, 실제328 runtime, UI, 현재 원격 PR head/base와 전체 스택 승인은 각각 따로 확인해야 한다. microVM grader·실제 Official vendor 세션·전체 회귀·운영 설치·배포·병합·최종 사람 Goal 확인은 이 감사의 성공 주장에 포함되지 않는다.
 
-후속 PR: [현재 제출 snapshot 수리 #45861](https://github.com/jeong-sik/masc/pull/45861), [native/콜백 검사 수리 #45867](https://github.com/jeong-sik/masc/pull/45867). 최소 native 실행 결과는 PR 본문의 frozen candidate/run 결속을 따르며, 이 문서의 원래328 실패 기록을 덮어쓰지 않는다.
+후속 PR: [현재 제출 snapshot 수리 #45861](https://github.com/jeong-sik/masc/pull/45861), [native/콜백 검사 수리 #45867](https://github.com/jeong-sik/masc/pull/45867), [durable publication·terminal fixture 수리 #45874](https://github.com/jeong-sik/masc/pull/45874). 최소 native 실행 결과는 PR 본문의 frozen candidate/run 결속을 따르며, 이 문서의 원래328 실패 기록을 덮어쓰지 않는다.

@@ -41,6 +41,24 @@ class ProtectedStoreTests(unittest.TestCase):
             self.assertNotIn(b"MARKER", path.read_bytes())
         self.assertFalse((self.directory / "connection.json").exists())
 
+    def test_declined_callback_schema_is_closed_and_invalid_write_keeps_active_authority(self):
+        self.write(self.next)
+        before = active_raw(self.store)
+        receipt = {"kind": "declined", "state": "STATE_MARKER",
+                   "connection_id": self.next["connection_id"]}
+        for changed in [{"kind": "captured"}, {"state": ""}, {"connection_id": "not-a-uuid"},
+                        {"unknown": "extra"}, {"connection_id": None}]:
+            with self.subTest(changed=changed):
+                with self.assertRaises(oauth.ConnectionError):
+                    self.write({**self.original, "declined_callback": {**receipt, **changed}})
+                self.assertEqual(active_raw(self.store), before)
+        with self.assertRaises(oauth.ConnectionError):
+            self.write({**self.next, "declined_callback": receipt})
+        self.assertEqual(active_raw(self.store), before)
+        declined = {**self.original, "declined_callback": receipt}
+        self.write(declined)
+        self.assertEqual(self.read(), declined)
+
     def test_delete_then_failed_add_cannot_erase_active_slot(self):
         self.write(self.next)
         before = active_raw(self.store)

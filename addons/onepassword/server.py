@@ -98,9 +98,6 @@ class Worker:
                 connector.cancel_authorization(expected_state=arguments["state"],
                                                expected_connection_id=arguments["connection_id"])
             elif action == "complete":
-                identity = connector.authorization_identity()
-                if identity != {key: arguments[key] for key in ["state", "connection_id"]}:
-                    raise ConnectionError("callback_attempt_mismatch")
                 callback = parse.urlsplit(arguments["callback_url"])
                 configured = parse.urlsplit(connector.configuration.redirect_uri)
                 if (callback.scheme, callback.netloc, callback.path) != (configured.scheme, configured.netloc, configured.path):
@@ -127,11 +124,13 @@ class Worker:
                 if declined:
                     if query["error"] != ["access_denied"]:
                         raise ConnectionError("invalid_callback")
-                    connector.cancel_authorization(expected_state=query["state"][0],
-                                                   expected_connection_id=arguments["connection_id"])
-                    return {**self.operator_view(connector), "callback_receipt": {
-                        "kind": "declined", "connection_id": arguments["connection_id"]}}
+                    receipt = connector.decline_authorization(expected_state=query["state"][0],
+                                                              expected_connection_id=arguments["connection_id"])
+                    return {**self.operator_view(connector), "callback_receipt": receipt}
                 else:
+                    identity = connector.authorization_identity()
+                    if identity != {key: arguments[key] for key in ["state", "connection_id"]}:
+                        raise ConnectionError("callback_attempt_mismatch")
                     connector.complete(state=query["state"][0], code=query["code"][0],
                                        integration_key=fragment["integration_key"][0])
             return self.operator_view(connector)

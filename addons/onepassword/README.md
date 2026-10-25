@@ -58,10 +58,14 @@ contract](../../docs/design/lane-addon-operator-controls.md). Register the exact
 HTTPS URL `<your MASC origin>/addons/oauth/callback` with 1Password. The callback
 return is sent through authenticated private POST before the fragment is cleared.
 The private `callback_receipt` names the original connection and distinguishes
-key capture from a directly confirmed decline. Capture does not claim connection
+key capture from a durably confirmed decline. Capture does not claim connection
 success: an exchange failure can leave a captured key with reconciliation still
 required. A lost response permits explicit redelivery of that same original
 return; the one-use code exchange is not reexecuted after its durable marker.
+For a decline, the protected disconnected record retains the exact receipt and
+original state together. Only a validated `access_denied` redelivery with that
+same state and connection can recover the receipt; generic views and manual
+cancellation do not return it, and a replacement attempt cannot borrow it.
 Unconfirmed/busy storage produces no capture acknowledgement. No tokens or PKCE
 verifier are returned to the page. Keyless, account-pinned recovery and confirmed
 remote revocation remain unfinished; another connection's key is never reused.

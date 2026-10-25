@@ -10,7 +10,7 @@ import { artifactDraftRecoveries, discardArtifactDraftRecovery, type ArtifactDra
 import { ArtifactLiveSession, draftBytes, type ArtifactLiveState } from '../../lib/artifact-live-session'
 import { resolveSharedSelection, restoreSharedDocument, sharedSource, type SharedSelection } from '../../lib/artifact-shared-document'
 import { ArtifactComposer, downloadArtifactDraft, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
-import { ArtifactHtmlEditor } from './artifact-html-editor'
+import { ArtifactSentenceEditor } from './artifact-sentence-editor'
 import { ArtifactDiscussionPanel } from './artifact-discussion-panel'
 
 export type ArtifactSharedCloseResult = { kind: 'keep_open' } | { kind: 'close'; publicationDiscarded: boolean }
@@ -88,7 +88,8 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
   const [session, setSession] = useState<ArtifactLiveSession | null>(null)
   const [state, setState] = useState<ArtifactLiveState | null>(null)
   const [error, setError] = useState('')
-  const [view, setView] = useState<'source' | 'rendered'>(doc.artifact.format === 'html' ? 'rendered' : 'source')
+  const [view, setView] = useState<'source' | 'rendered'>('rendered')
+  const [sourceFormat,setSourceFormat]=useState(doc.artifact.format)
   const [visualPending, setVisualPending] = useState(false)
   const [discussionPending, setDiscussionPending] = useState(false)
   const [reveal, setReveal] = useState<SharedSelection | null>(null)
@@ -124,6 +125,11 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
       if (!active || !isCurrent()) return
       const view = await sendArtifactDraftCommand({ action: 'open', artifact_id: doc.artifact.id, revision: doc.artifact.revision }, workspace)
       if (!active || !isCurrent()) return
+      const base=view.draft.base_revision===doc.artifact.revision?doc
+        :await fetchPublishedArtifact(doc.artifact.id,String(view.draft.base_revision),undefined,workspace)
+      if(!active||!isCurrent())return
+      if(base.artifact.body._blob.sha256!==view.draft.base_sha256)throw new Error('공유 원고의 게시 기준과 원본 문서가 다릅니다.')
+      setSourceFormat(base.artifact.format)
       opened = new ArtifactLiveSession(view, workspace, value => { if (active) setState(value) }, isCurrent)
       sessionForClose.current = opened
       setRecoveries(artifactDraftRecoveries(workspace, doc.artifact.id))
@@ -145,7 +151,7 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
     setRecoveries(artifactDraftRecoveries(session.workspace,doc.artifact.id))
   }, [session, state?.pending])
   const draft = (content: string) => ({ title: doc.artifact.title, summary: doc.artifact.summary,
-    format: doc.artifact.format, content, task_id: doc.artifact.task_id, goal_id: doc.artifact.goal_id })
+    format: sourceFormat, content, task_id: doc.artifact.task_id, goal_id: doc.artifact.goal_id })
   const preparePublication = (value: { base: ArtifactDocument; content: string }) => {
     const artifact = value.base.artifact
     const snapshot: ArtifactDraftSnapshot = { identity: {}, base: { id: artifact.id, revision: artifact.revision },
@@ -195,12 +201,12 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
       <button type="button" disabled=${!state || state.pending || visualPending || state.connection !== 'connected' || publication !== null || comparison !== null} onClick=${publish}>새 버전으로 게시</button>
       <button type="button" onClick=${onClose}>공동 편집 닫기</button>
     </div>
-    ${doc.artifact.format === 'html' ? html`<div class="flex gap-4" aria-label="공동 편집 표시 방식">
+    <div class="flex gap-4" aria-label="공동 편집 표시 방식">
       <button type="button" aria-pressed=${view === 'rendered'} onClick=${() => setView('rendered')}>문장 편집</button>
       <button type="button" aria-pressed=${view === 'source'} onClick=${() => {
         if (!visualPending || window.confirm('아직 반영하지 않은 문장이 있습니다. 원본 편집으로 바꿀까요?')) { setVisualPending(false); setView('source') }
       }}>원본 편집</button>
-    </div>` : null}
+    </div>
     ${state?.pending && !state.recoveryPersisted ? html`<p role="alert">브라우저에 복구 원고를 저장하지 못했습니다. 이 탭을 닫기 전에 원고를 다운로드해 주세요.</p>` : null}
     ${recoveries.map(recovery => html`<details key=${recovery.revision} class="border p-3">
       <summary>복구 원고 · ${new Date(recovery.at).toLocaleString()}</summary>
@@ -213,7 +219,7 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
       <p>최신 게시물은 v${comparison.base.artifact.revision}입니다. 아래 내용을 비교한 뒤 게시할 원고를 준비해 주세요.</p>
       <h3>${comparison.base.artifact.title} · ${comparison.base.artifact.format} · 최신 게시물</h3>
       <pre class="max-h-40 overflow-auto whitespace-pre-wrap">${comparison.base.content}</pre>
-      <h3>게시할 공유 원고 · ${doc.artifact.format}에서 시작</h3>
+      <h3>게시할 공유 원고 · ${sourceFormat}에서 시작</h3>
       <pre class="max-h-40 overflow-auto whitespace-pre-wrap">${comparison.content}</pre>
       <p>최신 게시물의 제목·요약·형식·Task·Goal을 유지합니다. 다음 화면에서 내용을 확인하고 저장해 주세요.</p>
       <button type="button" onClick=${() => { preparePublication(comparison); setComparison(null) }}>이 원고로 새 버전 준비</button>
@@ -231,7 +237,7 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
       })}</ul>` : null}
     ${session && state ? html`<div class="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
       <div class="flex min-h-0 min-w-0 flex-col">${view === 'rendered'
-        ? html`<${ArtifactHtmlEditor} session=${session} state=${state} onPending=${setVisualPending} />`
+        ? html`<${ArtifactSentenceEditor} session=${session} state=${state} format=${sourceFormat} onPending=${setVisualPending} />`
         : html`<${SharedCodeEditor} session=${session} state=${state} reveal=${reveal} />`}</div>
       <div class="min-h-0 min-w-0 overflow-auto"><${ArtifactDiscussionPanel} session=${session} state=${state} onPending=${setDiscussionPending}
         onReveal=${(position:SharedSelection)=>{

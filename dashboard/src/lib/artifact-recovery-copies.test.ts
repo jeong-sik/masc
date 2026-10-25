@@ -3,7 +3,7 @@ import { artifactDraftRecoveries, discardArtifactDraftRecovery, retainArtifactDr
 import { artifactSentenceRecoveries, discardArtifactSentence, retainArtifactSentence, type ArtifactSentenceInput } from './artifact-sentence-recovery'
 const workspace={basePath:'/immutable-recovery-test',mascRoot:'/separate-runtime'}
 const target={artifact_id:`artifact-${'f'.repeat(32)}`,generation:'019f0000-0000-7000-8000-000000000000'}
-const sentence:ArtifactSentenceInput={expected:'alpha',original:'alpha',input:'',selection:{anchor:[1],head:[2]},state:'snapshot'}
+const sentence:ArtifactSentenceInput={format:'html',expected:'alpha',original:'alpha',input:'',selection:{anchor:[1],head:[2]},state:'snapshot'}
 const stores=[{
   name:'source',prefix:'masc.artifact-draft-recovery.v1:',field:'state',
   save(id:string,value:string){const r=retainArtifactDraft(id,workspace,target,value);return {...r,value:r.state,discard:()=>discardArtifactDraftRecovery(r)}},

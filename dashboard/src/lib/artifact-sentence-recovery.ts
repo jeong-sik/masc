@@ -3,9 +3,9 @@ import { ArtifactDraftPositionSchema, ArtifactDraftTargetSchema, type ArtifactDr
 import type { ArtifactWorkspace } from '../api/published-artifacts'
 import type { SharedSelection } from './artifact-shared-document'
 
-export type ArtifactSentenceInput = { expected: string; original: string; input: string; selection: SharedSelection; state: string }
+export type ArtifactSentenceInput = { format:'html'|'markdown'; expected: string; original: string; input: string; selection: SharedSelection; state: string }
 const RecordSchema = Schema.Struct({ id: Schema.String, revision: Schema.String, workspace: Schema.Struct({ basePath: Schema.String, mascRoot: Schema.String }),
-  target: ArtifactDraftTargetSchema, expected: Schema.String, original: Schema.String, input: Schema.String,
+  target: ArtifactDraftTargetSchema, format:Schema.Literal('html','markdown'), expected: Schema.String, original: Schema.String, input: Schema.String,
   selection: ArtifactDraftPositionSchema, state: Schema.String, at: Schema.String })
 export type ArtifactSentenceRecovery = typeof RecordSchema.Type & { persisted: boolean; storedRevision: string | null }
 const prefix = 'masc.artifact-sentence-recovery.v1:'
@@ -16,7 +16,7 @@ const storageKey = (record: Pick<ArtifactSentenceRecovery,'id'|'revision'>) => `
 // skips the original expected-text guard or writes to a different workspace.
 export function retainArtifactSentence(id: string, workspace: ArtifactWorkspace, target: ArtifactDraftTarget, input: ArtifactSentenceInput): ArtifactSentenceRecovery {
   const previous=memory.get(id)
-  const data=structuredClone({id,workspace,target,expected:input.expected,original:input.original,input:input.input,state:input.state,
+  const data=structuredClone({id,workspace,target,format:input.format,expected:input.expected,original:input.original,input:input.input,state:input.state,
     selection:input.selection,revision:crypto.randomUUID(),at:new Date().toISOString()})
   const record:ArtifactSentenceRecovery={...data,persisted:false,storedRevision:previous?.storedRevision??null}
   try {

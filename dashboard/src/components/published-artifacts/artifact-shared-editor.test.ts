@@ -44,15 +44,15 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function fixture(char: string) {
-  const authority = seedSharedDocument('shared source\r\n한글 😀\r\n'); documents.push(authority)
+function fixture(char: string,source='shared source\r\n한글 😀\r\n') {
+  const authority = seedSharedDocument(source); documents.push(authority)
   const target = { artifact_id: `artifact-${char.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
   let sequence = 0
   const snapshot = (): ArtifactDraftView => ({ content: sharedSource(authority), threads: [], discussion_receipts: [], selection: null, draft: {
     schema: 'masc.artifact_draft.v2', target, state: draftBase64(sharedState(authority)), base_revision: 1,
     base_sha256: 'a'.repeat(64), sequence, updated_by: 'human', updated_at: '2026-10-25T13:00:00Z',
   } })
-  const frame = (): ArtifactDraftLiveFrame => ({ schema: 'masc.artifact_draft_live.v1', target, session_id: 'self', peers: [], document: snapshot() })
+  const frame = (): ArtifactDraftLiveFrame => ({ schema: 'masc.artifact_draft_live.v1', target, session_id: 'self', peers: [{session_id:'self',actor:'human',source:{kind:'dashboard_connection'},position:null,observed_at:'2026-10-26T03:00:00Z'}], document: snapshot() })
   vi.mocked(streamArtifactDraft).mockImplementation(async (_, __, callback, signal) => {
     callback(frame())
     await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
@@ -61,11 +61,53 @@ function fixture(char: string) {
   const artifact = { id: target.artifact_id, revision: 1, title: 'original title', summary: 'original summary', format: 'markdown' as const,
     author: 'publisher', created_at: '2026-10-25T13:00:00Z', task_id: null, goal_id: null, body: { _blob: { sha256: 'a'.repeat(64) } }, url: '/dashboard' }
   const doc: ArtifactDocument = { artifact, content: sharedSource(authority), revisions: [artifact] }
-  const mount = (isCurrent = () => true, onPublished = vi.fn()) => render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${doc} workspaceRoot="/fixture"
+  const mount = (isCurrent = () => true, onPublished = vi.fn(), openingDoc:ArtifactDocument=doc) => render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${openingDoc} workspaceRoot="/fixture"
     isCurrent=${isCurrent} onCloseRequest=${() => {}} onMutation=${() => {}} onPublished=${onPublished} onClose=${() => {}} />`)
-  const editor = async () => EditorView.findFromDOM(await screen.findByRole('textbox', { name: '공동 편집 원고' }))!
+  const editor = async () => {
+    fireEvent.click(await screen.findByRole('button',{name:'원본 편집'}))
+    return EditorView.findFromDOM(await screen.findByRole('textbox', { name: '공동 편집 원고' }))!
+  }
   return { authority, target, snapshot, merge, doc, mount, editor }
 }
+it('chooses the shared draft base format rather than a newer publication format',async()=>{
+  const f=fixture('a'),latest:ArtifactDocument={...f.doc,artifact:{...f.doc.artifact,revision:2,format:'html'}}
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchPublishedArtifact).mockResolvedValue(f.doc)
+  f.mount(()=>true,vi.fn(),latest)
+  await screen.findByRole('region',{name:'Markdown 문장 편집'})
+  expect(screen.queryByRole('region',{name:'HTML 문장 편집'})).toBeNull()
+  expect(fetchPublishedArtifact).toHaveBeenCalledWith(f.target.artifact_id,'1',undefined,workspace)
+})
+it('refuses a publication that does not match the shared draft base before opening either editor',async()=>{
+  const f=fixture('b'),latest:ArtifactDocument={...f.doc,artifact:{...f.doc.artifact,revision:2,format:'html'}}
+  vi.mocked(sendArtifactDraftCommand).mockResolvedValue(f.snapshot())
+  vi.mocked(fetchPublishedArtifact).mockResolvedValue({...f.doc,artifact:{...f.doc.artifact,body:{_blob:{sha256:'b'.repeat(64)}}}})
+  f.mount(()=>true,vi.fn(),latest)
+  await screen.findByText('공유 원고의 게시 기준과 원본 문서가 다릅니다.')
+  expect(streamArtifactDraft).not.toHaveBeenCalled()
+  expect(screen.queryByTitle('문장을 눌러 편집하는 미리보기')).toBeNull()
+})
+it('comments on a rendered Markdown range with a raw Markdown proposal and leaves the source unchanged',async()=>{
+  const source='# 제목\r\n\r\n**alpha**\r\n',f=fixture('a',source)
+  vi.mocked(sendArtifactDraftCommand).mockImplementation(async command=>command.action==='discuss'?{
+    ...f.snapshot(),discussion_receipts:[{request:command.request,actor:'human',at:'2026-10-26T03:00:00Z',applied:null}],
+  }:f.snapshot())
+  f.mount()
+  const iframe=await screen.findByTitle('문장을 눌러 편집하는 미리보기') as HTMLIFrameElement
+  await waitFor(()=>expect((screen.getByRole('button',{name:'선택한 원문에 댓글'}) as HTMLButtonElement).disabled).toBe(false))
+  const token=new DOMParser().parseFromString(iframe.srcdoc,'text/html').querySelector('script')!.getAttribute('nonce')
+  fireEvent(window,new MessageEvent('message',{source:iframe.contentWindow,data:{type:'masc.artifact.text.selected.v1',token,id:1}}))
+  await screen.findByLabelText('선택한 문장')
+  fireEvent.click(screen.getByRole('button',{name:'선택한 원문에 댓글'}))
+  fireEvent.input(screen.getByLabelText('댓글 내용'),{target:{value:'이 부분을 바꿔요'}})
+  fireEvent.click(screen.getByRole('checkbox'))
+  fireEvent.input(screen.getByLabelText('변경 제안 내용'),{target:{value:'**제안** &amp; 글'}})
+  fireEvent.click(screen.getByRole('button',{name:'댓글 보내기'}))
+  await waitFor(()=>expect(vi.mocked(sendArtifactDraftCommand).mock.calls.some(([c])=>c.action==='discuss')).toBe(true))
+  const call=vi.mocked(sendArtifactDraftCommand).mock.calls.find(([c])=>c.action==='discuss')![0]
+  expect(call.action==='discuss'&&call.request.command).toMatchObject({kind:'comment',quote:'alpha',body:'이 부분을 바꿔요',proposal:'**제안** &amp; 글'})
+  expect(sharedSource(f.authority)).toBe(source)
+})
 it('binds actual editor transactions to exact CRLF source, handles remote edits and removes departed peer cursors', async () => {
   const authority = seedSharedDocument('원고 😀\r\n다음\r\n')
   const target = { artifact_id: `artifact-${'a'.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
@@ -87,6 +129,7 @@ it('binds actual editor transactions to exact CRLF source, handles remote edits 
     created_at: '2026-10-25T13:00:00Z', task_id: null, goal_id: null, body: { _blob: { sha256: 'a'.repeat(64) } }, url: '/dashboard' }
   render(html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${{ artifact, content: sharedSource(authority), revisions: [artifact] }} workspaceRoot="/fixture"
     isCurrent=${() => true} onCloseRequest=${() => {}} onMutation=${() => {}} onPublished=${() => {}} onClose=${() => {}} />`)
+  fireEvent.click(await screen.findByRole('button',{name:'원본 편집'}))
   const editable = await screen.findByRole('textbox', { name: '공동 편집 원고' })
   const editor = EditorView.findFromDOM(editable)!
   expect(editor.state.doc.toString()).toBe('원고 😀\r\n다음\r\n')

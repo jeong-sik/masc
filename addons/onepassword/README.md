@@ -3,8 +3,10 @@
 Backend connection foundation for [#45736](https://github.com/jeong-sik/masc/issues/45736).
 This package is under development. Its native Lane Add-on exports login requests,
 committed status, next-page fill, release and cancellation, with a separate private
-operator approval surface. Automatic durable Keeper continuation is not connected,
-and it has not performed a real 1Password login.
+operator approval surface. Its private publication transport and durable original
+Keeper queue are connected in source. An isolated native candidate has executed
+the status tool in a real Keeper turn. Real 1Password login and original-task
+continuation remain unverified.
 The objective remains an installed connector that a Keeper uses in its existing
 Browser Add-on session, through verified website sign-in and continuation.
 
@@ -116,7 +118,8 @@ starts the five-second wait. It uses the declared
 one-minute rate-limit wait. Pausing does not expire the task or create another
 request. The service schedules the engine's steps with one checker per request.
 Its worker tools and private approval UI are source implementation; private durable delivery into the host Keeper queue is now connected in source.
-Actual installed Keeper turn continuation remains unverified.
+The isolated native failure-path probe below verifies a subsequent Keeper turn;
+real approval, fill and original website-task continuation remain unverified.
 
 The Browser private wire and original-CDP extension loader are now source
 implementation. Package-owned `prepare.js` waits for extension readiness and
@@ -128,14 +131,15 @@ programs are not model tools. The independent host socket broker and two-phase
 Python client are [source implementation](../../docs/design/lane-addon-companion-broker.md).
 Runtime/private-context authority wiring is also source implementation. The
 package negotiates the login-start export through version 3 of the private
-companion contract. Installed-host execution and real account
-verification remain unfinished.
+companion contract. Original-browser execution and real account verification
+remain unfinished.
 
 1. Extend the private connection controls with confirmed remote revocation
    and explicit interrupted-exchange recovery. A new account must not
    borrow an earlier account's integration key.
-2. Verify the package's login tools through installed Lane Add-on discovery
-   and an actual Keeper invocation.
+2. Exercise the login lifecycle through an installed candidate and actual Keeper
+   invocation. All seven exports were discovered on an isolated native host;
+   its actual Keeper status call does not verify login dispatch or continuation.
 3. Supported 1Password extension loading in the original owned Chromium session.
    `createAccessRequest`, status and `fillCredential` run under that Browser
    Add-on's existing page-operation ownership. No separate CDP fill bypass.
@@ -153,19 +157,22 @@ The host now retains the original Keeper turn/tool-use/task/conversation before
 issuing a private companion grant. An existing source binding permits only
 reconciliation, not another login dispatch. This is source implementation of
 [original invocation capture](../../docs/design/lane-addon-keeper-continuation.md),
-not a delivered wake or resumed Keeper turn. Private progress publication and the
-original Keeper's actual continuation remain to be connected.
+not a delivered wake or resumed Keeper turn. The host injects the original
+publication callback, and the worker Service delivers through a separate owned
+Publisher. Controlled failure delivery has reached a subsequent actual Keeper
+turn; successful login and original-task continuation still need runtime proof.
 
 The private login journal now retains typed attention, submitted-fill and terminal
 publication intents in the same atomic write as their operation state. A private
 ACK records exact-envelope host admission; it is not Keeper consumption. Storage
 uncertainty fences the old engine so it cannot overwrite already committed
 publication IDs. These private file scenarios are tested with fabricated
-credential/Browser edges. Actual publication transport and Keeper wake remain
-unconnected to the worker. The host now has canonical publication retention, a
+credential/Browser edges. Publication transport and Keeper queue admission are
+connected to the worker in source. The host has canonical publication retention, a
 typed original-source Keeper queue producer and strict observation intake; those
-APIs have not received a real worker publication or resumed a Keeper. Public login
-replies and observations contain no outbox or secrets.
+APIs received a real worker terminal publication in the isolated missing-Browser
+probe and woke a second actual Keeper turn. Public login replies and observations
+contain no outbox or secrets.
 
 ## Verification
 
@@ -208,6 +215,28 @@ it does not declare a second `service = "browser"` or replace the Browser owner.
 Its skill and tool exports are discovered through ordinary Add-on installation.
 Configuration/state failure reports unavailable, never connected.
 
+Preserve the package layout: copy the complete `onepassword/` directory and its
+sibling `protocol.py` from the same source commit. The Python worker imports that
+shared protocol from its parent directory. Resolve the native launcher from the
+matching installed candidate, rather than mixing host generations.
+
+The workspace must already declare its Skill sources in `runtime.toml`, because
+this package exports a Skill. Reuse the existing configuration. A minimal
+isolated workspace can declare:
+
+```toml
+[skills]
+[[skills.sources]]
+id = "workspace"
+anchor = "base-path"
+path = ".masc/skills"
+access = "read-write"
+```
+
+After saving the declaration, inspect its application status and configuration
+issues as well as the worker's attached state. An attached worker alone does not
+prove its package Skill was admitted.
+
 The operator may provision `connection-config.json` next to `server.py`, owned
 by their UID with mode 0600, containing `client_id`, `client_secret_file`,
 `redirect_uri` and `store_directory`. For Browser login, add `browser_extension`
@@ -249,9 +278,14 @@ Protocol references: [partner guide](https://www.1password.dev/agentic-autofill/
 [extension API](https://www.1password.dev/agentic-autofill/partners/extension-api),
 [Browserbase integration](https://docs.browserbase.com/integrations/1password/agentic-autofill).
 These are partner preview contracts; confirm access and supported builds with
-1Password before using production accounts. Client registration currently needs
-a Business account and a production HTTPS callback; end-user consent uses a
-separate Individual/Family account on 1password.com.
+1Password before using production accounts. The [personal-agent page](https://1password.com/personal-ai-agent-integrations)
+includes the feature in Individual and Family plans. The documented developer
+registration path requires a separate Business account and production HTTPS
+callback; an owner, administrator or Security-group member registers the client.
+If OAuth Application is absent, the integration guide directs the developer to
+their 1Password contact for activation. A personal end-user account does not
+supply that client registration. The documented end-user flow uses a US-region
+Individual/Family account on 1password.com.
 
 `delivery.py` owns a separate joined outbox thread. It keeps the original caller
 and publisher, acknowledges only exact envelopes after confirmed host admission,
@@ -260,4 +294,9 @@ and existing reads/observations trigger reconciliation after an uncertain ACK.
 Storage uncertainty fences publication sockets and cached batches. Shutdown joins
 the delivery owner before releasing the engine lease. No endpoint is retained or
 adopted after restart. Controlled Service/file/socket tests use a fabricated host
-ACK; real host queue admission and Keeper resumption still need runtime proof.
+ACK. A separate native probe exercised the actual package, broker, durable queue
+and two real Keeper turns with fabricated account state and a nonexistent Browser.
+Its terminal `outcome_unknown` was posted through `keeper_surface_post` to the
+original Dashboard conversation and retained there. The original Task was null;
+this proves the controlled failure continuation, not a real-account login or
+restoration of a website Task. See [candidate evidence](../../docs/design/onepassword-addon-docking.md#observed-native-candidate).

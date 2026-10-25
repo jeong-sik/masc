@@ -6647,3 +6647,8 @@
  (alias runtest-schema_wire_bytes_bench)
  (action
   (run %{exe:../packages/agent_core/bench/schema_wire_bytes_bench.exe})))
+
+(test
+ (name test_keeper_informational_checkpoint_ack)
+ (modules test_keeper_informational_checkpoint_ack)
+ (libraries masc_test_deps exact_output_fixture eio_main unix))

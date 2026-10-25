@@ -26,3 +26,10 @@ distinguishes transport/shim refusal from an executed check's nonzero result.
 These new assertions have not yet passed on a rebuilt helper. Parsing the changed
 sources is not compilation or runtime proof. The real SSH stale-shim failure and
 its separate provisioning receipt remain documented in the neighboring README.
+
+The first rebuilt-candidate requests at source
+`d222bd836c1fe09e84f485286f20d17332ee610d` failed to compile the bootstrap
+executable with `Unbound module Eio` at `Fs_compat.set_fs (Eio.Stdenv.fs env)`:
+targeted run 40195161883 and macOS artifact run 40195163878. The helper declared
+`eio_main` but omitted its direct `eio` dependency; the repair adds that explicit
+library. Those failed runs do not prove that the new CLI assertions pass.

@@ -451,8 +451,8 @@ and items_json ~context pairs =
   let* declared = find_param_type ~context pairs in
   let* () =
     match declared with
-    | Ptype_string | Ptype_object -> Ok ()
-    | Ptype_integer | Ptype_number | Ptype_boolean | Ptype_array ->
+    | Ptype_string | Ptype_integer | Ptype_object -> Ok ()
+    | Ptype_number | Ptype_boolean | Ptype_array ->
       Error
         (sprintf
            "%s.type %s is not supported for items"
@@ -478,6 +478,10 @@ and items_json ~context pairs =
     | "description" ->
       let* text = as_non_empty_string ~context:key_context value in
       Ok (Some ("description", `String text))
+    | "minimum" | "maximum" ->
+      let* () = only_for ~context:key_context ~declared Ptype_integer in
+      let* v = as_int ~context:key_context value in
+      Ok (Some (key, `Int v))
     | "min_length" ->
       let* () = only_for ~context:key_context ~declared Ptype_string in
       let* v = as_int ~context:key_context value in

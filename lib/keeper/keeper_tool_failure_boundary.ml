@@ -43,7 +43,7 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
      a repeat after a written-but-unpublished SKILL.md commits nothing and
      answers package_already_exists. The result names the reference that was
      written, so the Keeper can say so instead of losing the turn. *)
-  | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish -> Failure_returns_to_model
+  | Keeper_tool_descriptor.Tool_artifact_draft | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish -> Failure_returns_to_model
   (* A code query starts a language server, but the pool owns it
      and the turn ends it either way, so a failed call leaves the
      caller holding nothing. It answers with the readers. *)

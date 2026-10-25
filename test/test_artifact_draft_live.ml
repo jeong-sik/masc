@@ -5,11 +5,11 @@ let json session = match Live.observe session with Some (frame, _) -> frame | No
 let field name json = Yojson.Safe.Util.member name json
 let peers session = field "peers" (json session) |> Yojson.Safe.Util.to_list
 let with_session ?(base_path="/test") ?(actor="human") f =
-  let session = Live.join ~base_path ~actor ~target in Fun.protect ~finally:(fun () -> Live.leave session) (fun () -> f session)
+  let session = Live.join ~source:Live.Dashboard_connection ~base_path ~actor ~target in Fun.protect ~finally:(fun () -> Live.leave session) (fun () -> f session)
 let tests = [
   "connection lifecycle wakes observers and removes position", `Quick, (fun () -> with_session (fun first ->
     let _, pulse = Option.get (Live.observe first) in
-    let second = Live.join ~base_path:"/test" ~actor:"keeper" ~target in
+    let second = Live.join ~source:Live.Dashboard_connection ~base_path:"/test" ~actor:"keeper" ~target in
     Alcotest.(check bool) "join wakes prior observer" true (Eio.Promise.is_resolved pulse);
     Alcotest.(check int) "two peers" 2 (List.length (peers first));
     Live.leave second;
@@ -43,7 +43,7 @@ let tests = [
     Alcotest.(check bool) "captured pulse wakes" true (Eio.Promise.is_resolved before_publish);
     let document session = field "document" (json session) in
     Alcotest.(check string) "first available snapshot" "initial" (field "content" (document first) |> Yojson.Safe.Util.to_string);
-    let second = Live.join ~base_path:"/test" ~actor:"other" ~target in
+    let second = Live.join ~base_path:"/test" ~actor:"other" ~source:Live.Dashboard_connection ~target in
     Fun.protect ~finally:(fun () -> Live.leave second) (fun () ->
       Alcotest.(check bool) "join is presence only for existing observer" true (document first = `Null);
       Alcotest.(check string) "new observer has its own snapshot" "initial" (field "content" (document second) |> Yojson.Safe.Util.to_string);
@@ -67,7 +67,7 @@ let tests = [
       with_session ~actor:"other" (fun reconnected ->
         Alcotest.(check string) "fresh session receives current snapshot" "newer" (field "content" (document reconnected) |> Yojson.Safe.Util.to_string)))));
   "last connection destroys ephemeral room", `Quick, (fun () ->
-    let session = Live.join ~base_path:"/test" ~actor:"human" ~target in
+    let session = Live.join ~source:Live.Dashboard_connection ~base_path:"/test" ~actor:"human" ~target in
     ignore (Live.position session (Some { Artifact_document_engine.anchor = [1]; head = [2] }));
     Live.leave session;
     with_session (fun fresh ->

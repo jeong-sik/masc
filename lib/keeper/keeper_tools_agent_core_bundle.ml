@@ -108,6 +108,7 @@ let make_tool_bundle_for_descriptors_with_policy
      "the descriptor did not choose a projection". A descriptor that did
      choose one ([keeper.artifact.read] is the only one today) keeps it: its
      page size answers a different question than the wire ceiling. *)
+  let artifact_draft_scope = Keeper_artifact_draft_scope.create ~base_path:config.base_path ~keeper:meta.name in
   let model_projection_for_call (descriptor : Keeper_tool_descriptor.t) () =
     match checkpoint_owner (), descriptor.model_output_projection with
     | Some Runtime_execution.Masc_agent_core, Tool_output.Store_above _ ->
@@ -422,6 +423,7 @@ let make_tool_bundle_for_descriptors_with_policy
                    ~publication_recovery
                    ~ctx_snapshot
                    ~keeper_turn_id
+                   ~artifact_draft_scope
                    ~source_context:call_source_context
                    ?prepared_edit
                    ?turn_sandbox_factory
@@ -444,6 +446,7 @@ let make_tool_bundle_for_descriptors_with_policy
                    ~publication_recovery
                    ~ctx_snapshot
                    ~keeper_turn_id
+                   ~artifact_draft_scope
                    ~source_context:call_source_context
                    ?prepared_edit
                    ?turn_sandbox_factory
@@ -803,7 +806,7 @@ let make_tool_bundle_for_descriptors_with_policy
     | Keeper_tool_descriptor.Tool_tools_list | Keeper_tool_descriptor.Tool_capability_search
     | Keeper_tool_descriptor.Tool_context_status | Keeper_tool_descriptor.Tool_peer_artifact
     | Keeper_tool_descriptor.Tool_artifact_read | Keeper_tool_descriptor.Tool_skill_validate
-    | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish | Keeper_tool_descriptor.Tool_workspace_memory_read
+    | Keeper_tool_descriptor.Tool_artifact_draft | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish | Keeper_tool_descriptor.Tool_workspace_memory_read
     | Keeper_tool_descriptor.Tool_memory_search | Keeper_tool_descriptor.Tool_memory_select
     | Keeper_tool_descriptor.Tool_memory_retract | Keeper_tool_descriptor.Tool_memory_write
     | Keeper_tool_descriptor.Tool_constitution_write | Keeper_tool_descriptor.Tool_constitution_read
@@ -905,6 +908,7 @@ let make_tool_bundle_for_descriptors_with_policy
            })
   ; cleanup =
       (fun () ->
+        Keeper_artifact_draft_scope.close artifact_draft_scope;
         (* Turn end on both the ordinary and the raised path -- this thunk is
            what [run_with_setup_cleanup] guarantees -- which is the only point
            where "the listing found nothing usable" is still answerable.

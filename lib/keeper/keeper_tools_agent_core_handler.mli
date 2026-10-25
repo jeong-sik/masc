@@ -61,6 +61,7 @@ val make_keeper_tool_handler
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
   -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
@@ -101,6 +102,7 @@ val make_keeper_tool_handler_from_meta
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
   -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)

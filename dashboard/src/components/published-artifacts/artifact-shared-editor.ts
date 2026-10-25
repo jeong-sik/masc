@@ -199,7 +199,7 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
       ${state.peers.map(peer => {
         const range = peer.position && session ? resolveSharedSelection(session.doc, { anchor: [...peer.position.anchor], head: [...peer.position.head] }) : null
         const prefix = range && session ? session.content.slice(0, range.head) : null
-        return html`<li key=${peer.session_id}>${peer.actor}${peer.session_id === state.sessionId ? ' (이 창)' : ''}
+        return html`<li key=${peer.session_id}>${peer.source.kind === 'keeper_turn' ? `Keeper · ${peer.actor}` : peer.actor}${peer.session_id === state.sessionId ? ' (이 창)' : ''}
           · ${prefix !== null ? `${prefix.split('\n').length}행 ${prefix.length - prefix.lastIndexOf('\n')}열` : '원고 열람 중'}
           <time class="ml-1 text-[var(--color-fg-muted)]" dateTime=${peer.observed_at}>${new Date(peer.observed_at).toLocaleTimeString()}</time></li>`
       })}</ul>` : null}

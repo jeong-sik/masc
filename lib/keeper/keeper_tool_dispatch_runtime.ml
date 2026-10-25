@@ -209,6 +209,7 @@ let runtime_context
       ?source_context
       ?owned_job_replay
       ?turn_sandbox_factory
+      ?artifact_draft_scope
       ?sw
       ?clock
       ?proc_mgr
@@ -232,6 +233,7 @@ let runtime_context
     ; source_context
     ; owned_job_replay
     ; turn_sandbox_factory
+    ; artifact_draft_scope
     ; sw
     ; clock
     ; proc_mgr
@@ -261,6 +263,7 @@ let execute_keeper_tool_descriptor_with_authority
       ?prepared_edit
       ?prepared_write
       ?turn_sandbox_factory
+      ?artifact_draft_scope
       ?sw
       ?clock
       ?proc_mgr
@@ -300,6 +303,7 @@ let execute_keeper_tool_descriptor_with_authority
         ?source_context
         ?owned_job_replay
         ?turn_sandbox_factory
+        ?artifact_draft_scope
         ?sw
         ?clock
         ?proc_mgr
@@ -357,6 +361,7 @@ let execute_keeper_tool_call_with_authority
       ?prepared_edit
       ?prepared_write
       ?turn_sandbox_factory
+      ?artifact_draft_scope
       (* RFC-0182 Phase 5 PR-A.2: optional Eio resources threaded to
          Keeper_tool_runtime.context for Eio-bound descriptor handlers. *)
       ?sw
@@ -390,6 +395,7 @@ let execute_keeper_tool_call_with_authority
            ?source_context
            ?owned_job_replay
            ?turn_sandbox_factory
+           ?artifact_draft_scope
            ?sw
            ?clock
            ?proc_mgr
@@ -494,6 +500,7 @@ module Compatibility = struct
         ?source_context
         ?owned_job_replay
         ?turn_sandbox_factory
+        ?artifact_draft_scope
         ~(name : string)
         ~(input : Yojson.Safe.t)
         ()
@@ -508,6 +515,7 @@ module Compatibility = struct
         ?source_context
         ?owned_job_replay
         ?turn_sandbox_factory
+        ?artifact_draft_scope
         ~name
         ~input
         ()

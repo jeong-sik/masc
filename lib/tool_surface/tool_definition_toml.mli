@@ -122,6 +122,9 @@ val load
     [params] (object params only) and [items] (array params only).
     Everything else is an [Error] naming the offending key or value.
 
+    Array [items] support string, integer and object elements. Integer
+    elements accept integer [minimum] / [maximum] bounds.
+
     [params] and an object [items] table take the same parameter grammar,
     at any depth: an object parameter declares its own [[params]], one of
     those can be an array whose [items] are objects with [params] again. A

@@ -11,7 +11,7 @@ const workspace = { basePath: '/fixture', mascRoot: '/fixture/.masc' }, initial 
 let authority: Y.Doc, view: ArtifactDraftView, receivers: ((frame: ArtifactDraftLiveFrame) => void)[], sessions: ArtifactLiveSession[]
 const snapshot = (): ArtifactDraftView => ({ ...view, content: sharedSource(authority), draft: { ...view.draft, state: draftBase64(sharedState(authority)) } })
 const frame = (index: number): ArtifactDraftLiveFrame => ({ schema: 'masc.artifact_draft_live.v1', target, session_id: `session-${index}`, document: snapshot(),
-  peers: [{ session_id: `session-${index}`, actor: 'human', position: null, observed_at: '2026-10-25T13:00:00Z' }] })
+  peers: [{ session_id: `session-${index}`, actor: 'human', source: { kind: 'dashboard_connection' }, position: null, observed_at: '2026-10-25T13:00:00Z' }] })
 function open(isCurrent = () => true) { const session = new ArtifactLiveSession(snapshot(), workspace, () => {}, isCurrent); sessions.push(session); void session.connect(); return session }
 async function commit(command: Parameters<typeof sendArtifactDraftCommand>[0]) {
   if (command.action !== 'merge') throw new Error('only merge')

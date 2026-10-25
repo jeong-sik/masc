@@ -157,7 +157,7 @@ let create_with_descriptors
                                          | Keeper_tool_descriptor.Tool_peer_artifact
                                          | Keeper_tool_descriptor.Tool_artifact_read
                                          | Keeper_tool_descriptor.Tool_skill_validate
-                                         | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish
+                                         | Keeper_tool_descriptor.Tool_artifact_draft | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish
                                          | Keeper_tool_descriptor.Tool_workspace_memory_read
                                          | Keeper_tool_descriptor.Tool_memory_search
                                          | Keeper_tool_descriptor.Tool_memory_select
@@ -244,7 +244,7 @@ let create_with_descriptors
       | Keeper_tool_descriptor.Tool_peer_artifact
       | Keeper_tool_descriptor.Tool_artifact_read
       | Keeper_tool_descriptor.Tool_skill_validate
-      | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish
+      | Keeper_tool_descriptor.Tool_artifact_draft | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish
       | Keeper_tool_descriptor.Tool_workspace_memory_read
       | Keeper_tool_descriptor.Tool_memory_search
       | Keeper_tool_descriptor.Tool_memory_select

@@ -4,7 +4,7 @@ import { streamArtifactDraft, type ArtifactDraftLiveFrame } from './artifact-dra
 vi.mock('./core', () => ({ fetchControlPlane: vi.fn(), authHeaders: () => ({}), apiRequestErrorFromResponse: vi.fn() }))
 it('decodes a full snapshot followed by a cursor-only null document through the SSE reader', async () => {
   const target = { artifact_id: `artifact-${'a'.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
-  const peer = { session_id: 'connection', actor: 'human', position: null, observed_at: '2026-10-26T08:00:00Z' }
+  const peer = { session_id: 'connection', actor: 'human', source: { kind: 'dashboard_connection' }, position: null, observed_at: '2026-10-26T08:00:00Z' }
   const first = { schema: 'masc.artifact_draft_live.v1', session_id: peer.session_id, target, peers: [peer], document: {
     draft: { schema: 'masc.artifact_draft.v1', target, base_revision: 1, base_sha256: 'a'.repeat(64), state: 'AAA=', sequence: 0, updated_by: 'writer', updated_at: peer.observed_at }, content: '원고 😀\r\n', selection: null } }
   const position = { anchor: [1, 2], head: [3, 4] }

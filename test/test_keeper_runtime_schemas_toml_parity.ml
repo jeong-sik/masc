@@ -28,6 +28,7 @@ open Alcotest
 let expected =
   [ "keeper_artifact_transfer"
   ; "keeper_artifact_read"
+  ; "keeper_artifact_draft"
   ; "keeper_artifact_publish"
   ; "keeper_skill_validate"
   ; "keeper_skill_publish"

@@ -583,7 +583,7 @@ let test_rejections () =
   check_rejects ~name:"t"
     ~contents:
       (minimal "t"
-       ^ "[[params]]\nname = \"p\"\ntype = \"array\"\n[params.items]\ntype = \"integer\"\n")
+       ^ "[[params]]\nname = \"p\"\ntype = \"array\"\n[params.items]\ntype = \"number\"\n")
     "not supported for items";
   check_rejects ~name:"t"
     ~contents:
@@ -1139,6 +1139,18 @@ let test_string_items_carry_an_enum () =
     (member items "enum" = Some (`List [ `String "a"; `String "b" ]))
 ;;
 
+let test_integer_items_preserve_byte_bounds () =
+  let schema = load_ok ~name:"t" ~contents:(minimal "t" ^
+    "[[params]]\nname = \"anchor\"\ntype = \"array\"\n[params.items]\ntype = \"integer\"\nminimum = 0\nmaximum = 255\n") in
+  let items = match member (property schema ["anchor"]) "items" with Some value -> value | None -> fail "items absent" in
+  check bool "integer bytes stay integers with bounds" true
+    (member items "type" = Some (`String "integer") && member items "minimum" = Some (`Int 0) && member items "maximum" = Some (`Int 255));
+  check_rejects ~name:"t" ~contents:(minimal "t" ^
+    "[[params]]\nname = \"anchor\"\ntype = \"array\"\n[params.items]\ntype = \"integer\"\nminimum = 0.5\n") "must be an integer";
+  check_rejects ~name:"t" ~contents:(minimal "t" ^
+    "[[params]]\nname = \"anchor\"\ntype = \"array\"\n[params.items]\ntype = \"string\"\nminimum = 0\n") "only valid for type integer"
+;;
+
 let test_object_items_may_stay_open () =
   let schema =
     load_ok ~name:"t"
@@ -1363,6 +1375,7 @@ let () =
             "property bounds are rejected off an object"
             `Quick
             test_property_bounds_are_rejected_off_an_object
+        ; test_case "integer array items preserve byte bounds" `Quick test_integer_items_preserve_byte_bounds
         ; test_case "an array carries min_items" `Quick test_an_array_carries_min_items
         ; test_case
             "min_items is rejected off an array"

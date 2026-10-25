@@ -1651,6 +1651,7 @@ let observe
 ;;
 
 let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
+      ~(active_goals : (string list, Goal_store.unavailable) result)
   : world_observation
   =
   let backlog_snapshot = read_backlog_snapshot ~config ~meta in
@@ -1671,7 +1672,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   { pending_messages = []
   ; pending_board_events = []
   ; idle_seconds = compute_idle_seconds ~meta
-  ; active_goals = open_goal_ids ~config
+  ; active_goals
   ; unclaimed_task_count
   ; claimable_tasks
   ; held_task_skills = backlog_snapshot.held_task_skills

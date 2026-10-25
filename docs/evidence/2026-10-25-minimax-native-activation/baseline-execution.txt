@@ -1,0 +1,9 @@
+Baseline exact checkout and selected summaries (ANSI removed):
+test suite	Checkout	2026-10-24T17:55:15.8579659Z   ref: c75ee3febdb834225ff905020add4cecd2e5264b
+test suite	Checkout	2026-10-24T17:55:27.7351961Z HEAD is now at c75ee3fe fix(browser): end SDK session when owner IPC disconnects (#45841)
+test suite	Test	2026-10-24T17:57:03.9574434Z   ^[[32m[OK]^[[0m          ^[[36mparse^[[0m             12   MiniMax native catalog parse/history/r...
+test suite	Test	2026-10-24T17:57:03.9578697Z   ^[[32m[OK]^[[0m          ^[[36mparse^[[0m             13   inline carrier trust boundary and synt...
+test suite	Test	2026-10-24T17:57:03.9656135Z ^[[32mTest Successful^[[0m in 0.028s. 64 tests run.
+test suite	Test	2026-10-24T17:57:05.7396399Z ^[[32mTest Successful^[[0m in 0.064s. 57 tests run.
+test suite	Test	2026-10-24T17:57:06.8114293Z ^[[32mTest Successful^[[0m in 0.000s. 6 tests run.
+test suite	Test	2026-10-24T17:57:07.8113726Z ^[[32mTest Successful^[[0m in 0.002s. 60 tests run.

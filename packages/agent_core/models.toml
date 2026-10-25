@@ -801,6 +801,214 @@ supports_multimodal_inputs = true
 supports_image_input = true
 supports_native_streaming = true
 
+# Native MiniMax Chat replay. Checked 2026-10-25 against:
+# https://platform.minimax.io/docs/api-reference/text-openai-api
+# https://platform.minimax.io/docs/guides/text-m3-function-call
+# Scoped lookup is exact. The full assistant content (including inline think
+# tags), independent reasoning and tool calls must survive later turns. These
+# rows belong to MiniMax's own endpoint; Ollama rows retain their own wire.
+# M2 windows/prices are not established here. Tool-choice/schema acceptance is
+# still unverified; retain the existing native M3 declaration's conservative
+# field policy rather than infer acceptance from OpenAI wire compatibility.
+
+[[models]]
+model_id = "minimax-m2"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.1"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.1-highspeed"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.5"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.5-highspeed"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.7"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m2.7-highspeed"
+provider_name = "minimax"
+base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "none"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m3"
+provider_name = "minimax"
+base = "openai_chat"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "thinking_object_adaptive"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "minimax-m3.1-flash"
+provider_name = "minimax"
+base = "openai_chat"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+# Thinking cannot be disabled on this model; no off toggle is sent.
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning_content"
+content_inline_reasoning = "think_tags_with_chat_replay"
+reasoning_replay = "preserve_always"
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
 # Ollama Cloud Models (canonical 2026-06 seed)
 # Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.
 # Provider-scoped entries preserve Ollama Cloud wire behavior when a model id
@@ -2211,6 +2419,16 @@ task = "speech"
 model_id = "gemini-3.1-flash-tts-preview"
 provider_name = "gemini-speech"
 task = "speech"
+
+# Native OpenAI-compatible identity only. The Anthropic surface has a distinct
+# wire contract and is not inferred from the shared host.
+[[providers]]
+id = "minimax"
+kind = "openai_compat"
+base_url = "https://api.minimax.io"
+request_path = "/v1/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat"
 
 [[providers]]
 id = "nous"

@@ -1,0 +1,5 @@
+No local Dune build/execution.
+PARSE PASS packages/agent_core/lib/llm_provider/backend_openai_serialize.ml sha256=915959f69ebd6894ae321a5a152a27bcb82e1a269782e7fc7150778b98646cd4
+PARSE PASS packages/agent_core/test/test_backend_openai_codec.ml sha256=087d18c487e80da8425c3284641834a4d1ce6424108c2b9fac4d9b47cb646030
+Python tomllib catalog parse PASS; 9 explicit native rows.
+Whitespace git diff --check PASS.

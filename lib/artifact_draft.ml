@@ -8,6 +8,7 @@ type command =
   | Open of { artifact_id : string; revision : int }
   | Merge of { target : target; updates : string list }
   | Select of { target : target; anchor : int; head : int }
+  | Resolve of selection
   | Edit of { selection : selection; expected : string; replacement : string }
 let ( let* ) = Result.bind
 let safe_integer value = value >= 0 && Int64.of_int value <= 9_007_199_254_740_991L
@@ -94,4 +95,7 @@ let command_of_json json =
     let* selection = selection_of_json (field "selection" fields) in
     let* expected = string "expected" fields in let* replacement = string "replacement" fields in
     Ok (Edit { selection; expected; replacement })
+  | "resolve" ->
+    let* fields = fields ["action"; "selection"] json in
+    let* selection = selection_of_json (field "selection" fields) in Ok (Resolve selection)
   | _ -> Error "unknown draft action"

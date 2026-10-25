@@ -35,8 +35,8 @@ export function downloadArtifactDraft(draft: ArtifactDraft) {
   URL.revokeObjectURL(url)
 }
 
-export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDraftChange, onMutation, onSaved, onCancel }: {
-  initial: ArtifactDraft; base?: ArtifactDocument; isCurrent: () => boolean;
+export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDraftChange, onMutation, onSaved, onCancel, capturedWorkspace }: {
+  initial: ArtifactDraft; base?: ArtifactDocument; capturedWorkspace?: ArtifactWorkspace; isCurrent: () => boolean;
   workspaceRoot: string;
   onDraftChange: (draft: ArtifactDraft) => void;
   onMutation: (outcome: ArtifactPublicationOutcome) => void;
@@ -62,6 +62,7 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
   useEffect(() => {
     // Freeze both canonical roots when the editable draft is created. Never
     // recapture under another root after a failed read or a server switch.
+    if (capturedWorkspace) { setWorkspace({ kind: 'ready', value: capturedWorkspace }); return }
     void captureArtifactWorkspace(workspaceRoot).then(value => {
       if (current()) setWorkspace({ kind: 'ready', value })
     }, error => {

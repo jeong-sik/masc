@@ -6,6 +6,7 @@ import { navigate } from '../../router'
 import { copyToClipboard } from '../common/copyable-code'
 import type { ArtifactCheckState } from '../../api/published-artifact-checks'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
+import { ArtifactSharedEditor } from './artifact-shared-editor'
 import { ArtifactComposer, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
 
 // Opaque origin: no allow-same-origin. Keep the CSP first so the body cannot
@@ -44,6 +45,8 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
   const [width, setWidth] = useState<'wide' | 'reading'>('wide')
   const [copyFeedback, setCopyFeedback] = useState('')
   const [editing, setEditing] = useState<{ document: ArtifactDocument; snapshot: ArtifactDraftSnapshot } | null>(null)
+  const [sharing, setSharing] = useState<ArtifactDocument | null>(null)
+  const [sharedPending, setSharedPending] = useState(false)
   const { artifact, content, revisions } = doc
   useLayoutEffect(() => {
     const element = dialog.current!
@@ -62,6 +65,7 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
   const discardDraft = () => window.confirm('작성 중인 원고를 닫을까요? 저장하지 않은 내용은 사라집니다.')
   const close = () => {
     if (editing && !discardDraft()) return
+    if (sharedPending && !window.confirm('이 창에 아직 저장하지 못한 변경이 있습니다. 원고를 닫을까요?')) return
     if (editing) draftRetention.forget(editing.snapshot.identity)
     onClose()
   }
@@ -82,7 +86,7 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
           <div class="flex flex-wrap gap-3 text-xs">
             <button type="button" aria-label="링크 복사" onClick=${copyLink}><span class="sm:hidden">복사</span><span class="hidden sm:inline">링크 복사</span></button>
             <button type="button" aria-label="원본 다운로드" onClick=${() => downloadSource(doc)}><span class="sm:hidden">저장</span><span class="hidden sm:inline">원본 다운로드</span></button>
-            <button type="button" aria-label="문서 편집" disabled=${editing !== null} onClick=${() => {
+            <button type="button" aria-label="문서 편집" disabled=${editing !== null || sharing !== null} onClick=${() => {
               const snapshot: ArtifactDraftSnapshot = { identity: {}, base: { id: artifact.id, revision: artifact.revision }, value: {
                 title: artifact.title, summary: artifact.summary, format: artifact.format,
                 content, task_id: artifact.task_id, goal_id: artifact.goal_id,
@@ -90,13 +94,14 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
               draftRetention.remember(snapshot)
               setEditing({ document: doc, snapshot })
             }}>편집</button>
+            <button type="button" disabled=${editing !== null || sharing !== null} onClick=${() => setSharing(doc)}>공동 편집</button>
           </div>
         </div>
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="flex items-center gap-3" aria-label="본문 표시 방식">
             <span class="text-xs uppercase text-[var(--color-fg-muted)]">${artifact.format} · v${artifact.revision}</span>
-            <button type="button" disabled=${editing !== null} aria-pressed=${view === 'rendered'} onClick=${() => setView('rendered')}>미리보기</button>
-            <button type="button" disabled=${editing !== null} aria-pressed=${view === 'source'} onClick=${() => setView('source')}>원본</button>
+            <button type="button" disabled=${editing !== null || sharing !== null} aria-pressed=${view === 'rendered'} onClick=${() => setView('rendered')}>미리보기</button>
+            <button type="button" disabled=${editing !== null || sharing !== null} aria-pressed=${view === 'source'} onClick=${() => setView('source')}>원본</button>
             ${artifact.format === 'markdown' && view === 'rendered' ? html`
               <button type="button" aria-pressed=${width === 'wide'}
                 onClick=${() => setWidth(value => value === 'wide' ? 'reading' : 'wide')}>
@@ -104,7 +109,7 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
               </button>` : null}
           </div>
           <label class="flex min-w-0 items-center gap-1 text-xs">버전 ${' '}
-            <select aria-label="문서 버전" disabled=${editing !== null} value=${fixedRevision ? String(artifact.revision) : 'latest'}
+            <select aria-label="문서 버전" disabled=${editing !== null || sharing !== null} value=${fixedRevision ? String(artifact.revision) : 'latest'}
               onChange=${(event: Event) => changeRevision((event.target as HTMLSelectElement).value)}>
               <option value="latest">최신 버전</option>
               ${revisions.map(r => html`<option key=${r.revision} value=${String(r.revision)}>v${r.revision} · ${r.author} · ${new Date(r.created_at).toLocaleString()}</option>`)}
@@ -126,7 +131,10 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
         </details>
       </header>
       <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
-        ${editing ? html`<${ArtifactComposer} initial=${editing.snapshot.value}
+        ${sharing ? html`<${ArtifactSharedEditor} doc=${sharing} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent}
+          onPending=${setSharedPending} onMutation=${onPublication} onPublished=${onPublished}
+          onClose=${() => { if (!sharedPending || window.confirm('이 창에 아직 저장하지 못한 변경이 있습니다. 원고를 닫을까요?')) { setSharing(null); setSharedPending(false) } }} />`
+          : editing ? html`<${ArtifactComposer} initial=${editing.snapshot.value}
           base=${editing.document} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent} onMutation=${onPublication}
           onDraftChange=${(value: ArtifactDraftSnapshot['value']) => draftRetention.remember({ ...editing.snapshot, value })}
           onSaved=${(publication: ArtifactPublication) => { draftRetention.forget(editing.snapshot.identity); setEditing(null); onPublished(publication) }}

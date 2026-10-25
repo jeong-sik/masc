@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import signal
 import stat
 import subprocess
 import sys
@@ -141,10 +142,149 @@ def validate_image(image):
         raise InputRefused("grader image must be a captured Docker image id")
 
 
+def _declared_wait_bound(case):
+    """Stage wait bound in seconds, taken from the case's own declared policy.
+
+    No new policy value is invented here: the harness already declares
+    ``timeout_sec`` per case (scripts/harness_coding_eval.sh reads the same
+    field for its episode poll deadline). A missing or invalid declaration
+    refuses input instead of waiting forever (CR 5644102211)."""
+    raw = case.get("timeout_sec") if isinstance(case, dict) else None
+    if isinstance(raw, str) and raw.isdigit():
+        raw = int(raw)
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0:
+        raise InputRefused(
+            "stage wait bound must be declared as timeout_sec in case.json; "
+            "refusing to wait without a bound")
+    return int(raw)
+
+
+def _cid_file(output):
+    """Private identity file for the container of one grading invocation."""
+    fd, name = tempfile.mkstemp(prefix="masc-coding-grade-cid-")
+    os.close(fd)
+    path = Path(name)
+    path.unlink(missing_ok=True)          # docker --cidfile needs it absent
+    return path
+
+
+def _reclaim(path):
+    """Stop and remove exactly the recorded container, then classify.
+
+    Returns ``(cid, status)``. ``cid`` is the recorded original identity —
+    preserved verbatim even when cleanup fails, so a later operator can
+    still address that exact container. ``status`` is one of:
+
+    - ``"no_container"``: no identity was ever recorded (empty/absent file).
+    - ``"confirmed_removed"``: the daemon's structured listing
+      (``ps -a --filter id=… --format {{.ID}}``) answered successfully and
+      the identity is absent (no matching row).
+    - ``"container_still_present"``: the structured listing answered and the
+      identity still exists (a matching row).
+    - ``"uncertain"``: identity recorded, but the daemon could not answer
+      a structured query about it (read failure, stop/rm/inspect spawn or
+      daemon error, unparsable answer). Absence is never inferred from a
+      failure to read or to ask.
+
+    Classification uses only successful structured responses from
+    ``docker inspect --format {{json .Id}}``; no stderr substring
+    heuristics. Nothing may be claimed from ``docker rm`` alone. This
+    function never raises: cleanup errors are classified and returned,
+    preserving the caller's original grading outcome and receipts."""
+    try:
+        cid = path.read_text().strip()
+    except FileNotFoundError:
+        cid = ""
+    except OSError as error:
+        print("grading sandbox could not read the recorded container "
+              "identity: " + str(error), file=sys.stderr)
+        return ("", "uncertain")
+    if not cid:
+        _discard_cid_file(path)
+        return ("", "no_container")
+    for step in ("stop", "rm"):
+        try:
+            subprocess.run(["docker", step, cid], check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=60)
+        except (OSError, subprocess.SubprocessError) as error:
+            print("grading sandbox cleanup step failed (" + step + "): "
+                  + str(error), file=sys.stderr)
+            return (cid, "uncertain")
+    try:
+        listing = subprocess.run(
+            ["docker", "ps", "-a", "--filter", "id=" + cid,
+             "--format", "{{.ID}}"],
+            check=False, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as error:
+        print("grading sandbox cleanup query failed: " + str(error),
+              file=sys.stderr)
+        return (cid, "uncertain")
+    if listing.returncode != 0:
+        # The daemon could not answer a structured query about this exact
+        # identity. That is uncertainty, not proven absence.
+        return (cid, "uncertain")
+    rows = [line for line in (listing.stdout or "").splitlines()
+            if line.strip()]
+    if rows:
+        # A successful listing that still returns a row for this exact
+        # identity means stop/rm did not take effect.
+        return (cid, "container_still_present")
+    # Successful structured listing with zero rows for this identity: the
+    # daemon reports no such container — the only confirmed-removal
+    # evidence we accept. No stderr parsing is involved.
+    _discard_cid_file(path)
+    return (cid, "confirmed_removed")
+
+
+def _discard_cid_file(path):
+    """Best-effort removal of the recorded identity file.
+
+    Kept only after a confirmed removal (or when no identity was ever
+    recorded). Never allowed to raise over an in-flight grading outcome."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        print("grading sandbox could not remove the recorded container "
+              "identity file: " + str(error), file=sys.stderr)
+
+
+def _write_failure_receipt(receipt, snapshot, case, image, stage,
+                           captured_inputs, wait_bound, cleanup, failure,
+                           message):
+    """Failure receipts preserve the captured input identity, the declared
+    bound, the original container identity, and the actual cleanup
+    classification. A missing/failed receipt must never erase the fact
+    that a stage failed. ``cleanup`` is ``(cid, status)`` from _reclaim;
+    the recorded identity is written verbatim even when cleanup stayed
+    uncertain, so the exact container remains addressable afterwards."""
+    if receipt is None:
+        return
+    cleanup_cid, cleanup_status = cleanup
+    try:
+        write_receipt(receipt, {
+            "schema": "masc.coding_eval.grading.v1", "sandbox_profile": "docker",
+            "image_id": image, "stage": stage, "failed": True,
+            "failure": failure, "failure_message": message,
+            "wait_bound_seconds": wait_bound,
+            "cleanup_status": cleanup_status,
+            "cleanup_container_id": cleanup_cid,
+            "inputs": captured_inputs,
+        })
+    except OSError:
+        print("grading sandbox could not write failure receipt: "
+              + str(receipt), file=sys.stderr)
+
+
 def grade_snapshot(snapshot, case, image, stage, captured_inputs, *, receipt=None, log=None):
     script = relative_path(case[stage])
     if not (snapshot / "case" / script).is_file():
         raise InputRefused("declared grading script is absent")
+    wait_bound = _declared_wait_bound(case)
+    isolation = {"network": "none", "user": "65534:65534",
+                 "rootfs": "read_only", "input_mount": "read_only",
+                 "host_credentials": "not_forwarded"}
+    cid = _cid_file(snapshot)
     argv = [
         "docker", "run", "--rm", "--network", "none", "--read-only",
         "--cap-drop=ALL", "--security-opt", "no-new-privileges",
@@ -153,20 +293,65 @@ def grade_snapshot(snapshot, case, image, stage, captured_inputs, *, receipt=Non
         "--mount", "type=bind,src=" + str(snapshot) + ",dst=/input,readonly",
         "--workdir", "/work", "--env", "HOME=/tmp",
         "--env", "PYTHONDONTWRITEBYTECODE=1", "--entrypoint", "/bin/bash",
+        "--cidfile", str(cid),
         image, "-c",
         'set -euo pipefail; cp -R /input/workspace /work/workspace; '
         'chmod -R u+w /work/workspace; exec bash "$1" /work/workspace',
         "coding-eval-grader", "/input/case/" + str(script),
     ]
-    result = subprocess.run(argv, check=False, stdout=log, stderr=subprocess.STDOUT if log else None)
-    if receipt is not None:
+    stage_error = None
+    result = None
+    try:
+        result = subprocess.run(argv, check=False, stdout=log,
+                                stderr=subprocess.STDOUT if log else None,
+                                timeout=wait_bound)
+    except subprocess.TimeoutExpired as error:
+        stage_error = ("stage_timeout",
+                       stage + " stage exceeded the declared wait bound ("
+                       + str(wait_bound) + "s)")
+        raise InputRefused(stage_error[1])
+    except (KeyboardInterrupt, SystemExit) as error:
+        # SIGINT/SIGTERM delivered after the container started. The CLI
+        # maps SIGTERM to SystemExit via a signal handler registered in
+        # main(); KeyboardInterrupt is Python's SIGINT default. Either way
+        # the original error is re-raised unchanged after cleanup.
+        stage_error = ("cancelled", "grading was cancelled by signal")
+        raise
+    except OSError as error:
+        # The docker CLI invocation itself failed (spawn error, broken
+        # pipe, ...). The original error is re-raised unchanged after
+        # cleanup; the failure receipt records it alongside the identity.
+        stage_error = ("grader_invocation_failed",
+                       "docker invocation failed: " + repr(error))
+        raise
+    finally:
+        # Exactly one reclaim per stage attempt, covering every exit path
+        # (success, timeout, cancellation, unexpected exception). The
+        # recorded identity and its cleanup classification always reach
+        # the receipt; the original error, if any, is never replaced.
+        cleanup_cid, cleanup_status = _reclaim(cid)
+        receipt_recorded = False
+        try:
+            if stage_error is not None:
+                # Covers timeout, cancellation, and unexpected OSError:
+                # each path sets stage_error, so one branch records every
+                # failure receipt (cancelled sets it to "cancelled").
+                _write_failure_receipt(receipt, snapshot, case, image, stage,
+                                       captured_inputs, wait_bound,
+                                       (cleanup_cid, cleanup_status),
+                                       stage_error[0], stage_error[1])
+                receipt_recorded = True
+        except Exception as receipt_error:  # pragma: no cover - defensive
+            print("grading sandbox failed while recording the failure "
+                  "receipt: " + str(receipt_error), file=sys.stderr)
+    if receipt is not None and not receipt_recorded:
         write_receipt(receipt, {
             "schema": "masc.coding_eval.grading.v1", "sandbox_profile": "docker",
             "image_id": image, "stage": stage, "exit_code": result.returncode,
-            "inputs": captured_inputs,
-            "isolation": {"network": "none", "user": "65534:65534",
-                          "rootfs": "read_only", "input_mount": "read_only",
-                          "host_credentials": "not_forwarded"},
+            "wait_bound_seconds": wait_bound,
+            "inputs": captured_inputs, "isolation": isolation,
+            "cleanup_status": cleanup_status,
+            "cleanup_container_id": cleanup_cid,
         })
     return result.returncode
 
@@ -192,9 +377,21 @@ def grade_stages(case_dir, workspace, image, output):
                 continue
             fd = os.open(output / (stage + ".log"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "wb") as log:
-                exits[stage] = grade_snapshot(snapshot, case, image, stage, captured_inputs,
-                    receipt=output / (stage + "-receipt.json"), log=log)
+                try:
+                    exits[stage] = grade_snapshot(snapshot, case, image, stage,
+                        captured_inputs,
+                        receipt=output / (stage + "-receipt.json"), log=log)
+                except InputRefused as refusal:
+                    # A refused stage is a failed stage: the failure receipt has
+                    # already been written by grade_snapshot; grade_stages keeps
+                    # grading other stages and reports the refusal as 125.
+                    print("coding-eval grading input refused: " + str(refusal),
+                          file=sys.stderr)
+                    exits[stage] = 125
         write_receipt(output / "grading.json", exits)
+        if any(code == 125 for code in exits.values()):
+            return 125
+        return 0
 
 
 def main():
@@ -206,13 +403,24 @@ def main():
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    # SIGTERM maps to SystemExit so the cancel path (receipt + reclaim of
+    # the recorded container) runs inside grade_snapshot's finally block.
+    # SIGINT keeps Python's KeyboardInterrupt default. Both are then the
+    # explicit cancel signals of this CLI.
+    def _sigterm(signum, _frame):
+        raise SystemExit(128 + signum)
+    try:
+        signal.signal(signal.SIGTERM, _sigterm)
+    except (ValueError, OSError):  # pragma: no cover - non-main thread
+        pass
     try:
         if args.stage == "all":
             if args.output is None:
                 raise InputRefused("all stages require an output directory")
-            grade_stages(args.case, args.workspace, args.image, args.output)
-            return 0
-        return grade(args.case, args.workspace, args.image, args.stage, receipt=args.receipt)
+            return grade_stages(args.case, args.workspace, args.image,
+                                args.output)
+        return grade(args.case, args.workspace, args.image, args.stage,
+                     receipt=args.receipt)
     except (InputRefused, OSError, ValueError, KeyError) as error:
         print("coding-eval grading input refused: " + str(error), file=sys.stderr)
         return 125

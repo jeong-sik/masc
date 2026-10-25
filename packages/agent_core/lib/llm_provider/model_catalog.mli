@@ -181,8 +181,7 @@ val lookup_for_provider_reference
 
 val serves_bare_row : t -> provider_reference -> model_entry -> bool
 (** Whether this original bare catalog row describes the provider. A declared
-    provider must list a family covering the row's [model_id], rather than
-    only the requested model id. Anonymous native wires permit bare rows;
+    provider must list the row's exact [model_id]. Anonymous native wires permit bare rows;
     anonymous OpenAI-compatible endpoints do not. Scoped rows return [false].
     This grants no authority to read a replacement capability manifest. *)
 

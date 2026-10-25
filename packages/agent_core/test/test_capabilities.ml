@@ -500,7 +500,7 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
 ;;
 
 let test_lookup_provider_m () =
-  match Capabilities.for_model_id "qwen3.5-35b-a3b" with
+  match Capabilities.for_model_id "qwen3" with
   | Some c ->
     check (option int) "context 262K" (Some 262_144) c.max_context_tokens;
     check bool "tools" true c.supports_tools;
@@ -514,7 +514,10 @@ let test_lookup_provider_m () =
 ;;
 
 let test_lookup_qwen_gguf_name () =
-  match Capabilities.for_model_id "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf" with
+  check bool "undeclared GGUF variant has no catalog row" true
+    (Option.is_none
+       (Capabilities.for_model_id "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"));
+  match Capabilities.for_model_id "QWEN3.6" with
   | Some c ->
     check
       bool
@@ -773,7 +776,7 @@ let test_lookup_qwen3_thinking_control () =
     | Ok m -> m
     | Error e -> Alcotest.failf "manifest parse error: %s" e
   in
-  match Capabilities.for_model_id_with_manifest non_matching "qwen3-32b" with
+  match Capabilities.for_model_id_with_manifest non_matching "qwen3" with
   | Some c ->
     check bool "supports reasoning" true c.supports_reasoning;
     check_thinking_control
@@ -813,7 +816,7 @@ let test_lookup_glm5v_vision () =
 ;;
 
 let test_lookup_glm46v_vision () =
-  match Capabilities.for_model_id "glm-4.6v-flashx" with
+  match Capabilities.for_model_id "glm-4.6v" with
   | Some c ->
     check bool "has image input" true c.supports_image_input;
     check bool "multimodal" true c.supports_multimodal_inputs;
@@ -2981,13 +2984,13 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
           ~wire:None
           ~provider:(Llm_provider.Model_catalog.Declared_provider "mimo")
           ~model_id:"mimo-v2.5-pro" )
-    ; "qwen3.5", Capabilities.for_model_id "qwen3.5-35b-a3b"
+    ; "qwen3", Capabilities.for_model_id "qwen3"
     ; ( "deepseek-v4-flash"
       , Capabilities.for_provider_model_id
           ~wire:None
           ~provider:(Llm_provider.Model_catalog.Declared_provider "deepseek")
           ~model_id:"deepseek-v4-flash" )
-    ; "nvidia-ultra", Capabilities.for_model_id "nvidia-ultra-253b"
+    ; "nvidia-ultra", Capabilities.for_model_id "nvidia"
     ]
   in
   List.iter
@@ -3006,27 +3009,8 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
     cases
 ;;
 
-(* ── Prefix ordering invariant (M01) ────────────────────── *)
+(* Exact model rows carry their own capability and effort declarations. *)
 
-(* Provider-independent catalog lookup selects the longest exact declared
-   prefix. Whenever prefix A is a string prefix of prefix B (every model-id
-   starting with B also starts with A), B must win; otherwise A captures the
-   request and silently returns the wrong capabilities (e.g. tool_choice sent
-   to a model that does not support it → 400 error, anti-pattern M01).
-
-   Each case below uses a concrete model-id that begins with the *longer*
-   (more-specific) prefix — and therefore also with the *shorter* one — and
-   asserts the capability fingerprint that is unique to the longer branch.
-   If the two branches were swapped the assertion would fail. Provider-scoped
-   rows are exact identities and therefore do not participate in this test. *)
-(* A model's own bare row outranks the provider-wide base, and the bare row is
-   the only lookup that applies prefix matching, so a base that answered first
-   would make it unreachable.
-
-   Both cases declare a provider base. Only the first grants catalog bare-row
-   authority, so the row and base actually compete there. The discriminator
-   is a field the row sets and the base leaves [None]:
-   [accepted_reasoning_efforts]. *)
 (* The two halves of the assembly step #34743 removed, one test each, because
    restoring either without the other is a round trip: the erasing form broke
    #34301, and its absence broke the eleven non-reasoning ollama_cloud rows

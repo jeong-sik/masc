@@ -42,3 +42,10 @@ Cancellation is explicit; fixture timeouts only detect a stuck boundary.
 Source parsing and whitespace checks passed. Selected execution and independent
 source reviews are pending at record creation. No local Dune build/typecheck,
 full regression, live Keeper/fleet, installation or deployment is claimed.
+
+Initial dispatch [40231124770](https://github.com/jeong-sik/masc/actions/runs/40231124770)
+selected the two queue suites at `361bca5570df5aa2a96f6503a35444582a991c9e`.
+Author source review then found that the new callback argument had not been
+threaded into the private non-strict save wrapper. That wiring is corrected
+here, preserving the same writer and flags. The initial run's actual outcome
+has not yet been read; it is not executable proof for this corrected source.

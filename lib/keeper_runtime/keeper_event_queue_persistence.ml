@@ -397,9 +397,12 @@ let save_state_unlocked_with ~save_snapshot owner state =
          message)
 ;;
 
-let save_state_unlocked =
+let save_state_unlocked ?(before_write = fun () -> ()) owner state =
   save_state_unlocked_with
-    ~save_snapshot:(save_snapshot_atomic_with ~strict_parent_sync:false)
+    ~save_snapshot:(save_snapshot_atomic_with ~before_write ~strict_parent_sync:false)
+    owner
+    state
+;;
 
 type snapshot_read_error_kind =
   | Invalid_path

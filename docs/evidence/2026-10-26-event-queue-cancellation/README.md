@@ -49,3 +49,11 @@ Author source review then found that the new callback argument had not been
 threaded into the private non-strict save wrapper. That wiring is corrected
 here, preserving the same writer and flags. The initial run's actual outcome
 has not yet been read; it is not executable proof for this corrected source.
+
+Corrected dispatch [40231173957](https://github.com/jeong-sik/masc/actions/runs/40231173957)
+at `cb254b0d1ec2a6aec6005862b5b4f3353a30bfbd` failed before running tests:
+`Fs_compat` was unavailable to the new executable because its Dune stanza omitted
+the direct dependency. This repository disables implicit transitive dependencies.
+The stanza now explicitly names `masc.fs_compat`, `masc.masc_eio_context` and `eio`,
+matching the modules actually used. This compile failure does not establish any
+behavioral result; corrected execution and fresh-head source review are pending.

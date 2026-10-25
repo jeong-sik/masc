@@ -1168,7 +1168,8 @@
 (test
  (name test_keeper_event_queue_cancellation)
  (modules test_keeper_event_queue_cancellation)
- (libraries alcotest masc masc.keeper_runtime masc.masc_core eio_main unix yojson))
+ (libraries alcotest masc masc.keeper_runtime masc.masc_core
+  masc.fs_compat masc.masc_eio_context eio eio_main unix yojson))
 
 (test
  (name test_keeper_event_queue_state_v2)

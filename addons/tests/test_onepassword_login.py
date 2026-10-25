@@ -9,12 +9,15 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "onepassword"))
 from companion import BridgeError
 from login import Extension, Journal, LoginError, Logins, Phase
+import oauth
 from oauth import ConnectionError
+from onepassword_store_fixture import MemoryRecords, active_raw, replace_active_raw
 from test_onepassword_companion import Host
 
 
@@ -46,7 +49,7 @@ class Bridge:
         self.fill_error = self.release_error = False
         self.fill_entered = self.fill_return = None
         self.release_entered = self.release_return = None
-        self.journal_path = None
+        self.journal_store = None
 
     def bind(self, **arguments):
         self.calls.append(("bind", arguments))
@@ -56,8 +59,8 @@ class Bridge:
 
     def invoke(self, *, program, arguments):
         self.calls.append((arguments["kind"], arguments))
-        if self.journal_path:
-            record = json.loads(self.journal_path.read_text())["operations"][-1]
+        if self.journal_store:
+            record = json.loads(active_raw(self.journal_store))["operations"][-1]
             expected = {"request": "requesting", "status": "checking", "fill": "filling"}
             assert record["phase"] == expected[arguments["kind"]]
         if arguments["kind"] == "request":
@@ -91,6 +94,9 @@ class Bridge:
 
 class LoginTests(unittest.TestCase):
     def setUp(self):
+        backend = patch.object(oauth, "ProtectedRecords", MemoryRecords)
+        backend.start()
+        self.addCleanup(backend.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name) / "logins"
@@ -103,7 +109,7 @@ class LoginTests(unittest.TestCase):
     def make_engine(self):
         def create(_descriptor):
             bridge = Bridge()
-            bridge.journal_path = self.directory / "operations.json"
+            bridge.journal_store = self.journal
             self.bridges.append(bridge)
             return bridge
         engine = Logins(self.connector, self.journal, self.extension,
@@ -153,7 +159,7 @@ class LoginTests(unittest.TestCase):
         self.assertEqual([name for name, _ in bridge.calls].count("release"), 1)
         with self.assertRaises(LoginError):
             self.engine.fill_next(operation, CALLER)
-        record = json.loads((self.directory / "operations.json").read_text())["operations"][0]
+        record = json.loads(active_raw(self.journal))["operations"][0]
         self.assertIsNone(record["app_link"])
         self.assertIsNone(record["reference"])
         self.assertNotIn("PRIVATE_ACCESS_TOKEN", json.dumps(record))
@@ -164,7 +170,7 @@ class LoginTests(unittest.TestCase):
         self.assertEqual(pending["phase"], "approval_ready")
         for caller in [CALLER, {"kind": "operator"}]:
             self.assert_public(self.engine.status(pending["operation_id"], caller))
-        path = self.directory / "operations.json"
+        path = self.directory / "operations.reference.json"
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.directory.stat().st_mode & 0o777, 0o700)
 
@@ -408,22 +414,22 @@ class LoginTests(unittest.TestCase):
     def test_approval_redelivery_waits_for_opened_ack_and_repeated_ack_preserves_first_wait(self):
         operation = self.start()["operation_id"]
         bridge = self.bridges[-1]
-        path = self.directory / "operations.json"
-        original = path.read_bytes()
+        path = self.directory / "operations.reference.json"
+        original = active_raw(self.journal).encode()
         for _ in range(2):
             self.assertEqual(self.engine.approval(operation), {"open_url": APP_LINK})
         self.now += 20.
         self.assertEqual(self.engine.advance(operation, CALLER)["phase"], "approval_ready")
         self.assertEqual([name for name, _ in bridge.calls].count("status"), 0)
-        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(active_raw(self.journal).encode(), original)
         opened = self.engine.opened(operation)
-        first = json.loads(path.read_text())["operations"][0]
+        first = json.loads(active_raw(self.journal))["operations"][0]
         self.assertEqual(first["opened_at"], self.now)
         self.assertEqual(first["next_check_at"], self.now + 5.)
         self.now += 3.
         self.assertEqual(self.engine.approval(operation), {"open_url": APP_LINK})
         self.assertEqual(self.engine.opened(operation), opened)
-        self.assertEqual(json.loads(path.read_text())["operations"][0], first)
+        self.assertEqual(json.loads(active_raw(self.journal))["operations"][0], first)
         self.engine.advance(operation, CALLER)
         self.assertEqual([name for name, _ in bridge.calls].count("status"), 0)
         self.now = first["next_check_at"]
@@ -434,12 +440,12 @@ class LoginTests(unittest.TestCase):
         operation, bridge = self.ready()
         bridge.responses.append({"error": "rateLimitExceeded"})
         self.engine.advance(operation, CALLER)
-        path = self.directory / "operations.json"
-        limited = json.loads(path.read_text())["operations"][0]
+        path = self.directory / "operations.reference.json"
+        limited = json.loads(active_raw(self.journal))["operations"][0]
         self.now += 30.
         self.engine.opened(operation)
         self.assertEqual(self.engine.approval(operation), {"open_url": APP_LINK})
-        self.assertEqual(json.loads(path.read_text())["operations"][0], limited)
+        self.assertEqual(json.loads(active_raw(self.journal))["operations"][0], limited)
         self.engine.advance(operation, CALLER)
         self.assertEqual([name for name, _ in bridge.calls].count("status"), 1)
         self.now = limited["next_check_at"]
@@ -447,10 +453,10 @@ class LoginTests(unittest.TestCase):
         self.now = limited["opened_at"] + 121.
         waiting = self.engine.advance(operation, CALLER)
         self.assertEqual(waiting["phase"], "waiting_user")
-        retained = json.loads(path.read_text())["operations"][0]
+        retained = json.loads(active_raw(self.journal))["operations"][0]
         self.assertEqual(self.engine.approval(operation), {"open_url": APP_LINK})
         self.assertEqual(self.engine.opened(operation), waiting)
-        self.assertEqual(json.loads(path.read_text())["operations"][0], retained)
+        self.assertEqual(json.loads(active_raw(self.journal))["operations"][0], retained)
         self.assertEqual(self.engine.advance(operation, CALLER), waiting)
         self.assertEqual([name for name, _ in bridge.calls].count("status"), 2)
 
@@ -498,14 +504,14 @@ class LoginTests(unittest.TestCase):
     def test_retained_record_is_closed_and_never_repairs_unknown_fields(self):
         self.start()
         self.engine.close()
-        path = self.directory / "operations.json"
-        value = json.loads(path.read_text())
+        path = self.directory / "operations.reference.json"
+        value = json.loads(active_raw(self.journal))
         value["operations"][0]["unexpected_private_data"] = "PRIVATE_MARKER"
-        path.write_text(json.dumps(value))
+        replace_active_raw(self.journal, json.dumps(value))
         os.chmod(path, 0o600)
         with self.assertRaisesRegex(LoginError, "^unavailable$"):
             self.make_engine()
-        self.assertIn("unexpected_private_data", json.loads(path.read_text())["operations"][0])
+        self.assertIn("unexpected_private_data", json.loads(active_raw(self.journal))["operations"][0])
 
     def test_lifecycle_on_actual_private_socket_and_durable_store(self):
         def handler(host, connection, reader):

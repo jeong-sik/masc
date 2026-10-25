@@ -2589,6 +2589,64 @@ let map_first_returned f = function
     { first with returned = Option.map f first.returned } :: rest
 ;;
 
+(* Exercise the same Waiting payload codec as the original absorption owner,
+   including its on-disk progress history, before invoking the actual gate. *)
+let reload_gate_progress records =
+  let module P = Masc.Lane_addon_request_progress in
+  let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let transcript = `List (List.map (fun (record : Gate.retained_evaluation) ->
+    `Assoc ["request", record.request;
+      "returned", Option.value ~default:`Null record.returned]) records) in
+  let progress = P.append P.captured P.Dispatch_intended |> require in
+  let progress = P.append progress (P.Execution_observed (P.Waiting transcript)) |> require in
+  let path = Filename.temp_file "absorb-owner-progress" ".json" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Yojson.Safe.to_file path (P.to_json progress);
+    let restored = P.of_json (Yojson.Safe.from_file path) |> require in
+    match P.phase restored with
+    | P.Dispatch_pending (Some (P.Waiting (`List records))) ->
+      List.map (fun json ->
+        { Gate.request = Yojson.Safe.Util.member "request" json;
+          returned = Some (Yojson.Safe.Util.member "returned" json) }) records
+    | _ -> Alcotest.fail "original Waiting transcript was not restored")
+;;
+
+let test_replay_after_owner_numeric_normalization forward () =
+  let facts, absorbed = replay_inputs () in
+  let calls = ref 0 in
+  let respond direction questions =
+    incr calls;
+    replay_response ~forward ~reverse:1. direction questions in
+  let expected_outcome, expected_copies, records =
+    record_gate_evaluations ~facts ~absorbed ~respond in
+  let calls_before_restore = !calls in
+  let restored = reload_gate_progress records in
+  let first = List.hd restored in
+  let open Yojson.Safe.Util in
+  let answers = Option.get first.returned |> member "result" |> member "response"
+    |> member "answers" |> to_assoc in
+  Alcotest.(check bool) "the owner persisted integral confidence as an integer" true
+    (List.for_all (fun (_, answer) -> member "confidence" answer = `Int 1) answers);
+  (match restore_gate ~facts ~absorbed restored |> require_replay with
+   | Gate.Skipped _ -> Alcotest.fail "original gate was available"
+   | Gate.Evaluated {outcome; copy_checks; _} ->
+     Alcotest.(check bool) "original absorption decision survives owner reload" true
+       (expected_outcome = outcome);
+     Alcotest.(check bool) "original reverse copy decision survives owner reload" true
+       (expected_copies = copy_checks));
+  Alcotest.(check int) "replay does not ask the provider again" calls_before_restore !calls;
+  restore_gate ~facts ~absorbed
+    (map_first_returned (function
+      | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
+      | _ -> Alcotest.fail "evaluation object") restored)
+    |> refuse_replay "unknown field after owner reload";
+  restore_gate ~facts ~absorbed
+    (map_first_returned (function
+      | `Assoc (first :: fields) -> `Assoc (first :: first :: fields)
+      | _ -> Alcotest.fail "nonempty evaluation object") restored)
+    |> refuse_replay "duplicate field after owner reload"
+;;
+
 let test_replay_preserves_forward_reverse_policy () =
   let facts, absorbed = replay_inputs () in
   List.iter (fun reverse ->
@@ -2726,6 +2784,10 @@ let () =
     "keeper_librarian_absorb_gate"
     [ ( "original replay"
       , [ Alcotest.test_case "forward and reverse policy is rederived" `Quick test_replay_preserves_forward_reverse_policy
+        ; Alcotest.test_case "owner reload preserves integral forward evidence" `Quick
+            (test_replay_after_owner_numeric_normalization "mergeable")
+        ; Alcotest.test_case "owner reload preserves integral reverse evidence" `Quick
+            (test_replay_after_owner_numeric_normalization "loses_knowledge")
         ; Alcotest.test_case "incomplete and rebound originals refuse" `Quick test_replay_refuses_incomplete_or_rebound_originals
         ; Alcotest.test_case "only canonical typed raw responses restore" `Quick test_replay_strict_raw_response_codec
         ; Alcotest.test_case "original failed and partial outcomes survive" `Quick test_replay_preserves_original_failed_and_partial_results

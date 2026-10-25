@@ -281,13 +281,12 @@ let wire_json_of_schema_uncached (schema : Types.tool_schema) =
      | None -> [])
 ;;
 
-(* The caller holds [wire_schema_cache_mutex]. Preserve the existing miss
-   policy for both the initial lookup and a publication recheck. *)
+(* The caller holds [wire_schema_cache_mutex]. Initial lookup and publication
+   recheck share the same insertion path. *)
 let wire_schema_entry_locked schema =
   match Wire_schema_cache.find_opt wire_schema_cache schema with
   | Some cached -> cached
   | None ->
-    Wire_schema_cache.clean wire_schema_cache;
     let entry = Json_only (wire_json_of_schema_uncached schema) in
     Wire_schema_cache.add wire_schema_cache schema entry;
     entry

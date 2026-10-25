@@ -224,8 +224,13 @@ val descriptor_to_yojson : descriptor option -> Yojson.Safe.t
 
     Memoized on physical schema identity: a schema is immutable, so two calls
     on the same schema return the same value — the second call does not
-    rebuild the tree. The shared cache holds schemas weakly. This accessor
-    constructs only JSON; compact encoding is deferred until requested. *)
+    rebuild the tree. The shared cache holds schemas weakly: the GC can clear
+    unreachable keys and their cached data. Ephemeron's insertion-triggered
+    resize maintenance removes dead bucket nodes instead of cleaning on every
+    miss. Dead nodes can remain between maintenance operations, and the bucket
+    array can retain its peak size; this is not a fixed memory bound.
+    This accessor constructs only JSON; compact encoding is deferred until
+    requested. *)
 val wire_json_of_schema : Types.tool_schema -> Yojson.Safe.t
 
 val wire_string_of_schema : Types.tool_schema -> string

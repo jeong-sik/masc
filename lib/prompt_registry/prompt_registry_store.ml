@@ -29,4 +29,15 @@ let with_lock state f =
   Eio_guard.with_mutex state.mutex f
 
 let with_override_mutation_lock state f =
-  Eio_guard.with_mutex state.override_mutation_mutex f
+  (* This mutex coordinates transactions; it does not own their mutable state.
+     Release it normally even when the callback raises. Keep the state mutex's
+     separate poison policy and the guard's cancellation protection intact. *)
+  let outcome =
+    Eio_guard.with_mutex state.override_mutation_mutex (fun () ->
+        match f () with
+        | value -> Ok value
+        | exception exn -> Error (exn, Printexc.get_raw_backtrace ()))
+  in
+  match outcome with
+  | Ok value -> value
+  | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace

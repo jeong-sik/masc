@@ -49,4 +49,9 @@ val with_lock : t -> (unit -> 'a) -> 'a
 val with_override_mutation_lock : t -> (unit -> 'a) -> 'a
 (** Serialize override mutations and persistence transactions.  The dedicated
     Eio mutex may be held across filesystem I/O; readers continue to use
-    [with_lock] and observe the old immutable snapshot until commit. *)
+    [with_lock] and observe the old immutable snapshot until commit.
+    Acquisition remains cancellable; the acquired transaction retains the
+    guard's cancellation protection. Callback exceptions, including explicit
+    cancellation, propagate with their original backtrace after normal unlock
+    and do not poison this coordination mutex. This does not roll back callback
+    effects or change the separate state mutex's consistency contract. *)

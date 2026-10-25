@@ -1145,7 +1145,8 @@ let restore_overrides base_path =
       (Common.masc_dir_from_base_path ~base_path)
       "prompt_overrides.json"
   in
-  with_override_mutation_lock (fun () ->
+  let failures, moved_keys =
+    with_override_mutation_lock (fun () ->
       let candidate, failures, rejected_entries =
         if not (Sys.file_exists path) then ([], [], [])
         else
@@ -1181,29 +1182,33 @@ let restore_overrides base_path =
             (fun (((entry : Prompt_override_persistence.entry), _) as held) ->
               Hashtbl.replace quarantine_tbl entry.key held)
             rejected_entries);
-      List.iter
-        (fun (key, reason) ->
-          record_override_restore_failure ();
-          match key with
-          | None ->
-              Log.Misc.error
-                "prompt override restore: rejected persistence file, falling back to file values: %s"
-                reason
-          | Some key ->
-              Log.Misc.error
-                "prompt override restore: %s cannot render under the current contract, falling back to file value: %s"
-                key reason)
-        failures;
-      (* In force, and written against a default that has since changed.
-         One line per key: the catalog carries the same fact, but the boot
-         log is where an operator looks when a release changed a prompt. *)
-      List.iter
-        (fun (entry : Prompt_override_persistence.entry) ->
-          if override_default_moved_now entry then
-            Log.Misc.warn
-              "prompt override %s applies over a default that changed since it was written"
-              entry.key)
-        candidate)
+      let moved_keys =
+        List.filter_map
+          (fun (entry : Prompt_override_persistence.entry) ->
+            if override_default_moved_now entry then Some entry.key else None)
+          candidate
+      in
+      (failures, moved_keys))
+  in
+  List.iter
+    (fun (key, reason) ->
+      record_override_restore_failure ();
+      match key with
+      | None ->
+          Log.Misc.error
+            "prompt override restore: rejected persistence file, falling back to file values: %s"
+            reason
+      | Some key ->
+          Log.Misc.error
+            "prompt override restore: %s cannot render under the current contract, falling back to file value: %s"
+            key reason)
+    failures;
+  List.iter
+    (fun key ->
+      Log.Misc.warn
+        "prompt override %s applies over a default that changed since it was written"
+        key)
+    moved_keys
 
 type file_edit_promotion =
   | Promoted of { key : string }

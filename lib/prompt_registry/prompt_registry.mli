@@ -274,7 +274,10 @@ val set_restore_failure_observer : (unit -> unit) -> unit
 (** Installs the process-local observer called whenever override
     restore rejects an entry or cannot parse the persisted override
     file. The default observer is a no-op so this sub-library stays
-    independent of the runtime metrics implementation. *)
+    independent of the runtime metrics implementation. Called after the
+    candidate and quarantine commit, outside both registry locks; it may
+    invoke a public mutation. An observer exception propagates without
+    reverting the committed restore or poisoning the mutation mutex. *)
 
 (** {1 Listing + JSON export} *)
 

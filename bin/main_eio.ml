@@ -3066,7 +3066,7 @@ let keeper_lifecycle_post ~action ~base_path ~host ~port ~agent ~token ~keeper_n
   let bearer =
     match token with
     | Some raw -> Some raw
-    | None -> Auth_login.read_persisted_token ~base_path ~agent_name:agent
+    | None -> Auth_login.read_persisted_http_token ~base_path ~agent_name:agent
   in
   let headers =
     ("content-type", "application/json")
@@ -4317,16 +4317,12 @@ let setup_validate_runtime base_path =
           code
 
 let ensure_local_operator_login ~base_path ~port ~agent =
-  match Auth_login.read_persisted_token ~base_path ~agent_name:agent with
-  | Some token when (match Auth.verify_token base_path ~agent_name:agent ~token with
-      | Ok credential -> credential.role = Masc_domain.Admin
-      | Error _ -> false) -> 0
-  | Some _ | None ->
-    (match Auth_login.mint ~base_path ~host:"127.0.0.1" ~port
-        ~agent_name:agent ~role:Masc_domain.Admin
-        ~token_env_var:"MASC_TOKEN" ~token_lifetime:Auth_login.With_expiry () with
-    | Ok _ -> prerr_endline "Local operator credential ready."; 0
-    | Error error -> prerr_endline (Masc_domain.masc_error_to_string error); 1)
+  match Auth_login.ensure_local_operator ~base_path ~host:"127.0.0.1" ~port
+      ~agent_name:agent ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:Auth_login.With_expiry () with
+  | Ok None -> 0
+  | Ok (Some _) -> prerr_endline "Local operator credential ready."; 0
+  | Error error -> prerr_endline (Masc_domain.masc_error_to_string error); 1
 
 let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network_mode =
   let base_path = Env_config.normalize_masc_base_path_input base_path in

@@ -447,7 +447,42 @@ let test_keeper_reuse_repairs_unselected_collision () = with_workspace @@ fun ba
   check (option string) "repaired keeper bearer reaches HTTP actor resolution"
     (Some "keeper") (Server_auth.dashboard_actor_for_request ~base_path request)
 
+let test_formatted_admin_reaches_http_without_rotation () =
+  List.iter (fun suffix -> with_workspace @@ fun base_path ->
+    let agent_name = "operator-http" in
+    let report = auth_ok (Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+        ~agent_name ~role:D.Admin ~token_env_var:"FILE_BACKED_FIXTURE_TOKEN"
+        ~token_lifetime:Auth_login.Long_lived ()) in
+    Auth.save_private_text_file report.raw_token_file (report.bearer_token ^ suffix);
+    let paths = [ report.raw_token_file; Auth.credential_file base_path agent_name;
+      Auth.auth_config_file base_path ] in
+    let before = snapshot paths in
+    (match auth_ok (Auth_login.ensure_local_operator ~base_path ~host:"127.0.0.1"
+        ~port:8935 ~agent_name ~token_env_var:"FILE_BACKED_FIXTURE_TOKEN"
+        ~token_lifetime:Auth_login.With_expiry ()) with
+     | None -> ()
+     | Some _ -> fail "formatted valid Admin was replaced");
+    let token = match Auth_login.read_persisted_http_token ~base_path ~agent_name with
+      | Some token -> token | None -> fail "reused Admin has no HTTP bearer" in
+    check bool "wire bearer is the originally minted bearer" true
+      (String.equal token report.bearer_token);
+    let request = Httpun.Request.create ~headers:(Httpun.Headers.of_list
+        [ "Authorization", "Bearer " ^ token; "x-masc-agent", agent_name ]) `POST "/mcp" in
+    check (option string) "production parser resolves the same Admin owner"
+      (Some agent_name) (Server_auth.dashboard_actor_for_request ~base_path request);
+    let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+      | Ok authority -> authority | Error `Malformed -> fail "fixture authority invalid" in
+    (match Server_auth.verify_mcp_auth_for_authority ~base_path ~request_authority:authority request with
+     | Ok None -> ()
+     | Ok (Some _) -> fail "unexpected MCP authorization result"
+     | Error error -> fail (D.masc_error_to_string error));
+    check bool "HTTP authentication keeps persisted auth bytes unchanged" true (snapshot paths = before);
+    check bool "same bearer still verifies as Admin" true
+      ((auth_ok (Auth.verify_token base_path ~agent_name ~token)).role = D.Admin))
+    [ "\n"; "\r\n" ]
+
 let () = run "auth_file_backed_transaction" [ "publication", [
+  test_case "formatted Admin reaches HTTP without rotation" `Quick test_formatted_admin_reaches_http_without_rotation;
   test_case "keeper reuse repairs a bearer shared with an unselected owner" `Quick test_keeper_reuse_repairs_unselected_collision;
   test_case "prune then ensure recreates a recoverable pair" `Quick test_prune_then_ensure;
   test_case "ensure then prune preserves live pair and UUID" `Quick test_ensure_then_prune;

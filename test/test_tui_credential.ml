@@ -63,6 +63,84 @@ let test_plan_prefers_the_environment () =
   check string "an environment bearer is used even where none is demanded" "env"
     (plan ~env:(Some "env") ~requires:false ())
 
+let startup_plan stored =
+  Credential.plan ~env_token:None ~workspace_token:stored
+    ~workspace_requires_token:true ~workspace_initialized:true
+
+let workspace_refresh ~sent stored =
+  Credential.refresh_plan ~source:Credential.From_workspace ~sent ~stored
+    ~credential_record:true ~workspace_requires_token:true ~workspace_initialized:true
+
+let test_exact_opaque_file_token_is_used_without_replacement () =
+  let exact = " opaque-reader-fixture\t" in
+  let verified = ref [] in
+  let stored =
+    Credential.stored_token_of_file ~exact_token:(Some exact)
+      ~read_http_candidate:(fun () -> fail "a valid exact token must not read a different representation")
+      ~verify:(fun token ->
+        verified := token :: !verified;
+        if String.equal token exact then Ok () else Error Credential.Mismatched_token)
+  in
+  check (list string) "exact bytes are verified once" [ exact ] (List.rev !verified);
+  check bool "startup uses the existing opaque token rather than minting" true
+    (startup_plan stored = Credential.Use exact);
+  check bool "a later refusal does not authorize replacing the valid exact token" true
+    (workspace_refresh ~sent:exact stored = Credential.Keep_held)
+
+let test_http_file_candidate_is_verified_after_exact_rejection () =
+  let exact = "reader-fixture\n" and candidate = "reader-fixture" in
+  let verified = ref [] and candidate_reads = ref 0 in
+  let stored =
+    Credential.stored_token_of_file ~exact_token:(Some exact)
+      ~read_http_candidate:(fun () -> incr candidate_reads; Some candidate)
+      ~verify:(fun token ->
+        verified := token :: !verified;
+        if String.equal token candidate then Ok () else Error Credential.Mismatched_token)
+  in
+  check (list string) "the exact bytes precede HTTP candidate verification"
+    [ exact; candidate ] (List.rev !verified);
+  check int "one fallback read" 1 !candidate_reads;
+  check bool "startup adopts the verified HTTP representation without minting" true
+    (startup_plan stored = Credential.Use candidate);
+  check bool "refresh adopts that verified candidate rather than minting over it" true
+    (workspace_refresh ~sent:"previous-fixture" stored = Credential.Adopt candidate)
+
+let test_rejected_http_candidates_keep_the_existing_replacement_policy () =
+  let exact = "reader-fixture\n" and candidate = "reader-fixture" in
+  List.iter (fun (rejection, expected_plan, expected_refresh) ->
+    let verified = ref [] in
+    let stored =
+      Credential.stored_token_of_file ~exact_token:(Some exact)
+        ~read_http_candidate:(fun () -> Some candidate)
+        ~verify:(fun token ->
+          verified := token :: !verified;
+          Error (if String.equal token exact then Credential.Mismatched_token else rejection))
+    in
+    check (list string) "both representations were authoritatively rejected"
+      [ exact; candidate ] (List.rev !verified);
+    check bool "startup retains the typed policy" true (startup_plan stored = expected_plan);
+    check bool "refresh retains the typed policy" true
+      (workspace_refresh ~sent:candidate stored = expected_refresh))
+    [ (Credential.Expired_token, Credential.Mint Credential.Replaces_expired,
+       Credential.Remint Credential.Replaces_expired)
+    ; (Credential.Mismatched_token, Credential.Mint Credential.Replaces_mismatched,
+       Credential.Remint Credential.Replaces_mismatched)
+    ; (Credential.Other_rejection, Credential.Use candidate, Credential.Keep_held)
+    ]
+
+let test_an_unchanged_or_absent_http_candidate_keeps_the_exact_verdict () =
+  let exact = "opaque-reader-fixture" in
+  List.iter (fun candidate ->
+    let calls = ref 0 in
+    let stored =
+      Credential.stored_token_of_file ~exact_token:(Some exact)
+        ~read_http_candidate:(fun () -> candidate)
+        ~verify:(fun _ -> incr calls; Error Credential.Other_rejection)
+    in
+    check int "the same representation is not reverified" 1 !calls;
+    check bool "an unrelated refusal remains the server's decision" true
+      (startup_plan stored = Credential.Use exact)) [ None; Some exact ]
+
 (* Minting is for a workspace that is already here and demands a bearer. The
    two conditions are separate: a missing auth config reads as the default and
    the default demands one, so an empty directory claims to require a bearer it
@@ -260,6 +338,14 @@ let () =
             test_the_server_reason_comes_from_the_typed_code
         ; test_case "the plan prefers the environment" `Quick
             test_plan_prefers_the_environment
+        ; test_case "a valid exact opaque file token is never reminted" `Quick
+            test_exact_opaque_file_token_is_used_without_replacement
+        ; test_case "the HTTP candidate is verified only after exact rejection" `Quick
+            test_http_file_candidate_is_verified_after_exact_rejection
+        ; test_case "rejected HTTP candidates keep the replacement policy" `Quick
+            test_rejected_http_candidates_keep_the_existing_replacement_policy
+        ; test_case "an absent or identical HTTP candidate keeps the exact verdict" `Quick
+            test_an_unchanged_or_absent_http_candidate_keeps_the_exact_verdict
         ; test_case "minting is only into a workspace that demands one" `Quick
             test_plan_mints_only_into_a_workspace_that_demands_one
         ; test_case "an expired stored token is replaced" `Quick

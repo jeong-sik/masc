@@ -134,6 +134,27 @@ type stored_token =
   | Stored_mismatched
   | Not_stored
 
+type token_rejection = Expired_token | Mismatched_token | Other_rejection
+
+let stored_token_of_file ~exact_token ~read_http_candidate ~verify =
+  let rejected token = function
+    | Expired_token -> Stored_expired
+    | Mismatched_token -> Stored_mismatched
+    | Other_rejection -> Stored token
+  in
+  match exact_token with
+  | None -> Not_stored
+  | Some exact ->
+    (match verify exact with
+     | Ok () -> Stored exact
+     | Error rejection ->
+       (match read_http_candidate () with
+        | Some candidate when not (String.equal candidate exact) ->
+          (match verify candidate with
+           | Ok () -> Stored candidate
+           | Error rejection -> rejected candidate rejection)
+        | Some _ | None -> rejected exact rejection))
+
 (* Why a mint happens. Different news for the operator: a first start, a
    credential that ran out, and a file that no longer matches its record --
    which is what a mint that failed between its two writes leaves, and what

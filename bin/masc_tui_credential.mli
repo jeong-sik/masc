@@ -66,6 +66,24 @@ type stored_token =
   | Not_stored
       (** Nothing was persisted for this client. *)
 
+type token_rejection =
+  | Expired_token
+  | Mismatched_token
+  | Other_rejection
+      (** An objection this client leaves for the server rather than minting. *)
+
+val stored_token_of_file :
+  exact_token:string option ->
+  read_http_candidate:(unit -> string option) ->
+  verify:(string -> (unit, token_rejection) result) ->
+  stored_token
+(** Verify the exact persisted bytes first. A valid opaque token is retained
+    unchanged and the HTTP candidate is not read. Only a rejected exact token
+    permits trying a different HTTP representation. The chosen representation's
+    typed rejection keeps the existing expiry/mismatch replacement policy;
+    other rejections retain that token for the server to judge. No publication
+    or mint occurs here, and callback failures/cancellation propagate. *)
+
 type mint_reason =
   | First_token  (** This client held no bearer at all. *)
   | Replaces_expired  (** The bearer it held had expired. *)

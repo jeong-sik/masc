@@ -50,7 +50,10 @@ let check_readers base_path expected =
   check (option string) "public Auth file client" expected
     (Auth.load_raw_token base_path ~agent_name:"reader");
   check (option string) "login persisted file client" expected
-    (Auth_login.read_persisted_token ~base_path ~agent_name:"reader")
+    (Auth_login.read_persisted_token ~base_path ~agent_name:"reader");
+  check (option string) "HTTP file client removes only surrounding whitespace"
+    (Option.map String.trim expected)
+    (Auth_login.read_persisted_http_token ~base_path ~agent_name:"reader")
 
 let test_public_reader_file_states () = with_workspace @@ fun base_path ->
   let path = Auth.raw_token_file base_path "reader" in
@@ -244,6 +247,8 @@ let test_cancellation_propagates () = with_workspace @@ fun base_path ->
     (cancelled (fun () -> ignore (Auth.load_raw_token base_path ~agent_name:"reader")));
   check bool "login persisted read propagates cancellation" true
     (cancelled (fun () -> ignore (Auth_login.read_persisted_token ~base_path ~agent_name:"reader")));
+  check bool "HTTP persisted read propagates cancellation" true
+    (cancelled (fun () -> ignore (Auth_login.read_persisted_http_token ~base_path ~agent_name:"reader")));
   check bool "configuration read propagates cancellation" true
     (cancelled (fun () -> ignore (Auth.load_auth_config base_path)))
 

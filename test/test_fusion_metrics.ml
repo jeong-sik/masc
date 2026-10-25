@@ -74,18 +74,18 @@ let test_record_judge_execution_emits () =
   in
   check (float 0.0) "counter incremented by 1.0" (before +. 1.0) after
 
-let test_record_invocation_emits () =
+let test_record_denied_emits () =
   let before =
     Otel_metric_store.metric_value_or_zero
       Fusion_metrics.metric_fusion_invocations_total
-      ~labels:[ "topology", "refine"; "outcome", "completed" ]
+      ~labels:[ "topology", "refine"; "outcome", "denied"; "judge_result", "not_attempted" ]
       ()
   in
-  Fusion_metrics.record_invocation ~topology:Fusion_types.Refine `Completed;
+  Fusion_metrics.record_denied ~topology:Fusion_types.Refine;
   let after =
     Otel_metric_store.metric_value_or_zero
       Fusion_metrics.metric_fusion_invocations_total
-      ~labels:[ "topology", "refine"; "outcome", "completed" ]
+      ~labels:[ "topology", "refine"; "outcome", "denied"; "judge_result", "not_attempted" ]
       ()
   in
   check (float 0.0) "counter incremented by 1.0" (before +. 1.0) after
@@ -97,7 +97,7 @@ let () =
     ; ( "emission"
       , [ test_case "record_judge_execution increments counter" `Quick
             test_record_judge_execution_emits
-        ; test_case "record_invocation increments counter" `Quick
-            test_record_invocation_emits
+        ; test_case "record_denied increments counter" `Quick
+            test_record_denied_emits
         ] )
     ]

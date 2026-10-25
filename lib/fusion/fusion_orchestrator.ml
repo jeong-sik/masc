@@ -85,7 +85,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
   let publish progress = Option.iter (fun send -> send progress) on_progress in
   match Fusion_policy.decide ~policy request with
   | Fusion_types.Deny reason ->
-    Fusion_metrics.record_invocation ~topology `Denied;
+    Fusion_metrics.record_denied ~topology;
     Compute_denied reason
   | Fusion_types.Allow req ->
     (* 요청의 명단을 얹은 preset 을 이 실행의 모든 자리(panel, judge, 1차 judge)가
@@ -96,7 +96,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
          ~roster:req.Fusion_types.roster
      with
      | Error reason ->
-       Fusion_metrics.record_invocation ~topology `Denied;
+       Fusion_metrics.record_denied ~topology;
        Compute_denied reason
      | Ok vp ->
           let preset = Fusion_policy.Validated_preset.preset vp in
@@ -606,8 +606,8 @@ let project
       ~seat_routes:deliberation.seat_routes
   with
   | Ok () ->
-    Fusion_metrics.record_invocation ~topology `Completed;
+    Fusion_metrics.record_projection ~topology ~delivery:Recorded deliberation;
     Ok ()
   | Error msg ->
-    Fusion_metrics.record_invocation ~topology `Sink_failed;
+    Fusion_metrics.record_projection ~topology ~delivery:Sink_failed deliberation;
     Error msg

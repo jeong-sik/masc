@@ -1265,6 +1265,22 @@ let test_observed_boundary_forecast ~marks ~samples ~expected_front () =
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
   ignore (Keeper_checkpoint_store.save_agent_core_classified
     ~session_dir ~history_retained:0 checkpoint |> unwrap);
+  (* A completed turn has a real boundary as well as a checkpoint. This
+     exercises the forecast path that must preserve the observed front. *)
+  let position = Keeper_turn_boundaries.position_of_messages messages |> unwrap in
+  let boundary : Keeper_turn_boundaries.record =
+    { recorded_at = 1000.
+    ; event = Turn_ended
+        { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+        ; task_context = Keeper_turn_task_context.No_task
+        ; history_at_start = Fresh_history
+        ; position
+        }
+    }
+  in
+  Keeper_turn_boundaries.append
+    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name boundary
+  |> Result.map_error Keeper_turn_boundaries.append_error_to_string |> unwrap;
   let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
   List.iter (fun (atom_count, input_tokens) ->
     let ends = match digest_at 0, digest_at (atom_count - 1) with

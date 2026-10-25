@@ -473,9 +473,15 @@ let forecast ~config ~keeper_name =
   | Ok (Some meta) ->
     let trace_id = Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id in
     let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+    (* Read the actual history through the Keeper's existing checkpoint
+       lineage. A cold read fills that same encoding/decode memo for its
+       next save; unchanged files reuse it without another read or parse.
+       Boundary lines attest only their named positions, not an arbitrary
+       carried front or the checkpoint's message bytes. *)
     (match
        Keeper_checkpoint_store.turn_history_of_load
-         (Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id)
+         (Keeper_checkpoint_store.load_agent_core_for_save
+            ~keeper_name ~session_dir ~session_id:trace_id)
      with
      | Error error ->
        Error (Keeper_checkpoint_store.checkpoint_load_error_to_string error)

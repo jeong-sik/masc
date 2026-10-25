@@ -17,10 +17,14 @@ sys.path.insert(0, str(PACKAGE))
 import server
 import oauth
 from oauth import Configuration, Connector, PrivateStore
+from onepassword_store_fixture import MemoryRecords, active_raw
 
 
 class OperatorTests(unittest.TestCase):
     def setUp(self):
+        backend = patch.object(oauth, "ProtectedRecords", MemoryRecords)
+        backend.start()
+        self.addCleanup(backend.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -235,9 +239,9 @@ class OperatorTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
         self.assertEqual([action["id"] for action in rejected["actions"]], ["view"])
         self.call("complete", original)
-        retained = (self.root / "private" / "connection.json").read_bytes()
+        retained = active_raw(self.connector.store).encode()
         self.call("connect")
-        self.assertEqual((self.root / "private" / "connection.json").read_bytes(), retained)
+        self.assertEqual(active_raw(self.connector.store).encode(), retained)
         self.assertTrue(self.connector.status()["connected"])
         self.assertEqual(len(self.calls), 1)
 
@@ -299,6 +303,9 @@ class InstallationTests(unittest.TestCase):
     """Exercise the actual private-file loader, without a precreated store."""
 
     def setUp(self):
+        backend = patch.object(oauth, "ProtectedRecords", MemoryRecords)
+        backend.start()
+        self.addCleanup(backend.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -328,6 +335,7 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual([action["id"] for action in view["actions"]], ["connect"])
         self.assertEqual(stat.S_IMODE(self.store.stat().st_mode), 0o700)
         self.assertFalse((self.store / "connection.json").exists())
+        self.assertFalse((self.store / "connection.reference.json").exists())
         self.assertEqual(self.worker.status(), {"phase": "disconnected", "connected": False,
                                                "browser_login_available": False})
         begun = self.worker.operator({"action": "connect", "arguments": {}})

@@ -18,7 +18,7 @@ class ProtectedStoreTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name) / "private"
         self.records = MemoryRecords(self.temporary.name)
-        self.store = oauth.PrivateStore(self.directory, records=self.records)
+        self.store = oauth.PrivateStore(self.directory, records=self.records, provision=True)
         self.original = {"phase": "disconnected", "configuration_id": "a" * 64}
         self.next = {"phase": "authorizing", "configuration_id": "a" * 64,
                      "connection_id": "0e250ad7-e876-4e74-9145-1a0d5aa3a15c",

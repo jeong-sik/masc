@@ -214,12 +214,12 @@ class ConnectionTests(unittest.TestCase):
                                                   expected_connection_id=authorization["connection_id"])
                         else:
                             connector.disconnect(lose)
-                before = (directory / "connection.json").read_bytes()
+                before = active_raw(connector.store).encode()
                 calls_before = len(self.calls)
                 with self.assertRaisesRegex(oauth.ConnectionError, "authorization_cancel_refused"):
                     connector.cancel_authorization(expected_state=state,
                                                      expected_connection_id=authorization["connection_id"])
-                self.assertEqual((directory / "connection.json").read_bytes(), before)
+                self.assertEqual(active_raw(connector.store).encode(), before)
                 self.assertEqual(len(self.calls), calls_before)
 
     def test_disconnect_requires_the_pinned_cancel_api_for_pending_authorization(self):

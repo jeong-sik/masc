@@ -13,6 +13,8 @@ import threading
 import time
 
 from login import LoginError, Logins
+from companion import BridgeError, Publisher
+from delivery import Delivery
 
 
 class _Phase(Enum):
@@ -46,22 +48,27 @@ OPERATOR = {"kind": "operator"}
 
 
 class Service:
-    def __init__(self, engine: Logins, *, clock=time.time):
+    def __init__(self, engine: Logins, *, clock=time.time, publisher=Publisher.optional):
         self.engine, self.clock = engine, clock
+        self._publisher = publisher
         self._condition = threading.Condition()
         self._phase, self._cleanup_failed = _Phase.OPEN, False
         self._jobs, self._opened, self._confirmed, self._cancels = [], set(), set(), set()
         # Tie-breaking preserves admitted FIFO order; it never limits work.
         self._sequence = itertools.count()
+        self._delivery = Delivery(engine)
         self._thread = threading.Thread(target=self._run, name="onepassword-login", daemon=True)
         try:
             self._thread.start()
         except RuntimeError:
             self._phase = _Phase.FAILED
             try:
-                engine.close()
-            except BaseException:
-                raise LoginError("outcome_unknown") from None
+                self._delivery.close()
+            finally:
+                try:
+                    engine.close()
+                except BaseException:
+                    raise LoginError("outcome_unknown") from None
             raise LoginError("unavailable") from None
 
     def _available(self):
@@ -71,6 +78,7 @@ class Service:
 
     def notify(self):
         """Wake after an external clock/activity change; grants no authority."""
+        self._delivery.notify()
         with self._condition:
             self._condition.notify_all()
 
@@ -92,17 +100,29 @@ class Service:
 
     def submit(self, **arguments):
         self._available()
-        result, reserved = self.engine.reserve(**arguments)
+        try:
+            publisher = self._publisher(arguments["descriptor"])
+        except BridgeError:
+            raise LoginError("unavailable") from None
+        try:
+            result, reserved = self.engine.reserve(**arguments)
+        except BaseException:
+            if publisher is not None:
+                publisher.close()
+            raise
         if not reserved:
-            # A successful exported reply retains its host grant. Failed
-            # admission must instead make the host withdraw that unused grant.
+            if publisher is not None:
+                publisher.close()
             raise LoginError("outcome_unknown")
         try:
+            if publisher is not None:
+                self._delivery.register(result["operation_id"], arguments["caller"], publisher)
             self._enqueue(_Job(_Kind.REQUEST, result["operation_id"], dict(arguments["caller"]),
                                goal=arguments["goal"], reason=arguments["reason"]))
         except LoginError:
-            # The service closed after admission; only this original grant
-            # can be cancelled. Engine close may already have joined it.
+            self._delivery.discard(result["operation_id"])
+            if publisher is not None:
+                publisher.close()
             try:
                 self.engine.cancel(result["operation_id"], arguments["caller"])
             except LoginError:
@@ -112,11 +132,15 @@ class Service:
 
     def status(self, operation_id, caller):
         self._available()
-        return self.engine.status(operation_id, caller)
+        result = self.engine.status(operation_id, caller)
+        self._delivery.notify(operation_id)
+        return result
 
     def operations(self, caller):
         self._available()
-        return self.engine.operations(caller)
+        result = self.engine.operations(caller)
+        self._delivery.notify()
+        return result
 
     def approval(self, operation_id):
         self._available()
@@ -250,6 +274,13 @@ class Service:
                 self._condition.notify_all()
         finally:
             try:
+                self._delivery.close()
+            except BaseException:
+                with self._condition:
+                    self._cleanup_failed = True
+                    self._phase = _Phase.FAILED
+                    self._condition.notify_all()
+            try:
                 self.engine.close()
             except BaseException:
                 with self._condition:
@@ -263,6 +294,7 @@ class Service:
             if self._phase is not _Phase.OPEN:
                 return
             self._phase = _Phase.CLOSING
+            self._delivery.retire()
             try:
                 operations = self.engine.operations(OPERATOR)
             except LoginError:

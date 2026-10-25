@@ -158,5 +158,10 @@ Python `Publisher` owns separate sockets, pins its original socket/directory
 identities and can be closed independently of `Companion`. It sends one event
 per connection and does not retry automatically. Its controlled socket tests
 exercise terminal delivery after Browser close, a lost ACK, shutdown interruption
-and replacement refusal. The Service-owned outbox pump that calls it remains
-unconnected; no actual Keeper continuation is claimed by these fixtures.
+and replacement refusal. The Service-owned outbox pump calls it from a separate joined thread. State
+commits and existing status/host observation activity notify that pump; no new
+retry clock or Browser effect retry is introduced. General transport failure
+leaves the same envelope unacknowledged. Storage uncertainty fences the pump
+and all its sockets, including a cached next event. Service retirement closes
+publication IO before joining it and releasing the engine lease. Controlled
+Service/journal/socket fixtures do not prove actual Keeper continuation.

@@ -334,9 +334,8 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
     Some
       (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
   | Agent_core.Event_bus.ToolCalled { invocation; agent_name; tool_name; _ } ->
-    (* tool_called publishes before execution, so the keeper hook has not
-       minted an execution_id yet — this row carries the provider call id
-       only; the matching tool_completed row carries both. *)
+    (* Admission precedes the keeper result row. The completion payload adds
+       the product execution association after post-effect observers finish. *)
     let payload =
       `Assoc
         ([ "agent_name", `String agent_name; "tool_name", `String tool_name ]

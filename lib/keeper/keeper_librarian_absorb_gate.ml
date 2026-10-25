@@ -995,20 +995,13 @@ module Replay = struct
   let integer index = function `Int value -> value | _ -> reject index "expected an integer"
   let list index = function `List values -> values | _ -> reject index "expected a list"
 
-  (* Object order is immaterial; duplicate members remain visible and cannot
-     equal an encoder's unique member set. Preserve array and attempt order. *)
-  let rec ordered (json : Yojson.Safe.t) : Yojson.Safe.t =
-    match json with
-    | `Assoc fields -> `Assoc (List.sort (fun (a, _) (b, _) -> String.compare a b)
-        (List.map (fun (key, value) -> key, ordered value) fields))
-    | `List values -> `List (List.map ordered values)
-    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value -> value
-
   let same left right =
-    (* The host may carry Intlit before writing it; compare the JSON bytes'
-       parsed representation, as the original persistence roundtrip does. *)
-    Yojson.Safe.equal (ordered (Yojson.Safe.from_string (Yojson.Safe.to_string left)))
-      (ordered (Yojson.Safe.from_string (Yojson.Safe.to_string right)))
+    (* Original owner progress canonicalizes every payload before persistence.
+       Compare in that same normal form, including integral JSON numbers;
+       duplicates and non-finite numbers remain invalid. *)
+    match Lane_addon_action.canonical left, Lane_addon_action.canonical right with
+    | Ok left, Ok right -> Yojson.Safe.equal left right
+    | Error _, _ | _, Error _ -> false
 
   let require index condition detail = if not condition then reject index detail
   let canonical index original encoded =

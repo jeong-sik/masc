@@ -338,6 +338,10 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
       false
       native.supports_named_tool_choice;
     check bool "native Kimi reasoning" true native.supports_reasoning;
+    check (list string) "native Kimi ignores fixed sampling"
+      [ "temperature"; "top_p" ]
+      (List.map Capabilities.sampling_parameter_to_string
+         native.ignored_sampling_parameters);
     check
       bool
       "native Kimi does not claim strict structured output"

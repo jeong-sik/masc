@@ -37,6 +37,8 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
   const actor = state.peers.find(peer => peer.session_id === state.sessionId)?.actor ?? null
   const connected = state.connection === 'connected' && session.current
   const visible = () => active.current && session.current
+  const canUseConnection = () => visible() && session.snapshot.connection === 'connected' && actor !== null
+    && session.snapshot.peers.find(peer=>peer.session_id===session.snapshot.sessionId)?.actor === actor
   const tell = (text: string, error = false) => { if (visible()) setNotice({ text, error }) }
   const refresh = () => { if (visible()) setRecords(discussionLocals(session.workspace, target.artifact_id)) }
   const updateComposer = (next: Composer | null) => { composerRef.current = next; if (visible()) setComposer(next) }
@@ -59,7 +61,7 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
   }, [])
   useEffect(() => { onPending(Boolean(composer && meaningful(composer.input)) || busy.size > 0) }, [composer, busy])
   const begin = (input: DiscussionInput) => {
-    if (!connected || !actor) return
+    if (!canUseConnection() || !actor) return
     updateComposer({ id: crypto.randomUUID(), actor, input, record: null, recoveredFrom: [] })
     tell('입력은 이 브라우저에 보관합니다. 내용을 확인한 뒤 보내 주세요.')
   }
@@ -77,7 +79,7 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
     return true
   }
   const run = async (record: DiscussionLocalRecord, send: boolean) => {
-    if (record.value.kind !== 'request' || !connected || !sameDraftTarget(record.target,target) || busyRef.current.has(record.id)) return
+    if (record.value.kind !== 'request' || !canUseConnection() || !sameDraftTarget(record.target,target) || busyRef.current.has(record.id)) return
     if (send && actor !== record.actor) { tell('처음 요청을 보낸 편집자로 다시 연결해 주세요. 복구 내용은 다운로드할 수 있습니다.',true); return }
     if (send && session.snapshot.pending && ['comment','accept'].includes(record.value.request.command.kind)) { tell('공유 원고가 저장된 뒤 보내 주세요.',true); return }
     busyRef.current.add(record.id); setBusy(new Set(busyRef.current))
@@ -93,7 +95,7 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
   }
   const submit = () => {
     const current = composerRef.current
-    if (!current || !connected || actor !== current.actor || !current.input.body.trim()) return
+    if (!current || !canUseConnection() || actor !== current.actor || !current.input.body.trim()) return
     const request = { id: current.input.operationId, command: commandOf(current.input) }
     if (session.snapshot.pending && request.command.kind === 'comment') { tell('공유 원고가 저장된 뒤 보내 주세요.',true); return }
     const record = retainDiscussionLocal(current.id,session.workspace,target,current.actor,{kind:'request',request})
@@ -102,12 +104,12 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
     updateComposer(null); refresh(); void run(record,true)
   }
   const act = (command: ArtifactDiscussionCommand) => {
-    if (!connected || !actor) return
+    if (!canUseConnection() || !actor) return
     const record = retainDiscussionLocal(crypto.randomUUID(),session.workspace,target,actor,{kind:'request',request:artifactDiscussionRequest(command)})
     refresh(); void run(record,true)
   }
   const recover = async (record: DiscussionLocalRecord) => {
-    if (record.value.kind !== 'input' || !connected || actor !== record.actor || !sameDraftTarget(record.target,target) || busyRef.current.has(record.id)) return
+    if (record.value.kind !== 'input' || !canUseConnection() || actor !== record.actor || !sameDraftTarget(record.target,target) || busyRef.current.has(record.id)) return
     busyRef.current.add(record.id); setBusy(new Set(busyRef.current))
     try {
       const view = await fetchArtifactDraft(record.target.artifact_id,record.workspace)

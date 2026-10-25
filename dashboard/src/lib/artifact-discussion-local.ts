@@ -41,11 +41,12 @@ export function retainDiscussionLocal(id: string, workspace: ArtifactWorkspace, 
 // A late ACK or stale recovery view cannot delete a newer copy in another tab.
 export function discardDiscussionLocal(record: DiscussionLocalRecord): void {
   const current = memory.get(record.id)
-  if (current && current.revision !== record.revision) return
-  memory.delete(record.id)
+  if (current?.revision === record.revision) memory.delete(record.id)
+  const protectedRevision = current && current.revision !== record.revision && !current.persisted ? current.storedRevision : null
   try {
-    localStorage.removeItem(storageKey(record))
-    if(record.storedRevision) localStorage.removeItem(storageKey({...record,revision:record.storedRevision}))
+    for(const revision of new Set([record.revision,record.storedRevision])) {
+      if(revision && revision!==protectedRevision)localStorage.removeItem(storageKey({...record,revision}))
+    }
   } catch { /* Remaining copies are only offered for explicit recovery. */ }
 }
 export function discussionLocals(workspace: ArtifactWorkspace, artifactId: string): DiscussionLocalRecord[] {

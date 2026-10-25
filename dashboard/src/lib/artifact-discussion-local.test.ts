@@ -41,6 +41,19 @@ it('preserves another tab write interleaved with deletion itself, without depend
   expect(JSON.parse(storage.getItem(key(external))!).value.input.body).toBe('동시에 쓴 새 입력')
   expect(discussionLocals(workspace,target.artifact_id)).toHaveLength(1)
 })
+it('can discard a separate old immutable copy while preserving newer memory and its quota fallback', () => {
+  const old=retainDiscussionLocal('discard-old',workspace,target,'human',input)
+  const storage=localStorage
+  const external={...JSON.parse(storage.getItem(key(old))!),revision:crypto.randomUUID()}
+  storage.setItem(key(external),JSON.stringify(external))
+  const copy=discussionLocals(workspace,target.artifact_id).find(record=>record.revision===external.revision)!
+  vi.stubGlobal('localStorage',{get length(){return storage.length},key:storage.key.bind(storage),getItem:storage.getItem.bind(storage),removeItem:storage.removeItem.bind(storage),setItem(){throw new DOMException('full','QuotaExceededError')}})
+  const newer=retainDiscussionLocal(old.id,workspace,target,'human',{...input,input:{...input.input,body:'메모리의 새 입력'}})
+  discardDiscussionLocal(copy);discardDiscussionLocal(old)
+  expect(storage.getItem(key(copy))).toBeNull()
+  expect(storage.getItem(key(old))).not.toBeNull()
+  expect(discussionLocals(workspace,target.artifact_id)).toEqual([newer])
+})
 it('offers other generations separately while isolating canonical workspace roots', () => {
   const original = retainDiscussionLocal('scope', workspace, target, 'human', input)
   const older = retainDiscussionLocal('generation', workspace, { ...target, generation: '019f0000-0000-7000-8000-000000000001' }, 'human', input)

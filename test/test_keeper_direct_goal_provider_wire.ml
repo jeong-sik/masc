@@ -60,7 +60,7 @@ let observe config (goal : Goal_store.goal) =
       ~criterion_revision:goal.criterion_revision ~observed_value:reported_value
       ~evidence:"note:fixture operator inspected the persisted first result"
       ~actor:"fixture-operator" with
-  | Ok observation -> observation
+  | Ok receipt -> receipt.measurement
   | Error error -> fail (Goal_measurement.error_to_string error)
 
 let run_case source () =
@@ -161,8 +161,13 @@ let run_case source () =
      check bool "Goal store failure remains explicit on wire" true
        (contains ~needle:"goal_store_unavailable:" context);
      check bool "unreadable primary borrows no mirrored Goal" false (contains ~needle:goal.id context)
-   | Empty, None, None -> check bool "independent work invents no Goal layer" false
-       (contains ~needle:"Active Goals" context)
+   | Empty, None, None ->
+     check bool "receiver sees the authoritative empty Goal snapshot" true
+       (contains ~needle:"### Active Goals (0)" context);
+     List.iter (fun needle ->
+       check bool "empty Goal snapshot invents no row, criterion or read failure" false
+         (contains ~needle context))
+       [ "\n- "; "  Success criterion (stored values;"; "goal_store_unavailable:" ]
    | (Current | Revised | Measurement_unavailable | Goal_unavailable | Empty), _, _ ->
      fail "invalid fixture state");
   (* OpenAI-compatible requests use an ephemeral carrier; the agent's returned

@@ -3246,10 +3246,10 @@ let add_routes ~sw ~clock router =
                  respond_json_value_with_cors ~status req reqd
                    (dashboard_error_json ~ok:false
                       (Goal_measurement.error_to_string error))
-             | Ok measurement ->
+             | Ok receipt ->
                  respond_json_value_with_cors req reqd
-                   (`Assoc [ "ok", `Bool true
-                           ; "measurement", Goal_measurement.to_yojson measurement ])))
+                   (`Assoc (("ok", `Bool true)
+                            :: Goal_measurement.receipt_fields receipt))))
          request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals/detail" (fun request reqd ->
        with_public_read (fun state req reqd ->

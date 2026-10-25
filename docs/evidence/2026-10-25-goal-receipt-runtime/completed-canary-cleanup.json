@@ -1,0 +1,30 @@
+{
+  "at": "2026-10-24T16:47:21.622193+00:00",
+  "scope": "Only frozen completed isolated canaries/proxies; primary8935 and other user checkouts untouched",
+  "processes": [
+    {
+      "pid": 41335,
+      "exact_command_verified": true,
+      "signal": "SIGTERM",
+      "identity": "/tmp/masc-goal-canary-54e8b9b7-qwen"
+    },
+    {
+      "pid": 23228,
+      "exact_command_verified": true,
+      "signal": "SIGTERM",
+      "identity": "/tmp/masc-goal-wire-54e8b9b7-qwen"
+    },
+    {
+      "pid": 19782,
+      "exact_command_verified": true,
+      "signal": "SIGTERM",
+      "identity": "/tmp/masc-goal-canary-3014cfce-qwen"
+    },
+    {
+      "pid": 18494,
+      "exact_command_verified": true,
+      "signal": "SIGTERM",
+      "identity": "/tmp/masc-goal-wire-3014cfce-qwen"
+    }
+  ]
+}

@@ -494,7 +494,11 @@ let test_measurement_requires_current_criterion_and_evidence () =
          (args goal.criterion_revision "artifact:measured-count"))
   in
   check string "the tool calls it reported" "reported_only"
-    (json_state measured [ "verification" ]);
+    (json_state measured [ "measurement_status" ]);
+  check string "recording leaves completion unchanged" "unchanged"
+    (json_state measured [ "completion_effect" ]);
+  check string "the tool exposes the actual current phase" "executing"
+    (json_state measured [ "goal_at_recording"; "phase" ]);
   let first_measurement = Goal_measurement.projection (Goal_measurement.load config) goal in
   check string "actual is stored exactly" "0"
     (json_state first_measurement [ "record"; "observed_value" ]);
@@ -576,6 +580,68 @@ let record_evidence config (goal : Goal_store.goal) evidence =
     ~actor:"test"
 ;;
 
+let test_measurement_receipt_preserves_lifecycle_and_criterion () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal = measurable_goal config ctx "Measurement reports lifecycle, not completion" in
+  List.iter
+    (fun phase ->
+       let at_recording =
+         match Goal_store.transact_goal config ~goal_id:goal.id
+                 (fun current -> Ok ({ current with phase }, ())) with
+         | Ok (current, ()) -> current
+         | Error error -> fail (Goal_store.write_error_to_string error)
+       in
+       let paths = [ Goal_store.goals_path config; Goal_store.goals_path config ^ ".last-good" ] in
+       let before = List.map (fun path -> path, Fs_compat.load_file path) paths in
+       let receipt = must_succeed "measure an existing lifecycle state"
+           (dispatch ctx ~name:"masc_goal_measure"
+              [ "goal_id", `String goal.id
+              ; "criterion_revision", `String at_recording.criterion_revision
+              ; "observed_value", `String "1"
+              ; "evidence", `String "note:the declared metric was observed"
+              ]) in
+       check string "measurement remains a report" "reported_only"
+         (json_state receipt [ "measurement_status" ]);
+       check string "measurement performs no completion transition" "unchanged"
+         (json_state receipt [ "completion_effect" ]);
+       check bool "receipt binds the exact Goal, including suspension restore state" true
+         (Yojson.Safe.Util.member "goal_at_recording" receipt
+          = Goal_store.goal_to_yojson at_recording);
+       check bool "report is not named verification" true
+         (Yojson.Safe.Util.member "verification" receipt = `Null);
+       List.iter (fun (path, bytes) ->
+         check string "recording leaves Goal lifecycle bytes unchanged" bytes
+           (Fs_compat.load_file path)) before;
+       let stored = Yojson.Safe.from_string (Fs_compat.load_file (Goal_measurement.path config)) in
+       (match Yojson.Safe.Util.member "measurements" stored with
+        | `List [ `Assoc fields ] ->
+            check (list string) "durable observation schema has no receipt or lifecycle copy"
+              [ "actor"; "criterion_revision"; "evidence"; "goal_id"; "id";
+                "observed_value"; "recorded_at" ]
+              (List.sort String.compare (List.map fst fields))
+        | _ -> fail "expected one durable measurement row"))
+    Goal_phase.all;
+  let receipt = match record_evidence config goal "note:before a criterion edit" with
+    | Ok receipt -> receipt
+    | Error error -> fail (Goal_measurement.error_to_string error) in
+  let captured = `Assoc (Goal_measurement.receipt_fields receipt) in
+  let changed = match Goal_store.upsert_goal config ~id:goal.id ~target_value:"2" () with
+    | Ok (changed, _) -> changed
+    | Error error -> fail (Goal_store.write_error_to_string error) in
+  check bool "criterion really changed after recording" true
+    (changed.criterion_revision <> receipt.goal_at_recording.criterion_revision);
+  check bool "serializing an issued receipt does not reread a later Goal" true
+    (captured = `Assoc (Goal_measurement.receipt_fields receipt));
+  check string "measurement and transaction Goal name the same criterion"
+    receipt.measurement.criterion_revision receipt.goal_at_recording.criterion_revision;
+  (match record_evidence config goal "note:stale criterion" with
+   | Error (Goal_measurement.Conflict _) -> ()
+   | Ok _ -> fail "a stale criterion produced a receipt"
+   | Error error -> fail (Goal_measurement.error_to_string error))
+;;
+
 (* "Evidence-backed" means the product's Evidence Reference grammar, the one
    Task completion accepts, not any non-blank text: a Keeper sending
    evidence "done" must not put a reported value on the Goal tree. *)
@@ -614,7 +680,9 @@ let test_measurement_evidence_is_an_evidence_reference () =
   List.iter
     (fun evidence ->
        match record_evidence config goal evidence with
-       | Ok row -> check string "reference is stored as given" evidence row.evidence
+       | Ok receipt ->
+           check string "reference is stored as given" evidence
+             receipt.measurement.evidence
        | Error error ->
            fail
              (Printf.sprintf "evidence %S was refused: %s" evidence
@@ -691,9 +759,11 @@ let test_measurement_rows_follow_goal_existence_not_phase () =
    | Error detail -> fail detail);
   ignore (must_succeed "drop" (transition ctx kept.id "drop"));
   (match record_evidence config kept "note:metric seen again after the drop" with
-   | Ok row ->
+   | Ok receipt ->
        check string "a dropped Goal records the new observation"
-         "note:metric seen again after the drop" row.evidence
+         "note:metric seen again after the drop" receipt.measurement.evidence;
+       check string "the receipt records its actual dropped phase" "dropped"
+         (Goal_phase.to_string receipt.goal_at_recording.phase)
    | Error error -> fail (Goal_measurement.error_to_string error));
   (match Goal_store.find_goal config ~goal_id:kept.id with
    | Goal_store.Goal_found goal ->
@@ -2085,6 +2155,8 @@ let () =
             test_goal_list_renders_a_ledger_error_state
         ; test_case "measurements require current criterion and evidence" `Quick
             test_measurement_requires_current_criterion_and_evidence
+        ; test_case "measurement receipt preserves lifecycle and criterion" `Quick
+            test_measurement_receipt_preserves_lifecycle_and_criterion
         ; test_case "measurement evidence is an Evidence Reference" `Quick
             test_measurement_evidence_is_an_evidence_reference
         ; test_case "measurement rows follow Goal existence, not phase" `Quick

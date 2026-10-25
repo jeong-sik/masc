@@ -322,11 +322,9 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
 let handle_goal_measure ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =
   match Goal_measurement.record_json ctx.config ~actor:ctx.agent_name args with
-  | Ok measurement ->
+  | Ok receipt ->
       ok_result ~tool_name ~start_time
-        [ "measurement", Goal_measurement.to_yojson measurement
-        ; "verification", `String "reported_only"
-        ]
+        (Goal_measurement.receipt_fields receipt)
   | Error error ->
       let code =
         match error with

@@ -1,0 +1,98 @@
+{
+  "scope": "Actual first serialized provider request schema observation, no raw thinking; not Task/Goal behavior success.",
+  "observed_at": "2026-10-24T15:23:31.857852+00:00",
+  "identity_record": {
+    "source_sha": "54e8b9b7cafab6122b8eccc9e15d8ec549e03ad8",
+    "binary": "/tmp/masc-goal-runtime-54e8b9b7/masc",
+    "base_path": "/private/tmp/masc-goal-canary-54e8b9b7-qwen",
+    "pid": 41335,
+    "port": 58276,
+    "provider_proxy_port": 55595,
+    "model": "qwen3:8b",
+    "production_deployment": false
+  },
+  "request_path": "/tmp/masc-goal-wire-54e8b9b7-qwen/request-000002.request",
+  "request_bytes": 76356,
+  "request_sha256": "e50651b0c8c3d3557d652f0f205fc59dde966db1d1798c910f66461981a8381c",
+  "model_alias": "qwen3:8b",
+  "options": {
+    "temperature": 0.4
+  },
+  "tasklist_function": {
+    "name": "keeper_tasks_list",
+    "description": "List backlog tasks. Rows carry id, title, priority, created_at, status, assignee and lifecycle timestamps; projection=full adds completion notes, description, files, contract, handoff_context, execution_links. awaiting_verification means the task awaits the completion-authority verdict and no Keeper can claim it; never Read producer sandbox paths. Rows are ordered by priority, then created_at, then id. When truncated is true the response carries next_cursor; pass it as cursor with the same status, include_done and projection to read the rows after that page. The last page has none. new_tasks highlights recent off-page rows only on the first page; continuation pages do not repeat that discovery window. Narrow by task_ids, assignee, goal_id or a literal query before paging; all supplied filters are ANDed and must stay the same on continuation pages. Use task_ids with projection=full for known tasks instead of scanning the whole backlog. Exact task_ids lookups include every lifecycle state when status and include_done are both omitted; general discovery excludes done and cancelled tasks. Explicit lifecycle filters keep their stated meaning.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "task_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Exact task IDs to retrieve in one call. With status and include_done both omitted, returns requested tasks in every lifecycle state, including done and cancelled. Explicit lifecycle filters still apply."
+        },
+        "assignee": {
+          "type": "string",
+          "description": "Exact performer handle: includes claimed, in_progress, awaiting_verification and done tasks allowed by the status filter. Does not match a canceller or unassigned task."
+        },
+        "goal_id": {
+          "type": "string",
+          "description": "Exact Goal ID from the authoritative task-to-Goal link registry. No links returns an empty list; an unreadable registry returns an error."
+        },
+        "query": {
+          "type": "string",
+          "description": "Non-blank literal substring in title or description, ASCII case-insensitive. No regex, semantic ranking, notes or receipt search."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "todo",
+            "claimed",
+            "in_progress",
+            "awaiting_verification",
+            "done",
+            "cancelled"
+          ],
+          "description": "Filter by task status"
+        },
+        "include_done": {
+          "type": "boolean",
+          "description": "Explicit false excludes done and cancelled; true includes done but excludes cancelled. An explicit status takes precedence. When omitted, exact task_ids lookups include every state; general discovery excludes done and cancelled."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50,
+          "description": "Max tasks to return (default: 50)"
+        },
+        "cursor": {
+          "type": "string",
+          "description": "Opaque next_cursor from a previous truncated keeper_tasks_list response. Pass it with the same status, include_done and projection to read the rows after that page. A cursor from a different filter, or one this tool did not issue, is rejected with field=cursor."
+        },
+        "if_revision": {
+          "type": "string",
+          "description": "Optional producer revision from the previous keeper_tasks_list snapshot; matching revisions return unchanged."
+        },
+        "projection": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "full"
+          ],
+          "default": "compact"
+        }
+      }
+    }
+  },
+  "include_done_optional": true,
+  "include_done_has_no_default": true,
+  "goal_in_leading_system": true,
+  "current_revision_in_leading_system": true,
+  "system_sha256": "bc144759a69ec8ac8c6f09f8f69d968966755a6d035b595c07876be13a3011f1",
+  "owner_input_sha256": [
+    "59e13c9bccc380d802d544b796419ba45ad721efb3c7a402f9fe0d8c9d5a11a1"
+  ],
+  "owner_goal_id_hint": false
+}

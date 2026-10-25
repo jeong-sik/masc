@@ -1,0 +1,12 @@
+{
+  "source_request_sha256": "835c1d9ef1ae8037e65ba09dbbc8225c1f9533112d601c0a0aa82669ccace84d",
+  "candidate_receipt_sha256": "d8d17bce7874e9b1449e51a4851b4e667c62397d43643f9045877702532483b8",
+  "candidate_receipt_source": "Actual new source serializer/handler probe output; commit binding added after source freeze. Not a live new-binary tool call.",
+  "scope": "Baseline and phase_receipt arms only: one frozen final-response request and seed, same model/messages/options/tools; only last Tool receipt differs. Full candidate additionally changes the exact Goal System paragraph and canonical tool description; see full-candidate-binding.json. No returned tools execute, real G3 pass or population claim.",
+  "replacement_message_index": 51,
+  "seed": 20261024,
+  "applies_to": [
+    "baseline",
+    "phase_receipt"
+  ]
+}

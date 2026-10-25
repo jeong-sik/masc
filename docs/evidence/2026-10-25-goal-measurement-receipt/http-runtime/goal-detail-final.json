@@ -1,0 +1,107 @@
+{
+  "generated_at": "2026-10-24T16:31:39Z",
+  "approval_queue_state": {
+    "state": "ready"
+  },
+  "goal": {
+    "id": "goal-receipt-http-check",
+    "title": "Controlled receipt transport check",
+    "criterion_revision": "194efd0c49d088643d081da5fc457036",
+    "verification": {
+      "goal_id": "goal-receipt-http-check",
+      "completion": {
+        "state": "idle"
+      },
+      "submitted_evidence": [],
+      "updated_at": "2026-10-24T16:31:39Z"
+    },
+    "measurement": {
+      "state": "reported",
+      "record": {
+        "id": "702cb5a0eee36a54328530305f2309ad",
+        "goal_id": "goal-receipt-http-check",
+        "criterion_revision": "194efd0c49d088643d081da5fc457036",
+        "observed_value": "MCP probe observation",
+        "evidence": "note:Controlled transport check, no independent verification",
+        "actor": "goal-canary-operator",
+        "recorded_at": "2026-10-24T16:30:42Z"
+      }
+    },
+    "phase": "executing",
+    "resume_phase": null,
+    "phase_color": "#4ade80",
+    "goal_fsm": {
+      "state": "executing",
+      "resume_phase": null,
+      "source": "goal.phase",
+      "state_kind": "executing",
+      "next_actions": [
+        "request_complete",
+        "drop",
+        "pause",
+        "block"
+      ],
+      "activity_observation": "goal_metadata"
+    },
+    "priority": 3,
+    "metric": "note:Transport proof only",
+    "target_value": "HTTP and MCP preserve reported-only and actual Executing lifecycle",
+    "due_date": null,
+    "tasks": [],
+    "task_count": 0,
+    "task_done_count": 0,
+    "task_summary": {
+      "total": 0,
+      "done": 0,
+      "open": 0,
+      "terminal": 0,
+      "awaiting_verification": 0,
+      "cancelled": 0,
+      "unassigned": 0,
+      "completion_pct": null,
+      "by_status": {
+        "todo": 0,
+        "claimed": 0,
+        "in_progress": 0,
+        "awaiting_verification": 0,
+        "done": 0,
+        "cancelled": 0
+      }
+    },
+    "timeline_events": [
+      {
+        "ts": "2026-10-24T16:29:41Z",
+        "kind": "goal_created",
+        "lane": "goal",
+        "title": "Goal Created",
+        "summary": "created by goal-canary-operator: Controlled receipt transport check",
+        "severity": "ok"
+      }
+    ],
+    "children": [],
+    "child_count": 0,
+    "last_activity_at": "2026-10-24T16:29:41Z",
+    "stagnation_seconds": 118,
+    "activity_observation": "goal_metadata",
+    "linked_keeper_names": [],
+    "pending_approval_count": 0,
+    "latest_keeper_ref": null,
+    "latest_turn_ref": null,
+    "created_at": "2026-10-24T16:29:41Z",
+    "updated_at": "2026-10-24T16:29:41Z"
+  },
+  "linked_tasks": [],
+  "linked_keepers": [],
+  "approvals": [],
+  "execution_receipts": [],
+  "timeline": [
+    {
+      "ts": "2026-10-24T16:29:41Z",
+      "kind": "goal_created",
+      "lane": "goal",
+      "title": "Goal Created",
+      "summary": "created by goal-canary-operator: Controlled receipt transport check",
+      "severity": "ok"
+    }
+  ]
+}

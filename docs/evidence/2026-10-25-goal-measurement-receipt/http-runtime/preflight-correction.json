@@ -1,0 +1,4 @@
+{
+  "initial_failure": "Fixture assumed per-Goal filename; actual Goal_store.goals_path uses shared goals.json. Assertion failed before measurement HTTP call.",
+  "correction": "Read actual source path and capture shared primary and mirror; resume from saved Goal create receipt without repeating Goal mutation."
+}

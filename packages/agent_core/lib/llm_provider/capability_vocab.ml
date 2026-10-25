@@ -79,6 +79,10 @@ type reasoning_output_format =
    arrives on its own channel: a model can do both at once, and minimax-m3
    does. Folding this into that axis costs the model its reasoning_details
    stream. *)
+type json_schema_dialect =
+  | Openai_json_schema
+  | Json_object_schema
+
 type content_inline_reasoning =
   | No_content_inline_reasoning
   | Think_tags
@@ -481,6 +485,7 @@ let capability_fields =
   ; "reasoning_replay"
   ; "supports_response_format_json"
   ; "supports_structured_output"
+  ; "json_schema_dialect"
   ; "supports_multimodal_inputs"
   ; "supports_image_input"
   ; "supports_audio_input"
@@ -751,4 +756,17 @@ let base_label_values =
   ; "ollama_cloud_v1"
   ; "nvidia"
   ]
+;;
+
+let json_schema_dialect_values = [ "openai_json_schema"; "json_object_schema" ]
+
+let json_schema_dialect_of_string = function
+  | "openai_json_schema" -> Some Openai_json_schema
+  | "json_object_schema" -> Some Json_object_schema
+  | _ -> None
+;;
+
+let json_schema_dialect_to_string = function
+  | Openai_json_schema -> "openai_json_schema"
+  | Json_object_schema -> "json_object_schema"
 ;;

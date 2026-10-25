@@ -173,7 +173,30 @@ let response_format_to_openai_json = function
     Returns a JSON string ready for HTTP POST. *)
 let response_format_of_config (config : Provider_config.t) =
   match structured_schema_of_config config with
-  | Some schema -> response_format_to_openai_json (Types.JsonSchema schema)
+  | Some schema ->
+    let dialect =
+      match Provider_http_codec.of_config config with
+      | Provider_http_codec.Openai_chat ->
+        (match Provider_config.capabilities_for_config_model config with
+         | Some caps -> caps.Capabilities.json_schema_dialect
+         | None -> Capabilities.Openai_json_schema)
+      | Provider_http_codec.Anthropic_messages
+      | Provider_http_codec.Openai_responses
+      | Provider_http_codec.Ollama_chat
+      | Provider_http_codec.Gemini_generate_content
+      | Provider_http_codec.Glm_chat -> Capabilities.Openai_json_schema
+    in
+    (match dialect with
+     | Capabilities.Openai_json_schema ->
+       response_format_to_openai_json (Types.JsonSchema schema)
+     | Capabilities.Json_object_schema ->
+       let schema =
+         match schema with
+         | `Assoc fields when List.mem_assoc "name" fields && List.mem_assoc "schema" fields ->
+           List.assoc "schema" fields
+         | _ -> schema
+       in
+       Some (`Assoc [ "type", `String "json_object"; "schema", schema ]))
   | None when config.response_format = JsonMode ->
     response_format_to_openai_json Types.JsonMode
   | None -> None

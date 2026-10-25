@@ -70,6 +70,10 @@ type structured_output_support =
   | Json_object_only
   | Native_json_schema
 
+type json_schema_dialect =
+  | Openai_json_schema
+  | Json_object_schema
+
 (** Whether a model also embeds reasoning in the content channel, and in what
     shape. Separate from {!reasoning_streaming_format}, which says how reasoning
     arrives on its own channel: a model can use both at once. *)
@@ -191,3 +195,7 @@ val sampling_parameter_of_string : string -> sampling_parameter option
 val sampling_parameter_to_string : sampling_parameter -> string
 val base_label_values : string list
 val capability_fields : string list
+
+val json_schema_dialect_values : string list
+val json_schema_dialect_of_string : string -> json_schema_dialect option
+val json_schema_dialect_to_string : json_schema_dialect -> string

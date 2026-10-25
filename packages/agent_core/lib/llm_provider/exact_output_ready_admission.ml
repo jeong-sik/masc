@@ -190,9 +190,12 @@ let validate_gemini_schema ~path schema =
 ;;
 
 let schema_for_wire (target : request_target) (Domain_schema domain_schema) =
-  match Provider_http_codec.(json_schema_wire (of_config target.config)) with
-  | Raw_schema -> domain_schema
-  | Openai_named_schema ->
+  let codec = Provider_http_codec.of_config target.config in
+  match codec, target.capabilities.Caps.json_schema_dialect,
+        Provider_http_codec.json_schema_wire codec with
+  | Provider_http_codec.Openai_chat, Caps.Json_object_schema, _
+  | _, _, Provider_http_codec.Raw_schema -> domain_schema
+  | _, _, Provider_http_codec.Openai_named_schema ->
     `Assoc
       [ "name", `String (PC.structured_output_name_of_schema domain_schema)
       ; "schema", domain_schema

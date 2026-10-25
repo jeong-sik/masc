@@ -25,6 +25,7 @@ type model_entry =
   ; accepted_reasoning_efforts : string list option
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
+  ; json_schema_dialect : Capability_vocab.json_schema_dialect option
   ; supports_multimodal_inputs : bool option
   ; supports_image_input : bool option
   ; supports_audio_input : bool option
@@ -366,6 +367,7 @@ let known_entry_keys =
   ; "accepted_reasoning_efforts"
   ; "supports_response_format_json"
   ; "supports_structured_output"
+  ; "json_schema_dialect"
   ; "supports_multimodal_inputs"
   ; "supports_image_input"
   ; "supports_audio_input"
@@ -476,6 +478,16 @@ let parse_entry entry_toml =
       "tool_schema_conformance"
       ~allowed:Capability_vocab.tool_schema_conformance_values
       entry_toml
+  in
+  let* json_schema_dialect =
+    let* raw = canonical_string_opt ~entry_id "json_schema_dialect"
+      ~allowed:Capability_vocab.json_schema_dialect_values entry_toml in
+    match raw with
+    | None -> Ok None
+    | Some value ->
+      (match Capability_vocab.json_schema_dialect_of_string value with
+       | Some dialect -> Ok (Some dialect)
+       | None -> Error ("invalid json_schema_dialect: " ^ value))
   in
   let* supports_reasoning =
     bool_field ~entry_id "supports_reasoning" entry_toml
@@ -624,6 +636,7 @@ let parse_entry entry_toml =
     ; accepted_reasoning_efforts
     ; supports_response_format_json
     ; supports_structured_output
+    ; json_schema_dialect
     ; supports_multimodal_inputs
     ; supports_image_input
     ; supports_audio_input

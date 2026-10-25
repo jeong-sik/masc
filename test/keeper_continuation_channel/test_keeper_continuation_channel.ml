@@ -427,7 +427,7 @@ let test_discord_thread_parent_preserves_thread_target () =
     assert (reply_to_message_id = None);
     assert (guild_id = Some "G1");
     assert (user_id = "U1")
-  | Dashboard _ | Slack _ | Imessage _ | Keeper _ | Unrouted _ ->
+  | Dashboard _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _ ->
     failwith "Discord thread parent changed connector kind"
 
 (* iMessage (#24497). Before this constructor existed an iMessage-originated

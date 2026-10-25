@@ -1,0 +1,21 @@
+{
+  "production_baseline": "c288253aeb969ce4395693c0eaa946718c737192",
+  "checks": [
+    "ocamlc -stop-after parsing",
+    "git diff --check"
+  ],
+  "typecheck": false,
+  "executed_tests": false,
+  "test_sha256": "c80162d83393863a8fd51f9c8b844f820ca43a92a8fab30ef2271baf138eaa93",
+  "requested_suites": [
+    "test/test_keeper_held_session_restore"
+  ],
+  "full_regression": "not run on this candidate",
+  "previous_fixture_run": {
+    "run": 40158656336,
+    "head": "aab2135c694aa7eb78c29a88ff77b0048d3b11cc",
+    "conclusion": "success",
+    "cases": 1,
+    "limits": "Agent fixture files were names-only invalid JSON envelopes; prompt assets were absent. Current fixture strengthens both inputs and has not executed."
+  }
+}

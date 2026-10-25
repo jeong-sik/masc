@@ -6637,3 +6637,5 @@
   ../viewer/style.css
   (source_tree ../viewer/src))
  (action (run python3 %{dep:test_viewer_trpg_unavailable.py})))
+
+(include stanzas/test_keeper_held_session_restore.inc)

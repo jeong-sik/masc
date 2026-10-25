@@ -346,7 +346,6 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
        let rows =
          Llm_provider.Model_catalog.model_entries_for_provider catalog
            ~provider:(Llm_provider.Model_catalog.Declared_provider provider.id)
-           ~model_entries:(Llm_provider.Model_catalog.model_entries catalog)
          |> List.filter_map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
               match entry.max_context_tokens with
               | Some context when context > 0 ->

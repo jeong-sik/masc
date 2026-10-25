@@ -260,21 +260,23 @@ let test_scoped_lookup_matches_a_scan_of_the_rows () =
      | Some _ -> Alcotest.fail "a model id no row declares must miss")
 ;;
 
-(* Every construction path rejects ambiguous exact identities. *)
+(* Every catalog enters through the strict TOML constructor. *)
 let test_scoped_lookup_rejects_duplicate_rows () =
-  let catalog = Model_catalog_test_support.load_repo_model_catalog
-      ~suite:"model identifiers duplicate constructor" in
-  match List.find_opt
-      (fun (entry : Model_catalog.model_entry) -> Option.is_some entry.provider_name)
-      (Model_catalog.model_entries catalog) with
-  | None -> Alcotest.fail "the catalog has no scoped row"
-  | Some first ->
-    let second = { first with max_context_tokens = Some 1 } in
-    List.iter (fun rows -> Alcotest.(check bool) "duplicate exact identity rejected" true
-      (Result.is_error (Model_catalog.of_model_entries rows)))
-      [[first; second]; [second; first];
-       [first; {second with model_id = Model_identifiers.Model_id.of_string_exn
-         (String.uppercase_ascii (Model_identifiers.Model_id.to_string first.model_id))}]]
+  let row model provider context =
+    Printf.sprintf
+      "[[models]]\nmodel_id = %S\nprovider_name = %S\nmax_context_tokens = %d\n"
+      model provider context
+  in
+  List.iter
+    (fun (first, second) ->
+       Alcotest.(check bool) "duplicate exact identity rejected" true
+         (Result.is_error
+            (Model_catalog.of_toml_string ~source:"duplicate scoped rows"
+               (first ^ second))))
+    [ row "Fold-Model" "provider-a" 10, row "Fold-Model" "provider-a" 1
+    ; row "Fold-Model" "provider-a" 1, row "Fold-Model" "provider-a" 10
+    ; row "Fold-Model" "provider-a" 10, row "fold-model" "PROVIDER-A" 1
+    ]
 ;;
 
 (* A catalog of the given TOML, or the test fails with the loader's message. *)
@@ -399,26 +401,41 @@ let test_the_loader_refuses_rows_that_fold_to_one_id () =
       message
 ;;
 
-(* The exact-output binding tells rows apart by the key the index files them
-   under: rows whose ids differ only in case are one identity. *)
-let test_the_binding_folds_row_ids_as_the_index_does () =
-  let catalog =
-    catalog_of_toml ~source:"binding row ids"
-      "[[models]]\n\
-       model_id = \"Fold-Model\"\n\
-       provider_name = \"provider-a\"\n\
-       max_context_tokens = 1\n"
+(* Binding and enumeration must read the rows owned by their catalog. *)
+let test_binding_and_enumeration_retain_catalog_owned_rows () =
+  let catalog context =
+    catalog_of_toml ~source:"binding owned rows"
+      (Printf.sprintf {|[[providers]]
+id = "owner"
+kind = "anthropic"
+base_url = "https://example.invalid"
+request_path = "/v1/messages"
+auth = "none"
+[[models]]
+model_id = "Fold-Model"
+provider_name = "owner"
+max_context_tokens = %d
+|} context)
   in
-  match Model_catalog.model_entries catalog with
-  | [ base ] ->
-    let lower =
-      { base with
-        model_id = Model_identifiers.Model_id.of_string_exn "fold-model"
-      }
-    in
-    Alcotest.(check bool) "rows whose ids differ only in case are one identity" false
-      (Exact_output_catalog_binding.model_identities_unique [ base; lower ])
-  | rows -> Alcotest.failf "the fixture loaded %d rows, not one" (List.length rows)
+  let first = catalog 1 in
+  let second = catalog 2 in
+  List.iter (fun (catalog, context) ->
+    match Exact_output_catalog_binding.resolve_exact
+        ~catalog ~provider_ref:"owner" ~model_id:"fold-model" with
+    | Error _ -> Alcotest.fail "the declared exact model must bind"
+    | Ok (provider, model) ->
+      Alcotest.(check (option int)) "binding uses this catalog's capability row"
+        (Some context) model.max_context_tokens;
+      let visible = Model_catalog.model_entries_for_provider catalog
+          ~provider:(Model_catalog.Declared_provider "owner") in
+      Alcotest.(check bool) "binding and enumeration share the original row" true
+        (match visible with [row] -> row == model | _ -> false);
+      Alcotest.(check bool) "binding retains this catalog's provider" true
+        (match Model_catalog.provider_entries catalog with
+         | [row] -> row == provider | _ -> false);
+      Alcotest.(check string) "case-folded matching preserves declared wire bytes"
+        "Fold-Model" (Model_identifiers.Model_id.to_string model.model_id))
+    [first, 1; second, 2; first, 1]
 ;;
 
 let test_exact_lookup_and_ownership_do_not_expand_names () =
@@ -459,7 +476,7 @@ suggested_clients = ["codex"]
     Alcotest.(check bool) "suggestion metadata remains explicit" true
       (row.suggested_clients = [Model_catalog.Codex]);
     let visible = Model_catalog.model_entries_for_provider catalog
-      ~provider:(Declared_provider "owner-alias") ~model_entries:(Model_catalog.model_entries catalog) in
+      ~provider:(Declared_provider "owner-alias") in
     Alcotest.(check (list string)) "enumeration and lookup share exact ownership" ["family"]
       (List.map (fun (row : Model_catalog.model_entry) -> Model_identifiers.Model_id.to_string row.model_id) visible))
     [broad ^ specific; specific ^ broad]
@@ -505,5 +522,5 @@ let () =
             test_scoped_lookup_retries_under_the_canonical_provider
         ; Alcotest.test_case "the_loader_refuses_rows_that_fold_to_one_id" `Quick
             test_the_loader_refuses_rows_that_fold_to_one_id
-        ; Alcotest.test_case "the_binding_folds_row_ids_as_the_index_does" `Quick
-            test_the_binding_folds_row_ids_as_the_index_does ] ) ]
+        ; Alcotest.test_case "binding_and_enumeration_retain_catalog_owned_rows" `Quick
+            test_binding_and_enumeration_retain_catalog_owned_rows ] ) ]

@@ -70,7 +70,6 @@ type resolver_catalog_source =
 
 type resolver_collision =
   | Duplicate_provider_identity
-  | Duplicate_model_identity
   | Duplicate_target_identity
   | Provider_alias_shadow
 

@@ -1,0 +1,21 @@
+Actual run 40153805828 FAILURE at 20724a6803bdc6aa9b113a2791db98112c1f5133.
+Before selected tests: unresolved runtime suite and actual OCaml unbound value.
+This is not executed conformance success.
+
+test suite	Checkout	2026-10-25T02:16:25.2837424Z HEAD is now at 20724a68 docs: describe catalog-owned binding and add changelog
+test suite	Test	2026-10-25T02:17:41.0061229Z [targeted] FAIL - test_runtime_per_keeper_model_routing names no suite: no test/test_runtime_per_keeper_model_routing.ml, test_runtime_per_keeper_model_routing.ml, test/test_runtime_per_keeper_model_routing.py or test_runtime_per_keeper_model_routing.py, and no (alias runtest-test_runtime_per_keeper_model_routing)
+test suite	Test	2026-10-25T02:17:59.8395883Z File "packages/agent_core/lib/llm_provider/capabilities.ml", line 2508, characters 61-81:
+test suite	Test	2026-10-25T02:17:59.8397363Z 2508 |         [raw ^ ".undeclared"; "undeclared-provider/" ^ raw]) test_catalog_entries)
+test suite	Test	2026-10-25T02:17:59.8398562Z Error: Unbound value test_catalog_entries
+test suite	Test	2026-10-25T02:18:19.8179684Z [targeted] @@packages/agent_core/test/runtest-test_model_identifiers: FAIL exit 1 in 38s
+test suite	Test	2026-10-25T02:18:20.4484190Z File "packages/agent_core/lib/llm_provider/capabilities.ml", line 2508, characters 61-81:
+test suite	Test	2026-10-25T02:18:20.4485331Z 2508 |         [raw ^ ".undeclared"; "undeclared-provider/" ^ raw]) test_catalog_entries)
+test suite	Test	2026-10-25T02:18:20.4486766Z Error: Unbound value test_catalog_entries
+test suite	Test	2026-10-25T02:18:20.7818493Z [targeted] @@packages/agent_core/test/runtest-test_model_catalog_default: FAIL exit 1 in 1s
+test suite	Test	2026-10-25T02:18:21.4255453Z File "packages/agent_core/lib/llm_provider/capabilities.ml", line 2508, characters 61-81:
+test suite	Test	2026-10-25T02:18:21.4256435Z 2508 |         [raw ^ ".undeclared"; "undeclared-provider/" ^ raw]) test_catalog_entries)
+test suite	Test	2026-10-25T02:18:21.4257573Z Error: Unbound value test_catalog_entries
+test suite	Test	2026-10-25T02:18:21.9473923Z [targeted] @@packages/agent_core/test/runtest-test_capabilities: FAIL exit 1 in 1s
+test suite	Test	2026-10-25T02:18:22.6051456Z File "packages/agent_core/lib/llm_provider/capabilities.ml", line 2508, characters 61-81:
+test suite	Test	2026-10-25T02:18:22.6052221Z 2508 |         [raw ^ ".undeclared"; "undeclared-provider/" ^ raw]) test_catalog_entries)
+test suite	Test	2026-10-25T02:18:22.6053014Z Error: Unbound value test_catalog_entries

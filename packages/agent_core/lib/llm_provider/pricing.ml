@@ -135,59 +135,31 @@ let[@warning "-32"] test_catalog_entry
       ?cache_read
       model_id
   =
-  { Model_catalog.model_id = Model_identifiers.Model_id.of_string_exn model_id
-  ; suggested_clients = []
-  ; base_label = None
-  ; provider_name
-  ; max_context_tokens = None
-  ; serving_constraint = None
-  ; max_output_tokens = None
-  ; supports_tools = None
-  ; supports_tool_choice = None
-  ; supports_required_tool_choice = None
-  ; supports_named_tool_choice = None
-  ; supports_parallel_tool_calls = None
-  ; assistant_tool_content_format = None
-  ; chat_output_budget_field = None
-  ; tool_schema_conformance = None
-  ; supports_reasoning = None
-  ; accepted_reasoning_efforts = None
-  ; supports_response_format_json = None
-  ; supports_structured_output = None
-  ; json_schema_dialect = None
-  ; supports_multimodal_inputs = None
-  ; supports_image_input = None
-  ; supports_audio_input = None
-  ; supports_video_input = None
-  ; supports_document_input = None
-  ; modality_priority = None
-  ; task = None
-  ; supported_models = None
-  ; supports_native_streaming = None
-  ; supports_system_prompt = None
-  ; supports_assistant_prefill = None
-  ; supports_prompt_caching = None
-  ; supports_top_k = None
-  ; supports_min_p = None
-  ; supports_seed = None
-  ; ignored_sampling_parameters = None
-  ; thinking_control_format = None
-  ; anthropic_thinking_control = None
-  ; preserve_thinking_control_format = None
-  ; content_inline_reasoning = None
-  ; reasoning_output_format = None
-  ; reasoning_streaming_format = None
-  ; reasoning_replay = None
-  ; input_per_million = input
-  ; output_per_million = output
-  ; cache_write_multiplier = cache_write
-  ; cache_read_multiplier = cache_read
-  }
+  let string_field name = function
+    | None -> ""
+    | Some value -> Printf.sprintf "%s = %S\n" name value
+  in
+  let float_field name = function
+    | None -> ""
+    | Some value -> Printf.sprintf "%s = %.17e\n" name value
+  in
+  Printf.sprintf "[[models]]\nmodel_id = %S\n%s%s%s%s%s"
+    model_id
+    (string_field "provider_name" provider_name)
+    (float_field "input_per_million" input)
+    (float_field "output_per_million" output)
+    (float_field "cache_write_multiplier" cache_write)
+    (float_field "cache_read_multiplier" cache_read)
 ;;
 
 let[@warning "-32"] with_catalog entries f =
   let original = Model_catalog.global () in
-  Model_catalog.set_global (Model_catalog.of_model_entries entries |> Result.get_ok);
+  let catalog =
+    Model_catalog.of_toml_string ~source:"pricing inline fixture"
+      (String.concat "\n" entries)
+    |> Result.get_ok
+  in
+  Model_catalog.set_global catalog;
   Fun.protect
     ~finally:(fun () ->
       match original with

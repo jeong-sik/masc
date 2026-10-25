@@ -59,22 +59,18 @@ val validate_timeout
   -> float option
   -> (unit, string) result
 
-val model_identities_unique : Model_catalog.model_entry list -> bool
-(** [true] when no two entries share the provider/model identity — the
-    precondition that makes exact binding in {!resolve_exact} unambiguous. *)
-
 val resolve_exact
   :  catalog:Model_catalog.t
-  -> model_entries:Model_catalog.model_entry list
   -> provider_ref:string
   -> model_id:string
   -> ( Model_catalog.provider_entry * Model_catalog.model_entry
        , exact_binding_error )
        result
-(** Exact identity binding: the provider is found by [provider.id =
-    provider_ref]. Its scoped rows precede bare rows only when the provider
-    declares [serves_bare_models]. The model's [model_id = model_id] is compared
-    whole, despite the field name; family-prefix hits never admit a target.
+(** Exact identity binding reads only rows owned by [catalog], whose strict
+    constructor has rejected duplicate identities. The provider is found by
+    [provider.id = provider_ref]. Its scoped rows precede bare rows only when
+    the provider declares [serves_bare_models]. Model IDs compare whole with
+    ASCII case folding; family-prefix hits never admit a target.
     Callers holding a display or api_name (the label a gateway
     shows) must not pass it here; resolve that label to the catalog id
     first. Fails with {!Provider_missing} or {!Model_missing}. *)

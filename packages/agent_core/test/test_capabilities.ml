@@ -3128,8 +3128,7 @@ provider_name = "native"
     (Option.is_none (lookup "gpt-foreign"));
   check bool "an explicit scoped row remains authoritative" true
     (Option.is_some (lookup "gpt-explicit"));
-  let visible = Model_catalog.model_entries_for_provider catalog ~provider
-    ~model_entries:(Model_catalog.model_entries catalog) in
+  let visible = Model_catalog.model_entries_for_provider catalog ~provider in
   check (list string) "enumeration uses the same original-row authority"
     ["gpt-explicit"; "claude-declared"]
     (List.map (fun (entry : Model_catalog.model_entry) ->

@@ -231,8 +231,10 @@ let invocation_batches env fs config origin = with_intake env config (fun intake
     (match selected third with [selection] -> selection.source.payload=Q.Bootstrap | []|_::_ -> false);
   check bool "general source does not borrow a conversation" true (routed third=None))
 let general_source_precedes_addon env fs config origin = with_intake env config (fun intake ->
-  deliver fs config origin (notice ()) |> delivery_ok;
   bootstrap config ~urgency:Q.Immediate ~arrived_at:0.;
+  deliver fs config origin (notice ()) |> delivery_ok;
+  check bool "ordinary source is actually first in the durable urgency-stable queue" true
+    (match pending config with first::_ -> first.source.payload=Q.Bootstrap | [] -> false);
   let first=intake () in
   check bool "first admitted ordinary source excludes companion notice" true
     (match selected first with [selection] -> selection.source.payload=Q.Bootstrap | []|_::_ -> false);

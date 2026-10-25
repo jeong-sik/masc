@@ -463,7 +463,9 @@ let make_tool_bundle_for_descriptors_with_policy
                        ~input)
                    ()
              in
-             let bridge h = Tool_bridge.agent_core_tool_of_masc_with_execution_env
+             let bridge h =
+               Keeper_schema_observation.with_definition descriptor @@ fun () ->
+               Tool_bridge.agent_core_tool_of_masc_with_execution_env
                ~base_path:config.base_path
                ~answer_reader:(fun output_text ->
                  Keeper_tool_answer.answer ~tool_name:model_name ~output_text)

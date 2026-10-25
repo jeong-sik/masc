@@ -752,3 +752,8 @@
  (name test_minimax_responses_binding)
  (modules test_minimax_responses_binding)
  (libraries agent_core llm_provider alcotest yojson))
+
+(test
+ (name test_schema_observation)
+ (modules test_schema_observation)
+ (libraries agent_core alcotest eio eio_main yojson))

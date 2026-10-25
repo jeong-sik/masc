@@ -592,7 +592,7 @@ let acquire_base_path_lock ~run_dir base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
-let run_cmd ?(record_default = false) ~executable_path host port cli_base_path accept_store_quarantine =
+let run_cmd ?schema_observation ?(record_default = false) ~executable_path host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
   let workspace =
     Server_base_path_guard.exit_on_no_workspace
@@ -950,7 +950,14 @@ let run_cmd ?(record_default = false) ~executable_path host port cli_base_path a
      then exit. Only EINTR is caught here; anything else keeps its existing
      path to the toplevel. Every sampled field is scheduler-independent
      (atomics, a try-lock counter, module-init constants). *)
-  (match Eio_main.run run_inside_scheduler with
+  let run_observed env =
+    match schema_observation with
+    | None -> run_inside_scheduler env
+    | Some observer ->
+      Agent_core.Base.Schema_observation.within observer
+        (fun () -> run_inside_scheduler env)
+  in
+  (match Eio_main.run run_observed with
    | () -> ()
    | exception Unix.Unix_error (Unix.EINTR, func, _) ->
      let pending =
@@ -1332,6 +1339,49 @@ let start_cmd =
   let info = Cmd.info "start" ~doc in
   Cmd.v info
     Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)
+
+let schema_observe_cmd =
+  let module Observation = Agent_core.Base.Schema_observation in
+  let mode =
+    Arg.(required & opt (some (enum
+      [ "disabled", Observation.Disabled
+      ; "identity", Observation.Identity_only
+      ; "timed", Observation.Timed ])) None
+      & info ["observation-mode"] ~docv:"MODE"
+          ~doc:"Schema diagnostic mode: disabled, identity, or timed.")
+  in
+  let directory =
+    Arg.(required & opt (some string) None
+      & info ["observation-directory"] ~docv:"NEW_DIRECTORY"
+          ~doc:"Create an exclusive diagnostic output directory. After the server scheduler exits, write report.json. A forced exit leaves no final report.")
+  in
+  let workspace =
+    Arg.(required & opt (some string) None & info ["base-path"] ~docv:"PATH"
+      ~doc:"Explicit owned diagnostic workspace; normal Keeper scheduling remains active.")
+  in
+  let run mode directory host port workspace =
+    Unix.mkdir directory 0o700;
+    let observer = Observation.create ~mode in
+    let identity = Build_identity.current () in
+    Installed_dashboard.initialize ~executable_path:identity.executable_path
+      ~binary_commit:identity.binary_commit;
+    Fun.protect
+      (fun () ->
+         run_cmd ~schema_observation:observer ~executable_path:identity.executable_path
+           host port (Some workspace) false;
+         Cmd.Exit.ok)
+      ~finally:(fun () ->
+        (* The scheduler and its owned children have returned before the
+           immutable scalar snapshot is serialized. No event retains a tool. *)
+        let report = Observation.snapshot observer |> Observation.report_to_json in
+        match Fs_compat.save_file_atomic (Filename.concat directory "report.json")
+                (Yojson.Safe.pretty_to_string report ^ "\n") with
+        | Ok () -> ()
+        | Error detail -> failwith ("schema observation report: " ^ detail))
+  in
+  Cmd.v (Cmd.info "schema-observe"
+    ~doc:"Run an owned server experiment and record actual schema work until shutdown.")
+    Term.(const run $ mode $ directory $ host $ port $ workspace)
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
@@ -4648,6 +4698,7 @@ let cmd =
     ; inspect_file_cmd
     ; skills_refresh_cmd
     ; start_cmd
+    ; schema_observe_cmd
     ; login_cmd
     ; mcp_config_cmd
     ; runtime_default_set_cmd

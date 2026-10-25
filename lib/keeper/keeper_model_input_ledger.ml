@@ -407,7 +407,11 @@ let prefix_digest ~system_prompt ~tools =
   let part text = Printf.sprintf "%d:%s" (String.length text) text in
   let schemas =
     List.map
-      (fun tool -> part (Yojson.Safe.to_string (Agent_core.Tool.schema_to_json tool)))
+      (fun tool ->
+         let json = Agent_core.Tool.schema_to_json tool in
+         part (Agent_core.Base.Schema_observation.encode
+                 ~site:Prefix_digest_encode ~schema:tool.Agent_core.Tool.schema
+                 (fun () -> Yojson.Safe.to_string json)))
       tools
   in
   Digestif.SHA256.(digest_string (String.concat "" (part system_prompt :: schemas)) |> to_hex)

@@ -109,7 +109,9 @@ let agent_core_tool_of_masc
       ?on_externalization_error
       (handler json_args)
   in
-  match Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema () with
+  match Agent_core.Base.Schema_observation.constructor
+          ~site:Bridge_plain_constructor
+          (fun () -> Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema ()) with
   | Ok schema ->
     Agent_core.Tool.of_schema ?descriptor schema
       (Agent_core.Tool.ignoring_execution_env agent_core_handler)
@@ -139,7 +141,9 @@ let agent_core_tool_of_masc_with_execution_env
       ?on_externalization_error
       (handler execution_env json_args)
   in
-  match Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema () with
+  match Agent_core.Base.Schema_observation.constructor
+          ~site:Bridge_execution_env_constructor
+          (fun () -> Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema ()) with
   | Ok schema -> Agent_core.Base.Tool.of_schema ?descriptor schema agent_core_handler
   | Error detail ->
     invalid_arg (Printf.sprintf "tool %S schema invalid: %s" name detail)

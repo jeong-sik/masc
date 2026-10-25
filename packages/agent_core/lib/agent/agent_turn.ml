@@ -26,7 +26,11 @@ type turn_preparation =
 
 let prepare_tools ~(tools : Tool_set.t) () =
   let selected = Tool_set.to_list tools in
-  let tool_schemas = List.map Tool.schema_to_json selected in
+  Schema_observation.surface ~site:Sdk_prepare_json (fun () ->
+    List.map (fun (tool : Tool.t) -> tool.schema) selected);
+  let tool_schemas =
+    Schema_observation.with_site Sdk_prepare_json (fun () ->
+      List.map Tool.schema_to_json selected) in
   let tools_json = if tool_schemas = [] then None else Some tool_schemas in
   let visible_tool_names = List.map (fun (t : Tool.t) -> t.schema.name) selected in
   tools_json, visible_tool_names

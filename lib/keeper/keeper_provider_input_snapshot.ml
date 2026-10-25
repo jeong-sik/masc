@@ -395,7 +395,11 @@ let message_payload (message : Agent_core.Types.message) =
 ;;
 
 let tool_schema_payload (tool : Agent_core.Tool.t) =
-  Agent_core.Tool.schema_to_json tool |> Yojson.Safe.to_string |> payload_of_string
+  let json = Agent_core.Tool.schema_to_json tool in
+  Agent_core.Base.Schema_observation.encode
+    ~site:Provider_snapshot_encode ~schema:tool.Agent_core.Tool.schema
+    (fun () -> Yojson.Safe.to_string json)
+  |> payload_of_string
 ;;
 
 let store_artifact store ~reusable ~mime { payload_bytes = bytes; payload_sha256 = sha256 } =
@@ -433,11 +437,15 @@ let write_best_effort
     (* Serialising and hashing every message and tool schema is pure, so the
        CPU pool does it. Reuse lookup, map updates and the append stay on
        this fiber; each new blob's addressing and durable put use the IO pool. *)
-    let system_payload, message_payloads, tool_payloads =
-      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    let work = Agent_core.Base.Schema_observation.capture (fun () ->
+      Agent_core.Base.Schema_observation.measure ~site:Worker_work (fun () ->
         ( (if String.equal system_prompt "" then None else Some (payload_of_string system_prompt))
         , List.map message_payload messages
-        , List.map tool_schema_payload tools ))
+        , List.map tool_schema_payload tools )))
+    in
+    let system_payload, message_payloads, tool_payloads =
+      Agent_core.Base.Schema_observation.measure ~site:Worker_queue_and_await
+        (fun () -> Domain_pool_ref.submit_cpu_or_inline work)
     in
     let blob_store = Tool_blob_store.create ~base_path:config.base_path in
     let reusable =

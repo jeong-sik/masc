@@ -2374,6 +2374,9 @@ let run_named
           ~runtime_id:attempt_runtime_id
           runtime
       in
+      Agent_core.Base.Schema_observation.with_attempt
+        ~routing_run_id ~lane_attempt_index:idx ~runtime_id:attempt_runtime_id
+      @@ fun () ->
       Option.iter
         (fun observe ->
            observe

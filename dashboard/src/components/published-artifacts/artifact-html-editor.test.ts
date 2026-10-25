@@ -29,7 +29,7 @@ async function fixture() {
   const authority = seedSharedDocument('<style>p{color:red}</style>\r\n<p>alpha &amp; 친구 😀</p>')
   const target = { artifact_id: `artifact-${'e'.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
   let sequence = 0, receive!: (frame: ArtifactDraftLiveFrame) => void, changed: (state: ArtifactLiveState) => void = () => {}
-  const snapshot = (): ArtifactDraftView => ({ content: sharedSource(authority), selection: null, draft: { schema: 'masc.artifact_draft.v1', target,
+  const snapshot = (): ArtifactDraftView => ({ content: sharedSource(authority), threads: [], discussion_receipts: [], selection: null, draft: { schema: 'masc.artifact_draft.v2', target,
     state: draftBase64(sharedState(authority)), base_revision: 1, base_sha256: 'a'.repeat(64), sequence, updated_by: 'actor', updated_at: '2026-10-26T01:00:00Z' } })
   const frame = (): ArtifactDraftLiveFrame => ({ schema: 'masc.artifact_draft_live.v1', session_id: 'self', target, peers: [], document: snapshot() })
   vi.mocked(sendArtifactDraftCommand).mockImplementation(async command => {

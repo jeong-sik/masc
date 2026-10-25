@@ -1,10 +1,12 @@
 module Draft = Artifact_draft
 module Engine = Artifact_document_engine
 module Artifacts = Published_artifact_store
+module Discussion = Artifact_discussion
 type error =
   | Invalid of string
   | Missing
   | Generation_conflict of Draft.target
+  | Discussion_conflict of string
   | Artifact_error of Artifacts.error
   | Transform_error of Engine.error
   | Unavailable of string
@@ -12,16 +14,13 @@ type error =
 type view = { draft : Draft.t; content : string; selection : (Draft.selection * int * int) option }
 let ( let* ) = Result.bind
 let error_message = function
-  | Invalid message | Unavailable message -> message
+  | Invalid message | Unavailable message | Discussion_conflict message -> message
   | Missing -> "shared draft not found"
   | Generation_conflict _ -> "shared draft generation changed; reopen the document"
   | Artifact_error error -> Artifacts.error_message error
   | Transform_error error -> Engine.error_message error
   | Commit_uncertain _ -> "draft may have been saved; reread before retrying"
-let view_to_json view = `Assoc
-  ["draft", Draft.to_json view.draft; "content", `String view.content;
-   "selection", (match view.selection with None -> `Null | Some (selection, anchor, head) ->
-     `Assoc ["selection", Draft.selection_to_json selection; "anchor", `Int anchor; "head", `Int head])]
+let view_to_json view = Draft.document_to_json ~draft:view.draft ~content:view.content ~selection:view.selection
 let root ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "artifact_drafts"
 let path ~base_path artifact_id = Filename.concat (root ~base_path) (artifact_id ^ ".json")
 let protect f = try f () with
@@ -109,10 +108,10 @@ let mutate ?runner ~base_path ~actor (target : Draft.target) transform =
     let* snapshot, previous = load ~base_path target.artifact_id in
     let* previous = match previous with None -> Error Missing | Some draft -> Ok draft in
     let* () = matching target previous in
-    let* source, selection = transform ?runner previous in let* () = source_limit source in
-    if String.equal source.state previous.state then Ok { draft = previous; content = source.content; selection }
+    let* source, selection, discussion = transform ?runner previous in let* () = source_limit source in
+    if String.equal source.state previous.state && discussion = previous.discussion then Ok { draft = previous; content = source.content; selection }
     else
-      let* draft = Draft.advance previous ~state:source.state ~actor ~at:(Types_core.now_iso ())
+      let* draft = Draft.advance ~discussion previous ~state:source.state ~actor ~at:(Types_core.now_iso ())
         |> Result.map_error (fun message -> Invalid message) in
       let* committed = commit ~base_path snapshot draft in
       match committed with `Retry -> attempt () | `Saved -> Ok { draft; content = source.content; selection } in
@@ -122,7 +121,7 @@ let execute_command ?runner ~base_path ~actor command = protect (fun () ->
   else match command with
   | Draft.Open { artifact_id; revision } -> open_draft ?runner ~base_path ~actor ~artifact_id ~revision ()
   | Merge { target; updates } -> mutate ?runner ~base_path ~actor target (fun ?runner draft ->
-      let* source = Engine.merge ?runner ~state:draft.Draft.state ~updates () |> transformed in Ok (source, None))
+      let* source = Engine.merge ?runner ~state:draft.Draft.state ~updates () |> transformed in Ok (source, None, draft.discussion))
   | Select { target; anchor; head } ->
     let* view = read ?runner ~base_path ~artifact_id:target.artifact_id () in let* () = matching target view.draft in
     let* selected = Engine.select ?runner ~state:view.draft.state ~anchor ~head () |> transformed in
@@ -130,12 +129,37 @@ let execute_command ?runner ~base_path ~actor command = protect (fun () ->
   | Edit { selection; expected; replacement } ->
     mutate ?runner ~base_path ~actor selection.target (fun ?runner draft ->
       let* edited = Engine.edit ?runner ~state:draft.Draft.state ~selection:selection.position ~expected ~replacement () |> transformed in
-      Ok (edited.snapshot, Some ({ Draft.target = selection.target; position = edited.selection }, edited.anchor, edited.head)))
+      Ok (edited.snapshot, Some ({ Draft.target = selection.target; position = edited.selection }, edited.anchor, edited.head), draft.discussion))
   | Resolve selection ->
     let* view = read ?runner ~base_path ~artifact_id:selection.target.artifact_id () in
     let* () = matching selection.target view.draft in
     let* selected = Engine.resolve ?runner ~state:view.draft.state ~selection:selection.position () |> transformed in
-    Ok { view with selection = Some (selection, selected.anchor, selected.head) })
+    Ok { view with selection = Some (selection, selected.anchor, selected.head) }
+  | Discuss { target; request } ->
+    mutate ?runner ~base_path ~actor target (fun ?runner draft ->
+      let* existing = Discussion.check draft.discussion ~actor request
+        |> Result.map_error (fun message -> Discussion_conflict message) in
+      let source () = Engine.merge ?runner ~state:draft.state ~updates:[] () |> transformed in
+      match existing with
+      | Some _ -> let* snapshot = source () in Ok (snapshot, None, draft.discussion)
+      | None ->
+        let* snapshot, selection, applied = match request.command with
+          | Discussion.Comment { position; quote; _ } ->
+            let* selected = Engine.resolve ?runner ~state:draft.state ~selection:position () |> transformed in
+            let* actual = Engine.selected_text selected |> transformed in
+            if actual <> quote then Error (Transform_error { Engine.kind = Changed_selection; message = "selected comment source changed; reread before commenting" })
+            else Ok (selected.snapshot, Some ({ Draft.target; position }, selected.anchor, selected.head), None)
+          | Accept thread_id ->
+            (* [check] proved this thread exists and still has a pending proposal. *)
+            let* threads = Discussion.threads draft.discussion |> Result.map_error (fun message -> Discussion_conflict message) in
+            let thread = List.find (fun (thread : Discussion.thread) -> thread.id = thread_id) threads in
+            let replacement = Option.get thread.proposal in
+            let* edited = Engine.edit ?runner ~state:draft.state ~selection:thread.position ~expected:thread.quote ~replacement () |> transformed in
+            Ok (edited.snapshot, Some ({ Draft.target; position = edited.selection }, edited.anchor, edited.head), Some edited.selection)
+          | Reply _ | Resolve _ | Reopen _ | Reject _ -> let* snapshot = source () in Ok (snapshot, None, None) in
+        let* discussion = Discussion.append draft.discussion ~actor ~at:(Types_core.now_iso ()) request ~applied
+          |> Result.map_error (fun message -> Discussion_conflict message) in
+        Ok (snapshot, selection, discussion)))
 
 let execute ?runner ~base_path ~actor command =
   let result = execute_command ?runner ~base_path ~actor command in

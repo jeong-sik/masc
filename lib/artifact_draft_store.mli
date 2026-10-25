@@ -2,6 +2,7 @@ type error =
   | Invalid of string
   | Missing
   | Generation_conflict of Artifact_draft.target
+  | Discussion_conflict of string
   | Artifact_error of Published_artifact_store.error
   | Transform_error of Artifact_document_engine.error
   | Unavailable of string

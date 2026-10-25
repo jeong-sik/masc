@@ -48,8 +48,8 @@ function fixture(char: string) {
   const authority = seedSharedDocument('shared source\r\n한글 😀\r\n'); documents.push(authority)
   const target = { artifact_id: `artifact-${char.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
   let sequence = 0
-  const snapshot = (): ArtifactDraftView => ({ content: sharedSource(authority), selection: null, draft: {
-    schema: 'masc.artifact_draft.v1', target, state: draftBase64(sharedState(authority)), base_revision: 1,
+  const snapshot = (): ArtifactDraftView => ({ content: sharedSource(authority), threads: [], discussion_receipts: [], selection: null, draft: {
+    schema: 'masc.artifact_draft.v2', target, state: draftBase64(sharedState(authority)), base_revision: 1,
     base_sha256: 'a'.repeat(64), sequence, updated_by: 'human', updated_at: '2026-10-25T13:00:00Z',
   } })
   const frame = (): ArtifactDraftLiveFrame => ({ schema: 'masc.artifact_draft_live.v1', target, session_id: 'self', peers: [], document: snapshot() })
@@ -71,7 +71,7 @@ it('binds actual editor transactions to exact CRLF source, handles remote edits 
   const target = { artifact_id: `artifact-${'a'.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
   let sequence = 0, receive!: (frame: ArtifactDraftLiveFrame) => void
   let peers: ArtifactDraftLiveFrame['peers'] = [{ session_id: 'self', actor: 'human', source: { kind: 'dashboard_connection' }, position: null, observed_at: '2026-10-25T13:00:00Z' }]
-  const snapshot = (): ArtifactDraftView => ({ content: sharedSource(authority), selection: null, draft: { schema: 'masc.artifact_draft.v1', target,
+  const snapshot = (): ArtifactDraftView => ({ content: sharedSource(authority), threads: [], discussion_receipts: [], selection: null, draft: { schema: 'masc.artifact_draft.v2', target,
     state: draftBase64(sharedState(authority)), base_revision: 1, base_sha256: 'a'.repeat(64), sequence, updated_by: 'human', updated_at: '2026-10-25T13:00:00Z' } })
   const frame = () => ({ schema: 'masc.artifact_draft_live.v1' as const, target, session_id: 'self', peers, document: snapshot() })
   vi.mocked(sendArtifactPresence).mockResolvedValue()

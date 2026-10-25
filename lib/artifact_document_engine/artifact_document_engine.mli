@@ -12,6 +12,7 @@ val error_message : error -> string
 val selection_to_json : selection -> Yojson.Safe.t
 val selection_of_json : Yojson.Safe.t -> (selection, string) result
 val valid_state : string -> bool
+val selected_text : positioned -> (string, error) result
 val default_runner : ?executable:string -> string -> (Unix.process_status * string, string) result
 val seed : ?runner:runner -> string -> (snapshot, error) result
 val merge : ?runner:runner -> state:string -> updates:string list -> unit -> (snapshot, error) result

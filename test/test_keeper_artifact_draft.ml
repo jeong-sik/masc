@@ -39,6 +39,27 @@ let with_observer base_path target f =
 let integration runner =
   let call scope base_path input = Keeper_artifact_draft.handle ~runner ~scope ~base_path ~keeper:"keeper-editor" ~turn_ref ~args:input () in
   [
+  "Keeper discussion uses real actor and durable request receipts", `Quick, (fun () -> with_base (fun base_path -> with_scope base_path (fun scope ->
+    let artifact = publish base_path "alpha" in
+    let opened = call scope base_path (open_args artifact.id) |> success in
+    let target = target_of opened in
+    let chosen = call scope base_path (select target 0 5) |> success in
+    let position = member "position" (member "selection" chosen) |> Artifact_document_engine.selection_of_json |> require in
+    let request = { Artifact_discussion.id = member "next_request_id" chosen |> text;
+      command = Artifact_discussion.Comment { position; quote = "alpha"; body = "Keeper가 제안해요"; proposal = Some "함께 편집" } } in
+    let input = `Assoc ["action", `String "discuss"; "target", Draft.target_to_json target;
+      "request", Artifact_discussion.request_to_json request] in
+    let commented = call scope base_path input |> success in
+    let receipt = member "discussion_receipts" commented |> Yojson.Safe.Util.to_list |> List.hd in
+    Alcotest.(check string) "actual actor" "keeper-editor" (member "actor" receipt |> text);
+    Alcotest.(check string) "stable receipt" request.id (member "id" (member "request" receipt) |> text);
+    Alcotest.(check string) "comment does not edit text" "alpha" (member "content" commented |> text);
+    let duplicate = call scope base_path input |> success in
+    Alcotest.(check int) "retry one event" 1 (member "discussion_receipts" duplicate |> Yojson.Safe.Util.to_list |> List.length);
+    let accept = { Artifact_discussion.id = member "next_request_id" duplicate |> text; command = Artifact_discussion.Accept request.id } in
+    let result = call scope base_path (`Assoc ["action", `String "discuss"; "target", Draft.target_to_json target;
+      "request", Artifact_discussion.request_to_json accept]) |> success in
+    Alcotest.(check string) "proposal applied" "함께 편집" (member "content" result |> text))));
   "selected Keeper edit follows human prefix and preserves publication", `Quick, (fun () -> with_base (fun base_path -> with_scope base_path (fun scope ->
     let artifact = publish base_path "alpha\r\n한글 😀\r\n" in
     let opened = call scope base_path (open_args artifact.id) |> success in

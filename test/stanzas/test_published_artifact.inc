@@ -18,6 +18,12 @@
   alcotest eio eio_main unix yojson))
 
 (test
+ (name test_artifact_discussion)
+ (modules test_artifact_discussion)
+ (libraries masc masc.artifact_document_engine masc.masc_process masc.masc_core masc.masc_random_id masc.fs_compat
+  alcotest eio eio_main unix yojson))
+
+(test
  (name test_artifact_draft_live)
  (modules test_artifact_draft_live)
  (libraries masc masc.artifact_document_engine alcotest eio eio_main yojson))

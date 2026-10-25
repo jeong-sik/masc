@@ -104,6 +104,19 @@ let utf16_length text =
       let scalar = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
       count (offset + Uchar.utf_decode_length decoded) (total + if scalar > 0xFFFF then 2 else 1) in
   count 0 0
+let selected_text (positioned : positioned) =
+  let text = positioned.snapshot.content in
+  let offset target =
+    let rec walk byte units =
+      if units = target then Some byte
+      else if units > target || byte >= String.length text then None
+      else let decoded = String.get_utf_8_uchar text byte in
+        let scalar = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+        walk (byte + Uchar.utf_decode_length decoded) (units + if scalar > 0xFFFF then 2 else 1) in
+    if target < 0 then None else walk 0 0 in
+  match offset (min positioned.anchor positioned.head), offset (max positioned.anchor positioned.head) with
+  | Some start, Some stop -> Ok (String.sub text start (stop - start))
+  | _ -> unavailable "transformer selection splits a character or exceeds source"
 let decode_positioned values =
   let parsed =
     let* snapshot = snapshot values in

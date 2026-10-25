@@ -22,7 +22,7 @@ async function commit(command: Parameters<typeof sendArtifactDraftCommand>[0]) {
 }
 beforeEach(() => {
   sessions = []; receivers = []; authority = seedSharedDocument(initial)
-  view = { draft: { schema: 'masc.artifact_draft.v1', target, base_revision: 1, base_sha256: 'b'.repeat(64), state: draftBase64(sharedState(authority)), sequence: 0, updated_by: 'publisher', updated_at: '2026-10-25T13:00:00Z' }, content: initial, selection: null }
+  view = { draft: { schema: 'masc.artifact_draft.v2', target, base_revision: 1, base_sha256: 'b'.repeat(64), state: draftBase64(sharedState(authority)), sequence: 0, updated_by: 'publisher', updated_at: '2026-10-25T13:00:00Z' }, content: initial, threads: [], discussion_receipts: [], selection: null }
   vi.mocked(sendArtifactPresence).mockReset().mockResolvedValue()
   vi.mocked(sendArtifactDraftCommand).mockReset().mockImplementation(commit)
   vi.mocked(streamArtifactDraft).mockReset().mockImplementation(async (_, __, receive, signal) => {

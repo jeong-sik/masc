@@ -12,6 +12,7 @@ let error_response error =
   | Invalid _ -> response `Bad_request "invalid_artifact_draft" []
   | Missing -> response `Not_found "artifact_draft_not_found" []
   | Generation_conflict target -> response `Conflict "artifact_draft_generation_conflict" ["current_target", Artifact_draft.target_to_json target]
+  | Discussion_conflict _ -> response `Conflict "artifact_discussion_conflict" []
   | Transform_error { kind = Engine.Invalid_request; _ } -> response `Bad_request "invalid_artifact_draft" []
   | Transform_error { kind = Invalid_document; _ } -> response `Bad_request "invalid_artifact_draft_document" []
   | Transform_error { kind = Invalid_selection; _ } -> response `Bad_request "invalid_artifact_draft_selection" []

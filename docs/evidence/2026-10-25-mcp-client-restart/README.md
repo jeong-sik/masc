@@ -19,7 +19,7 @@ expected base and `.masc` root. Each process rejects an unauthenticated initiali
 with401. The same static client bearer then succeeds at initialize, initialized
 notification, tools/list (54 tools), and tools/call for `masc_tool_help` about
 `masc_status`. The two returned session IDs must differ. The original raw client
-credential bytes must remain unchanged, while the internal Keeper token hash
+credential value (after stripping surrounding whitespace) must remain unchanged, while the internal Keeper token hash
 must change between server processes. Both server processes are terminated and
 reaped, and the private credentials, raw responses and server logs are deleted.
 Only non-secret assertions, counts and executable identity are published.

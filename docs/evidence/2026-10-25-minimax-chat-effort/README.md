@@ -25,3 +25,11 @@ Selected checkout/assertion/suite lines and raw log SHA/size are retained in thi
 PR #45972 is an isolated bottom branch because #45859 was already merged. gh stack init adopted it; gh stack submit reported native stacks disabled, and REST stack:null was observed. Main advanced fromc8e4 to32b4c94120f04e0b970105e958ad10d2dbaf50ce with a docs/evidence/changelog-only delta. That is not a newly executed current-main combination.
 
 Native Responses integration, exact M2 Responses availability, Chat tool-choice evidence and the rest of #27924 remain open. This incremental repair does not close that issue or the oldest-issues campaign.
+
+## Actual final execution
+
+[Run40201714511](https://github.com/jeong-sik/masc/actions/runs/40201714511) checked out exactly `34eced85849e37c20ab0c7113367b40a9735883d` and completed SUCCESS: codec65 + capabilities124 + provider config140 + runtime-format parser8 + public inventory2 = **339 actual cases**. Full admission with omitted/explicit depths, unsupported/disable boundaries, the existing native replay case, both parser spellings and the public inventory reload assertions were reached. Server projection compiled in this execution. This is data/protocol proof, not rendered UI or vendor HTTP.
+
+Earlier [run40201598560](https://github.com/jeong-sik/masc/actions/runs/40201598560) atdd5358 actually succeeded338 (the inventory suite then had only its pre-existing one case). It predates the added inventory roundtrip and is not the final339 result. Counts from intermediate/failed runs are not added to339.
+
+All19 source/fixture hashes in source-hashes.json match subsequent evidence/changelog-only heads. The first changelog check found the missing PR citation; it was corrected at44f679d4039e5f084c08fd06e4cab4b35398ba27 and check-files then passed. The earlier author COMMENT's mention of fragment checks was not a successful fragment receipt. No source or fixture changed for that correction. Full regression remains unexecuted.

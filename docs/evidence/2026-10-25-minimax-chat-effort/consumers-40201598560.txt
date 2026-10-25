@@ -1,0 +1,102 @@
+run: 40201598560
+url: https://github.com/jeong-sik/masc/actions/runs/40201598560
+head: dd5358dcae3ac9a220c1ccee977d882c0479f6cc
+raw_sha256: e1e9e2e04cad0133bb11a4299dc25b9f3774d56cbf54b573c9886d5b6e0b2c4e
+raw_bytes: 757462
+
+test suite	Checkout	2026-10-25T14:18:36.9598141Z HEAD is now at dd5358dc fix(runtime): carry default-on effort through declarations and projection
+test suite	Test	2026-10-25T14:20:00.0268425Z [targeted] @@packages/agent_core/test/runtest-test_backend_openai_codec: start 2026-10-25T14:20:00Z (dune alias)
+test suite	Test	2026-10-25T14:20:35.5458127Z ^[[33mASSERT^[[0m ordinary categorical effort still requires an explicit depth
+test suite	Test	2026-10-25T14:20:35.5459210Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5459631Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5459987Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5460356Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5460859Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5461280Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5462075Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5462470Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5462820Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5463250Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5463680Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5464165Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5465215Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5465614Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5465956Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5466311Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5466825Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5467249Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5468250Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5468836Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5469216Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5469572Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5469965Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5470311Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5471451Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5471856Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5472262Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5472640Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5473134Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5473608Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5473969Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5474463Z ^[[33mASSERT^[[0m omission preserves the provider's default depth
+test suite	Test	2026-10-25T14:20:35.5474879Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5475574Z ^[[33mASSERT^[[0m omission preserves the provider's default depth
+test suite	Test	2026-10-25T14:20:35.5476421Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5476944Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5477335Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5477827Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5478211Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5478556Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5479435Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5479848Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5480196Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5480551Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5480933Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5481324Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5482225Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5482754Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5483102Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5483454Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5483848Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5484370Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5485677Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5486064Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5486509Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5486867Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5487247Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5487594Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5488546Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5489048Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5489426Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5489865Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5490249Z ^[[33mASSERT^[[0m native Chat transmits the requested effort
+test suite	Test	2026-10-25T14:20:35.5490587Z ^[[33mASSERT^[[0m no competing thinking object
+test suite	Test	2026-10-25T14:20:35.5490943Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5491441Z ^[[33mASSERT^[[0m omission preserves the provider's default depth
+test suite	Test	2026-10-25T14:20:35.5492028Z ^[[33mASSERT^[[0m native request passes full public admission
+test suite	Test	2026-10-25T14:20:35.5492443Z ^[[33mASSERT^[[0m omission preserves the provider's default depth
+test suite	Test	2026-10-25T14:20:35.5493327Z ^[[33mASSERT^[[0m unsupported depth fails public admission
+test suite	Test	2026-10-25T14:20:35.5493722Z ^[[33mASSERT^[[0m unsupported depth cannot reach a final request
+test suite	Test	2026-10-25T14:20:35.5494566Z ^[[33mASSERT^[[0m unsupported depth fails public admission
+test suite	Test	2026-10-25T14:20:35.5495329Z ^[[33mASSERT^[[0m unsupported depth cannot reach a final request
+test suite	Test	2026-10-25T14:20:35.5496444Z ^[[33mASSERT^[[0m unsupported depth fails public admission
+test suite	Test	2026-10-25T14:20:35.5496939Z ^[[33mASSERT^[[0m unsupported depth cannot reach a final request
+test suite	Test	2026-10-25T14:20:35.5497339Z ^[[33mASSERT^[[0m explicit disable fails public admission
+test suite	Test	2026-10-25T14:20:35.5497754Z ^[[33mASSERT^[[0m explicit disable cannot reach a final request
+test suite	Test	2026-10-25T14:20:35.5498261Z ^[[33mASSERT^[[0m explicit disable fails public admission
+test suite	Test	2026-10-25T14:20:35.5498649Z ^[[33mASSERT^[[0m explicit disable cannot reach a final request
+test suite	Test	2026-10-25T14:20:35.5499111Z   ^[[32m[OK]^[[0m          ^[[36mparse^[[0m             12   MiniMax M3.1 native Chat depth control.
+test suite	Test	2026-10-25T14:20:35.7132861Z ^[[32mTest Successful^[[0m in 0.111s. 65 tests run.
+test suite	Test	2026-10-25T14:20:35.7133875Z [targeted] @@packages/agent_core/test/runtest-test_backend_openai_codec: OK in 35s
+test suite	Test	2026-10-25T14:20:35.7134440Z [targeted] @@packages/agent_core/test/runtest-test_capabilities: start 2026-10-25T14:20:35Z (dune alias)
+test suite	Test	2026-10-25T14:20:37.2164991Z ^[[32mTest Successful^[[0m in 0.039s. 124 tests run.
+test suite	Test	2026-10-25T14:20:37.2256894Z [targeted] @@packages/agent_core/test/runtest-test_capabilities: OK in 2s
+test suite	Test	2026-10-25T14:20:37.2278703Z [targeted] @@packages/agent_core/test/runtest-test_provider_config: start 2026-10-25T14:20:37Z (dune alias)
+test suite	Test	2026-10-25T14:20:39.6243524Z ^[[32mTest Successful^[[0m in 0.601s. 140 tests run.
+test suite	Test	2026-10-25T14:20:39.6400108Z [targeted] @@packages/agent_core/test/runtest-test_provider_config: OK in 2s
+test suite	Test	2026-10-25T14:23:28.4229318Z ASSERT thinking-control-format reasoning_effort
+test suite	Test	2026-10-25T14:23:28.4229782Z ASSERT thinking-control-format reasoning-effort
+test suite	Test	2026-10-25T14:23:28.4230381Z ASSERT thinking-control-format reasoning_effort_default_on
+test suite	Test	2026-10-25T14:23:28.4230953Z ASSERT thinking-control-format reasoning-effort-default-on
+test suite	Test	2026-10-25T14:23:28.4238508Z Test Successful in 0.001s. 8 tests run.
+test suite	Test	2026-10-25T14:23:28.5816168Z Test Successful in 0.000s. 1 test run.

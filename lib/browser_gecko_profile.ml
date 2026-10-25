@@ -86,9 +86,51 @@ let parse_pref_line_key line =
           String.sub rest (close_quote + 1) (String.length rest - close_quote - 1)
           |> String.trim
         in
-        if String.starts_with ~prefix:"," tail then Some key else None
-    else
-      None
+        if not (String.starts_with ~prefix:"," tail) then None
+        else begin
+          (* The key alone never licenses deleting the whole line: a line may
+             carry several user_pref statements or a trailing comment. Accept
+             the key only when this call closes exactly once and nothing but
+             the terminating semicolon follows it; otherwise the caller must
+             keep the original line verbatim. *)
+          let tail =
+            String.trim (String.sub tail 1 (String.length tail - 1))
+          in
+          let len = String.length tail in
+          let depth = ref 0 and in_string = ref false and escaped = ref false in
+          let closed_at = ref None in
+          let i = ref 0 in
+          while !i < len && Option.is_none !closed_at do
+            let c = tail.[!i] in
+            if !in_string then begin
+              if !escaped then escaped := false
+              else if Char.equal c '\\' then escaped := true
+              else if Char.equal c '"' then in_string := false
+            end
+            else begin
+              match c with
+              | '"' -> in_string := true
+              | '(' -> incr depth
+              | ')' -> if !depth = 0 then closed_at := Some !i else decr depth
+              | _ -> ()
+            end;
+            incr i
+          done;
+          let single_statement =
+            match !closed_at with
+            | None -> false
+            | Some at ->
+              let after =
+                String.trim (String.sub tail (at + 1) (len - at - 1))
+              in
+              String.length after >= 1
+              && Char.equal after.[0] ';'
+              && String.equal
+                   (String.trim (String.sub after 1 (String.length after - 1)))
+                   ""
+          in
+          if single_statement then Some key else None
+        end
 
 let split_lines_without_trailing_empty text =
   let raw = String.split_on_char '\n' text in

@@ -57,7 +57,7 @@ val provider_id_of_provider_config : Llm_provider.Provider_config.t -> string
 (** Project the config-owned capabilities used by completion admission.
     Selected bindings carry provider facts into the config at construction;
     this read never re-resolves provider aliases or consults the current
-    registry as a fallback. Frozen absence uses the typed wire default. *)
+    registry as a fallback. Frozen absence uses the same conservative wire defaults as request admission. *)
 val capabilities_for_provider_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Capabilities.capabilities

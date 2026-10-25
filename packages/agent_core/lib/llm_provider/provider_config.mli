@@ -369,6 +369,17 @@ val provider_reference : t -> Model_catalog.provider_reference
     including [None]. *)
 val capabilities_for_config_model : t -> Capabilities.capabilities option
 
+type capability_source = Model_capability | Provider_default_capability
+
+val resolve_request_capabilities : t -> Capabilities.capabilities * capability_source
+(** One capability resolution for request admission, observation and runtime
+    projection. Explicit declarations and frozen model policies answer first.
+    Missing model facts use the typed wire's existing request defaults. Unknown
+    OpenAI-compatible endpoints acquire no capability-dependent options;
+    other undeclared native models retain their wire defaults and conservative
+    tool-choice flags. A frozen absence never reopens catalog or registry state. *)
+
+
 val freeze_for_request : t -> t
 (** Capture the catalog resolution for this request without changing explicit
     overrides. Idempotent while provider/model identity is unchanged. *)

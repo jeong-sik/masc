@@ -53,14 +53,6 @@ val emit_tool_call_metrics
 
 (** {1 Request admission} *)
 
-val effective_capabilities : Provider_config.t -> Capabilities.capabilities
-(** The same effective capabilities used by completion admission and wire
-    observers: an explicit config override or resolved model policy, otherwise
-    the typed wire default. A frozen missing model policy stays missing; this
-    projection never adds a second registry/catalog fallback after config
-    resolution. Unfrozen configs retain normal request-time resolution.
-    Provider-level declarations enter through a selected binding's config. *)
-
 val requires_non_http_transport : Provider_config.provider_kind -> bool
 
 type thinking_control_request_rejection =

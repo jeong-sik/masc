@@ -220,7 +220,8 @@ let provider_id_of_provider_config cfg =
   | None -> PConfig.string_of_provider_kind cfg.kind
 ;;
 
-let capabilities_for_provider_config = Llm_provider.Complete_common.effective_capabilities
+let capabilities_for_provider_config config =
+  fst (PConfig.resolve_request_capabilities config)
 ;;
 
 let resolve_model binding ~requested_model =

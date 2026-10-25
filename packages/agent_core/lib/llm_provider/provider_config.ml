@@ -461,30 +461,30 @@ let tool_choice_request_rejection_to_message = function
       model_id
 ;;
 
-let request_capabilities_for_config (config : t) =
-  let caps =
-    match capabilities_for_config_model config with
-    | Some caps -> caps
-    | None ->
-      (match config.kind with
-       | Glm -> Capabilities.glm_capabilities
-       | Anthropic -> Capabilities.anthropic_capabilities
-       | Kimi -> Capabilities.kimi_capabilities
-       | Ollama -> Capabilities.ollama_capabilities
-       | Gemini -> Capabilities.gemini_capabilities
-       | OpenAI_compat -> Capabilities.default_capabilities)
-  in
-  caps
+type capability_source = Model_capability | Provider_default_capability
+
+let resolve_request_capabilities (config : t) =
+  match capabilities_for_config_model config with
+  | Some caps -> caps, Model_capability
+  | None ->
+    let caps = match config.kind with
+      | Glm -> Capabilities.glm_capabilities
+      | Anthropic -> Capabilities.anthropic_capabilities
+      | Kimi -> Capabilities.kimi_capabilities
+      | Ollama -> Capabilities.ollama_capabilities
+      | Gemini -> Capabilities.gemini_capabilities
+      | OpenAI_compat -> Capabilities.default_capabilities in
+    (* A native wire declares its protocol, not an unknown model's forced-tool
+       support. Preserve the existing admission policy in the shared record. *)
+    let caps = match config.kind with
+      | Glm | OpenAI_compat -> caps
+      | Anthropic | Kimi | Ollama | Gemini ->
+        {caps with supports_tool_choice=false; supports_required_tool_choice=false;
+          supports_named_tool_choice=false} in
+    caps, Provider_default_capability
 ;;
 
-let tool_choice_capabilities_for_config (config : t) =
-  match capabilities_for_config_model config with
-  | Some caps -> caps
-  | None ->
-    (match config.kind with
-     | Glm -> Capabilities.glm_capabilities
-     | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini ->
-       Capabilities.default_capabilities)
+let request_capabilities_for_config config = fst (resolve_request_capabilities config)
 ;;
 
 let validate_tool_choice_request_with_capabilities
@@ -527,7 +527,7 @@ let validate_tool_choice_request_typed (config : t) =
   match validate_anthropic_thinking_tool_choice config with
   | Error _ as error -> error
   | Ok () ->
-    let caps = tool_choice_capabilities_for_config config in
+    let caps = request_capabilities_for_config config in
     validate_tool_choice_request_with_capabilities
       ~provider_kind:config.kind
       ~model_id:config.model_id

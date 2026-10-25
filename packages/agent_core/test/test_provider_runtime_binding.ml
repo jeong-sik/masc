@@ -240,7 +240,7 @@ let test_explicit_provider_id_requires_selected_catalog_capabilities () =
     Alcotest.(check bool) "raw provider id does not reopen overlay capability policy" false
       caps.supports_reasoning;
     Alcotest.(check bool) "runtime capability agrees with completion admission" true
-      (caps = Llm_provider.Complete_common.effective_capabilities config);
+      (caps = fst (Llm_provider.Provider_config.resolve_request_capabilities config));
     let binding = expect_binding "subscriber-local" in
     let selected = expect_ok (Provider_runtime_binding.to_provider_config
       ~model:"unlisted-local-model" binding) in
@@ -248,7 +248,7 @@ let test_explicit_provider_id_requires_selected_catalog_capabilities () =
     Alcotest.(check bool) "selected catalog declaration retains reasoning" true
       caps.supports_reasoning;
     Alcotest.(check bool) "selected declaration agrees with completion admission" true
-      (caps = Llm_provider.Complete_common.effective_capabilities selected))
+      (caps = fst (Llm_provider.Provider_config.resolve_request_capabilities selected)))
 ;;
 
 (* A model no catalog row names is the deployment's own, and its capability
@@ -962,7 +962,7 @@ base = "openai_chat_extended"
     let actual = Provider_runtime_binding.capabilities_for_provider_config config in
     let expected = Option.value
       (Llm_provider.Provider_config.capabilities_for_config_model config)
-      ~default:Llm_provider.Capabilities.openai_compat_chat_capabilities in
+      ~default:Llm_provider.Capabilities.default_capabilities in
     Alcotest.(check bool) "runtime projection cannot revive a missing model policy" true
       (actual = expected))
 ;;
@@ -977,7 +977,7 @@ let test_frozen_absence_survives_provider_overlay () =
       let actual = Provider_runtime_binding.capabilities_for_provider_config config in
       let expected = Option.value
       (Llm_provider.Provider_config.capabilities_for_config_model config)
-      ~default:Llm_provider.Capabilities.openai_compat_chat_capabilities in
+      ~default:Llm_provider.Capabilities.default_capabilities in
       Alcotest.(check bool) "runtime projection cannot acquire a later provider overlay" true
         (actual = expected)))
 ;;
@@ -994,18 +994,48 @@ let test_selected_binding_carries_provider_capabilities () =
     let actual = Provider_runtime_binding.capabilities_for_provider_config config in
     let expected = Option.value
       (Llm_provider.Provider_config.capabilities_for_config_model config)
-      ~default:Llm_provider.Capabilities.openai_compat_chat_capabilities in
+      ~default:Llm_provider.Capabilities.default_capabilities in
     Alcotest.(check bool) "selected provider reasoning survives overlay removal" true
       actual.supports_reasoning;
     Alcotest.(check bool) "selected provider facts match request admission" true
       (actual = expected))
 ;;
 
+let test_projected_options_match_public_admission () =
+  with_model_catalog "" (fun () ->
+    List.iter (fun kind ->
+      let config = Llm_provider.Provider_config.make ~kind
+        ~model_id:"undeclared-request-model" ~base_url:"https://example.invalid" ()
+        |> Llm_provider.Provider_config.freeze_for_request in
+      let caps = Provider_runtime_binding.capabilities_for_provider_config config in
+      List.iter (fun choice ->
+        let advertised = match choice with
+          | Llm_provider.Types.Any -> caps.supports_tool_choice && caps.supports_required_tool_choice
+          | Tool _ -> caps.supports_tool_choice && caps.supports_named_tool_choice
+          | Auto | None_ -> true in
+        Alcotest.(check bool) "advertised forcing agrees with full public admission"
+          advertised (Result.is_ok (Llm_provider.Complete_common.validate_all
+            {config with tool_choice=Some choice})))
+        [Llm_provider.Types.Any;Tool "lookup"])
+      Llm_provider.Provider_config.all_provider_kinds;
+    let config = Llm_provider.Provider_config.make ~kind:OpenAI_compat
+      ~model_id:"undeclared-request-model" ~base_url:"https://example.invalid" () in
+    let caps = Provider_runtime_binding.capabilities_for_provider_config config in
+    Alcotest.(check bool) "undeclared endpoint advertises no schema guarantee" false
+      caps.supports_structured_output;
+    Alcotest.(check bool) "undeclared endpoint schema fails full admission" true
+      (Result.is_error (Llm_provider.Complete_common.validate_all
+        {config with response_format=Llm_provider.Types.JsonSchema
+          (`Assoc ["type",`String "object"])})))
+;;
+
 let () =
   Alcotest.run
     "Provider_runtime_binding"
     [ ( "policy authority",
-        [ Alcotest.test_case "missing model policy survives replacement" `Quick
+        [ Alcotest.test_case "projected options match public admission" `Quick
+            test_projected_options_match_public_admission
+        ; Alcotest.test_case "missing model policy survives replacement" `Quick
             test_frozen_absence_survives_model_catalog_replacement
         ; Alcotest.test_case "missing provider policy survives overlay" `Quick
             test_frozen_absence_survives_provider_overlay

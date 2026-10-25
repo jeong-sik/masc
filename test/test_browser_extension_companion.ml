@@ -7,13 +7,15 @@ module B=Browser_stagehand_backend
 module P=Browser_extension_protocol
 module W=Browser_stagehand_wire
 module L=Browser_lane
-let ok = function Ok value -> value | Error _ -> fail "fixture operation failed"
+let answered = function
+  | L.Answered value -> value
+  | Rejected_before_effect _ | Lane_absent | Timed_out | Refused _ -> fail "fixture browser lifecycle refused"
 let operation_id="0b000000-0000-4000-8000-000000000019"
 let extension_id=String.make 32 'a'
 let url="https://example.org/login"
 let page=`Assoc ["page_id",`String "cdp-page-9";"url",`String url]
 let scenario () = Eio_mock.Backend.run_full (fun env -> Eio.Switch.run (fun sw ->
-  let transport=ref None and sent=ref [] and private_calls=ref 0 in
+  let transport=ref None and sent=ref [] and private_calls=ref 0 and summaries=ref 0 in
   let get ()=match !transport with Some cdp -> cdp | None -> fail "CDP not created" in
   let send frame =
     let value=Yojson.Safe.from_string frame in
@@ -52,17 +54,28 @@ let scenario () = Eio_mock.Backend.run_full (fun env -> Eio.Switch.run (fun sw -
     ~call:(fun _ -> function
       | W.Context_pages -> Ok (`List [page])
       | W.Context_active_page -> Ok page
+      | W.Page_evaluate {page_id;expression=_} ->
+          check string "public summary belongs to the original page" "cdp-page-9" page_id;
+          incr summaries;
+          Ok (`Assoc ["value",`String (Yojson.Safe.to_string (`Assoc ["url",`String url;
+            "title",`String "Login";"viewport",`Null]))])
       | W.Close -> Ok (`Assoc ["closed",`Bool true])
       | _ -> fail "unexpected public Stagehand command")
     ~private_ready:(fun _ -> true) ~shutdown:(fun _ -> Ok ()) ~pid:(fun _ -> 42) ~log:ignore in
-  ignore (B.execute backend (L.Session_open {headless=Some true}));
-  ignore (B.execute backend L.Tabs_list);
+  let opened=B.execute backend (L.Session_open {headless=Some true}) |> answered in
+  check bool "original Browser actually opened" true (Yojson.Safe.Util.member "opened" opened=`Bool true);
+  let listed=B.execute backend L.Tabs_list |> answered in
+  let tab_id=match listed with
+    | `List [tab] -> (match Yojson.Safe.Util.member "id" tab with
+        | `Int id when id>=0 -> id | _ -> fail "listed original tab has no identity")
+    | _ -> fail "fixture did not list its original page" in
+  check int "original tab summary completed before private admission" 1 !summaries;
   let companion=Browser_extension_companion.create ~sw ~backend
     ~transport:(fun original run ->
       check bool "original CDP object is retained" true (original==cdp);
       run original ~worker:"stagehand-session") in
   let directory=Unix.realpath (Filename.get_temp_dir_name ()) in
-  let prepare=P.Prepare {operation_id;tab_id=0;extension_id;directory;
+  let prepare=P.Prepare {operation_id;tab_id;extension_id;directory;
     program="async()=>({ready:true})";arguments=`Assoc []} in
   check bool "prepared only after exact worker initialization" true
     (companion prepare=Ok (`Assoc ["prepared",`Bool true]));
@@ -83,11 +96,14 @@ let scenario () = Eio_mock.Backend.run_full (fun env -> Eio.Switch.run (fun sw -
     (match B.execute backend L.Tabs_list with
      | L.Rejected_before_effect _ -> true
      | Answered _|Lane_absent|Timed_out|Refused _ -> false);
+  check int "fenced tab read never reaches public evaluation" 1 !summaries;
   check bool "original private operation cannot follow another worker" true
     (companion invoke=Error P.Outcome_unknown);
   check int "worker loss never replays private code" 2 !private_calls;
-  ignore (B.execute backend L.Session_close);
-  ignore (B.execute backend (L.Session_open {headless=Some true}));
+  let closed=B.execute backend L.Session_close |> answered in
+  check bool "original Browser shutdown confirmed" true (Yojson.Safe.Util.member "closed" closed=`Bool true);
+  let reopened=B.execute backend (L.Session_open {headless=Some true}) |> answered in
+  check bool "replacement Browser actually opened" true (Yojson.Safe.Util.member "opened" reopened=`Bool true);
   check bool "old operation cannot follow a reopened browser" true (companion invoke=Error P.Not_started);
   check bool "release settles only the original binding" true
     (companion (P.Release operation_id)=Ok (`Assoc ["released",`Bool true]));

@@ -11,7 +11,7 @@ let evidence = [Evidence.Evidence_note "The measurement belongs to this exact su
   Evidence.Evidence_artifact {reference="artifact:measurement.json"; content="{\"value\":100}";
     bytes=13; truncated=false}]
 
-let with_workspace f =
+let with_initialized_workspace f =
   let path = Filename.temp_dir "goal-original-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.clear_fs (); Fs_compat.remove_tree path;
     Config_dir_resolver.reset ()) (fun () ->
@@ -23,12 +23,15 @@ let with_workspace f =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Workspace.default_config path in
       ignore (Workspace.init config ~agent_name:(Some "planner"));
-      let root = Filename.concat
-        (Evidence.project_root_of_base_path path) (Playground_paths.bundle_root "measurement-owner") in
-      Fs_compat.mkdir_p root;
       Prompt_registry.set_markdown_dir
         (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts");
-      f config root))))
+      f config))))
+
+let with_workspace f = with_initialized_workspace (fun config ->
+  let root = Filename.concat (Evidence.project_root_of_base_path config.base_path)
+    (Playground_paths.bundle_root "measurement-owner") in
+  Fs_compat.mkdir_p root;
+  f config root)
 
 let stored = function
   | Ok value -> value | Error error -> Alcotest.fail (Goal_store.write_error_to_string error)
@@ -48,6 +51,52 @@ let pending ?id ?(items=evidence) config =
   goal.id
 let authority config goal_id = get (A.create_goal_review ~config ~goal_id)
 let original authority = get (V.prepare ~attempt:0 ~authority)
+
+let test_fresh_goal_without_keeper_or_manual_playground () =
+  with_initialized_workspace (fun config ->
+    let root = Filename.concat config.base_path Playground_paths.all_playgrounds_prefix in
+    Alcotest.(check bool) "bootstrap supplies the shared root" true (Sys.is_directory root);
+    Alcotest.(check int) "no Keeper or producer was created" 0
+      (Array.length (Sys.readdir root));
+    let goal, _ = stored (Goal_store.upsert_goal config
+      ~title:"Read a public measurement without creating a Keeper"
+      ~metric:"https://example.com/measurement.json" ~target_value:"100" ()) in
+    let current, requested = proof (Workspace_goals.request_current_proof config ~goal_id:goal.id) in
+    let request_id = match requested.Goal_verification.completion with
+      | Goal_verification.Proof_pending {request_id; _} -> request_id
+      | Completion_idle | Proof_proven _ | Proof_refuted _ | Human_confirmed _ ->
+        Alcotest.fail "public proof request did not remain pending" in
+    let admitted = authority config goal.id in
+    let prepared = original admitted in
+    let subject = V.subject prepared in
+    Alcotest.(check string) "same Goal" goal.id subject.goal_id;
+    Alcotest.(check string) "same request" request_id subject.request_id;
+    Alcotest.(check bool) "same criterion" true
+      (Goal_store.criterion_equal (Goal_store.criterion_of_goal current) subject.criterion);
+    Alcotest.(check bool) "known-empty shared layout" true (V.root_layout prepared = []);
+    Unix.rmdir root;
+    (match A.create_goal_review ~config ~goal_id:goal.id with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "unavailable shared root was treated as empty");
+    Alcotest.(check bool) "read-only authority cannot recreate the root" false
+      (Sys.file_exists root);
+    ignore (Workspace.init config ~agent_name:None);
+    let restored_authority = authority config goal.id in
+    ignore (original restored_authority);
+    Alcotest.(check bool) "bootstrap repair preserves retained authority" true
+      (V.matches_authority prepared restored_authority);
+    let after = match Goal_store.find_goal config ~goal_id:goal.id with
+      | Goal_store.Goal_found goal -> goal
+      | Goal_absent | Store_unavailable _ -> Alcotest.fail "Goal disappeared during preparation" in
+    Alcotest.(check bool) "preparation does not prove the Goal" true
+      (after.phase = Goal_phase.Verifying);
+    let record = match get (Goal_verification.get_record_authoritative config ~goal_id:goal.id) with
+      | Some record -> record
+      | None -> Alcotest.fail "proof request disappeared during preparation" in
+    Alcotest.(check bool) "proof request remains byte-equivalent" true
+      (Yojson.Safe.equal (Goal_verification.record_to_yojson requested)
+        (Goal_verification.record_to_yojson record)))
+
 let with_changed_prompts f =
   let names = [Prompt_names.goal_verification_proof; Prompt_names.verification_system] in
   let saved = List.map (fun name -> name, Prompt_registry.resolve_prompt name) names in
@@ -245,6 +294,7 @@ let test_unavailable_report_keeps_original_and_lookup_authority () =
       (get (V.of_json (V.to_json prepared))) (Ok (Some row)))
 
 let () = Alcotest.run "goal verifier original" ["host preparation", [
+  Alcotest.test_case "fresh Goal proof needs no Keeper or manual shared root" `Quick test_fresh_goal_without_keeper_or_manual_playground;
   Alcotest.test_case "retained prompt and actual shared-root visual lookup" `Quick test_stored_goal_preparation_and_actual_visual_lookup;
   Alcotest.test_case "exact subject, evidence and workspace authority" `Quick test_other_subject_evidence_and_workspace_refuse;
   Alcotest.test_case "malformed immutable input refuses" `Quick test_malformed_original_refuses;

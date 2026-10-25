@@ -22,7 +22,8 @@ module Types = Masc_domain
        (mtime-stable) and produces no extra directories.
     3. {b init creates expected dirs} — after
        a single call, [.masc/agents/], [.masc/keepers/],
-       [.masc/traces/], [.masc/tasks/] and [.masc/messages/] exist. *)
+       [.masc/traces/], [.masc/tasks/], [.masc/messages/] and the shared
+       playground exist. *)
 
 module B = Workspace_bootstrap
 (* [Workspace] is the wrapper module re-exported by [masc]; it
@@ -116,7 +117,10 @@ let test_init_creates_dirs () =
           let p = Filename.concat masc sub in
           assert (Sys.file_exists p);
           assert (Sys.is_directory p))
-        [ "agents"; "keepers"; "traces"; "tasks"; "messages" ])
+        [ "agents"; "keepers"; "traces"; "tasks"; "messages" ];
+      let playground = Filename.concat dir Playground_paths.all_playgrounds_prefix in
+      assert (Sys.is_directory playground);
+      assert (Array.length (Sys.readdir playground) = 0))
 
 let test_init_seeds_state_json () =
   (* The state JSON file should be created. *)
@@ -172,6 +176,26 @@ let test_init_does_not_clobber_existing_state () =
               in true
             with Not_found -> false)))
 
+let test_reinit_restores_shared_playground_without_clobber () =
+  with_tmp (fun dir ->
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:None);
+      let state_path = Workspace_utils.state_path config in
+      let state_before = In_channel.with_open_bin state_path In_channel.input_all in
+      let playground = Filename.concat dir Playground_paths.all_playgrounds_prefix in
+      Unix.rmdir playground;
+      ignore (Workspace.init config ~agent_name:None);
+      assert (Sys.is_directory playground);
+      assert (Array.length (Sys.readdir playground) = 0);
+      let producer = Filename.concat playground "existing-producer" in
+      Unix.mkdir producer 0o755;
+      let evidence_path = Filename.concat producer "evidence.json" in
+      let evidence = "{\"value\":3}" in
+      Out_channel.with_open_bin evidence_path (fun out -> output_string out evidence);
+      ignore (Workspace.init config ~agent_name:None);
+      assert (In_channel.with_open_bin evidence_path In_channel.input_all = evidence);
+      assert (In_channel.with_open_bin state_path In_channel.input_all = state_before))
+
 (* ── runner ───────────────────────────────────────────────── *)
 
 let () =
@@ -182,4 +206,5 @@ let () =
   test_init_seeds_state_json ();
   test_init_idempotent ();
   test_init_does_not_clobber_existing_state ();
+  test_reinit_restores_shared_playground_without_clobber ();
   print_endline "test_workspace_bootstrap: all assertions passed"

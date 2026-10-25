@@ -31,6 +31,7 @@ let init config ~agent_name =
     ; Filename.concat (masc_dir config) "traces"
     ; tasks_dir config
     ; messages_dir config
+    ; Filename.concat config.base_path Playground_paths.all_playgrounds_prefix
     ];
   let backlog = backlog_path config in
   if not (path_exists config backlog)

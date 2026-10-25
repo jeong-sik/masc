@@ -738,11 +738,101 @@ let test_native_request_provenance_reopen () =
     with Exit -> ()) [true; false]) [false; true]
 ;;
 
+type publication_interrupt = Publication_break | Publication_cancel
+
+let test_reserved_publication_replays_after_unlock interrupt =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let runtime = Agent.create_execution_runtime ~sw ~domain_mgr:env#domain_mgr
+      ~domain_count:1 |> Result.map_error Error.to_string |> value in
+  let internal_runtime = Runtime.create ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+      |> Result.map_error Runtime.create_error_to_string |> value in
+  let dir = make_dir env#fs "agent_core-reserved-observation-" in
+  Eio.Switch.on_release sw (fun () -> Eio.Path.rmtree ~missing_ok:true dir);
+  writer_value (Writer.run ~codec:(Codec.of_runtime internal_runtime) ~dir (fun ~sw:_ writer ->
+    let scope = scope_value (Scope.start ~writer ~agent_name:"reserved-observation") in
+    let bus = Event_bus.create () in
+    let config = Event_bus.subscription_config ~capacity:4 ~overflow:Drop_newest
+        |> Result.map_error (fun _ -> "invalid fixture subscription") |> value in
+    let subscription = Event_bus.subscribe ~config ~filter:Event_bus.filter_tools_only bus in
+    let first = ref true and interrupt_publication = ref (fun () -> ()) in
+    let observer = Internal.Agent_tool_observer.create ~publish:(fun bus event ->
+      Event_bus.publish bus event;
+      if !first then (first := false; !interrupt_publication ())) scope in
+    observer.register
+      ~run_id:(Scope.scope_locator_run_id (Scope.scope_locator scope)) ~event_bus:(Some bus);
+    let turn = scope_value (Scope.open_turn scope ~ordinal:1) in
+    let provider = scope_value (Scope.open_provider_attempt turn ~ordinal:0 (binding ())) in
+    let call = scope_value (Scope.open_invocation provider ~invocation:(invocation ())
+        ~tool_name:"reserved-projection-tool" ~input:(`Assoc [])) in
+    let effects = ref 0 in
+    (match Scope.execute call ~invoke:(fun ~start_child:_ ~tool_name:_ ~input:_ ->
+       incr effects; "committed before publication", Types.Tool_succeeded) with
+     | Ok (Scope.Executed _) -> ()
+     | Ok (Scope.Replayed _) -> fail "fresh effect unexpectedly replayed"
+     | Error error -> fail (Scope.error_to_string error));
+    scope_value (Scope.close_provider_attempt provider Event.Succeeded);
+    scope_value (Scope.close_turn turn Event.Succeeded);
+    scope_value (Scope.finish scope Event.Succeeded);
+    let occurrence = match Tool_contract.Invocation.occurrence (Scope.bound_invocation call) with
+      | Some occurrence -> occurrence | None -> fail "durable call lost canonical occurrence" in
+    observer.settled_observers occurrence;
+    let projection = projection_value
+        (Agent.open_execution_projection ~runtime ~dir (public_locator scope)) in
+    let read () = projection_value (Projection.read_page projection
+        ~after:(Projection.beginning_cursor projection) ~limit:1024 ()) in
+    let before = read () in
+    let caught = match Eio.Cancel.sub (fun cancellation ->
+      interrupt_publication := (match interrupt with
+        | Publication_break -> (fun () -> raise Sys.Break)
+        | Publication_cancel -> (fun () ->
+            Eio.Cancel.cancel cancellation Exit;
+            Eio.Fiber.check ()));
+      observer.flush ()) with
+      | () -> None
+      | exception exn -> Some exn in
+    check bool "reserved publication interruption escapes to caller" true
+      (match interrupt,caught with
+       | Publication_break,Some Sys.Break
+       | Publication_cancel,Some (Eio.Cancel.Cancelled Exit) -> true
+       | _ -> false);
+    let accepted = Event_bus.drain subscription in
+    check int "receiver accepted first occurrence before interruption" 1 (List.length accepted);
+    (* Outside the cancelled child context, the same coordinator must remain
+       usable and retry the unacknowledged source occurrence without effects. *)
+    observer.flush ();
+    let replay = Event_bus.drain subscription in
+    let canonical = projection_value (Projection.read_tool_observations projection
+        ~after:(Projection.beginning_cursor projection) ~limit:1024 ()) in
+    check int "retry delivers called and completed" 2 (List.length replay);
+    check bool "retry retains the accepted unacknowledged event identity" true
+      (match accepted,replay with [first],retry::_ -> first=retry | _ -> false);
+    check bool "retry matches exact canonical observations in source order" true
+      (replay=List.map (fun (observation:Projection.tool_observation) -> observation.event)
+        canonical.observations);
+    observer.flush ();
+    check int "acknowledged source observations do not repeat" 0
+      (List.length (Event_bus.drain subscription));
+    check int "reserved publication retry never repeats effect" 1 !effects;
+    let after = read () in
+    check bool "reserved publication failure leaves canonical events and cursor unchanged" true
+      (before.events=after.events && before.next_cursor=after.next_cursor);
+    let terminal = projection_value (Agent.read_execution_terminal projection) in
+    check bool "committed success is not relabelled by reserved publication" true
+      (match terminal with
+       | Some {Agent.disposition={outcome=Terminal_succeeded;recovery=Retire};_} -> true
+       | _ -> false)))
+;;
+
 let () =
   Alcotest.run
     "Execution projection"
     [ ( "authority"
       , [ test_case "live and restart projection" `Quick test_live_and_restart_projection
+        ; test_case "Sys.Break publication retries after normal mutex unlock" `Quick
+            (fun () -> test_reserved_publication_replays_after_unlock Publication_break)
+        ; test_case "cancelled publication retries from a fresh context" `Quick
+            (fun () -> test_reserved_publication_replays_after_unlock Publication_cancel)
         ; test_case "native sync/stream request evidence survives errors and reopen"
             `Quick test_native_request_provenance_reopen
         ; test_case "settled invocation projection" `Quick test_settled_invocation_projection

@@ -912,7 +912,7 @@ let validate_custom_value ~name value =
     let* () = match List.assoc_opt "index" fields with
       | Some (`Int _) -> Ok ()
       | Some _ | None -> Error (Malformed_event (surface ^ " needs an integer index")) in
-    let* _ = required_string ~surface "snapshot" fields
+    let* _ = required_string ~allow_blank:true ~surface "snapshot" fields
       |> Result.map_error (fun detail -> Malformed_event detail) in
     let* owner = Masc.Keeper_chat_events.optional_response_identity_of_fields fields
       |> Result.map_error (fun detail -> Malformed_event detail) in

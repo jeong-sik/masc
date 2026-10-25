@@ -681,7 +681,7 @@ let test_current_nonterminal_event_set () =
                                        ; error_status = Some 529 }
           ]
       else if String.equal name "KEEPER_THINKING_SNAPSHOT" then
-        `Assoc ["index", `Int 0; "snapshot", `String "full reasoning";
+        `Assoc ["index", `Int 0; "snapshot", `String "";
                 "response", `Assoc ["content_generation", `Int 0; "stream_scope", `Int 0]]
       else if String.equal name "KEEPER_THINKING_DELTA" then
         (* The strict decoder requires an object with an integer index; a Null

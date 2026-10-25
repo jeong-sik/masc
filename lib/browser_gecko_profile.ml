@@ -131,6 +131,7 @@ let parse_pref_line_key line =
           in
           if single_statement then Some key else None
         end
+    else None
 
 let split_lines_without_trailing_empty text =
   let raw = String.split_on_char '\n' text in

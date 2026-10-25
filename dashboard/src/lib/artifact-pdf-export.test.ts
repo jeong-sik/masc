@@ -53,3 +53,8 @@ it.each(['<h1>WWWW0END</h1>','<h1>한글</h1>','<ul><li><h1>한글</h1></li></ul
  const {file,pdf:document}=await pdf(doc('<table><tr>'+Array.from({length:15},()=>`<td>${cell}</td>`).join('')+'</tr></table>','html'))
  expect(file.notices.join(' ')).toContain('넓은 표는 열을 나눴으며');expect(document.getPageCount()).toBeGreaterThanOrEqual(1)
 })
+
+it('discloses unsupported joiners instead of passing a missing glyph into the PDF text layer',async()=>{
+ const {file}=await pdf(doc('<p>A\u200DB ❤️ 👩‍💻</p>','html'))
+ expect(file.notices.join(' ')).toContain('유니코드 번호')
+})

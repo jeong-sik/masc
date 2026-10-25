@@ -36,7 +36,7 @@ export async function artifactPdfFile(doc:ArtifactDocument,bytes:ArtifactPdfFont
       notices.add('표현할 수 없는 제어 문자는 대체 문자로 바꿨습니다.');return '\uFFFD'
     }).join('')
   }
-  function supports(font:Font,value:string):boolean {return Array.from(value).every(character=>{const point=character.codePointAt(0)!;return point===10||point===13||point===0x200D||point===0xFE0E||point===0xFE0F||font.hasGlyphForCodePoint(point)})}
+  function supports(font:Font,value:string):boolean {return Array.from(value).every(character=>{const point=character.codePointAt(0)!;return point===10||point===13||font.hasGlyphForCodePoint(point)})}
   function text(value:string,style:Style,context:Context):ContentText[] {
     const output:ContentText[]=[],primary=style.bold?fonts.bold:fonts.regular
     for(const {segment} of graphemes.segment(clean(value).replaceAll('\r\n','\n').replaceAll('\r','\n').replaceAll('\t','    '))){

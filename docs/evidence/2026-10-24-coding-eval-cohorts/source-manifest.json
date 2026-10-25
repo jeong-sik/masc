@@ -1,0 +1,118 @@
+{
+  "baseline": {
+    "source_sha256": {
+      "lib/core/json_util.ml": "b1fea064f3da9252986044b2d6087ea95bbb229a944119ed84d38cc1a2f43281",
+      "lib/core/list_util.ml": "f70255633e25ad5f7497b87199c174e2d9fccfe3456599038d850313ad089bf9",
+      "lib/eval_harness.mli": "71e7dbfc502177838f1e20bf4351438683925f41b65da15a2c084a67c788de46",
+      "lib/eval_harness.ml": "8e898b901106393563adb9fb4dd70a89ce88a448446ebcc60db2677efbf21b31",
+      "lib/keeper_operation_identity/keeper_operation_id.mli": "3fd62e6d16e04bfe522e10670b57c51ed43705d9ec82e2613f37cb014fc5066f",
+      "lib/keeper_operation_identity/keeper_operation_id.ml": "0c48a9d285a83f7dba859ff12005288d8e0e07dba034dfbe27e792cfcb7e881b",
+      "test/coding_eval_case.ml": "d2f701f8a7805c2c2aafdc73ecb4ffabf740537ce2cddf050163b6564bddb2fd",
+      "test/coding_eval_report.ml": "06400acb720febe4db48f23da0eb509e52d271884f7fa66f5b4d32907fa2667c",
+      "test/coding_eval_report_cli.ml": "46c36384a31331c1869952e8a0220c40130a975e379a945d41dc9b805b5cbe75",
+      "lib/trajectory/trajectory.ml": "41aa6a52be5cafcfb189c6cfdbd19e540aad988ab8223ab00082e85730301311"
+    },
+    "ports": {
+      "shared_types.ml": "module Json_kind = struct let name _ = failwith \"unused JSON kind port\" end\n",
+      "string_util.ml": "let utf8_prefix ~max_bytes:_ _ = failwith \"unused UTF8 prefix port\"\n",
+      "eio.ml": "module Cancel = struct exception Cancelled of exn end\n",
+      "safe_ops.ml": "let protect ~default:_ _ = failwith \"unused Safe_ops port\"\n",
+      "fs_compat.ml": "let load_file _ = failwith \"unused Fs_compat port\"\n",
+      "eval_tool_selector.ml": "type t = unit\ntype call = { tool_name : string; route_evidence : unit option }\nlet label _ = failwith \"unused selector label port\"\nlet matches _ _ = failwith \"unused selector matching port\"\nlet of_yojson _ : (t, string) result = failwith \"unused selector decoder port\"\n",
+      "masc.ml": "module Eval_harness = Eval_harness\nmodule Trajectory = Trajectory\n"
+    },
+    "trajectory_fragments": {
+      "type": "type trajectory_outcome =\n  | Completed\n  | Failed of string\n  | Timeout\n  | Gated of string  (** rejected by pre-execution gate *)\n\n",
+      "formatter": "let outcome_to_string = function\n  | Completed -> \"completed\"\n  | Failed msg -> Printf.sprintf \"failed: %s\" msg\n  | Timeout -> \"timeout\"\n  | Gated reason -> Printf.sprintf \"gated: %s\" reason\n\n(** Default truncation limit for result text in JSONL persistence. *)"
+    },
+    "warning_errors": {
+      "shared_types.ml": "-a",
+      "string_util.ml": "-a",
+      "eio.ml": "-a",
+      "safe_ops.ml": "-a",
+      "fs_compat.ml": "-a",
+      "eval_tool_selector.ml": "-a",
+      "trajectory.ml": "-a",
+      "json_util.ml": "-a",
+      "list_util.ml": "-a",
+      "eval_harness.mli": "-a",
+      "eval_harness.ml": "-a",
+      "masc.ml": "-a",
+      "keeper_operation_id.mli": "-a",
+      "keeper_operation_id.ml": "-a",
+      "coding_eval_case.ml": "-a",
+      "coding_eval_report.ml": "-a"
+    }
+  },
+  "candidate": {
+    "source_sha256": {
+      "lib/core/json_util.ml": "b1fea064f3da9252986044b2d6087ea95bbb229a944119ed84d38cc1a2f43281",
+      "lib/core/list_util.ml": "f70255633e25ad5f7497b87199c174e2d9fccfe3456599038d850313ad089bf9",
+      "lib/eval_harness.mli": "9d5752a64383a11d552d72ae9f4a73c1b3c0fab7d7150d28145bc49f47660712",
+      "lib/eval_harness.ml": "30bef98a7a204b3ddc62785d6144746c9d9299b26c36dfa19034e23292e210dd",
+      "lib/keeper_operation_identity/keeper_operation_id.mli": "3fd62e6d16e04bfe522e10670b57c51ed43705d9ec82e2613f37cb014fc5066f",
+      "lib/keeper_operation_identity/keeper_operation_id.ml": "0c48a9d285a83f7dba859ff12005288d8e0e07dba034dfbe27e792cfcb7e881b",
+      "test/coding_eval_case.ml": "d2f701f8a7805c2c2aafdc73ecb4ffabf740537ce2cddf050163b6564bddb2fd",
+      "test/coding_eval_report.ml": "ea10e4ee0a98021a9ac14d0e82e245d7230a35b70caaa97eeca046db4e35574c",
+      "test/coding_eval_report_cli.ml": "8248c0a4397255465678211be0a85e5788f766c2e7bb5aaa6f31dcab117b138e",
+      "lib/trajectory/trajectory.ml": "41aa6a52be5cafcfb189c6cfdbd19e540aad988ab8223ab00082e85730301311",
+      "test/test_coding_eval_cases.ml": "ac13d65788d3bd2ea3bd4f0335cfeca603a4a10e49b7ba8c8df88e270c6a8ddf"
+    },
+    "ports": {
+      "shared_types.ml": "module Json_kind = struct let name _ = failwith \"unused JSON kind port\" end\n",
+      "string_util.ml": "let utf8_prefix ~max_bytes:_ _ = failwith \"unused UTF8 prefix port\"\n",
+      "eio.ml": "module Cancel = struct exception Cancelled of exn end\n",
+      "safe_ops.ml": "let protect ~default:_ _ = failwith \"unused Safe_ops port\"\n",
+      "fs_compat.ml": "let load_file _ = failwith \"unused Fs_compat port\"\n",
+      "eval_tool_selector.ml": "type t = unit\ntype call = { tool_name : string; route_evidence : unit option }\nlet label _ = failwith \"unused selector label port\"\nlet matches _ _ = failwith \"unused selector matching port\"\nlet of_yojson _ : (t, string) result = failwith \"unused selector decoder port\"\n",
+      "masc.ml": "module Eval_harness = Eval_harness\nmodule Trajectory = Trajectory\n"
+    },
+    "trajectory_fragments": {
+      "type": "type trajectory_outcome =\n  | Completed\n  | Failed of string\n  | Timeout\n  | Gated of string  (** rejected by pre-execution gate *)\n\n",
+      "formatter": "let outcome_to_string = function\n  | Completed -> \"completed\"\n  | Failed msg -> Printf.sprintf \"failed: %s\" msg\n  | Timeout -> \"timeout\"\n  | Gated reason -> Printf.sprintf \"gated: %s\" reason\n\n(** Default truncation limit for result text in JSONL persistence. *)"
+    },
+    "warning_errors": {
+      "shared_types.ml": "-a",
+      "string_util.ml": "-a",
+      "eio.ml": "-a",
+      "safe_ops.ml": "-a",
+      "fs_compat.ml": "-a",
+      "eval_tool_selector.ml": "-a",
+      "trajectory.ml": "-a",
+      "json_util.ml": "-a",
+      "list_util.ml": "-a",
+      "eval_harness.mli": "+a",
+      "eval_harness.ml": "+a",
+      "masc.ml": "-a",
+      "keeper_operation_id.mli": "-a",
+      "keeper_operation_id.ml": "-a",
+      "coding_eval_case.ml": "-a",
+      "coding_eval_report.ml": "+a"
+    }
+  },
+  "compiler": "5.5.1",
+  "baseline_commit": "8eac5c07c290d134a9ef6acb1e298584bf9a1366",
+  "corpus_case_sha256": {
+    "benchmarks/coding/cases/l1-bash-classify/case.json": "e703489bf3e09e54c5be2fb641c1e3c70d9ce85c39c9ba7eecb4c2ab8c5647e1",
+    "benchmarks/coding/cases/l1-calc-add/case.json": "33d8b8a66a39d07d0b4a2202e103fff32f501b36f108e49209b5a0a7d02d319f",
+    "benchmarks/coding/cases/l1-context-premise-resistance/case.json": "df55456a123a6acbb3ad6d218ec6dcbbebdf276f27fc4f883c0544c03bc5ff5e",
+    "benchmarks/coding/cases/l1-context-source-bound-refresh/case.json": "fdbce1624f6b5dfd7cffea8e9fa16cb27f3b5d88235bbb6dce26412eb9b0f03e",
+    "benchmarks/coding/cases/l1-context-state-resolution/case.json": "1eede40536463e2652cda4cfd5ae9e77741ae124e8e0e0c2a5d498538bfcd21d",
+    "benchmarks/coding/cases/l1-node-sum/case.json": "a0e287428536878b9c0195af4e17184ba54f5ea0d0c5eb04a36a250446cdb213",
+    "benchmarks/coding/cases/l1-py-clamp/case.json": "b4f25f2b6b7796a511b79a72d4eefb1c474f4beb354945d55427e07fd73538f4",
+    "benchmarks/coding/cases/l1-py-reverse/case.json": "bbb83a36c7feab9cad26f02329444dc6019180cff33a494ef7cbced5d850f4b6",
+    "benchmarks/coding/cases/l2-context-policy-adaptation/case.json": "6e97b168d218c9c4201e9f07c0146be63b490b8f780d4645098bbfc45660a9c0",
+    "benchmarks/coding/cases/l2-node-stats/case.json": "29ce851cf7c99ed2b74c24c83df1578a4f37ea97dfb9ef49e731172ce9c21053",
+    "benchmarks/coding/cases/l2-py-parse-kv/case.json": "6e0d717704f2c4646cca9d07225934ccffae4f8ba9e0b42505ca0ed0bc1a5c11",
+    "benchmarks/coding/cases/l2-py-rle/case.json": "a9299cdb60c95a0e48e9e0a22f089097c6b914bf7a45ae4776530ec06b436ea6",
+    "benchmarks/coding/cases/l2-py-slugify/case.json": "b5ddb58dacb45b669025c1ecb993cb33ac7af976d3641c2703bd95e5afdc1476",
+    "benchmarks/coding/cases/l2-py-wordcount/case.json": "65c494d0f812be92d4977a2ed1044247fbd197aabd216ed3db78a229f0aee1e0",
+    "benchmarks/coding/cases/l3-py-cache-invalidation/case.json": "141251e3d50db406df5a5aaa196563fb5183a99b1a2715268d3d1709f9ceaee2",
+    "benchmarks/coding/cases/l3-py-config-plumb/case.json": "244f269c7d6cf236de077ebcc96ba633aa70f238fea773d6a6fdd4416bbd5d06",
+    "benchmarks/coding/cases/l3-py-mutable-default/case.json": "47e77d94d1793b29bf5215bd91f13bfa9cd293ab619e9be826d76d9954b74cbc",
+    "benchmarks/coding/cases/l3-py-offbyone-window/case.json": "913f2af300cdd1d69a80c119187335417dd54bfdeb87733847ac087cd350e41a",
+    "benchmarks/coding/cases/l3-py-rename-callers/case.json": "c61f17ae89c50b7e7275c161d401b22f81014e53895eb1faf3bc5e87fb5f7853",
+    "benchmarks/coding/cases/l3-py-thread-baseurl/case.json": "eec9a6ba27bc6bc0bf592d0cb192e92b97e5587087ffb33fc71517945b62dd38"
+  },
+  "scope": "Actual full report/case/eval sources and actual CLI, with explicit fail-on-use ports; not native MASC, provider, sandbox, Dune or CI"
+}

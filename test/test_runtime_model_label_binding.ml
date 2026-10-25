@@ -172,7 +172,21 @@ let declared_default () = with_catalog (fun () ->
     Alcotest.(check string) "catalog default wins independently of derived environment key" "overlap" config.model_id;
     Alcotest.(check (option string)) "auto retains canonical provider" (Some "label-b") config.provider_id;
     Alcotest.(check (option int)) "auto retains exact model context" (Some 32768)
-      (Provider_config.context_window config)))
+      (Provider_config.context_window config);
+    let configured = match Runtime_model_string.parse_model_string
+        ~temperature:0.25 ~max_tokens:128 ~system_prompt:"explicit system"
+        ~keep_alive:"5m" ~num_ctx:4096 "label-b:auto" with
+      | Some config -> config | None -> Alcotest.fail "configured default was refused" in
+    Alcotest.(check (option (float 0.001))) "binding construction preserves temperature"
+      (Some 0.25) configured.temperature;
+    Alcotest.(check (option int)) "binding construction preserves output limit"
+      (Some 128) configured.max_tokens;
+    Alcotest.(check (option string)) "binding construction preserves system prompt"
+      (Some "explicit system") configured.system_prompt;
+    Alcotest.(check (option string)) "binding construction preserves keep-alive"
+      (Some "5m") configured.keep_alive;
+    Alcotest.(check (option int)) "binding construction preserves context option"
+      (Some 4096) configured.num_ctx))
 let alias_default () = with_catalog (fun () ->
   let config = transport_config "label-b-alias:auto" in
   Alcotest.(check string) "alias resolves declared default" "overlap" config.model_id;

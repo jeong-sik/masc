@@ -16,11 +16,6 @@ val normalize_provider_id : string -> string
 
 val local_runtime_label : string -> string
 
-val provider_name_matches_default_local_openai_runtime : string -> bool
-
-val provider_name_matches_kind_default :
-  string -> Llm_provider.Provider_config.provider_kind -> bool
-
 val default_headers_for_kind :
   Llm_provider.Provider_config.provider_kind -> (string * string) list
 

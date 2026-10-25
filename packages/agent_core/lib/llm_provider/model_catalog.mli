@@ -91,7 +91,6 @@ type provider_entry = Model_provider_catalog.entry =
   ; default_model : string option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
-  ; identity_hosts : string list
   ; supports_parallel_tool_suppression : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
@@ -203,29 +202,6 @@ val model_entries_for_provider
     rows precede canonical scoped rows, then permitted bare rows; a row with
     the same whole id in an earlier scope shadows the later row. Model ids
     remain verbatim. Enumeration preserves declared exact identities. *)
-
-(** Return the catalog-declared provider identity for a concrete endpoint.
-
-    Matching is exact and declaration-driven: [base_url] matches either the
-    provider row's canonical [base_url] or one of its exact [identity_hosts].
-    No model id is consulted. *)
-val provider_label_for_base_url
-  :  ?getenv:(string -> string option)
-  -> t
-  -> kind:Provider_kind.t
-  -> base_url:string
-  -> string option
-
-(** Like {!provider_label_for_base_url}, but also requires the request path to
-    match the provider row. Use this for telemetry/provider-name identity where
-    the wire shape matters, not for capability host gates. *)
-val provider_label_for_endpoint
-  :  ?getenv:(string -> string option)
-  -> t
-  -> kind:Provider_kind.t
-  -> base_url:string
-  -> request_path:string
-  -> string option
 
 (** Return the active model catalog.
 

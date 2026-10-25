@@ -505,7 +505,6 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       ; if provider.requires_api_key then "api-key" else "none"
       ; option_string provider.default_model
       ; option_string provider.capabilities_base
-      ; String.concat "," (List.sort_uniq String.compare provider.identity_hosts)
       ])
   in
   let models =
@@ -782,7 +781,7 @@ let load_resolver_snapshot
            match target.wire with
            | Catalog_provider_wire ->
              ( provider.kind
-             , Model_provider_catalog.resolved_base_url ~getenv provider
+             , provider.base_url
              , provider.request_path
              , false
              , Binding.capabilities_of_catalog_binding provider model )

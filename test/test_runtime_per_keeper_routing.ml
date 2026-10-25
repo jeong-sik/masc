@@ -348,7 +348,6 @@ base_url = "https://api.kimi.com/coding"
 request_path = "/v1/messages"
 auth = "api-key"
 capabilities_base = "kimi"
-identity_hosts = ["api.kimi.com"]
 |}
 ;;
 

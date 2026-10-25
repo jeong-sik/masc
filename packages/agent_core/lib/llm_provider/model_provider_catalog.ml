@@ -22,7 +22,6 @@ type entry =
   ; default_model : string option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
-  ; identity_hosts : string list
   ; supports_parallel_tool_suppression : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
@@ -112,7 +111,6 @@ let known_keys =
   ; "default_model"
   ; "capabilities_base"
   ; "capabilities_base_by_identity_kind"
-  ; "identity_hosts"
   ; "supports_parallel_tool_suppression"
   ; "serves_bare_models"
   ]
@@ -337,7 +335,6 @@ let parse_entry provider_toml =
     parse [] (Option.value models ~default:[])
   in
   let* aliases = string_list_field ~entry_id:id "aliases" provider_toml in
-  let* identity_hosts = string_list_field ~entry_id:id "identity_hosts" provider_toml in
   Ok
     { id
     ; aliases = Option.value aliases ~default:[]
@@ -351,71 +348,5 @@ let parse_entry provider_toml =
     ; capabilities_base_by_identity_kind
     ; supports_parallel_tool_suppression
     ; serves_bare_models
-    ; identity_hosts =
-        Option.value identity_hosts ~default:[] |> List.map String.lowercase_ascii
     }
-;;
-
-let normalize_url value =
-  let trimmed = String.trim value in
-  if trimmed = ""
-  then trimmed
-  else (
-    let rec strip_trailing_slash s =
-      let len = String.length s in
-      if len > 1 && s.[len - 1] = '/'
-      then strip_trailing_slash (String.sub s 0 (len - 1))
-      else s
-    in
-    strip_trailing_slash trimmed)
-;;
-
-let host_of_url value =
-  match Uri.of_string value |> Uri.host with
-  | None -> None
-  | Some host -> Some (String.lowercase_ascii host)
-;;
-
-let resolved_base_url ?getenv:_ entry = entry.base_url
-;;
-
-let base_url_matches ?getenv:_ entry base_url =
-  String.equal (normalize_url entry.base_url) (normalize_url base_url)
-;;
-
-let host_matches entry base_url =
-  match host_of_url base_url with
-  | None -> false
-  | Some host -> List.exists (String.equal host) entry.identity_hosts
-;;
-
-let label_of_entry entry =
-  let normalized = String.lowercase_ascii (String.trim entry.id) in
-  if normalized = "" then None else Some normalized
-;;
-
-let provider_label_for_base_url ?getenv entries ~kind ~base_url =
-  match
-    List.find_opt
-      (fun entry ->
-         List.mem kind entry.identity_kinds
-         && (base_url_matches ?getenv entry base_url || host_matches entry base_url))
-      entries
-  with
-  | None -> None
-  | Some entry -> label_of_entry entry
-;;
-
-let provider_label_for_endpoint ?getenv entries ~kind ~base_url ~request_path =
-  let request_path = String.trim request_path in
-  match
-    List.find_opt
-      (fun entry ->
-         List.mem kind entry.identity_kinds
-         && String.equal (String.trim entry.request_path) request_path
-         && (base_url_matches ?getenv entry base_url || host_matches entry base_url))
-      entries
-  with
-  | None -> None
-  | Some entry -> label_of_entry entry
 ;;

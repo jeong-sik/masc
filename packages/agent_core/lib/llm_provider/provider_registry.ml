@@ -209,7 +209,7 @@ let default () =
     let caps = capabilities_for_registered_label capability_label in
     let defaults : provider_defaults =
       { kind = entry.kind
-      ; base_url = Model_provider_catalog.resolved_base_url entry
+      ; base_url = entry.base_url
       ; request_path = entry.request_path
       ; requires_api_key = entry.requires_api_key
       }

@@ -13,7 +13,6 @@ type entry =
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
     (** Wire-specific capability bases. Keys must also appear in
         [identity_kinds]; absent keys inherit [capabilities_base]. *)
-  ; identity_hosts : string list
   ; supports_parallel_tool_suppression : bool
     (** The provider documents a request control that limits a response to at
         most one tool call. Missing declarations are false; this is separate
@@ -26,21 +25,3 @@ type entry =
   }
 
 val parse_entry : Otoml.t -> (entry, string) result
-
-(** Resolve the exact provider base URL: the row's [base_url] as written. *)
-val resolved_base_url : ?getenv:(string -> string option) -> entry -> string
-
-val provider_label_for_base_url
-  :  ?getenv:(string -> string option)
-  -> entry list
-  -> kind:Provider_kind.t
-  -> base_url:string
-  -> string option
-
-val provider_label_for_endpoint
-  :  ?getenv:(string -> string option)
-  -> entry list
-  -> kind:Provider_kind.t
-  -> base_url:string
-  -> request_path:string
-  -> string option

@@ -130,6 +130,16 @@ let test_task_sources_preserve_committed_state () = with_fixture (fun config ->
       (source |> member "task" |> member "verification_id" |> to_string)) [pending_task;pending_goal];
   let next = new_task config ~title:"Next increment" ~description:"Use prior approval evidence" in
   check bool "goalless Task remains valid" true (Option.is_none next.contract);
+  let primary = Workspace.read_backlog_r config |> require "multi-Task primary" in
+  let batched = capture config Evidence.Goal_workspace [reference; "task:" ^ next.id] in
+  let batched_surface = VAT.create_goal_proof ~config ~submitted_evidence:batched
+    |> require "multi-Task source surface" in
+  List.iter (fun id ->
+    let source = read batched_surface "keeper_tasks_list" (task_args id) in
+    check int "one batch retains one primary revision" primary.version
+      (source |> member "backlog_version" |> to_int);
+    check string "one batch retains one primary timestamp" primary.last_updated
+      (source |> member "backlog_last_updated" |> to_string)) [prior.id;next.id];
   Verification_protocol.create_submit_request ~config ~task:next ~assignee:"producer"
     ~verification_id:"next-with-prior-source"
     ~claim:(Masc_domain.Completion_evidence {evidence_refs=[reference]}) |> require "next submission";
@@ -139,6 +149,12 @@ let test_task_sources_preserve_committed_state () = with_fixture (fun config ->
     | _ -> fail "Task source was not captured" in
   let task_surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:(restored items)
     |> require "Task source surface" in
+  let schema = List.find (fun (schema : Types_core.tool_schema) -> schema.name="keeper_tasks_list")
+    (VAT.schemas task_surface) in
+  check (list string) "Task source requires exact ids" ["task_ids"]
+    (schema.input_schema |> member "required" |> to_list |> List.map to_string);
+  check (list string) "Task source has no live listing filters" ["cursor";"task_ids"]
+    (schema.input_schema |> member "properties" |> keys);
   let goal, _ = Goal_store.upsert_goal config ~title:"Ordered increments" ~metric:"source" ~target_value:"1" ()
     |> require "Goal" in
   let ctx : Tool_workspace.context = {config;agent_name="producer"} in

@@ -14,6 +14,8 @@
     because immutable target readership is not available at this boundary.
     Explicit Task sources use a narrowed exact-single-Task keeper_tasks_list
     descriptor over immutable submitted bytes, never a live backlog listing.
+    That descriptor is offered only when the submission contains a Task source;
+    Task-free retained originals keep their existing lookup authority.
     Neither surface grants general access to the MASC storage directory.
     Mutating execution is absent: a verifier has no turn continuation that
     could resume an approved Gate effect. *)

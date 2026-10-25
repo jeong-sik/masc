@@ -21,7 +21,15 @@ let tool_name = function
   | Task_source -> "keeper_tasks_list"
 ;;
 
-let all_tools = [ Read_file; Search_files; Web_fetch; Board_source; Fusion_source; Task_source ]
+let source_tools submitted_evidence =
+  let has_task_source = List.exists (function
+    | Workspace_verification_store.Evidence_collaboration {reference; _} ->
+      (match Workspace_verification_store.collaboration_reference reference with
+       | Some (Workspace_verification_store.Task_source, _) -> true
+       | Some ((Workspace_verification_store.Board_source | Workspace_verification_store.Fusion_source), _) | None -> false)
+    | Evidence_note _ | Evidence_artifact _ | Evidence_invalid_reference
+    | Evidence_artifact_unreadable _ | Evidence_artifact_binary _ -> false) submitted_evidence in
+  [Board_source; Fusion_source] @ if has_task_source then [Task_source] else []
 
 type t =
   { ownership_root : string
@@ -130,9 +138,9 @@ let create ~config ~producer ~submitted_evidence =
   in
   let* tools =
     resolve_tools
-      (match producer_scope with
-       | Keeper_producer _ -> all_tools
-       | Workspace_producer -> [ Read_file; Web_fetch; Board_source; Fusion_source; Task_source ])
+      ((match producer_scope with
+        | Keeper_producer _ -> [Read_file; Search_files; Web_fetch]
+        | Workspace_producer -> [Read_file; Web_fetch]) @ source_tools submitted_evidence)
   in
   let* ownership_root =
     match producer_scope with
@@ -175,7 +183,7 @@ let create ~config ~producer ~submitted_evidence =
    the checkouts under them. *)
 let create_goal_proof ~(config : Workspace.config) ~submitted_evidence =
   let open Result.Syntax in
-  let* tools = resolve_tools [ Read_file; Web_fetch; Board_source; Fusion_source; Task_source ] in
+  let* tools = resolve_tools ([Read_file; Web_fetch] @ source_tools submitted_evidence) in
   let project_root =
     Workspace_verification_store.project_root_of_base_path config.base_path
   in

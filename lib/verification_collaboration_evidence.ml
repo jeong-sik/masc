@@ -140,9 +140,7 @@ let capture_fusion ~config ~authority ~run_id =
    synthesize an approval verdict or pretend this is complete event history.
    The submit path already holds its backlog lease: one strict read needs no
    second acquisition, and Goal capture gets one atomic primary observation. *)
-let capture_task ~config ~task_id =
-  let* backlog = Workspace.read_backlog_r config
-    |> Result.map_error (fun detail -> Storage_failed detail) in
+let capture_task ~(backlog : Masc_domain.backlog) ~task_id =
   match List.filter (fun (task : Masc_domain.task) -> task.id = task_id) backlog.tasks with
   | [] -> Error (Source_unavailable
       "referenced Task was not found in the primary backlog; no approval history or deletion is inferred")
@@ -154,17 +152,31 @@ let capture_task ~config ~task_id =
 
 (* Captured once before the request commit; never capture on verifier read. *)
 let capture ~config ~authority ~references = protect (fun () ->
+  let references = List.sort_uniq String.compare references in
+  (* Goal capture does not hold the backlog lease. Reuse one complete primary
+     observation so its explicit Task references cannot mix commit revisions. *)
+  let* primary =
+    if List.exists (fun reference -> match Store.collaboration_reference reference with
+      | Some (Store.Task_source, _) -> true
+      | Some ((Store.Board_source | Store.Fusion_source), _) | None -> false) references
+    then Workspace.read_backlog_r config
+      |> Result.map Option.some
+      |> Result.map_error (fun detail -> Storage_failed detail)
+    else Ok None in
   List.fold_left (fun result reference ->
     let* items = result in
     let* source = match Store.collaboration_reference reference with
       | Some (Store.Board_source, post_id) -> capture_board ~config ~authority ~post_id
       | Some (Store.Fusion_source, run_id) -> capture_fusion ~config ~authority ~run_id
-      | Some (Store.Task_source, task_id) -> capture_task ~config ~task_id
+      | Some (Store.Task_source, task_id) ->
+        (match primary with
+         | Some backlog -> capture_task ~backlog ~task_id
+         | None -> Error (Storage_failed "Task reference has no primary capture observation"))
       | None -> Error (Invalid_request "expected board:<post-id>, fusion:<run-id> or task:<task-id>") in
     let content = Yojson.Safe.to_string source in
     let sha256 = Digestif.SHA256.(digest_string content |> to_hex) in
     Ok (items @ [Store.Evidence_collaboration {reference; content; sha256}]))
-    (Ok []) (List.sort_uniq String.compare references))
+    (Ok []) references)
 
 let submitted_source ~submitted_evidence reference =
   let matches = List.filter_map (function

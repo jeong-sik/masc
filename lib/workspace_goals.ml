@@ -640,7 +640,7 @@ let parse_goal_evidence_refs args =
         | `String reference :: rest ->
             (match Workspace_verification_store.collaboration_reference reference with
              | Some _ -> collect (reference :: acc) rest
-             | None -> Error "evidence_refs accepts explicit board: or fusion: references")
+             | None -> Error "evidence_refs accepts explicit board:, fusion: or task: references")
         | _ -> Error "evidence_refs must contain strings" in
       collect [] rows
   | _ -> Error "evidence_refs must be a list"

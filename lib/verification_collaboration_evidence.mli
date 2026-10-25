@@ -19,7 +19,9 @@ val error_to_string : error -> string
 val capture : config:Workspace.config -> authority:authority -> references:string list ->
   (Workspace_verification_store.submitted_evidence_item list, error) result
 (** Capture explicit collaboration references before the submission commits.
-    Captured items carry all source bytes and ownership; reads never consult live Board state. *)
+    All Task references in one capture use the same strict primary backlog
+    observation. Captured items carry all source bytes and ownership; reads
+    never consult live Board or Task state. *)
 val read_board : submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> args:Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
 val read_fusion : submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> args:Yojson.Safe.t ->

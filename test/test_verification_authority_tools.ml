@@ -267,7 +267,7 @@ let test_schemas_are_the_descriptor_schemas () =
     in
     Alcotest.(check (list string))
       "the surface is read-only"
-      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status"; "keeper_tasks_list" ]
+      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
       names;
     List.iter
       (fun (schema : Masc_domain.tool_schema) ->
@@ -281,7 +281,7 @@ let test_schemas_are_the_descriptor_schemas () =
              | "tool_read_file" ->
                  descriptor.Descriptor.description
                  ^ " " ^ VAT.image_delivery_note
-             | "masc_board_post_get" | "masc_fusion_status" | "keeper_tasks_list" ->
+             | "masc_board_post_get" | "masc_fusion_status" ->
                  (* These descriptors supply input validation; standalone
                     reviewer descriptions state their narrower authority. *)
                  schema.description
@@ -304,14 +304,6 @@ let test_schemas_are_the_descriptor_schemas () =
               Alcotest.(check (list string))
                 "masc_fusion_status adds source continuation to exact lookup"
                 ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
-                (schema.input_schema |> member "properties" |> keys)
-            | "keeper_tasks_list" ->
-              let open Yojson.Safe.Util in
-              Alcotest.(check (list string)) "Task source requires exact ids"
-                ["task_ids"]
-                (schema.input_schema |> member "required" |> to_list |> List.map to_string);
-              Alcotest.(check (list string)) "Task source has no live listing filters"
-                ["cursor"; "task_ids"]
                 (schema.input_schema |> member "properties" |> keys)
             | "masc_board_post_get" ->
               let open Yojson.Safe.Util in
@@ -475,7 +467,7 @@ let test_workspace_producer_gets_owned_read_surface () =
   | Ok surface ->
     Alcotest.(check (list string))
       "workspace producer surface"
-      [ "tool_read_file"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status"; "keeper_tasks_list" ]
+      [ "tool_read_file"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
       (VAT.schemas surface
        |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
     (match

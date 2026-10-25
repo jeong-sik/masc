@@ -7444,7 +7444,11 @@ let test_shipped_browser_composition_refuses_text_mode skill_name arguments () =
 let composition_failure_output_exn ~base_path content =
   let payload = structured_tool_output_exn ~base_path content in
   let payload = match Yojson.Safe.Util.(member "masc.tool_disposition" payload, member "message" payload) with
-    | `String "failed", `String message -> parse_json message
+    | `String "failed", `String message ->
+      (match Yojson.Safe.Util.member "failure_class" payload with
+       | `String class_ when Option.is_some (Tool_result.tool_failure_class_of_string class_) ->
+         parse_json message
+       | _ -> failf "invalid composition failure class: %s" (Yojson.Safe.to_string payload))
     | `Null, `Null -> payload
     | _ -> failf "invalid composition failure envelope: %s" (Yojson.Safe.to_string payload) in
   match Yojson.Safe.Util.member "effect_disposition" payload with

@@ -9385,6 +9385,112 @@ let test_lane_status_observations_remain_composable () =
          ; Profile.Remote_ssh, "unreachable"
          ])
 
+(* These alternatives run through the Keeper handler before the plan checks
+   their exact data. A fabricated last-page object would miss producer drift. *)
+let test_composable_task_page_alternatives () =
+  with_exec_fixture ~always_allow:true "composable-task-alternatives"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       ignore (Workspace.init config ~agent_name:None);
+       let invoke input =
+         let result = KET.execute_keeper_tool_call_with_outcome
+           ~config ~meta ~publication_recovery ~ctx_work
+           ~name:"keeper_tasks_list" ~input () in
+         check string "tasks producer succeeds" "success" (outcome_label result.KTE.disposition);
+         match result.KTE.data with
+         | None -> fail "tasks producer returned no structured data"
+         | Some data -> validate_probe_output ~tool_name:"keeper_tasks_list" ~data; data
+       in
+       let open Yojson.Safe.Util in
+       let empty = invoke (`Assoc []) in
+       check (list string) "empty producer snapshot" []
+         (empty |> member "snapshot" |> to_list |> List.map (fun row -> row |> member "id" |> to_string));
+       List.iter (fun title -> ignore (Workspace.add_task config
+         ~created_by:"composable-output-probe" ~title ~priority:3 ~description:""))
+         [ "first alternative"; "second alternative" ];
+       let first = invoke (`Assoc [ "limit", `Int 1 ]) in
+       check bool "first page is truncated" true (first |> member "truncated" |> to_bool);
+       let cursor = first |> member "next_cursor" |> to_string in
+       let revision = first |> member "revision" |> to_string in
+       let unchanged = invoke (`Assoc [ "limit", `Int 1; "if_revision", `String revision ]) in
+       check string "conditional producer branch" "unchanged" (unchanged |> member "kind" |> to_string);
+       check bool "unchanged carries no snapshot or cursor" true
+         (member "snapshot" unchanged = `Null && member "next_cursor" unchanged = `Null);
+       let last = invoke (`Assoc [ "limit", `Int 1; "cursor", `String cursor ]) in
+       check bool "last page is not truncated" false (last |> member "truncated" |> to_bool);
+       check bool "last page omits cursor" true (member "next_cursor" last = `Null);
+       let rows data = data |> member "snapshot" |> to_list in
+       check int "one row on each page" 1 (List.length (rows first));
+       check int "one final row" 1 (List.length (rows last));
+       check bool "continuation does not repeat the first row" true (rows first <> rows last);
+       (* Remove the cursor declaration from the actual descriptor, recreating
+          the historical schema drift while keeping the real producer value. *)
+       let descriptors = KTD.all_descriptors () |> List.map (fun (descriptor : KTD.t) ->
+         if List.mem "keeper_tasks_list" (KTD.keeper_model_names descriptor) then
+           match descriptor.composable_output with
+           | KTD.Opaque_output -> fail "tasks lost its composable declaration"
+           | KTD.Json_output { schema = `Assoc fields } ->
+             let properties = fields |> List.assoc "properties" |> to_assoc in
+             check bool "cursor declaration exists before negative mutation" true
+               (List.mem_assoc "next_cursor" properties);
+             let schema = `Assoc (("properties", `Assoc (List.remove_assoc "next_cursor" properties))
+               :: List.remove_assoc "properties" fields) in
+             { descriptor with composable_output = KTD.Json_output { schema } }
+           | KTD.Json_output _ -> fail "tasks output schema is not an object"
+         else descriptor) in
+       let node_id = match Plan.Node_id.make "tasks" with
+         | Ok id -> id | Error Plan.Node_id.Empty -> fail "empty node" in
+       let node = Plan.node ~id:node_id ~tool_name:"keeper_tasks_list"
+         ~input:(Plan.Json_template.literal (`Assoc [])) () in
+       let plan = match Plan.create ~descriptors [ node ] with
+         | Ok plan -> plan | Error error -> fail (Plan.error_to_string error) in
+       match Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id first with
+       | Error (Plan.Output_validation_failed { error = Plan.Unexpected_field { field = "next_cursor"; path = [] }; _ }) -> ()
+       | Error _ | Ok _ -> fail "real paged producer value did not expose the removed cursor declaration")
+;;
+
+let test_composable_metric_observation_alternatives () =
+  with_exec_fixture ~always_allow:true "composable-metric-alternatives"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       ignore (Workspace.init config ~agent_name:None);
+       let name = "exact-unobserved-metric-agent" in
+       let input = `Assoc [ "agent_name", `String name ] in
+       let invoke tool_name =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config ~meta ~publication_recovery ~ctx_work ~name:tool_name ~input () in
+       let success_data tool_name =
+         let result = invoke tool_name in
+         check string "metric producer succeeds" "success" (outcome_label result.KTE.disposition);
+         match result.KTE.data with
+         | None -> fail "metric producer returned no data"
+         | Some data -> validate_probe_output ~tool_name ~data; data in
+       let open Yojson.Safe.Util in
+       let missing = success_data "masc_agent_fitness" in
+       let row = missing |> member "agents" |> to_list |> function
+         | [ row ] -> row | _ -> fail "missing named observation lost its exact row" in
+       check string "unobserved exact identity" name (row |> member "agent_id" |> to_string);
+       check bool "missing observation keeps both nested values null" true
+         (member "metrics" row = `Null && member "components" row = `Null);
+       let missing_metrics = invoke "masc_get_metrics" in
+       check bool "missing metrics is a tool failure, not a success-schema value" true
+         (outcome_label missing_metrics.KTE.disposition <> "success");
+       let metric = Masc.Metrics_store_eio.create_metric ~agent_id:name ~task_id:"pending-observation" () in
+       (match Masc.Metrics_store_eio.record config metric with
+        | Ok Masc.Metrics_store_eio.Written -> ()
+        | Ok Enqueued -> Masc.Metrics_store_eio.flush_pending ()
+        | Error error -> fail (Masc.Metrics_store_eio.record_error_to_string error));
+       let observed = success_data "masc_get_metrics" in
+       check int "actual pending observation emitted" 1 (observed |> member "record_count" |> to_int);
+       List.iter (fun field -> check bool (field ^ " remains null without an outcome") true
+         (member field observed = `Null))
+         [ "avg_completion_time_s"; "task_success_rate"; "error_rate"; "handoff_task_success_rate" ];
+       let fitness = success_data "masc_agent_fitness" in
+       let row = fitness |> member "agents" |> to_list |> function
+         | [ row ] -> row | _ -> fail "observed named pool changed cardinality" in
+       check bool "recorded fitness uses an object rather than missing observation" true
+         (match member "metrics" row, member "components" row with
+          | `Assoc _, `Assoc _ -> true | _ -> false))
+;;
+
 let test_composable_outputs_satisfy_declared_schema () =
   with_exec_fixture
     ~process:true
@@ -10777,6 +10883,10 @@ let () =
     ("composable_output_contract", [
       test_case "lane observations remain composable without a guest" `Quick
         test_lane_status_observations_remain_composable;
+      test_case "composable task page alternatives" `Quick
+        test_composable_task_page_alternatives;
+      test_case "composable metric observation alternatives" `Quick
+        test_composable_metric_observation_alternatives;
       test_case "every composable tool has an output probe" `Quick
         test_every_composable_tool_has_an_output_probe;
       test_case "real producer output satisfies its declared schema" `Quick

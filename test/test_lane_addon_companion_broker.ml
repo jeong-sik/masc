@@ -286,7 +286,8 @@ let provider_ends_before_invocation_acceptance () = with_broker (fun env sw brok
   Eio.Fiber.yield ();
   check bool "publication has no acceptance before the invocation decision" false
     (Eio.Promise.is_resolved response);
-  B.revoke broker;B.await_stopped broker;
+  B.revoke broker;
+  check bool "ended provider listener descriptor close is confirmed" true (B.await_stopped broker = Ok ());
   check bool "late worker success cannot accept an ended provider" true
     (B.accept grant=Error B.Unavailable);
   B.end_invocation grant;

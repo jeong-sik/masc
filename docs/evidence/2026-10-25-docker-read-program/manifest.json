@@ -1,0 +1,82 @@
+{
+  "schema": "masc.read-program.publication.v1",
+  "source_sha": "cdeb9e5af15677c22fc4be8b0cc0f82d42e5b351",
+  "scope": "Every file in this evidence directory except this manifest itself. Nested actual manifest covers only its directory.",
+  "entries": [
+    {
+      "file": "README.md",
+      "bytes": 4621,
+      "sha256": "9e9e9ceae5fdcd4253727ea8670e55a3d5a5dcc95791baab2aea5a21e0c13cf6"
+    },
+    {
+      "file": "actual/README.md",
+      "bytes": 1917,
+      "sha256": "4793876ef6a4457bc1ba91a158807ff9502c6dbb42d63a03c685fbf564637cc6"
+    },
+    {
+      "file": "actual/actual-read-program-review.json",
+      "bytes": 8053,
+      "sha256": "f1553d414856cfda472e6eec8949d4a8bda598773cb8b2345db53bcdf418c030"
+    },
+    {
+      "file": "actual/manifest.json",
+      "bytes": 609,
+      "sha256": "e1cb5bcb5c567183683c89c9a5a4c716310360374fd974a8ea6f2561504c848b"
+    },
+    {
+      "file": "compile-response.json",
+      "bytes": 3666,
+      "sha256": "b4df8d9205d6834afba6c5580b68117418dff3453b5202d7b20b185ff0ec47b1"
+    },
+    {
+      "file": "local-parse-84003.json",
+      "bytes": 900,
+      "sha256": "afe5b775099bd54099ffdd849a679f10aa27ecc0c2a6c44b772f2ed0d4870c6a"
+    },
+    {
+      "file": "native-dispatch-84003.json",
+      "bytes": 728,
+      "sha256": "1b3fffe858dace7677ca054d903d195f3aa2035ad9787b074fdfba160123089d"
+    },
+    {
+      "file": "native-dispatch-cdeb.json",
+      "bytes": 891,
+      "sha256": "eeb898ca5f4dd63cb3b9de6bbc2b4c950cdd636b551365d34c910d4d9aaba781"
+    },
+    {
+      "file": "native-failure-84003.json",
+      "bytes": 697,
+      "sha256": "0a70c3343116937a263a3f63f8bbb5161fb6c3cdd9fb7f4d9e6a0defb6a2c0ab"
+    },
+    {
+      "file": "native-result-cdeb.json",
+      "bytes": 1473,
+      "sha256": "ae16c7db118cf48cbf2bc7ad20e835ecd1d3b5754601c7c7256c27a495c5692e"
+    },
+    {
+      "file": "source-boundary.json",
+      "bytes": 852,
+      "sha256": "0a117a8a95c0737443d6c4af349b80a583274a282f26b6f13e1633401f258283"
+    },
+    {
+      "file": "source-review/prior-native-error-cdeb9e5a.txt",
+      "bytes": 744,
+      "sha256": "50cf0b5a80dbb88f28218d90277c2d6169812bb356ec75cf62a740780adec379"
+    },
+    {
+      "file": "source-review/review-cdeb9e5a.json",
+      "bytes": 13339,
+      "sha256": "e2ce772ba95ad68de9893170915317e35280c8fe521d816123542f7ce9d96bc5"
+    },
+    {
+      "file": "source-review/review.json",
+      "bytes": 9703,
+      "sha256": "08f1a40f6a8da6a023fb8531136f860169a0a620aa243796243008c41778a293"
+    },
+    {
+      "file": "task-observation.json",
+      "bytes": 478,
+      "sha256": "61038637a2efd788f79cf479b827a170322686893572826a0e1d3c9b7b010976"
+    }
+  ]
+}

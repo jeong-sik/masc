@@ -97,7 +97,8 @@ val read_file :
     The caller owns container-path translation: any path referenced
     in [command_argv] must already be in container space (use
     [container_path_of_host] to convert). The first element of
-    [command_argv] is the executable.
+    [command_argv] is the executable. The Docker fallback clears the image's
+    default entrypoint so it cannot reinterpret that program or its exit code.
 
     Returns the captured stdout bytes clamped to [max_bytes]. Errors
     include image misconfiguration, empty [command_argv], runtime

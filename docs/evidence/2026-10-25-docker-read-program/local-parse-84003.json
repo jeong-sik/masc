@@ -1,0 +1,26 @@
+{
+  "schema": "masc.read-program.local-parse.v1",
+  "head": "84003fe04f9ac67a4b4b8f5fe851a3ad2c1924d8",
+  "observed_at": "2026-10-25T11:41:11.759729+00:00",
+  "files": [
+    {
+      "file": "lib/keeper/keeper_sandbox_read_backend.mli",
+      "bytes": 8930,
+      "sha256": "13b7f3aa8cacd52230211bc5aab7dad8240d316a9d0e15ff199b476af674c1de"
+    },
+    {
+      "file": "lib/keeper/keeper_sandbox_read_backend.ml",
+      "bytes": 30262,
+      "sha256": "94e8c5f1682d4ffca9ca6423f260e66f5f15306164f7f24c22e73aac4c1eb3b6"
+    },
+    {
+      "file": "test/test_keeper_sandbox_read_backend.ml",
+      "bytes": 138420,
+      "sha256": "11dce62b340361a08d75c73c011280e5d0dc4b7c7d8fe3759a710039982cb56f"
+    }
+  ],
+  "parse_exit": 0,
+  "local_dune_run": false,
+  "native_or_typing_claimed": false,
+  "parse_basis": "The three explicit ocamlc -stop-after parsing commands succeeded before the source commit."
+}

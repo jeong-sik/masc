@@ -1,0 +1,28 @@
+{
+  "schema": "masc.read-program.native-dispatch.v1",
+  "source_sha": "84003fe04f9ac67a4b4b8f5fe851a3ad2c1924d8",
+  "branch": "codex/goal-read-program-20261025",
+  "observed_at": "2026-10-25T11:41:29.961367+00:00",
+  "suites": [
+    "test_keeper_sandbox_read_backend"
+  ],
+  "command": [
+    "gh",
+    "workflow",
+    "run",
+    "test.yml",
+    "--repo",
+    "jeong-sik/masc",
+    "--ref",
+    "codex/goal-read-program-20261025",
+    "-f",
+    "minimal=true",
+    "-f",
+    "suite=test_keeper_sandbox_read_backend"
+  ],
+  "exit_code": 0,
+  "stdout": "https://github.com/jeong-sik/masc/actions/runs/40189920561\n",
+  "stderr": "",
+  "full_regression": "not_run",
+  "previous_full_regression_run_head_suites": "not_established"
+}

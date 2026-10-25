@@ -1808,7 +1808,7 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
              (try io.send frame json; Ok () with
               | exn ->
                 Llm_provider.Reserved_exn.reraise_if_reserved exn;
-                vendor_closed := true;
+                close_delivery ();
                 stopped := Some (Turn_input_write_failed (Printexc.to_string exn));
                 retain ()) in
         (match delivery with

@@ -41,3 +41,12 @@ the direct `masc.masc_process` library, whose unwrapped module is not exposed by
 `open Masc`. This dependency is now explicit as well. The preflight library's
 12-case suite passed in the first targeted run; that does not compile this
 separate executable or prove the CLI regressions pass.
+
+Candidate `327fd90f7fec1a07f4ca7e5836d5cad3e8e39c15` compiled and packaged
+successfully in macOS run 40198143147. Linux CLI run 40198292667 executed all ten
+cases: nine passed; the config-refusal assertion failed because Cmdliner wrapped
+`unknown key "env_file"` across lines. The actual result was the required nonzero
+`remote_ssh_preflight_unavailable` refusal with the original config error intact.
+The assertion now normalizes diagnostic whitespace before checking that cause;
+it still requires nonzero exit, no success text, no false root-missing claim,
+and no Keeper workspace creation.

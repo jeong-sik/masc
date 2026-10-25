@@ -1,0 +1,66 @@
+{
+  "source_log_sha256": "83151550e227bcca966c8750454453bd3a33c9d57be5451596b004c97df84ed7",
+  "scope": "Exact original log excerpts for durable replay, typed correlation, Host identity and hook error assertions. Complete run and case counts are recorded separately.",
+  "lines": [
+    {
+      "line": 1075,
+      "text": "2026-10-25T01:13:22.2315877Z ASSERT confirmed review survives an independent history replay"
+    },
+    {
+      "line": 1076,
+      "text": "2026-10-25T01:13:22.2360360Z   [OK]          completion_authority               22   boot recovery commits..."
+    },
+    {
+      "line": 1126,
+      "text": "2026-10-25T01:13:22.3550465Z ASSERT confirmed review survives an independent history replay"
+    },
+    {
+      "line": 1143,
+      "text": "2026-10-25T01:13:22.3597566Z   [OK]          completion_authority               24   system LLM uses persi..."
+    },
+    {
+      "line": 1784,
+      "text": "2026-10-25T01:13:23.3604650Z ASSERT typed rejection retains verification correlation"
+    },
+    {
+      "line": 1785,
+      "text": "2026-10-25T01:13:23.3605101Z ASSERT typed rejection retains its reason"
+    },
+    {
+      "line": 1786,
+      "text": "2026-10-25T01:13:23.3605481Z ASSERT typed rejection retains its authority"
+    },
+    {
+      "line": 1801,
+      "text": "2026-10-25T01:13:23.3655319Z ASSERT durable verdict audit retains task_id"
+    },
+    {
+      "line": 1802,
+      "text": "2026-10-25T01:13:23.3655579Z ASSERT durable verdict audit retains verification_id"
+    },
+    {
+      "line": 1803,
+      "text": "2026-10-25T01:13:23.3655833Z ASSERT durable verdict audit retains reason"
+    },
+    {
+      "line": 1804,
+      "text": "2026-10-25T01:13:23.3656067Z ASSERT durable verdict audit retains verdict"
+    },
+    {
+      "line": 1805,
+      "text": "2026-10-25T01:13:23.3656315Z ASSERT durable verdict audit retains authority_kind"
+    },
+    {
+      "line": 1806,
+      "text": "2026-10-25T01:13:23.3656579Z ASSERT durable verdict audit retains authority_actor"
+    },
+    {
+      "line": 3622,
+      "text": "2026-10-25T01:15:35.2603779Z ASSERT deterministic pre-result turn identity"
+    },
+    {
+      "line": 3633,
+      "text": "2026-10-25T01:15:37.2802240Z ASSERT terminal hook detail survives"
+    }
+  ]
+}

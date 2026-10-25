@@ -1,11 +1,16 @@
 {
-  "recorded_at": "2026-10-25T01:17:23.649758+00:00",
+  "recorded_at": "2026-10-25T01:26:43.939356+00:00",
   "scope": "This directory excluding this manifest. Historical receipts remain original bytes.",
   "files": [
     {
       "path": "README.md",
-      "bytes": 2868,
-      "sha256": "a20dc63be185abc3936c1ba65b5fea50f631b3a424ddfea49e289024daa6069c"
+      "bytes": 3135,
+      "sha256": "7bca539091951e23f3002cbaa64b275c50518ff10b0850f50f8b156db2cf6b4f"
+    },
+    {
+      "path": "final-primary-state.json",
+      "bytes": 11287,
+      "sha256": "0be58c48d1a1b95e1eafc65d5cf4a851d43c8356b46a5916f2ba65853a73c56b"
     },
     {
       "path": "goal-proof-request/intent.json",

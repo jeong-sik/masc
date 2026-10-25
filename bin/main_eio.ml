@@ -573,16 +573,6 @@ let shutdown_signal_name = function
   | Sigterm -> "SIGTERM"
   | Sigint -> "SIGINT"
 
-let acquire_pid_lock port =
-  match Server_startup_takeover.acquire_pid_lock port with
-  | Server_startup_takeover.Acquired -> ()
-  | Server_startup_takeover.Already_running { pid } ->
-      Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
-        (Printf.sprintf
-           "[FATAL] Another MASC server (PID %d) is already running on port %d. Kill it first: kill %d"
-           pid port pid);
-      exit 1
-
 let acquire_base_path_lock ~run_dir base_path =
   match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
   | Server_startup_takeover.Base_path_acquired lease -> lease
@@ -656,7 +646,7 @@ let run_cmd ?(record_default = false) ~executable_path host port cli_base_path a
   in
   (* The lease has established the canonical .masc boundary. OCaml read its
      event-directory environment before entering ML, so the default needs a
-     same-process exec before any PID lock, thread, sampler, or scheduler.
+     same-process exec before any thread, sampler, or scheduler.
      Reuse the deployment handoff capability rather than release ownership
      while the replacement runtime reacquires its process-lifetime handle. *)
   let event_startup =
@@ -680,29 +670,7 @@ let run_cmd ?(record_default = false) ~executable_path host port cli_base_path a
           ~handoff_error_to_string:Server_startup_takeover.base_path_lock_rejection_to_string
           error);
      exit 1);
-  acquire_pid_lock port;
   Log.init_from_env ();
-  (* Report a fresh takeover breadcrumb at boot: after a SIGKILL escalation
-     the victim could not log, so this is the only place the kill becomes
-     visible. Skip the breadcrumb this process wrote itself while reclaiming
-     the lock (the killer already logged its own WARN). *)
-  (match
-     Server_startup_takeover.read_takeover_breadcrumb
-       ~lock_path:(Server_startup_takeover.pid_lock_path port)
-       ()
-   with
-   | Server_startup_takeover.Breadcrumb_found { killer_pid = Some killer; _ }
-     when killer = Unix.getpid () -> ()
-   | Server_startup_takeover.Breadcrumb_found { breadcrumb_path; age_sec; payload; _ }
-     ->
-     Log.Server.warn
-       "[Startup] takeover breadcrumb found (%.0fs old, %s) — previous instance was killed by a takeover: %s"
-       age_sec breadcrumb_path payload
-   | Server_startup_takeover.Breadcrumb_stale _ | Server_startup_takeover.Breadcrumb_absent
-     -> ()
-   | Server_startup_takeover.Breadcrumb_unreadable { breadcrumb_path; reason } ->
-     Log.Server.warn "[Startup] takeover breadcrumb unreadable at %s: %s"
-       breadcrumb_path reason);
   let shutdown_cfg =
     match Masc.Shutdown.config_from_env_result () with
     | Ok config -> config
@@ -804,8 +772,7 @@ let run_cmd ?(record_default = false) ~executable_path host port cli_base_path a
   Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> request_shutdown Sigterm));
   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> request_shutdown Sigint));
 
-  let max_bind_retries = 5 in
-  let rec try_start attempt =
+  let start () =
     (try
       Eio.Switch.run @@ fun sw ->
       let clock = Eio.Stdenv.clock env in
@@ -826,31 +793,6 @@ let run_cmd ?(record_default = false) ~executable_path host port cli_base_path a
             Log.Server.info
               "[MASC] Received %s, shutting down gracefully (timeout=%.0fs, hard_exit=%d)..."
               signal_name force_timeout Masc.Shutdown.process_deadline_exit_code;
-            (* Signal-sender attribution for the restart-cycle investigation:
-               a takeover killer writes a breadcrumb next to the pid lock
-               right before signalling; its absence means the sender is
-               external (user, pkill, system). *)
-            (match
-               Server_startup_takeover.read_takeover_breadcrumb
-                 ~lock_path:(Server_startup_takeover.pid_lock_path port)
-                 ()
-             with
-             | Server_startup_takeover.Breadcrumb_found { age_sec; payload; _ } ->
-               Log.Server.info
-                 "[Shutdown] signal attribution: takeover breadcrumb (%.1fs old): %s"
-                 age_sec payload
-             | Server_startup_takeover.Breadcrumb_stale { age_sec; _ } ->
-               Log.Server.info
-                 "[Shutdown] signal attribution: no fresh takeover breadcrumb (stale one is %.0fs old) — sender is external (user/pkill/system)"
-                 age_sec
-             | Server_startup_takeover.Breadcrumb_absent ->
-               Log.Server.info
-                 "[Shutdown] signal attribution: no takeover breadcrumb — sender is external (user/pkill/system)"
-             | Server_startup_takeover.Breadcrumb_unreadable { breadcrumb_path; reason }
-               ->
-               Log.Server.warn
-                 "[Shutdown] signal attribution: breadcrumb unreadable at %s: %s"
-                 breadcrumb_path reason);
             (* Phase 1: Notify SSE clients *)
             let t_phase = Unix.gettimeofday () in
             let shutdown_data =
@@ -973,15 +915,8 @@ let run_cmd ?(record_default = false) ~executable_path host port cli_base_path a
            caller-side [benign] classifies only leaf exceptions. *)
         Log.Server.info
           "MASC MCP: Background fibers finished, shutdown complete (with benign in-flight cancellations)."
-    | Unix.Unix_error (Unix.EADDRINUSE, _, _) when attempt < max_bind_retries ->
-        let delay = Float.min 30.0 (2.0 ** Float.of_int attempt) in
-        Log.Server.warn "Port %d in use, retrying in %.0fs (attempt %d/%d)"
-          port delay (attempt + 1) max_bind_retries;
-        Time_compat.sleep delay;
-        try_start (attempt + 1)
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
-        Log.Server.error "[FATAL] Port %d is still in use after %d retries. Try: lsof -i :%d | grep LISTEN"
-          port max_bind_retries port;
+        Log.Server.error "[FATAL] Port %d is already in use; startup refused" port;
         exit 1
     | Unix.Unix_error (Unix.EACCES, _, _) ->
         Log.Server.error "[FATAL] Permission denied binding to port %d" port;
@@ -998,7 +933,7 @@ let run_cmd ?(record_default = false) ~executable_path host port cli_base_path a
         if bt <> "" then Log.Server.error "[FATAL] Backtrace:\n%s" bt;
         exit 1)
   in
-  try_start 0;
+  start ();
   (match Atomic.get shutdown_watchdog with
    | None -> ()
    | Some watchdog ->

@@ -45,7 +45,7 @@ fn main() {
         .add_plugins(bevy::state::app::StatesPlugin)
         .add_plugins((ModePlugin, ThemePlugin))
         // DOM + session systems only; renderer/audio plugins are skipped on wasm fallback.
-        .add_plugins((sse::SsePlugin, game::GameStatePlugin, dom::DomBridgePlugin))
+        .add_plugins((sse::TrpgPollingPlugin, game::GameStatePlugin, dom::DomBridgePlugin))
         .run();
 }
 
@@ -73,7 +73,7 @@ fn main() {
         .insert_resource(ClearColor(default_theme.clear_color()))
         .add_plugins((ModePlugin, ThemePlugin))
         .add_plugins((
-            sse::SsePlugin,
+            sse::TrpgPollingPlugin,
             game::GameStatePlugin,
             render::MapRenderPlugin,
             shaders::PostProcessPlugin,

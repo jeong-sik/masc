@@ -1378,7 +1378,7 @@ fn start_polling_loop(messages: Arc<Mutex<Vec<(String, String)>>>, active: Arc<A
 
 /// Startup system that creates the current TRPG polling input.
 #[cfg(target_arch = "wasm32")]
-pub fn setup_sse(mut commands: Commands, mut connection: ResMut<ConnectionStatus>) {
+pub fn setup_polling(mut commands: Commands, mut connection: ResMut<ConnectionStatus>) {
     *connection = ConnectionStatus::Connecting;
     let messages = Arc::new(Mutex::new(Vec::new()));
     let active = Arc::new(AtomicBool::new(true));
@@ -1393,12 +1393,12 @@ pub fn setup_sse(mut commands: Commands, mut connection: ResMut<ConnectionStatus
     );
 }
 
-/// Native no-op for setup_sse.
+/// Native no-op for setup_polling.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn setup_sse(mut _commands: Commands, mut _connection: ResMut<ConnectionStatus>) {}
+pub fn setup_polling(mut _commands: Commands, mut _connection: ResMut<ConnectionStatus>) {}
 
 /// OnExit(Trpg) system: stops polling and removes the resource.
-pub fn teardown_sse(
+pub fn teardown_polling(
     mut commands: Commands,
     receiver: Option<Res<SseReceiver>>,
     connection: Option<ResMut<ConnectionStatus>>,

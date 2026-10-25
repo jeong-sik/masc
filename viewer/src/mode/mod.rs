@@ -65,7 +65,8 @@ pub enum ViewerMode {
     Home,
 
     /// D&D 5e game session viewer (그림란드 연대기).
-    /// Data source: MASC `/api/v1/trpg/stream` JSON polling.
+    /// Unavailable: this repository has no canonical TRPG producer.
+    /// Requests are rejected before changing mode or starting any runtime systems.
     Trpg,
 
     /// Experiment visualization — Sankey diagrams, network graphs, A/B metrics.
@@ -79,6 +80,37 @@ pub enum ViewerMode {
     /// Social board feed — agent posts, comments, reactions.
     /// SSE: MASC `/sse?workspace=social`
     Social,
+}
+
+/// A known mode can be unavailable without becoming an unknown mode or a
+/// speculative connection attempt. URL, restored storage and card requests all
+/// cross this boundary before URL/storage/NextState effects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeUnavailable {
+    TrpgProducerAbsent,
+}
+
+impl ModeUnavailable {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::TrpgProducerAbsent => "trpg_producer_absent",
+        }
+    }
+
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::TrpgProducerAbsent => "TRPG는 현재 지원되지 않습니다. 연결할 TRPG 서비스가 없습니다.",
+        }
+    }
+}
+
+fn admit_mode(mode: ViewerMode) -> Result<ViewerMode, ModeUnavailable> {
+    match mode {
+        ViewerMode::Trpg => Err(ModeUnavailable::TrpgProducerAbsent),
+        ViewerMode::Home | ViewerMode::Monitor | ViewerMode::Social | ViewerMode::Experiment => {
+            Ok(mode)
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -974,6 +1006,29 @@ fn poll_mode_transition(
         };
 
         if let Some(mode) = requested {
+            let mode = match admit_mode(mode) {
+                Ok(mode) => mode,
+                Err(reason) => {
+                    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+                        if let Some(body) = doc.body() {
+                            let _ = body.set_attribute("data-mode-unavailable", reason.code());
+                        }
+                        if let Some(notice) = doc.get_element_by_id("mode-unavailable") {
+                            notice.set_text_content(Some(reason.message()));
+                            let _ = notice.remove_attribute("hidden");
+                        }
+                    }
+                    return;
+                }
+            };
+            if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+                if let Some(body) = doc.body() {
+                    let _ = body.remove_attribute("data-mode-unavailable");
+                }
+                if let Some(notice) = doc.get_element_by_id("mode-unavailable") {
+                    let _ = notice.set_attribute("hidden", "");
+                }
+            }
             if *current.get() != mode {
                 log::info!("Mode transition: {:?} → {:?}", current.get(), mode);
 

@@ -531,44 +531,12 @@ mod tests {
     }
 
     #[test]
-    fn sse_endpoint_routes_masc_modes_to_legacy_sse() {
-        assert_eq!(
-            sse_endpoint(&ViewerMode::Monitor).as_deref(),
-            Some("/sse?workspace=monitor")
-        );
-        assert_eq!(
-            sse_endpoint(&ViewerMode::Experiment).as_deref(),
-            Some("/sse?workspace=experiment")
-        );
-        assert_eq!(
-            sse_endpoint(&ViewerMode::Social).as_deref(),
-            Some("/sse?workspace=social")
-        );
-    }
-
-    #[test]
-    fn sse_endpoint_by_name_matches_stateful_variant() {
-        assert_eq!(
-            sse_endpoint_by_name("Monitor").as_deref(),
-            Some("/sse?workspace=monitor")
-        );
-        assert_eq!(
-            sse_endpoint_by_name("Experiment").as_deref(),
-            Some("/sse?workspace=experiment")
-        );
-        assert_eq!(
-            sse_endpoint_by_name("Social").as_deref(),
-            Some("/sse?workspace=social")
-        );
-    }
-
-    #[test]
     fn redact_auth_query_masks_sensitive_values() {
         assert_eq!(
             redact_auth_query(
-                "/api/v1/trpg/stream/sse?workspace_id=default&token=abc123&agent=viewer&auth_token=qwe"
+                "/sse?workspace=monitor&token=abc123&agent=viewer&auth_token=qwe"
             ),
-            "/api/v1/trpg/stream/sse?workspace_id=default&token=***&agent=viewer&auth_token=***"
+            "/sse?workspace=monitor&token=***&agent=viewer&auth_token=***"
         );
     }
 

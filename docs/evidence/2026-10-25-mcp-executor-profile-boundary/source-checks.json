@@ -1,0 +1,29 @@
+{
+  "base": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+  "source_sha256": {
+    "lib/mcp_server_eio_execute.mli": "91725c2d17456299e61c6a86b0250798fd17c27f389ad0d29db302ab3c0a31f6",
+    "lib/mcp_server_eio_execute.ml": "c23e7ac5167bad6db0f6cd93f54b13144ff5a282ff5360eecddcddfff333c478",
+    "test/test_mcp_server_eio_tool_dispatch.ml": "fd71cf62c3f29ff4031d8f94a2e049d44f0cfbb82d4a6a70e7c68356a65ce1d9"
+  },
+  "parse": "PASS",
+  "whitespace": "PASS",
+  "local_dune": "NOT_RUN",
+  "typecheck": "NOT_RUN",
+  "execution": "NOT_RUN",
+  "requested_suites": [
+    "test/test_mcp_server_eio_tool_dispatch"
+  ],
+  "full_regression": "NOT_RUN",
+  "prior_run": {
+    "run": 40162337813,
+    "head": "62fb1c616785a4fe723bf02f5ca4c54371861bff",
+    "conclusion": "FAILURE",
+    "passed_suite": {
+      "name": "test/test_mcp_seat_profile",
+      "cases": 12
+    },
+    "failed_stage": "tool_dispatch fixture compilation",
+    "error": "facade Mcp_server_eio.tool_profile is distinct from shared Mcp_server_eio_types.tool_profile",
+    "repair": "call actual common Mcp_server_eio_execute entry with its declared type"
+  }
+}

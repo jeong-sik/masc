@@ -161,12 +161,60 @@ let test_tool_call_heartbeats () =
       Alcotest.(check bool) "tool call heartbeats" true
         (not (String.equal last_seen stale_last_seen)))
 
+(* Direct callers do not pass the protocol-level tools/call gate. A profile
+   refusal must still precede every actual dispatch hook, even with valid admin
+   credentials and caller-controlled internal-runtime flags. *)
+let test_direct_executor_enforces_profile_before_hooks () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let entered = ref 0 in
+  Fun.protect ~finally:(fun () -> Tool_dispatch.clear_hooks (); cleanup_dir base_path)
+    (fun () ->
+      Tool_dispatch.clear_hooks ();
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
+      let raw_token = create_admin_token base_path in
+      let name = "masc_tool_help" in
+      let call profile internal_keeper_runtime name =
+        Masc.Mcp_server_eio_execute.execute_tool_eio ~sw ~clock:env#clock
+          ~workspace_scope:(Mcp_server.workspace_scope state)
+          ~profile ~auth_token:raw_token ~internal_keeper_runtime state ~name
+          ~arguments:(`Assoc ["tool_name", `String "masc_status"]) in
+      Tool_dispatch.register_pre_hook (fun ~schema:_ ~name:_ ~args:_ ->
+        incr entered; Tool_dispatch.Pass);
+      List.iter (fun (profile, name) ->
+        Alcotest.(check bool) "fixture tool excluded by actual restricted profile" false
+          (Masc.Mcp_server_eio_tool_profile.tool_allowed_in_profile state profile name);
+        List.iter (fun internal ->
+          let result = call profile internal name in
+          (match result with
+           | Tool_result.Failed failure ->
+             Alcotest.(check bool) "profile refusal is typed policy rejection" true
+               (failure.class_ = Tool_result.Policy_rejection);
+             Alcotest.(check bool) "no effect was attempted" true
+               (failure.effect_disposition = Tool_result.Proven_pre_effect)
+           | Tool_result.Completed _ | Tool_result.Deferred _ ->
+             Alcotest.fail "direct executor bypassed profile");
+          Alcotest.(check int) "refused call never enters actual dispatch hook" 0 !entered)
+          [false; true])
+        [Masc.Mcp_server_eio_tool_profile.Operator_remote, name;
+         Seat, name; Full, "masc_unregistered_profile_fixture"];
+      let allowed = call Masc.Mcp_server_eio_tool_profile.Full false name in
+      Alcotest.(check bool) "allowed Full call still executes actual tool" true
+        (Tool_result.is_success allowed);
+      Alcotest.(check int) "only admitted call reaches actual dispatch hook" 1 !entered)
+
 let () =
   Alcotest.run "Mcp_server_eio_tool_dispatch"
     [
       ( "tool_dispatch",
         [
           "execute masc_tool_help", `Quick, test_execute_tool_help_tool;
+          ( "direct executor enforces profile before hooks", `Quick,
+            test_direct_executor_enforces_profile_before_hooks );
           ( "execute tag dispatch respects pre-hooks",
             `Quick,
             test_execute_tool_tag_dispatch_respects_pre_hooks );

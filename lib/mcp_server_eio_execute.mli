@@ -91,9 +91,16 @@ val execute_tool_eio :
     - Bumps the [Otel_metric_store.record_request] counter for
       every inbound call.
 
-    [profile] defaults to [Full]; [internal_keeper_runtime]
-    defaults to [false] (set [true] for keeper-runtime
-    callers that bypass the public-tool whitelist).
+    The executor enforces the existing [tool_allowed_in_profile] membership
+    contract itself before tool authorization, dispatch hooks or tool effects. Calling this
+    entry directly (including gRPC) cannot bypass it. A refusal returns
+    [Policy_rejection] with [Proven_pre_effect]. This does not grant caller
+    identity or replace token/role authorization. Protocol-level admission may
+    reject earlier to preserve its JSON-RPC method-not-found envelope.
+
+    [profile] defaults to [Full]; [internal_keeper_runtime] defaults to [false].
+    The flag is verified against its internal bearer token when resolving
+    caller identity; it does not override profile membership.
 
     Type variables [{'sw, 'clk, 'auth}] stay polymorphic
     (cycle 205 lesson) so the dispatcher's body — which

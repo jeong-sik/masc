@@ -101,15 +101,15 @@ let execute_tool_eio
     | None -> ()
     | Some sid -> Client_registry_eio.set_resolved_name sid agent_name ~is_ephemeral
   in
+  let profile_permitted =
+    Mcp_server_eio_tool_profile.tool_allowed_in_profile state profile name
+  in
   let direct_call_authority =
     match profile with
     | Mcp_server_eio_tool_profile.Full ->
       Mcp_server_eio_caller_identity.Catalog_policy
     | Managed_agent | Operator_remote | Seat ->
-      if
-        Mcp_server_eio_tool_profile.tool_allowed_in_profile state
-          profile
-          name
+      if profile_permitted
       then Mcp_server_eio_caller_identity.Restricted_profile
       else Mcp_server_eio_caller_identity.Catalog_policy
   in
@@ -196,6 +196,16 @@ let execute_tool_eio
         ());
     result
   in
+  if not profile_permitted
+  then
+    with_non_public_tool_audit ~agent_name
+      (Tool_result.make_err
+         ~tool_name:name
+         ~class_:Tool_result.Policy_rejection
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         ~start_time:(Tool_timing.start ())
+         (Printf.sprintf "Tool '%s' is not available on this MCP endpoint." name))
+  else
   match mode_gate_error with
   | Some msg -> with_non_public_tool_audit ~agent_name (runtime_error_result msg)
   | None ->

@@ -1,0 +1,84 @@
+{
+  "schema": "masc.goal.declared-aggregate.source-review-response.v1",
+  "status": "FINAL_FROZEN",
+  "frozen_at_utc": "2026-10-25T17:21:18.695763+00:00",
+  "verdict": "AGREES_PRIOR_SOURCE_P2_FAIL_AND_SCOPED_SOURCE_REPAIR_PASS_UNEXECUTED_AGGREGATE_OUTCOME",
+  "frozen_review": {
+    "path": "../masc-goal-proof-source-provenance-final-review-20261026/review.json",
+    "bytes": 15046,
+    "sha256": "9076a581cd507522be3493765bc3bb4714aecea464477162f45af1526a3c8e8f",
+    "read_in_full": true,
+    "head": "6373afb2e651d27312886866a2c2a7dd0060a3f3",
+    "direct_base": "ce5ae0548c0b3349b57b46755034c444e260db25",
+    "canonical_complete_diff_sha256": "e2460860627d5805cc6ad3ab5e2cf83433999d6fc2b6e4060148b4a4d7a5c17e"
+  },
+  "prior_fail_response": {
+    "severity": "P2",
+    "agreement": true,
+    "finding": "The unqualified instruction against combining results from different runs could override a legitimate metric that explicitly aggregates named observations. That contradicts respecting the declared measurement procedure and risks a false REJECT or selecting only one input.",
+    "self_correction": "My earlier exact35b653 source PASS missed this unconditional aggregation restriction. Preserve that frozen PASS as historical review; the later6373 FAIL supersedes it for this newly identified current-content finding.",
+    "empirical_limit": "No failed aggregate judgment was observed in that source review. Existing N/P/R controls use one raw record or the reported value, so their successful outcomes do not exercise or clear this branch.",
+    "separate_integrity": "The frozen final review separately passes publication/capture integrity. Capture and Task workflow integrity do not validate the defective prompt content, and this response does not repeat the complete publication or raw98 audit."
+  },
+  "current_patch": {
+    "state": "Uncommitted prompt-only repair on the exact6373 checkout; not a new committed-head or PR approval.",
+    "path": "config/prompts/goal_verification.md",
+    "bytes": 7672,
+    "sha256": "529f84a6a36146eca2821e02ade8a9467b166b5d1ed25eea4b37493cc5579539",
+    "canonical_diff_command": "git diff --no-ext-diff --binary --full-index 6373afb2e651d27312886866a2c2a7dd0060a3f3 -- config/prompts/goal_verification.md",
+    "diff_bytes": 1317,
+    "diff_sha256": "ec237e2626db205e084bbb77f1508a2a7356970a57807b5121849240ac8c4222",
+    "assessment": "The replacement explicitly permits aggregation when the metric declares it, retaining each execution identifier and scope and following the declared method. The remaining prohibition targets out-of-scope mixing and substituting one execution as evidence for another. It removes the unconditional combine ban without forcing approval or adding measurement requirements.",
+    "repair_scope": "This closes the named source-level wording blocker. It does not certify runtime model compliance, every aggregate metric or the entire PR/Stack.",
+    "new_P0_P1_P2_in_named_patch": []
+  },
+  "gate_and_consumer_assessment": [
+    "The proof section is byte-identical to35b653; only the lookup guidance ending changes. All template placeholders remain identical.",
+    "Goal_verifier_original still renders existing subject/measurement/lookup variables and persists exact prompt/system bytes. Its API, schema and stored authority checks are unchanged.",
+    "Verification_authority_tools still supplies read-only authority and typed measurement context independently. No new permission grant, numeric gate, path extraction or store effect is introduced.",
+    "Goal_verification_agent still reuses retained Originals and settled receipts. The repair applies to fresh preparation/effective overrides rather than retrofitting an older judgment.",
+    "Prompt_registry still resolves effective override values. A source-file hash alone cannot establish that a running provider used the repaired text."
+  ],
+  "read_only_checks": {
+    "unchanged_direct_consumer_hashes": {
+      "lib/keeper/goal_verifier_original.ml": "3a7628a68dc50c87e9efc192b4f0c1c6756d95caff8feb71462e15b79bdc7147",
+      "lib/verification_authority_tools.ml": "ed48872fca7eb34471bb667e52c7c315e45cb91a6277196a2014388f82b5b154",
+      "lib/goal_verification_agent.ml": "bab2de3604da240846d7823d6b3e586eb3fe585889621b38a61fe8082b7dc388",
+      "lib/prompt_registry/prompt_registry.ml": "ae4f60d767367469561d8cf45d5d73a754932d66a09572a69a0663f64f0ff439"
+    },
+    "unchanged_placeholder_names": [
+      "goal_title",
+      "lookup_root_layout",
+      "lookup_section",
+      "lookup_tools",
+      "metric",
+      "reported_measurement",
+      "submitted_sources",
+      "target_value"
+    ],
+    "proof_section_unchanged": true,
+    "prompt_diff_check_exit": 0,
+    "OCaml_parser_native_CI_or_model_execution": false
+  },
+  "new_aggregate_control_design_only": {
+    "source": "Parent-described plan; new cohort files and outcomes intentionally not inspected.",
+    "candidate": "Existing3e binary plus normal API overrides corresponding to529f prompt bytes.",
+    "declared_inputs": "run-a recorded stdout4 and run-b recorded stdout6, retaining their distinct IDs. The metric explicitly sums those two observations, excludes producer report99 and compares the sum to exactly10.",
+    "predeclared_expectation": "APPROVE is legitimate under the described contract; it is an expected result, not an observed or forced verdict.",
+    "assessment": "This directly exercises the previously untested allowed-aggregation branch without inventing a new condition for the original main criterion. A future outcome must bind actual read values/IDs, effective retained/provider prompt, structured verdict and committed typed state separately.",
+    "outcome_assessed": false
+  },
+  "workflow_and_remaining_limits": [
+    "Root reports normal Task2676 completion and a fresh successor Task2680 with predecessor_task_id2676. This response performs no live Task lookup or state repair and does not treat Done as clearing the source P2.",
+    "The prior6373 FAIL, exact35b653 source reviews and three-control originals remain frozen. New529f aggregate evidence is a different cohort and must not be pooled with N/P/R as if one prompt or experiment.",
+    "No source-only causal A/B or general verifier-quality conclusion follows. Contract versus injection and aggregation interpretation remain model judgments.",
+    "The original eleven-case Goal proof, main installation, human final confirmation, new-head native/build, formal GitHub approval, whole-stack approval and merge remain separate and unproven here.",
+    "A future exact new-head source review is still needed before describing the committed PR as source-PASS. This dirty-byte review is narrower."
+  ],
+  "effects": {
+    "API_model_provider_Board_native_CI_runtime_calls": 0,
+    "source_Git_store_Goal_Task_or_existing_artifact_mutations": 0,
+    "agents_spawned": 0,
+    "only_new_output": "response.json"
+  }
+}

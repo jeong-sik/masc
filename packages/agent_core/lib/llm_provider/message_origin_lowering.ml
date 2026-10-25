@@ -40,7 +40,7 @@ let policy_for_provider_config config =
     | Some {Capabilities.reasoning_replay_override=Force_initial_system_latest_user_turn_tool_calls;_} -> `Initial
     | Some {Capabilities.reasoning_replay_override=Force_turn_scoped_system_context_preserve_always;_} -> `Turn_scoped
     | Some {Capabilities.reasoning_replay_override=
-        (Default_reasoning_replay | Force_no_replay | Force_drop_without_tool_preserve_with_tool
+        (Default_reasoning_replay | Force_preserve_responses_text | Force_no_replay | Force_drop_without_tool_preserve_with_tool
          | Force_latest_user_turn_tool_calls | Force_preserve_always | Force_preserve_with_request_tools);_}
     | None -> `Preserve
   in

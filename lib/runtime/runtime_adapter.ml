@@ -663,7 +663,8 @@ let with_client_history_replay
     (match capabilities with
      | Some
          ({ Llm_provider.Capabilities.reasoning_replay_override =
-              Llm_provider.Capabilities.Default_reasoning_replay
+              (Llm_provider.Capabilities.Default_reasoning_replay
+               | Llm_provider.Capabilities.Force_preserve_responses_text)
           ; _
           } as caps) ->
        Some

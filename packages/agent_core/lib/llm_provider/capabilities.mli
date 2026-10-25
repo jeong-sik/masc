@@ -46,6 +46,8 @@ type reasoning_replay_override = Capability_vocab.reasoning_replay_override =
   | Force_initial_system_latest_user_turn_tool_calls
   (** Replay tool-call reasoning only inside the structurally latest user turn. *)
   | Force_preserve_always
+  | Force_preserve_responses_text
+    (** Full plaintext replay on Responses only; other protocols keep their default. *)
   | Force_turn_scoped_system_context_preserve_always
   | Force_preserve_with_request_tools
     (** Replay all prior assistant reasoning exactly when outgoing tools are present. *)

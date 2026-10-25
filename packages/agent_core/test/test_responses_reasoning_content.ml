@@ -14,7 +14,7 @@ let config = Provider_config.make ~kind:Provider_config.OpenAI_compat
   ~provider_id:"responses-text-fixture" ~model_id:"responses-text-fixture"
   ~base_url:"https://fixture.invalid" ~request_path:"/v1/responses" ~max_tokens:128
   ~model_capabilities_override:{Capabilities.default_capabilities with
-    supports_reasoning=true;reasoning_replay_override=Capabilities.Force_preserve_always} ()
+    supports_reasoning=true;reasoning_replay_override=Capabilities.Force_preserve_responses_text} ()
 let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let text_part kind text = `Assoc ["type",`String kind;"text",`String text]
 let reasoning ?(summary=[]) ?(content=[]) ?encrypted id =
@@ -138,6 +138,40 @@ let openai_opaque_policy_control () =
   Alcotest.(check (list string)) "existing OpenAI policy still excludes plaintext" ["message"]
     (List.map(fun row->member "type" row |> to_string)rows)
 
+let dedicated_contract () =
+  let source=get(Reasoning_dialect.reasoning_source_for_provider_config config) in
+  List.iter(fun tools_present ->
+    let capability=get(Reasoning_dialect.replay_capability_for_provider_config ~tools_present config) in
+    Alcotest.(check bool) "stamped source and request contract agree" true
+      (source=capability.target && source.replay_contract=capability.contract
+       && capability.contract.replay_policy=Reasoning_replay_contract.All_assistant_messages)) [false;true]
+let other_protocol_defaults () =
+  List.iter(fun(kind,path)->
+    let make override=Provider_config.make ~kind ~provider_id:"protocol-control"
+      ~model_id:"protocol-control" ~base_url:"https://fixture.invalid" ~request_path:path
+      ~model_capabilities_override:{Capabilities.default_capabilities with
+        reasoning_replay_override=override} () in
+    let before=Reasoning_dialect.for_provider_config(make Capabilities.Default_reasoning_replay) in
+    let after=Reasoning_dialect.for_provider_config(make Capabilities.Force_preserve_responses_text) in
+    Alcotest.(check bool) "Responses-only option leaves other protocol defaults" true (before=after))
+    [Provider_config.OpenAI_compat,"/v1/chat/completions"
+    ;Provider_config.Ollama,"/api/chat"
+    ;Provider_config.Anthropic,"/v1/messages"
+    ;Provider_config.Gemini,"/v1beta/models/fixture:generateContent"]
+let chat_override_does_not_activate_responses () =
+  let shared={config with Provider_config.model_capabilities_override=
+    Some {Capabilities.default_capabilities with reasoning_replay_override=Force_preserve_always}} in
+  let capability=get(Reasoning_dialect.replay_capability_for_provider_config shared) in
+  Alcotest.(check bool) "Chat preserve-always cannot opt Responses into plaintext" true
+    (capability.contract.replay_policy=Reasoning_replay_contract.Provider_opaque_state)
+let manifest_declaration () =
+  let manifest=get(Capability_manifest.of_json (Yojson.Safe.from_string
+    {|{"schema_version":2,"models":[{"model_id":"declared-responses","reasoning_replay":"preserve_responses_text"}]}|})) in
+  match Capability_manifest.entries manifest with
+  | [entry] -> Alcotest.(check bool) "public manifest parses dedicated typed policy" true
+      ((Capabilities.apply_manifest_entry entry).reasoning_replay_override=Force_preserve_responses_text)
+  | [] | _::_ -> Alcotest.fail "one manifest entry expected"
+
 let () = Alcotest.run "responses_reasoning_content"
   ["public history",List.map(fun(name,fn)->Alcotest.test_case name `Quick fn)
     ["full content through tool and later turn",full_tool_history
@@ -150,4 +184,8 @@ let () = Alcotest.run "responses_reasoning_content"
     ;"unknown content extensions",unknown_content_part
     ;"malformed recognized text",malformed_content
     ;"malformed content carrier",malformed_carrier
-    ;"OpenAI opaque policy control",openai_opaque_policy_control]]
+    ;"OpenAI opaque policy control",openai_opaque_policy_control
+    ;"producer consumer contract identity",dedicated_contract
+    ;"other protocol default controls",other_protocol_defaults
+    ;"Chat override cannot activate Responses",chat_override_does_not_activate_responses
+    ;"public manifest declaration",manifest_declaration]]

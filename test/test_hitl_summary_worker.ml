@@ -26,6 +26,13 @@ let original_message_texts original =
     | _ -> fail "judge original did not produce its three text messages")
 ;;
 
+let judge_schema_instruction () =
+  EO.make_output_requirement
+    ~schema:Schema.hitl_context_summary_schema
+    ~minimum_guarantee:EO.Json_syntax
+  |> EO.schema_instruction_text
+;;
+
 let judgment_json judgment =
   `Assoc
     [ "context_summary", `String "The exact action matches visible context."
@@ -962,8 +969,10 @@ let test_json_syntax_request_is_prompt_only_and_carries_canonical_domain_schema 
          |> to_list
          |> List.map (fun message -> message |> member "content" |> to_string)
        in
-       check (list string) "HTTP request uses the retained original message bytes"
-         (original_message_texts original) message_texts;
+       check (list string)
+         "HTTP request preserves original bytes plus the Core schema contract"
+         (original_message_texts original @ [ judge_schema_instruction () ])
+         message_texts;
        let message_text = String.concat "\n" message_texts in
        List.iter
          (fun field ->
@@ -3024,11 +3033,12 @@ let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
        let expected_prompt =
          Original.output_contract original ^ "\n\n"
          ^ Yojson.Safe.to_string (Original.context_bundle original)
+         ^ "\n\n" ^ judge_schema_instruction ()
        in
        let seen_runtime = ref None in
        let runner ~runtime:{Runtime_instance.id=runtime_id;_} ~system_prompt:_ ~output_schema:_ ~prompt =
          seen_runtime := Some runtime_id;
-         check string "CLI prompt uses the retained original context bytes"
+         check string "CLI prompt preserves original bytes plus the Core schema contract"
            expected_prompt prompt;
          check bool
            "the cli prompt carries the judgment contract"

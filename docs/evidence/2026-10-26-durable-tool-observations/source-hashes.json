@@ -1,7 +1,7 @@
 {
   "source_head": "cd54792ad1f3448b42e8e6098465438fba08d952",
   "sha256": {
-    "lib/keeper/keeper_event_bridge.ml": "d57278f6aa4dd74ab9aa03c08d500665a3664ff9dda66993874a7cb61fea7fa6",
+    "lib/keeper/keeper_event_bridge.ml": "5b9fbc5ddb98c10a22efdf51226234756655398ee8941844cccd1e95e7262ad2",
     "lib/keeper/keeper_execution_join.ml": "b21f7acba0c0ea9b9556dfd927407df2521fcc138f69a27bdbe6855da8ee37ac",
     "lib/keeper/keeper_execution_join.mli": "768fc2bcb97c99fbca6e9342e0e4f21969a1a3091a6f65170f0c14c352a5727f",
     "lib/keeper_tool_call_log.ml": "e823ecc9c36e7fb2226a02544929bd6e0f27ad41177509d98681579cd90018dd",
@@ -75,5 +75,6 @@
       "selected_lines": 21,
       "file": "canonical-40212409214.txt"
     }
-  ]
+  ],
+  "comment_delta": "Keeper_event_bridge admission comment clarified after tested cd54792ad1f3448b42e8e6098465438fba08d952; executable behavior unchanged."
 }

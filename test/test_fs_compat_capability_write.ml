@@ -553,6 +553,47 @@ let test_cancelled_replace_retains_cleanup_facts_on_second_cancellation ~fs () =
     (read_file (Filename.concat (Filename.concat directory stage) "payload"))
 ;;
 
+let test_cancelled_create_preserves_initial_cancellation_during_cleanup ~fs () =
+  with_tmp_dir @@ fun directory ->
+  with_parent_capability ~fs directory @@ fun parent ->
+  let label = "cancelled create with cancelled cleanup" in
+  let reason = Failure "initial create cancellation" in
+  let backtrace = Printexc.get_callstack 32 in
+  let observed_reason, cancellation, observed_backtrace =
+    require_capability_write_cancellation ~label (fun () ->
+      ignore
+        (Capability_write_test.create_capability_file_exclusive
+           ~before_stage:(function
+             | Fs_compat.Write_payload ->
+               Printexc.raise_with_backtrace
+                 (Eio.Cancel.Cancelled reason)
+                 backtrace
+             | Fs_compat.Cleanup_close ->
+               raise (Eio.Cancel.Cancelled (Failure "later close cancellation"))
+             | _ -> ())
+           ~parent
+           ~leaf:"target"
+           ~permissions:0o640
+           "new"
+         : (unit, Fs_compat.capability_write_error) result))
+  in
+  check bool (label ^ " preserves initial reason") true
+    (observed_reason == reason);
+  check_preserved_backtrace ~label backtrace observed_backtrace;
+  check bool (label ^ " preserves create operation") true
+    (cancellation.operation = Fs_compat.Create_exclusive_operation);
+  check bool (label ^ " preserves incomplete creation") true
+    (cancellation.target_effect = Fs_compat.Target_created_incomplete);
+  check bool (label ^ " has no invented write primary") true
+    (Option.is_none cancellation.interrupted_primary_failure);
+  check bool (label ^ " has no invented recovery interruption") true
+    (Option.is_none cancellation.interrupted_recovery);
+  check_cancellation_cleanup_stages ~label
+    ~expected_cleanup_stages:[] cancellation;
+  check string "cancelled creation leaves an observable incomplete target" ""
+    (read_file (Filename.concat directory "target"))
+;;
+
 let test_recovery_cancellation_preserves_authority_and_backtrace ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
@@ -2357,6 +2398,10 @@ let () =
             "cancelled replacement retains cleanup facts after second cancellation"
             `Quick
             (test_cancelled_replace_retains_cleanup_facts_on_second_cancellation ~fs)
+        ; test_case
+            "cancelled create preserves initial cancellation during cleanup"
+            `Quick
+            (test_cancelled_create_preserves_initial_cancellation_during_cleanup ~fs)
         ; test_case "create cleanup cancellation preserves authority" `Quick
             (test_create_direct_cleanup_cancellation_preserves_authority ~fs)
         ; test_case "recovery cancellation preserves authority" `Quick

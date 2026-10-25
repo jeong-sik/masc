@@ -910,6 +910,32 @@ let write_cleanup_failures failures =
   List.map (fun failure -> Write_cleanup_failure failure) failures
 ;;
 
+let capability_write_cancellation_context = function
+  | Capability_recovery_operation_cancelled (reason, interruption) ->
+    reason, Some interruption, []
+  | Write_cleanup_failed_on_cancellation (reason, failures) ->
+    reason, None, write_cleanup_failures failures
+  | reason -> reason, None, []
+;;
+
+let cleanup_cancelled_write ~interrupted_recovery ~additional cleanup =
+  try interrupted_recovery, additional @ cleanup () with
+  | Eio.Cancel.Cancelled cleanup_reason ->
+    (* The caller re-raises its original cancellation and backtrace. A second
+       cancellation must retain cleanup facts without replacing that authority. *)
+    let _, cleanup_interruption, carried_failures =
+      capability_write_cancellation_context cleanup_reason
+    in
+    let interrupted_recovery, additional =
+      match interrupted_recovery, cleanup_interruption with
+      | None, interruption -> interruption, additional
+      | Some original, None -> Some original, additional
+      | Some original, Some interruption ->
+        Some original, additional @ [ Recovery_cleanup_failure interruption ]
+    in
+    interrupted_recovery, additional @ carried_failures
+;;
+
 let reraise_capability_write_cancellation
       ~backtrace
       ~operation
@@ -919,12 +945,7 @@ let reraise_capability_write_cancellation
       reason
   =
   let reason, interrupted_recovery, carried_cleanup_failures =
-    match reason with
-    | Capability_recovery_operation_cancelled (reason, interruption) ->
-      reason, Some interruption, []
-    | Write_cleanup_failed_on_cancellation (reason, failures) ->
-      reason, None, write_cleanup_failures failures
-    | reason -> reason, None, []
+    capability_write_cancellation_context reason
   in
   Printexc.raise_with_backtrace
     (Eio.Cancel.Cancelled
@@ -1553,14 +1574,11 @@ let replace_capability_file_with
      | Eio.Cancel.Cancelled reason as cancellation ->
        let backtrace = Printexc.get_raw_backtrace () in
        let reason, interrupted_recovery, additional =
-         match reason with
-         | Capability_recovery_operation_cancelled (reason, interruption) ->
-           reason, Some interruption, []
-         | Write_cleanup_failed_on_cancellation (reason, failures) ->
-           reason, None, write_cleanup_failures failures
-         | reason -> reason, None, []
+         capability_write_cancellation_context reason
        in
-       let cleanup_failures = additional @ cleanup () in
+       let interrupted_recovery, cleanup_failures =
+         cleanup_cancelled_write ~interrupted_recovery ~additional cleanup
+       in
        if
          !target_effect = Target_unchanged
          && Option.is_none interrupted_recovery
@@ -1763,14 +1781,15 @@ let create_capability_file_exclusive_with
      with
      | Eio.Cancel.Cancelled reason as cancellation ->
        let backtrace = Printexc.get_raw_backtrace () in
-       let reason, additional =
-         match reason with
-         | Write_cleanup_failed_on_cancellation (reason, failures) ->
-           reason, write_cleanup_failures failures
-         | reason -> reason, []
+       let reason, interrupted_recovery, additional =
+         capability_write_cancellation_context reason
        in
-       let cleanup_failures = additional @ cleanup () in
-       if !target_effect = Target_unchanged && cleanup_failures = []
+       let interrupted_recovery, cleanup_failures =
+         cleanup_cancelled_write ~interrupted_recovery ~additional cleanup
+       in
+       if !target_effect = Target_unchanged
+          && Option.is_none interrupted_recovery
+          && cleanup_failures = []
        then Printexc.raise_with_backtrace cancellation backtrace
        else
          Printexc.raise_with_backtrace
@@ -1780,7 +1799,7 @@ let create_capability_file_exclusive_with
                  , { operation
                    ; target_effect = !target_effect
                    ; interrupted_primary_failure = None
-                   ; interrupted_recovery = None
+                   ; interrupted_recovery
                    ; cleanup_failures
                    } )))
            backtrace

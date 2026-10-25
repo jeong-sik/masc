@@ -243,7 +243,33 @@ let general_source_precedes_addon env fs config origin = with_intake env config 
   let second=intake () in
   check int "companion admits on its own later turn" 1 (List.length (selected second));
   check_route "ordinary source never strips later companion route" origin.source.channel second)
-let retired_tool_result_does_not_anchor_batch env fs config origin = with_intake env config (fun intake ->
+let retired_tool_result_does_not_anchor_batch env fs config origin =
+  let runtime_snapshot=Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot) (fun () ->
+  let runtime_path=Filename.concat config.Workspace.base_path "receipt-runtime.toml" in
+  write runtime_path {|[providers.codex]
+protocol = "codex-app-server"
+command = "/bin/false"
+is-non-interactive = true
+[models.codex]
+api-name = "gpt-fixture"
+max-context = 400000
+[codex.codex]
+[runtime]
+default = "codex.codex"
+|};
+  ignore (Runtime.init_default ~config_path:runtime_path |> string_ok);
+  Masc_test_deps.declare_fixture_keeper ~base_path:config.base_path
+    ~sandbox_profile:(Some Keeper_types_profile.Docker) ~sandbox_image:"base" keeper;
+  Keeper_types_profile.invalidate_keeper_profile_snapshots ();
+  let meta=match Keeper_meta_store.read_effective_meta config keeper |> string_ok with
+    | Some meta -> meta | None -> fail "declared fixture Keeper missing" in
+  check bool "fixture route can consume Codex receipt bodies" true
+    (Keeper_codex_tool_outbox_wake.route_can_consume meta);
+  let outbox=Keeper_codex_tool_outbox.load ~base_path:config.base_path ~keeper_name:keeper |> string_ok in
+  check (list string) "fixture has no unread receipt bodies" []
+    (Keeper_codex_tool_outbox.receipt_ids outbox);
+  with_intake env config (fun intake ->
   (* An inactive receipt hint is synthetic; the real queue/intake retires it
      without acknowledging any Codex result or the companion publication. *)
   let receipt_id=String.make 64 'a' in
@@ -256,6 +282,9 @@ let retired_tool_result_does_not_anchor_batch env fs config origin = with_intake
      | first::_ -> first.source.payload=Q.Tool_result_ready receipt_id
      | [] -> false);
   let admitted=intake () in
+  check (option string) "hint retirement has no intake error" None
+    (Option.map Keeper_heartbeat_stimulus_intake.event_queue_intake_error_to_string
+       admitted.event_queue_intake_error);
   let selection=match selected admitted with
     | [selection] -> selection | [] | _::_ -> fail "original companion was not admitted after hint retirement" in
   check string "retired hint cannot select a different invocation" origin.O.id (payload selection).ao_origin_id;
@@ -263,7 +292,7 @@ let retired_tool_result_does_not_anchor_batch env fs config origin = with_intake
   check int "hint retirement keeps original publication pending before turn completion" 1
     (List.length (pending config));
   ack_fixture_batch config admitted;
-  check int "only later original turn completion consumes publication" 0 (List.length (pending config)))
+  check int "only later original turn completion consumes publication" 0 (List.length (pending config))))
 let unreadable_source_does_not_anchor_batch env fs config origin = with_intake env config (fun intake ->
   let other=another_origin fs config origin in
   deliver fs config origin (notice ()) |> delivery_ok;

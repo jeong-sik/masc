@@ -20,7 +20,7 @@ Dashboard reconstructs a pending delta's prefix from the same exact owned block 
 
 The same Dashboard command then passed **139 cases**. Independent review of that correction found another P2 by source: rebuilding only the newest response's buffers lost earlier responses in the same attempt. This was not an executed failure in the108-case baseline; its new controls did not exist there. The helper now rebuilds all reasoning in the current attempt/continuation segment, stopping at superseded or segment boundaries. New controls preserve a previous response through interleaved append and snapshot replacement, then exclude it after supersession. The earlier independent PASS missed this and is superseded.
 
-Source hashes bind all five production/fixture files at `c0f2f3032b0cb998bb66b74b29433c242d63df34`. Corrected TUI [40197182110](https://github.com/jeong-sik/masc/actions/runs/40197182110) targets that exact head; result pending inspection. Earlier40196789259 at05d preceded the contiguous-append optimization, and40196874006 atabb preceded earlier-response preservation. Neither certifies the final source.
+Source hashes bind all five production/fixture files at `c0f2f3032b0cb998bb66b74b29433c242d63df34`. Corrected TUI [40197182110](https://github.com/jeong-sik/masc/actions/runs/40197182110) was dispatched for that exact head; the final observed outcome is recorded below. Earlier40196789259 at05d preceded the contiguous-append optimization, and40196874006 atabb preceded earlier-response preservation. Neither certifies the final source.
 
 ## Scope limits
 
@@ -32,7 +32,7 @@ No local Dune build or typecheck was run. Changed OCaml parses and full whitespa
 
 [40196874006](https://github.com/jeong-sik/masc/actions/runs/40196874006) checked out exactly `abb125d4e13994e74d5490c71cf26407be61b82a` and completed SUCCESS: **109 actual cases**. The joined production collector→redactor/bridge→durable journal→TUI replay assertions passed, including retained replacement position, unaffected answer, readable projection, fresh same-process journal reader and sequence deduplication. The owned/anonymous append control passed too.
 
-This is intermediate source before the independently found earlier-response aggregate correction. It does not certify that later correction or its added control. The current110-case request40197182110 remains distinct and pending inspection. The actual109 success is retained even though the earlier-response concern remained outside that fixture's coverage. Neither this109 nor Dashboard139 is a rendered UI or OS restart result.
+This is intermediate source before the independently found earlier-response aggregate correction. It does not certify that later correction or its added control. The final110-case request40197182110 is distinct; its observed outcome is recorded below. The actual109 success is retained even though the earlier-response concern remained outside that fixture's coverage. Neither this109 nor Dashboard139 is a rendered UI or OS restart result.
 
 ## Observed final corrected execution
 

@@ -63,6 +63,7 @@ let tilde_name = function
   | "17" -> Some "f6"
   | "18" -> Some "f7"
   | "19" -> Some "f8"
+  | "20" -> Some "f9"
   | _ -> None
 
 (* Unicode code points the Kitty protocol reports as themselves. Only the ones
@@ -83,6 +84,7 @@ let codepoint_name code =
     | 57369 -> Some "f6"
     | 57370 -> Some "f7"
     | 57371 -> Some "f8"
+    | 57372 -> Some "f9"
     | _ -> None
 
 (* The surface handlers predate CSI-u and consume the legacy byte vocabulary.

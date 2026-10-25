@@ -2914,6 +2914,41 @@ type schedule_snapshot = {
       (#38411). *)
 }
 
+let chat_schedule_toggle_key = "f9"
+let chat_schedule_toggle_label = "F9"
+
+(** Display-only proximity; these bands never affect dispatch or expiry. *)
+type chat_schedule_proximity =
+  | Schedule_elapsed | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown
+
+let chat_schedule_proximity ~now = function
+  | None -> Schedule_unknown
+  | Some due when due <= now -> Schedule_elapsed
+  | Some due when due -. now <= 3600. -> Schedule_soon (* one-hour display band *)
+  | Some due ->
+      let today = Unix.localtime now and day = Unix.localtime due in
+      if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
+      else Schedule_later
+
+let chat_schedule_entries ~keeper_name snapshot =
+  let target = "keeper:" ^ keeper_name in
+  snapshot.scs_rows
+  |> List.filter_map (fun row ->
+       let owns = match row.sch_payload_target with
+         | Some actual -> String.equal actual target
+         | None -> row.sch_payload_keeper_name = Some keeper_name in
+       if not owns then None else
+       let due = match row.sch_next_due_at_iso with
+         | Some _ as value -> value
+         | None -> row.sch_due_at_iso in
+       match Schedule_domain.schedule_status_of_string row.sch_status with
+       | Ok (Scheduled | Due) -> Some (row, Option.bind due Time_codec.parse_rfc3339_opt)
+       | Ok (Running | Succeeded | Failed | Cancelled | Expired) -> None
+       | Error _ -> Some (row, None))
+  |> List.stable_sort (fun (_, left) (_, right) -> match left, right with
+       | Some left, Some right -> Float.compare left right
+       | Some _, None -> -1 | None, Some _ -> 1 | None, None -> 0)
+
 (** One recorded wake attempt of a schedule instance. The list surface carries
     only the newest of these on its row; the whole list arrives from the exact
     schedule lookup. *)
@@ -9154,6 +9189,7 @@ type state = {
      read as having none. *)
   mutable keeper_schedules: (string * schedule_snapshot) option;
   mutable keeper_schedules_error: (string * string) option;
+  mutable msg_schedules_expanded: bool;
   (* A cancel armed for a second keypress: which schedule. The cursor can move
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
@@ -14108,7 +14144,9 @@ let keeper_detail_target_matches state keeper_name =
 let apply_keeper_schedules_read state request result =
   let current = finish_detail_read state request in
   if current && server_authority_ready state
-     && keeper_detail_target_matches state request.drr_keeper then
+     && (match state.view with
+         | Keepers Keeper_message -> state.msg_target_keeper_name = Some request.drr_keeper
+         | _ -> keeper_detail_target_matches state request.drr_keeper) then
     match result with
     | Ok snapshot ->
         state.keeper_schedules <- Some (request.drr_keeper, snapshot);
@@ -15841,6 +15879,7 @@ let create_state
   schedule_wake_history_inflight = None;
   keeper_schedules = None;
   keeper_schedules_error = None;
+  msg_schedules_expanded = false;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   schedule_form_refusal = None;
@@ -20765,20 +20804,80 @@ let keeper_message_inflight_rows (state : state) ~now =
   List.map (fun group -> true, summary group)
     (keeper_message_inflight_drawn state)
 
+let keeper_message_schedule_rows state ~now ~max_rows =
+  if state.view <> Keepers Keeper_message || max_rows <= 0 then [] else
+  let plain = Masc_tui_keeper_chat_projection.terminal_safe_text in
+  let notice text = [Schedule_unknown, "  Job · " ^ text ^ " · " ^ chat_schedule_toggle_label] in
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+      let snapshot = match state.keeper_schedules with
+        | Some (name, value) when String.equal name keeper_name -> Some value
+        | Some _ | None -> None in
+      let failed = match state.keeper_schedules_error with
+        | Some (name, _) -> String.equal name keeper_name
+        | None -> false in
+      let reading = detail_read_waiting state ~tab:Detail_automation ~keeper:keeper_name in
+      match snapshot with
+      | None -> notice (if failed then "조회 실패" else if reading then "조회 중" else "미조회")
+      | Some snapshot when Option.is_some snapshot.scs_read_error
+                           || Option.is_none snapshot.scs_request_count -> notice "저장소 조회 불가"
+      | Some snapshot ->
+          let entries = chat_schedule_entries ~keeper_name snapshot in
+          let freshness = if failed then " · 이전 관측/갱신 실패"
+            else if reading then " · 갱신 중" else "" in
+          let partial = if snapshot.scs_truncated then " · 일부 목록" else "" in
+          let describe (row, due) =
+            let proximity = chat_schedule_proximity ~now due in
+            let band = match proximity with
+              | Schedule_elapsed -> "예정 시각 지남" | Schedule_soon -> "1시간 이내"
+              | Schedule_today -> "오늘" | Schedule_later -> "이후" | Schedule_unknown -> "시각 미확인" in
+            let clock = match due with
+              | None -> band
+              | Some due ->
+                  let tm = Unix.localtime due in
+                  let distance = Masc_tui_message_layout.span_text (Float.abs (due -. now)) in
+                  Printf.sprintf "%s %02d-%02d %02d:%02d (%s %s)" band
+                    (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min distance
+                    (if due > now then "후" else "전") in
+            let title = match row.sch_payload_summary with
+              | Some value -> value | None -> row.sch_schedule_id in
+            proximity, clock ^ " · " ^ plain title in
+          let toggle = chat_schedule_toggle_label ^ (if state.msg_schedules_expanded then " 접기" else " 펼치기") in
+          match entries with
+          | [] -> notice ("관측된 다음 예약 없음" ^ freshness ^ partial)
+          | first :: _ ->
+              let proximity, text = describe first in
+              let header_text = if state.msg_schedules_expanded && max_rows > 1
+                then Printf.sprintf "예약 Job %d개" (List.length entries)
+                else "다음 Job · " ^ text in
+              let header = proximity, "  " ^ header_text ^ freshness ^ partial ^ " · " ^ toggle in
+              if not state.msg_schedules_expanded || max_rows = 1 then [header] else
+              let available = min 3 (max_rows - 1) in
+              let shown = List.take available entries in
+              let remaining = List.length entries - List.length shown in
+              header :: List.map (fun entry ->
+                let proximity, text = describe entry in proximity, "    · " ^ text) shown
+              @ (if remaining > 0 && List.length shown + 1 < max_rows then
+                   [Schedule_unknown, Printf.sprintf "    +%d개 · Keeper Automation에서 전체 확인" remaining]
+                 else [])
+
 type keeper_message_status_frame =
   { kmsf_source : keeper_message_status_source
   ; kmsf_inflight_rows : (bool * string) list
   ; kmsf_activity_rows : Masc_tui_answering.chat_activity_row list
   ; kmsf_interrupt_rows : string list
+  ; kmsf_schedule_rows : (chat_schedule_proximity * string) list
   }
 
 (* These are the same original rows used by the budget and the draw. The
    frame is local to that synchronous call, never a state or worker cache. *)
-let keeper_message_status_frame state ~now =
+let keeper_message_status_frame ?(schedule_budget = 1) state ~now =
   { kmsf_source = keeper_message_status_source state ~now
   ; kmsf_inflight_rows = keeper_message_inflight_rows state ~now
   ; kmsf_activity_rows = keeper_message_activity_rows state
   ; kmsf_interrupt_rows = keeper_observed_interrupt_rows state
+  ; kmsf_schedule_rows = keeper_message_schedule_rows state ~now ~max_rows:schedule_budget
   }
 
 let keeper_message_status_rows ?status_frame ?scroll (state : state) =
@@ -20794,6 +20893,7 @@ let keeper_message_status_rows ?status_frame ?scroll (state : state) =
   List.length status_frame.kmsf_inflight_rows
   + List.length status_frame.kmsf_activity_rows
   + List.length status_frame.kmsf_interrupt_rows
+  + List.length status_frame.kmsf_schedule_rows
   + unavailable_target
   + (match status_frame.kmsf_source with
      | No_message_status -> 0
@@ -20827,7 +20927,20 @@ let keeper_message_status_rows ?status_frame ?scroll (state : state) =
   + (if keeper_message_reading_back ?scroll state then 1 else 0)
   + composer_extra_rows state
 
+let keeper_message_frame_for_viewport ?scroll state ~now ~terminal_rows =
+  let frame = keeper_message_status_frame ~schedule_budget:0 state ~now in
+  let status_rows = keeper_message_status_rows ~status_frame:frame ?scroll state
+    + (if keeper_message_reading_back ?scroll state then 0 else 1) in
+  (* Keep the existing three-row transcript minimum; extra schedule rows are
+     a viewport choice, never a limit on stored jobs or their execution. *)
+  let budget = min 5 (max 0
+      (Masc_tui_message_layout.message_history_height ~terminal_rows ~status_rows - 3)) in
+  { frame with kmsf_schedule_rows = keeper_message_schedule_rows state ~now ~max_rows:budget }
+
 let keeper_message_command_window ?status_frame ?scroll state ~terminal_rows ~terminal_cols =
+  let status_frame = Some (match status_frame with
+    | Some frame -> frame
+    | None -> keeper_message_frame_for_viewport ?scroll state ~now:(Unix.gettimeofday ()) ~terminal_rows) in
   match state.view, state.keeper_message_focus, state.voice_capture,
         state.msg_recall_replaces with
   | Keepers Keeper_message, Right_pane, None, None

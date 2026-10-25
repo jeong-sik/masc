@@ -1670,6 +1670,25 @@ the TUI cannot check it.
 A path that cannot be read, or a file that is empty, is refused on the
 footer. Nothing takes the screen to report a failure.
 
+#### Upcoming Keeper Jobs
+
+Chat shows the selected Keeper's next scheduled Job above the composer. Press
+**F9** to expand or fold the upcoming list. The summary includes the Job, local
+month/day and time, and the time until or since its due instant. It does not
+change or run a schedule.
+
+Proximity is repeated in text: elapsed due time is red, within one hour is
+warning yellow, later today is informational cyan, and later dates use the
+secondary foreground. Theme and NO_COLOR handling apply. A passed due instant
+is not evidence of a failed or completed Job.
+
+The list uses the Keeper-scoped schedule read and includes Scheduled/Due work,
+not completed or currently running occurrences. Read failures retain the last
+observation with a refresh-failed label; an unread store is not an empty list.
+A capped server page is marked partial. Extra Job rows yield to the existing
+chat input and transcript minimum on a small terminal. Keeper Automation remains
+the place to inspect the full schedule page.
+
 #### Lines typed during a turn
 
 Enter during a running turn is the explicit **queue next** action — the footer

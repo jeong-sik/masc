@@ -4341,7 +4341,7 @@ let render_keeper_message (state : state) =
        precedes its first paint, the pin already restores a reading position
        although the stored scroll is still zero. Reserve and draw its chrome
        from that same requested position, before measuring the history. *)
-    let status_frame = keeper_message_status_frame state ~now:(Unix.gettimeofday ()) in
+    let status_frame = keeper_message_frame_for_viewport ~scroll:requested state ~now:(Unix.gettimeofday ()) ~terminal_rows:rows in
     let command_window = keeper_message_command_window ~status_frame ~scroll:requested state
       ~terminal_rows:rows ~terminal_cols:cols in
     let command_rows = match command_window with None -> 0 | Some (_, entries) -> 2 + List.length entries in
@@ -4590,6 +4590,15 @@ let render_keeper_message (state : state) =
        history and the composer. They are entries in the history now -- see
        [chat_tail_entries] -- so the conversation holds one time axis and
        these rows scroll with the lines they follow. *)
+
+    List.iter (fun (proximity, line) ->
+      let style = match proximity with
+        | Schedule_elapsed -> Theme.bad ()
+        | Schedule_soon -> Theme.warn ()
+        | Schedule_today -> Theme.info ()
+        | Schedule_later | Schedule_unknown -> Theme.recede () in
+      box_line_styled chat_buf chat_cols ~style line)
+      status_frame.kmsf_schedule_rows;
 
     (* Input area divider *)
     box_divider chat_buf chat_cols;

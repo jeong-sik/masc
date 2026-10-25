@@ -262,6 +262,8 @@ let expand_turn_label = "Ctrl-S"
 let voice_speak_key = "Ctrl-Y"
 let voice_listen_key = "Ctrl-A"
 let roster_toggle_key = "Ctrl-B"
+let chat_schedules_key = Masc_tui_types.chat_schedule_toggle_key
+let chat_schedules_label = Masc_tui_types.chat_schedule_toggle_label
 
 (* [t] on a keeper: the Keeper Calls view, where a call's served input and
    output are drawn whole. Named for the rows that fold a long payload and
@@ -580,6 +582,8 @@ let for_surface = function
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
       ; b Act "Ctrl-K / Ctrl-P" "queued line"
           ~help:"cancel / edit the last queued line"
+      ; b Act chat_schedules_label "next Jobs"
+          ~help:"fold or expand this Keeper's upcoming scheduled Jobs; local due time and proximity colors"
       ; b Act "Ctrl-T" "queue"
           ~help:"inspect and manage waiting turns"
       ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"

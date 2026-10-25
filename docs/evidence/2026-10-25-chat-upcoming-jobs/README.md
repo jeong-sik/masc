@@ -12,7 +12,7 @@ is shared, including while reading older chat messages.
 
 ## Checks executed
 
-- Direct standalone compilation of the unchanged production CSI module interface
+- Direct standalone compilation of the production CSI module interface
   and implementation with the current `test_tui_csi.ml`: **19 tests PASS**, including
   F9 legacy/Kitty/modifier decoding. Alcotest reported 0.005 seconds. This is a
   protocol test, not a native TUI interaction or a screen-layout test.

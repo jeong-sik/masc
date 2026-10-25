@@ -1,5 +1,6 @@
 module B = Lane_addon_companion_broker
 type creation_error = Unavailable | Cleanup_unconfirmed
+type cleanup = Paths_retained of string
 
 type settlement =
   { notify : B.completion Eio.Promise.u
@@ -8,7 +9,7 @@ type settlement =
 
 type t =
   { broker : B.t
-  ; cleanup : (unit, string) result Eio.Lazy.t
+  ; cleanup : (cleanup, string) result Eio.Lazy.t
   ; sw : Eio.Switch.t
   ; settlements : settlement list ref
   ; releasing : bool ref
@@ -75,7 +76,7 @@ let create ~sw ~max_message_bytes =
     Eio.Switch.on_release startup (fun () ->
       if not !published then Option.iter (fun cleanup ->
         match Eio.Lazy.force cleanup with
-        | Ok () -> ()
+        | Ok (Paths_retained _) -> cleanup_failure := Some "private companion startup path retained"
         | Error detail -> cleanup_failure := Some detail) !startup_cleanup);
     let* directory, identity, cleanup = Eio.Cancel.protect (fun () ->
       let* directory, identity = Eio_unix.run_in_systhread (fun () ->
@@ -88,38 +89,31 @@ let create ~sw ~max_message_bytes =
         with Unix.Unix_error _ | Sys_error _ ->
           if !allocated then cleanup_failure := Some "private companion allocation identity unavailable";
           Error "private companion allocation unavailable") in
-      let socket_path = Filename.concat directory "s" in
       let cleanup = Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
         releasing := true;
         Option.iter B.revoke !original;
-        Option.iter B.await_stopped !original;
+        let stopped = match !original with
+          | None -> Ok ()
+          | Some owner -> B.await_stopped owner in
         (* Broker completion notifications cannot still arrive after its join. *)
         List.iter (fun pending -> ignore (Eio.Promise.try_resolve pending.notify B.Abandoned)) !settlements;
         let settled = Eio.Fiber.List.map (fun pending -> Eio.Promise.await pending.settled) !settlements in
-        let removed = Eio_unix.run_in_systhread (fun () ->
-          try
-            let current = Unix.lstat directory in
-            if not (same_directory identity current) then
-              Error "private companion allocation identity changed"
-            else (
-              (match Unix.lstat socket_path with
-               (* Only the broker knows its bound socket inode. A path stat
-                  taken after B.create must never grant unlink authority. *)
-               | _ -> raise Exit
-               | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
-              Unix.rmdir directory;
-              Ok ())
-          with
-          | Exit | Unix.Unix_error _ | Sys_error _ -> Error "private companion cleanup unconfirmed") in
-        match removed, List.find_opt Result.is_error settled with
-        | Ok (), None -> Ok ()
-        | Error detail, _ | Ok (), Some (Error detail) -> Error detail
+        (* POSIX pathname deletion is not conditional on an inode. Even an
+           unchanged lstat followed by unlink/rmdir can delete a same-UID
+           successor. Close the owned resources and retain both names. *)
+        match stopped, List.find_opt Result.is_error settled with
+        | Ok (), None ->
+            Log.Misc.warn "Private companion stopped IPC path retained: %s" directory;
+            Ok (Paths_retained directory)
+        | Error B.Listener_close_unconfirmed, _ ->
+            Error "private companion listener close unconfirmed"
+        | Ok (), Some (Error detail) -> Error detail
         | Ok (), Some (Ok ()) -> Error "private settlement unconfirmed") in
       startup_cleanup := Some cleanup;
       Ok (directory, identity, cleanup)) in
     Eio.Switch.on_release sw (fun () ->
       match Eio.Lazy.force cleanup with
-      | Ok () -> ()
+      | Ok (Paths_retained _) -> ()
       | Error _ -> Log.Misc.warn "Private companion allocation remains retained");
     let* owner = B.create ~sw ~directory ~max_message_bytes
       |> Result.map_error (fun _ -> "private companion listener unavailable") in

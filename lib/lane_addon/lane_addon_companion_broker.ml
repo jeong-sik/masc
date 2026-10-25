@@ -1,5 +1,6 @@
 module P=Browser_extension_protocol
 type error = Unavailable | Not_started | Outcome_unknown
+type shutdown_error = Listener_close_unconfirmed
 type selection = { browser_instance_id:string; tab_id:int }
 type completion = Released | Abandoned
 type binding = {
@@ -11,7 +12,8 @@ type t = {
   socket_path:string; max_message_bytes:int;
   grants:(string,grant) Hashtbl.t;
   retired:unit Eio.Promise.t; retire:unit Eio.Promise.u;
-  stopped:unit Eio.Promise.t; stop:unit Eio.Promise.u;
+  stopped:(unit,shutdown_error) result Eio.Promise.t;
+  stop:(unit,shutdown_error) result Eio.Promise.u;
   mutable live:bool;
 }
 and grant = {
@@ -143,24 +145,23 @@ let serve_connection t flow =
                      | P.Prepare _|P.Invoke _ -> write t flow (`Assoc ["value",value]);loop ()) in
             loop ())) in
       Watched_work.run run ~watcher:(fun () -> Eio.Promise.await grant.cancelled))
-let private_listener ~sw ~directory ~directory_identity ~socket_path =
+let private_listener ~sw ~socket_path ~shutdown =
   Eio.Cancel.protect (fun () ->
-    let fd,identity=Eio_unix.run_in_systhread (fun () ->
+    let close fd =
+      match Unix.close fd with
+      | () -> shutdown := Ok ()
+      | exception Unix.Unix_error _ -> shutdown := Error Listener_close_unconfirmed in
+    let fd=Eio_unix.run_in_systhread (fun () ->
       let fd=Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+      shutdown := Error Listener_close_unconfirmed;
       try Unix.set_nonblock fd;Unix.bind fd (Unix.ADDR_UNIX socket_path);Unix.listen fd 1;
-        fd,Unix.lstat socket_path
-      with exn -> Unix.close fd;raise exn) in
+        fd
+      with exn -> close fd;raise exn) in
     (* Eio.Net.listen installs an unconditional path unlink. Import only the
-       descriptor and own removal ourselves, after checking both identities. *)
+       descriptor. A pathname check cannot authorize deleting a successor
+       installed between that check and unlink, so retain the socket path. *)
     Eio.Switch.on_release sw (fun () -> Eio_unix.run_in_systhread (fun () ->
-      Unix.close fd;
-      try
-        let parent=Unix.lstat directory and current=Unix.lstat socket_path in
-        if parent.st_kind=Unix.S_DIR && parent.st_dev=directory_identity.Unix.st_dev
-          && parent.st_ino=directory_identity.st_ino && current.st_kind=Unix.S_SOCK
-          && current.st_dev=identity.Unix.st_dev && current.st_ino=identity.st_ino
-        then Unix.unlink socket_path
-      with Unix.Unix_error (Unix.ENOENT,_,_) -> ()));
+      close fd));
     Eio_unix.Net.import_socket_listening ~sw ~close_unix:false fd)
 let create ~sw ~directory ~max_message_bytes =
   if max_message_bytes<String.length (Yojson.Safe.to_string (error_json Outcome_unknown))
@@ -173,25 +174,26 @@ let create ~sw ~directory ~max_message_bytes =
         ~path:directory info |> Result.map_error (fun _ -> Unavailable) in
       (match Unix.lstat (Filename.concat directory "s") with
        | _ -> Error Unavailable
-       | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok info)
+       | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ())
     with Unix.Unix_error _ -> Error Unavailable) in
-  let* directory_identity=checked in
+  let* ()=checked in
   let socket_path=Filename.concat directory "s" in
   let retired,retire=Eio.Promise.create () and stopped,stop=Eio.Promise.create () in
   let t={socket_path;max_message_bytes;grants=Hashtbl.create 4;retired;retire;stopped;stop;live=true} in
   let ready,resolve_ready=Eio.Promise.create () in
+  let shutdown = ref (Ok ()) in
   let started=ref false in
   Eio.Switch.check sw;
   Eio.Switch.on_release sw (fun () -> if not !started then (
     revoke t;
     ignore (Eio.Promise.try_resolve resolve_ready (Error Unavailable));
-    ignore (Eio.Promise.try_resolve t.stop ())));
+    ignore (Eio.Promise.try_resolve t.stop !shutdown)));
   Eio.Fiber.fork_daemon ~sw (fun () ->
     started:=true;
     if not t.live then `Stop_daemon else
-    Fun.protect ~finally:(fun () -> revoke t;ignore (Eio.Promise.try_resolve t.stop ())) (fun () ->
+    Fun.protect ~finally:(fun () -> revoke t;ignore (Eio.Promise.try_resolve t.stop !shutdown)) (fun () ->
       let serve () = Eio.Switch.run (fun scope ->
-        let socket=private_listener ~sw:scope ~directory ~directory_identity ~socket_path in
+        let socket=private_listener ~sw:scope ~socket_path ~shutdown in
         Eio.Promise.resolve resolve_ready (Ok ());
         while true do
           Eio.Switch.check scope;
@@ -213,7 +215,7 @@ let create ~sw ~directory ~max_message_bytes =
   if not !started then (
     revoke t;
     ignore (Eio.Promise.try_resolve resolve_ready (Error Unavailable));
-    ignore (Eio.Promise.try_resolve t.stop ()));
+    ignore (Eio.Promise.try_resolve t.stop !shutdown));
   (try Eio.Promise.await ready |> Result.map (fun () -> t) with
    | Eio.Cancel.Cancelled _ as exn ->
-       revoke t;Eio.Cancel.protect (fun () -> await_stopped t);raise exn)
+       revoke t;ignore (Eio.Cancel.protect (fun () -> await_stopped t));raise exn)

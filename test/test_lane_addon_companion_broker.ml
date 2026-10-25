@@ -136,7 +136,8 @@ let revoke_signal_and_join_are_distinct () = with_broker (fun env sw broker ->
     check bool "revoke signal is not a cleanup receipt" false (Eio.Promise.is_resolved stopped);
     check bool "revocation refuses new grants" true
       (B.issue broker ~bind:(fun _ -> Error B.Not_started)=Error B.Unavailable);
-    Eio.Promise.resolve allow_cleanup ();Eio.Promise.await_exn stopped;
+    Eio.Promise.resolve allow_cleanup ();
+    check bool "listener descriptor close is confirmed" true (Eio.Promise.await_exn stopped = Ok ());
     check bool "joined revocation finished the original binding once" true (!completions=[B.Abandoned])))
 let cancelled_invocation_joins_bind () = with_broker (fun env sw broker ->
   let entered,enter=Eio.Promise.create () and cancelled,cancelled_resolver=Eio.Promise.create () in

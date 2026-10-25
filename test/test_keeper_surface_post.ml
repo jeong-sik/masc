@@ -12,6 +12,7 @@ module Store = Masc.Keeper_chat_store
 module SP = Masc.Keeper_surface_post
 
 let target_pp fmt = function
+  | SP.To_native route -> Format.fprintf fmt "To_native{%s}" (Yojson.Safe.to_string (Masc.Keeper_native_origin_reply.to_yojson route))
   | SP.To_dashboard -> Format.fprintf fmt "To_dashboard"
   | SP.To_discord { channel_id } ->
       Format.fprintf fmt "To_discord{%s}" channel_id
@@ -226,15 +227,12 @@ let test_slack_foreign_channel_id_is_error () =
         (Astring.String.is_infix ~affix:"ZZZ" message)
   | Ok _ -> fail "foreign slack channel_id must not resolve"
 
-let test_unsupported_surface_is_error () =
+let test_missing_native_origin_and_unknown_surface_are_errors () =
   List.iter
     (fun surface ->
-      match resolve ~surface ~channel_id:None ~bound_discord_channels:[] () with
-      | Error message ->
-          check bool (surface ^ " unsupported") true
-            (Astring.String.is_infix ~affix:"not supported" message)
-      | Ok _ -> fail (surface ^ " must not resolve in P4"))
-    [ "telegram"; "openclaw" ]
+      check bool (surface ^ " has no authorized destination") true
+        (Result.is_error (resolve ~surface ~channel_id:None ~bound_discord_channels:[] ())))
+    [ "telegram"; "imessage"; "openclaw" ]
 
 (* ── set_blocks ─────────────────────────────────────────────────── *)
 
@@ -347,6 +345,7 @@ let test_terminal_receipt_requires_exact_supported_route () =
 (* ── delivery_target codec ──────────────────────────────────────── *)
 
 let delivery_target_pp fmt = function
+  | SP.Delivered_to_native route -> Format.fprintf fmt "native{%s}" (Yojson.Safe.to_string (Masc.Keeper_native_origin_reply.to_yojson route))
   | SP.Delivered_to_dashboard -> Format.fprintf fmt "dashboard"
   | SP.Delivered_to_discord { channel_id } ->
       Format.fprintf fmt "discord{%s}" channel_id
@@ -755,8 +754,8 @@ let () =
             test_slack_continuation_selects_exact_bound_channel;
           test_case "slack foreign channel_id is an error" `Quick
             test_slack_foreign_channel_id_is_error;
-          test_case "unsupported surfaces are errors" `Quick
-            test_unsupported_surface_is_error;
+          test_case "missing native origin and unknown surface are errors" `Quick
+            test_missing_native_origin_and_unknown_surface_are_errors;
         ] );
       ( "set_blocks",
         [

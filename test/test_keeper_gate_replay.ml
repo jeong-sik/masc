@@ -759,7 +759,7 @@ let test_large_connector_post_preserves_exact_durable_request () =
       decoded_blocks;
     Alcotest.check (Alcotest.list Alcotest.string) "mention ids retained"
       [ "U123ABC" ] mention_user_ids
-  | Ok (Replay_discord_post _) ->
+  | Ok (Replay_native_post _ | Replay_discord_post _) ->
     Alcotest.fail "Slack request decoded as Discord"
   | Error detail -> Alcotest.fail detail
 ;;
@@ -787,7 +787,7 @@ let test_slack_connector_post_retains_thread_ts () =
       "thread coordinate retained"
       (Some "1700000000.000100")
       thread_ts
-  | Ok (Replay_discord_post _) ->
+  | Ok (Replay_native_post _ | Replay_discord_post _) ->
     Alcotest.fail "Slack request decoded as Discord"
   | Error detail -> Alcotest.fail detail
 ;;
@@ -811,7 +811,8 @@ let test_connector_post_replay_retains_terminal_target () =
          "terminal target remains the approved channel"
          "D-exact"
          channel_id
-     | ( Masc.Keeper_surface_post.To_dashboard
+     | ( Masc.Keeper_surface_post.To_native _
+       | Masc.Keeper_surface_post.To_dashboard
        | Masc.Keeper_surface_post.To_slack _ ) ->
        Alcotest.fail "Discord replay produced the wrong terminal target")
   | Error detail -> Alcotest.fail detail

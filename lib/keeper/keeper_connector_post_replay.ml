@@ -21,6 +21,8 @@ let connector_post_gate_input ~connector ~channel_id ~content ~mention_user_ids
 ;;
 
 type connector_post_replay =
+  | Replay_native_post of
+      { input : Yojson.Safe.t; route : Keeper_native_origin_reply.t; content : string }
   | Replay_discord_post of
       { input : Yojson.Safe.t
       ; channel_id : string
@@ -135,7 +137,17 @@ let connector_post_replay_of_gate_input input =
         Error
           "approved connector_post mention_user_ids must be sorted and unique"
     in
-    if String.equal connector Keeper_surface_post.discord_label
+    if String.equal connector "telegram" || String.equal connector "imessage" then (
+      let* () = reject_unknown
+        ~allowed:["connector";"channel_id";"content";"mention_user_ids";"native_route"] fields in
+      let* route = match List.filter (fun (name,_) -> name="native_route") fields with
+        | [(_,value)] -> Keeper_native_origin_reply.of_yojson value
+        | [] | _::_ -> Error "approved native post requires one exact native_route" in
+      if connector <> Keeper_native_origin_reply.connector route
+         || channel_id <> Keeper_native_origin_reply.channel_id route then
+        Error "approved native post connector/channel differs from its route"
+      else Ok (Replay_native_post {input;route;content}))
+    else if String.equal connector Keeper_surface_post.discord_label
     then (
       let* () =
         reject_unknown
@@ -185,6 +197,7 @@ let connector_post_replay_of_gate_input input =
 ;;
 
 let connector_post_replay_target = function
+  | Replay_native_post {route;_} -> Keeper_surface_post.To_native route
   | Replay_discord_post { channel_id; _ } ->
     Keeper_surface_post.To_discord { channel_id }
   | Replay_slack_post { channel_id; thread_ts; blocks; _ } ->
@@ -202,6 +215,9 @@ let connector_post_call_summary replay =
       (String_util.first_nonblank_line content)
   in
   match replay with
+  | Replay_native_post {route;content;_} ->
+    line ~connector:(Keeper_native_origin_reply.connector route)
+      ~channel_id:(Keeper_native_origin_reply.destination_id route) ~content
   | Replay_discord_post { channel_id; content; _ } ->
     line ~connector:Keeper_surface_post.discord_label ~channel_id ~content
   | Replay_slack_post { channel_id; content; _ } ->

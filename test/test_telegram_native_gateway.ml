@@ -155,6 +155,13 @@ let test_binding_path_authority () =
         "TELEGRAM_BINDING_AUDIT_PATH",audit;"MASC_TELEGRAM_BINDING_AUDIT_PATH",audit^".other"] (fun () ->
         let resolved=Channel_gate_telegram_state.resolve_keeper_for_channel_result ~channel_id:"-1005" in
         check bool "existing custom binding remains visible" true (resolved=Ok(Some "keeper-custom"));
+        let native = Route.telegram ~bot_user_id:777L ~chat_id:(-1005L)
+          ~message_thread_id:None ~direct_messages_topic_id:None ~reply_to_message_id:None
+          ~user_id:123L |> ok |> Keeper_native_origin_reply.of_continuation |> ok in
+        check bool "current owner may reply" true
+          (Result.is_ok (Keeper_native_origin_reply.check_binding ~keeper_name:"keeper-custom" native));
+        check bool "foreign Keeper cannot borrow origin" true
+          (Result.is_error (Keeper_native_origin_reply.check_binding ~keeper_name:"foreign" native));
         check bool "mutation uses same authority" true
           (Result.is_ok(Channel_gate_telegram_state.bind ~channel_id:"-1006" ~keeper_name:"second" ~actor_name:"fixture"));
         check bool "audit override used" true (Sys.file_exists audit);
@@ -230,8 +237,76 @@ let test_prepared_claim_conflicts_and_uncertain_write () = with_claim_root (fun 
   check bool "claim storage failure prevents Gate" true (Result.is_error blocked);
   check (list string) "failed persistence did not dispatch another Keeper" ["A";"A"] !delivered)
 
+let test_autonomous_wake_native_reply () = with_token (fun clock ->
+  let module Native = Keeper_native_origin_reply in
+  let module Queue = Keeper_event_queue in
+  let route = Route.telegram ~bot_user_id:777L ~chat_id:(-1001234567890L)
+    ~message_thread_id:(Some 7) ~direct_messages_topic_id:None
+    ~reply_to_message_id:(Some 8) ~user_id:123L |> ok in
+  let wake : Queue.stimulus = {post_id="keeper-ask:answer";urgency=Queue.Normal;
+    arrived_at=1.;payload=Queue.Ask_answered {ask_id="answer";channel=route}} in
+  (* Actual queue wire round trip and production wake projection; no fabricated
+     result receipt substitutes for a transport callback. *)
+  let restored = Queue.stimulus_to_yojson wake |> Yojson.Safe.to_string
+    |> Yojson.Safe.from_string |> Queue.stimulus_of_yojson |> ok in
+  let channel = Keeper_unified_turn.continuation_channel_of_wake
+    (Keeper_registry.Woken [restored.payload]) |> Option.get in
+  let native = Native.of_continuation channel |> ok in
+  let target = Keeper_surface_post.resolve_target ~surface:"telegram" ~channel_id:None
+    ~continuation_channel:channel ~native_reply:native () |> ok in
+  check bool "wake reply addresses original route" true
+    (Keeper_surface_post.matches_continuation_route target channel);
+  check bool "cannot retarget the native continuation" true
+    (Result.is_error (Keeper_surface_post.resolve_target ~surface:"telegram"
+      ~channel_id:(Some "-2000") ~continuation_channel:channel ~native_reply:native ()));
+  let input = `Assoc ["connector",`String "telegram";"channel_id",`String (Native.channel_id native);
+    "native_route",Native.to_yojson native;"content",`String "answer";"mention_user_ids",`List []] in
+  let replay = Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input
+    (Yojson.Safe.from_string (Yojson.Safe.to_string input)) |> ok in
+  let replay_target = Keeper_tool_in_process_runtime.connector_post_replay_target replay in
+  check bool "Gate replay retains native route" true
+    (Keeper_surface_post.matches_continuation_route replay_target channel);
+  let receipt = Keeper_surface_post.delivery_target_of_post_target replay_target in
+  let receipt_json = Keeper_surface_post.delivery_target_to_yojson receipt in
+  check bool "completed effect metadata survives its wire" true
+    (Keeper_surface_post.delivery_target_of_yojson
+       (Yojson.Safe.from_string (Yojson.Safe.to_string receipt_json)) = Ok receipt);
+  let sends = ref [] in
+  let post ~url ~body = match Filename.basename (Uri.path (Uri.of_string url)) with
+    | "getMe" -> Ok (200,{|{"ok":true,"result":{"id":777,"is_bot":true,"first_name":"Bot"}}|})
+    | "sendMessage" -> sends := Yojson.Safe.from_string body :: !sends;
+      Ok (200,{|{"ok":true,"result":{"message_id":99,"chat":{"id":-1001234567890},"message_thread_id":7}}|})
+    | _ -> fail "unexpected method" in
+  Native.send ~telegram_post:post ~clock native ~content:"answer" |> ok;
+  check int "one actual injected send" 1 (List.length !sends);
+  let body = List.hd !sends in
+  check bool "wake forum coordinates retained" true
+    (Yojson.Safe.Util.member "message_thread_id" body = `Int 7
+      && Yojson.Safe.Util.member "reply_parameters" body = `Assoc ["message_id",`Int 8]);
+  let imessage = Route.imessage ~chat_identifier:"source" ~chat_guid:(Some "source-guid") ~user_id:"person" |> ok in
+  let native = Native.of_continuation ~imessage_destination:"self-guid" imessage |> ok in
+  let sent = ref None in
+  Native.send ~clock ~imessage_send:(fun ~chat_guid ~content -> sent:=Some(chat_guid,content);Ok ())
+    native ~content:"answer" |> ok;
+  check (option (pair string string)) "configured iMessage destination used" (Some ("self-guid","answer")) !sent;
+  check bool "self-chat receipt cannot claim original group was answered" false
+    (Native.matches_continuation native imessage);
+  let native_input = `Assoc ["connector",`String "imessage";"channel_id",`String "source";
+    "native_route",Native.to_yojson native;"content",`String "answer";"mention_user_ids",`List []] in
+  let replay = Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input native_input |> ok in
+  check (option string) "approval names the actual configured destination" (Some "imessage self-guid: answer")
+    (Keeper_tool_in_process_runtime.connector_post_call_summary replay);
+  let json = Keeper_surface_post.delivery_target_to_yojson
+    (Keeper_surface_post.Delivered_to_native native) in
+  check bool "duplicate receipt field is refused" true
+    (match json with `Assoc fields -> Result.is_error (Keeper_surface_post.delivery_target_of_yojson
+       (`Assoc (("channel_id",`String "source")::fields))) | _ -> fail "receipt object");
+  check bool "unknown native route cannot be replayed" true
+    (Result.is_error (Native.of_yojson (`Assoc ["kind",`String "dashboard";"thread_id",`String "foreign"]))))
+
 let ()=run "Telegram native gateway" ["continuity",[
   test_case "prepared claims survive retry and uncertain write" `Quick test_prepared_claim_conflicts_and_uncertain_write;
+  test_case "autonomous persisted wake and native effect route" `Quick test_autonomous_wake_native_reply;
   test_case "strict route and topic separation" `Quick test_route_roundtrip_and_topics;
   test_case "producer exact source and original receipt" `Quick test_producer_exact_route_and_receipt;
   test_case "unreadable binding stays owed" `Quick test_unreadable_binding_is_not_ignored;

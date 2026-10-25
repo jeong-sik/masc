@@ -2,7 +2,10 @@ defer_loading = true
 name = "keeper_surface_post"
 description = """
 Post a message to one conversation endpoint: 'dashboard' (appears in the \
-operator's chat transcript), 'discord', or 'slack'. Standard Markdown is \
+operator's chat transcript), 'discord', 'slack', 'telegram', or 'imessage'. Telegram/iMessage require the \
+originating continuation and its current Keeper binding; they cannot select \
+a foreign conversation. iMessage follows the configured reply mode. Telegram \
+and iMessage deliver plain text. Standard Markdown is \
 rendered natively by Discord and by Slack's Block Kit markdown block. To \
 create a real highlighted user mention, pass stable participant-roster ids \
 in mention_user_ids; never guess ids from display names. A Slack post may \
@@ -20,7 +23,11 @@ name = "surface"
 type = "string"
 required = true
 description = """
-Lane to post to: 'dashboard', 'discord', or 'slack'. Posting to a surface \
+Lane to post to: 'dashboard', 'discord', 'slack', 'telegram', or 'imessage'. Telegram/iMessage require the \
+originating continuation and its current Keeper binding; they cannot select \
+a foreign conversation. iMessage follows the configured reply mode. Telegram \
+and iMessage deliver plain text.
+ Posting to a surface \
 this keeper is not bound to is an error, not a no-op."""
 
 [[params]]

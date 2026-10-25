@@ -2630,6 +2630,14 @@ function ChatControlStatusCard({
           hint: '답변 내용은 해당 채널에서 확인할 수 있습니다.',
         }
       }
+      if (target?.kind === 'telegram' || target?.kind === 'imessage') {
+        const connector = target.kind === 'telegram' ? 'Telegram' : 'iMessage'
+        return {
+          title: `${connector}로 답변 완료`,
+          body: `Keeper의 답변이 ${connector} 대화 ${target.channelId}로 전송되었습니다.`,
+          hint: '답변 내용은 해당 대화에서 확인할 수 있습니다.',
+        }
+      }
       if (target?.kind === 'discord') {
         return {
           title: 'Discord로 답변 완료',
@@ -2639,7 +2647,7 @@ function ChatControlStatusCard({
       }
       return {
         title: '커넥터로 답변 완료',
-        body: 'Keeper의 답변이 외부 커넥터(Slack/Discord)로 전송되었습니다.',
+        body: 'Keeper의 답변이 외부 커넥터로 전송되었습니다.',
         hint: '답변 내용은 해당 채널에서 확인할 수 있습니다.',
       }
     })()

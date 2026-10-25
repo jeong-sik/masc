@@ -165,3 +165,63 @@ this consolidation. Command from dashboard:
 `pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/config/navigation.test.ts src/components/connector-constants.test.ts`.
 See [the execution output](connector-ids-followup.txt). This is a separate run
 from the earlier 140 cases; suite overlap is not counted as new unique coverage.
+
+## Autonomous native wake follow-up (separate upper layer)
+
+An original-scope gap remained after the native Owner operation path: generic
+Ask/Fusion/owned-job wakes retained the continuation, but the autonomous
+`keeper_surface_post` tool rejected Telegram/iMessage. There is no automatic
+terminal publisher that compensates for that rejection.
+
+The upper `fix/native-origin-wake-reply-20261025` layer adds a closed native
+route behind the existing post tool and exact Gate approval/replay. Initial
+admission reads only the selected connector's binding authority, and replay
+reads its current binding again. Telegram retains bot/chat/topic/reply fields.
+iMessage resolves the configured reply mode before approval and pins the actual
+GUID; self-chat delivery is not evidence of delivery to the original group.
+Actual delivery metadata distinguishes that destination from the origin binding
+key. Uncertain transport failures do not authorize an automatic resend.
+
+The new fixture restores an Ask_answered stimulus through the queue JSON wire,
+uses the production wake projection and target/replay decoder, and exercises
+the native sender with injected transport. It also covers refusal to change the
+origin and authoritative binding ownership. This is not a complete model-driven
+autonomous turn, actual Telegram/macOS send, or installed runtime test.
+At this entry, OCaml parsing and tool TOML parsing passed; **the added OCaml
+scenario has not executed**. Earlier 24/92 results do not certify this new layer.
+
+The existing keeper-message and chat-primitives suites passed **211 tests**
+including native receipt normalization. See [the output](wake-dashboard.txt).
+This is fixture/DOM execution, without a new browser observation of this layer.
+The earlier two unrelated baseline typecheck failures still apply.
+
+### Autonomous follow-up compilation result
+
+[Run 40113587452](https://github.com/jeong-sik/masc/actions/runs/40113587452)
+at `939db8d04e8bbbd205b16cf9b2da3429db47d35b` completed **FAILURE**, before
+any of its three selected suites executed. The runtime's native route lookup
+had a fragile catch-all over the continuation variant (warning 4); an existing
+Gate replay fixture omitted the added `To_native` constructor (warning 8).
+The repair enumerates every continuation case and adds the missing test arm.
+This source repair does not establish execution of the new wake scenario.
+The same three suites are requested again; earlier lower-layer 24/92 results
+remain separate. No local Dune build or CI watch loop was used.
+
+### Native wake scenario observed; stale surface assertion repaired
+
+[Run 40113998540](https://github.com/jeong-sik/masc/actions/runs/40113998540)
+at `4926407ddf3d617c0ed65d11cb95ef6469ae40da` compiled the selected candidate
+and **passed all 9 native gateway cases and all 35 Gate replay cases**. The new
+Ask_answered queue-wire → production wake projection → exact target/replay →
+injected native send case executed successfully, including actual iMessage
+destination summary and strict receipt assertions. This remains injected
+transport/source execution, not a full autonomous model turn or live connector.
+See [the retained execution excerpt](wake-execution-followup.txt).
+
+The aggregate run still FAILED: one of the 31 surface-post cases asserted the
+old unsupported-surface error wording. Telegram without an origin was correctly
+refused, but the fixture expected a particular substring. It now verifies
+refusal of missing Telegram/iMessage origins and unknown surfaces through the
+actual result, without constraining error text. Production source and the
+native/Gate replay fixtures are unchanged; only the surface-post suite is
+requested again. No 31-case PASS is claimed before that execution.

@@ -111,6 +111,13 @@ val put_durable : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
     the producer boundary for a durable record that will outlive the current
     process and point back to the blob.
 
+    The owned, no-follow directory chain is checked before and after creation;
+    each directory and the ownership root are synced before payload publication.
+    The caller keeps this workspace subtree process-owned while writing, as for
+    other path-based owned writers. Preparation and I/O run in a system thread
+    when called from Eio. Unsafe directory chains raise [Sys_error] before any
+    payload is written.
+
     Cancellation propagates. Other write or sync failures raise [Sys_error]
     without returning a reference. *)
 

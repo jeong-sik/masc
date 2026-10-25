@@ -84,6 +84,7 @@ npm test
 실제 npm 설치/잠금 재설치, React와 Vite 설정·플러그인·별칭·pre/post build·동적 chunk, 파일 그래프의 전체 바이트/SHA와 HTTP 경로, 검증용 DOM/ESM에서의 실제 앱 동작, 잠금 변조·최종 기록 실패·출력 수집 중 변경 등을 검사합니다. DOM 실행은 SourceTextModule+HappyDOM이며 실제 브라우저/CSP/layout/프로젝트 UI·Keeper 배정은 별도입니다.
 
 [근거] [npm run](https://docs.npmjs.com/cli/v11/commands/npm-run/), [npm ci](https://docs.npmjs.com/cli/v11/commands/npm-ci/), [Vite production build](https://vite.dev/guide/build.html), [esbuild API](https://esbuild.github.io/api/) 및 고정 설치본. 2026-10-26 KST · High. 실제 검사 범위를 전체 브라우저나 제품 통합 증거로 넓히지 않습니다.
+
 ## 프로젝트 원본 보관
 
 네이티브 서버 쪽 `Artifact_project_source.request_of_json`은 실행기와 같은 요청 형식을 받습니다.

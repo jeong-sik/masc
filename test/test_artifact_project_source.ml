@@ -128,6 +128,44 @@ let test_unsafe_directory () = with_base (fun base_path ->
   Unix.rename dir moved; Unix.symlink moved dir;
   S.read ~base_path ~id:source.id |> unavailable;
   S.save ~base_path ~author:"human" request |> unavailable)
+let test_manifest_references () = with_base (fun base_path ->
+  let source = save base_path request in
+  let file = List.hd source.files in
+  let wrong_length = Tool_output.make_artifact_ref ~sha256:file.body.sha256
+    ~bytes:(file.body.bytes + 1) ~preview:file.body.preview ~mime:file.body.mime
+    |> Result.map_error Tool_output.make_error_to_string |> ok in
+  let wrong = { source with files = { file with body = wrong_length } :: List.tl source.files } in
+  write (metadata base_path source.id) (A.to_json wrong |> Yojson.Safe.to_string);
+  S.read ~base_path ~id:source.id |> unavailable;
+  let malformed = match A.to_json source with
+    | `Assoc fields -> `Assoc (("files", `List [
+        `Assoc ["path", `String "package.json"; "body", `Assoc ["_blob", `String "broken"]]])
+        :: List.remove_assoc "files" fields)
+    | _ -> Alcotest.fail "manifest must be an object" in
+  (match A.of_json malformed with Error _ -> () | Ok _ -> Alcotest.fail "invalid blob wrapper accepted");
+  write (metadata base_path source.id) (Yojson.Safe.to_string malformed);
+  S.read ~base_path ~id:source.id |> unavailable;
+  match Tool_blob_maintenance.run ~base_path
+    ~board_posts_file:(fun ~workspace_masc_dir -> Filename.concat workspace_masc_dir "absent-board.json")
+    ~mode:Tool_blob_maintenance.Delete_previous_candidates with
+  | Error _ -> () | Ok _ -> Alcotest.fail "retention ignored a malformed owned reference")
+let test_blob_parent_symlinks () =
+  List.iter (fun shard -> with_base (fun base_path -> with_base (fun outside ->
+    let masc = Common.masc_dir_from_base_path ~base_path in
+    Unix.mkdir masc 0o700;
+    let blobs = Filename.concat masc "tool_blobs" in
+    let target = if shard then (
+      Unix.mkdir blobs 0o700;
+      let digest = Digestif.SHA256.(digest_string "{}\n" |> to_hex) in
+      Filename.concat blobs (String.sub digest 0 2)) else blobs in
+    Unix.symlink outside target;
+    S.save ~base_path ~author:"human" request |> unavailable;
+    Alcotest.(check int) "no source bytes written outside workspace" 0
+      (Array.length (Sys.readdir outside));
+    let metadata_dir = Filename.dirname (metadata base_path ("project-" ^ String.make 32 'a')) in
+    Alcotest.(check bool) "no committed source metadata" false
+      (Array.exists (fun name -> Filename.check_suffix name ".json") (Sys.readdir metadata_dir)))))
+    [false; true]
 
 let () = Eio_main.run (fun _ -> match Array.to_list Sys.argv with
   | [_; "--save"; base_path; input] ->
@@ -144,4 +182,6 @@ let () = Eio_main.run (fun _ -> match Array.to_list Sys.argv with
       Alcotest.test_case "invalid import contracts" `Quick test_rejections;
       Alcotest.test_case "corrupt, missing and symbolic-link blobs" `Quick test_damaged_files;
       Alcotest.test_case "private metadata, corruption, identity and symlinks" `Quick test_metadata_boundary;
-      Alcotest.test_case "unsafe source directories" `Quick test_unsafe_directory]])
+      Alcotest.test_case "unsafe source directories" `Quick test_unsafe_directory;
+      Alcotest.test_case "reference lengths, malformed metadata and retention" `Quick test_manifest_references;
+      Alcotest.test_case "blob parent symlinks reject before writes" `Quick test_blob_parent_symlinks]])

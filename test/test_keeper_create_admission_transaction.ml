@@ -410,14 +410,14 @@ let with_boot_runtime_catalog f =
     (fun () ->
       write_file path
         {|[[models]]
-id_prefix = "test-model"
+model_id = "test-model"
 provider_name = "test_provider"
 base = "openai_chat"
 max_context_tokens = 8192
 supports_tools = true
 
 [[models]]
-id_prefix = "other-model"
+model_id = "other-model"
 provider_name = "test_provider"
 base = "openai_chat"
 max_context_tokens = 8192

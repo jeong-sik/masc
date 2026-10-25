@@ -3974,28 +3974,25 @@ let wizard_model_client_arg =
   Arg.enum [ "claude-code", Wizard_claude_code; "codex", Wizard_codex ]
 
 let wizard_model_entries client catalog =
+  let suggested_client = match client with
+    | Wizard_claude_code -> Llm_provider.Model_catalog.Claude_code
+    | Wizard_codex -> Llm_provider.Model_catalog.Codex in
   Llm_provider.Model_catalog.model_entries catalog
   |> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-    match client, entry.provider_name with
-    | Wizard_claude_code, (None | Some "anthropic") ->
-      Llm_provider.Model_identifiers.Id_prefix.starts_with
-        ~prefix:
-          (Llm_provider.Model_identifiers.Id_prefix.of_string_exn "claude-")
-        entry.id_prefix
-    | Wizard_codex, (None | Some "openai-responses") ->
-      Llm_provider.Model_identifiers.Id_prefix.starts_with
-        ~prefix:
-          (Llm_provider.Model_identifiers.Id_prefix.of_string_exn "gpt-")
-        entry.id_prefix
-    | (Wizard_claude_code | Wizard_codex), Some _ -> false)
+      List.mem suggested_client entry.suggested_clients)
 
 let wizard_exact_model_entries ~prefer_bare model entries =
+  let requested = Llm_provider.Model_identifiers.Model_id.of_string model in
   let exact_entries = entries
     |> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-      String.equal
-        (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
-        model
-      || Option.fold ~none:false ~some:(List.mem model) entry.supported_models)
+      match requested with
+      | Error _ -> false
+      | Ok requested ->
+        let same raw = match Llm_provider.Model_identifiers.Model_id.of_string raw with
+          | Ok id -> Llm_provider.Model_identifiers.Model_id.equal id requested
+          | Error _ -> false in
+        Llm_provider.Model_identifiers.Model_id.equal entry.model_id requested
+        || Option.fold ~none:false ~some:(List.exists same) entry.supported_models)
   in
   let entries =
     if prefer_bare
@@ -4056,7 +4053,7 @@ let runtime_model_list_cmd =
              (`List
                (entries
                 |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-                       Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+                       Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
                 |> List.sort_uniq String.compare
                 |> List.filter_map (fun model ->
                      Option.map (fun context -> `Assoc [ "id", `String model
@@ -4232,7 +4229,9 @@ let runtime_model_info_cmd =
               | None -> false) entries in
             let has_exact_scoped = List.exists
               (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-                String.equal (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix) model
+                (match Llm_provider.Model_identifiers.Model_id.of_string model with
+                 | Ok id -> Llm_provider.Model_identifiers.Model_id.equal entry.model_id id
+                 | Error _ -> false)
                 || Option.fold ~none:false ~some:(List.mem model) entry.supported_models)
               scoped in
             if has_exact_scoped then scoped else

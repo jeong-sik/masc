@@ -28,7 +28,7 @@
     row matches, the manifest can supply capabilities for custom deployments.
 
     Priority (highest first):
-    + 1. Model catalog row matching by [id_prefix] (case-insensitive prefix)
+    + 1. Model catalog row matching by [model_id] (case-insensitive prefix)
     + 2. Manifest entry matching an exact [model_id] (ASCII case-insensitive)
     + 3. [None] when neither source declares the model
 

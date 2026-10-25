@@ -6,8 +6,11 @@ end
 
 open Result_syntax
 
+type suggested_client = Claude_code | Codex
+
 type model_entry =
-  { id_prefix : Model_identifiers.Id_prefix.t
+  { model_id : Model_identifiers.Model_id.t
+  ; suggested_clients : suggested_client list
   ; base_label : string option
   ; provider_name : string option
   ; max_context_tokens : int option
@@ -74,7 +77,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
   ; supports_parallel_tool_suppression : bool
-  ; serves_bare_rows : Model_identifiers.Id_prefix.t list
+  ; serves_bare_models : Model_identifiers.Model_id.t list
   }
 
 module String_map = Map.Make (String)
@@ -85,7 +88,7 @@ type t =
   ; providers : provider_entry list
   ; scoped_rows : model_entry Row_key_map.t String_map.t
     (* The rows that name a provider, by the provider's normalized label and
-       then by the row's [Id_prefix.equality_key], each to the first such row
+       then by the row's [Model_id.equality_key], each to the first such row
        in [models]: the row [lookup_for_provider] answers with, found
        without scanning [models]. A catalog is never changed after [make]. *)
   }
@@ -101,7 +104,7 @@ let index_scoped_rows models =
        | None -> index
        | Some declared ->
          let label = normalize_label declared in
-         let key = Model_identifiers.Id_prefix.equality_key entry.id_prefix in
+         let key = Model_identifiers.Model_id.equality_key entry.model_id in
          let rows =
            match String_map.find_opt label index with
            | Some rows -> rows
@@ -119,7 +122,6 @@ let make ~models ~providers =
 ;;
 
 let empty = make ~models:[] ~providers:[]
-let of_model_entries models = make ~models ~providers:[]
 let model_entries t = t.models
 let provider_entries t = t.providers
 
@@ -343,7 +345,8 @@ let anthropic_thinking_control_opt ~entry_id key toml =
    [Capability_manifest.reject_unknown_keys]. Keep this list in sync with the
    record construction below. *)
 let known_entry_keys =
-  [ "id_prefix"
+  [ "model_id"
+  ; "suggested_clients"
   ; "base"
   ; "provider_name"
   ; "max_context_tokens"
@@ -401,7 +404,7 @@ let known_entry_keys =
 
 let reject_unknown_entry_keys ~entry_id entry_toml =
   match Otoml.list_table_keys_result entry_toml with
-  | Error _ -> Ok () (* not a table; the id_prefix shape check already handled it *)
+  | Error _ -> Ok () (* not a table; the model_id shape check already handled it *)
   | Ok keys ->
     (match List.filter (fun k -> not (List.mem k known_entry_keys)) keys with
      | [] -> Ok ()
@@ -414,20 +417,35 @@ let reject_unknown_entry_keys ~entry_id entry_toml =
 ;;
 
 let parse_entry entry_toml =
-  let* id_prefix =
-    match find_string_field ~entry_id:"<unknown>" "id_prefix" entry_toml with
-    | Error _ -> Error "model entry field \"id_prefix\" expected string"
-    | Ok None -> Error "model entry missing required \"id_prefix\" field"
+  let* model_id =
+    match find_string_field ~entry_id:"<unknown>" "model_id" entry_toml with
+    | Error _ -> Error "model entry field \"model_id\" expected string"
+    | Ok None -> Error "model entry missing required \"model_id\" field"
     | Ok (Some raw) ->
-      let* id_prefix = Model_identifiers.Id_prefix.of_string raw in
+      let* model_id = Model_identifiers.Model_id.of_string raw in
       let* () =
         reject_unknown_entry_keys
-          ~entry_id:(Model_identifiers.Id_prefix.to_string id_prefix)
+          ~entry_id:(Model_identifiers.Model_id.to_string model_id)
           entry_toml
       in
-      Ok id_prefix
+      Ok model_id
   in
-  let entry_id = Model_identifiers.Id_prefix.to_string id_prefix in
+  let entry_id = Model_identifiers.Model_id.to_string model_id in
+  let* suggested_clients =
+    let* names = string_list_field ~entry_id "suggested_clients" entry_toml in
+    let rec parse seen = function
+      | [] -> Ok (List.rev seen)
+      | name :: rest ->
+        let* client = match name with
+          | "claude_code" -> Ok Claude_code
+          | "codex" -> Ok Codex
+          | other -> Error (Printf.sprintf
+              "model entry %S has unknown suggested client %S" entry_id other) in
+        if List.mem client seen then
+          Error (Printf.sprintf "model entry %S has duplicate suggested client %S" entry_id name)
+        else parse (client :: seen) rest in
+    parse [] (Option.value names ~default:[])
+  in
   let* base_label =
     canonical_string_opt
       ~entry_id
@@ -562,7 +580,7 @@ let parse_entry entry_toml =
     |> Result.map_error (fun error ->
       Printf.sprintf
         "model entry %S %s"
-        (Model_identifiers.Id_prefix.to_string id_prefix)
+        (Model_identifiers.Model_id.to_string model_id)
         (Capability_vocab.thinking_control_format_codec_error_to_string error))
   in
   let* anthropic_thinking_control =
@@ -618,7 +636,8 @@ let parse_entry entry_toml =
     float_field ~entry_id "cache_read_multiplier" entry_toml
   in
   Ok
-    { id_prefix
+    { model_id
+    ; suggested_clients
     ; base_label
     ; provider_name
     ; max_context_tokens
@@ -670,21 +689,21 @@ let parse_entry entry_toml =
 let%test "parse_entry rejects an unknown/misspelled field, not silently dropped" =
   (* A typo like [suports_tools] must fail closed rather than leave
      supports_tools at its default with no signal (Agent Core contract silent-swallow). *)
-  let entry = Otoml.Parser.from_string "id_prefix = \"m\"\nsuports_tools = true" in
+  let entry = Otoml.Parser.from_string "model_id = \"m\"\nsuports_tools = true" in
   match parse_entry entry with
   | Error _ -> true
   | Ok _ -> false
 ;;
 
 let%test "parse_entry accepts an entry whose fields are all known" =
-  let entry = Otoml.Parser.from_string "id_prefix = \"m\"\nsupports_tools = true" in
+  let entry = Otoml.Parser.from_string "model_id = \"m\"\nsupports_tools = true" in
   match parse_entry entry with
   | Ok _ -> true
   | Error _ -> false
 ;;
 
 let%test "parse_entry rejects empty supported_models list" =
-  let entry = Otoml.Parser.from_string "id_prefix = \"m\"\nsupported_models = []" in
+  let entry = Otoml.Parser.from_string "model_id = \"m\"\nsupported_models = []" in
   match parse_entry entry with
   | Error _ -> true
   | Ok _ -> false
@@ -692,7 +711,7 @@ let%test "parse_entry rejects empty supported_models list" =
 
 let%test "parse_entry rejects whitespace-only supported_models item" =
   let entry =
-    Otoml.Parser.from_string "id_prefix = \"m\"\nsupported_models = [\"   \"]"
+    Otoml.Parser.from_string "model_id = \"m\"\nsupported_models = [\"   \"]"
   in
   match parse_entry entry with
   | Error _ -> true
@@ -702,7 +721,7 @@ let%test "parse_entry rejects whitespace-only supported_models item" =
 let%test "parse_entry rejects duplicate supported_models" =
   let entry =
     Otoml.Parser.from_string
-      "id_prefix = \"m\"\nsupported_models = [\"model-a\", \"model-a\"]"
+      "model_id = \"m\"\nsupported_models = [\"model-a\", \"model-a\"]"
   in
   match parse_entry entry with
   | Error _ -> true
@@ -710,21 +729,21 @@ let%test "parse_entry rejects duplicate supported_models" =
 ;;
 
 let%test "parse_entry parses a canonical task value into the closed variant" =
-  let entry = Otoml.Parser.from_string "id_prefix = \"m\"\ntask = \"transcription\"" in
+  let entry = Otoml.Parser.from_string "model_id = \"m\"\ntask = \"transcription\"" in
   match parse_entry entry with
   | Ok { task; _ } -> task = Some Capability_vocab.Transcription
   | Error _ -> false
 ;;
 
 let%test "parse_entry rejects an unknown task value, not silently dropped" =
-  let entry = Otoml.Parser.from_string "id_prefix = \"m\"\ntask = \"chat\"" in
+  let entry = Otoml.Parser.from_string "model_id = \"m\"\ntask = \"chat\"" in
   match parse_entry entry with
   | Error _ -> true
   | Ok _ -> false
 ;;
 
 let%test "parse_entry leaves task undeclared as None" =
-  let entry = Otoml.Parser.from_string "id_prefix = \"m\"" in
+  let entry = Otoml.Parser.from_string "model_id = \"m\"" in
   match parse_entry entry with
   | Ok { task = None; _ } -> true
   | Ok _ | Error _ -> false
@@ -733,7 +752,7 @@ let%test "parse_entry leaves task undeclared as None" =
 let%test "parse_entry parses Anthropic thinking control as typed catalog data" =
   let entry =
     Otoml.Parser.from_string
-      "id_prefix = \"thinking-control-parse-fixture\"\n\
+      "model_id = \"thinking-control-parse-fixture\"\n\
        anthropic_thinking_control = \"adaptive_default\""
   in
   match parse_entry entry with
@@ -748,7 +767,7 @@ let%test "parse_entry rejects unknown Anthropic thinking control" =
        let entry =
          Otoml.Parser.from_string
            (Printf.sprintf
-              "id_prefix = \"m\"\nanthropic_thinking_control = %S"
+              "model_id = \"m\"\nanthropic_thinking_control = %S"
               policy)
        in
        Result.is_error (parse_entry entry))
@@ -758,7 +777,7 @@ let%test "parse_entry rejects unknown Anthropic thinking control" =
 let%test "parse_entry parses ignored_sampling_parameters into closed variants" =
   let entry =
     Otoml.Parser.from_string
-      "id_prefix = \"m\"\nignored_sampling_parameters = [\"temperature\", \"top_p\"]"
+      "model_id = \"m\"\nignored_sampling_parameters = [\"temperature\", \"top_p\"]"
   in
   match parse_entry entry with
   | Ok { ignored_sampling_parameters; _ } ->
@@ -769,7 +788,7 @@ let%test "parse_entry parses ignored_sampling_parameters into closed variants" =
 
 let%test "parse_entry rejects unknown ignored_sampling_parameters" =
   let entry =
-    Otoml.Parser.from_string "id_prefix = \"m\"\nignored_sampling_parameters = [\"temp\"]"
+    Otoml.Parser.from_string "model_id = \"m\"\nignored_sampling_parameters = [\"temp\"]"
   in
   match parse_entry entry with
   | Error _ -> true
@@ -779,14 +798,14 @@ let%test "parse_entry rejects unknown ignored_sampling_parameters" =
 let%test "parse_entry rejects an unknown base preset, not silent default" =
   (* An unknown [base] must fail closed here rather than resolve to
      [default_capabilities] downstream (Agent Core contract §2 rule 4). *)
-  let entry = Otoml.Parser.from_string "id_prefix = \"m\"\nbase = \"not_a_preset\"" in
+  let entry = Otoml.Parser.from_string "model_id = \"m\"\nbase = \"not_a_preset\"" in
   match parse_entry entry with
   | Error _ -> true
   | Ok _ -> false
 ;;
 
 let%test "parse_entry accepts a known base preset" =
-  let entry = Otoml.Parser.from_string "id_prefix = \"m\"\nbase = \"openai_chat\"" in
+  let entry = Otoml.Parser.from_string "model_id = \"m\"\nbase = \"openai_chat\"" in
   match parse_entry entry with
   | Ok _ -> true
   | Error _ -> false
@@ -819,7 +838,7 @@ let parse_table_array toml key parse =
    so no two rows this check lets through share an index slot. *)
 let model_row_key (entry : model_entry) =
   Option.map normalize_label entry.provider_name,
-  Model_identifiers.Id_prefix.equality_key entry.id_prefix
+  Model_identifiers.Model_id.equality_key entry.model_id
 ;;
 
 let provider_entry_key (entry : provider_entry) = normalize_label entry.id
@@ -832,11 +851,11 @@ let duplicate_model_label (entry : model_entry) =
   | None ->
     Printf.sprintf
       "model row %S"
-      (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+      (Model_identifiers.Model_id.to_string entry.model_id)
   | Some provider ->
     Printf.sprintf
       "model row %S for provider %S"
-      (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+      (Model_identifiers.Model_id.to_string entry.model_id)
       provider
 ;;
 
@@ -861,6 +880,11 @@ let reject_duplicate_rows models providers =
      with
      | Some label -> Error (Printf.sprintf "model catalog declares %s twice" label)
      | None -> Ok ())
+;;
+
+let of_model_entries models =
+  let* () = reject_duplicate_rows models [] in
+  Ok (make ~models ~providers:[])
 ;;
 
 let catalog_of_toml toml =
@@ -901,17 +925,9 @@ let load_default () =
 ;;
 
 let lookup_entries entries model_id =
-  let sorted_t =
-    List.fast_sort
-      (fun a b ->
-         compare
-           (String.length (Model_identifiers.Id_prefix.to_string b.id_prefix))
-           (String.length (Model_identifiers.Id_prefix.to_string a.id_prefix)))
-      entries
-  in
   List.find_opt
-    (fun entry -> Model_identifiers.Model_id.starts_with ~prefix:entry.id_prefix model_id)
-    sorted_t
+    (fun entry -> Model_identifiers.Model_id.equal entry.model_id model_id)
+    entries
 ;;
 
 let lookup t model_id =
@@ -965,8 +981,8 @@ let serves_bare_row t provider (row : model_entry) =
      | Declared_provider _ ->
        (match provider_entry_for_reference t provider with
         | Some entry -> List.exists (fun family ->
-            Model_identifiers.Id_prefix.starts_with ~prefix:family row.id_prefix)
-            entry.serves_bare_rows
+            Model_identifiers.Model_id.equal family row.model_id)
+            entry.serves_bare_models
         | None -> false)
      | Anonymous_wire Provider_kind.OpenAI_compat -> false
      | Anonymous_wire (Provider_kind.Anthropic | Kimi | Ollama | Gemini | Glm) -> true)
@@ -995,7 +1011,7 @@ let model_entries_for_provider t ~provider ~model_entries =
     | Some _ | None -> [] in
   let bare = List.filter (serves_bare_row t provider) model_entries in
   let _, reversed = List.fold_left (fun (seen, rows) (entry : model_entry) ->
-    let key = Model_identifiers.Id_prefix.equality_key entry.id_prefix in
+    let key = Model_identifiers.Model_id.equality_key entry.model_id in
     if Row_key_map.mem key seen then seen, rows
     else Row_key_map.add key entry seen, entry :: rows)
     (Row_key_map.empty, []) (scoped requested @ canonical @ bare) in

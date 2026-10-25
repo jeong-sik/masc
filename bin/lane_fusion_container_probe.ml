@@ -249,7 +249,7 @@ let run ~repo_root ~output_dir ~head_sha =
           let providers = [Panel_a;Panel_b;Judge] |> List.map (fun provider -> provider,listen provider) in
           let catalog_path = Filename.concat root "catalog.toml" in
           write catalog_path (String.concat "\n" (List.map (fun (provider,_) -> Printf.sprintf
-            "[[models]]\nid_prefix=\"container-fixture\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=256\nchat_output_budget_field=\"max_tokens\"\nsupports_tools=false\nsupports_system_prompt=true\nsupports_reasoning=false\nsupports_native_streaming=false\nignored_sampling_parameters=[]\n"
+            "[[models]]\nmodel_id=\"container-fixture\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=256\nchat_output_budget_field=\"max_tokens\"\nsupports_tools=false\nsupports_system_prompt=true\nsupports_reasoning=false\nsupports_native_streaming=false\nignored_sampling_parameters=[]\n"
             (installation_id provider)) providers));
           Llm_provider.Model_catalog.load_file catalog_path |> require |> Llm_provider.Model_catalog.set_global;
           let runtime_path = Filename.concat root "runtime.toml" in

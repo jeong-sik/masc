@@ -30,7 +30,7 @@ let install_catalog ?(base = "openai_chat") ~sw ~supports_native_streaming () =
     | None -> Llm_provider.Model_catalog.clear_global ());
   let source =
     Printf.sprintf
-      "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = %S\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_native_streaming = %b\n"
+      "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = %S\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_native_streaming = %b\n"
       model_id base supports_native_streaming
   in
   match Llm_provider.Model_catalog.of_toml_string ~source:"stream-dispatch-test" source with

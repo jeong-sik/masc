@@ -107,15 +107,15 @@ let test_incomplete_cache_pricing_remains_declared () =
     (entries <> []);
   List.iter
     (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-      let id_prefix =
-        Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
+      let model_id =
+        Llm_provider.Model_identifiers.Model_id.to_string entry.model_id
       in
-      match Llm_provider.Pricing.pricing_for_model_opt id_prefix with
+      match Llm_provider.Pricing.pricing_for_model_opt model_id with
       | None ->
-        Alcotest.failf "%s declares base prices and they are not observable" id_prefix
+        Alcotest.failf "%s declares base prices and they are not observable" model_id
       | Some (pricing : Llm_provider.Pricing.pricing) ->
         Alcotest.(check bool)
-          (id_prefix ^ ": no cache multiplier is invented")
+          (model_id ^ ": no cache multiplier is invented")
           true
           (Option.is_none pricing.cache_write_multiplier
            && Option.is_none pricing.cache_read_multiplier))

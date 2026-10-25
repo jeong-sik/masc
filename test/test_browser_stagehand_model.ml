@@ -39,7 +39,7 @@ let resolver_snapshot ~base_url ~system_prompt =
        request_path = \"/v1/chat/completions\"\n\
        auth = \"none\"\n\n\
        [[models]]\n\
-       id_prefix = \"model\"\n\
+       model_id = \"model\"\n\
        provider_name = \"stagehand-fixture\"\n\
        max_context_tokens = 65536\n\
        max_output_tokens = 4096\n\

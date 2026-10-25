@@ -67,7 +67,7 @@ let read path =
 let model_catalog =
   {|
 [[models]]
-id_prefix = "gpt-5.4"
+model_id = "gpt-5.4"
 provider_name = "stub-http"
 base = "openai_chat"
 max_context_tokens = 200000

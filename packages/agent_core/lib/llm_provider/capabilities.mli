@@ -303,7 +303,7 @@ val for_model_id_catalog : string -> capabilities option
 (** Resolve an explicit provider/model pair while preserving whether the
     caller declared an identity or knows only a wire kind. Exact scoped rows
     win. A declared provider reads bare catalog rows only when its catalog
-    entry declares [serves_bare_rows]; it never borrows capability-manifest
+    entry declares [serves_bare_models]; it never borrows capability-manifest
     facts. Anonymous native wires retain model/manifest fallback; anonymous
     OpenAI-compatible endpoints do not borrow bare model facts. Provider bases
     answer last. Anonymous wire labels never resolve catalog provider aliases.

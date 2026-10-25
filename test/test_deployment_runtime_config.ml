@@ -114,7 +114,7 @@ let test_unknown_keeper_setting_refused exe () = with_workspace (fun root ->
    judges against another catalog. *)
 let degraded_catalog =
   {|[[models]]
-id_prefix = "good"
+model_id = "good"
 provider_name = "fixture"
 base = "openai_chat"
 max_context_tokens = 8192

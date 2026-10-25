@@ -1266,7 +1266,7 @@ let prompt_only_snapshot base_url =
        request_path = \"/v1/chat/completions\"\n\
        auth = \"none\"\n\n\
        [[models]]\n\
-       id_prefix = \"hitl-incapable-model\"\n\
+       model_id = \"hitl-incapable-model\"\n\
        provider_name = \"hitl-incapable-provider\"\n\
        max_context_tokens = 8192\n\
        max_output_tokens = 1024\n\

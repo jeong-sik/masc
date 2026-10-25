@@ -216,7 +216,7 @@ let test_http_effect_checkpoint_owner_restart_alternate ?(durable_native = false
     Cohttp_eio.Server.run socket server ~on_error:raise);
   let catalog_path = Filename.concat base_path "models.toml" in
   write catalog_path (String.concat "\n" (List.map (fun provider -> Printf.sprintf
-    "[[models]]\nid_prefix = \"resume-fixture\"\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 200000\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" provider)
+    "[[models]]\nmodel_id = \"resume-fixture\"\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 200000\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" provider)
     ["primary"; "removed"; "alternate"]));
   Llm_provider.Model_catalog.load_file catalog_path |> require "catalog" |> Llm_provider.Model_catalog.set_global;
   let runtime_path = Filename.concat base_path "runtime.toml" in
@@ -547,7 +547,7 @@ let test_http_same_path_resume_after_tool_result ?(durable_native = false) ~resu
     Cohttp_eio.Server.run socket server ~on_error:raise);
   let catalog_path = Filename.concat base_path "models.toml" in
   write catalog_path
-    "[[models]]\nid_prefix = \"resume-fixture\"\nprovider_name = \"primary\"\nbase = \"openai_chat\"\nmax_context_tokens = 200000\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n";
+    "[[models]]\nmodel_id = \"resume-fixture\"\nprovider_name = \"primary\"\nbase = \"openai_chat\"\nmax_context_tokens = 200000\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n";
   Llm_provider.Model_catalog.load_file catalog_path |> require "catalog" |> Llm_provider.Model_catalog.set_global;
   let runtime_path = Filename.concat base_path "runtime.toml" in
   write runtime_path (Printf.sprintf {|[runtime]

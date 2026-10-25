@@ -35,7 +35,7 @@ let run_phase ~child root =
     | None -> Llm_provider.Model_catalog.clear_global ()
     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
   let catalog = Printf.sprintf
-      "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
+      "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"native-context-test" catalog
     |> require "model catalog" |> Llm_provider.Model_catalog.set_global;
   let provider_calls = ref 0 and tool_calls = ref 0 and hook_calls = ref 0 in
@@ -203,7 +203,7 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
     | None -> Llm_provider.Model_catalog.clear_global ()
     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
   let catalog = Printf.sprintf
-      "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
+      "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"native-input-test" catalog
   |> require "model catalog" |> Llm_provider.Model_catalog.set_global;
   let workspace = Workspace.default_config root in
@@ -335,7 +335,7 @@ let test_retired_input_history_cut () =
     | None -> Llm_provider.Model_catalog.clear_global ()
     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
   let catalog=Printf.sprintf
-      "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
+      "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"native-cut-test" catalog
     |> require "model catalog" |> Llm_provider.Model_catalog.set_global;
   let workspace=Workspace.default_config root in

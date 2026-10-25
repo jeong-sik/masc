@@ -73,7 +73,7 @@ val resolve_exact
        result
 (** Exact identity binding: the provider is found by [provider.id =
     provider_ref]. Its scoped rows precede bare rows only when the provider
-    declares [serves_bare_rows]. The model's [id_prefix = model_id] is compared
+    declares [serves_bare_models]. The model's [model_id = model_id] is compared
     whole, despite the field name; family-prefix hits never admit a target.
     Callers holding a display or api_name (the label a gateway
     shows) must not pass it here; resolve that label to the catalog id

@@ -79,7 +79,7 @@ let install_fixture_catalog ~sw =
     | None -> Llm_provider.Model_catalog.clear_global ()
     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
   let catalog = Printf.sprintf
-      "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
+      "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"native-stop-receipt-test" catalog
     |> require "model catalog" |> Llm_provider.Model_catalog.set_global
 

@@ -58,7 +58,7 @@ let test_applied_key_is_retained () =
     (* api-name points at a catalog model: the capability gate rejects
        configured runtimes whose model is absent from the AGENT_CORE
        catalog (RFC-0206), so the fixture uses a provider-qualified embedded row (provider_name="deepseek",
-       id_prefix="deepseek-v4-pro"): a named [providers] entry never falls
+       model_id="deepseek-v4-pro"): a named [providers] entry never falls
        back to bare model rows instead of a made-up id. *)
     let original = {|[providers."deepseek"]
 display-name = "Fixture HTTP (deepseek)"

@@ -108,7 +108,7 @@ let catalog_fixture_toml entry =
      request_path = %S\n\
      auth = \"none\"\n\n\
      [[models]]\n\
-     id_prefix = %S\n\
+     model_id = %S\n\
      provider_name = %S\n\
      max_context_tokens = 8192\n\
      max_output_tokens = 1024\n\

@@ -153,7 +153,7 @@ let test_claude_provider_reads_claude_bare_rows () =
            true
            (via_provider.Capabilities.max_context_tokens
             <> claude_base.Capabilities.max_context_tokens))
-    [ "claude-fable-5"; "claude-fable-5-20260901"; "claude-opus-5-5"; "claude-sonnet-5" ];
+    [ "claude-fable-5"; "claude-opus-5-5"; "claude-sonnet-5" ];
   match lookup "deepseek-anthropic" "claude-fable-5", lookup "deepseek-anthropic" "no-such-model" with
   | Some named, Some unknown ->
     check
@@ -1964,7 +1964,7 @@ let test_global_catalog_precedes_global_manifest () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = "s9-precedence-model"
+model_id = "s9-precedence-model-v1"
 base = "openai_chat"
 max_context_tokens = 123456
 supports_tools = true
@@ -1994,14 +1994,14 @@ let test_provider_scoped_catalog_identity_is_exact () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = "exact-model"
+model_id = "exact-model"
 base = "openai_chat"
 supports_tools = false
 thinking_control_format = "chat_template_token"
 thinking_control_token = "<|bare|>"
 
 [[models]]
-id_prefix = "exact-model"
+model_id = "exact-model"
 provider_name = "acme"
 base = "openai_chat"
 supports_tools = true
@@ -2045,14 +2045,8 @@ thinking_control_token = "<|provider|>"
                 ~wire:None
                 ~provider:(Llm_provider.Model_catalog.Declared_provider "acme")
                 ~model_id:"exact-model-preview");
-           (match Capabilities.for_model_id "exact-model-preview" with
-            | Some caps ->
-              check
-                bool
-                "bare family lookup retains prefix semantics"
-                false
-                caps.supports_tools
-            | None -> fail "provider-independent family lookup must remain available");
+           check bool "bare exact lookup does not inherit variants" true
+             (Option.is_none (Capabilities.for_model_id "exact-model-preview"));
            check
              (option string)
              "exact provider/model token resolves"
@@ -2634,7 +2628,7 @@ let test_model_catalog_rejects_unknown_reasoning_replay () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = "bad-replay"
+model_id = "bad-replay"
 reasoning_replay = "preserve-allways"
 |}
     (fun path ->
@@ -2649,7 +2643,7 @@ let test_model_catalog_rejects_wrong_type_policy_string () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = "bad-policy-type"
+model_id = "bad-policy-type"
 reasoning_replay = true
 |}
     (fun path ->
@@ -2675,7 +2669,7 @@ let test_model_catalog_rejects_unknown_policy_strings () =
          (Printf.sprintf
             {|
 [[models]]
-id_prefix = "bad-%s"
+model_id = "bad-%s"
 %s = "%s"
 |}
             field
@@ -2694,7 +2688,7 @@ let test_model_catalog_rejects_wrong_type_base_label () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = "bad-base-type"
+model_id = "bad-base-type"
 base = 17
 |}
     (fun path ->
@@ -2710,7 +2704,7 @@ let check_model_catalog_rejects_typed_field ~field ~value ~expected_type =
     (Printf.sprintf
        {|
 [[models]]
-id_prefix = "typed-field"
+model_id = "typed-field"
 %s = %s
 |}
        field
@@ -2751,39 +2745,39 @@ let test_model_catalog_rejects_wrong_type_string_list () =
     ~expected_type:"expected string array"
 ;;
 
-let test_model_catalog_rejects_empty_id_prefix () =
+let test_model_catalog_rejects_empty_model_id () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = ""
+model_id = ""
 |}
     (fun path ->
        match Model_catalog.load_file path with
        | Error msg ->
-         check_contains "mentions id_prefix" msg "id_prefix";
+         check_contains "mentions model_id" msg "model_id";
          check_contains "mentions empty" msg "must not be empty"
-       | Ok _ -> Alcotest.fail "empty model catalog id_prefix should reject")
+       | Ok _ -> Alcotest.fail "empty model catalog model_id should reject")
 ;;
 
-let test_model_catalog_rejects_padded_id_prefix () =
+let test_model_catalog_rejects_padded_model_id () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = " padded-model "
+model_id = " padded-model "
 |}
     (fun path ->
        match Model_catalog.load_file path with
        | Error msg ->
-         check_contains "mentions id_prefix" msg "id_prefix";
+         check_contains "mentions model_id" msg "model_id";
          check_contains "mentions exact value" msg "leading or trailing whitespace"
-       | Ok _ -> Alcotest.fail "padded model catalog id_prefix should reject")
+       | Ok _ -> Alcotest.fail "padded model catalog model_id should reject")
 ;;
 
 let test_model_catalog_rejects_empty_provider_name () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = "bad-provider-name"
+model_id = "bad-provider-name"
 provider_name = "   "
 |}
     (fun path ->
@@ -2798,7 +2792,7 @@ let test_model_catalog_rejects_empty_thinking_control_token () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = "bad-thinking-token"
+model_id = "bad-thinking-token"
 thinking_control_token = "   "
 |}
     (fun path ->
@@ -2813,7 +2807,7 @@ let test_model_catalog_rejects_padded_thinking_control_token () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = "bad-thinking-token"
+model_id = "bad-thinking-token"
 thinking_control_token = " <|custom_think|> "
 |}
     (fun path ->
@@ -2828,7 +2822,7 @@ let test_model_catalog_rejects_unknown_accepted_reasoning_effort () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = "bad-effort"
+model_id = "bad-effort"
 accepted_reasoning_efforts = ["low", "turbo"]
 |}
     (fun path ->
@@ -2886,7 +2880,7 @@ let test_manifest_and_catalog_common_override_parity () =
   with_temp_model_catalog
     {|
 [[models]]
-id_prefix = "parity-model"
+model_id = "parity-model"
 max_context_tokens = 123456
 max_output_tokens = 7890
 supports_tools = true
@@ -3083,10 +3077,10 @@ let test_a_non_reasoning_row_inherits_no_effort_ladder () =
 
 (* Keep the row/base distinction local: production catalogs may add scoped
    rows or omit providers, neither of which tests the fallback branch. *)
-let with_precedence_catalog ~serves_bare_rows f =
+let with_precedence_catalog ~serves_bare_models f =
   with_temp_model_catalog
     (Printf.sprintf {|[[providers]]
-serves_bare_rows = %s
+serves_bare_models = %s
 id = "precedence-provider"
 kind = "gemini"
 base_url = "https://example.invalid"
@@ -3095,11 +3089,11 @@ auth = "none"
 capabilities_base = "gemini"
 
 [[models]]
-id_prefix = "precedence-model"
+model_id = "precedence-model"
 base = "gemini"
 supports_reasoning = true
 accepted_reasoning_efforts = ["high"]
-|} (if serves_bare_rows then {|["precedence-model"]|} else "[]"))
+|} (if serves_bare_models then {|["precedence-model"]|} else "[]"))
     (fun path ->
       let previous = Model_catalog.global () in
       Fun.protect
@@ -3113,7 +3107,7 @@ accepted_reasoning_efforts = ["high"]
 ;;
 
 let test_a_bare_row_outranks_the_provider_base () =
-  with_precedence_catalog ~serves_bare_rows:true (fun () ->
+  with_precedence_catalog ~serves_bare_models:true (fun () ->
     match Capabilities.for_provider_model_id ~wire:None
       ~provider:(Model_catalog.Declared_provider "precedence-provider")
       ~model_id:"precedence-model" with
@@ -3124,7 +3118,7 @@ let test_a_bare_row_outranks_the_provider_base () =
 ;;
 
 let test_a_named_provider_still_refuses_the_bare_row () =
-  with_precedence_catalog ~serves_bare_rows:false (fun () ->
+  with_precedence_catalog ~serves_bare_models:false (fun () ->
     match Capabilities.for_provider_model_id ~wire:None ~provider:(Llm_provider.Model_catalog.Declared_provider "precedence-provider") ~model_id:"precedence-model" with
     | None -> fail "explicitly declared provider base must resolve"
     | Some capabilities ->
@@ -3132,7 +3126,7 @@ let test_a_named_provider_still_refuses_the_bare_row () =
         None (accepted_reasoning_effort_strings capabilities))
 ;;
 
-let test_declared_bare_families_bind_original_rows () =
+let test_declared_bare_models_bind_original_rows () =
   let catalog = Model_catalog.of_toml_string ~source:"served bare families"
     {|[[providers]]
 id = "native"
@@ -3141,22 +3135,24 @@ kind = "anthropic"
 base_url = "https://example.invalid"
 request_path = "/v1/messages"
 auth = "none"
-serves_bare_rows = ["claude-"]
+serves_bare_models = ["claude-declared"]
 [[models]]
-id_prefix = "claude"
+model_id = "claude"
 [[models]]
-id_prefix = "claude-declared"
+model_id = "claude-declared"
 [[models]]
-id_prefix = "gpt-foreign"
+model_id = "gpt-foreign"
 [[models]]
-id_prefix = "gpt-explicit"
+model_id = "gpt-explicit"
 provider_name = "native"
 |} |> Result.get_ok in
   let provider = Model_catalog.Declared_provider "gemini" in
   let lookup name = Model_catalog.lookup_model_for_provider catalog ~provider
     ~model_id:(Model_identifiers.Model_id.of_string_exn name) in
-  check bool "a declared alias retains its family's row" true
-    (Option.is_some (lookup "claude-declared-20261019"));
+  check bool "a declared alias retains its exact row" true
+    (Option.is_some (lookup "claude-declared"));
+  check bool "permission does not extend to an undeclared variant" true
+    (Option.is_none (lookup "claude-declared-20261019"));
   check bool "request spelling cannot grant a broader original row" true
     (Option.is_none (lookup "claude-unlisted"));
   check bool "another vendor's bare row is not served" true
@@ -3168,64 +3164,24 @@ provider_name = "native"
   check (list string) "enumeration uses the same original-row authority"
     ["gpt-explicit"; "claude-declared"]
     (List.map (fun (entry : Model_catalog.model_entry) ->
-      Model_identifiers.Id_prefix.to_string entry.id_prefix) visible)
+      Model_identifiers.Model_id.to_string entry.model_id) visible)
 ;;
 
-let test_prefix_ordering_invariant () =
-  (* Each entry: (route, model_id, label, discriminating_predicate).
-     The predicate is true only when the more-specific (longer-prefix)
-     branch wins. *)
+let test_exact_rows_do_not_inherit_variant_capabilities () =
   let cases =
-    [ (* glm-5v-turbo must precede glm-5 (inside broad branch).
-         Discriminator: supports_image_input (5v-turbo) vs not (broad glm-5). *)
-      ( Direct_model
-      , "glm-5v-turbo-x"
-      , "glm-5v-turbo must precede broad glm-5"
-      , fun (c : Capabilities.capabilities) ->
-          c.supports_image_input && c.max_output_tokens = Some 128_000 )
-    ; (* glm-5-code must precede glm-5 (inside broad branch).
-         Discriminator: 128K context (code branch) vs 200K (broad glm-5). *)
-      ( Direct_model
-      , "glm-5-code-x"
-      , "glm-5-code must precede broad glm-5"
-      , fun (c : Capabilities.capabilities) ->
-          c.max_context_tokens = Some 128_000 )
-    ; (* glm-4.6v must precede glm-4.6 (inside broad branch) *)
-      ( Direct_model
-      , "glm-4.6v-x"
-      , "glm-4.6v must precede broad glm-4.6"
-      , fun (c : Capabilities.capabilities) ->
-          c.supports_image_input
-          && c.supports_reasoning
-          && c.max_output_tokens = Some 32_768 )
-    ; (* glm-4.5v must precede glm-4.5 (inside broad branch) *)
-      ( Direct_model
-      , "glm-4.5v-x"
-      , "glm-4.5v must precede broad glm-4.5"
-      , fun (c : Capabilities.capabilities) ->
-          c.supports_image_input
-          && c.supports_reasoning
-          && c.max_output_tokens = Some 16_384 )
-    ; (* broad glm-4.5 branch must precede glm-4.
-         Discriminator: supports_reasoning + 96K output (broad) vs neither (glm-4). *)
-      ( Direct_model
-      , "glm-4.5-latest"
-      , "broad glm-4.5 branch must precede glm-4"
-      , fun (c : Capabilities.capabilities) ->
-          c.supports_reasoning && c.max_output_tokens = Some 96_000 )
-    ]
-  in
-  List.iter
-    (fun (route, model_id, label, ok) ->
-       match frontier_capabilities route model_id with
-       | None ->
-         fail
-           (Printf.sprintf
-              "prefix ordering [%s]: for_model_id %S returned None"
-              label
-              model_id)
-       | Some c -> check bool (Printf.sprintf "prefix ordering: %s" label) true (ok c))
-    cases
+    [ "glm-5v-turbo", (fun (c : Capabilities.capabilities) -> c.supports_image_input)
+    ; "glm-5-code", (fun c -> c.max_context_tokens = Some 128_000)
+    ; "glm-4.6v", (fun c -> c.supports_image_input && c.max_output_tokens = Some 32_768)
+    ; "glm-4.5v", (fun c -> c.supports_image_input && c.max_output_tokens = Some 16_384)
+    ; "glm-4.5", (fun c -> c.supports_reasoning && c.max_output_tokens = Some 96_000) ] in
+  List.iter (fun (model_id, valid) ->
+    (match frontier_capabilities Direct_model model_id with
+     | None -> fail ("declared exact model missing: " ^ model_id)
+     | Some c -> check bool "exact row keeps its declared policy" true (valid c));
+    List.iter (fun suffix ->
+      check bool "an undeclared variant has no inherited policy" true
+        (Option.is_none (frontier_capabilities Direct_model (model_id ^ suffix))))
+      ["-x"; ":unlisted"; "-latest"]) cases
 ;;
 
 (* ── Anthropic thinking wire without a declared policy ─────────── *)
@@ -3668,13 +3624,13 @@ let () =
             `Quick
             test_model_catalog_rejects_wrong_type_string_list
         ; test_case
-            "model catalog rejects empty id_prefix"
+            "model catalog rejects empty model_id"
             `Quick
-            test_model_catalog_rejects_empty_id_prefix
+            test_model_catalog_rejects_empty_model_id
         ; test_case
-            "model catalog rejects padded id_prefix"
+            "model catalog rejects padded model_id"
             `Quick
-            test_model_catalog_rejects_padded_id_prefix
+            test_model_catalog_rejects_padded_model_id
         ; test_case
             "model catalog rejects empty provider_name"
             `Quick
@@ -3700,7 +3656,7 @@ let () =
       , [ test_case
             "shadow pairs all resolve to specific branch (M01)"
             `Quick
-            test_prefix_ordering_invariant
+            test_exact_rows_do_not_inherit_variant_capabilities
         ; test_case
             "a declared effort ladder survives its own row"
             `Quick
@@ -3738,7 +3694,7 @@ let () =
             `Quick
             test_claude_provider_reads_claude_bare_rows
         ; test_case "served families bind original rows, not request names" `Quick
-            test_declared_bare_families_bind_original_rows
+            test_declared_bare_models_bind_original_rows
         ] )
     ]
 ;;

@@ -897,7 +897,7 @@ let initialize_synthetic_runtime ~base ~endpoint runtime =
   let model = string "model_id" runtime in
   let catalog_path = Filename.concat base "model-catalog.toml" in
   write catalog_path (Printf.sprintf
-    "[[models]]\nid_prefix = %S\nprovider_name = \"preparation_fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = %d\nmax_output_tokens = %d\nsupports_tools = true\nsupports_native_streaming = true\n"
+    "[[models]]\nmodel_id = %S\nprovider_name = \"preparation_fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = %d\nmax_output_tokens = %d\nsupports_tools = true\nsupports_native_streaming = true\n"
     model (integer "max_context_tokens" runtime) (integer "max_output_tokens" runtime));
   Llm_provider.Model_catalog.load_file catalog_path |> get Fun.id |> Llm_provider.Model_catalog.set_global;
   write (config_path base) (Printf.sprintf

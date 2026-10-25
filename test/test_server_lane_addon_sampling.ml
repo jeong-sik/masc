@@ -171,7 +171,7 @@ let test_actual_http_route_and_durable_sampling ?(primary_reply=`Bad_request) ?(
   Eio.Fiber.fork_daemon ~sw (fun () -> Cohttp_eio.Server.run socket server ~on_error:raise);
   let catalog_path = Filename.concat root "models.toml" in
   write catalog_path (String.concat "\n" (List.map (fun provider -> Printf.sprintf
-    "[[models]]\nid_prefix=\"sampling-fixture\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nchat_output_budget_field=\"max_tokens\"\nsupports_tools=false\nsupports_multimodal_inputs=true\nsupports_image_input=%b\nsupports_system_prompt=true\nsupports_reasoning=false\nsupports_native_streaming=false\nignored_sampling_parameters=[]\n" provider (primary_images || provider <> "primary"))
+    "[[models]]\nmodel_id=\"sampling-fixture\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nchat_output_budget_field=\"max_tokens\"\nsupports_tools=false\nsupports_multimodal_inputs=true\nsupports_image_input=%b\nsupports_system_prompt=true\nsupports_reasoning=false\nsupports_native_streaming=false\nignored_sampling_parameters=[]\n" provider (primary_images || provider <> "primary"))
     ["primary";"secondary"]));
   let catalog = require (Llm_provider.Model_catalog.load_file catalog_path) in
   Llm_provider.Model_catalog.set_global catalog;
@@ -363,7 +363,7 @@ let test_invalid_sampling_route_is_stable_until_runtime_update () =
   let store = Store.create ~root:(Filename.concat masc "lane-addons") in
   let catalog_path = Filename.concat root "models.toml" in
   write catalog_path {|[[models]]
-id_prefix="sampling-fixture"
+model_id="sampling-fixture"
 provider_name="primary"
 base="openai_chat"
 max_context_tokens=200000

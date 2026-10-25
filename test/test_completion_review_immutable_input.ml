@@ -67,7 +67,7 @@ let run_refusal ~body_limit () =
       ~on_error:raise);
   let catalog_path = Filename.concat base_path "models.toml" in
   write catalog_path (Printf.sprintf
-    "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
+    "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
     model_id);
   (match Llm_provider.Model_catalog.load_file catalog_path with
    | Ok catalog -> Llm_provider.Model_catalog.set_global catalog

@@ -62,7 +62,7 @@ auth = %S
 capabilities_base = "openai_chat_extended"
 
 [[models]]
-id_prefix = %S
+model_id = %S
 provider_name = %S
 max_context_tokens = 8192
 max_output_tokens = 1024

@@ -87,7 +87,7 @@ let target_catalog
      auth = \"none\"\n\
      %s\n\
      [[models]]\n\
-     id_prefix = %S\n\
+     model_id = %S\n\
      provider_name = %S\n\
      max_context_tokens = 8192\n\
      max_output_tokens = 1024\n\
@@ -857,9 +857,9 @@ request_path = "/v1/messages"
 auth = "none"
 capabilities_base = "anthropic"
 capabilities_base_by_identity_kind = { anthropic = "openai_chat_extended" }
-serves_bare_rows = %s
+serves_bare_models = %s
 [[models]]
-id_prefix = "shared"
+model_id = "shared"
 %s
 max_context_tokens = 8192
 max_output_tokens = 1024
@@ -868,7 +868,7 @@ input_per_million = 10.0
 output_per_million = 50.0
 %s
 [[models]]
-id_prefix = "gpt-foreign"
+model_id = "gpt-foreign"
 base = "openai_chat_extended"
 max_context_tokens = 8192
 max_output_tokens = 1024
@@ -881,7 +881,7 @@ body_timeout_s = 30.0
 |} (if serves then {|["shared"]|} else "[]")
     (if row_base then "base = \"anthropic\"" else "")
     (if scoped then {|[[models]]
-id_prefix = "shared"
+model_id = "shared"
 provider_name = "native"
 max_context_tokens = 4096
 max_output_tokens = 1024

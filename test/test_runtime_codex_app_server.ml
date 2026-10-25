@@ -4606,7 +4606,7 @@ let test_production_runtime_walk_receipt ~recover () =
     let catalog_path=Filename.concat base_path "walk-models.toml" in
     let model prefix=Printf.sprintf {|
 [[models]]
-id_prefix = %S
+model_id = %S
 provider_name = "projection"
 base = "openai_chat"
 max_context_tokens = 400000
@@ -4765,7 +4765,7 @@ let test_production_last_projection ~http_predecessor ~reject_codex () =
     let catalog_path = Filename.concat base_path "models.toml" in
     write_fixture_file catalog_path {|
 [[models]]
-id_prefix = "projection-http-fixture"
+model_id = "projection-http-fixture"
 provider_name = "projection"
 base = "openai_chat"
 max_context_tokens = 400000

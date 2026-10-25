@@ -53,7 +53,7 @@ let with_declared_lane f =
     (fun () ->
       write_file catalog
         {|[[models]]
-id_prefix = "qwen"
+model_id = "qwen"
 provider_name = "runpod_mtp"
 base = "openai_chat"
 max_context_tokens = 128000

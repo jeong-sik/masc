@@ -4,11 +4,11 @@ module Capability_vocab = Llm_provider.Capability_vocab
 module Model_catalog = Llm_provider.Model_catalog
 module Serving_constraint = Llm_provider.Serving_constraint
 
-let first_id_prefix ~suite catalog =
+let first_model_id ~suite catalog =
   match Model_catalog.model_entries catalog with
   | [] -> failf "%s: repo model catalog should not be empty" suite
   | (entry : Model_catalog.model_entry) :: _ ->
-    Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix
+    Llm_provider.Model_identifiers.Model_id.to_string entry.model_id
 ;;
 
 let with_clean_model_catalog_override f =
@@ -16,14 +16,8 @@ let with_clean_model_catalog_override f =
   Fun.protect ~finally:Model_catalog.clear_global f
 ;;
 
-(* Model ids masc declares in runtime.toml for the Claude Code, Codex and
-   Antigravity subscriptions. [Model_catalog.lookup] is a longest-prefix match,
-   so a missing row fails in one of two silent ways: an id that no row prefixes
-   resolves to [None] and [Runtime] disables that runtime at boot, while an id
-   that only a *shorter* row prefixes inherits that row's capabilities with no
-   error. Asserting the resolved [id_prefix] — rather than merely that the
-   lookup succeeded — is what separates "gpt-5.6-sol found its own row" from
-   "gpt-5.6-sol silently landed on gpt-5". *)
+(* Exact model declarations used by subscriptions. The second value records
+   the former family row: differing runtime slot aliases must now miss. *)
 let subscription_model_rows =
   [ "claude-opus-5-5", "claude-opus-5-5"
   ; "claude-fable-5", "claude-fable-5"
@@ -265,23 +259,18 @@ let test_documented_claude_prefill_exclusions () =
 ;;
 
 let test_subscription_models_resolve_their_own_rows () =
-  let catalog =
-    Model_catalog_test_support.load_repo_model_catalog ~suite:"subscription model rows"
-  in
-  List.iter
-    (fun (model_id, expected_prefix) ->
-       match Model_catalog.lookup catalog (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id) with
-       | None ->
-         failf
-           "%s resolves to no catalog row; Runtime disables uncatalogued runtimes at boot"
-           model_id
-       | Some (entry : Model_catalog.model_entry) ->
-         check
-           string
-           (Printf.sprintf "%s resolves to its own row" model_id)
-           expected_prefix
-           (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix))
-    subscription_model_rows
+  let catalog = Model_catalog_test_support.load_repo_model_catalog ~suite:"subscription model rows" in
+  List.iter (fun (model_id, former_row) ->
+    let found = Model_catalog.lookup catalog
+      (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id) in
+    if String.equal model_id former_row then
+      match found with
+      | None -> failf "declared exact model %s is missing" model_id
+      | Some (entry : Model_catalog.model_entry) ->
+        check string "exact declaration" model_id
+          (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
+    else check bool "a runtime alias is not an API model declaration" true
+      (Option.is_none found)) subscription_model_rows
 ;;
 
 let test_sonnet_5_5_thinking_modes_reach_the_wire () =
@@ -564,7 +553,7 @@ let test_ollama_cloud_v1_vendor_rows_preserve_probe_truth () =
          List.filter
            (fun (entry : Model_catalog.model_entry) ->
               String.equal
-                (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+                (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
                 model_id
               && entry.provider_name = Some "ollama_cloud")
            entries
@@ -655,7 +644,7 @@ let test_no_ollama_cloud_row_states_a_wire () =
         && Option.is_some entry.thinking_control_format
       | Some _ | None -> false)
     |> List.map (fun (entry : Model_catalog.model_entry) ->
-           Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+           Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
     |> List.sort String.compare
   in
   check
@@ -669,7 +658,7 @@ let test_in_memory_catalog_rejects_invalid_generated_input () =
   match
     Model_catalog.of_toml_string
       ~source:"invalid embedded candidate"
-      "[[models]]\nid_prefix = \"broken\"\nsupports_tools = \"yes\""
+      "[[models]]\nmodel_id = \"broken\"\nsupports_tools = \"yes\""
   with
   | Error msg ->
     check
@@ -686,7 +675,7 @@ let test_global_loads_default_catalog_for_capabilities () =
       ~suite:"model catalog default production path"
   in
   let model_id =
-    first_id_prefix ~suite:"model catalog default production path" expected
+    first_model_id ~suite:"model catalog default production path" expected
   in
   with_clean_model_catalog_override (fun () ->
     match Capabilities.for_model_id_catalog model_id with
@@ -701,7 +690,7 @@ let test_global_loads_default_catalog_for_capabilities () =
 let constraint_catalog ?expires_at ?rejected_from () =
   Printf.sprintf
     "[[models]]\n\
-     id_prefix = \"evidence-model\"\n\
+     model_id = \"evidence-model\"\n\
      provider_name = \"evidence-runtime\"\n\
      max_context_tokens = 1048576\n\
      serving_constraint_source_kind = \"probe\"\n\
@@ -801,7 +790,7 @@ let test_serving_constraint_partial_group_fails_closed () =
     Model_catalog.of_toml_string
       ~source:"partial serving constraint fixture"
       "[[models]]\n\
-       id_prefix = \"partial-evidence\"\n\
+       model_id = \"partial-evidence\"\n\
        serving_constraint_source_kind = \"probe\"\n\
        serving_constraint_accepted_through_tokens = 524298\n"
   with
@@ -901,7 +890,7 @@ let test_kimi_coding_rows_leave_temperature_out () =
 ;;
 
 (* The bare row and its two provider-scoped twins are three catalog keys
-   ((provider_name, id_prefix) is the duplicate check), so nothing in the
+   ((provider_name, model_id) is the duplicate check), so nothing in the
    loader keeps them in step. They describe one Z.AI model; pin the limits
    and the vision flags to the same values so a later edit to one row cannot
    leave a runtime on a different ceiling than the bare-id callers see. *)
@@ -913,7 +902,7 @@ let test_glm_vision_rows_agree () =
     List.filter
       (fun (entry : Model_catalog.model_entry) ->
          String.equal
-           (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+           (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
            "glm-4.6v")
       (Model_catalog.model_entries catalog)
   in
@@ -979,7 +968,7 @@ let openrouter_entry entries model_id =
     List.filter
       (fun (entry : Model_catalog.model_entry) ->
          String.equal
-           (Llm_provider.Model_identifiers.Id_prefix.to_string entry.id_prefix)
+           (Llm_provider.Model_identifiers.Model_id.to_string entry.model_id)
            model_id
          && entry.provider_name = Some "openrouter")
       entries
@@ -1189,7 +1178,7 @@ let test_empty_capability_vocab_value_is_rejected () =
   rejects "reasoning_output_format" Capability_vocab.reasoning_output_format_of_string;
   rejects "content_inline_reasoning" Capability_vocab.content_inline_reasoning_of_string;
   let toml =
-    "[[models]]\nid_prefix = \"vocab-model\"\ntool_schema_conformance = \"\"\n"
+    "[[models]]\nmodel_id = \"vocab-model\"\ntool_schema_conformance = \"\"\n"
   in
   let expected_reason =
     "model entry \"vocab-model\" field \"tool_schema_conformance\" has unknown value \

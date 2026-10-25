@@ -68,7 +68,7 @@ let test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane () =
   let model_id = "optional-cap-" ^ String.make 1024 'm' in
   let catalog_path = Filename.concat base_path "models.toml" in
   let catalog_row provider = Printf.sprintf
-    "[[models]]\nid_prefix = %S\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
+    "[[models]]\nmodel_id = %S\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
     model_id provider in
   write catalog_path (catalog_row "fixture" ^ catalog_row "overflow");
   (match Llm_provider.Model_catalog.load_file catalog_path with
@@ -204,7 +204,7 @@ let test_historical_tool_results ?(argument_seed = Completed_seed)
   let model_id = "no-body-gate-demote" in
   let catalog_path = Filename.concat base_path "models.toml" in
   let catalog_row provider = Printf.sprintf
-    "[[models]]\nid_prefix = %S\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
+    "[[models]]\nmodel_id = %S\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
     model_id provider in
   write catalog_path (catalog_row "fixture");
   (match Llm_provider.Model_catalog.load_file catalog_path with

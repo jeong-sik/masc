@@ -360,7 +360,7 @@ val provider_reference : t -> Model_catalog.provider_reference
 
 (** Resolve model capabilities using the explicit provider/model pair. A
     config with [provider_id] accepts an exact scoped row or a bare catalog row
-    when that provider declares [serves_bare_rows]. Without
+    when that provider declares [serves_bare_models]. Without
     [provider_id], native typed provider kinds may use a provider-independent
     model row; [OpenAI_compat] never does, because its wire kind alone cannot
     select a vendor/model dialect. Generic compatibility callers can provide

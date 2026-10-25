@@ -1,0 +1,19 @@
+{
+  "schema": "masc.goal-chain.chronology-observation.v1",
+  "scope": "Clarification of two distinct timestamps for the same Task approval. Does not count a second approval or impose a wait gate.",
+  "source_sha": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "task_id": "task-001",
+  "approve_tool_finished_epoch": 1792924045.7385,
+  "beta_gamma_edit_epoch": 1792924105.454603,
+  "edit_minus_approve_tool_finished_seconds": 59.716103,
+  "primary_done_recorded_at": "2026-10-25T10:27:35Z",
+  "primary_done_timestamp_resolution": "one second",
+  "beta_gamma_edit_utc": "2026-10-25T10:28:25.454603+00:00",
+  "edit_is_after_both": true,
+  "backlog_frozen_sha256": "9f6dcec0b5894b4d09ff9083239610a445ac2eed4631e914098750a9011f9fac",
+  "independent_response_basis": "Actual reviewer trace and primary Task ledger were read separately; reviewer-tool completion precedes the primary Done record.",
+  "not_claimed": [
+    "No exact ledger latency below its one-second timestamp resolution.",
+    "No inferred semantic waiting period or universal temporal-contract guarantee."
+  ]
+}

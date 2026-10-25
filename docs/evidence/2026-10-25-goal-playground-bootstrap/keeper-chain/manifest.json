@@ -1,0 +1,16 @@
+{
+  "schema": "masc.public-evidence-manifest.v1",
+  "scope": "All public files except this manifest itself",
+  "entries": [
+    {
+      "file": "actual-keeper-goal-proof-chain.json",
+      "bytes": 10469,
+      "sha256": "f2192df0269cd9ecec8625aea8977b69af6dda3ad6554128e7d78a42e42e169e"
+    },
+    {
+      "file": "README.md",
+      "bytes": 838,
+      "sha256": "9bba3adbe4c4c55167a2e4f09cacf638ad3b168afe872e8f7fb2744374fd86ae"
+    }
+  ]
+}

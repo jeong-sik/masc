@@ -1,0 +1,43 @@
+{
+  "schema": "masc.main-source-boundary.v1",
+  "installed_binary_commit": "2e36766f4364d37d2525df1d30f452ae48a2ee93",
+  "candidate_source": "a0523385b9a5475fcb3998795d09307f262daf32",
+  "scope": "Exact source objects at the embedded build commit, not a fresh live execution of these feature paths. No main checkout mutation.",
+  "files": [
+    {
+      "path": "lib/workspace/workspace_init.ml",
+      "installed_source_exists": true,
+      "installed_source_sha256": "a60c5cfb8803fb55b54397fdb3ea2eca0b67cc689df462287f3ad475ba393121",
+      "candidate_source_sha256": "80e8d786de3f45ac5585187142f5d2ba82c33039e793ae08f60c8f8bf3d1d7f1",
+      "equal": false
+    },
+    {
+      "path": "lib/keeper/goal_verifier_original.ml",
+      "installed_source_exists": true,
+      "installed_source_sha256": "d01ce5030f4646a5ec309372678a52ae98c0458a130dfc19861d3d1ee0aee1f7",
+      "candidate_source_sha256": "3a7628a68dc50c87e9efc192b4f0c1c6756d95caff8feb71462e15b79bdc7147",
+      "equal": false
+    },
+    {
+      "path": "lib/verification_authority_tools.ml",
+      "installed_source_exists": true,
+      "installed_source_sha256": "d513b417a55cfba75fd9372777164c9996ccc10e78d5a043a9ed00888d130900",
+      "candidate_source_sha256": "1a64f7820f88f90d00215e3373e0d017ec9befc9d12c40c85d5aed12e57492cc",
+      "equal": false
+    },
+    {
+      "path": "scripts/harness/lib/coding_eval_sandbox.py",
+      "installed_source_exists": false,
+      "installed_source_sha256": null,
+      "candidate_source_sha256": "5427e8af828b2bcc7eeac73a627c3821c0739e7e170eef114428be2ab2b57d96",
+      "equal": false
+    },
+    {
+      "path": "scripts/harness/lib/coding_eval_inputs.py",
+      "installed_source_exists": false,
+      "installed_source_sha256": null,
+      "candidate_source_sha256": "69d0e3832cd21a994df9efa595afa648b5ea71d6fb503e2b7dab1a5ef32aa339",
+      "equal": false
+    }
+  ]
+}

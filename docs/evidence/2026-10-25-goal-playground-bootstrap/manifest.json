@@ -1,0 +1,98 @@
+{
+  "schema": "masc.public-evidence-manifest.v1",
+  "scope": "Every file in this evidence directory except this manifest itself. Nested manifests apply only to their own folder.",
+  "source_sha": "a0523385b9a5475fcb3998795d09307f262daf32",
+  "actual_cohort_source_sha": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "entries": [
+    {
+      "file": "README.md",
+      "bytes": 7390,
+      "sha256": "ce6a60915b18d8255d2b677ec7f2af61df924f0b698969dc597f0ae4d4f7bdd3"
+    },
+    {
+      "file": "chronology-observation.json",
+      "bytes": 1074,
+      "sha256": "6b9d9a31bfb4f7a88c8fddda1915f0b704ebf3ea7ad589c95591ecf9f60b6934"
+    },
+    {
+      "file": "coding-boundary/README.md",
+      "bytes": 1648,
+      "sha256": "89489659f427feaedf808a3ce784e4bd324cd5be66a03d6fc6fffa32e03cb943"
+    },
+    {
+      "file": "coding-boundary/actual-coding-boundary.json",
+      "bytes": 29007,
+      "sha256": "3a6dc21a39518bf62f303682808609272d4b49d92e2e7b8eba4b15e81016bd9a"
+    },
+    {
+      "file": "coding-boundary/publication-manifest.json",
+      "bytes": 746,
+      "sha256": "066f1a3d0c26d88177c1d97cd2abe9281fe58c1622948a357975aa85e8f38e41"
+    },
+    {
+      "file": "coding-boundary/review.json",
+      "bytes": 1875,
+      "sha256": "d953d029b2a964e355e6827a98ad072f22b05781194bbbd4a6635c92e76fefe2"
+    },
+    {
+      "file": "independent-source-review-a0523385.json",
+      "bytes": 11723,
+      "sha256": "afd591aeb18767210ec8ccbedfb5bbe2cd671555be5d2185fde12891f354b194"
+    },
+    {
+      "file": "keeper-chain/README.md",
+      "bytes": 838,
+      "sha256": "9bba3adbe4c4c55167a2e4f09cacf638ad3b168afe872e8f7fb2744374fd86ae"
+    },
+    {
+      "file": "keeper-chain/actual-keeper-goal-proof-chain.json",
+      "bytes": 10469,
+      "sha256": "f2192df0269cd9ecec8625aea8977b69af6dda3ad6554128e7d78a42e42e169e"
+    },
+    {
+      "file": "keeper-chain/manifest.json",
+      "bytes": 443,
+      "sha256": "8ce6a06e971a2447f413112bd420009c4d23502c72c5c1f90cfb45ac89fd7c64"
+    },
+    {
+      "file": "local-parse.json",
+      "bytes": 831,
+      "sha256": "8891988ef84c0fef0e32e17a51233cf0b9d2a027827d3b58f5d73c886af6e080"
+    },
+    {
+      "file": "main-observation.json",
+      "bytes": 1614,
+      "sha256": "81462c693ba7769531b26747bae1b4f29adc1e728cc984a149870ca4bf8559e1"
+    },
+    {
+      "file": "main-source-boundary-2e36766f.json",
+      "bytes": 1874,
+      "sha256": "26dfc2b5e5f8665fa96d8ec2e1a0a181ac51023e60204feeeed6b75c5663da71"
+    },
+    {
+      "file": "native-dispatch.json",
+      "bytes": 1004,
+      "sha256": "4526492aa8f18d84f7ddeacc9271542d0c2675ca60952a166c70bf06f9fc1c26"
+    },
+    {
+      "file": "native-result.json",
+      "bytes": 1779,
+      "sha256": "118c057f98dbeeb02586391451009ead97bc55e94c23df202f237083981c0e67"
+    },
+    {
+      "file": "root-evidence-check.json",
+      "bytes": 508,
+      "sha256": "c33122357cd907260a7e4d252fe169eb0c8b897d45243d842b913ed88f07b217"
+    },
+    {
+      "file": "source-boundary.json",
+      "bytes": 1314,
+      "sha256": "5f8bf8f1ea173d81fcdeddda81c28b8e334c060538c236db0b326ecbf375de58"
+    },
+    {
+      "file": "task2652-receipts.json",
+      "bytes": 706,
+      "sha256": "708e7fd853ef25839cb53abb0d29115bb9e468848f2d29d56ed4efa64892b514"
+    }
+  ]
+}

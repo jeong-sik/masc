@@ -6,7 +6,7 @@ import { navigate } from '../../router'
 import { copyToClipboard } from '../common/copyable-code'
 import type { ArtifactCheckState } from '../../api/published-artifact-checks'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
-import { ArtifactSharedEditor } from './artifact-shared-editor'
+import { ArtifactSharedEditor, type ArtifactSharedCloseRequest } from './artifact-shared-editor'
 import { ArtifactComposer, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
 
 // Opaque origin: no allow-same-origin. Keep the CSP first so the body cannot
@@ -46,7 +46,7 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
   const [copyFeedback, setCopyFeedback] = useState('')
   const [editing, setEditing] = useState<{ document: ArtifactDocument; snapshot: ArtifactDraftSnapshot } | null>(null)
   const [sharing, setSharing] = useState<ArtifactDocument | null>(null)
-  const [sharedPending, setSharedPending] = useState(false)
+  const sharedCloseRequest = useRef<ArtifactSharedCloseRequest | null>(null)
   const { artifact, content, revisions } = doc
   useLayoutEffect(() => {
     const element = dialog.current!
@@ -65,7 +65,7 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
   const discardDraft = () => window.confirm('작성 중인 원고를 닫을까요? 저장하지 않은 내용은 사라집니다.')
   const close = () => {
     if (editing && !discardDraft()) return
-    if (sharedPending && !window.confirm('이 창에 아직 저장하지 못한 변경이 있습니다. 원고를 닫을까요?')) return
+    if (sharing && sharedCloseRequest.current?.().kind !== 'close') return
     if (editing) draftRetention.forget(editing.snapshot.identity)
     onClose()
   }
@@ -131,9 +131,9 @@ export function ArtifactReader({ doc, fixedRevision, readError, workspaceRoot, d
         </details>
       </header>
       <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
-        ${sharing ? html`<${ArtifactSharedEditor} doc=${sharing} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent}
-          onPending=${setSharedPending} onMutation=${onPublication} onPublished=${onPublished}
-          onClose=${() => { if (!sharedPending || window.confirm('이 창에 아직 저장하지 못한 변경이 있습니다. 원고를 닫을까요?')) { setSharing(null); setSharedPending(false) } }} />`
+        ${sharing ? html`<${ArtifactSharedEditor} draftRetention=${draftRetention} doc=${sharing} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent}
+          onCloseRequest=${(request: ArtifactSharedCloseRequest | null) => { sharedCloseRequest.current = request }} onMutation=${onPublication} onPublished=${onPublished}
+          onClose=${() => { if (sharedCloseRequest.current?.().kind === 'close') setSharing(null) }} />`
           : editing ? html`<${ArtifactComposer} initial=${editing.snapshot.value}
           base=${editing.document} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent} onMutation=${onPublication}
           onDraftChange=${(value: ArtifactDraftSnapshot['value']) => draftRetention.remember({ ...editing.snapshot, value })}

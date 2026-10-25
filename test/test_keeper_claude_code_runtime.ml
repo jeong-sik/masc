@@ -505,7 +505,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                        invalid_arg "event_capture requires event_bus"))))))
 ;;
 
-let run_unified_autonomous_repeat_cycles ~base_path ~cli_path =
+let run_unified_autonomous_read_cycles ~base_path ~cli_path =
   let keeper_name = "claude-fixture" in
   let meta =
     match
@@ -544,17 +544,9 @@ let run_unified_autonomous_repeat_cycles ~base_path ~cli_path =
                      fixture runs; without this every turn-level log_call here
                      degrades to Commit_required_but_store_unavailable and the
                      cross-cycle ledger assertions below would have no rows to
-                     read even after the repetition fix lands. *)
+                     read. The fixture crosses the real Owner child boundary
+                     before requesting a canonical input writer. *)
                   Keeper_tool_call_log.init ~base_path:config.base_path ();
-                  (* More than the former tail window, with distinct I/O so
-                     none of these unrelated reads can trigger a repeat. *)
-                  for index = 1 to 205 do
-                    let identity = string_of_int index in
-                    Keeper_tool_call_log.log_call ~keeper_name ~tool_name:"fixture_history"
-                      ~input:(`String identity) ~output_text:identity
-                      ~input_fingerprint:identity ~output_fingerprint:identity
-                      ~wire_outcome:Tool_result.Ok ~duration_ms:0. ()
-                  done;
                   Masc_test_deps.declare_fixture_keeper
                     ~base_path
                     ~sandbox_profile:(Some Masc.Keeper_types_profile.Docker)
@@ -633,184 +625,49 @@ let run_unified_autonomous_repeat_cycles ~base_path ~cli_path =
                           ~reactive:false
                           Keeper_heartbeat_source_batch.empty
                       in
-                      Keeper_unified_turn.run_keeper_cycle
-                        ~before_dispatch_authority:(fun () -> Ok ())
-                        ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
-                        ~config
-                        ~meta
-                        ~publication_recovery_provider:
-                          Keeper_publication_recovery_availability.non_runtime_provider
-                        ~observation
-                        ~turn_input
-                        ~turn_decision
-                        ~shared_context:!shared_context
-                        ()
+                      match Keeper_owner_registry.run_autonomous_if_idle
+                          ~base_path:config.base_path ~keeper_name (fun () ->
+                            Keeper_unified_turn.run_keeper_cycle
+                              ~before_dispatch_authority:(fun () -> Ok ())
+                              ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
+                              ~config ~meta
+                              ~publication_recovery_provider:
+                                Keeper_publication_recovery_availability.non_runtime_provider
+                              ~observation ~turn_input ~turn_decision
+                              ~shared_context:!shared_context ()) with
+                      | Ok (`Ran result) -> result
+                      | Ok (`Busy reason) -> fail (Keeper_owner.autonomous_block_to_string reason)
+                      | Ok `Interrupted -> fail "fixture autonomous child was interrupted"
+                      | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
                     in
-                    match run meta with
-                    | Error failure ->
-                      fail (Agent_core.Error.to_string failure.error)
-                    | Ok (Keeper_unified_turn.Turn_completed { meta = next_meta; _ }) ->
-                      check bool
-                        "normal official-client cycle writes no AGENT_CORE checkpoint"
-                        false
-                        (Sys.file_exists checkpoint_path);
-                      (* Inspect the durable rows before the next cycle consumes
-                         them as cross-cycle evidence. *)
-                      (match
-                         Keeper_tool_call_log.read_recent ~keeper_name ~n:100 ()
-                       with
-                       | Error (Keeper_tool_call_log.Index_unavailable detail) ->
-                         fail detail
-                       | Ok rows ->
-                         let task_rows =
-                           List.filter
-                             (fun row ->
-                                Yojson.Safe.Util.(
-                                  member "tool" row = `String "keeper_tasks_list"
-                                  && member "trace_id" row = `String trace_id))
-                             rows
-                         in
-                         check int
-                           "cycle one persists both task reads to the real call ledger"
-                           2
-                           (List.length task_rows);
-                         check (list int)
-                           "both cycle-one ledger rows carry keeper_turn_id 1"
-                           [ 1; 1 ]
-                           (List.map
-                              (fun row ->
-                                 Yojson.Safe.Util.(
-                                   member "keeper_turn_id" row
-                                   |> function `Int n -> n | _ -> -1))
-                              task_rows));
-                      (match run next_meta with
-                       | Error failure ->
-                         fail (Agent_core.Error.to_string failure.error)
-                       | Ok
-                           (Keeper_unified_turn.Turn_checkpointed
-                             { checkpoint_reason =
-                                 Keeper_unified_turn.Repeated_tool_call
-                                   { tool_name; repeated_count }
-                             ; meta = after_yield
-                             ; _
-                             }) ->
-                         check bool
-                           "checkpointless repeated-call cycle also writes no AGENT_CORE checkpoint"
-                           false
-                           (Sys.file_exists checkpoint_path);
-                         check string
-                           "third exact MASC task read is the repeated tool"
-                           "keeper_tasks_list"
-                           tool_name;
-                         check int
-                           "two calls from cycle one plus the current call"
-                           3
-                           repeated_count;
-                         let trace_id =
-                           Keeper_id.Trace_id.to_string meta.runtime.trace_id
-                         in
-                         let rows =
-                           match
-                             Keeper_tool_call_log.read_recent
-                               ~keeper_name
-                               ~n:100
-                               ()
-                           with
-                           | Ok rows -> rows
-                           | Error
-                               (Keeper_tool_call_log.Index_unavailable detail) ->
-                             fail detail
-                         in
-                         let task_calls =
-                           rows
-                           |> List.filter (fun row ->
-                                Yojson.Safe.Util.(
-                                  member "tool" row
-                                  = `String "keeper_tasks_list"
-                                  && member "trace_id" row = `String trace_id))
-                         in
-                         let turn_ids =
-                           List.map
-                             (fun row ->
-                                Yojson.Safe.Util.(
-                                  member "keeper_turn_id" row |> to_int))
-                             task_calls
-                         in
-                         check (list int)
-                           "the real call ledger assigns both earlier reads to cycle one"
-                           [ 1; 1; 2 ]
-                           turn_ids;
-                         let inputs =
-                           List.map
-                             (fun row ->
-                                Yojson.Safe.Util.member "input" row
-                                |> Yojson.Safe.to_string)
-                             task_calls
-                         in
-                         (match inputs with
-                          | [ first; second; third ] ->
-                            check bool
-                              "all three successful reads have identical input"
-                              true
-                              (String.equal first second && String.equal second third)
-                          | _ ->
-                            fail "the real call ledger did not record three task reads");
-                         let outputs =
-                           List.map
-                             (fun row ->
-                                Yojson.Safe.Util.member "output" row
-                                |> Yojson.Safe.to_string)
-                             task_calls
-                         in
-                         (match outputs with
-                          | [ first; second; third ] ->
-                            check bool
-                              "all three successful reads have identical output"
-                              true
-                              (String.equal first second && String.equal second third)
-                          | _ ->
-                            fail "the real call ledger did not record three task results");
-                         check (list string)
-                           "the repeated lookups all completed successfully"
-                           [ "ok"; "ok"; "ok" ]
-                           (List.map
-                              (fun row ->
-                                 Yojson.Safe.Util.(member "wire_outcome" row |> to_string))
-                              task_calls);
-                         (* Restore the Session record into a new loop context,
-                            just as a persisted context resumes. *)
-                         (match Agent_core.Context.of_json ~eio:true
-                           (Agent_core.Context.to_json !shared_context) with
-                          | Ok restored -> shared_context := restored
-                          | Error error -> fail (Agent_core.Context.decode_error_to_string error));
-                         let after_changed_query = match run after_yield with
-                           | Ok (Keeper_unified_turn.Turn_completed {meta; _}) -> meta
-                           | Error failure -> fail (Agent_core.Error.to_string failure.error)
-                           | Ok _ -> fail "a new query after the first yield was judged from old calls" in
-                         (match run after_changed_query with
-                          | Ok (Keeper_unified_turn.Turn_checkpointed
-                              {checkpoint_reason = Keeper_unified_turn.Repeated_tool_call
-                                {tool_name = "keeper_tasks_list"; repeated_count = 3}; _}) -> ()
-                          | Error failure -> fail (Agent_core.Error.to_string failure.error)
-                          | Ok _ -> fail "the second cross-cycle repeat streak did not rearm")
-                       | Ok (Keeper_unified_turn.Turn_checkpointed _) ->
-                         fail "cycle one unexpectedly checkpointed"
-                       | Ok (Keeper_unified_turn.Turn_completed _) ->
-                         fail "cycle two did not stop at the third exact call"
-                       | Ok (Keeper_unified_turn.Turn_input_required _) ->
-                         fail "cycle two requested input instead of detecting repetition"
-                       | Ok (Keeper_unified_turn.Turn_cancelled _) ->
-                         fail "cycle two was unexpectedly cancelled"
-                       | Ok (Keeper_unified_turn.Turn_skipped _) ->
-                         fail "cycle two was unexpectedly skipped")
-                    | Ok (Keeper_unified_turn.Turn_checkpointed _) ->
-                      fail "cycle one unexpectedly checkpointed"
-                    | Ok (Keeper_unified_turn.Turn_input_required _) ->
-                      fail "cycle one requested input"
-                    | Ok (Keeper_unified_turn.Turn_cancelled _) ->
-                      fail "cycle one was unexpectedly cancelled"
-                    | Ok (Keeper_unified_turn.Turn_skipped _) ->
-                      fail "cycle one was unexpectedly skipped")))))
+                    let completed meta = match run meta with
+                      | Error failure -> fail (Agent_core.Error.to_string failure.error)
+                      | Ok (Keeper_unified_turn.Turn_completed {meta; _}) -> meta
+                      | Ok (Turn_checkpointed _ | Turn_input_required _ | Turn_cancelled _ | Turn_skipped _) ->
+                        fail "provider terminal did not complete the autonomous cycle" in
+                    let next_meta = completed meta in
+                    check bool "first official cycle writes no AGENT_CORE checkpoint" false
+                      (Sys.file_exists checkpoint_path);
+                    (match Agent_core.Context.of_json ~eio:true
+                        (Agent_core.Context.to_json !shared_context) with
+                     | Ok restored -> shared_context := restored
+                     | Error error -> fail (Agent_core.Context.decode_error_to_string error));
+                    ignore (completed next_meta);
+                    check bool "second official cycle also writes no AGENT_CORE checkpoint" false
+                      (Sys.file_exists checkpoint_path);
+                    let rows = match Keeper_tool_call_log.read_recent ~keeper_name ~n:100 () with
+                      | Error (Keeper_tool_call_log.Index_unavailable detail) -> fail detail
+                      | Ok rows -> List.filter (fun row -> Yojson.Safe.Util.(
+                          member "tool" row = `String "keeper_tasks_list"
+                          && member "trace_id" row = `String trace_id)) rows in
+                    check (list int) "real ledger keeps all repeated reads in their original cycles"
+                      [1;1;2] (List.map (fun row -> Yojson.Safe.Util.(member "keeper_turn_id" row |> to_int)) rows);
+                    check (list string) "all reads execute successfully without a repeat-count stop"
+                      ["ok";"ok";"ok"] (List.map (fun row -> Yojson.Safe.Util.(member "wire_outcome" row |> to_string)) rows);
+                    List.iter (fun field -> match List.map (Yojson.Safe.Util.member field) rows with
+                      | [first;second;third] -> check bool ("same actual " ^ field ^ " is retained across cycles")
+                          true (first=second && second=third)
+                      | _ -> fail "expected three actual retained reads") ["input";"output"])))))
 ;;
 
 let check_usage_scope ~frames ~expected_scope ~input_tokens ~output_tokens
@@ -1317,7 +1174,7 @@ let test_keeper_projects_masc_tool () =
                (String_util.contains_substring raw "MASC_TOOL_RESULT")))
 ;;
 
-let test_official_client_repetition_crosses_unified_autonomous_cycles () =
+let test_checkpointless_reads_cross_unified_owner_cycles () =
   let base_path = temp_workspace () in
   let query =
     `Assoc
@@ -1351,18 +1208,6 @@ let test_official_client_repetition_crosses_unified_autonomous_cycles () =
     ; Emit (result ~turn_id:"unified-turn-2" "POLL_TURN_TWO_COMPLETE")
     ]
   in
-  let changed_call request_id =
-    mcp_tool_call ~request_id ~tool_name:"keeper_tasks_list"
-      ~arguments:(`Assoc [ "status", `String "todo"; "limit", `Int 11;
-        "projection", `String "compact" ]) in
-  let later_turn ~turn_id calls =
-    [ Emit_and_read mcp_initialize; Emit mcp_initialized_notification; Emit_and_read mcp_list ]
-    @ List.map (fun id -> Emit_and_read (changed_call id)) calls
-    @ [ Emit (assistant ~turn_id "CHANGED_QUERY_COMPLETE");
-        Emit (result ~turn_id "CHANGED_QUERY_COMPLETE") ] in
-  let later_lines =
-    [ later_turn ~turn_id:"unified-turn-3" ["tasks-4"; "tasks-5"]
-    ; later_turn ~turn_id:"unified-turn-4" ["tasks-6"] ] in
   Masc_test_deps.with_process_env
     "MASC_KEEPER_AUTONOMOUS_ENABLED"
     (Some "true")
@@ -1370,8 +1215,8 @@ let test_official_client_repetition_crosses_unified_autonomous_cycles () =
        Fun.protect
          ~finally:(fun () -> cleanup_tree base_path)
          (fun () ->
-            with_fixture_sequence ~later_lines first_lines second_lines (fun cli_path ->
-              run_unified_autonomous_repeat_cycles ~base_path ~cli_path)))
+            with_fixture_sequence first_lines second_lines (fun cli_path ->
+              run_unified_autonomous_read_cycles ~base_path ~cli_path)))
 ;;
 
 (* WP1 completion trigger (native tool provenance): each official-client
@@ -2085,18 +1930,22 @@ let test_keeper_shrinks_history_after_statusless_context_error
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       let official_client_continuation = if not native_gate then None else (
+       let official_client_continuation, gate_seed_held_context =
+         if not native_gate then None, [] else (
          with_fixture
            [ Emit (assistant ~turn_id:"turn-gated" "GATE_WAIT")
            ; Emit (result ~turn_id:"turn-gated" "GATE_WAIT") ]
            (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"GATE" () with
              | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
          let stored = load_state base_path in
+         let held = match stored.context_frontier with
+           | Some frontier -> frontier.held_context
+           | None -> fail "native Gate seed did not record its exact context frontier" in
          match stored.phase with
          | Settled {session_id; turn_id} ->
            Some ({ client_kind=stored.client_kind; runtime_id=stored.runtime_id;
              session_id; turn_id; tool_surface_sha256=stored.tool_surface_sha256;
-             frame=Keeper_repetition_snapshot.empty } : Keeper_semantic_execution.official_client_checkpoint)
+             frame=Keeper_repetition_snapshot.empty } : Keeper_semantic_execution.official_client_checkpoint), held
          | _ -> fail "native Gate seed did not settle") in
        with_fixture_sequence
          ~first_system_marker ~second_system_marker
@@ -2136,18 +1985,20 @@ let test_keeper_shrinks_history_after_statusless_context_error
          (match raw with
           | None -> fail "native Gate fixture did not capture its resume input"
           | Some raw ->
-            (* The seed had no history. Reading the supplied history now
-               yields a fresh known-empty unread observation, which replaces
-               the unavailable observation held by the native session. It
-               grants no history replay or Gate respawn authority. *)
+            (* Both dispatches read the same known-empty unread state. Bind
+               the omitted carrier to the actual seed frontier before
+               asserting that Resume sends only the new owner input. *)
             let expected = attach_native_unread
                 ~unread:Keeper_librarian_request_unread.empty []
-              |> List.map (fun (message : Agent_core.Types.message) ->
-                   Keeper_official_client_host.history_role_label message.role
-                   ^ Keeper_official_client_host.encode_history_message message)
+              |> List.map Keeper_official_client_host.encode_history_message
             in
-            check string "a Gate resume sends its changed unread evidence and new input only"
-              (String.concat "\n\n" (expected @ ["SHRINK_HISTORY"]))
+            List.iter (fun encoded ->
+              let digest = Digestif.SHA256.(digest_string encoded |> to_hex) in
+              check bool "same known-empty unread observation is already held" true
+                (List.exists (fun (item : Keeper_official_client_session_store.held_context) ->
+                  item.context = Librarian_unread && item.sha256 = digest) gate_seed_held_context)) expected;
+            check string "a Gate resume omits already-held unread and sends new input only"
+              "SHRINK_HISTORY"
               (content_of_wire_message raw));
          check bool "resume system file carries no canonical snapshot" false
            (String_util.contains_substring
@@ -3092,6 +2943,7 @@ let run_direct_attempt
       ?on_memory_capacity_refusal
       ?required_native_posture ?on_native_task_observation ?on_child_content_observation ?on_event
       ?hooks
+      ?terminal_effect_state
       ?composed_context
       ?argument_source ?librarian_front
       ?(initial_messages = [])
@@ -3137,6 +2989,7 @@ let run_direct_attempt
                     | Some timeout_s -> { config with Runtime_execution.timeout_s }
                   in
                   Keeper_claude_code_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "claude-pre-dispatch" })
+                    ?terminal_effect_state
                     ?composed_context
                     ?argument_source ?librarian_front
                     ?on_memory_capacity_refusal
@@ -4984,12 +4837,15 @@ let test_cut_auth_probe_is_retried_once () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture ~auth_first_body:"{\"loggedIn\":true," [] (fun cli_path ->
+       with_fixture ~auth_first_body:"{\"loggedIn\":true,"
+         [Emit (assistant ~turn_id:"auth-retry-complete" "AUTH_RETRY_COMPLETE");
+          Emit (result ~turn_id:"auth-retry-complete" "AUTH_RETRY_COMPLETE")]
+         (fun cli_path ->
          match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
-         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail }))
-           when Astring.String.is_infix ~affix:"auth status" detail ->
-             fail ("cut probe was not retried: " ^ detail)
-         | Error _ | Ok _ ->
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok turn ->
+             check string "successful auth retry reaches actual provider terminal"
+               "AUTH_RETRY_COMPLETE" (keeper_response_text turn);
              (* The fixture leaves this marker on its first, cut answer. *)
              check bool "the cut first probe ran" true
                (Sys.file_exists (cli_path ^ ".auth-first"))))
@@ -5094,7 +4950,7 @@ let test_unbounded_turn_keeps_subscription_probe_bounded () =
   | None -> fail "unbounded turn config leaked into the subscription probe"
 ;;
 
-let repeated_tool_fixture =
+let repeated_read_frames =
   [ Emit_and_read mcp_initialize
   ; Emit mcp_initialized_notification
   ; Emit_and_read mcp_list
@@ -5104,7 +4960,7 @@ let repeated_tool_fixture =
   ]
 ;;
 
-let repeated_tool () =
+let repeated_tool ?(on_call = fun () -> ()) () =
   Agent_core.Tool.create
     ~name:"masc_probe"
     ~description:"Return the same deterministic result"
@@ -5116,6 +4972,7 @@ let repeated_tool () =
         }
       ]
     (fun _ ->
+      on_call ();
       Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
 ;;
 
@@ -5214,7 +5071,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture repeated_tool_fixture (fun cli_path ->
+       with_fixture repeated_read_frames (fun cli_path ->
          let attempt =
            run_direct_attempt
              ~system_prompt:"   "
@@ -5235,20 +5092,22 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
          | Ok _ -> fail "blank system prompt was sent as the client default"))
 ;;
 
-let test_repeated_tool_stop_records_pre_result_turn_identity () =
+let test_provider_terminal_after_repeated_reads_keeps_root_context () =
   let base_path = temp_workspace () in
+  let calls = ref 0 in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        with_fixture
          ([Emit parent_tool_assistant; Emit child_tool_assistant; Emit child_tool_result]
-          @ repeated_tool_fixture) (fun cli_path ->
+          @ repeated_read_frames
+          @ [Emit (result ~turn_id:"turn-read-complete" "READS_COMPLETE")]) (fun cli_path ->
          let attempt =
            run_direct_attempt
              ~base_path
              ~cli_path
              ~goal:"REPEAT_TOOL"
-             ~tools:[ repeated_tool () ]
+             ~tools:[ repeated_tool ~on_call:(fun () -> incr calls) () ]
              ()
          in
          (match attempt.result with
@@ -5256,30 +5115,83 @@ let test_repeated_tool_stop_records_pre_result_turn_identity () =
           | Ok result ->
             (match result.runtime_observation with
              | Some {request_context=Some context; _} ->
-                 check int "host stop retains root occupancy after child activity" 205
+                 check int "terminal retains observed root occupancy after child activity" 205
                    context.input_tokens
-             | _ -> fail "host stop dropped root request context");
+             | _ -> fail "terminal dropped observed root request context");
             (match result.stop_reason with
-             | Runtime_agent.Yielded_after_repeated_tool_call
-                 { tool_name; repeated_count; _ } ->
-               check string "repeated tool" "masc_probe" tool_name;
-               check int "repeat threshold" 3 repeated_count
-             | _ -> fail "repeated Claude tool call was not a checkpoint yield"));
+             | Runtime_agent.Completed _ -> ()
+             | _ -> fail "actual provider terminal did not complete the read turn"));
+         check int "each same read executes before the explicit terminal" 3 !calls;
          match
            (load_state ~keeper_name:"claude-pre-dispatch" base_path).phase
          with
-         | Settled { session_id; turn_id; _ } ->
+         | Settled { turn_id; _ } ->
            check
              string
-             "deterministic pre-result turn identity"
-             (Keeper_claude_code_runtime.For_testing.host_stop_turn_identity
-                ~session_id
-                ~turn_count:1)
+             "durable turn identity comes from the actual provider terminal"
+             "turn-read-complete"
              turn_id
-         | _ -> fail "repeated Claude tool call did not settle durable state"))
+         | _ -> fail "provider terminal did not settle durable state"))
 ;;
 
-let test_repeated_tool_stop_preserves_terminal_hook_failure () =
+let test_typed_terminal_stop_records_pre_result_turn_identity () =
+  let base_path = temp_workspace () in
+  (* This state is the fixture's explicit terminal-producer port. No external
+     effect or durable stimulus is manufactured by this test. The real Host
+     consumes its typed deferral and must settle before a vendor result UUID. *)
+  let producer_state = ref Keeper_tools_agent_core.Terminal_effect_open in
+  let calls = ref 0 in
+  let terminal_tool = Agent_core.Tool.create
+    ~descriptor:(Agent_core.Tool.terminal_descriptor
+      Agent_core.Tool_contract.Proven_pre_effect)
+    ~name:"masc_probe" ~description:"Defer at the fixture terminal boundary"
+    ~parameters:[{Agent_core.Types.name="marker";description="Fixture marker";
+      param_type=String;required=true}]
+    (fun _ ->
+      incr calls;
+      producer_state := Keeper_tools_agent_core.Deferred_tool_result;
+      Ok {Agent_core.Types.content="FIXTURE_DEFERRED";content_blocks=None;_meta=None})
+  in
+  let terminal_fixture =
+    [ Emit parent_tool_assistant; Emit child_tool_assistant; Emit child_tool_result
+    ; Emit_and_read mcp_initialize; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list; Emit_and_read (mcp_call_with_id "terminal-1") ]
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture terminal_fixture (fun cli_path ->
+         let attempt =
+           run_direct_attempt
+             ~terminal_effect_state:(fun () -> !producer_state)
+             ~base_path ~cli_path ~goal:"TYPED_TERMINAL" ~tools:[terminal_tool] ()
+         in
+         (match attempt.result with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok result ->
+            check int "one explicitly terminal invocation reaches the Host" 1 !calls;
+            (match result.runtime_observation with
+             | Some {request_context=Some context;_} ->
+               check int "host stop retains root occupancy after child activity"
+                 205 context.input_tokens
+             | _ -> fail "host stop dropped root request context");
+            (match result.stop_reason with
+             | Runtime_agent.Yielded_to_durable_stimulus _ -> ()
+             | Runtime_agent.Completed _
+             | Yielded_to_operation_queued _
+             | Yielded_after_repeated_tool_call _
+             | Yielded_after_repeated_assistant_text _
+             | InputRequired _ ->
+               fail "typed terminal deferral did not settle the host boundary"));
+         match (load_state ~keeper_name:"claude-pre-dispatch" base_path).phase with
+         | Settled {session_id;turn_id;_} ->
+           check string "deterministic pre-result turn identity"
+             (Keeper_claude_code_runtime.For_testing.host_stop_turn_identity
+                ~session_id ~turn_count:1) turn_id
+         | _ -> fail "typed terminal boundary did not settle durable state"))
+;;
+
+let test_post_tool_hook_failure_survives_provider_terminal () =
   let base_path = temp_workspace () in
   let hooks =
     { Agent_core.Hooks.empty with
@@ -5292,7 +5204,9 @@ let test_repeated_tool_stop_preserves_terminal_hook_failure () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture repeated_tool_fixture (fun cli_path ->
+       with_fixture
+         (repeated_read_frames @ [Emit (result ~turn_id:"turn-hook-complete" "READS_COMPLETE")])
+         (fun cli_path ->
          let attempt =
            run_direct_attempt
              ~hooks
@@ -5303,7 +5217,7 @@ let test_repeated_tool_stop_preserves_terminal_hook_failure () =
              ()
          in
          match attempt.result with
-         | Ok _ -> fail "repeated host stop hid the terminal hook failure"
+         | Ok _ -> fail "provider terminal hid the terminal hook failure"
          | Error error ->
            check bool
              "terminal hook detail survives"
@@ -6485,9 +6399,9 @@ let () =
             test_keeper_projects_typed_tool_history_and_lifecycle
         ; test_case "projects MASC tool" `Quick test_keeper_projects_masc_tool
         ; test_case
-            "checkpointless polling repetition crosses unified autonomous cycles"
+            "checkpointless repeated reads cross Owner autonomous cycles"
             `Quick
-            test_official_client_repetition_crosses_unified_autonomous_cycles
+            test_checkpointless_reads_cross_unified_owner_cycles
         ; test_case
             "distinguishes native and MASC tool provenance"
             `Quick
@@ -6601,13 +6515,17 @@ let () =
             `Quick
             test_blank_system_prompt_is_refused_not_defaulted
         ; test_case
-            "repeated tool stop records pre-result turn identity"
+            "explicit provider terminal follows repeated reads"
             `Quick
-            test_repeated_tool_stop_records_pre_result_turn_identity
+            test_provider_terminal_after_repeated_reads_keeps_root_context
         ; test_case
-            "repeated tool stop preserves terminal hook failure"
+            "typed terminal stop records pre-result turn identity"
             `Quick
-            test_repeated_tool_stop_preserves_terminal_hook_failure
+            test_typed_terminal_stop_records_pre_result_turn_identity
+        ; test_case
+            "post-tool hook failure survives provider terminal"
+            `Quick
+            test_post_tool_hook_failure_survives_provider_terminal
         ; test_case
             "every posture names the schema lookup"
             `Quick

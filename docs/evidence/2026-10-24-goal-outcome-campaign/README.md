@@ -1,6 +1,6 @@
 # Goal outcomes and verification integrity campaign
 
-The audit of [Mental Models in the Agentic Era](https://productmindset.substack.com/p/mental-models-in-the-agentic-era) identified seven specific weaknesses at source8eac5c07c290d134a9ef6acb1e298584bf9a1366. The implementation and measurements are in [Native Stack45750](https://github.com/jeong-sik/masc/pull/45853), linked to [issue45747](https://github.com/jeong-sik/masc/issues/45747).
+The audit of [Mental Models in the Agentic Era](https://productmindset.substack.com/p/mental-models-in-the-agentic-era) identified seven specific weaknesses at source8eac5c07c290d134a9ef6acb1e298584bf9a1366. The implementation and measurements are in [Native Stack45750](https://github.com/jeong-sik/masc/pull/45867), linked to [issue45747](https://github.com/jeong-sik/masc/issues/45747).
 
 The metric is defined by fixed cases G1–G4 and A1–A7. Task count and Goal linkage ratio are diagnostic, not success targets. Independent Tasks remain valid. The canonical host metric is the experiment-owned acceptance.json referenced by Goal goal-outcome-driven-work-20261024, revision306708facbfb9379a9e51b8f7c815678. This directory preserves a dated snapshot, not another mutable authority.
 

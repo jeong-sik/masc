@@ -1,0 +1,76 @@
+{
+  "scope": "Actual fixture OCaml generator and generated shell/stdin/stdout protocol only; not Host, Owner, native MASC suite, SDK, vendor, runtime or model-success execution",
+  "base_head": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "results": [
+    {
+      "variant": "before",
+      "source_sha256": "67d3433abe96cbcc152b4e28ac8fd3d3a1d21e8e9f344fa545f8569f6b0d1ba6",
+      "generator_source_sha256": "5117bc3aed8f857ccc7949b99f6b561fa8ffc05ede855118ae3b8e7c27a25848",
+      "generated_script_sha256": "fab8e29daa18292a85453d17d21613e99ecea877ab5a584a029be5103cc3a9c0",
+      "compile_exit": 0,
+      "compile_stderr": "",
+      "protocol_exit": 0,
+      "actual_tool_call_ids": [
+        "call-repeat-1",
+        "call-repeat-2",
+        "call-repeat-3"
+      ],
+      "auth_probe": null,
+      "explicit_terminal_frames": [],
+      "checks": "actual three requests acknowledged; old fixture has no result; repaired fixture emits one explicit terminal"
+    },
+    {
+      "variant": "after",
+      "source_sha256": "d4f007816c8d21a9910350c412a8112cd35824f46e7c9abb2266a6b19883d81e",
+      "generator_source_sha256": "909cf050fe1a8e437d84861503be6cc4e1c6859e13dd25ae6d2589603dbc6a62",
+      "generated_script_sha256": "4e964572557ae9ceb6785c31e2bcbfa23c10f3b4e7e493cf6053a1cbda28201e",
+      "compile_exit": 0,
+      "compile_stderr": "",
+      "protocol_exit": 0,
+      "actual_tool_call_ids": [
+        "call-repeat-1",
+        "call-repeat-2",
+        "call-repeat-3"
+      ],
+      "auth_probe": null,
+      "explicit_terminal_frames": [
+        {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "session_id": "fixture-session",
+          "uuid": "turn-read-complete",
+          "result": "READS_COMPLETE",
+          "api_error_status": null
+        }
+      ],
+      "checks": "actual three requests acknowledged; old fixture has no result; repaired fixture emits one explicit terminal"
+    },
+    {
+      "variant": "auth_retry_after",
+      "source_sha256": "d4f007816c8d21a9910350c412a8112cd35824f46e7c9abb2266a6b19883d81e",
+      "generator_source_sha256": "909cf050fe1a8e437d84861503be6cc4e1c6859e13dd25ae6d2589603dbc6a62",
+      "generated_script_sha256": "8b3a9733fb69431f3767c8f2c12889e9d998e915f14b3baf889020d968fd9ba1",
+      "compile_exit": 0,
+      "compile_stderr": "",
+      "protocol_exit": 0,
+      "actual_tool_call_ids": [],
+      "auth_probe": {
+        "first_is_expected_cut_document": true,
+        "second_is_valid_logged_in_document": true
+      },
+      "explicit_terminal_frames": [
+        {
+          "type": "result",
+          "subtype": "success",
+          "is_error": false,
+          "session_id": "fixture-session",
+          "uuid": "auth-retry-complete",
+          "result": "AUTH_RETRY_COMPLETE",
+          "api_error_status": null
+        }
+      ],
+      "checks": "first auth document is cut, second is valid, then one explicit terminal"
+    }
+  ]
+}

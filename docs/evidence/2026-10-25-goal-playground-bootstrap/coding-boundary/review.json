@@ -1,0 +1,20 @@
+{
+  "verdict": "PASS_SELECTED_EXISTING_CONSUMERS_ON_CAPABLE_IMAGE_WITH_RETAINED_FIRST_IMAGE_FAILURE",
+  "source_commit": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "public_report_sha256": "3a6dc21a39518bf62f303682808609272d4b49d92e2e7b8eba4b15e81016bd9a",
+  "scope": "Independent actual execution of existing consumers; source/fixture/expectations remain unchanged. Observer and publication only.",
+  "observed_results": {
+    "first_image": "Docker Python verify127, Nodeoracle+staticlink methodsPASS",
+    "capable_image": "existing Docker methodPASS, actual container exits0/0/0/0/7",
+    "three_stages": "verify0/regression0/build0; same actual retained snapshot independently rehashed"
+  },
+  "privacy": "Public objects constructed from explicit allowed fields; actual private host paths/commands and raw output remain private with hashes. No real credentials or raw host environment collected.",
+  "remaining_boundaries": [
+    "build.sh and regression.sh in this existing fixture copy verify.sh and execute the Python boundary candidate. This proves stage dispatch/isolation on a frozen snapshot; it is not compilation of a real project.",
+    "Actual three-stage result belongs only to source3228 and the capable a6e34 image cohort. de170b failed before Python assertions, and that failure is retained.",
+    "The Node oracle checks execute host corpus consumers, coupled to the same source32 snapshot preparer; they are not a separately demonstrated Docker oracle-tampering attack.",
+    "microVM/SSH grading was not executed. Source refusal is not VM/SSH grading success.",
+    "No actual full coding-eval suite, provider/model calls, local Dune, CI watch, production runtime/Goal/Task changes, image pulls/builds, global prune/stop or installation.",
+    "No population reliability or production secret-safety claim follows from these controlled probes."
+  ]
+}

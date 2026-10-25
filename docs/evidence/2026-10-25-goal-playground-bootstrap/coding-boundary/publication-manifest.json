@@ -1,0 +1,22 @@
+{
+  "source_commit": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "scope": "Frozen independent actual coding-boundary supplement, not historical acceptance rewrite.",
+  "files": [
+    {
+      "file": "actual-coding-boundary.json",
+      "bytes": 29007,
+      "sha256": "3a6dc21a39518bf62f303682808609272d4b49d92e2e7b8eba4b15e81016bd9a"
+    },
+    {
+      "file": "review.json",
+      "bytes": 1875,
+      "sha256": "d953d029b2a964e355e6827a98ad072f22b05781194bbbd4a6635c92e76fefe2"
+    },
+    {
+      "file": "README.md",
+      "bytes": 1648,
+      "sha256": "89489659f427feaedf808a3ce784e4bd324cd5be66a03d6fc6fffa32e03cb943"
+    }
+  ],
+  "private_originals_manifest_sha256": "5981718a4a0003979c7144d296bd2af11c4a4dac89bd4de4ac4e7127940d3af7"
+}

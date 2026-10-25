@@ -1,0 +1,35 @@
+{
+  "schema": "masc.bootstrap-native-dispatch.v1",
+  "observed_at": "2026-10-25T10:55:38.394678+00:00",
+  "source_sha": "a0523385b9a5475fcb3998795d09307f262daf32",
+  "branch": "codex/goal-playground-bootstrap-20261025",
+  "pre_dispatch_remote_sha": "a0523385b9a5475fcb3998795d09307f262daf32",
+  "suites": [
+    "test_workspace_bootstrap",
+    "test_goal_verifier_original"
+  ],
+  "command": [
+    "gh",
+    "workflow",
+    "run",
+    "test.yml",
+    "--repo",
+    "jeong-sik/masc",
+    "--ref",
+    "codex/goal-playground-bootstrap-20261025",
+    "-f",
+    "minimal=true",
+    "-f",
+    "suite=test_workspace_bootstrap,test_goal_verifier_original"
+  ],
+  "exit_code": 0,
+  "stdout": "https://github.com/jeong-sik/masc/actions/runs/40186754980\n",
+  "stderr": "",
+  "earlier_sha_ref_attempt": {
+    "exit_code": 1,
+    "http_status": 422,
+    "reason": "No ref found for full SHA; no workflow created"
+  },
+  "full_regression": "not_run",
+  "previous_full_regression_run_head_suites": "not_established"
+}

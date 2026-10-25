@@ -264,7 +264,8 @@ let provider_revocation_joins_original_publication () = with_broker (fun env sw 
     let stopped=Eio.Fiber.fork_promise ~sw (fun () -> B.await_stopped broker) in
     Eio.Fiber.yield ();
     check bool "provider revoke has not yet joined publication cleanup" false (Eio.Promise.is_resolved stopped);
-    Eio.Promise.resolve allow_cleanup ();Eio.Promise.await_exn stopped;
+    Eio.Promise.resolve allow_cleanup ();
+    check bool "publication listener descriptor close is confirmed" true (Eio.Promise.await_exn stopped = Ok ());
     check bool "late callback success cannot acknowledge retired authority" true
       (match Eio.Buf_read.line reader with _ -> false | exception End_of_file -> true)))
 let ()=run "private companion broker" ["invocation authority",[

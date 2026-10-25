@@ -29,16 +29,13 @@ let create ~publish scope =
             let rec deliver = function
               | [] -> cursor:=Ok page.next_cursor;`Done
               | (observation:Scope.tool_observation)::rest ->
-                let run_id=observation.event.meta.run_id in
-                (match Execution_event.Run_id.of_string run_id with
-                 | Error detail -> `Failed detail
-                 | Ok run_id -> match Run_map.find_opt run_id !audiences with
-                   | None -> `Failed ("unregistered tool observation audience for run " ^
-                                     Execution_event.Run_id.to_string run_id)
-                   | Some audience ->
-                     Option.iter (fun bus -> publish bus observation.event) audience;
-                     cursor:=Ok observation.through;
-                     deliver rest) in
+                (match Run_map.find_opt observation.run_id !audiences with
+                 | None -> `Failed ("unregistered tool observation audience for run " ^
+                                   Execution_event.Run_id.to_string observation.run_id)
+                 | Some audience ->
+                   Option.iter (fun bus -> publish bus observation.event) audience;
+                   cursor:=Ok observation.through;
+                   deliver rest) in
             deliver page.observations
       with exn -> `Raised (exn,Printexc.get_raw_backtrace ())) in
     match outcome with

@@ -276,7 +276,8 @@ module type S = sig
     -> unit
     -> (page, error) result
   type tool_observation =
-    { event : Event_bus.event
+    { run_id : Run_id.t
+    ; event : Event_bus.event
     ; through : cursor
     }
   type tool_observation_page = private

@@ -387,10 +387,11 @@ val sweep_abandoned_microvm_guests :
   is_pid_alive:(int -> bool) ->
   run_argv:(timeout_sec:float -> string list -> Unix.process_status * string) ->
   (Keeper_microvm_backend.t * Keeper_sandbox_microvm.sweep_outcome) list
-(** Collect abandoned guests under the same lifecycle lock as boot and
-    teardown. The lock covers listing through deletion: stable guest names
-    may otherwise be reused between observing a dead owner and removing it.
-    Guest commands and unrelated Keeper lanes do not acquire this lock. *)
+(** Collect abandoned guests with exclusive lifecycle inventory ownership
+    from listing through deletion: stable guest names may otherwise be
+    adopted between observing a dead owner and removing it. Ordinary
+    lifecycle operations serialize per Keeper; different Keepers may prepare
+    concurrently whenever inventory maintenance is not active. *)
 
 type build_cleanup_report = { cleaned : int; failed : int }
 

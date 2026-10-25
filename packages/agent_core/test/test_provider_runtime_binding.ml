@@ -936,10 +936,73 @@ capabilities_base = "openai_chat_extended"
           = Llm_provider.Capabilities.gemini_capabilities))
 ;;
 
+(* A frozen missing policy is an observed absence, not permission for the
+   runtime projection to consult a later process catalog. *)
+let test_frozen_absence_survives_model_catalog_replacement () =
+  with_model_catalog "" (fun () ->
+    let config = Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat ~provider_id:"snapshot-provider"
+      ~model_id:"snapshot-model" ~base_url:"https://example.invalid" ()
+      |> Llm_provider.Provider_config.freeze_for_request in
+    Alcotest.(check bool) "missing model policy is frozen" true
+      (Llm_provider.Provider_config.capabilities_for_config_model config = None);
+    let replacement = match Llm_provider.Model_catalog.of_toml_string
+        ~source:"replacement" {|[[models]]
+model_id = "snapshot-model"
+provider_name = "snapshot-provider"
+base = "openai_chat_extended"
+|} with
+      | Ok catalog -> catalog | Error detail -> Alcotest.fail detail in
+    Llm_provider.Model_catalog.set_global replacement;
+    Alcotest.(check bool) "low-level policy retains its observed absence" true
+      (Llm_provider.Provider_config.capabilities_for_config_model config = None);
+    let actual = Provider_runtime_binding.capabilities_for_provider_config config in
+    let expected,_ = Llm_provider.Complete_common.resolve_capabilities_for_config config in
+    Alcotest.(check bool) "runtime projection cannot revive a missing model policy" true
+      (actual = expected))
+;;
+
+let test_frozen_absence_survives_provider_overlay () =
+  with_model_catalog "" (fun () ->
+    let config = Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat ~provider_id:"subscriber-local"
+      ~model_id:"unlisted-local-model" ~base_url:"https://example.invalid" ()
+      |> Llm_provider.Provider_config.freeze_for_request in
+    with_provider_catalog catalog_json (fun () ->
+      let actual = Provider_runtime_binding.capabilities_for_provider_config config in
+      let expected,_ = Llm_provider.Complete_common.resolve_capabilities_for_config config in
+      Alcotest.(check bool) "runtime projection cannot acquire a later provider overlay" true
+        (actual = expected)))
+;;
+
+let test_selected_binding_carries_provider_capabilities () =
+  with_provider_catalog catalog_json (fun () ->
+    let binding = expect_binding "subscriber-alias" in
+    let config = expect_ok (Provider_runtime_binding.to_provider_config
+      ~model:"unlisted-local-model" binding) in
+    Alcotest.(check bool) "binding projects its declared capability into config" true
+      (Option.is_some config.model_capabilities_override);
+    let config = Llm_provider.Provider_config.freeze_for_request config in
+    Llm_provider.Provider_catalog.clear_global ();
+    let actual = Provider_runtime_binding.capabilities_for_provider_config config in
+    let expected,_ = Llm_provider.Complete_common.resolve_capabilities_for_config config in
+    Alcotest.(check bool) "selected provider reasoning survives overlay removal" true
+      actual.supports_reasoning;
+    Alcotest.(check bool) "selected provider facts match request admission" true
+      (actual = expected))
+;;
+
 let () =
   Alcotest.run
     "Provider_runtime_binding"
-    [ ( "catalog"
+    [ ( "policy authority",
+        [ Alcotest.test_case "missing model policy survives replacement" `Quick
+            test_frozen_absence_survives_model_catalog_replacement
+        ; Alcotest.test_case "missing provider policy survives overlay" `Quick
+            test_frozen_absence_survives_provider_overlay
+        ; Alcotest.test_case "selected binding carries provider facts" `Quick
+            test_selected_binding_carries_provider_capabilities ])
+    ; ( "catalog"
       , [ Alcotest.test_case "registry fallback preserves provider authority" `Quick
             test_registry_fallback_preserves_provider_authority
         ; Alcotest.test_case

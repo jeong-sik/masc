@@ -7,7 +7,8 @@ registration, evidence and changelog.
 The existing nine Session tests preserve live queues/tombstones across actual
 restoration but do not invoke Keeper bootstrap. This fixture connects the actual
 Mcp_server.create_state_eio Session actor, Owner inventory with the production
-operation runner, approval persistence and public persistence prepare/claim/start.
+operation runner, actual prompt/Gate/MCP-session restoration and public persistence
+prepare/claim/start.
 It writes one autonomous Keeper's real TOML/meta and explicitly declares a Docker
 catalog pin. That pin is fixture configuration, not proof of a physical image.
 The test supplies explicit runtime availability, not a model request or response.

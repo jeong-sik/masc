@@ -74,9 +74,13 @@ let test_keeper_boots_while_real_restore_is_held () =
         ~on_turn_slot_released:None config
       |> require_ok Keeper_owner_registry.install_error_to_string
       |> ignore;
+      ignore
+        (Prompt_defaults.bootstrap_runtime
+           ~workspace_path:config.workspace_path ~base_path : string);
       Keeper_approval_queue.install_persistence ~base_path
       |> require_ok Keeper_approval_queue_result.install_error_to_string
       |> ignore;
+      Server_mcp_transport_http_session.load_sessions_from_file ~base_path ();
       let prepared =
         Server_bootstrap_loops.prepare_keeper_persistence
           ~accept_store_quarantine:false ~config ()

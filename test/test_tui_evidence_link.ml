@@ -87,6 +87,9 @@ let test_a_submitted_source_links_to_its_masc_object () =
   Alcotest.(check (list link_testable)) "fusion run"
     [ Link.Masc_reference { kind = Masc_tui_link.Fusion_run; id = "run-9" } ]
     (Link.of_item (source ~reference:"fusion:run-9" "{}"));
+  Alcotest.(check (list link_testable)) "Task state source"
+    [ Link.Masc_reference { kind = Masc_tui_link.Task; id = "task-42" } ]
+    (Link.of_item (source ~reference:"task:task-42" "{}"));
   Alcotest.(check string) "printed as the shared reference"
     (Masc_tui_link.reference Masc_tui_link.Board_post "post-1")
     (Link.text (Link.Masc_reference { kind = Masc_tui_link.Board_post; id = "post-1" }))

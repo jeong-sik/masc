@@ -49,8 +49,8 @@ let invalid_input surface name args =
     check bool "input rejection explains the error" true
       (String.trim (Tool_result.message result) <> "")
   | _ -> fail "malformed source input unexpectedly succeeded"
-let post ~author ~visibility ?origin ?meta_json content =
-  match Board_dispatch.create_post ~author ~content ~post_kind:Board.System_post
+let post ~author ~visibility ?origin ?meta_json ?(post_kind=Board.System_post) content =
+  match Board_dispatch.create_post ~author ~content ~post_kind
     ~visibility ~ttl_hours:0 ?origin ?meta_json () with
   | Ok post -> post
   | Error error -> failf "post: %s" (Board_tool.board_error_to_string error)
@@ -98,6 +98,135 @@ let restored items =
   | `List rows -> List.map (fun row -> Store.submitted_evidence_item_of_yojson row |> require "persisted item") rows
   | _ -> fail "snapshot array"
 
+let new_task config ~title ~description =
+  ignore (Workspace.add_task config ~title ~priority:1 ~description);
+  let backlog = Workspace.read_backlog_r config |> require "primary backlog" in
+  List.find (fun (task : Masc_domain.task) -> task.title = title) backlog.tasks
+
+let task_args id = `Assoc ["task_ids", `List [`String id]]
+
+let test_task_sources_preserve_committed_state () = with_fixture (fun config ->
+  let open Yojson.Safe.Util in
+  let prior = new_task config ~title:"Prior approval" ~description:"Produce the first increment" in
+  List.iter (fun action -> match Workspace.transition_task_r config ~agent_name:"producer"
+    ~task_id:prior.id ~action ~notes:"First increment evidence"
+    ~prepare_verification_request:(Verification_protocol.create_submit_request ~config) () with
+    | Ok _ -> ()
+    | Error error -> failf "prior %s: %s" (Masc_domain.task_action_to_string action)
+        (Masc_error.to_string error))
+    [Masc_domain.Claim; Masc_domain.Start; Masc_domain.Submit_for_verification];
+  let pending = Workspace.read_backlog_r config |> require "pending primary" in
+  let row = List.find (fun (task : Masc_domain.task) -> task.id = prior.id) pending.tasks in
+  let verification_id = match row.task_status with
+    | Masc_domain.AwaitingVerification {verification_id; _} -> verification_id
+    | _ -> fail "prior Task did not await verification" in
+  let reference = "task:" ^ prior.id in
+  let pending_task, pending_goal = surfaces config [reference] in
+  ignore (Workspace.commit_verdict_r config
+    ~authority:(Masc_domain.Human_operator {operator_id="fixture-operator"})
+    ~verdict:Masc_domain.Verdict_approved ~task_id:prior.id ~verification_id
+    ~notes:"Independent first-increment approval" () |> require "prior verdict commit");
+  List.iter (fun surface ->
+    let source = read surface "keeper_tasks_list" (task_args prior.id) in
+    check string "later approval cannot change the pending snapshot" "awaiting_verification"
+      (source |> member "task" |> member "status" |> to_string);
+    check string "pending request identity remains exact" verification_id
+      (source |> member "task" |> member "verification_id" |> to_string)) [pending_task;pending_goal];
+  let next = new_task config ~title:"Next increment" ~description:"Use prior approval evidence" in
+  check bool "goalless Task remains valid" true (Option.is_none next.contract);
+  let primary = Workspace.read_backlog_r config |> require "multi-Task primary" in
+  let batched = capture config Evidence.Goal_workspace [reference; "task:" ^ next.id] in
+  let batched_surface = VAT.create_goal_proof ~config ~submitted_evidence:batched
+    |> require "multi-Task source surface" in
+  List.iter (fun id ->
+    let source = read batched_surface "keeper_tasks_list" (task_args id) in
+    check int "one batch retains one primary revision" primary.version
+      (source |> member "backlog_version" |> to_int);
+    check string "one batch retains one primary timestamp" primary.last_updated
+      (source |> member "backlog_last_updated" |> to_string)) [prior.id;next.id];
+  Verification_protocol.create_submit_request ~config ~task:next ~assignee:"producer"
+    ~verification_id:"next-with-prior-source"
+    ~claim:(Masc_domain.Completion_evidence {evidence_refs=[reference]}) |> require "next submission";
+  let request = Verification.load_request config.base_path "next-with-prior-source" |> require "next request" in
+  let items = match member "submitted_evidence" request.output with
+    | `List rows -> List.map (fun row -> Store.submitted_evidence_item_of_yojson row |> require "Task evidence decode") rows
+    | _ -> fail "Task source was not captured" in
+  let task_surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:(restored items)
+    |> require "Task source surface" in
+  let schema = List.find (fun (schema : Types_core.tool_schema) -> schema.name="keeper_tasks_list")
+    (VAT.schemas task_surface) in
+  check (list string) "Task source requires exact ids" ["task_ids"]
+    (schema.input_schema |> member "required" |> to_list |> List.map to_string);
+  check (list string) "Task source has no live listing filters" ["cursor";"task_ids"]
+    (schema.input_schema |> member "properties" |> keys);
+  let goal, _ = Goal_store.upsert_goal config ~title:"Ordered increments" ~metric:"source" ~target_value:"1" ()
+    |> require "Goal" in
+  let ctx : Tool_workspace.context = {config;agent_name="producer"} in
+  let result = Tool_workspace.dispatch ctx ~name:"masc_goal_transition"
+    ~args:(`Assoc ["goal_id",`String goal.id;"action",`String "request_complete";
+      "evidence_refs",`List [`String reference]]) |> Option.get in
+  (match result with Tool_result.Completed _ -> () | _ -> fail (Tool_result.message result));
+  let record = Goal_verification.get_record_authoritative config ~goal_id:goal.id
+    |> require "Goal source record" |> Option.get in
+  let goal_surface = VAT.create_goal_proof ~config ~submitted_evidence:(restored record.submitted_evidence)
+    |> require "Goal source surface" in
+  let committed = Workspace.read_backlog_r config |> require "committed primary" in
+  let original = List.find (fun (task : Masc_domain.task) -> task.id = prior.id) committed.tasks in
+  let original_json = Masc_domain.task_to_yojson original in
+  List.iter (fun surface ->
+    let source = read surface "keeper_tasks_list" (task_args prior.id) in
+    check bool "full committed state, time and notes preserved" true (member "task" source = original_json);
+    check int "primary revision retained" committed.version (source |> member "backlog_version" |> to_int);
+    check string "primary display timestamp retained" committed.last_updated
+      (source |> member "backlog_last_updated" |> to_string);
+    denied surface "keeper_tasks_list" (task_args next.id) "verification_source_access_denied";
+    invalid_input surface "keeper_tasks_list" (`Assoc []);
+    invalid_input surface "keeper_tasks_list" (`Assoc ["task_ids",`List [`String prior.id;`String next.id]]);
+    invalid_input surface "keeper_tasks_list" (`Assoc ["task_ids",`List [`String prior.id];"status",`String "done"]))
+    [task_surface;goal_surface];
+  let changed = {committed with tasks=List.map (fun (task : Masc_domain.task) ->
+    if task.id=prior.id then {task with title="Changed after submission"} else task) committed.tasks} in
+  Workspace.write_backlog config changed;
+  ignore (Workspace.delete_task_r config ~task_id:prior.id |> require "delete live prior Task");
+  List.iter (fun surface ->
+    let source = read surface "keeper_tasks_list" (task_args prior.id) in
+    check bool "edit and deletion cannot replace submitted state" true (member "task" source=original_json))
+    [task_surface;goal_surface])
+
+let test_task_source_failure_boundaries () = with_fixture (fun config ->
+  let task = new_task config ~title:"Task source integrity" ~description:"Original body" in
+  let reference = "task:" ^ task.id in
+  let items = capture config (Evidence.Task_producer "producer") [reference] in
+  let corrupt = List.map (function
+    | Store.Evidence_collaboration {reference;content;sha256} ->
+      Store.Evidence_collaboration {reference;content=content ^ " ";sha256}
+    | item -> item) items in
+  let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:corrupt |> require "corrupt surface" in
+  denied surface "keeper_tasks_list" (task_args task.id) "verification_source_storage_failed";
+  let wrong_id = "another-task" in
+  let wrong = List.map (function
+    | Store.Evidence_collaboration {content;sha256;_} ->
+      Store.Evidence_collaboration {reference="task:" ^ wrong_id;content;sha256}
+    | item -> item) items in
+  let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:wrong |> require "wrong identity surface" in
+  denied surface "keeper_tasks_list" (task_args wrong_id) "verification_source_storage_failed";
+  (match Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:["task:absent"] with
+   | Error (Evidence.Source_unavailable _) -> () | _ -> fail "unknown Task became evidence");
+  let primary_rows = Workspace.read_backlog_r config |> require "original primary" in
+  Workspace.write_backlog config {primary_rows with tasks=task :: primary_rows.tasks};
+  (match Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[reference] with
+   | Error (Evidence.Storage_failed _) -> () | _ -> fail "ambiguous duplicate Task identity became evidence");
+  let duplicated = Workspace.read_backlog_r config |> require "duplicated primary" in
+  Workspace.write_backlog config {duplicated with tasks=primary_rows.tasks};
+  let primary = Workspace_backlog.backlog_path config in
+  let recovery = Workspace_backlog.backlog_recovery_path config in
+  check bool "valid recovery exists before damage" true (Sys.file_exists recovery);
+  Fs_compat.save_file_atomic primary "{broken" |> require "damage primary for recovery control";
+  (match Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[reference] with
+   | Error (Evidence.Storage_failed _) -> () | _ -> fail "recovery was presented as primary Task evidence");
+  (match Workspace.read_backlog_observation_r config with
+   | Ok _ -> () | Error _ -> fail "negative control lost the valid recovery copy"))
+
 let test_submission_freezes_sources () = with_fixture (fun config ->
   let p = post ~author:"producer" ~visibility:Board.Internal "Original objection" in
   let id = Board.Post_id.to_string p.id in
@@ -143,7 +272,7 @@ let test_submission_freezes_sources () = with_fixture (fun config ->
   denied empty "masc_board_post_get" (post_args p) "verification_source_access_denied")
 
 let test_capture_failures_and_corruption () = with_fixture (fun config ->
-  let p = post ~author:"producer" ~visibility:Board.Direct "@recipient Private original" in
+  let p = post ~author:"producer" ~visibility:Board.Direct ~post_kind:Board.Human_post "@recipient Private original" in
   let require_error label = function Error _ -> () | Ok _ -> fail label in
   Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[board_ref p]
     |> require_error "Goal captured private source";
@@ -298,7 +427,9 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
   let fusion_post = post ~author:"producer" ~visibility:Board.Unlisted ~meta_json:metadata
     ~origin:Board.{turn_ref=None; source=Some "fusion"; fusion_run_id=Some run_id; fusion_producer=Some "producer"}
     "Large Fusion source" in
-  let task, goal = surfaces config [board_ref board; "fusion:" ^ run_id] in
+  let task_row = new_task config ~title:"Large Task source" ~description:payload in
+  let primary = Workspace.read_backlog_r config |> require "large Task primary" in
+  let task, goal = surfaces config [board_ref board; "fusion:" ^ run_id; "task:" ^ task_row.id] in
   let cursor_args args cursor = match args with
     | `Assoc fields -> `Assoc (("cursor", cursor) :: fields) | _ -> assert false in
   let bridge surface name args =
@@ -332,15 +463,8 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
       | cursor -> collect offset (bridge surface name (cursor_args args cursor)) (content :: parts) in
     collect 0 first [] in
   List.iter (fun surface ->
-    List.iter (fun (name, args, original) ->
+    List.iter (fun (name, args, expected) ->
       let reconstructed, cursor = reconstruct surface name args in
-      let expected = if String.equal name "masc_board_post_get" then
-        `Assoc ["source", `String "board"; "post", Board.post_to_yojson original;
-          "comments", `List []; "pagination", `Assoc ["offset", `Int 0; "returned", `Int 0;
-            "total", `Int 0; "has_more", `Bool false; "next_offset", `Null]]
-      else `Assoc ["source", `String "fusion"; "run_id", `String run_id;
-        "evidence_sha256", `String (Fusion_decision.evidence_sha256 original);
-        "post", Board.post_to_yojson original; "keeper_decisions", `List []] in
       check bool "entire original source including escapes and Unicode survives" true
         (reconstructed = expected);
       let invalid_hash = match cursor with `Assoc fields ->
@@ -348,9 +472,19 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
         | _ -> fail "large source lacks continuation" in
       denied surface name (cursor_args args invalid_hash) "verification_source_unavailable";
       invalid_input surface name (cursor_args args (`Assoc ["source_sha256", `String "bad"; "byte_offset", `Int 0])))
-      ["masc_board_post_get", post_args board, board; "masc_fusion_status", run_args run_id, fusion_post])
+      ["masc_board_post_get", post_args board,
+        `Assoc ["source", `String "board"; "post", Board.post_to_yojson board;
+          "comments", `List []; "pagination", `Assoc ["offset", `Int 0; "returned", `Int 0;
+            "total", `Int 0; "has_more", `Bool false; "next_offset", `Null]];
+       "masc_fusion_status", run_args run_id,
+        `Assoc ["source", `String "fusion"; "run_id", `String run_id;
+          "evidence_sha256", `String (Fusion_decision.evidence_sha256 fusion_post);
+          "post", Board.post_to_yojson fusion_post; "keeper_decisions", `List []];
+       "keeper_tasks_list", task_args task_row.id,
+        `Assoc ["source", `String "task"; "backlog_version", `Int primary.version;
+          "backlog_last_updated", `String primary.last_updated; "task", Masc_domain.task_to_yojson task_row]])
     [task; goal];
-  let private_post = post ~author:"producer" ~visibility:Board.Direct ~meta_json:metadata "@peer Private source" in
+  let private_post = post ~author:"producer" ~visibility:Board.Direct ~post_kind:Board.Human_post ~meta_json:metadata "@peer Private source" in
   let task_private = VAT.create ~config ~producer:"producer"
     ~submitted_evidence:(capture config (Evidence.Task_producer "producer") [board_ref private_post])
     |> require "private snapshot" in
@@ -367,6 +501,8 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
     (continued |> member "representation" |> to_string))
 
 let () = run "Verifier submitted collaboration sources" ["submission", [
+  test_case "Task and Goal submission preserve exact prior committed state" `Quick test_task_sources_preserve_committed_state;
+  test_case "Task source rejects corruption, wrong identity and recovered primary" `Quick test_task_source_failure_boundaries;
   test_case "submission freezes author, comments and expiring Fusion source" `Quick test_submission_freezes_sources;
   test_case "capture authority, corruption and persistence roundtrip" `Quick test_capture_failures_and_corruption;
   test_case "original Fusion advice and separately attributed decisions" `Quick test_fusion_original_and_separate_decision;

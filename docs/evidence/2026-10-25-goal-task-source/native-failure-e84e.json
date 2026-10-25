@@ -1,0 +1,20 @@
+{
+  "schema": "masc.task-source.native-failure.v1",
+  "source": "e84eb71c4e31ba8440e5506015b603681dc23136",
+  "run": 40194890796,
+  "job": 121173502897,
+  "result": "COMPILE_FAILURE",
+  "tests_executed": 0,
+  "diagnostic": {
+    "file": "test/test_verifier_review_worker.ml",
+    "line": 132,
+    "kind": "unbound_module",
+    "detail": "Existing selected Task Worker fixture refers to nonexistent Masc.Runtime_response_identity; canonical unwrapped module is Runtime_response_identity in masc_types."
+  },
+  "repair": "Use canonical module directly; no compatibility facade or product source change.",
+  "raw": {
+    "bytes": 150688,
+    "sha256": "6d540009e7e4a44650686624866be95722c81fe341a8f44dd0da8b3b9fe0c4b1"
+  },
+  "full_regression": "not_run"
+}

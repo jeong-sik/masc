@@ -1,0 +1,701 @@
+diff --git a/config/prompts/keeper.md b/config/prompts/keeper.md
+index 4c4763811b1e76c7b0816bf365b521def65fe5c5..1c7d6226aa8ba905b33f5afd735c1c332d437d51 100644
+--- a/config/prompts/keeper.md
++++ b/config/prompts/keeper.md
+@@ -35,6 +35,8 @@ async Composition Skill은 격리 job 시작·결과 대기·전체 출력 읽
+ 
+ Goal 의 `metric` 에는 판정자가 직접 열어 읽을 수 있는 공개 URL 이나 `board:<post-id>` 를, `target_value` 에는 그 출처에서 읽을 값을 적는다. 측정이 없으면 먼저 기준선을 확인하고, 읽기 실패는 목표 미달이나 빈 Goal 목록으로 바꾸지 않는다. Task 의 승인·병합·테스트 통과만으로 Goal 측정값을 올리지 않는다. 산출물의 실제 결과를 metric 의 출처에서 확인한 뒤 `masc_goal_measure` 로 관측값과 근거를 남긴다. `criterion_revision` 은 `masc_goal_list` 에서 읽고 측정과 같은 기준인지 확인한다. Task 가 끝났어도 Goal 성공조건이 남았으면 그 조건의 구현·실측·수정을 이어간다. 관측값이 `target_value` 에 닿으면 `masc_goal_transition` 의 `request_complete` 로 검증을 요청하며, verifier 판정과 사람의 최종 확인은 각각 별도 단계다. 완료 보고는 `goal_at_recording.phase` 와 이후 실제 전이에 맞추고, `measurement_status="reported_only"`·`completion_effect="unchanged"` 를 검증·완료로 표현하지 않는다.
+ 
++선행 Task 승인이 필요한 계약은 제출할 때 `task:<task-id>`를 증거에 포함한다. 판정자는 제출 시점의 원본 Task 상태·완료 시각·판정 노트를 `keeper_tasks_list`로 읽을 수 있다. 직접 쓴 승인 요약으로 대신하지 않는다. 이 상태는 전체 승인 이력이나 외부 acceptance가 아니며 Goal 성과 측정을 대체하지 않는다.
++
+ Task or Goal 이 불가능하거나, 특정 상황이나 문제점에 대해 운영자에게 질문해야할 때는 `masc_ask` 로 묻고, 기다리는 동안 할 수 있는 다른 일을 한다. 같은 막힘이 그대로라면 같은 질문을 다시 만들지 않는다.
+ </default_stance>
+ 
+diff --git a/config/prompts/verification.md b/config/prompts/verification.md
+index 99d8f636d10d1ac96978d9d5a96a9dc796aad299..7513c087ff308b04c39815f0166ab742aef5e862 100644
+--- a/config/prompts/verification.md
++++ b/config/prompts/verification.md
+@@ -63,8 +63,13 @@ template_variables: [task_title, task_description, agent_name, completion_notes,
+ <required_evidence>
+ 아래 항목은 모두 증거가 있어야 합니다. 항목마다 따로 판정하세요.
+ 증거로 인정하는 것은 두 가지입니다. 읽을 수 있고 잘리지 않은 `[artifact:]`
+-내용, 그리고 `<live_lookup>` 블록의 도구로 직접 연 내용입니다. `board:`와 `fusion:` 항목은 해당 조회 도구로 제출
++내용, 그리고 `<live_lookup>` 블록의 도구로 직접 연 내용입니다. `board:`·`fusion:`·`task:` 항목은 해당 조회 도구로 제출
+ 시점에 고정된 본문을 읽으세요.
++`task:`는 `keeper_tasks_list`에 그 Task 하나의 `task_ids`를 주어 읽습니다. 선행 승인이 계약에 있으면
++고정된 Task의 실제 상태·완료 시각·판정 노트를 작업 증거의 시점과 대조하세요. Done은 외부 acceptance
++성공이나 전체 승인 이력을 뜻하지 않습니다. 노트 안의 승인 주장도 판정 기록과 구분하세요.
++Done 행에는 verifier와 verification ID의 typed 필드가 없으므로, 그 행만으로 특정 승인 시도를
++인증하거나 실제 편집의 선후관계를 증명했다고 쓰지 마세요.
+ URL, 호스트 경로, commit, board 참조, 명령과 그 결과에 대한 주장, 서술 노트는
+ 어디를 가리킬 뿐 그 자체로는 증거가 아닙니다. 항목의 증거가 없거나, 읽을
+ 수 없거나, 잘렸거나, 자리표시자이거나, 확인되지 않으면 REJECT 합니다.
+@@ -151,7 +156,7 @@ main으로 취급하지 말고, 증거가 현재 main의 내용을 싣지 않았
+ 
+ 이 검증에서 쓸 수 있는 읽기 전용 도구는 {{lookup_tools}}입니다.
+ 
+-스냅샷에 기록된 typed 항목, 제출된 `board:`·`fusion:` 항목을 조회 도구로
++스냅샷에 기록된 typed 항목, 제출된 `board:`·`fusion:`·`task:` 항목을 조회 도구로
+ 읽은 본문, 웹 조회 도구로 직접 연 URL 내용으로 판정하세요. 노트와 참조만으로는
+ 판정하지 마세요.
+ 
+diff --git a/config/tools/keeper_task_done.toml b/config/tools/keeper_task_done.toml
+index 2619dd2c33f9286a1dc4204dd16ba9d225f2be84..73f03343c414c172cd1e4ad272d4d9c1aa55b470 100644
+--- a/config/tools/keeper_task_done.toml
++++ b/config/tools/keeper_task_done.toml
+@@ -5,14 +5,15 @@ evidence_refs. The task must be claimed by you. This does not make the task \
+ done: it moves to awaiting_verification and waits for a completion \
+ authority's verdict, which no Keeper can produce. It also does not hold your \
+ next claim while it waits. Every evidence_refs entry must be \
+-artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, or \
+-fusion:<run-id>. Artifact paths include the checkout prefix: a file at \
++artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, \
++fusion:<run-id>, or task:<task-id>. Artifact paths include the checkout prefix: a file at \
+ repo/evidence/build.log is artifact:repo/evidence/build.log even with Execute \
+ cwd=repo. The response evidence_capture names this saved request and reports \
+ unreadable or truncated artifacts; submission success is not capture success. \
+ Files and collaboration sources are captured at submission; \
+-Board/Fusion reads during review use those frozen bytes, including comments \
+-and original Fusion producer identity. A note is narrative, not captured proof. \
++Board/Fusion/Task reads during review use those frozen bytes, including comments, \
++original Fusion producer identity and primary Task completion state. Task state \
++is not complete approval history or external acceptance. A note is narrative, not captured proof. \
+ Pure-placeholder results ('done', 'ok', etc.) are rejected."""
+ 
+ [[params]]
+@@ -38,7 +39,7 @@ min_items = 1
+ description = """
+ Trusted references substantiating completion: artifact:<producer-root-relative-path> \
+ for files, board:<post-id> for a full thread, fusion:<run-id> for original advice \
+-and recorded decisions, or note:<text> for narrative. Collaboration capture must \
++and recorded decisions, task:<task-id> for exact committed Task state, or note:<text> for narrative. Collaboration capture must \
+ succeed before submission commits; later edits, author changes and expiry do not \
+ change the reviewer snapshot. A commit or URL in a note must still be inspected."""
+ 
+@@ -55,7 +56,7 @@ short_description = "Submit your owned task for verification with a result summa
+ when_to_use = "Use when the current keeper has finished an owned task and can cite concrete evidence_refs."
+ key_constraints = [
+   "Caller must own the task; no tool overrides task ownership.",
+-  "Use artifact:, board:, fusion:, or note: references; the verifier judges their actual contents.",
++  "Use artifact:, board:, fusion:, task:, or note: references; the verifier judges their actual contents.",
+   "The task moves to awaiting_verification, not done. Only a completion authority commits the verdict.",
+ ]
+ details_markdown = "Issues submit_for_verification. The task waits for an operator or auto-judge verdict, which no Keeper can produce; it does not hold your next claim while it waits, and cancelling it discards the evidence you just submitted. For PR-bearing work, include the PR URL or artifact reference in evidence_refs."
+diff --git a/config/tools/keeper_task_release.toml b/config/tools/keeper_task_release.toml
+index f3880ef2cce9e908af11d473b81333ffe1c39f60..ad24e7113eec90eb2e5dedfefbd269c019eea4ff 100644
+--- a/config/tools/keeper_task_release.toml
++++ b/config/tools/keeper_task_release.toml
+@@ -52,8 +52,8 @@ type = "array"
+ items = { type = "string", min_length = 1 }
+ description = """
+ Optional sources to retain in the Task handoff for the next owner. Use \
+-artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, or \
+-fusion:<run-id>. These references preserve context; they do not copy a \
++artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, \
++fusion:<run-id>, or task:<task-id>. These references preserve context; they do not copy a \
+ peer's sandbox file. Export binary files with keeper_artifact_transfer \
+ and pass the exported objects through masc_keeper_delegate artifacts."""
+ 
+diff --git a/config/tools/masc_goal_measure.toml b/config/tools/masc_goal_measure.toml
+index 5234fadf18591bf116d1d0d83d32b33f6e87d923..339f5e1826123d9058d94cde7e67f308aff5129c 100644
+--- a/config/tools/masc_goal_measure.toml
++++ b/config/tools/masc_goal_measure.toml
+@@ -32,4 +32,5 @@ type = "string"
+ required = true
+ description = """
+ An Evidence Reference: artifact:<producer-root-relative-path>, note:<text>, \
+-board:<post-id>, or fusion:<run-id>. Any other form is rejected."""
++board:<post-id>, fusion:<run-id>, or task:<task-id>. A Task row does not establish \
++external acceptance or the Goal measurement. Any other form is rejected."""
+diff --git a/config/tools/masc_goal_transition.toml b/config/tools/masc_goal_transition.toml
+index 5fbdfd2c87b622d12837f76009d04e7a19e69674..498eb4e5018bba4f2dd8ba37284f026856c687cc 100644
+--- a/config/tools/masc_goal_transition.toml
++++ b/config/tools/masc_goal_transition.toml
+@@ -36,4 +36,4 @@ description = "Required for drop: why the Goal is dropped. It becomes the review
+ name = "evidence_refs"
+ type = "array"
+ items = { type = "string" }
+-description = "For request_complete: explicit board:<post_id> or fusion:<run_id> references. Their exact source is captured with this proof request. Omit on retry to keep the submitted snapshot; supplying changed evidence creates a new request."
++description = "For request_complete: explicit board:<post_id>, fusion:<run_id> or task:<task_id> references. Their exact source is captured with this proof request. Task lifecycle state is not complete approval history or external acceptance. Omit on retry to keep the submitted snapshot; supplying changed evidence creates a new request."
+diff --git a/config/tools/masc_transition.toml b/config/tools/masc_transition.toml
+index f185b515190fd73ea7fb62cbafc65a5ea60fb666..b65e77d7c3dabf5ad60ea170ef4425919a9633fa 100644
+--- a/config/tools/masc_transition.toml
++++ b/config/tools/masc_transition.toml
+@@ -67,7 +67,9 @@ actions (submit_for_verification / done / release / cancel). On \
+ action='submit_for_verification', every 'evidence_refs' entry must use \
+ 'artifact:<producer-root-relative-path>' for a bounded file snapshot or \
+ 'note:<text>' for narrative evidence, 'board:<post-id>' for a frozen thread, or \
+-'fusion:<run-id>' for frozen advice and decisions. A public URL inside a note (a PR, a CI \
++'fusion:<run-id>' for frozen advice and decisions, or 'task:<task-id>' for exact \
++primary Task state at submission. A Task row is not complete approval history or \
++external acceptance. A public URL inside a note (a PR, a CI \
+ run) can be fetched live by the verifier itself; materialize volatile \
+ contents as an artifact when they must be pinned at submit time. Commits and \
+ traces are not fetched. Bare relative paths and absolute host paths are \
+@@ -114,6 +116,6 @@ type = "array"
+ items = { type = "string", min_length = 1 }
+ description = """
+ Typed verifier evidence. Use artifact:<producer-root-relative-path> for \
+-files, board:<post-id> or fusion:<run-id> for submission-bound collaboration \
++files, board:<post-id>, fusion:<run-id> or task:<task-id> for submission-bound collaboration \
+ snapshots, or note:<text> for narrative, commit, trace, receipt, or URL evidence. \
+ Bare and absolute paths are invalid."""
+diff --git a/lib/verification_authority_tools.ml b/lib/verification_authority_tools.ml
+index 7982b70c317c84bb640969d0849a0e0e5ba26d5b..872f4163ad33fa3fa6a037eb4b88922b1d266b63 100644
+--- a/lib/verification_authority_tools.ml
++++ b/lib/verification_authority_tools.ml
+@@ -10,6 +10,7 @@ type tool =
+   | Web_fetch
+   | Board_source
+   | Fusion_source
++  | Task_source
+ 
+ let tool_name = function
+   | Read_file -> "tool_read_file"
+@@ -17,9 +18,18 @@ let tool_name = function
+   | Web_fetch -> "masc_web_fetch"
+   | Board_source -> "masc_board_post_get"
+   | Fusion_source -> "masc_fusion_status"
++  | Task_source -> "keeper_tasks_list"
+ ;;
+ 
+-let all_tools = [ Read_file; Search_files; Web_fetch; Board_source; Fusion_source ]
++let source_tools submitted_evidence =
++  let has_task_source = List.exists (function
++    | Workspace_verification_store.Evidence_collaboration {reference; _} ->
++      (match Workspace_verification_store.collaboration_reference reference with
++       | Some (Workspace_verification_store.Task_source, _) -> true
++       | Some ((Workspace_verification_store.Board_source | Workspace_verification_store.Fusion_source), _) | None -> false)
++    | Evidence_note _ | Evidence_artifact _ | Evidence_invalid_reference
++    | Evidence_artifact_unreadable _ | Evidence_artifact_binary _ -> false) submitted_evidence in
++  [Board_source; Fusion_source] @ if has_task_source then [Task_source] else []
+ 
+ type t =
+   { ownership_root : string
+@@ -58,6 +68,13 @@ let exact_fusion_run_schema =
+     ]
+ ;;
+ 
++let exact_task_source_schema =
++  `Assoc ["type", `String "object";
++    "properties", `Assoc ["task_ids", `Assoc ["type", `String "array";
++      "items", `Assoc ["type", `String "string"; "minLength", `Int 1];
++      "minItems", `Int 1; "maxItems", `Int 1]];
++    "required", `List [`String "task_ids"]; "additionalProperties", `Bool false]
++
+ let source_pagination_schema = function
+   | `Assoc fields ->
+     let open Result.Syntax in
+@@ -84,6 +101,9 @@ let descriptor_of_tool tool =
+      | Board_source ->
+        Result.map (fun input_schema -> tool, { descriptor with input_schema })
+          (source_pagination_schema descriptor.input_schema)
++     | Task_source ->
++       Result.map (fun input_schema -> tool, { descriptor with input_schema })
++         (source_pagination_schema exact_task_source_schema)
+      | Read_file | Search_files | Web_fetch -> Ok (tool, descriptor))
+   | [] ->
+     Error
+@@ -118,9 +138,9 @@ let create ~config ~producer ~submitted_evidence =
+   in
+   let* tools =
+     resolve_tools
+-      (match producer_scope with
+-       | Keeper_producer _ -> all_tools
+-       | Workspace_producer -> [ Read_file; Web_fetch; Board_source; Fusion_source ])
++      ((match producer_scope with
++        | Keeper_producer _ -> [Read_file; Search_files; Web_fetch]
++        | Workspace_producer -> [Read_file; Web_fetch]) @ source_tools submitted_evidence)
+   in
+   let* ownership_root =
+     match producer_scope with
+@@ -163,7 +183,7 @@ let create ~config ~producer ~submitted_evidence =
+    the checkouts under them. *)
+ let create_goal_proof ~(config : Workspace.config) ~submitted_evidence =
+   let open Result.Syntax in
+-  let* tools = resolve_tools [ Read_file; Web_fetch; Board_source; Fusion_source ] in
++  let* tools = resolve_tools ([Read_file; Web_fetch] @ source_tools submitted_evidence) in
+   let project_root =
+     Workspace_verification_store.project_root_of_base_path config.base_path
+   in
+@@ -394,6 +414,8 @@ let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.
+          "Read a Board post and its paginated comments frozen in this verification submission, including identities and full metadata. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. Task reviews can read shared posts and their producer's own Direct posts; Goal reviews read shared workspace posts only. Read-only: no posting, voting or adoption."
+        | Fusion_source ->
+          "Read Fusion panel/judge/source-context evidence frozen in this verification submission and separately recorded Keeper decisions by required exact run_id. Task reviews read the actual producer's Fusion source; Goal reviews read shared workspace Fusion source. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. This does not run Fusion or adopt advice."
++       | Task_source ->
++         "Read exactly one Task frozen by an explicit task:<id> reference in this verification submission. Supply task_ids with that one id. Includes the canonical Task state, completion timestamp and notes plus primary backlog revision; no live listing, recovery snapshot or other Task is read. A Done row is committed state, not complete approval history or external acceptance. Large sources return source_json_page fragments; follow next_cursor to null and concatenate the exact JSON. Read-only."
+        | Search_files | Web_fetch -> descriptor.description)
+   ; input_schema = descriptor.input_schema
+   }
+@@ -505,6 +527,8 @@ let run t tool ~args =
+     collaboration_read Verification_collaboration_evidence.read_board
+   | (Keeper_producer _ | Workspace_producer), Fusion_source ->
+     collaboration_read Verification_collaboration_evidence.read_fusion
++  | (Keeper_producer _ | Workspace_producer), Task_source ->
++    collaboration_read Verification_collaboration_evidence.read_task
+   | (Keeper_producer _ | Workspace_producer), Web_fetch ->
+     Tool_misc_web_fetch.handle
+       ~tool_name:(tool_name Web_fetch)
+@@ -640,7 +664,7 @@ let media_result t tool ~name ~args ~start_time =
+                    ; Llm_provider.Types.image_block ~media_type
+                        ~data:(Base64.encode_exn bytes) () ] ()) ))
+      | _ -> None)
+-  | (Read_file | Search_files | Web_fetch | Board_source | Fusion_source), _ -> None
++  | (Read_file | Search_files | Web_fetch | Board_source | Fusion_source | Task_source), _ -> None
+ ;;
+ 
+ let dispatch t ~name ~args =
+diff --git a/lib/verification_authority_tools.mli b/lib/verification_authority_tools.mli
+index ecc5fbfe5d438e4bc2985ed615310ce52301e260..80d71c83cb925c3e84bac6eb722d318eb35bbf12 100644
+--- a/lib/verification_authority_tools.mli
++++ b/lib/verification_authority_tools.mli
+@@ -8,10 +8,14 @@
+     refused, validated redirects, bounded extraction — live in the tool. Descriptor registry drift and unreadable
+     producer state reject surface construction. Every dispatched call is
+     validated and translated by the same descriptor that was advertised.
+-    Exact Board/Fusion source reads are also available. Task authority uses
++    Exact Board/Fusion/Task source reads are also available. Task authority uses
+     the actual producer identity; Goal authority permits shared workspace
+     records. Direct posts are readable only by their author via Task review,
+     because immutable target readership is not available at this boundary.
++    Explicit Task sources use a narrowed exact-single-Task keeper_tasks_list
++    descriptor over immutable submitted bytes, never a live backlog listing.
++    That descriptor is offered only when the submission contains a Task source;
++    Task-free retained originals keep their existing lookup authority.
+     Neither surface grants general access to the MASC storage directory.
+     Mutating execution is absent: a verifier has no turn continuation that
+     could resume an approved Gate effect. *)
+diff --git a/lib/verification_collaboration_evidence.ml b/lib/verification_collaboration_evidence.ml
+index 8fc355af13fcca792ba406ef3164d1876d924507..d7da5c34d1630d88ef5a92ae890e0a3202891a7e 100644
+--- a/lib/verification_collaboration_evidence.ml
++++ b/lib/verification_collaboration_evidence.ml
+@@ -135,18 +135,48 @@ let capture_fusion ~config ~authority ~run_id =
+     ; "keeper_decisions", `List decisions ])
+ 
+ 
++(* A Task's primary row is the domain commit, unlike bounded run observations
++   or acknowledged outbox rows. Keep its actual state and provenance; do not
++   synthesize an approval verdict or pretend this is complete event history.
++   The submit path already holds its backlog lease: one strict read needs no
++   second acquisition, and Goal capture gets one atomic primary observation. *)
++let capture_task ~(backlog : Masc_domain.backlog) ~task_id =
++  match List.filter (fun (task : Masc_domain.task) -> task.id = task_id) backlog.tasks with
++  | [] -> Error (Source_unavailable
++      "referenced Task was not found in the primary backlog; no approval history or deletion is inferred")
++  | [task] -> Ok (`Assoc ["source", `String "task";
++      "backlog_version", `Int backlog.version;
++      "backlog_last_updated", `String backlog.last_updated;
++      "task", Masc_domain.task_to_yojson task])
++  | _ -> Error (Storage_failed "primary backlog contains duplicate referenced Task identities")
++
+ (* Captured once before the request commit; never capture on verifier read. *)
+ let capture ~config ~authority ~references = protect (fun () ->
++  let references = List.sort_uniq String.compare references in
++  (* Goal capture does not hold the backlog lease. Reuse one complete primary
++     observation so its explicit Task references cannot mix commit revisions. *)
++  let* primary =
++    if List.exists (fun reference -> match Store.collaboration_reference reference with
++      | Some (Store.Task_source, _) -> true
++      | Some ((Store.Board_source | Store.Fusion_source), _) | None -> false) references
++    then Workspace.read_backlog_r config
++      |> Result.map Option.some
++      |> Result.map_error (fun detail -> Storage_failed detail)
++    else Ok None in
+   List.fold_left (fun result reference ->
+     let* items = result in
+     let* source = match Store.collaboration_reference reference with
+       | Some (Store.Board_source, post_id) -> capture_board ~config ~authority ~post_id
+       | Some (Store.Fusion_source, run_id) -> capture_fusion ~config ~authority ~run_id
+-      | None -> Error (Invalid_request "expected board:<post-id> or fusion:<run-id>") in
++      | Some (Store.Task_source, task_id) ->
++        (match primary with
++         | Some backlog -> capture_task ~backlog ~task_id
++         | None -> Error (Storage_failed "Task reference has no primary capture observation"))
++      | None -> Error (Invalid_request "expected board:<post-id>, fusion:<run-id> or task:<task-id>") in
+     let content = Yojson.Safe.to_string source in
+     let sha256 = Digestif.SHA256.(digest_string content |> to_hex) in
+     Ok (items @ [Store.Evidence_collaboration {reference; content; sha256}]))
+-    (Ok []) (List.sort_uniq String.compare references))
++    (Ok []) references)
+ 
+ let submitted_source ~submitted_evidence reference =
+   let matches = List.filter_map (function
+@@ -210,3 +240,20 @@ let read_fusion ~submitted_evidence ~args = protect (fun () ->
+   | `Assoc fields when List.assoc_opt "source" fields = Some (`String "fusion")
+       && List.assoc_opt "run_id" fields = Some (`String run_id) -> page_source ~args source
+   | _ -> Error (Storage_failed "invalid submitted Fusion snapshot"))
++
++let read_task ~submitted_evidence ~args = protect (fun () ->
++  let* task_id = match args with
++    | `Assoc fields ->
++      (match List.assoc_opt "task_ids" fields with
++       | Some (`List [`String id]) when id <> "" && String.trim id = id -> Ok id
++       | Some _ | None -> Error (Invalid_request "task_ids must name exactly one Task source"))
++    | _ -> Error (Invalid_request "task_ids must name exactly one Task source") in
++  let* source = submitted_source ~submitted_evidence ("task:" ^ task_id) in
++  let* () = match source with
++    | `Assoc ["source", `String "task"; "backlog_version", `Int version;
++        "backlog_last_updated", `String _; "task", task_json] when version > 0 ->
++      (match Masc_domain.task_of_yojson task_json with
++       | Ok task when task.id = task_id -> Ok ()
++       | Ok _ | Error _ -> Error (Storage_failed "submitted Task identity does not match reference"))
++    | _ -> Error (Storage_failed "invalid submitted Task snapshot") in
++  page_source ~args source)
+diff --git a/lib/verification_collaboration_evidence.mli b/lib/verification_collaboration_evidence.mli
+index 4484e2f3ee9e40c648a5b1140fd3302eff485f89..46009861fc76bd6512d7eb1423a633f23123c36c 100644
+--- a/lib/verification_collaboration_evidence.mli
++++ b/lib/verification_collaboration_evidence.mli
+@@ -19,8 +19,20 @@ val error_to_string : error -> string
+ val capture : config:Workspace.config -> authority:authority -> references:string list ->
+   (Workspace_verification_store.submitted_evidence_item list, error) result
+ (** Capture explicit collaboration references before the submission commits.
+-    Captured items carry all source bytes and ownership; reads never consult live Board state. *)
++    All Task references in one capture use the same strict primary backlog
++    observation. Captured items carry all source bytes and ownership; reads
++    never consult live Board or Task state. *)
+ val read_board : submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> args:Yojson.Safe.t ->
+   (Yojson.Safe.t, error) result
+ val read_fusion : submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> args:Yojson.Safe.t ->
+   (Yojson.Safe.t, error) result
++val read_task : submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> args:Yojson.Safe.t ->
++  (Yojson.Safe.t, error) result
++(** [task_ids] must name exactly one explicitly submitted [task:<id>]. Capture
++    uses the strict primary backlog and retains its revision, last update and
++    full canonical Task row. Read never consults the current backlog. The row
++    describes committed state, including completion time and notes; it is not
++    a complete approval history or evidence of external acceptance. A Done row
++    does not have typed verifier/verification-id fields; its notes remain
++    attributed Task content, not a reconstructed approval certificate. Shared
++    Task records are available to both Task and Goal review authority. *)
+diff --git a/lib/workspace/workspace_verification_snapshot.ml b/lib/workspace/workspace_verification_snapshot.ml
+index 10b7ee5905c2a111c26a49558c0fffd9c8e2e8bb..8d03be09f6cdd566637c2f739ddb3814f1d2cd46 100644
+--- a/lib/workspace/workspace_verification_snapshot.ml
++++ b/lib/workspace/workspace_verification_snapshot.ml
+@@ -17,7 +17,7 @@ type evidence_read_failure =
+   | Evidence_changed_during_read
+   | Evidence_read_error of string
+ 
+-type collaboration_kind = Board_source | Fusion_source
++type collaboration_kind = Board_source | Fusion_source | Task_source
+ 
+ type submitted_evidence_item =
+   | Evidence_collaboration of { reference : string; content : string; sha256 : string }
+@@ -110,7 +110,10 @@ let collaboration_reference reference =
+     else None in
+   match parse "board:" Board_source with
+   | Some _ as value -> value
+-  | None -> parse "fusion:" Fusion_source
++  | None ->
++    (match parse "fusion:" Fusion_source with
++     | Some _ as value -> value
++     | None -> parse "task:" Task_source)
+ 
+ let collaboration_metadata ~reference ~content ~sha256 =
+   `Assoc ["kind", `String "collaboration"; "reference", `String reference;
+diff --git a/lib/workspace/workspace_verification_snapshot.mli b/lib/workspace/workspace_verification_snapshot.mli
+index 2ff321691125506a9af868b6e2ab6a71a634188c..76eefe70f9a4cbbba6b7c691e4daab678153004f 100644
+--- a/lib/workspace/workspace_verification_snapshot.mli
++++ b/lib/workspace/workspace_verification_snapshot.mli
+@@ -17,7 +17,7 @@ type evidence_read_failure =
+   | Evidence_changed_during_read
+   | Evidence_read_error of string
+ 
+-type collaboration_kind = Board_source | Fusion_source
++type collaboration_kind = Board_source | Fusion_source | Task_source
+ 
+ type submitted_evidence_item =
+   | Evidence_collaboration of { reference : string; content : string; sha256 : string }
+diff --git a/lib/workspace/workspace_verification_store.ml b/lib/workspace/workspace_verification_store.ml
+index d5c1cc78ed63a10e4e060f317333c44c78a3f842..436af10cccee606abd4776046b1d9c951ff1f925 100644
+--- a/lib/workspace/workspace_verification_store.ml
++++ b/lib/workspace/workspace_verification_store.ml
+@@ -179,7 +179,7 @@ let artifact_reference_form =
+ ;;
+ 
+ let note_reference_form = note_reference_prefix ^ "<text>"
+-let resolvable_reference_forms = [ artifact_reference_form; note_reference_form; "board:<post-id>"; "fusion:<run-id>" ]
++let resolvable_reference_forms = [ artifact_reference_form; note_reference_form; "board:<post-id>"; "fusion:<run-id>"; "task:<task-id>" ]
+ 
+ let valid_producer_relative_path path =
+   Filename.is_relative path
+diff --git a/lib/workspace/workspace_verification_store.mli b/lib/workspace/workspace_verification_store.mli
+index 71a7436a08ff5218799bfeeecb8e5be5ccf10fed..cd726df97843f0d8efa2b01a0737d129681b0455 100644
+--- a/lib/workspace/workspace_verification_store.mli
++++ b/lib/workspace/workspace_verification_store.mli
+@@ -14,7 +14,7 @@ type evidence_read_failure =
+   | Evidence_changed_during_read
+   | Evidence_read_error of string
+ 
+-type collaboration_kind = Board_source | Fusion_source
++type collaboration_kind = Board_source | Fusion_source | Task_source
+ 
+ type submitted_evidence_item =
+   | Evidence_collaboration of { reference : string; content : string; sha256 : string }
+diff --git a/lib/workspace_goals.ml b/lib/workspace_goals.ml
+index a646e83f9addb383412dbb730898e58e770b30cd..eeb3414a94845f8b76dd1c8199d39d260570a4f5 100644
+--- a/lib/workspace_goals.ml
++++ b/lib/workspace_goals.ml
+@@ -640,7 +640,7 @@ let parse_goal_evidence_refs args =
+         | `String reference :: rest ->
+             (match Workspace_verification_store.collaboration_reference reference with
+              | Some _ -> collect (reference :: acc) rest
+-             | None -> Error "evidence_refs accepts explicit board: or fusion: references")
++             | None -> Error "evidence_refs accepts explicit board:, fusion: or task: references")
+         | _ -> Error "evidence_refs must contain strings" in
+       collect [] rows
+   | _ -> Error "evidence_refs must be a list"
+diff --git a/lib/workspace_goals.mli b/lib/workspace_goals.mli
+index 82fe38c6204c640fd2e8be8f7851ef2e109bb182..3e02ab85cfc0a65265b4159cca19b935ca71582e 100644
+--- a/lib/workspace_goals.mli
++++ b/lib/workspace_goals.mli
+@@ -150,7 +150,9 @@ type proof_request_error =
+ 
+ val request_current_proof : ?evidence_refs:string list -> Workspace_utils_backend_setup.config -> goal_id:string ->
+   (Goal_store.goal * Goal_verification.record, proof_request_error) result
+-(** Bind a proof request and Verifying phase to the same current criterion. *)
++(** Bind a proof request and Verifying phase to the same current criterion.
++    Explicit Board/Fusion/Task source references are captured with the request;
++    omitting references on retry retains the same immutable submitted bytes. *)
+ 
+ val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
+   (bool, Goal_store.write_error) result
+diff --git a/test/test_goal_verifier_original.ml b/test/test_goal_verifier_original.ml
+index 5536b6673db740d38e96c362ec5972ee5619dae3..664650d20c4c5913c1ce671dec77a00cbc21e7da 100644
+--- a/test/test_goal_verifier_original.ml
++++ b/test/test_goal_verifier_original.ml
+@@ -293,7 +293,43 @@ let test_unavailable_report_keeps_original_and_lookup_authority () =
+     check_prompt_observation "retained original still has its captured report"
+       (get (V.of_json (V.to_json prepared))) (Ok (Some row)))
+ 
++let test_task_capability_is_submission_bound () = with_workspace (fun config _root ->
++  let without_task_id = pending config in
++  let without_task = authority config without_task_id in
++  let retained_without_task = original without_task in
++  let names authority = (A.goal_review_lookup authority).schemas
++    |> List.map (fun (schema : Types_core.tool_schema) -> schema.name) in
++  Alcotest.(check (list string)) "Task-free authority retains the existing schema surface"
++    ["tool_read_file";"masc_web_fetch";"masc_board_post_get";"masc_fusion_status"] (names without_task);
++  ignore (Workspace.add_task config ~title:"Exact Task observation" ~priority:1 ~description:"Original Task body");
++  let backlog = get (Workspace.read_backlog_r config) in
++  let task = List.find (fun (task : Masc_domain.task) -> task.title="Exact Task observation") backlog.tasks in
++  let items = Verification_collaboration_evidence.capture ~config
++    ~authority:Verification_collaboration_evidence.Goal_workspace ~references:["task:" ^ task.id]
++    |> Result.map_error Verification_collaboration_evidence.error_to_string |> get in
++  let with_task_id = pending ~items config in
++  let with_task = authority config with_task_id in
++  let retained_with_task = original with_task in
++  Alcotest.(check bool) "explicit Task source adds only its read capability" true
++    (names with_task = names without_task @ ["keeper_tasks_list"]);
++  Workspace.write_backlog config {backlog with tasks=List.map (fun (row : Masc_domain.task) ->
++    if row.id=task.id then {row with title="Changed live Task"} else row) backlog.tasks};
++  List.iter (fun (id,prepared) ->
++    let restored = get (V.of_json (V.to_json prepared)) in
++    Alcotest.(check bool) "retained original matches after unrelated live Task changes" true
++      (V.matches_authority restored (authority config id)))
++    [without_task_id,retained_without_task;with_task_id,retained_with_task];
++  let result = (A.goal_review_lookup (authority config with_task_id)).dispatch
++    ~name:"keeper_tasks_list" ~args:(`Assoc ["task_ids",`List [`String task.id]]) in
++  match result with
++  | Tool_result.Completed _ ->
++    let source = Tool_result.message result |> Yojson.Safe.from_string in
++    Alcotest.(check bool) "restored authority reads the submitted original Task" true
++      (Yojson.Safe.Util.member "task" source = Masc_domain.task_to_yojson task)
++  | Tool_result.Failed _ | Tool_result.Deferred _ -> Alcotest.fail (Tool_result.message result))
++
+ let () = Alcotest.run "goal verifier original" ["host preparation", [
++  Alcotest.test_case "Task capability follows submitted evidence and retained authority" `Quick test_task_capability_is_submission_bound;
+   Alcotest.test_case "fresh Goal proof needs no Keeper or manual shared root" `Quick test_fresh_goal_without_keeper_or_manual_playground;
+   Alcotest.test_case "retained prompt and actual shared-root visual lookup" `Quick test_stored_goal_preparation_and_actual_visual_lookup;
+   Alcotest.test_case "exact subject, evidence and workspace authority" `Quick test_other_subject_evidence_and_workspace_refuse;
+diff --git a/test/test_verification_collaboration_evidence.ml b/test/test_verification_collaboration_evidence.ml
+index 23602815d6ee5f9304ecb2fe7fcf0173818bece9..61987e1a24dae199e1c73d44bba050be229e7eb9 100644
+--- a/test/test_verification_collaboration_evidence.ml
++++ b/test/test_verification_collaboration_evidence.ml
+@@ -98,6 +98,131 @@ let restored items =
+   | `List rows -> List.map (fun row -> Store.submitted_evidence_item_of_yojson row |> require "persisted item") rows
+   | _ -> fail "snapshot array"
+ 
++let new_task config ~title ~description =
++  ignore (Workspace.add_task config ~title ~priority:1 ~description);
++  let backlog = Workspace.read_backlog_r config |> require "primary backlog" in
++  List.find (fun (task : Masc_domain.task) -> task.title = title) backlog.tasks
++
++let task_args id = `Assoc ["task_ids", `List [`String id]]
++
++let test_task_sources_preserve_committed_state () = with_fixture (fun config ->
++  let open Yojson.Safe.Util in
++  let prior = new_task config ~title:"Prior approval" ~description:"Produce the first increment" in
++  List.iter (fun action -> ignore (Workspace.transition_task_r config ~agent_name:"producer"
++    ~task_id:prior.id ~action ~notes:"First increment evidence" () |> require "prior transition"))
++    [Masc_domain.Claim; Masc_domain.Start; Masc_domain.Submit_for_verification];
++  let pending = Workspace.read_backlog_r config |> require "pending primary" in
++  let row = List.find (fun (task : Masc_domain.task) -> task.id = prior.id) pending.tasks in
++  let verification_id = match row.task_status with
++    | Masc_domain.AwaitingVerification {verification_id; _} -> verification_id
++    | _ -> fail "prior Task did not await verification" in
++  let reference = "task:" ^ prior.id in
++  let pending_task, pending_goal = surfaces config [reference] in
++  ignore (Workspace.commit_verdict_r config
++    ~authority:(Masc_domain.Human_operator {operator_id="fixture-operator"})
++    ~verdict:Masc_domain.Verdict_approved ~task_id:prior.id ~verification_id
++    ~notes:"Independent first-increment approval" () |> require "prior verdict commit");
++  List.iter (fun surface ->
++    let source = read surface "keeper_tasks_list" (task_args prior.id) in
++    check string "later approval cannot change the pending snapshot" "awaiting_verification"
++      (source |> member "task" |> member "status" |> to_string);
++    check string "pending request identity remains exact" verification_id
++      (source |> member "task" |> member "verification_id" |> to_string)) [pending_task;pending_goal];
++  let next = new_task config ~title:"Next increment" ~description:"Use prior approval evidence" in
++  check bool "goalless Task remains valid" true (Option.is_none next.contract);
++  let primary = Workspace.read_backlog_r config |> require "multi-Task primary" in
++  let batched = capture config Evidence.Goal_workspace [reference; "task:" ^ next.id] in
++  let batched_surface = VAT.create_goal_proof ~config ~submitted_evidence:batched
++    |> require "multi-Task source surface" in
++  List.iter (fun id ->
++    let source = read batched_surface "keeper_tasks_list" (task_args id) in
++    check int "one batch retains one primary revision" primary.version
++      (source |> member "backlog_version" |> to_int);
++    check string "one batch retains one primary timestamp" primary.last_updated
++      (source |> member "backlog_last_updated" |> to_string)) [prior.id;next.id];
++  Verification_protocol.create_submit_request ~config ~task:next ~assignee:"producer"
++    ~verification_id:"next-with-prior-source"
++    ~claim:(Masc_domain.Completion_evidence {evidence_refs=[reference]}) |> require "next submission";
++  let request = Verification.load_request config.base_path "next-with-prior-source" |> require "next request" in
++  let items = match member "submitted_evidence" request.output with
++    | `List rows -> List.map (fun row -> Store.submitted_evidence_item_of_yojson row |> require "Task evidence decode") rows
++    | _ -> fail "Task source was not captured" in
++  let task_surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:(restored items)
++    |> require "Task source surface" in
++  let schema = List.find (fun (schema : Types_core.tool_schema) -> schema.name="keeper_tasks_list")
++    (VAT.schemas task_surface) in
++  check (list string) "Task source requires exact ids" ["task_ids"]
++    (schema.input_schema |> member "required" |> to_list |> List.map to_string);
++  check (list string) "Task source has no live listing filters" ["cursor";"task_ids"]
++    (schema.input_schema |> member "properties" |> keys);
++  let goal, _ = Goal_store.upsert_goal config ~title:"Ordered increments" ~metric:"source" ~target_value:"1" ()
++    |> require "Goal" in
++  let ctx : Tool_workspace.context = {config;agent_name="producer"} in
++  let result = Tool_workspace.dispatch ctx ~name:"masc_goal_transition"
++    ~args:(`Assoc ["goal_id",`String goal.id;"action",`String "request_complete";
++      "evidence_refs",`List [`String reference]]) |> Option.get in
++  (match result with Tool_result.Completed _ -> () | _ -> fail (Tool_result.message result));
++  let record = Goal_verification.get_record_authoritative config ~goal_id:goal.id
++    |> require "Goal source record" |> Option.get in
++  let goal_surface = VAT.create_goal_proof ~config ~submitted_evidence:(restored record.submitted_evidence)
++    |> require "Goal source surface" in
++  let committed = Workspace.read_backlog_r config |> require "committed primary" in
++  let original = List.find (fun (task : Masc_domain.task) -> task.id = prior.id) committed.tasks in
++  let original_json = Masc_domain.task_to_yojson original in
++  List.iter (fun surface ->
++    let source = read surface "keeper_tasks_list" (task_args prior.id) in
++    check bool "full committed state, time and notes preserved" true (member "task" source = original_json);
++    check int "primary revision retained" committed.version (source |> member "backlog_version" |> to_int);
++    check string "primary display timestamp retained" committed.last_updated
++      (source |> member "backlog_last_updated" |> to_string);
++    denied surface "keeper_tasks_list" (task_args next.id) "verification_source_access_denied";
++    invalid_input surface "keeper_tasks_list" (`Assoc []);
++    invalid_input surface "keeper_tasks_list" (`Assoc ["task_ids",`List [`String prior.id;`String next.id]]);
++    invalid_input surface "keeper_tasks_list" (`Assoc ["task_ids",`List [`String prior.id];"status",`String "done"]))
++    [task_surface;goal_surface];
++  let changed = {committed with tasks=List.map (fun (task : Masc_domain.task) ->
++    if task.id=prior.id then {task with title="Changed after submission"} else task) committed.tasks} in
++  Workspace.write_backlog config changed;
++  ignore (Workspace.delete_task_r config ~task_id:prior.id |> require "delete live prior Task");
++  List.iter (fun surface ->
++    let source = read surface "keeper_tasks_list" (task_args prior.id) in
++    check bool "edit and deletion cannot replace submitted state" true (member "task" source=original_json))
++    [task_surface;goal_surface])
++
++let test_task_source_failure_boundaries () = with_fixture (fun config ->
++  let task = new_task config ~title:"Task source integrity" ~description:"Original body" in
++  let reference = "task:" ^ task.id in
++  let items = capture config (Evidence.Task_producer "producer") [reference] in
++  let corrupt = List.map (function
++    | Store.Evidence_collaboration {reference;content;sha256} ->
++      Store.Evidence_collaboration {reference;content=content ^ " ";sha256}
++    | item -> item) items in
++  let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:corrupt |> require "corrupt surface" in
++  denied surface "keeper_tasks_list" (task_args task.id) "verification_source_storage_failed";
++  let wrong_id = "another-task" in
++  let wrong = List.map (function
++    | Store.Evidence_collaboration {content;sha256;_} ->
++      Store.Evidence_collaboration {reference="task:" ^ wrong_id;content;sha256}
++    | item -> item) items in
++  let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:wrong |> require "wrong identity surface" in
++  denied surface "keeper_tasks_list" (task_args wrong_id) "verification_source_storage_failed";
++  (match Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:["task:absent"] with
++   | Error (Evidence.Source_unavailable _) -> () | _ -> fail "unknown Task became evidence");
++  let primary_rows = Workspace.read_backlog_r config |> require "original primary" in
++  Workspace.write_backlog config {primary_rows with tasks=task :: primary_rows.tasks};
++  (match Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[reference] with
++   | Error (Evidence.Storage_failed _) -> () | _ -> fail "ambiguous duplicate Task identity became evidence");
++  let duplicated = Workspace.read_backlog_r config |> require "duplicated primary" in
++  Workspace.write_backlog config {duplicated with tasks=primary_rows.tasks};
++  let primary = Workspace_backlog.backlog_path config in
++  let recovery = Workspace_backlog.backlog_recovery_path config in
++  check bool "valid recovery exists before damage" true (Sys.file_exists recovery);
++  Fs_compat.save_file_atomic primary "{broken" |> require "damage primary for recovery control";
++  (match Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[reference] with
++   | Error (Evidence.Storage_failed _) -> () | _ -> fail "recovery was presented as primary Task evidence");
++  (match Workspace.read_backlog_observation_r config with
++   | Ok _ -> () | Error _ -> fail "negative control lost the valid recovery copy"))
++
+ let test_submission_freezes_sources () = with_fixture (fun config ->
+   let p = post ~author:"producer" ~visibility:Board.Internal "Original objection" in
+   let id = Board.Post_id.to_string p.id in
+@@ -298,7 +423,9 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
+   let fusion_post = post ~author:"producer" ~visibility:Board.Unlisted ~meta_json:metadata
+     ~origin:Board.{turn_ref=None; source=Some "fusion"; fusion_run_id=Some run_id; fusion_producer=Some "producer"}
+     "Large Fusion source" in
+-  let task, goal = surfaces config [board_ref board; "fusion:" ^ run_id] in
++  let task_row = new_task config ~title:"Large Task source" ~description:payload in
++  let primary = Workspace.read_backlog_r config |> require "large Task primary" in
++  let task, goal = surfaces config [board_ref board; "fusion:" ^ run_id; "task:" ^ task_row.id] in
+   let cursor_args args cursor = match args with
+     | `Assoc fields -> `Assoc (("cursor", cursor) :: fields) | _ -> assert false in
+   let bridge surface name args =
+@@ -332,15 +459,8 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
+       | cursor -> collect offset (bridge surface name (cursor_args args cursor)) (content :: parts) in
+     collect 0 first [] in
+   List.iter (fun surface ->
+-    List.iter (fun (name, args, original) ->
++    List.iter (fun (name, args, expected) ->
+       let reconstructed, cursor = reconstruct surface name args in
+-      let expected = if String.equal name "masc_board_post_get" then
+-        `Assoc ["source", `String "board"; "post", Board.post_to_yojson original;
+-          "comments", `List []; "pagination", `Assoc ["offset", `Int 0; "returned", `Int 0;
+-            "total", `Int 0; "has_more", `Bool false; "next_offset", `Null]]
+-      else `Assoc ["source", `String "fusion"; "run_id", `String run_id;
+-        "evidence_sha256", `String (Fusion_decision.evidence_sha256 original);
+-        "post", Board.post_to_yojson original; "keeper_decisions", `List []] in
+       check bool "entire original source including escapes and Unicode survives" true
+         (reconstructed = expected);
+       let invalid_hash = match cursor with `Assoc fields ->
+@@ -348,7 +468,17 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
+         | _ -> fail "large source lacks continuation" in
+       denied surface name (cursor_args args invalid_hash) "verification_source_unavailable";
+       invalid_input surface name (cursor_args args (`Assoc ["source_sha256", `String "bad"; "byte_offset", `Int 0])))
+-      ["masc_board_post_get", post_args board, board; "masc_fusion_status", run_args run_id, fusion_post])
++      ["masc_board_post_get", post_args board,
++        `Assoc ["source", `String "board"; "post", Board.post_to_yojson board;
++          "comments", `List []; "pagination", `Assoc ["offset", `Int 0; "returned", `Int 0;
++            "total", `Int 0; "has_more", `Bool false; "next_offset", `Null]];
++       "masc_fusion_status", run_args run_id,
++        `Assoc ["source", `String "fusion"; "run_id", `String run_id;
++          "evidence_sha256", `String (Fusion_decision.evidence_sha256 fusion_post);
++          "post", Board.post_to_yojson fusion_post; "keeper_decisions", `List []];
++       "keeper_tasks_list", task_args task_row.id,
++        `Assoc ["source", `String "task"; "backlog_version", `Int primary.version;
++          "backlog_last_updated", `String primary.last_updated; "task", Masc_domain.task_to_yojson task_row]])
+     [task; goal];
+   let private_post = post ~author:"producer" ~visibility:Board.Direct ~meta_json:metadata "@peer Private source" in
+   let task_private = VAT.create ~config ~producer:"producer"
+@@ -367,6 +497,8 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
+     (continued |> member "representation" |> to_string))
+ 
+ let () = run "Verifier submitted collaboration sources" ["submission", [
++  test_case "Task and Goal submission preserve exact prior committed state" `Quick test_task_sources_preserve_committed_state;
++  test_case "Task source rejects corruption, wrong identity and recovered primary" `Quick test_task_source_failure_boundaries;
+   test_case "submission freezes author, comments and expiring Fusion source" `Quick test_submission_freezes_sources;
+   test_case "capture authority, corruption and persistence roundtrip" `Quick test_capture_failures_and_corruption;
+   test_case "original Fusion advice and separately attributed decisions" `Quick test_fusion_original_and_separate_decision;

@@ -10,6 +10,7 @@ type tool =
   | Web_fetch
   | Board_source
   | Fusion_source
+  | Task_source
 
 let tool_name = function
   | Read_file -> "tool_read_file"
@@ -17,9 +18,18 @@ let tool_name = function
   | Web_fetch -> "masc_web_fetch"
   | Board_source -> "masc_board_post_get"
   | Fusion_source -> "masc_fusion_status"
+  | Task_source -> "keeper_tasks_list"
 ;;
 
-let all_tools = [ Read_file; Search_files; Web_fetch; Board_source; Fusion_source ]
+let source_tools submitted_evidence =
+  let has_task_source = List.exists (function
+    | Workspace_verification_store.Evidence_collaboration {reference; _} ->
+      (match Workspace_verification_store.collaboration_reference reference with
+       | Some (Workspace_verification_store.Task_source, _) -> true
+       | Some ((Workspace_verification_store.Board_source | Workspace_verification_store.Fusion_source), _) | None -> false)
+    | Evidence_note _ | Evidence_artifact _ | Evidence_invalid_reference
+    | Evidence_artifact_unreadable _ | Evidence_artifact_binary _ -> false) submitted_evidence in
+  [Board_source; Fusion_source] @ if has_task_source then [Task_source] else []
 
 type t =
   { ownership_root : string
@@ -58,6 +68,13 @@ let exact_fusion_run_schema =
     ]
 ;;
 
+let exact_task_source_schema =
+  `Assoc ["type", `String "object";
+    "properties", `Assoc ["task_ids", `Assoc ["type", `String "array";
+      "items", `Assoc ["type", `String "string"; "minLength", `Int 1];
+      "minItems", `Int 1; "maxItems", `Int 1]];
+    "required", `List [`String "task_ids"]; "additionalProperties", `Bool false]
+
 let source_pagination_schema = function
   | `Assoc fields ->
     let open Result.Syntax in
@@ -84,6 +101,9 @@ let descriptor_of_tool tool =
      | Board_source ->
        Result.map (fun input_schema -> tool, { descriptor with input_schema })
          (source_pagination_schema descriptor.input_schema)
+     | Task_source ->
+       Result.map (fun input_schema -> tool, { descriptor with input_schema })
+         (source_pagination_schema exact_task_source_schema)
      | Read_file | Search_files | Web_fetch -> Ok (tool, descriptor))
   | [] ->
     Error
@@ -118,9 +138,9 @@ let create ~config ~producer ~submitted_evidence =
   in
   let* tools =
     resolve_tools
-      (match producer_scope with
-       | Keeper_producer _ -> all_tools
-       | Workspace_producer -> [ Read_file; Web_fetch; Board_source; Fusion_source ])
+      ((match producer_scope with
+        | Keeper_producer _ -> [Read_file; Search_files; Web_fetch]
+        | Workspace_producer -> [Read_file; Web_fetch]) @ source_tools submitted_evidence)
   in
   let* ownership_root =
     match producer_scope with
@@ -163,7 +183,7 @@ let create ~config ~producer ~submitted_evidence =
    the checkouts under them. *)
 let create_goal_proof ~(config : Workspace.config) ~submitted_evidence =
   let open Result.Syntax in
-  let* tools = resolve_tools [ Read_file; Web_fetch; Board_source; Fusion_source ] in
+  let* tools = resolve_tools ([Read_file; Web_fetch] @ source_tools submitted_evidence) in
   let project_root =
     Workspace_verification_store.project_root_of_base_path config.base_path
   in
@@ -394,6 +414,8 @@ let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.
          "Read a Board post and its paginated comments frozen in this verification submission, including identities and full metadata. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. Task reviews can read shared posts and their producer's own Direct posts; Goal reviews read shared workspace posts only. Read-only: no posting, voting or adoption."
        | Fusion_source ->
          "Read Fusion panel/judge/source-context evidence frozen in this verification submission and separately recorded Keeper decisions by required exact run_id. Task reviews read the actual producer's Fusion source; Goal reviews read shared workspace Fusion source. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. This does not run Fusion or adopt advice."
+       | Task_source ->
+         "Read exactly one Task frozen by an explicit task:<id> reference in this verification submission. Supply task_ids with that one id. Includes the canonical Task state, completion timestamp and notes plus primary backlog revision; no live listing, recovery snapshot or other Task is read. A Done row is committed state, not complete approval history or external acceptance. Large sources return source_json_page fragments; follow next_cursor to null and concatenate the exact JSON. Read-only."
        | Search_files | Web_fetch -> descriptor.description)
   ; input_schema = descriptor.input_schema
   }
@@ -505,6 +527,8 @@ let run t tool ~args =
     collaboration_read Verification_collaboration_evidence.read_board
   | (Keeper_producer _ | Workspace_producer), Fusion_source ->
     collaboration_read Verification_collaboration_evidence.read_fusion
+  | (Keeper_producer _ | Workspace_producer), Task_source ->
+    collaboration_read Verification_collaboration_evidence.read_task
   | (Keeper_producer _ | Workspace_producer), Web_fetch ->
     Tool_misc_web_fetch.handle
       ~tool_name:(tool_name Web_fetch)
@@ -640,7 +664,7 @@ let media_result t tool ~name ~args ~start_time =
                    ; Llm_provider.Types.image_block ~media_type
                        ~data:(Base64.encode_exn bytes) () ] ()) ))
      | _ -> None)
-  | (Read_file | Search_files | Web_fetch | Board_source | Fusion_source), _ -> None
+  | (Read_file | Search_files | Web_fetch | Board_source | Fusion_source | Task_source), _ -> None
 ;;
 
 let dispatch t ~name ~args =

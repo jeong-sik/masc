@@ -293,7 +293,43 @@ let test_unavailable_report_keeps_original_and_lookup_authority () =
     check_prompt_observation "retained original still has its captured report"
       (get (V.of_json (V.to_json prepared))) (Ok (Some row)))
 
+let test_task_capability_is_submission_bound () = with_workspace (fun config _root ->
+  let without_task_id = pending config in
+  let without_task = authority config without_task_id in
+  let retained_without_task = original without_task in
+  let names authority = (A.goal_review_lookup authority).schemas
+    |> List.map (fun (schema : Types_core.tool_schema) -> schema.name) in
+  Alcotest.(check (list string)) "Task-free authority retains the existing schema surface"
+    ["tool_read_file";"masc_web_fetch";"masc_board_post_get";"masc_fusion_status"] (names without_task);
+  ignore (Workspace.add_task config ~title:"Exact Task observation" ~priority:1 ~description:"Original Task body");
+  let backlog = get (Workspace.read_backlog_r config) in
+  let task = List.find (fun (task : Masc_domain.task) -> task.title="Exact Task observation") backlog.tasks in
+  let items = Verification_collaboration_evidence.capture ~config
+    ~authority:Verification_collaboration_evidence.Goal_workspace ~references:["task:" ^ task.id]
+    |> Result.map_error Verification_collaboration_evidence.error_to_string |> get in
+  let with_task_id = pending ~items config in
+  let with_task = authority config with_task_id in
+  let retained_with_task = original with_task in
+  Alcotest.(check bool) "explicit Task source adds only its read capability" true
+    (names with_task = names without_task @ ["keeper_tasks_list"]);
+  Workspace.write_backlog config {backlog with tasks=List.map (fun (row : Masc_domain.task) ->
+    if row.id=task.id then {row with title="Changed live Task"} else row) backlog.tasks};
+  List.iter (fun (id,prepared) ->
+    let restored = get (V.of_json (V.to_json prepared)) in
+    Alcotest.(check bool) "retained original matches after unrelated live Task changes" true
+      (V.matches_authority restored (authority config id)))
+    [without_task_id,retained_without_task;with_task_id,retained_with_task];
+  let result = (A.goal_review_lookup (authority config with_task_id)).dispatch
+    ~name:"keeper_tasks_list" ~args:(`Assoc ["task_ids",`List [`String task.id]]) in
+  match result with
+  | Tool_result.Completed _ ->
+    let source = Tool_result.message result |> Yojson.Safe.from_string in
+    Alcotest.(check bool) "restored authority reads the submitted original Task" true
+      (Yojson.Safe.Util.member "task" source = Masc_domain.task_to_yojson task)
+  | Tool_result.Failed _ | Tool_result.Deferred _ -> Alcotest.fail (Tool_result.message result))
+
 let () = Alcotest.run "goal verifier original" ["host preparation", [
+  Alcotest.test_case "Task capability follows submitted evidence and retained authority" `Quick test_task_capability_is_submission_bound;
   Alcotest.test_case "fresh Goal proof needs no Keeper or manual shared root" `Quick test_fresh_goal_without_keeper_or_manual_playground;
   Alcotest.test_case "retained prompt and actual shared-root visual lookup" `Quick test_stored_goal_preparation_and_actual_visual_lookup;
   Alcotest.test_case "exact subject, evidence and workspace authority" `Quick test_other_subject_evidence_and_workspace_refuse;

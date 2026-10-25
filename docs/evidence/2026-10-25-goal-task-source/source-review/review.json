@@ -1,0 +1,369 @@
+{
+  "schema": "masc.task-source.independent-source-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T12:47:10.260097+00:00",
+  "reviewer": "repair_eval_metrics",
+  "first_line": "verdict: FAIL head: a2bfd30359b0e06d31c6e88cdc6f4501dc950e03 by: repair_eval_metrics",
+  "verdict": "FAIL_SOURCE_P2",
+  "head": "a2bfd30359b0e06d31c6e88cdc6f4501dc950e03",
+  "base": "975c4751ca41e4e458c9e22103d7c50ba625f716",
+  "canonical_complete_diff_sha256": "c507d70cff757576d6437983e560604d65a3f767b5b49546d8a4a4e82da72914",
+  "full_binary_patch_sha256": "955ccf2122f8c23882635c4b46d886a131fa45230f23cf6d74096269e5cd9330",
+  "raw_diff_sha256": "da7c8621f3d7dc66649e679cf7b74337537ea64a0d9fb2728d81823c551f3e28",
+  "scope": {
+    "complete_committed_diff_read": true,
+    "changed_files": 16,
+    "insertions": 238,
+    "deletions": 37,
+    "context_files_targeted_read": 19,
+    "issue_contract": "Parent-supplied Issue45936 exact immutable Task state source extension; remote issue not retrieved because API calls were prohibited.",
+    "uncommitted_author_repairs_excluded": true,
+    "whole_stack_approval": false
+  },
+  "findings_P0_P1_P2": [
+    {
+      "id": "P2-1",
+      "priority": "P2",
+      "title": "One Goal submission can freeze Task references from different backlog revisions",
+      "location": "lib/verification_collaboration_evidence.ml:141",
+      "additional_locations": [
+        "lib/verification_collaboration_evidence.ml:157",
+        "lib/workspace_goals.ml:668",
+        "lib/workspace_goals.ml:713"
+      ],
+      "trigger": "Submit at least two explicit task: references through Goal request_complete while a Task/backlog commit occurs between the per-reference reads.",
+      "source_evidence": "capture sorts/deduplicates references and folds over them. Every Task_source calls capture_task, which independently calls Workspace.read_backlog_r. Goal request_current_proof holds a Goal transaction, not the backlog lease. Task normal submission holds its backlog lease, but the shared capture function is also a Goal consumer.",
+      "impact": "The same immutable proof request can combine Task A from revisionN with Task B from revisionN+1. Each row is individually authentic and version-labelled, but the submission no longer represents one primary observation for an ordered/multiple-Task contract.",
+      "repair_direction": "When the capture batch contains Task references, read the strict primary backlog once and pass that immutable value to every Task capture. Preserve strict primary failure and exact duplicate-ID refusal. Add a two-Task fixture asserting one shared revision/observation without broad locks or a second store.",
+      "validation_level": "Independent source trace only; no concurrent runtime reproduction in this review. Parent separately received the same finding from design response and accepted repair."
+    },
+    {
+      "id": "P2-2",
+      "priority": "P2",
+      "title": "Unconditional new Task lookup authority prevents resuming existing retained Task/Goal Originals",
+      "location": "lib/verification_authority_tools.ml:178",
+      "additional_locations": [
+        "lib/verification_authority_tools.ml:24",
+        "lib/verification_authority_tools.ml:135",
+        "lib/verification_authority_tools.ml:856",
+        "lib/keeper/goal_verifier_original.ml:72",
+        "lib/keeper/goal_verifier_worker.ml:455",
+        "lib/keeper/verifier_review_worker.ml:54",
+        "lib/goal_verification_agent.ml:413"
+      ],
+      "trigger": "An existing pre-change Task/Goal retained Original in Captured or Admission_wait has no settled receipt, no explicit task: source, and is resumed after deploying this head.",
+      "source_evidence": "Task_source is added to all_tools and every Workspace/Goal surface even when submitted_evidence contains no Task source. Complete schemas enter review binding digests. Existing Originals retain old lookup_schemas/binding. Goal matches_authority requires both to match exactly; Goal Worker rejects with Authority_changed before dispatch. Task Worker similarly requires exact binding/schema names and rejects with Grants_mismatch. The Goal agent reuses the current request retained frontier and maps the refusal to Proof_lookup_unavailable.",
+      "impact": "The unrelated Task source extension changes authority for older requests and blocks safe resume even when they never requested this new capability. It must not be repaired by relaxing immutable-original identity validation.",
+      "repair_direction": "Offer Task_source only when the immutable submitted_evidence actually contains an explicit captured Task source. Keep previous descriptor bytes/order/binding unchanged for Task-free surfaces; validate both Task and Goal retained Original consumers. Do not add a version/compatibility knob or weaken the authority guard.",
+      "validation_level": "Independent exact-source control-flow/equality trace only; no native/model execution. Parent explicitly accepted this second P2 and least-authority repair."
+    }
+  ],
+  "nonblocking_P3": [
+    {
+      "id": "P3-1",
+      "location": "config/tools/masc_goal_transition.toml:39",
+      "additional_location": "lib/workspace_goals.ml:643",
+      "finding": "Canonical Goal request_complete evidence_refs description and malformed-reference guidance still mention only board/fusion, while the parser now accepts task and the Keeper prompt recommends it. The actual Goal dispatcher fixture supplies task successfully in source, so this is discoverability/documentation drift rather than a typed input rejection.",
+      "suggestion": "Include task:<task-id> in both descriptions and retain the immutable-state/acceptance limitations."
+    }
+  ],
+  "positive_source_assessment": [
+    {
+      "topic": "Exact row and primary failure",
+      "detail": "capture_task filters the strict primary backlog by exact Task ID. Missing row is Source_unavailable, duplicate matching rows are Storage_failed, and read_backlog_r refuses recovered observations. The payload preserves backlog version/display timestamp plus Masc_domain.task_to_yojson of the canonical row. It is canonical typed state, not a byte-for-byte copy of the whole backlog file."
+    },
+    {
+      "topic": "Immutable source integrity and access",
+      "detail": "Capture serializes source bytes once and computes SHA256. Persistence decode rechecks reference form/content hash/object shape. submitted_source requires exactly one matching captured identity and never reads current backlog. read_task checks source kind/version/canonical Task identity. Referencing an uncaptured Task is Policy_rejection; corruption/mismatched identity is Runtime_failure."
+    },
+    {
+      "topic": "Descriptor authority and schema",
+      "detail": "The existing canonical keeper_tasks_list descriptor is reused with a narrowed object schema requiring exactly one task_ids item and permitting only the existing typed paging cursor. Dispatch validates against that same descriptor and executes read_task over retained bytes rather than the live Task-list handler. No broad backlog listing, new filesystem root or mutation tool is added."
+    },
+    {
+      "topic": "Paging",
+      "detail": "New Task source reuses the existing SHA-bound exact JSON text paging with UTF-8 byte boundaries and bridge-size fitting. Authored large-source test reconstructs pages through actual Tool_bridge.to_agent_core_typed_result, checks contiguous bytes/digest/full Task JSON and rejects wrong-digest/invalid cursors. This fixture is authored and unexecuted in this scope."
+    },
+    {
+      "topic": "Task and Goal consumers",
+      "detail": "Production Task submission partitions collaboration refs and captures before request commit through Verification_protocol, installed Workspace hooks and backlog-locked transition preparation. Goal request_complete captures through Workspace_goals before proof mark/Goal phase update. Native fixture invokes actual Task protocol persistence/load and public Goal dispatcher/get_record_authoritative, not a parallel source implementation."
+    },
+    {
+      "topic": "Goalless Task and completion meaning",
+      "detail": "No new Goal-link requirement, completion gate, approval counter, budget or automatic phase transition is introduced. Fixture explicitly uses a contractless Task. Prompts distinguish Done row state/time/notes from typed verifier/verification-ID certificate, whole approval history, edit ordering proof and external acceptance. Original Goal measurement and human confirmation remain separate."
+    },
+    {
+      "topic": "Fixture assertions",
+      "detail": "New corruption/wrong identity/duplicate primary/recovered-primary and before/after-approval/edit/delete cases assert directly outside callback isolation; with_fixture uses Fun.protect cleanup rather than swallowing assertions. Pending and approved canonical state are compared, with persistence roundtrip and both authority types. Native execution remains unverified; the tests do not yet cover the two P2 boundaries."
+    }
+  ],
+  "validation": {
+    "complete_exact_diff_read": true,
+    "git_diff_check_exit": 0,
+    "git_diff_check_output_bytes": 0,
+    "native_tests_executed_by_reviewer": 0,
+    "OCaml_compilation_or_parsing_executed_by_reviewer": false,
+    "provider_API_CI_Docker_calls": 0,
+    "source_or_fixture_edits": 0,
+    "author_reported_parse10": "Parent report only; not independently executed/certified here."
+  },
+  "limitations": [
+    "This is exact-head source review with two unresolved P2 findings; follow-up working-tree repairs do not alter this verdict and require a new identity/review.",
+    "No native test, local Dune, provider/model, API/CI/Docker, approval, merge or runtime mutation was performed. Source tracing and authored fixtures are not actual pipeline, concurrent batch, retained-resume or model-behavior proof.",
+    "Canonical Task JSON does not contain typed verifier/verification-ID data for Done. No approval certificate, complete event history, temporal ordering proof or external acceptance is inferred.",
+    "Workspace.read_backlog_r uses the existing canonical domain decoder/cache. This change does not attest raw backlog file bytes or strengthen pre-existing optional-field normalization/cache semantics.",
+    "Source schema/integrity checks do not establish rendered UI, installation, whole-stack integration, original Goal completion or human confirmation.",
+    "Read-only Git/file tools and external review artifacts only; the author checkout had uncommitted follow-up repairs during final review, explicitly excluded from this immutable-head assessment."
+  ],
+  "source_and_context_files": [
+    {
+      "path": "config/prompts/keeper.md",
+      "role": "changed_full_diff_read",
+      "git_blob": "1c7d6226aa8ba905b33f5afd735c1c332d437d51",
+      "sha256": "ba3fd5964f8e448cc01dfcfa2e9949a7c67d8c578d38a07f413f4ee20844ebab",
+      "bytes": 60472
+    },
+    {
+      "path": "config/prompts/verification.md",
+      "role": "changed_full_diff_read",
+      "git_blob": "7513c087ff308b04c39815f0166ab742aef5e862",
+      "sha256": "e63ec4341cd59f3a4ca2e692969bf19e2a7764ed6c63f3471438ebb83fbc7fa8",
+      "bytes": 13478
+    },
+    {
+      "path": "config/tools/keeper_task_done.toml",
+      "role": "changed_full_diff_read",
+      "git_blob": "73f03343c414c172cd1e4ad272d4d9c1aa55b470",
+      "sha256": "78a361be5810ecd6dd8aa5a83a4c26fdc0f35ec7357f71c958fbc6f090ed7ce3",
+      "bytes": 3342
+    },
+    {
+      "path": "config/tools/keeper_task_release.toml",
+      "role": "changed_full_diff_read",
+      "git_blob": "ad24e7113eec90eb2e5dedfefbd269c019eea4ff",
+      "sha256": "38c874a5fb2c000a7df5bb5e135bac0f7ca04231552cdfd876d2123a59519552",
+      "bytes": 3368
+    },
+    {
+      "path": "config/tools/masc_goal_measure.toml",
+      "role": "changed_full_diff_read",
+      "git_blob": "339f5e1826123d9058d94cde7e67f308aff5129c",
+      "sha256": "e745b8986b3822005bff3d8f681b5d34483531c79dc43f917156d7a6f16ed160",
+      "bytes": 1215
+    },
+    {
+      "path": "config/tools/masc_transition.toml",
+      "role": "changed_full_diff_read",
+      "git_blob": "b65e77d7c3dabf5ad60ea170ef4425919a9633fa",
+      "sha256": "4151eee86a665f44d6573a2565a73b24a559b6bbc05dcd5163f0425a770470cb",
+      "bytes": 4539
+    },
+    {
+      "path": "lib/verification_authority_tools.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "bc77e2f2c3648ca246c3522fd4fd58deb453bf1e",
+      "sha256": "96fecd490a7abd45f091c57e97ea0d3ea7018e9b091b6a1b306ec4fa7380c714",
+      "bytes": 44603
+    },
+    {
+      "path": "lib/verification_authority_tools.mli",
+      "role": "changed_full_diff_read",
+      "git_blob": "98138389214e7fc7e37efc6b33aca934d2d55e7e",
+      "sha256": "aadae040724313bd0d34a55d6d98abff7b0f57a78b0658f43ece11b39ee7905b",
+      "bytes": 8022
+    },
+    {
+      "path": "lib/verification_collaboration_evidence.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "fa9b240e74c01c1fe910135118f8d626dea7fce0",
+      "sha256": "3e8b04c67261b65d38b31ee2187cf6e685c0955871c32abaa5dbb0d6d73bced9",
+      "bytes": 13835
+    },
+    {
+      "path": "lib/verification_collaboration_evidence.mli",
+      "role": "changed_full_diff_read",
+      "git_blob": "ebb6ae0ee29f043fea0207b12e6d962cf761ae5d",
+      "sha256": "c172da31cdb995e8d22dc8e5a99026a96228365afb15f5f356d86892d34e238a",
+      "bytes": 2353
+    },
+    {
+      "path": "lib/workspace/workspace_verification_snapshot.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "8d03be09f6cdd566637c2f739ddb3814f1d2cd46",
+      "sha256": "3ad0792480c776327958867f367899df8c7597b1f84f6d6447f74fb4c666d1fa",
+      "bytes": 30879
+    },
+    {
+      "path": "lib/workspace/workspace_verification_snapshot.mli",
+      "role": "changed_full_diff_read",
+      "git_blob": "76eefe70f9a4cbbba6b7c691e4daab678153004f",
+      "sha256": "bf4e40d90602092713b21e4daa9dc0b135a97b09fb593570eb1d5b2757828528",
+      "bytes": 3316
+    },
+    {
+      "path": "lib/workspace/workspace_verification_store.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "436af10cccee606abd4776046b1d9c951ff1f925",
+      "sha256": "b29a2a041f8014d32d3e421c7b97511bec1f5d6555833139b88c747396856255",
+      "bytes": 20369
+    },
+    {
+      "path": "lib/workspace/workspace_verification_store.mli",
+      "role": "changed_full_diff_read",
+      "git_blob": "cd726df97843f0d8efa2b01a0737d129681b0455",
+      "sha256": "104eaec35c51d7610f027f68517f95d9d30fad65e53c37a0523f500fb247dda5",
+      "bytes": 11935
+    },
+    {
+      "path": "test/test_verification_authority_tools.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "c9657c0c0f58aa9249f1a2866e63bcef85ab4a8a",
+      "sha256": "33968eb4d577b04cc4e65596f47a1d5557db576a3f904ca152b6288bd78c33d6",
+      "bytes": 75199
+    },
+    {
+      "path": "test/test_verification_collaboration_evidence.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "f198dbe8cd05a4954285744a4c0b0350cde81a7b",
+      "sha256": "1e8b866334646f74b2400eaade6991570623f396376a70ead24fce23d224af59",
+      "bytes": 34382
+    },
+    {
+      "path": "docs/constitution.xml",
+      "role": "targeted_context_read",
+      "git_blob": "7d2ff0b1e8121da7156f6c34df9445740475a3c7",
+      "sha256": "afd95dbc22a2e74fa6b96510c685487ad915260984bd1e1b393fe8eadb544682",
+      "bytes": 40861
+    },
+    {
+      "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+      "role": "targeted_context_read",
+      "git_blob": "aaf68625654f83f0bfd9130c7028813d8711b10c",
+      "sha256": "03ae9fad1c4e361062b2b405bf1bca8ed77dd01d5613397459aa6ba4541d4ddc",
+      "bytes": 20085
+    },
+    {
+      "path": "docs/guides/NATIVE-GITHUB-STACKS.md",
+      "role": "targeted_context_read",
+      "git_blob": "fc856a5f8050fe4f2c4d7d558301b62fbe51bec8",
+      "sha256": "6b01a6724e9666a73658355cffb3a98877e014743865ee744fce5330acea559d",
+      "bytes": 7988
+    },
+    {
+      "path": "lib/workspace/workspace_backlog.ml",
+      "role": "targeted_context_read",
+      "git_blob": "063482e3391a31c7e1016638f41f43df00275e8e",
+      "sha256": "4203b94aa9a2b03bfb96b7e70eb83d8298f525eaed997ffdd8ce73206cdf10d7",
+      "bytes": 18957
+    },
+    {
+      "path": "lib/types/types_core.ml",
+      "role": "targeted_context_read",
+      "git_blob": "1d07ceac280a5d59802e67689487bd9cfaba737a",
+      "sha256": "7d8b9f7794ef97b25053c42308ef16a85fba601347cf4757be82a019aeb7a11c",
+      "bytes": 59217
+    },
+    {
+      "path": "lib/verification_protocol.ml",
+      "role": "targeted_context_read",
+      "git_blob": "a150ef8a8d0cc9b7b28a1643b59ea6fef3ef2d4e",
+      "sha256": "ac5e8ac491e1b8985aa9dbb9e14b03ed88615bba4bd183716842246af59c316c",
+      "bytes": 28805
+    },
+    {
+      "path": "lib/workspace_goals.ml",
+      "role": "targeted_context_read",
+      "git_blob": "a646e83f9addb383412dbb730898e58e770b30cd",
+      "sha256": "22fe90c86c08fd8549ea437f4f582c21ccfab52ec3f2d16a9b04b97cfb367bd5",
+      "bytes": 57019
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "role": "targeted_context_read",
+      "git_blob": "dc2acf81b6c4101db5b072c159938d440419fcfb",
+      "sha256": "4f66ec9447b4d5aacebe01281d5e6cf01a6d7962bd0b7988cedaacead210ddaa",
+      "bytes": 58281
+    },
+    {
+      "path": "lib/task/tool_task.ml",
+      "role": "targeted_context_read",
+      "git_blob": "d661a8f587b0003c93ccdde98ffa7d7cad00e99e",
+      "sha256": "5a0a781102924e909934d28720a981d7203c2a6586d67be247f59232bf1cece5",
+      "bytes": 25322
+    },
+    {
+      "path": "lib/workspace_metric_hooks.ml",
+      "role": "targeted_context_read",
+      "git_blob": "8ec6fff0d5b5f16c942f87af22abfb83f9342ebf",
+      "sha256": "b100f19285d9f3c43e9384b23c6ff1de483a162865fdb07174e1d49ddf86b07e",
+      "bytes": 22160
+    },
+    {
+      "path": "lib/keeper/keeper_tool_descriptor.ml",
+      "role": "targeted_context_read",
+      "git_blob": "448c49e3502d44faf6ec424f904f9d39ca2e784a",
+      "sha256": "ad2d11134025862a1599bede690f338cc6dbcaba1be3d9562db940a7355237cd",
+      "bytes": 143445
+    },
+    {
+      "path": "lib/keeper/keeper_tool_descriptor_resolution.ml",
+      "role": "targeted_context_read",
+      "git_blob": "a61212efc3a6f53f6fba07f9fffe7be4cf29ef7e",
+      "sha256": "174768c4c885447da6eec61e313dfbbd0f8f20f8e84c745af5fa4e89bfdb75a9",
+      "bytes": 6260
+    },
+    {
+      "path": "lib/keeper/goal_verifier_original.ml",
+      "role": "targeted_context_read",
+      "git_blob": "c132a2e7bc869487253307aa4006424bafac5772",
+      "sha256": "3a7628a68dc50c87e9efc192b4f0c1c6756d95caff8feb71462e15b79bdc7147",
+      "bytes": 8252
+    },
+    {
+      "path": "lib/keeper/goal_verifier_worker.ml",
+      "role": "targeted_context_read",
+      "git_blob": "d28b0a2154376844bc751dcabfa097d33d7d4326",
+      "sha256": "7875e0d0b57a5ab9be7f182166f04b3e156be2280150c8faabe2db788cb55873",
+      "bytes": 35673
+    },
+    {
+      "path": "lib/keeper/verifier_review_worker.ml",
+      "role": "targeted_context_read",
+      "git_blob": "9935e286add0e9e97e98ad2b2584675bfd1dfb94",
+      "sha256": "d22865afdbe70c79d705b962d765f75cf355788302091a4e2fc43c7f2c344ed2",
+      "bytes": 13602
+    },
+    {
+      "path": "lib/keeper/verifier_review_original.ml",
+      "role": "targeted_context_read",
+      "git_blob": "41c08e8d6f021a36dce858456eb3252e5027d9f0",
+      "sha256": "4d4769457e38ecb36d6593274b13a161097f243ff3779e748b2491cdd2caee65",
+      "bytes": 19493
+    },
+    {
+      "path": "lib/goal_verification_agent.ml",
+      "role": "targeted_context_read",
+      "git_blob": "6baab2dd0600a23598d3013236e9186d8c907e62",
+      "sha256": "bab2de3604da240846d7823d6b3e586eb3fe585889621b38a61fe8082b7dc388",
+      "bytes": 40378
+    },
+    {
+      "path": "config/tools/keeper_tasks_list.toml",
+      "role": "targeted_context_read",
+      "git_blob": "4467ac64784bf0ca6544f3efec39497707d55b94",
+      "sha256": "118a671d25c7b5efed760397ae2985c8b491f37a1d9485bf29715a5c4f3d8261",
+      "bytes": 4909
+    },
+    {
+      "path": "config/tools/masc_goal_transition.toml",
+      "role": "targeted_context_read",
+      "git_blob": "5fbdfd2c87b622d12837f76009d04e7a19e69674",
+      "sha256": "ecba550c7044d672660c3b92df36b20ff89208569e8b924376e80f66eb3f7808",
+      "bytes": 1882
+    }
+  ],
+  "memory_use": {
+    "guidance_only": "MEMORY.md:64-65 current-head source/CI/review/merge separation; all source findings freshly verified.",
+    "current_facts_from_memory": false
+  }
+}

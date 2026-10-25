@@ -2,8 +2,9 @@
     a closed variant instead of searching text.
 
     Two kinds exist in the data. A submitted source ([board:<id>],
-    [fusion:<id>]) names a MASC object the TUI can open with its [masc://]
-    reference. A URL written in a note, in a source's text or in an artifact's
+    [fusion:<id>], [task:<id>]) names a MASC object the TUI can open with its
+    [masc://] reference. Navigation opens the current object; the submitted
+    evidence body remains the immutable snapshot. A URL written in a note, in a source's text or in an artifact's
     text is an http(s) address. A file artifact's path is the item's own
     reference line, so it is not repeated as a link: it is a path in the
     producer's sandbox, not an address the operator can open.

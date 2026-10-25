@@ -129,7 +129,7 @@ let test_frozen_prompt_media_and_lookup () = with_workspace (fun config store ->
       ~base_path:(Store.project_root_of_base_path config.Workspace.base_path) ~agent_name:producer in
     Fs_compat.mkdir_p root;
     Out_channel.with_open_bin (Filename.concat root "receipt.txt") (fun out -> output_string out "retained evidence");
-    let identity = get (Masc.Runtime_response_identity.make ~execution_id:"retained-execution"
+    let identity = get (Runtime_response_identity.make ~execution_id:"retained-execution"
       ~actor:"reviewer" ~runtime_id:"fixture-reviewer" ~response_id:"accepted-response"
       ~provider_id:"fixture-provider" ~model_id:"fixture-model" ~tool_use_id:"verdict-call"
       ~provider_turn:2 ~source_tool_use_ordinal:0) in

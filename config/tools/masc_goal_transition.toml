@@ -36,4 +36,4 @@ description = "Required for drop: why the Goal is dropped. It becomes the review
 name = "evidence_refs"
 type = "array"
 items = { type = "string" }
-description = "For request_complete: explicit board:<post_id> or fusion:<run_id> references. Their exact source is captured with this proof request. Omit on retry to keep the submitted snapshot; supplying changed evidence creates a new request."
+description = "For request_complete: explicit board:<post_id>, fusion:<run_id> or task:<task_id> references. Their exact source is captured with this proof request. Task lifecycle state is not complete approval history or external acceptance. Omit on retry to keep the submitted snapshot; supplying changed evidence creates a new request."

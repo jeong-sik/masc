@@ -79,6 +79,8 @@ let masc_reference_of_source reference =
       [ Masc_reference { kind = Masc_tui_link.Board_post; id } ]
   | Some (Workspace_verification_store.Fusion_source, id) ->
       [ Masc_reference { kind = Masc_tui_link.Fusion_run; id } ]
+  | Some (Workspace_verification_store.Task_source, id) ->
+      [ Masc_reference { kind = Masc_tui_link.Task; id } ]
   | None -> []
 
 let without_repeats links =

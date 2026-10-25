@@ -150,7 +150,9 @@ type proof_request_error =
 
 val request_current_proof : ?evidence_refs:string list -> Workspace_utils_backend_setup.config -> goal_id:string ->
   (Goal_store.goal * Goal_verification.record, proof_request_error) result
-(** Bind a proof request and Verifying phase to the same current criterion. *)
+(** Bind a proof request and Verifying phase to the same current criterion.
+    Explicit Board/Fusion/Task source references are captured with the request;
+    omitting references on retry retains the same immutable submitted bytes. *)
 
 val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
   (bool, Goal_store.write_error) result

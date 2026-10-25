@@ -17,7 +17,7 @@ type evidence_read_failure =
   | Evidence_changed_during_read
   | Evidence_read_error of string
 
-type collaboration_kind = Board_source | Fusion_source
+type collaboration_kind = Board_source | Fusion_source | Task_source
 
 type submitted_evidence_item =
   | Evidence_collaboration of { reference : string; content : string; sha256 : string }

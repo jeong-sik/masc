@@ -179,7 +179,7 @@ let artifact_reference_form =
 ;;
 
 let note_reference_form = note_reference_prefix ^ "<text>"
-let resolvable_reference_forms = [ artifact_reference_form; note_reference_form; "board:<post-id>"; "fusion:<run-id>" ]
+let resolvable_reference_forms = [ artifact_reference_form; note_reference_form; "board:<post-id>"; "fusion:<run-id>"; "task:<task-id>" ]
 
 let valid_producer_relative_path path =
   Filename.is_relative path

@@ -52,8 +52,8 @@ type = "array"
 items = { type = "string", min_length = 1 }
 description = """
 Optional sources to retain in the Task handoff for the next owner. Use \
-artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, or \
-fusion:<run-id>. These references preserve context; they do not copy a \
+artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, \
+fusion:<run-id>, or task:<task-id>. These references preserve context; they do not copy a \
 peer's sandbox file. Export binary files with keeper_artifact_transfer \
 and pass the exported objects through masc_keeper_delegate artifacts."""
 

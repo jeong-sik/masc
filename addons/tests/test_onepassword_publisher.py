@@ -9,6 +9,7 @@ import socket
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from test_onepassword_companion import Host, INSTANCE, bridge
 
@@ -118,3 +119,46 @@ class PublisherTests(unittest.TestCase):
                 with self.assertRaises(bridge.BridgeError):
                     bridge.Publisher({"socket_path": path, "invocation_id": "a" * 64,
                         "publication_id": None, "max_message_bytes": 16384})
+
+    def test_close_after_actual_ack_read_cannot_return_late_success(self):
+        acknowledged, resume = threading.Event(), threading.Event()
+        errors = []
+        def handler(host, connection, reader):
+            host.read(reader)
+            host.write(connection, {"accepted": True})
+        host = self.host(handler)
+        publisher = self.publisher(host)
+        roundtrip = publisher._roundtrip
+        def gated(flow, raw):
+            reply = roundtrip(flow, raw)
+            acknowledged.set()
+            self.assertTrue(resume.wait(2))
+            return reply
+        def send():
+            try:
+                publisher.publish(EVENT)
+            except bridge.BridgeError as error:
+                errors.append(error.code)
+        with patch.object(publisher, "_roundtrip", side_effect=gated):
+            thread = threading.Thread(target=send)
+            thread.start()
+            try:
+                self.assertTrue(acknowledged.wait(2))
+                publisher.close()
+            finally:
+                resume.set()
+                thread.join(2)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, ["outcome_unknown"])
+
+    def test_malformed_and_deep_actual_replies_keep_fixed_failure_boundary(self):
+        for reply in [b'{broken\n', b'[' * 1100 + b'0' + b']' * 1100 + b'\n']:
+            with self.subTest(reply_bytes=len(reply)):
+                def handler(host, connection, reader):
+                    host.read(reader)
+                    connection.sendall(reply)
+                host = self.host(handler)
+                publisher = self.publisher(host)
+                with self.assertRaises(bridge.BridgeError) as raised:
+                    publisher.publish(EVENT)
+                self.assertEqual(raised.exception.code, "outcome_unknown")

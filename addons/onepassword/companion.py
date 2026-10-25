@@ -382,7 +382,10 @@ class Publisher(_Transport):
                 if (not isinstance(reply, dict) or set(reply) != {"accepted"}
                         or reply["accepted"] is not True):
                     raise BridgeError("outcome_unknown")
-            except (OSError, ValueError, TypeError, UnicodeError):
+                with self._state_lock:
+                    if self._closed or self._socket is not flow:
+                        raise BridgeError("outcome_unknown")
+            except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
                 raise BridgeError("outcome_unknown") from None
             finally:
                 with self._state_lock:

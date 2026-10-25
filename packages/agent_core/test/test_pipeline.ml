@@ -1746,7 +1746,9 @@ let test_terminal_disposition_sink_failure_fails_call () =
     (Eio.Path.is_file Eio.Path.(dir / "events.v1.commit"))
 ;;
 
-let test_trace_finalization_preserves_committed_success () =
+type trace_diagnostic_fault = Diagnostic_ok | Diagnostic_failed | Diagnostic_reserved
+
+let test_trace_finalization_preserves_committed_success diagnostic_fault () =
   with_execution_test_dir "agent_core-trace-postcommit-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let trace_path = Filename.temp_file "agent_core-terminal-observer-" ".jsonl" in
@@ -1798,15 +1800,37 @@ let test_trace_finalization_preserves_committed_success () =
         Sys.remove trace_path;
         Unix.mkdir trace_path 0o700;
         Ok ()) () in
-  let result=Agent.run ~sw ~execution_store agent "settle the effect" in
+  let diagnostics=ref 0 in
+  Log.clear_sinks ();
+  Log.set_global_level Log.Error;
+  Log.add_sink (fun (record : Log.record) ->
+    if record.module_name="agent_trace"
+       && record.message="raw trace finalization failed after run result" then (
+      incr diagnostics;
+      match diagnostic_fault with
+      | Diagnostic_ok -> ()
+      | Diagnostic_failed -> raise (Failure "injected diagnostic sink failure")
+      | Diagnostic_reserved -> raise Sys.Break));
+  let result=Fun.protect
+      ~finally:(fun () -> Log.clear_sinks ();Log.set_global_level Log.Info)
+      (fun () -> match Agent.run ~sw ~execution_store agent "settle the effect" with
+        | result -> Some result
+        | exception Sys.Break -> None) in
   Alcotest.(check int) "external effect executed once" 1 !tool_calls;
   Alcotest.(check bool) "fault occurs after canonical terminal observation" true
     (Option.is_some !before);
-  (match result with
-   | Ok response -> Alcotest.(check string) "committed answer survives observer failure"
-       "committed answer" (Types.text_of_response response)
-   | Error error -> Alcotest.failf "observer relabeled committed success: %s" (Error.to_string error));
-  Alcotest.(check (option bool)) "completion callback observes execution success" (Some true) !completion;
+  (match diagnostic_fault,result with
+   | Diagnostic_reserved,None ->
+     Alcotest.(check (option bool)) "reserved diagnostic preempts completion callback" None !completion
+   | (Diagnostic_ok | Diagnostic_failed),Some (Ok response) ->
+     Alcotest.(check string) "committed answer survives observer failure"
+       "committed answer" (Types.text_of_response response);
+     Alcotest.(check (option bool)) "completion callback observes execution success" (Some true) !completion
+   | (Diagnostic_ok | Diagnostic_failed | Diagnostic_reserved),Some (Error error) ->
+     Alcotest.failf "observer relabeled committed success: %s" (Error.to_string error)
+   | Diagnostic_reserved,Some (Ok _)
+   | (Diagnostic_ok | Diagnostic_failed),None -> Alcotest.fail "diagnostic fault propagation mismatch");
+  Alcotest.(check int) "trace failure diagnostic attempted once" 1 !diagnostics;
   (match Agent.lifecycle agent with
    | Some snapshot -> Alcotest.(check bool) "lifecycle retains committed success" true
        (snapshot.status=Agent.Completed)
@@ -4460,7 +4484,15 @@ let () =
         ; Alcotest.test_case
             "trace failure preserves committed execution success"
             `Quick
-            test_trace_finalization_preserves_committed_success
+            (test_trace_finalization_preserves_committed_success Diagnostic_ok)
+        ; Alcotest.test_case
+            "throwing trace diagnostic preserves committed success"
+            `Quick
+            (test_trace_finalization_preserves_committed_success Diagnostic_failed)
+        ; Alcotest.test_case
+            "reserved trace diagnostic finalizes committed lifecycle"
+            `Quick
+            (test_trace_finalization_preserves_committed_success Diagnostic_reserved)
         ; Alcotest.test_case
             "terminal disposition observes cancellation"
             `Quick

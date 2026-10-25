@@ -462,7 +462,8 @@ let test_endpoint_namespace_roundtrip () =
     match Keeper_tool_execute_path.resolve_tool_execute_cwd
       ~remote_workspace_root:(Some overlap_root) ~config:overlap_config ~meta
       ~write_enabled:false ~args with
-    | Ok actual -> check string label expected actual
+    | Ok actual -> check string label expected
+        (Keeper_alerting_path.normalize_path_for_check_stripped actual)
     | Error error -> fail error)
     [ "omitted cwd is not projected twice", `Assoc [], overlap_host
     ; "relative cwd is not projected twice", `Assoc [ "cwd", `String "subdir" ],

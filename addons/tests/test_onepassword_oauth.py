@@ -10,6 +10,8 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
+from onepassword_store_fixture import MemoryRecords, active_raw, replace_active_raw
 from urllib.parse import parse_qs, urlsplit
 import base64
 
@@ -23,6 +25,9 @@ SPEC.loader.exec_module(oauth)
 
 class ConnectionTests(unittest.TestCase):
     def setUp(self):
+        backend = patch.object(oauth, "ProtectedRecords", MemoryRecords)
+        backend.start()
+        self.addCleanup(backend.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name) / "private"
@@ -186,7 +191,7 @@ class ConnectionTests(unittest.TestCase):
     def retained_record_bytes(self):
         # Used only by an in-flight fixture callback that already holds the
         # connection lock; reacquiring another flock would block that callback.
-        return json.loads((self.directory / "connection.json").read_text())
+        return json.loads(active_raw(self.store))
 
     def test_lost_refresh_during_disconnect_is_not_replayed_or_revoked(self):
         self.connect()
@@ -332,10 +337,9 @@ class ConnectionTests(unittest.TestCase):
             {**original, "expires_at": float("inf")},
             {**original, "phase": "reconnect_required"},
         ]
-        target = self.directory / "connection.json"
         for record in damaged:
             with self.subTest(record=record):
-                target.write_text(json.dumps(record))
+                replace_active_raw(self.store, json.dumps(record))
                 for operation in [self.connector.status,
                                   lambda: self.connector.credentials(lambda *args: self.fail("must not use corrupt tokens"),
                                                                      expected_connection_id=original["connection_id"]),
@@ -347,8 +351,7 @@ class ConnectionTests(unittest.TestCase):
     def test_duplicate_json_fields_are_not_accepted_as_authoritative_records(self):
         self.connect()
         original = self.retained()
-        target = self.directory / "connection.json"
-        target.write_text('{"phase":"connected",' + json.dumps(original)[1:])
+        replace_active_raw(self.store, '{"phase":"connected",' + json.dumps(original)[1:])
         with self.assertRaisesRegex(oauth.ConnectionError, "invalid_connection_record"):
             self.connector.status()
 
@@ -382,18 +385,18 @@ class ConnectionTests(unittest.TestCase):
     def test_private_file_permissions_and_symlink_rejection(self):
         self.connect()
         self.assertEqual(stat.S_IMODE(self.directory.stat().st_mode), 0o700)
-        target = self.directory / "connection.json"
+        target = self.directory / "connection.reference.json"
         self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
         outside = Path(self.temporary.name) / "outside.json"
         target.rename(outside)
         target.symlink_to(outside)
         with self.assertRaises(OSError):
             self.connector.status()
-        self.assertIn("INTEGRATION_KEY", outside.read_text())
+        self.assertNotIn("INTEGRATION_KEY", outside.read_text())
 
     def test_hardlinked_record_and_replaced_directory_are_rejected(self):
         self.connect()
-        os.link(self.directory / "connection.json", Path(self.temporary.name) / "other-link")
+        os.link(self.directory / "connection.reference.json", Path(self.temporary.name) / "other-link")
         with self.assertRaisesRegex(oauth.ConnectionError, "unsafe_secret_store"):
             self.connector.status()
         self.directory.rename(Path(self.temporary.name) / "old")

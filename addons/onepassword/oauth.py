@@ -12,11 +12,13 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 import base64
 import fcntl
+import functools
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
+import platform
 import secrets
 import stat
 import threading
@@ -144,20 +146,89 @@ def validate_record(value: dict):
         raise ConnectionError("invalid_connection_record")
 
 
+class ProtectedRecords:
+    """Only the OS credential store; never a discovered or plaintext backend."""
+
+    def __init__(self, identity: str):
+        self.service = "org.masc.onepassword." + identity
+        self.backend = None
+
+    @staticmethod
+    @functools.cache
+    def _backend_class():
+        try:
+            if platform.system() == "Darwin":
+                from keyring.backends.macOS import Keyring
+
+                class NativeKeyring(Keyring):
+                    keychain = None
+
+                    def set_properties_from_env(self):
+                        pass
+            elif platform.system() == "Linux":
+                from keyring.backends.SecretService import Keyring, secretstorage
+                from keyring.errors import KeyringLocked
+
+                class NativeKeyring(Keyring):
+                    def set_properties_from_env(self):
+                        pass
+
+                    def get_preferred_collection(self):
+                        # Do not create a collection or prompt to unlock one.
+                        bus = secretstorage.dbus_init()
+                        try:
+                            collection = secretstorage.get_collection_by_alias(bus, "default")
+                            if collection.is_locked():
+                                raise KeyringLocked()
+                            return collection
+                        except Exception:
+                            bus.close()
+                            raise
+
+                    def unlock(self, item):
+                        if item.is_locked():
+                            raise KeyringLocked()
+            else:
+                raise ConnectionError("protected_store_unavailable")
+            return NativeKeyring
+        except Exception:
+            raise ConnectionError("protected_store_unavailable") from None
+
+    def _backend(self):
+        if self.backend is None:
+            self.backend = self._backend_class()()
+        return self.backend
+
+    def read(self, slot: int) -> str | None:
+        try:
+            return self._backend().get_password(self.service, str(slot))
+        except Exception:
+            raise ConnectionError("protected_store_unavailable") from None
+
+    def write(self, slot: int, value: str):
+        try:
+            self._backend().set_password(self.service, str(slot), value)
+        except Exception:
+            raise ConnectionError("protected_store_unavailable") from None
+
+
 class PrivateStore:
-    """One backend's 0700 directory, 0600 records, locked across processes.
+    """Encrypted records with a nonsecret, locked commit reference.
 
     All file operations are relative to the original directory descriptor.
     Symlinks, hard-linked files and a replaced directory are refused. This is
     backend storage under the operator's UID, not an OS isolation boundary.
     """
-    def __init__(self, directory: Path):
+    def __init__(self, directory: Path, *, records=None):
         if not directory.is_absolute():
             raise ConnectionError("store_path_not_absolute")
         self.directory = directory
         self.directory.mkdir(mode=0o700, exist_ok=True)
         self.identity = self._directory_identity()
         self.thread_lock = threading.RLock()
+        namespace = json.dumps([os.getuid(), str(directory.resolve()), *self.identity],
+                               separators=(",", ":")).encode()
+        self.records = records if records is not None else ProtectedRecords(hashlib.sha256(namespace).hexdigest())
 
     @staticmethod
     def _owned(info, *, directory=False):
@@ -195,9 +266,17 @@ class PrivateStore:
                     os.close(lock)
                 os.close(root)
 
-    def read(self, root: int) -> dict | None:
+    def _reference(self, root: int) -> int | None:
         try:
-            fd = os.open("connection.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            os.stat("connection.json", dir_fd=root, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            # Old plaintext state needs explicit operator reconciliation. Never
+            # silently adopt, copy, delete, or fall back to it.
+            raise ConnectionError("plaintext_connection_reconciliation_required")
+        try:
+            fd = os.open("connection.reference.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                          dir_fd=root)
         except FileNotFoundError:
             return None
@@ -210,22 +289,50 @@ class PrivateStore:
             raise ConnectionError("invalid_connection_record") from None
         finally:
             os.close(fd)
+        if (not isinstance(value, dict) or set(value) != {"schema", "slot"}
+                or value["schema"] != "masc.1password.protected.v1"
+                or type(value["slot"]) is not int or value["slot"] not in {0, 1}):
+            raise ConnectionError("invalid_connection_reference")
+        return value["slot"]
+
+    def read(self, root: int) -> dict | None:
+        slot = self._reference(root)
+        # Even an empty directory must not disguise an unavailable/locked
+        # backend as a disconnected account.
+        raw = self.records.read(0 if slot is None else slot)
+        if slot is None:
+            return None
+        if not isinstance(raw, str):
+            raise ConnectionError("protected_connection_missing")
+        try:
+            value = json.loads(raw, object_pairs_hook=unique_object, parse_constant=reject_constant)
+        except (ValueError, UnicodeError):
+            raise ConnectionError("invalid_connection_record") from None
         validate_record(value)
         return value
 
     def write(self, root: int, value: dict):
         validate_record(value)
+        current = self._reference(root)
+        slot = 0 if current is None else 1 - current
+        raw = json.dumps(value, allow_nan=False, separators=(",", ":"))
+        # keyring's macOS writer deletes before adding. Only replace the
+        # inactive slot, then verify it before publishing the new reference.
+        self.records.write(slot, raw)
+        if self.records.read(slot) != raw:
+            raise ConnectionError("protected_store_write_unconfirmed")
         temporary = ".connection-" + secrets.token_hex(16)
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                      0o600, dir_fd=root)
         try:
             with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as stream:
-                json.dump(value, stream, allow_nan=False, separators=(",", ":"))
+                json.dump({"schema": "masc.1password.protected.v1", "slot": slot}, stream,
+                          separators=(",", ":"))
                 stream.flush()
                 os.fsync(fd)
             if self._directory_identity() != self.identity:
                 raise ConnectionError("secret_store_replaced")
-            os.replace(temporary, "connection.json", src_dir_fd=root, dst_dir_fd=root)
+            os.replace(temporary, "connection.reference.json", src_dir_fd=root, dst_dir_fd=root)
             temporary = None
             os.fsync(root)
         finally:

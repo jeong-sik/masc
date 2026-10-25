@@ -62,7 +62,7 @@ let parse = function
         | Some (`String "select_option") -> keys
         | _ -> "value" :: "values" :: keys in
       let keys = match List.assoc_opt "action" fields with
-        | Some (`String ("click" | "fill" | "hover" | "double_click" | "select_option" | "press_key")) -> keys
+        | Some (`String ("click" | "fill" | "hover" | "double_click")) -> keys
         | _ -> "target" :: keys in
       if List.exists (fun key -> List.mem_assoc key fields) keys
       then Error "arguments do not match the selected interaction action" else Ok () in
@@ -124,15 +124,14 @@ let parse = function
         let* () = excludes (["selector";"nodeId";"x";"y";"point";"from";"to";"viewport"] @
           if action = "press_key" then ["text"] else []) in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "native keyboard input requires expectedUrl" in
+        let* document_id = match List.assoc_opt "documentId" fields with
+          | Some (`String id) when id <> "" -> Ok id | _ -> Error "native keyboard input requires observed documentId" in
         if action = "type_text" then
-          let* document_id = match List.assoc_opt "documentId" fields with
-            | Some (`String id) when id <> "" -> Ok id | _ -> Error "native keyboard input requires observed documentId" in
           let* text = match List.assoc_opt "text" fields with Some (`String text) -> Ok text
             | _ -> Error "type_text requires string text" in
           let* () = Browser_lane.Keyboard.validate_text text in
           Ok (Browser_lane.Type_text {document_id;text})
         else
-          let* snapshot = snapshot_target () in
           let* key = match List.assoc_opt "key" fields with Some (`String key) -> Ok key
             | _ -> Error "press_key requires key" in
           let* modifiers = match List.assoc_opt "modifiers" fields with
@@ -143,12 +142,7 @@ let parse = function
                 | _ -> Error "modifiers must contain strings" in strings values
             | Some _ -> Error "modifiers must be an array" in
           let* key = Browser_lane.Keyboard.of_wire ~key ~modifiers in
-          (match snapshot with
-           | Some target -> Ok (Browser_lane.Press_target {target;key})
-           | None ->
-             let* document_id = match List.assoc_opt "documentId" fields with
-               | Some (`String id) when id <> "" -> Ok id | _ -> Error "native keyboard input requires observed documentId" in
-             Ok (Browser_lane.Press_key {document_id;key}))
+          Ok (Browser_lane.Press_key {document_id;key})
       | Some (`String "double_click") ->
         let* () = excludes ["text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "double_click requires expectedUrl" in
@@ -168,24 +162,12 @@ let parse = function
       | Some (`String "drag_to") ->
         let* () = excludes ["selector";"documentId";"nodeId";"text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "drag_to requires expectedUrl" in
-        let endpoint key = match List.assoc_opt key fields with
-          | Some (`Assoc endpoint_fields as raw) ->
-            if List.exists (fun (k, _) -> List.mem k ["ref"; "role"; "text"]) endpoint_fields then
-              Result.map (fun t -> `Snapshot t) (Browser_lane.snapshot_target_of_json raw)
-            else
-              Result.map (fun t -> `Pointer t) (pointer_target endpoint_fields)
+        let target key = match List.assoc_opt key fields with
+          | Some (`Assoc fields) -> pointer_target fields
           | _ -> Error ("drag_to requires " ^ key ^ " target") in
-        let* source = endpoint "source" in let* destination = endpoint "destination" in
+        let* source = target "source" in let* destination = target "destination" in
         let* via,duration_ms = drag_options () in
-        (match source, destination with
-         | `Pointer source, `Pointer destination ->
-           Ok (Browser_lane.Drag_to {source;destination;via;duration_ms})
-         | `Snapshot source, `Snapshot destination ->
-           let* () = match via with [] -> Ok () | _ :: _ -> Error "a snapshot target drag_to does not take via waypoints" in
-           let* () = if duration_ms = 0 then Ok () else Error "ego drag requires durationMs=0; movement timing is not exposed by its mouse API" in
-           Ok (Browser_lane.Drag_target {source;destination})
-         | (`Pointer _, `Snapshot _) | (`Snapshot _, `Pointer _) ->
-           Error "drag_to source and destination must both be snapshot targets or both use selector or documentId/nodeId")
+        Ok (Browser_lane.Drag_to {source;destination;via;duration_ms})
       | Some (`String "follow_link") ->
         let* () = excludes ["selector";"text";"x";"y";"point";"from";"to";"viewport"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error "follow_link requires expectedUrl" in
@@ -222,7 +204,7 @@ let parse = function
          | _ -> Error "fill requires string text (empty text clears the input)")
       | Some (`String "select_option") ->
         let* () = excludes ["text"; "documentId"; "nodeId"; "x"; "y"; "point"; "from"; "to"; "viewport"] in
-        let* snapshot = snapshot_target () in
+        let* selector = selector () in
         let* selection = match List.assoc_opt "value" fields, List.assoc_opt "values" fields with
           | Some (`String value), None -> Ok (Browser_lane.Single_option value)
           | None, Some (`List values) ->
@@ -233,9 +215,7 @@ let parse = function
               | _ :: _ -> Error "select_option values must contain only strings" in
             strings [] values
           | _ -> Error "select_option requires exactly one of string value or string array values ([] clears a multiple select)" in
-        (match snapshot with
-         | Some target -> Ok (Browser_lane.Select_option_target {target;selection})
-         | None -> let* selector = selector () in Ok (Browser_lane.Select_option {selector;selection}))
+        Ok (Browser_lane.Select_option {selector;selection})
       | Some (`String "scroll") ->
         let* () = excludes ["selector"; "text"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"] in
         let* x = integer "x" in let* y = integer "y" in Ok (Browser_lane.Scroll {x; y})
@@ -305,9 +285,7 @@ let parse = function
         | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _
         | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _
         | Browser_lane.Click_target _ | Browser_lane.Fill_target _
-        | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _
-        | Browser_lane.Select_option_target _ | Browser_lane.Press_target _
-        | Browser_lane.Drag_target _) ->
+        | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _) ->
         Error "framePath applies only to click, fill, select_option and scroll with a selector" in
     Ok { route = base.route; tab_id; frame_path; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
@@ -707,8 +685,7 @@ let needs_pointer_resolution = function
   | Browser_lane.Activate_tab | Fill _ | Select_option _ | Set_zoom _ | Set_viewport _
   | Double_click_at _ | Type_text _ | Press_key _ | Scroll _ | Hover_at _ | Tap_at _
   | Swipe _ | Click_at _ | Scroll_at _ | Drag _ | Follow_link _ | Fill_node _
-  | Click_target _ | Fill_target _ | Hover_target _ | Double_click_target _
-  | Select_option_target _ | Press_target _ | Drag_target _ -> false
+  | Click_target _ | Fill_target _ | Hover_target _ | Double_click_target _ -> false
 
 let resolve_pointer_input action = function
   | `Assoc fields ->
@@ -735,9 +712,7 @@ let resolve_pointer_input action = function
      | Browser_lane.Tap_at _ | Browser_lane.Swipe _
      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
      | Browser_lane.Fill_node _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _
-     | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _
-     | Browser_lane.Select_option_target _ | Browser_lane.Press_target _
-     | Browser_lane.Drag_target _ ->
+     | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ ->
        Error "semantic pointer action required" in
     let* url = required "url" in
     (match url with

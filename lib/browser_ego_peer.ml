@@ -906,12 +906,10 @@ type keys = Text of string | Chord of Browser_lane.Keyboard.t
 let keys_lines = function
   | Text _ -> ["        await page.keyboard.type(args.keys);"]
   | Chord _ -> ["        await page.keyboard.press(args.keys);"]
-let chord_to_ego (chord : Browser_lane.Keyboard.t) =
-  String.concat "+"
-    (List.map Browser_lane.Keyboard.modifier_name chord.modifiers @ [Browser_lane.Keyboard.key_text chord.key])
 let keys_fields = function
   | Text text -> ["keys",str text]
-  | Chord chord -> ["keys",str (chord_to_ego chord)]
+  | Chord chord -> ["keys",str (String.concat "+"
+      (List.map Browser_lane.Keyboard.modifier_name chord.modifiers @ [Browser_lane.Keyboard.key_text chord.key]))]
 
 let receipt_of ~id ~verb = function
   | `Assoc fields -> Ok (obj (("tabId",`Int id) :: ("action",str verb) :: List.remove_assoc "action" fields))
@@ -1070,7 +1068,7 @@ let ego_locator = function
     Printf.sprintf "loc=role:%s[name%s%s]" role (if exact then "=" else "*=") (Yojson.Safe.to_string (str name))
   | Target_text {text;exact} -> "text=" ^ (if exact then Yojson.Safe.to_string (str text) else text)
 type target_operation = Target_click | Target_fill of string | Target_hover | Target_double_click
-  | Target_select of Browser_lane.option_selection | Target_drag of string | Target_press of string
+  | Target_select of Browser_lane.option_selection | Target_drag of string
 let target_input_script = {js|async function nativeTargetInput(page, args) {
   const reason = error => String(error && error.message || error);
   let refusal = null, urlBefore = null;
@@ -1081,7 +1079,7 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
         refusal = "the tab is at " + urlBefore + ", not at expectedUrl; read it again";
     } catch (error) { refusal = reason(error); }
   };
-  if (!["click", "fill", "hover", "double_click", "select_option", "drag_to", "press_key"].includes(args.action))
+  if (!["click", "fill", "hover", "double_click", "select_option", "drag_to"].includes(args.action))
     return {before: true, error: "unsupported snapshot target action"};
   await checkUrl();
   if (refusal !== null) return {before: true, error: refusal};
@@ -1094,7 +1092,6 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
       case "double_click": receipt = await page.dblclick(args.target, {label: args.cursor}); break;
       case "select_option": receipt = {selectedValues: await page.selectOption(args.target, args.selection)}; break;
       case "drag_to": receipt = await page.dragAndDrop(args.target, args.destination, {label: args.cursor}); pointerReleased = !receipt?.dialog; break;
-      case "press_key": receipt = await page.press(args.target, args.keys); break;
     }
   } catch (error) {
     failure = reason(error);
@@ -1112,21 +1109,19 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
     | Target_hover -> "hover", `Null
     | Target_double_click -> "double_click", `Null
     | Target_select _ -> "select_option", `Null
-    | Target_drag _ -> "drag_to", `Null
-    | Target_press _ -> "press_key", `Null in
+    | Target_drag _ -> "drag_to", `Null in
   let selection = match operation with
     | Target_select (Browser_lane.Single_option value) -> obj ["value",str value]
     | Target_select (Browser_lane.Multiple_options values) -> `List (List.map (fun value -> obj ["value",str value]) values)
-    | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_drag _ | Target_press _ -> `Null in
+    | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_drag _ -> `Null in
   let unknown = Printf.sprintf "read tab %d before another step" id in
   let holds_button = match operation with Target_drag _ -> true
-    | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ | Target_press _ -> false in
+    | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> false in
   if holds_button then t.pointer_state <- Release_uncertain;
   let response = run_native_step t ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",(match expected_url with Some url -> str url | None -> `Null);"target",str locator;
         "action",str verb;"text",text;"selection",selection;"cursor",str cursor;
-        "keys",(match operation with Target_press keys -> str keys | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ | Target_drag _ -> `Null);
-        "destination",(match operation with Target_drag destination -> str destination | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ | Target_press _ -> `Null)])
+        "destination",(match operation with Target_drag destination -> str destination | Target_click | Target_fill _ | Target_hover | Target_double_click | Target_select _ -> `Null)])
       (String.concat "\n" [
         target_input_script;
         unblocked_agent_page;
@@ -1167,7 +1162,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
            | Target_select _, Some (`List values) when List.for_all (function `String _ -> true | _ -> false) values ->
              Ok ["selectedValues",`List values]
            | Target_select _, (None | Some _) -> outcome "ego answered selection without its selected values"
-           | (Target_click | Target_fill _ | Target_hover | Target_double_click | Target_drag _ | Target_press _), (None | Some _) -> Ok [] in
+           | (Target_click | Target_fill _ | Target_hover | Target_double_click | Target_drag _), (None | Some _) -> Ok [] in
          Ok (obj (["tabId",`Int id;"action",str verb] @ reference @ ["urlBefore",str url_before]
                   @ tab_fields (Some tab)
                   @ (match popups with [] -> [] | _ :: _ -> ["popups",`List popups])
@@ -1202,9 +1197,7 @@ let interact ?actor t args =
     | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
     | Browser_lane.Click_at _ | Browser_lane.Scroll_at _ | Browser_lane.Follow_link _
     | Browser_lane.Fill_node _ | Browser_lane.Click _ | Browser_lane.Click_node _ | Browser_lane.Hover _
-    | Browser_lane.Double_click _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _
-    | Browser_lane.Double_click_target _ | Browser_lane.Select_option_target _ | Browser_lane.Press_target _
-    | Browser_lane.Drag_target _ -> Ok () in
+    | Browser_lane.Double_click _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Ok () in
   let* expected_url, action =
     let needs_resolution = match request.action with
       | Browser_lane.Click _ -> false
@@ -1221,9 +1214,7 @@ let interact ?actor t args =
       | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _ | Browser_lane.Double_click_at _
       | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
       | Browser_lane.Fill_node _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _
-      | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _
-      | Browser_lane.Select_option_target _ | Browser_lane.Press_target _
-      | Browser_lane.Drag_target _ -> Browser_interaction.needs_pointer_resolution request.action in
+      | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Browser_interaction.needs_pointer_resolution request.action in
     if needs_resolution then
       let* resolved = resolve t ~label ~deadline (input ~expected_url:request.expected_url request.action) in
       before (Browser_interaction.resolve_pointer_input request.action resolved)
@@ -1288,22 +1279,6 @@ let interact ?actor t args =
   | Browser_lane.Fill_target {target; text} -> on_target ~target (Target_fill text)
   | Browser_lane.Hover_target target -> on_target ~target Target_hover
   | Browser_lane.Double_click_target target -> on_target ~target Target_double_click
-  | Browser_lane.Select_option_target {target; selection} -> on_target ~target (Target_select selection)
-  | Browser_lane.Press_target {target; key} ->
-    (match key.key with
-     | Browser_lane.Keyboard.Character scalar when Uchar.to_int scalar > last_pressable_character ->
-       Error (Live.Before_effect press_refused)
-     | Browser_lane.Keyboard.Character _ | Browser_lane.Keyboard.Named _ ->
-       on_target ~target (Target_press (chord_to_ego key)))
-  | Browser_lane.Drag_target {source; destination} ->
-    (match expected_url with
-     | Some _ ->
-       native_input t ~id ~label ~cursor:cursor_text ~expected_url
-         ~locator:(ego_locator source)
-         ~reference:["source",Browser_lane.snapshot_target_to_json source;
-                     "destination",Browser_lane.snapshot_target_to_json destination]
-         ~operation:(Target_drag (ego_locator destination))
-     | None -> Error (Live.Before_effect "a snapshot target requires expectedUrl"))
   | Browser_lane.Tap_at _ | Browser_lane.Swipe _
   | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Activate_tab -> refused
 

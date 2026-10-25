@@ -661,7 +661,7 @@ let dispatch ?actor ?request_id t ~verb args =
             | None -> Ok result))
       | Browser_lane.Set_viewport size -> set_viewport t context args size
       | Browser_lane.Set_zoom _ -> Error (Before_effect "set_zoom requires a connected WebExtension browser")
-      | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ | Browser_lane.Select_option_target _ | Browser_lane.Press_target _ | Browser_lane.Drag_target _ -> Error (Before_effect Browser_lane.snapshot_target_refused)
+      | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Error (Before_effect Browser_lane.snapshot_target_refused)
       | Browser_lane.Activate_tab -> activate t context id args in
       let receipt = match receipt with
         | `Assoc fields ->

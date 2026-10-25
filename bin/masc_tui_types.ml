@@ -7244,9 +7244,7 @@ module Browser_lane_view = struct
                                                 | Tap_at _ | Swipe _
                                                 | Follow_link _ | Click_node _
                                                 | Fill_node _ | Click_target _ | Fill_target _
-                                                | Hover_target _ | Double_click_target _
-                                                | Select_option_target _ | Press_target _
-                                                | Drag_target _)
+                                                | Hover_target _ | Double_click_target _)
                                           ; _ } )
                                   | Loading
                                       ( _

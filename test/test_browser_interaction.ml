@@ -321,32 +321,13 @@ let test_snapshot_targets () =
   expect "a fill"
     (Browser_lane.Fill_target {target=Browser_lane.Target_ref 5;text=""})
     (target "fill" (`Assoc ["ref",`Int 5]) @ ["text",`String ""]);
-  expect "a select option"
-    (Browser_lane.Select_option_target {target=Browser_lane.Target_ref 7;selection=Browser_lane.Multiple_options []})
-    (target "select_option" (`Assoc ["ref",`Int 7]) @ ["values",`List []]);
-  let enter_key = match Browser_lane.Keyboard.of_wire ~key:"Enter" ~modifiers:["Control"] with
-    | Ok key -> key | Error error -> fail error in
-  expect "a press key"
-    (Browser_lane.Press_target {target=Browser_lane.Target_ref 8;key=enter_key})
-    (target "press_key" (`Assoc ["ref",`Int 8]) @ ["key",`String "Enter";"modifiers",`List [`String "Control"]]);
-  expect "a drag between snapshot targets"
-    (Browser_lane.Drag_target {
-       source=Browser_lane.Target_ref 2;
-       destination=Browser_lane.Target_role {role="region";name="Done";exact=true}})
-    (fields "drag_to" @ url @ [
-       "source",`Assoc ["ref",`Int 2];
-       "destination",`Assoc ["role",`String "region";"name",`String "Done"]]);
   List.iter (fun (label,input) ->
     check bool label true (Result.is_error (Interaction.parse (`Assoc input))))
     ["no expectedUrl",fields "click" @ ["target",`Assoc ["ref",`Int 1]];
      "with a selector",target "click" (`Assoc ["ref",`Int 1]) @ ["selector",`String "#send"];
      "with a scene node",target "click" (`Assoc ["ref",`Int 1]) @ ["documentId",`String "d";"nodeId",`String "n"];
      "in a frame",target "click" (`Assoc ["ref",`Int 1]) @ ["framePath",`List [`String "#frame"]];
-     "on scroll",target "scroll" (`Assoc ["ref",`Int 1]) @ ["x",`Int 0;"y",`Int 10];
-     "select without value or values",target "select_option" (`Assoc ["ref",`Int 1]);
-     "press_key with target and documentId",target "press_key" (`Assoc ["ref",`Int 1]) @ ["documentId",`String "d";"key",`String "Enter"];
-     "drag_to mixing snapshot target and selector",fields "drag_to" @ url @ ["source",`Assoc ["ref",`Int 1];"destination",`Assoc ["selector",`String "#drop"]];
-     "drag_to snapshot target with via waypoints",fields "drag_to" @ url @ ["source",`Assoc ["ref",`Int 1];"destination",`Assoc ["ref",`Int 2];"via",`List [`Assoc ["x",`Float 0.5;"y",`Float 0.5]]];
+     "on select",target "select_option" (`Assoc ["ref",`Int 1]) @ ["values",`List []];
      "hover with a selector",target "hover" (`Assoc ["ref",`Int 1]) @ ["selector",`String "#send"];
      "double-click in an explicit frame",target "double_click" (`Assoc ["ref",`Int 1]) @ ["framePath",`List [`String "#frame"]];
      "a negative ref",target "click" (`Assoc ["ref",`Int (-1)]);

@@ -1,8 +1,8 @@
 name = "masc_browser_interact"
 description = """
 Click, fill, scroll, hover, drag, follow a link, activate a browser tab, set the page viewport size, or set actual browser zoom. tap_at and swipe send a touch pointer (not a mouse) on a live BiDi connection or the owned Firefox: tap_at presses and releases at an observed point, swipe holds the touch from one observed point to another; Stagehand and a connected WebExtension refuse them before any effect. set_viewport takes width and height together in CSS pixels (100–4096) on a live BiDi connection, an automation Firefox or Stagehand; on a live BiDi connection or an automation Firefox, giving neither restores the browser's own size. An automation Firefox resizes its window and keeps at least about 500 x 120 outer pixels, so a smaller request is refused with the size the page kept. Read scene/screenshot geometry again afterward. set_zoom requires an exact WebExtension client/tab, expectedUrl and factor 0.3–5. It measures the resulting zoomFactor and zoomScope; Firefox per-origin zoom can affect same-site tabs. Read scene/screenshot geometry again afterward. hover/drag_to accept observed elements (selector or scene reference) without guessing screenshot coordinates. On connections other than ego they resolve visible, unobstructed targets in the current viewport; scroll and re-read offscreen targets first. Ego selector hover uses SDK resolution and auto-scrolling. hover_at (no click) and drag move a trusted pointer. automation, Stagehand Chromium, live webdriver_bidi and ego task spaces serve these actions; Stagehand and ego support custom drag paths but require durationMs=0. activate_tab is live-only, on a web_extension connection (>=0.6.0): it verifies active=true without window focus or navigation. A live request its connection cannot serve is refused before input as live_transport_unsupported; servingClients are the connected browsers that can. List that connection's tabs first: tab IDs are per connection.
-On an ego task space action=workflow runs known native Page calls in steps, then returns a final native snapshot. Each step names method (click, dblclick, hover, focus, fill, press, selectOption, goto, reload, waitForURL, waitForSelector, waitForLoadState) with its SDK arguments. SDK methods own resolution and waits. A step failure stops the sequence and retains completed steps; inspect before continuing and never replay the workflow. expectedUrl guards the initial page only; later navigation is allowed. Use separate workflows when an intermediate observation requires new judgment. No host JavaScript is accepted.
-On an ego task space, selector and snapshot target click/fill/hover/double_click/select_option/press_key/drag_to use ego native Page methods. The selector follows ego SDK syntax (snapshot refs, semantic locators, CSS, iframe/shadow traversal); ego owns target resolution, actionability and auto-scrolling. Prefer BrowserRead mode=snapshot and its refs. Ego selectOption follows native programmatic selection semantics, including disabled options. TUI documentId/nodeId actions retain their scene adapter.
+On an ego task space action=workflow runs known native Page calls in steps, then returns a final native snapshot. Each step names method (click, dblclick, hover, fill, press, selectOption, goto, waitForURL, waitForSelector, waitForLoadState) with its SDK arguments. SDK methods own resolution and waits. A step failure stops the sequence and retains completed steps; inspect before continuing and never replay the workflow. expectedUrl guards the initial page only; later navigation is allowed. Use separate workflows when an intermediate observation requires new judgment. No host JavaScript is accepted.
+On an ego task space, selector click/fill/hover/double_click/select_option use ego native Page methods. The selector follows ego SDK syntax (snapshot refs, semantic locators, CSS, iframe/shadow traversal); ego owns target resolution, actionability and auto-scrolling. Prefer BrowserRead mode=snapshot and its refs. Ego selectOption follows native programmatic selection semantics, including disabled options. TUI documentId/nodeId actions retain their scene adapter.
 The tab is explicit; no arbitrary JavaScript. drag/drag_to issue trusted pointer input; a receipt does not prove the application accepted a drop. HTML5 DataTransfer/drop is not guaranteed by Firefox and has no synthetic fallback. Read again after success or failure before retrying: page handlers can change external state. click/fill require an inspected target; ego applies its native actionability rules. On automation, Stagehand Chromium and live webdriver_bidi, click resolves an unobstructed selector or scene node and sends native pointerDown/pointerUp, supporting trusted pointerdown/mousedown menus; disabled and aria-disabled targets are refused. On those three connections click captures the current URL when expectedUrl is omitted, then checks it before input. Ego reads the URL before entering its SDK method, which can itself wait; this is not an atomic navigation guard. WebExtension retains DOM click. Ego fill follows its native SDK input behavior; other connections fill text inputs/textarea with input/change events. Fill does not press Enter or submit. scroll_at scrolls the pane under the point. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
@@ -87,7 +87,7 @@ description = "Retain the observed live clientId on every subsequent tab read/ac
 name = "target"
 type = "object"
 additional_properties = false
-description = "click/fill/hover/double_click/select_option/press_key on an ego connection, with the observed top-level expectedUrl and without selector or documentId/nodeId: {ref} from the latest BrowserRead snapshot of the same page (12 for ref=12), {role, name} or {text}. Read a new snapshot after page changes/input or a stale/unknown ref refusal. A ref from an iframe's snapshot acts inside that frame; role and text also search frames when the top document has none; framePath is not combined with target. exact (default true) matches the whole name or text; false matches a part, any case."
+description = "click/fill/hover/double_click on an ego connection, with the observed top-level expectedUrl and without selector or documentId/nodeId: {ref} from the latest BrowserRead snapshot of the same page (12 for ref=12), {role, name} or {text}. Read a new snapshot after page changes/input or a stale/unknown ref refusal. A ref from an iframe's snapshot acts inside that frame; role and text also search frames when the top document has none; framePath is not combined with target. exact (default true) matches the whole name or text; false matches a part, any case."
 
 [[params.params]]
 name = "ref"
@@ -222,7 +222,7 @@ required = true
 [[params]]
 name = "source"
 type = "object"
-description = "drag_to source: one selector, observed documentId/nodeId, or on an ego connection a snapshot target ({ref}, {role, name, exact} or {text, exact})."
+description = "drag_to source: one selector OR observed documentId/nodeId. Must be visible and unobstructed."
 additional_properties = false
 
 [[params.params]]
@@ -236,32 +236,11 @@ type = "string"
 [[params.params]]
 name = "nodeId"
 type = "string"
-
-[[params.params]]
-name = "ref"
-type = "integer"
-minimum = 0
-
-[[params.params]]
-name = "role"
-type = "string"
-
-[[params.params]]
-name = "name"
-type = "string"
-
-[[params.params]]
-name = "text"
-type = "string"
-
-[[params.params]]
-name = "exact"
-type = "boolean"
 
 [[params]]
 name = "destination"
 type = "object"
-description = "drag_to destination: one selector, observed documentId/nodeId, or on an ego connection a snapshot target ({ref}, {role, name, exact} or {text, exact})."
+description = "drag_to destination: one selector OR observed documentId/nodeId, in the same current document."
 additional_properties = false
 
 [[params.params]]
@@ -275,27 +254,6 @@ type = "string"
 [[params.params]]
 name = "nodeId"
 type = "string"
-
-[[params.params]]
-name = "ref"
-type = "integer"
-minimum = 0
-
-[[params.params]]
-name = "role"
-type = "string"
-
-[[params.params]]
-name = "name"
-type = "string"
-
-[[params.params]]
-name = "text"
-type = "string"
-
-[[params.params]]
-name = "exact"
-type = "boolean"
 
 [[params]]
 name = "via"
@@ -362,7 +320,7 @@ description = "set_zoom only: actual browser zoom factor (0.3–5), requires exa
 [[params]]
 name = "steps"
 type = "array"
-description = "workflow only: native Page calls in order, followed by one final snapshot. click/dblclick/hover/focus take selector; fill takes selector,text; press takes selector,key; selectOption takes selector and value or distinct values ([] clears); goto takes an absolute HTTP(S) url; reload takes no target or url; waitForURL takes a native string/glob url; waitForSelector takes selector,state (attached/detached/visible/hidden); waitForLoadState takes state (domcontentloaded/load/networkidle). Optional nonnegative JavaScript-safe timeoutMs is forwarded unchanged to that SDK method; omission uses the SDK default. MASC adds no cumulative execution-time or step-count limit. Locators come from observations; no injected script or new intermediate judgment inside this call."
+description = "workflow only: native Page calls in order, followed by one final snapshot. click/dblclick/hover take selector; fill takes selector,text; press takes selector,key; selectOption takes selector and value or distinct values ([] clears); goto takes an absolute HTTP(S) url; waitForURL takes a native string/glob url; waitForSelector takes selector,state (attached/detached/visible/hidden); waitForLoadState takes state (domcontentloaded/load/networkidle). Optional nonnegative JavaScript-safe timeoutMs is forwarded unchanged to that SDK method; omission uses the SDK default. MASC adds no cumulative execution-time or step-count limit. Locators come from observations; no injected script or new intermediate judgment inside this call."
 
 [params.items]
 type = "object"
@@ -372,7 +330,7 @@ additional_properties = false
 name = "method"
 type = "string"
 required = true
-enum = ["click", "dblclick", "hover", "focus", "fill", "press", "selectOption", "goto", "reload", "waitForURL", "waitForSelector", "waitForLoadState"]
+enum = ["click", "dblclick", "hover", "fill", "press", "selectOption", "goto", "waitForURL", "waitForSelector", "waitForLoadState"]
 
 [[params.items.params]]
 name = "selector"

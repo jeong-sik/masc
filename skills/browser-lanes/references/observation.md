@@ -10,8 +10,7 @@
 `snapshotScope=subtree`와 앞선 snapshot의 `root`(예: `@12`)를 쓴다. snapshot의 ref는
 scene의 documentId/nodeId와 다른 식별자다.
 
-click·fill·hover·double_click·select_option·press_key는 관측한 `target: {ref: 12}`를 우선 쓰고,
-drag_to는 `source`와 `destination`에 snapshot target(`{ref: 12}` 등)을 쓸 수 있다. role/name이나
+click·fill·hover·double_click은 관측한 `target: {ref: 12}`를 우선 쓴다. role/name이나
 text target도 사용할 수 있으나, 같은 이름이 프레임 안팎에 있으면 ref로 구분한다.
 `expectedUrl`은 snapshot에 나온 최상위 탭 URL이며 `framePath`를 섞지 않는다.
 조작 뒤나 stale/unknown ref 오류 뒤에는 같은 탭의 새 snapshot으로 이어간다.
@@ -39,12 +38,11 @@ documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔
 
 | method | 필드 |
 |---|---|
-| click, dblclick, hover, focus | selector |
+| click, dblclick, hover | selector |
 | fill | selector, text |
 | press | selector, key |
 | selectOption | selector, value 또는 중복 없는 values; []는 선택 해제 |
 | goto | url: 절대 HTTP(S) 주소 |
-| reload | (없음) |
 | waitForURL | url: SDK의 문자열/glob |
 | waitForSelector | selector, state: attached/detached/visible/hidden |
 | waitForLoadState | state: domcontentloaded/load/networkidle |

@@ -190,7 +190,7 @@ let support backend operation = match backend with
       | Connected Browser_lane.Web_extension -> Unsupported "WebExtension does not serve native pointer drag."
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"drag_to" Interact
           [observed;target;geometry;ego_agent_pages;
-           "Selector or snapshot target endpoints without via waypoints use ego's native page.dragAndDrop; scene or custom-waypoint drags use ego's native mouse API with observed waypoints; durationMs must be zero. Input receipt does not establish application drop acceptance."]
+           "Uses ego's native mouse API with observed waypoints; durationMs must be zero. Input receipt does not establish application drop acceptance."]
       | Safari_unavailable -> missing)
     | Html5_drop -> (match backend with
       | Owned_chromium -> conditional ~action:"drag_to" Interact
@@ -251,8 +251,8 @@ let support backend operation = match backend with
          "An uncertain Chromium keyboard release quarantines this owned session: inspect status and explicitly close/reopen; no replay or automatic page closure."] else missing)
     | Press_key | Key_chord -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"press_key" Interact
-          [observed;"Requires expectedUrl and either target ({ref}, {role, name, exact} or {text, exact}) for native page.press or current documentId for active-focus keyboard input; stale document/URL is refused.";
-           "Accepts named keys or one printable ASCII character with Control/Meta/Alt/Shift modifiers. Type other text with type_text.";
+          [observed;"Requires current documentId and expectedUrl; stale document/URL is refused.";
+           "Targets current enabled focus (or body); accepts named keys or one printable ASCII character with Control/Meta/Alt/Shift modifiers. Type other text with type_text.";
            ego_agent_pages]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
       if native backend then conditional ~action:"press_key" Interact
@@ -266,7 +266,7 @@ let support backend operation = match backend with
       | Connected (Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
     | Select_option -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"select_option" Interact
-          [observed;"Pass selector or target ({ref}, {role, name, exact} or {text, exact}) with value or distinct values ([] clears). Ego receives exact {value} objects and returns its native selected values. Disabled options are programmatically selectable. Native method failures are uncertain and are never replayed.";ego_agent_pages]
+          [observed;"Pass value or distinct values ([] clears). Ego receives exact {value} objects and returns its native selected values. Disabled options are programmatically selectable. Native method failures are uncertain and are never replayed.";ego_agent_pages]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium ->
           dom_input backend (conditional ~action:"select_option" Interact
             [observed;"Pass one select's selector and either value for a single-choice select or distinct values for a multiple select ([] clears it). Missing, ambiguous or disabled requested options are refused before any effect.";

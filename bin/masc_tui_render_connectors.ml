@@ -123,9 +123,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                     | Browser_lane.Drag _ | Browser_lane.Follow_link _
                     | Browser_lane.Click_node _ | Browser_lane.Fill_node _
                     | Browser_lane.Click_target _ | Browser_lane.Fill_target _
-                    | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _
-                    | Browser_lane.Select_option_target _ | Browser_lane.Press_target _
-                    | Browser_lane.Drag_target _ )
+                    | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ )
                 ; _
                 } ) -> "Interacting with selected browser viewport…", Theme.info ()
         | Loading (_, Screenshot _) ->

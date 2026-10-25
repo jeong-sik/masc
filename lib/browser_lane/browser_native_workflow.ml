@@ -2,11 +2,11 @@ type element_state = Attached | Detached | Visible | Hidden
 type load_state = Dom_content_loaded | Load | Network_idle
 type selection = One of string | Many of string list
 type action =
-  | Click of string | Double_click of string | Hover of string | Focus of string
+  | Click of string | Double_click of string | Hover of string
   | Fill of { selector : string; text : string }
   | Press of { selector : string; key : string }
   | Select_option of { selector : string; selection : selection }
-  | Goto of string | Reload | Wait_for_url of string
+  | Goto of string | Wait_for_url of string
   | Wait_for_selector of { selector : string; state : element_state }
   | Wait_for_load_state of load_state
 type step = { action : action; timeout_ms : int option }
@@ -47,10 +47,10 @@ let step_of_json value =
     | None -> Ok None
     | Some _ -> Result.map Option.some (integer "timeoutMs" fields) in
   let* action = match method_ with
-    | "click" | "dblclick" | "hover" | "focus" ->
+    | "click" | "dblclick" | "hover" ->
       let* _ = arguments ["selector"] in let* selector = selector () in
       (match method_ with "click" -> Ok (Click selector) | "dblclick" -> Ok (Double_click selector)
-       | "hover" -> Ok (Hover selector) | "focus" -> Ok (Focus selector) | _ -> Error "unknown native pointer method")
+       | "hover" -> Ok (Hover selector) | _ -> Error "unknown native pointer method")
     | "fill" ->
       let* _ = arguments ["selector";"text"] in let* selector = selector () in
       let* raw = required "text" fields in
@@ -70,7 +70,6 @@ let step_of_json value =
       Ok (Select_option {selector;selection})
     | "goto" -> let* _ = arguments ["url"] in let* raw = text "url" fields in
       let* url = url raw in Ok (Goto url)
-    | "reload" -> let* _ = arguments [] in Ok Reload
     | "waitForURL" -> let* _ = arguments ["url"] in let* url = text "url" fields in Ok (Wait_for_url url)
     | "waitForSelector" -> let* _ = arguments ["selector";"state"] in
       let* selector = selector () in let* raw = text "state" fields in let* state = element_state raw in
@@ -98,23 +97,22 @@ let of_json value =
     | _ -> Error "steps must be a native Page call array" in
   Ok {tab_id;expected_url;steps;snapshot_scope;max_chars}
 let is_effect = function
-  | Click _ | Double_click _ | Hover _ | Focus _ | Fill _ | Press _ | Select_option _ | Goto _ | Reload -> true
+  | Click _ | Double_click _ | Hover _ | Fill _ | Press _ | Select_option _ | Goto _ -> true
   | Wait_for_url _ | Wait_for_selector _ | Wait_for_load_state _ -> false
 let method_name = function
-  | Click _ -> "click" | Double_click _ -> "dblclick" | Hover _ -> "hover" | Focus _ -> "focus" | Fill _ -> "fill"
-  | Press _ -> "press" | Select_option _ -> "selectOption" | Goto _ -> "goto" | Reload -> "reload" | Wait_for_url _ -> "waitForURL"
+  | Click _ -> "click" | Double_click _ -> "dblclick" | Hover _ -> "hover" | Fill _ -> "fill"
+  | Press _ -> "press" | Select_option _ -> "selectOption" | Goto _ -> "goto" | Wait_for_url _ -> "waitForURL"
   | Wait_for_selector _ -> "waitForSelector" | Wait_for_load_state _ -> "waitForLoadState"
 let string value = `String value
 let step_to_json {action;timeout_ms} =
   let selector value = ["selector",string value] in
   let fields = match action with
-    | Click s | Double_click s | Hover s | Focus s -> selector s
+    | Click s | Double_click s | Hover s -> selector s
     | Fill {selector=s;text} -> selector s @ ["text",string text]
     | Press {selector=s;key} -> selector s @ ["key",string key]
     | Select_option {selector=s;selection} -> selector s @
       (match selection with One value -> ["value",string value] | Many values -> ["values",`List (List.map string values)])
     | Goto url | Wait_for_url url -> ["url",string url]
-    | Reload -> []
     | Wait_for_selector {selector=s;state} -> selector s @ ["state",string (element_state_name state)]
     | Wait_for_load_state state -> ["state",string (load_state_name state)] in
   `Assoc (["method",string (method_name action)] @ fields @ Option.to_list (Option.map (fun n -> "timeoutMs",`Int n) timeout_ms))

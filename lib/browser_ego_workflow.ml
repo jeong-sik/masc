@@ -19,7 +19,6 @@ let script = {js|async function nativeWorkflow(page, args) {
         case 'click': effect = effectStarted = true; receipt = await page.click(step.selector, {...options, label: args.cursor}); break;
         case 'dblclick': effect = effectStarted = true; receipt = await page.dblclick(step.selector, {...options, label: args.cursor}); break;
         case 'hover': effect = effectStarted = true; receipt = await page.hover(step.selector, {...options, label: args.cursor}); break;
-        case 'focus': effect = effectStarted = true; receipt = await page.focus(step.selector, options); break;
         case 'fill': effect = effectStarted = true; receipt = await page.fill(step.selector, step.text, options); break;
         case 'press': effect = effectStarted = true; receipt = await page.press(step.selector, step.key, options); break;
         case 'selectOption': {
@@ -28,7 +27,6 @@ let script = {js|async function nativeWorkflow(page, args) {
           receipt = await page.selectOption(step.selector, selection, options); break;
         }
         case 'goto': effect = effectStarted = true; receipt = await page.goto(step.url, options); break;
-        case 'reload': effect = effectStarted = true; receipt = await page.reload(options); break;
         case 'waitForURL': await page.waitForURL(step.url, options); break;
         case 'waitForSelector': await page.waitForSelector(step.selector, {...options, state: step.state}); break;
         case 'waitForLoadState': await page.waitForLoadState(step.state, options); break;

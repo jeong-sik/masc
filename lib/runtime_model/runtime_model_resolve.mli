@@ -37,9 +37,15 @@ val resolve_auto_model
   -> model_selector
   -> model_resolution
 
-(** Parse a "model@url" custom model spec.
-    Returns [(model_id, base_url)].
-    Without [@], uses [CUSTOM_LLM_BASE_URL] env or the local discovery
-    default endpoint. Prefer explicit runtime provider endpoints for
-    operator-configured routing. *)
-val parse_custom_model : string -> string * string
+type custom_model_error =
+  | Missing_endpoint
+  | Empty_model
+  | Invalid_endpoint
+
+val custom_model_error_to_string : custom_model_error -> string
+
+(** Parse an explicit [model@url] custom HTTP model selection.
+    Both model and an absolute HTTP(S) endpoint are required. No process
+    environment or discovery state supplies an omitted endpoint. The model
+    and URL are trimmed at the boundary; URL path/query bytes are preserved. *)
+val parse_custom_model : string -> (string * string, custom_model_error) result

@@ -3,7 +3,8 @@
     Pure functions that map user-facing [auto] selectors through the AGENT_CORE
     provider runtime binding projection. Provider-specific alias/catalog truth
     belongs upstream in AGENT_CORE, not in MASC runtime code.
-    No side effects beyond reading environment variables.
+    Custom URL selection is explicit; only auto-model resolution consults
+    the runtime binding's declared defaults/discovery.
 
     @since 0.92.0 extracted from Runtime_config *)
 
@@ -29,14 +30,6 @@ type model_resolution =
   ; resolved_model_id : string
   ; provenance : model_resolution_provenance
   }
-
-let env_value_opt ?(getenv = Sys.getenv_opt) var =
-  match getenv var with
-  | Some v ->
-    let trimmed = String.trim v in
-    if String.equal trimmed "" then None else Some trimmed
-  | None -> None
-;;
 
 let explicit_resolution requested_model_id resolved_model_id =
   { requested_model_id; resolved_model_id; provenance = Explicit_input }
@@ -110,17 +103,30 @@ let resolve_auto_model
      | Concrete _ -> explicit_resolution model_id (String.trim model_id))
 ;;
 
-let parse_custom_model model_id =
-  match String.index_opt model_id '@' with
+type custom_model_error =
+  | Missing_endpoint
+  | Empty_model
+  | Invalid_endpoint
+
+let custom_model_error_to_string = function
+  | Missing_endpoint -> "custom model requires an explicit model@url selection"
+  | Empty_model -> "custom model selection has an empty model id"
+  | Invalid_endpoint -> "custom model requires an absolute HTTP(S) endpoint"
+;;
+
+let parse_custom_model selection =
+  match String.index_opt selection '@' with
+  | None -> Error Missing_endpoint
   | Some at_idx ->
-    let model = String.sub model_id 0 at_idx in
-    let url = String.sub model_id (at_idx + 1) (String.length model_id - at_idx - 1) in
-    model, url
-  | None ->
-    let url =
-      match env_value_opt "CUSTOM_LLM_BASE_URL" with
-      | Some u -> u
-      | None -> Llm_provider.Discovery.default_endpoint
-    in
-    model_id, url
+    let model = String.sub selection 0 at_idx |> String.trim in
+    let url = String.sub selection (at_idx + 1) (String.length selection - at_idx - 1)
+      |> String.trim in
+    if model = "" then Error Empty_model
+    else
+      match Uri.of_string url with
+      | uri ->
+        (match Uri.scheme uri, Uri.host uri with
+         | Some ("http" | "https"), Some host when host <> "" -> Ok (model, url)
+         | _ -> Error Invalid_endpoint)
+      | exception Invalid_argument _ -> Error Invalid_endpoint
 ;;

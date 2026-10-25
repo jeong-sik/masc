@@ -19,12 +19,9 @@ let resolve (spec : string) : resolution =
          "malformed spec %S: expected \"provider:model\" or \"custom:model@url\""
          spec)
   | Some ("custom", rest) ->
-    let model_id, base_url = Runtime_model_resolve.parse_custom_model rest in
-    if model_id = "" then
-      Unknown
-        (Printf.sprintf "malformed custom spec %S: empty model id" spec)
-    else
-      Custom_url { model_id; base_url }
+    (match Runtime_model_resolve.parse_custom_model rest with
+     | Ok (model_id, base_url) -> Custom_url { model_id; base_url }
+     | Error error -> Unknown (Runtime_model_resolve.custom_model_error_to_string error))
   | Some (provider_name, model_id) ->
     (* Registry is the SSOT for pinned providers. We never override its
        [kind] from a substring of [provider_name] or [model_id]. *)

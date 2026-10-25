@@ -793,7 +793,7 @@ let hourly_timeline (entries : tool_call_entry list) : hourly_bucket list =
   let tbl : (string, int * int) Hashtbl.t = Hashtbl.create 24 in
   List.iter (fun (e : tool_call_entry) ->
     let hour = hour_start_iso e.ts in
-    let is_err = Option.is_some e.error in
+    let is_err = entry_is_failure e in
     match Hashtbl.find_opt tbl hour with
     | None -> Hashtbl.replace tbl hour (1, if is_err then 1 else 0)
     | Some (c, errs) -> Hashtbl.replace tbl hour (c + 1, errs + (if is_err then 1 else 0))

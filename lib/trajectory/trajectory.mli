@@ -246,7 +246,9 @@ val aggregate_tool_stats : tool_call_entry list -> tool_stat list
     Results sorted by call_count descending. *)
 
 val hourly_timeline : tool_call_entry list -> hourly_bucket list
-(** Bucket entries by hour. Results sorted chronologically. *)
+(** Bucket entries by hour. Results sorted chronologically. [error_count]
+    uses the same failure definition as {!aggregate_tool_stats}: an explicit
+    error or a rejected Gate decision. A row with both counts once. *)
 
 val tool_stat_to_json : tool_stat -> Yojson.Safe.t
 val hourly_bucket_to_json : hourly_bucket -> Yojson.Safe.t

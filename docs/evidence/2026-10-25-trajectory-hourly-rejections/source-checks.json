@@ -1,0 +1,24 @@
+{
+  "base": "8fb696da672be25e8efe69ff6eaccc89cb547e88",
+  "source_sha256": {
+    "lib/trajectory/trajectory.mli": "193241000e2d2db561b838de831f13f0d247b616de7e6bd235457b6cd07b9302",
+    "lib/trajectory/trajectory.ml": "139ebf7c81c72f860caffe336cee97b12310a666fc63270a94f04450a543f4fe",
+    "test/test_trajectory.ml": "c2a3f06fdfb953a61abfe5b4f01317ca0f97d1666a0d34d5f0e19d32b0bc40b6"
+  },
+  "ocaml_parse": "PASS",
+  "whitespace": "PASS",
+  "local_dune": "NOT_RUN",
+  "typecheck": "NOT_RUN",
+  "execution": "NOT_RUN",
+  "requested_suites": [
+    "test/test_trajectory"
+  ],
+  "full_regression": "NOT_RUN",
+  "parent_selected_run": {
+    "run": 40162239132,
+    "head": "8fb696da672be25e8efe69ff6eaccc89cb547e88",
+    "conclusion": "SUCCESS",
+    "cases": 22,
+    "scope": "Fusion metrics/wake only, not this trajectory change"
+  }
+}

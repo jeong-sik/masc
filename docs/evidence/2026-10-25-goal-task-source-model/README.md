@@ -13,7 +13,7 @@ PR #45949의 기능을 실제 모델로 확인했다. 원문 조회 도구를 �
 | P | Done, 지표 1 | `keeper_tasks_list(task-001)` | APPROVE | `proof_proven` / `awaiting_confirmation` |
 | N | InProgress, 지표 0 | `keeper_tasks_list(task-002)` | REJECT | `proof_refuted` / `executing` |
 
-두 Task 원문 모두 primary revision 10이다. [P 원문](source-P.json)은 2,561 bytes, [N 원문](source-N.json)은 527 bytes다. 원본과 [판정 P](goal-P-result.json)·[판정 N](goal-N-result.json)의 request ID, criterion revision, run ID가 일치한다. 도구 결과는 verdict를 요청한 다음 실제 provider 입력에도 들어 있다. P의 registry excerpt는 1,024 bytes에서 잘렸으므로 그 excerpt만으로 전체 조회를 입증하지 않았다. 실제 다음 요청의 full Tool message를 풀어 2,561-byte 원문과 일치시켰다.
+두 Task 원문 모두 primary revision 10이다. [P 원문](source-P.json)은 2,561 bytes, [N 원문](source-N.json)은 527 bytes다. 원본과 [판정 P](goal-P-result.json)·[판정 N](goal-N-result.json)의 request ID, criterion revision, run ID가 일치한다. 조회 결과가 다음 실제 provider 요청에 포함된 상태에서 모델이 verdict를 생성했다. P의 registry excerpt는 1,024 bytes에서 잘렸으므로 그 excerpt만으로 전체 조회를 입증하지 않았다. 실제 다음 요청의 full Tool message를 풀어 2,561-byte 원문과 일치시켰다.
 
 양성 선행 Task는 운영자가 만든 45-byte JSON fixture를 제출했다. [실제 자동 판정](automatic-task-result.json)은 파일 Read → 구조화 APPROVE → `system_llm_agent` / `verifier_exact` 원장 → primary Done으로 이어졌다. 운영자가 verdict를 주입하지 않았다. producer는 운영자 fixture이며 producer 모델 identity를 만들어 넣지 않았다.
 
@@ -41,7 +41,7 @@ Done 행에는 영구 typed verifier/verification-ID 승인 인증서나 전체 
 
 [계측 수리](instrumentation-recovery.json)를 숨기지 않는다. 처음에는 macOS 임시 경로 정규화가 빠져 준비 단계에서 거절됐다. 이 최초 사건은 Root가 작성한 영수증과 코드 경로 근거이며 raw stderr 파일·수리 전 script 사본은 없다. 정상 prepare 후 보존한 초기 wrapper를 그 이전 script로 부르지 않는다. 다음에는 정상 적용된 claim의 plain text 응답을 클라이언트가 JSON으로 해석하다 실패했다. 원장을 읽고 같은 Claimed Task에서 이어갔으며 생성·claim을 재시도하지 않았다. 지표·목표·예상 결과는 유지했다.
 
-[정리 기록](owned-cleanup.json)은 판정과 terminal snapshot 이후다. 미완료 음성 Task를 Cancelled로 끝냈지만 제출 원문은 InProgress와 같은 SHA로 남았다. 새 모델 판정을 요청하지 않았다. 소유한 개발 UI·서버·proxy만 종료하고 브라우저 공간도 닫았다. terminal 당시 원본을 정리 후 원장으로 덮어쓰지 않았다.
+[정리 기록](owned-cleanup.json)은 판정과 terminal snapshot 이후다. 미완료 음성 Task를 Cancelled로 끝냈지만 제출 원문은 InProgress와 같은 SHA로 남았다. 새 모델 판정을 요청하지 않았다. 소유한 개발 UI·서버·proxy의 세 PID가 종료됐음을 확인하고 브라우저 공간도 닫았다. descendant 전체나 fleet 전역 종료를 확인한 기록은 아니다. terminal 당시 원본을 정리 후 원장으로 덮어쓰지 않았다.
 
 [원본 manifest](private-originals-manifest.json)는 Task·Goal 원장과 wire 등 37개 비공개 원문의 bytes·SHA를 결속한다. raw reasoning·헤더·인증값·호스트 경로는 공개하지 않는다. 공개 JSON 중 projection은 해당 사실과 원본 해시를 표시했고 Task source 두 파일은 제출된 bytes 그대로다. [설계 검토](design-review.json), [실제 cohort의 독립 검토](cohort-review.json), [설계 요구 대응](design-response.json)은 각각 동결된 범위에만 적용된다. 실제 cohort 검토는 조회·판정·저장 상태와 후속 Task 취소를 다루며 화면·프로세스 정리·후속 공개 projection의 감사는 포함하지 않는다. 같은 cohort의 재검토를 추가 실행으로 세지 않는다.
 

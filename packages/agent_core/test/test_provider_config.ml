@@ -2786,10 +2786,15 @@ let test_catalog_policy_native_and_proxy () =
       check_bool (label ^ " policy presence") expected
         (Option.is_some (Provider_config.anthropic_thinking_control config));
       let body = Backend_anthropic.build_request ~config ~messages:[] () in
-      check_bool (label ^ " serialized thinking presence") expected
+      (* A catalog policy does not itself request a wire toggle. In particular,
+         always-adaptive Claude intentionally omits the thinking field. *)
+      check_bool (label ^ " default request omits thinking toggle") false
         (List.mem_assoc "thinking" (Yojson.Safe.Util.to_assoc (Yojson.Safe.from_string body)))
     in
     check "declared native" true (config ~provider_id:"claude" ());
+    check_bool "native policy is always adaptive" true
+      (Provider_config.anthropic_thinking_control (config ~provider_id:"claude" ())
+       = Some Capabilities.Anthropic_always_adaptive);
     let proxy = config ~provider_id:"deepseek-anthropic" () in
     check "declared proxy" false proxy;
     let usage : Types.api_usage =

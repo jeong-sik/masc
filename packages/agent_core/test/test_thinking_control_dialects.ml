@@ -860,29 +860,34 @@ let assistant_with_reasoning ?(tool = false) config =
   }
 ;;
 
-let test_deepseek_replays_reasoning_only_for_tool_call_turns () =
+let test_deepseek_replays_reasoning_when_request_has_tools () =
   let config =
     declared_catalog_openai_compat_config
       ~base_url:"https://api.deepseek.com"
       ~provider_id:"deepseek"
       "deepseek-v4-flash"
   in
-  let plain =
-    BOR.build_request ~config ~messages:[ assistant_with_reasoning config ] ()
-    |> json_of_body
+  let calc =
+    `Assoc
+      [ "name", `String "calc"
+      ; "description", `String "Calculate an expression"
+      ; "parameters", `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc [ "expr", `Assoc [ "type", `String "string" ] ]
+          ; "required", `List [ `String "expr" ]
+          ]
+      ]
   in
-  let tool =
-    BOR.build_request ~config ~messages:[ assistant_with_reasoning ~tool:true config ] ()
-    |> json_of_body
-  in
-  let plain_assistant = plain |> member "messages" |> index 0 in
-  let tool_assistant = tool |> member "messages" |> index 0 in
-  check_member_absent "reasoning_content" plain_assistant;
-  check
-    string
-    "tool reasoning_content"
-    "use calculator"
-    (tool_assistant |> member "reasoning_content" |> to_string)
+  List.iter (fun (had_tool_call, reasoning) ->
+    let messages = [ assistant_with_reasoning ~tool:had_tool_call config ] in
+    let without_tools = BOR.build_request ~config ~messages () |> json_of_body in
+    check_member_absent "reasoning_content"
+      (without_tools |> member "messages" |> index 0);
+    let with_tools =
+      BOR.build_request ~config ~messages ~tools:[ calc ] () |> json_of_body in
+    check string "request tools retain prior assistant reasoning" reasoning
+      (with_tools |> member "messages" |> index 0 |> member "reasoning_content" |> to_string))
+    [ false, "plain thought"; true, "use calculator" ]
 ;;
 
 let test_qwen_preserve_replays_reasoning_content () =
@@ -1627,9 +1632,9 @@ let () =
               `Quick
               test_deepseek_disabled_thinking_keeps_sampling
           ; test_case
-              "deepseek replays reasoning only for tool call turns"
+              "deepseek replay depends on current request tools"
               `Quick
-              test_deepseek_replays_reasoning_only_for_tool_call_turns
+              test_deepseek_replays_reasoning_when_request_has_tools
           ; test_case
               "qwen preserve replays reasoning_content"
               `Quick

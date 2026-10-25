@@ -558,16 +558,16 @@ let test_lookup_provider_m_qwen3_mtp_explicit_provider () =
       (Reasoning_dialect.replay_policy_to_string dialect.replay_policy);
     check
       bool
-      "catalog resolves the closed latest-user replay policy"
+      "catalog resolves the initial-system latest-user replay policy"
       true
-      (c.reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls);
+      (c.reasoning_replay_override = Capabilities.Force_initial_system_latest_user_turn_tool_calls);
     (match Capabilities.for_model_id "qwen36-35b-a3b-mtp" with
      | Some bare ->
        check
          bool
-         "bare runtime row resolves the same latest-user replay policy"
+         "bare runtime row resolves the same initial-system replay policy"
          true
-         (bare.reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls)
+         (bare.reasoning_replay_override = Capabilities.Force_initial_system_latest_user_turn_tool_calls)
      | None -> fail "bare qwen3.6 runtime row should resolve")
   | None -> fail "explicit provider/model lookup should match qwen3.6 model id"
 ;;

@@ -560,7 +560,11 @@ let test_another_list_query_does_not_repeat_completed_work () =
     let cached = read ~key:"names" ~ttl_s:3600.
         (fun () -> fail "the newer cache publication was overwritten") in
     check string "the competing publication is retained" "names"
-      (Yojson.Safe.Util.to_string cached))
+      (Yojson.Safe.Util.to_string cached);
+    let cached_detailed = read ~key:"detailed" ~ttl_s:3600.
+        (fun () -> fail "the outer query's publication was lost") in
+    check string "both query keys coexist in the same generation" "detailed"
+      (Yojson.Safe.Util.to_string cached_detailed))
 
 let test_explicit_invalidation_repeats_the_obsolete_read () =
   with_empty_roster_cache (fun () ->

@@ -114,8 +114,43 @@ let read_keeper_toml_content (path : string) =
       }
   | Ok content -> Ok content
 
+type parsed_toml_cache_entry =
+  { content : string
+  ; parsed : string * keeper_profile_defaults
+  }
+
+let parsed_toml_cache_max_entries = 1024
+let parsed_toml_cache : (string, parsed_toml_cache_entry) Hashtbl.t =
+  Hashtbl.create 64
+let parsed_toml_mu = Stdlib.Mutex.create ()
+
+let invalidate_parsed_toml_cache () =
+  Stdlib.Mutex.protect parsed_toml_mu (fun () ->
+    Hashtbl.reset parsed_toml_cache)
+;;
+
 let inspect_keeper_toml (path : string) =
-  Result.bind (read_keeper_toml_content path) (inspect_keeper_toml_content ~path)
+  match read_keeper_toml_content path with
+  | Error _ as error -> error
+  | Ok content ->
+    let cached =
+      Stdlib.Mutex.protect parsed_toml_mu (fun () ->
+        match Hashtbl.find_opt parsed_toml_cache path with
+        | Some entry when String.equal entry.content content ->
+          Some entry.parsed
+        | Some _ | None -> None)
+    in
+    (match cached with
+     | Some parsed -> Ok parsed
+     | None ->
+       (match inspect_keeper_toml_content ~path content with
+        | Error _ as error -> error
+        | Ok parsed ->
+          Stdlib.Mutex.protect parsed_toml_mu (fun () ->
+            if Hashtbl.length parsed_toml_cache >= parsed_toml_cache_max_entries
+            then Hashtbl.reset parsed_toml_cache;
+            Hashtbl.replace parsed_toml_cache path { content; parsed });
+          Ok parsed))
 
 let load_keeper_toml = inspect_keeper_toml
 

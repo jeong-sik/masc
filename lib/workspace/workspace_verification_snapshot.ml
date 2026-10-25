@@ -17,7 +17,7 @@ type evidence_read_failure =
   | Evidence_changed_during_read
   | Evidence_read_error of string
 
-type collaboration_kind = Board_source | Fusion_source
+type collaboration_kind = Board_source | Fusion_source | Task_source
 
 type submitted_evidence_item =
   | Evidence_collaboration of { reference : string; content : string; sha256 : string }
@@ -110,7 +110,10 @@ let collaboration_reference reference =
     else None in
   match parse "board:" Board_source with
   | Some _ as value -> value
-  | None -> parse "fusion:" Fusion_source
+  | None ->
+    (match parse "fusion:" Fusion_source with
+     | Some _ as value -> value
+     | None -> parse "task:" Task_source)
 
 let collaboration_metadata ~reference ~content ~sha256 =
   `Assoc ["kind", `String "collaboration"; "reference", `String reference;

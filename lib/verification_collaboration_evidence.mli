@@ -24,3 +24,13 @@ val read_board : submitted_evidence:Workspace_verification_store.submitted_evide
   (Yojson.Safe.t, error) result
 val read_fusion : submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> args:Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
+val read_task : submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> args:Yojson.Safe.t ->
+  (Yojson.Safe.t, error) result
+(** [task_ids] must name exactly one explicitly submitted [task:<id>]. Capture
+    uses the strict primary backlog and retains its revision, last update and
+    full canonical Task row. Read never consults the current backlog. The row
+    describes committed state, including completion time and notes; it is not
+    a complete approval history or evidence of external acceptance. A Done row
+    does not have typed verifier/verification-id fields; its notes remain
+    attributed Task content, not a reconstructed approval certificate. Shared
+    Task records are available to both Task and Goal review authority. *)

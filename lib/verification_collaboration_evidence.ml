@@ -135,6 +135,23 @@ let capture_fusion ~config ~authority ~run_id =
     ; "keeper_decisions", `List decisions ])
 
 
+(* A Task's primary row is the domain commit, unlike bounded run observations
+   or acknowledged outbox rows. Keep its actual state and provenance; do not
+   synthesize an approval verdict or pretend this is complete event history.
+   The submit path already holds its backlog lease: one strict read needs no
+   second acquisition, and Goal capture gets one atomic primary observation. *)
+let capture_task ~config ~task_id =
+  let* backlog = Workspace.read_backlog_r config
+    |> Result.map_error (fun detail -> Storage_failed detail) in
+  match List.filter (fun (task : Masc_domain.task) -> task.id = task_id) backlog.tasks with
+  | [] -> Error (Source_unavailable
+      "referenced Task was not found in the primary backlog; no approval history or deletion is inferred")
+  | [task] -> Ok (`Assoc ["source", `String "task";
+      "backlog_version", `Int backlog.version;
+      "backlog_last_updated", `String backlog.last_updated;
+      "task", Masc_domain.task_to_yojson task])
+  | _ -> Error (Storage_failed "primary backlog contains duplicate referenced Task identities")
+
 (* Captured once before the request commit; never capture on verifier read. *)
 let capture ~config ~authority ~references = protect (fun () ->
   List.fold_left (fun result reference ->
@@ -142,7 +159,8 @@ let capture ~config ~authority ~references = protect (fun () ->
     let* source = match Store.collaboration_reference reference with
       | Some (Store.Board_source, post_id) -> capture_board ~config ~authority ~post_id
       | Some (Store.Fusion_source, run_id) -> capture_fusion ~config ~authority ~run_id
-      | None -> Error (Invalid_request "expected board:<post-id> or fusion:<run-id>") in
+      | Some (Store.Task_source, task_id) -> capture_task ~config ~task_id
+      | None -> Error (Invalid_request "expected board:<post-id>, fusion:<run-id> or task:<task-id>") in
     let content = Yojson.Safe.to_string source in
     let sha256 = Digestif.SHA256.(digest_string content |> to_hex) in
     Ok (items @ [Store.Evidence_collaboration {reference; content; sha256}]))
@@ -210,3 +228,20 @@ let read_fusion ~submitted_evidence ~args = protect (fun () ->
   | `Assoc fields when List.assoc_opt "source" fields = Some (`String "fusion")
       && List.assoc_opt "run_id" fields = Some (`String run_id) -> page_source ~args source
   | _ -> Error (Storage_failed "invalid submitted Fusion snapshot"))
+
+let read_task ~submitted_evidence ~args = protect (fun () ->
+  let* task_id = match args with
+    | `Assoc fields ->
+      (match List.assoc_opt "task_ids" fields with
+       | Some (`List [`String id]) when id <> "" && String.trim id = id -> Ok id
+       | Some _ | None -> Error (Invalid_request "task_ids must name exactly one Task source"))
+    | _ -> Error (Invalid_request "task_ids must name exactly one Task source") in
+  let* source = submitted_source ~submitted_evidence ("task:" ^ task_id) in
+  let* () = match source with
+    | `Assoc ["source", `String "task"; "backlog_version", `Int version;
+        "backlog_last_updated", `String _; "task", task_json] when version > 0 ->
+      (match Masc_domain.task_of_yojson task_json with
+       | Ok task when task.id = task_id -> Ok ()
+       | Ok _ | Error _ -> Error (Storage_failed "submitted Task identity does not match reference"))
+    | _ -> Error (Storage_failed "invalid submitted Task snapshot") in
+  page_source ~args source)

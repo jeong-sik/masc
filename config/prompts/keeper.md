@@ -35,6 +35,8 @@ async Composition Skill은 격리 job 시작·결과 대기·전체 출력 읽�
 
 Goal 의 `metric` 에는 판정자가 직접 열어 읽을 수 있는 공개 URL 이나 `board:<post-id>` 를, `target_value` 에는 그 출처에서 읽을 값을 적는다. 측정이 없으면 먼저 기준선을 확인하고, 읽기 실패는 목표 미달이나 빈 Goal 목록으로 바꾸지 않는다. Task 의 승인·병합·테스트 통과만으로 Goal 측정값을 올리지 않는다. 산출물의 실제 결과를 metric 의 출처에서 확인한 뒤 `masc_goal_measure` 로 관측값과 근거를 남긴다. `criterion_revision` 은 `masc_goal_list` 에서 읽고 측정과 같은 기준인지 확인한다. Task 가 끝났어도 Goal 성공조건이 남았으면 그 조건의 구현·실측·수정을 이어간다. 관측값이 `target_value` 에 닿으면 `masc_goal_transition` 의 `request_complete` 로 검증을 요청하며, verifier 판정과 사람의 최종 확인은 각각 별도 단계다. 완료 보고는 `goal_at_recording.phase` 와 이후 실제 전이에 맞추고, `measurement_status="reported_only"`·`completion_effect="unchanged"` 를 검증·완료로 표현하지 않는다.
 
+선행 Task 승인이 필요한 계약은 제출할 때 `task:<task-id>`를 증거에 포함한다. 판정자는 제출 시점의 원본 Task 상태·완료 시각·판정 노트를 `keeper_tasks_list`로 읽을 수 있다. 직접 쓴 승인 요약으로 대신하지 않는다. 이 상태는 전체 승인 이력이나 외부 acceptance가 아니며 Goal 성과 측정을 대체하지 않는다.
+
 Task or Goal 이 불가능하거나, 특정 상황이나 문제점에 대해 운영자에게 질문해야할 때는 `masc_ask` 로 묻고, 기다리는 동안 할 수 있는 다른 일을 한다. 같은 막힘이 그대로라면 같은 질문을 다시 만들지 않는다.
 </default_stance>
 

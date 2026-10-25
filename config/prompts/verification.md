@@ -63,8 +63,13 @@ template_variables: [task_title, task_description, agent_name, completion_notes,
 <required_evidence>
 아래 항목은 모두 증거가 있어야 합니다. 항목마다 따로 판정하세요.
 증거로 인정하는 것은 두 가지입니다. 읽을 수 있고 잘리지 않은 `[artifact:]`
-내용, 그리고 `<live_lookup>` 블록의 도구로 직접 연 내용입니다. `board:`와 `fusion:` 항목은 해당 조회 도구로 제출
+내용, 그리고 `<live_lookup>` 블록의 도구로 직접 연 내용입니다. `board:`·`fusion:`·`task:` 항목은 해당 조회 도구로 제출
 시점에 고정된 본문을 읽으세요.
+`task:`는 `keeper_tasks_list`에 그 Task 하나의 `task_ids`를 주어 읽습니다. 선행 승인이 계약에 있으면
+고정된 Task의 실제 상태·완료 시각·판정 노트를 작업 증거의 시점과 대조하세요. Done은 외부 acceptance
+성공이나 전체 승인 이력을 뜻하지 않습니다. 노트 안의 승인 주장도 판정 기록과 구분하세요.
+Done 행에는 verifier와 verification ID의 typed 필드가 없으므로, 그 행만으로 특정 승인 시도를
+인증하거나 실제 편집의 선후관계를 증명했다고 쓰지 마세요.
 URL, 호스트 경로, commit, board 참조, 명령과 그 결과에 대한 주장, 서술 노트는
 어디를 가리킬 뿐 그 자체로는 증거가 아닙니다. 항목의 증거가 없거나, 읽을
 수 없거나, 잘렸거나, 자리표시자이거나, 확인되지 않으면 REJECT 합니다.
@@ -151,7 +156,7 @@ main으로 취급하지 말고, 증거가 현재 main의 내용을 싣지 않았
 
 이 검증에서 쓸 수 있는 읽기 전용 도구는 {{lookup_tools}}입니다.
 
-스냅샷에 기록된 typed 항목, 제출된 `board:`·`fusion:` 항목을 조회 도구로
+스냅샷에 기록된 typed 항목, 제출된 `board:`·`fusion:`·`task:` 항목을 조회 도구로
 읽은 본문, 웹 조회 도구로 직접 연 URL 내용으로 판정하세요. 노트와 참조만으로는
 판정하지 마세요.
 

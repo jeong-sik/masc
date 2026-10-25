@@ -32,4 +32,5 @@ type = "string"
 required = true
 description = """
 An Evidence Reference: artifact:<producer-root-relative-path>, note:<text>, \
-board:<post-id>, or fusion:<run-id>. Any other form is rejected."""
+board:<post-id>, fusion:<run-id>, or task:<task-id>. A Task row does not establish \
+external acceptance or the Goal measurement. Any other form is rejected."""

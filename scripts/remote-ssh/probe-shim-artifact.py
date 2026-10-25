@@ -73,8 +73,12 @@ def main():
         if status != 0 or output != b"config-loaded" or len(pieces) != 3 or pieces[-1] != b"":
             raise SystemExit(f"framed config execution failed: status={status} stdout={output!r} stderr={errors!r}")
         trailer = json.loads(pieces[1])["masc_exec_result"]
-        if (trailer.get("v"), trailer.get("exit"), trailer.get("signal"),
-                trailer.get("timed_out"), trailer.get("shim_error")) != (3, 0, None, False, None):
+        required = {"v", "exit", "signal", "timed_out", "shim_error"}
+        if (type(trailer) is not dict or not required.issubset(trailer)
+                or type(trailer["v"]) is not int or trailer["v"] != 3
+                or type(trailer["exit"]) is not int or trailer["exit"] != 0
+                or trailer["signal"] is not None or trailer["timed_out"] is not False
+                or trailer["shim_error"] is not None):
             raise SystemExit(f"framed execution did not succeed: {trailer!r}")
     if hashlib.sha256(shim.read_bytes()).hexdigest() != binary_sha:
         raise SystemExit("candidate bytes changed during probe")

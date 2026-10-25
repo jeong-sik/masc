@@ -453,8 +453,7 @@ let test_consumer_act_answer_survives_host_proof action_kind () =
     let action=match action_kind with
       | Object_action -> `Assoc ["elementId",`String "0-320";"method",`String "click";"arguments",`List []]
       | Null_action -> `Null in
-    let answer=`Assoc ["action",action;"twoStep",`Bool false] in
-    let answer=match Lane_addon_action.canonical answer with
+    let answer=match Lane_addon_action.canonical (`Assoc ["action",action;"twoStep",`Bool false]) with
       | Ok answer -> answer | Error detail -> fail detail in
     let output={Types.name="author";schema=baseline;request_schema=Types.Consumer_request_schema} in
     let package={package with exact_outputs=[output]} in

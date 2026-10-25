@@ -18,8 +18,7 @@ type page_key =
   }
 
 type filter =
-  { status : Masc_domain.Task_status_tag.t option
-  ; include_done : bool
+  { lifecycle : Keeper_tasks_list_query.lifecycle_filter
   ; projection : string
   ; selection : Keeper_tasks_list_query.t
   }

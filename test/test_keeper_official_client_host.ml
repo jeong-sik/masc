@@ -1379,7 +1379,7 @@ let msg role text : Agent_core.Types.message =
 ;;
 
 let prepare messages =
-  Host.prepare_turn
+  Host.prepare_turn ~composed_context:None
     ~runtime_label:"Fixture"
     ~keeper_name:"seed-fixture"
     ~turn_count:1
@@ -1391,7 +1391,7 @@ let prepare messages =
     ~configured_reasoning_effort:None
 ;;
 
-let prepare_prompt ?(hooks = None) system_prompt =
+let prepare_prompt ?(hooks = None) ?(composed_context = None) system_prompt =
   Host.prepare_turn
     ~runtime_label:"Fixture"
     ~keeper_name:"prompt-fixture"
@@ -1401,6 +1401,7 @@ let prepare_prompt ?(hooks = None) system_prompt =
     ~initial_messages:[ msg Agent_core.Types.User "history" ]
     ~model_input_projection:None
     ~hooks
+    ~composed_context
     ~configured_reasoning_effort:None
 ;;
 
@@ -1439,6 +1440,47 @@ let test_hook_override_to_blank_system_prompt_is_refused () =
     (prepare_prompt ~hooks:(Some hooks) "SYS")
 ;;
 
+(* A Goal is an observation, so its nonblank bytes cannot supply the Keeper
+   instructions the official lane already requires. The assembly is published
+   by the actual hook; reading it before that hook would miss this refusal. *)
+let test_goal_observation_cannot_mask_blank_keeper_instructions () =
+  let prepare_composed ~initial ~override =
+    let issued = ref None in
+    let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+      | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+        let current_params = {current_params with system_prompt_override=override} in
+        let base_system_prompt = Option.value ~default:initial current_params.system_prompt_override in
+        let partition = Keeper_context_layers.singleton Active_goals
+            "Goal observation: current revision and reported measurement 1/3" in
+        let assembly = Keeper_run_prompt.assemble_request_context ~base_system_prompt
+            ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
+            ~existing_extra_system_context:None
+            ~blocks:[Prompt_block_id.Dynamic_context, Keeper_context_layers.text partition] in
+        issued := Some assembly;
+        Agent_core.Hooks.AdjustParams {current_params with
+          extra_system_context=assembly.extra_system_context;
+          system_prompt_override=Keeper_context_assembly.system_prompt_override
+            ~previous:current_params.system_prompt_override assembly}
+      | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+      | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
+    let result = prepare_prompt ~hooks:(Some hooks)
+        ~composed_context:(Some (fun () -> !issued)) initial in
+    check bool "the actual hook issued a Goal carrier" true
+      (match !issued with
+       | Some {system_prompt=Some {goal_text=Some _;_};_} -> true
+       | Some _ | None -> false);
+    result in
+  List.iter (fun (initial, override) -> check_refused_system_prompt
+      "Goal context over blank selected Keeper instructions"
+      (prepare_composed ~initial ~override))
+    ["",None; " \n\t ",None; "valid configured instructions",Some "";
+     "valid configured instructions",Some " \n\t "];
+  match prepare_composed ~initial:"" ~override:(Some "valid selected instructions") with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok prepared -> check bool "a valid selected override and its Goal remain admitted" true
+      (String.starts_with ~prefix:"valid selected instructions\n\n" prepared.Host.system_prompt)
+;;
+
 let test_non_blank_system_prompt_reaches_the_lane_unchanged () =
   match prepare_prompt "  SYS with edges  " with
   | Error error -> fail (Agent_core.Error.to_string error)
@@ -1468,7 +1510,7 @@ let test_extra_system_context_keeps_typed_provenance () =
     }
   in
   let result =
-    Host.prepare_turn
+    Host.prepare_turn ~composed_context:None
       ~runtime_label:"Fixture"
       ~keeper_name:"provenance-fixture"
       ~turn_count:1
@@ -2663,6 +2705,95 @@ let use_markdown_prompts () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts")
 ;;
 
+(* The vendor retains its first System prompt. A newly issued Goal snapshot
+   therefore has to reach its Resume User prompt, independently of the extra
+   carrier that the session already holds. This exercises the actual host
+   preparation, held projection, codec and write-slot binding, not a vendor
+   session or remote model. *)
+let test_a_changed_system_goal_reaches_a_held_official_session () =
+  let module A = Keeper_context_assembly in
+  let owner = "Continue with the remaining work." in
+  let prepare observation =
+    let partition = match observation with
+      | None -> Layers.unattributed Direct_turn "TASK GATE LANE"
+      | Some text -> Layers.singleton Layers.Active_goals text
+          |> fun goals -> Layers.append_unattributed goals Direct_turn "TASK GATE LANE" in
+    let assembly = Keeper_run_prompt.assemble_request_context
+        ~base_system_prompt:"BASE_INSTRUCTIONS" ~post_tool_round:false ~previous_assembly:None
+        ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
+        ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
+    let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+      | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+        Agent_core.Hooks.AdjustParams {current_params with
+          extra_system_context=assembly.extra_system_context;
+          system_prompt_override=A.system_prompt_override ~previous:current_params.system_prompt_override assembly}
+      | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+      | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
+    let prepared = match Host.prepare_turn ~runtime_label:"held-goal-fixture"
+        ~composed_context:(Some (fun () -> Some assembly))
+        ~keeper_name:"held-goal" ~turn_count:1 ~system_prompt:"BASE_INSTRUCTIONS"
+        ~tools:[] ~initial_messages:[Agent_core.Types.user_msg owner]
+        ~model_input_projection:None ~hooks:(Some hooks) ~configured_reasoning_effort:None with
+      | Ok prepared -> prepared | Error error -> fail (Agent_core.Error.to_string error) in
+    assembly, prepared in
+  let first_text = "Goal goal-observed; revision one; measurement initial=0/3" in
+  let new_text = "Goal goal-observed; revision two; measurement new=1/4\n관측 \"reported_only\"" in
+  let first, first_prepared = prepare (Some first_text) in
+  check bool "Start actually issues its Goal in the System prompt" true
+    (contains first_prepared.system_prompt first_text);
+  let held = Host.start_held_context ~composed_context:first first_prepared.messages in
+  let resume assembly (prepared : Host.prepared_turn) held =
+    Host.resume_prompt ~goal:owner ~held ~composed_context:assembly prepared.messages in
+  let same = resume first first_prepared held in
+  check string "the first System observation is held without a duplicate Resume" owner same.prompt;
+  let second, second_prepared = prepare (Some new_text) in
+  check bool "the Goal stays out of the extra carrier's source blocks" false
+    (List.mem_assoc Prompt_block_id.Active_goals second.blocks);
+  let delivery = resume second second_prepared held in
+  check string "changed Goal is a distinct User observation before the owner request"
+    ("USER:\n" ^ Host.encode_history_message (Agent_core.Types.user_msg new_text) ^ "\n\n" ^ owner)
+    delivery.prompt;
+  List.iter (fun marker -> check bool "held non-Goal world state is not rebroadcast" false
+    (contains delivery.prompt marker)) ["TASK";"GATE";"LANE";"BASE_INSTRUCTIONS";first_text];
+  let repeated = resume second second_prepared delivery.held_context in
+  check string "the updated revision is subsequently held" owner repeated.prompt;
+  let absent, absent_prepared = prepare None in
+  let added = resume second second_prepared
+      (Host.start_held_context ~composed_context:absent absent_prepared.messages) in
+  check string "a Goal introduced after Start reaches Resume too" delivery.prompt added.prompt;
+  let open Yojson.Safe.Util in
+  let binding projected prompt = Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write projected
+      (Runtime_official_client_write.raw prompt) in
+  let issued = binding delivery.context_projection delivery.prompt in
+  check string "the actual Resume slot matches" "matched_completed_slot"
+    (issued |> member "status" |> to_string);
+  let source = match issued |> member "occurrences" |> to_list with
+    | [occurrence] -> occurrence |> member "source"
+    | _ -> fail "exactly the changed Goal must be attributed" in
+  check string "source is the System partition, not extra context" "system_prompt"
+    (source |> member "source_carrier" |> to_string);
+  check string "projection names the actual Resume User carrier" "official_resume_user_prompt"
+    (source |> member "target_carrier" |> to_string);
+  let physical = match second.system_prompt with Some value -> value | None -> fail "issued System missing" in
+  check string "source receipt hashes the issued System bytes" physical.partition.sha256
+    (source |> member "assembly" |> member "sha256" |> to_string);
+  let span_index = match source |> member "source_span_indices" |> to_list with
+    | [index] -> to_int index | _ -> fail "one typed Goal source span required" in
+  let span = List.nth physical.partition.spans span_index in
+  check string "the selected source span is exactly the new observation" new_text
+    (String.sub physical.text span.offset span.bytes);
+  let omitted = binding repeated.context_projection repeated.prompt in
+  check bool "held omission retains explicit System source proof" true
+    (List.exists (fun proof -> member "source_carrier" proof = `String "system_prompt")
+      (omitted |> member "omitted_held" |> to_list));
+  let stale = Keeper_context_submission_link.encoded_system_goal ~assembly:(Some first)
+      (Agent_core.Types.user_msg new_text) in
+  check string "an observation cannot borrow an older System receipt" "unavailable"
+    (binding stale (Keeper_context_submission_link.text stale)
+      |> member "issuer_attribution" |> member "status" |> to_string)
+;;
+
 (* One session: the wiki, the memory ledger and the Board posts stay the same
    from turn to turn while the fleet messages change. Only the changed section
    goes out, under the frame, and one line names the sections left out. *)
@@ -3022,7 +3153,7 @@ let test_unsupported_choice_refuses_before_projection () =
     | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
       Agent_core.Hooks.AdjustParams {current_params with tool_choice=Some Agent_core.Types.Any}
     | _ -> Agent_core.Hooks.Continue)} in
-  let result = Host.prepare_turn ~runtime_label:"Fixture" ~keeper_name:"choice-fixture"
+  let result = Host.prepare_turn ~composed_context:None ~runtime_label:"Fixture" ~keeper_name:"choice-fixture"
     ~turn_count:1 ~system_prompt:"SYS" ~tools:[] ~initial_messages:[]
     ~model_input_projection:(Some (fun ~tools:_ messages -> projected:=true;Ok messages))
     ~hooks:(Some hooks) ~configured_reasoning_effort:None in
@@ -3052,7 +3183,9 @@ let () =
             test_carried_summaries_without_a_witness_name_one_carrier
         ] )
     ; ( "World State sections on resume"
-      , [ test_case
+      , [ test_case "changed System Goal reaches a held session" `Quick
+            test_a_changed_system_goal_reaches_a_held_official_session
+        ; test_case
             "a resume sends only the changed sections"
             `Quick
             test_a_resume_sends_only_the_changed_world_state_sections
@@ -3278,6 +3411,8 @@ let () =
         ] )
     ; ( "system prompt refusal (masc#33165)"
       , [ test_case "a blank prompt is refused" `Quick test_blank_system_prompt_is_refused
+        ; test_case "Goal observations cannot mask blank Keeper instructions" `Quick
+            test_goal_observation_cannot_mask_blank_keeper_instructions
         ; test_case
             "a hook override to blank is refused"
             `Quick

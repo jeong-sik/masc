@@ -860,6 +860,19 @@ let test_the_pinned_blocks_follow_the_assemblys_cache_order () =
     [ "skill_compositions"; "memory_os_recall"; "dynamic_context"; "temporal_summary" ]
     (block_names composition.Keeper_next_request_forecast.pinned_blocks)
 
+let test_goal_is_counted_once_in_the_system_slot () =
+  let composition = Keeper_next_request_forecast.read_composition
+      (component (Turn_record.Prompt_block Prompt_block_id.Active_goals) 1_094
+       :: first_round_composition) in
+  Alcotest.(check int) "the stable system slot includes the Goal once" (10_832 + 1_094)
+    composition.instructions_bytes;
+  Alcotest.(check int) "fixed total includes that same Goal once" (82_410 + 1_094)
+    composition.fixed_bytes;
+  Alcotest.(check (option int)) "the extra context does not count it again" (Some 159_710)
+    composition.first_round_pinned_bytes;
+  Alcotest.(check bool) "Goal is absent from the trailing-context layout" false
+    (List.mem_assoc Prompt_block_id.Active_goals composition.pinned_blocks)
+
 let test_a_post_tool_composition_says_nothing_about_the_pinned_blocks () =
   let composition = Keeper_next_request_forecast.read_composition post_tool_composition in
   Alcotest.(check int) "the fixed parts still read; the schemas ride every round" 82_410
@@ -1337,6 +1350,8 @@ let () =
             `Quick test_a_first_round_composition_yields_the_fixed_and_pinned_parts
         ; Alcotest.test_case "the pinned blocks follow the assembly's cache order" `Quick
             test_the_pinned_blocks_follow_the_assemblys_cache_order
+        ; Alcotest.test_case "Goal bytes appear once in the stable system slot" `Quick
+            test_goal_is_counted_once_in_the_system_slot
         ; Alcotest.test_case "a post-tool composition says nothing about the pinned blocks"
             `Quick test_a_post_tool_composition_says_nothing_about_the_pinned_blocks
         ; Alcotest.test_case "an operator note alone is not a first round" `Quick

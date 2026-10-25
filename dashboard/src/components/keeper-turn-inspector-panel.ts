@@ -30,7 +30,7 @@ type RawView = 'text' | 'tree'
 
 const TABS: Array<{ id: Tab; label: string; hint: string }> = [
   { id: 'raw', label: 'Retained trace records', hint: 'REDACTED TRACE · 보존된 실행 레코드' },
-  { id: 'prompt', label: 'Typed next prompt', hint: 'TYPED · 다음 턴에 조립될 시스템 컨텍스트' },
+  { id: 'prompt', label: 'Captured prompt', hint: 'TYPED · 마지막으로 기록된 프롬프트' },
   { id: 'note', label: 'Operator input', hint: 'OPERATOR INPUT · 다음 턴 한 번에만 실리는 문장' },
 ]
 
@@ -264,7 +264,7 @@ export function KeeperPromptCapture({ keeper }: { keeper: string }) {
       <div class="text-3xs text-[var(--color-fg-muted)]">
         turn ${capture.absoluteTurn} · trace
         <span class="font-mono">${capture.traceId}</span> ·
-        ${ago(capture.capturedAt)} · 합계 ${formatBytes(total)}
+        ${ago(capture.capturedAt)} · 블록 합계 ${formatBytes(total)}
       </div>
       ${capture.blocks.map(block => html`
         <div key=${block.id} class="rounded border border-[var(--color-border-subtle)]">
@@ -282,12 +282,20 @@ export function KeeperPromptCapture({ keeper }: { keeper: string }) {
           ${open === block.id ? html`<div class="p-2 pt-0"><${Pre} text=${block.text} /></div>` : null}
         </div>
       `)}
+      ${capture.systemPrompt === null ? html`<${Muted}>이 캡처에는 System 프롬프트가 기록되지 않음<//>` : html`
+        <details>
+          <summary class="cursor-pointer text-3xs text-[var(--color-fg-muted)]">
+            System 프롬프트 (${formatBytes(utf8Bytes(capture.systemPrompt))})
+          </summary>
+          <div class="pt-1"><${Pre} text=${capture.systemPrompt} /></div>
+        </details>
+      `}
       ${capture.assembled === null
         ? null
         : html`
           <details>
             <summary class="cursor-pointer text-3xs text-[var(--color-fg-muted)]">
-              조립된 전문 (${formatBytes(utf8Bytes(capture.assembled))})
+              Extra context (${formatBytes(utf8Bytes(capture.assembled))})
             </summary>
             <div class="pt-1"><${Pre} text=${capture.assembled} /></div>
           </details>

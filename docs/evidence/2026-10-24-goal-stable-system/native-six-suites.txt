@@ -1,0 +1,6 @@
+test suite	Test	2026-10-24T14:12:07.0369022Z [targeted] test/test_keeper_direct_goal_provider_wire: OK in 1s
+test suite	Test	2026-10-24T14:12:07.1595439Z [targeted] test/test_keeper_prompt_capture: OK in 0s
+test suite	Test	2026-10-24T14:12:07.7045145Z [targeted] test/test_keeper_next_request_forecast: OK in 0s
+test suite	Test	2026-10-24T14:12:07.8547822Z [targeted] test/test_keeper_provider_input_snapshot: OK in 0s
+test suite	Test	2026-10-24T14:12:07.9804062Z [targeted] test/test_keeper_context_observation_projection: OK in 0s
+test suite	Test	2026-10-24T14:12:08.2036645Z [targeted] test/test_keeper_official_client_host: OK in 0s

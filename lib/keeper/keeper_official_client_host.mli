@@ -292,7 +292,9 @@ val start_held_context :
     {!is_carried_on_resume} selects, named and digested as {!resume_prompt}
     names it, except blocks {!Prompt_block_id.resent_when_held} sends every
     time and World State sections
-    {!Keeper_context_layers.resend_on_resume} sends every time. *)
+    {!Keeper_context_layers.resend_on_resume} sends every time. The issued
+    System Goal observation is also held: a start sends it in the System
+    prompt, while a later changed observation must use the Resume prompt. *)
 
 type carried_summary =
   { label : string
@@ -326,7 +328,12 @@ val resume_prompt :
     historical task reference, the Librarian working state, and the context
     carrier -- one carried context per typed block when [composed_context]
     proves its exact text contains only uniquely named blocks and separators,
-    the whole carrier otherwise. A carried
+    the whole carrier otherwise. The exact Goal observation in
+    [composed_context.system_prompt] is a separate carried [Active_goals]
+    context. An official session holds its first System prompt until native
+    compaction, so a changed/new Goal is sent as a separate encoded User
+    observation, with explicit System-derived source attribution. It is not
+    an extra-context carrier and never joins its blocks. A carried
     context goes out only when [held] does not already name it with the same
     digest, or when its block is {!Prompt_block_id.resent_when_held}. A
     resumed vendor session stores every prompt as history, so re-sending an
@@ -654,6 +661,7 @@ val prepare_turn :
   model_input_projection:
     (tools:Agent_core.Tool.t list -> Agent_core.Agent.model_input_projection) option ->
   hooks:Agent_core.Hooks.hooks option ->
+  composed_context:(unit -> composed_context option) option ->
   configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
   (prepared_turn, Agent_core.Error.t) result
 (** [configured_reasoning_effort] seeds the turn params the
@@ -668,7 +676,11 @@ val prepare_turn :
     [InvalidConfig { field = "system_prompt" }]. Every official client runs
     its own built-in instructions when masc names none, with masc's tool
     surface still attached, so a blank composition is a configuration defect
-    named here once rather than in each lane (#33165).
+    named here once rather than in each lane (#33165). [composed_context] is
+    read after the hook publishes its assembly. When the selected System
+    bytes are that exact issued carrier, its underlying [base_text] must also
+    be nonblank: a Goal observation does not supply Keeper instructions. A
+    stale assembly cannot substitute for a different selected override.
 
     The hook's [extra_system_context] is appended as a raw [System] message
     carrying [origin = System_context]. Official

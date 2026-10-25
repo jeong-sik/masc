@@ -924,6 +924,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     let hook_turn_count = claim_plan.turn_count in
     let* prepared =
       Host.prepare_turn
+        ~composed_context
         ~configured_reasoning_effort
         ~runtime_label
         ~keeper_name

@@ -611,6 +611,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
           "historical_task_reference_unavailable: this client cannot replace task-reference context without replaying it as user input") in
     let* prepared =
       Host.prepare_turn
+        ~composed_context
         ~configured_reasoning_effort:
           (Runtime_inference.resolve_reasoning_effort ~runtime_id)
         ~runtime_label

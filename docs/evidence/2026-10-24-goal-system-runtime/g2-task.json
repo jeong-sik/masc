@@ -1,0 +1,16 @@
+{
+  "id": "task-001",
+  "title": "Set alpha to true in acceptance.json",
+  "description": "Read workspace/acceptance.json. Change the value of the \"alpha\" field to true. Ensure \"beta\" and \"gamma\" remain false. Use artifact:workspace/acceptance.json as evidence for verification. Do not modify \"beta\" or \"gamma\" until this task is approved.",
+  "priority": 2,
+  "files": [],
+  "created_at": "2026-10-24T14:29:27Z",
+  "created_by": "goal-canary",
+  "contract": {
+    "strict": true,
+    "required_evidence": [
+      "artifact:workspace/acceptance.json"
+    ]
+  },
+  "status": "todo"
+}

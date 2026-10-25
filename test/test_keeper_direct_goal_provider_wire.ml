@@ -71,7 +71,7 @@ let run_case source () =
   let base_path = Filename.temp_dir "direct-goal-wire-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
   let config = Workspace.default_config base_path in
-  Fs_compat.mkdir_p (Workspace.masc_dir config);
+  ignore (Workspace.init config ~agent_name:None);
   install_prompts base_path;
   let goal, measurement = match source with
     | Empty -> None, None
@@ -90,19 +90,23 @@ let run_case source () =
    | Goal_unavailable -> Fs_compat.save_file (Goal_store.goals_path config) "invalid JSON"
    | Current | Revised | Empty -> ());
   let prepared = prepare config in
-  let dynamic = Direct.project prepared ~workspace_memory_access:None in
   (* An interleaved preparation cannot replace an already captured turn. *)
   (match measurement with
    | Some observation -> check bool "original preparation retains its own observed value" true
        (contains ~needle:observation.id (Direct.project original ~workspace_memory_access:None))
    | None -> ());
-  let partition = Keeper_context_layers.unattributed Direct_turn dynamic in
-  let assembled = Keeper_run_prompt.assemble_extra_system_context
+  let partition = Direct.project_partition prepared ~workspace_memory_access:None in
+  let dynamic = Keeper_context_layers.text partition in
+  let base_system_prompt = "Respond to the owner using current workspace observations." in
+  let assembled = Keeper_run_prompt.assemble_request_context ~base_system_prompt
+      ~post_tool_round:false ~previous_assembly:None
       ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, dynamic] in
   let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params; _} ->
-      AdjustParams {current_params with extra_system_context = assembled.extra_system_context}
+      AdjustParams {current_params with extra_system_context = assembled.extra_system_context;
+        system_prompt_override = Keeper_context_assembly.system_prompt_override
+          ~previous:current_params.system_prompt_override assembled}
     | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _
     | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> Continue) } in
   let received = ref [] in
@@ -117,7 +121,7 @@ let run_case source () =
       ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions"
       ~tool_stream:false () in
   let runtime = Runtime_agent.default_config ~name:"direct-goal-wire"
-      ~provider_cfg ~system_prompt:"Respond to the owner using current workspace observations."
+      ~provider_cfg ~system_prompt:base_system_prompt
       ~tools:[] in
   let runtime = {runtime with hooks = Some hooks} in
   let result = match Runtime_agent.run ~sw ~net:env#net ~config:runtime owner_request with
@@ -132,8 +136,12 @@ let run_case source () =
   check bool "owner request supplies no Goal ID hint" false
     (match goal with Some goal -> contains ~needle:goal.id owner_request | None -> false);
   check bool "actual wire retains the owner request" true (List.mem owner_request content);
-  let contexts = List.filter (contains ~needle:"[system context]") content in
-  let context = match contexts with [context] -> context | _ -> fail "one fresh context carrier required" in
+  let context = match List.filter (fun message -> Json.member "role" message = `String "system") messages with
+    | [message] -> Json.member "content" message |> Json.to_string
+    | _ -> fail "one effective leading system prompt required" in
+  check bool "Goal data never appears in the extra User carrier" false
+    (List.exists (fun text -> contains ~needle:"[system context]" text &&
+       contains ~needle:"Active Goals" text) content);
   (match source, goal, measurement with
    | Current, Some goal, Some observation ->
      List.iter (fun needle -> check bool "receiver sees current Goal provenance" true
@@ -160,6 +168,8 @@ let run_case source () =
   (* OpenAI-compatible requests use an ephemeral carrier; the agent's returned
      durable-checkpoint candidate must contain the owner and answer only. *)
   let checkpoint = match result.checkpoint with Some value -> value | None -> fail "checkpoint missing" in
+  check (option string) "Goal suffix leaves the durable base instructions unchanged"
+    (Some base_system_prompt) checkpoint.system_prompt;
   List.iter (fun (message : Agent_core.Types.message) ->
     List.iter (function
       | Agent_core.Types.Text text ->
@@ -170,10 +180,178 @@ let run_case source () =
       | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
       | ToolResult _ | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
 
+let test_goal_survives_read_then_task_creation () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  install_catalog ~sw;
+  let base_path = Filename.temp_dir "goal-tool-loop-wire-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let config = Workspace.default_config base_path in
+  (* The real bundled Task writer requires the same initialized workspace as
+     a Keeper turn; creating only [.masc] leaves no state or backlog. *)
+  ignore (Workspace.init config ~agent_name:(Some "goal-loop-wire"));
+  install_prompts base_path;
+  let goal = create_goal config in
+  let measurement = observe config goal in
+  let prepared = Direct.prepare
+      ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"goal-loop-wire")
+      ~current_task:Keeper_world_observation_inputs.No_current_task ~held_task_skills:[]
+      ~task_skill_surfaces:[] ~workspace_memory:Workspace_memory_ledger.Missing
+      ~wiki_contents:Keeper_wiki_contents.Off ~lane_updates:(Ok (`List []))
+      ~approval_authority_text:"INITIAL_GATE_SNAPSHOT"
+      ~recent_direct_conversation_text:"INITIAL_OWNER_CONVERSATION"
+      ~worktree_text:"INITIAL_WORKTREE_SNAPSHOT" ~telemetry_feedback_text:""
+      ~turn_instructions_text:"INITIAL_TURN_INSTRUCTIONS" () in
+  let partition = Direct.project_partition prepared ~workspace_memory_access:None in
+  let dynamic = Keeper_context_layers.text partition in
+  let existing_override = "EXISTING_BASE_OVERRIDE" in
+  let previous = ref None in
+  let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params; messages; _} ->
+      let post_tool_round = Keeper_run_prompt.is_later_round_of_this_turn
+          ~injected_this_turn:(Option.is_some !previous) messages in
+      let current_params = {current_params with system_prompt_override=Some existing_override} in
+      let issued = Keeper_run_prompt.assemble_request_context
+          ~base_system_prompt:(Option.get current_params.system_prompt_override) ~post_tool_round
+          ~previous_assembly:!previous ~dynamic_context_partition:(Some partition)
+          ~existing_extra_system_context:current_params.extra_system_context
+          ~blocks:[Prompt_block_id.Dynamic_context, dynamic;
+                   Prompt_block_id.Temporal_summary, "INITIAL_CLOCK"] in
+      previous := Some issued;
+      Keeper_prompt_capture.write ~config ~keeper:"goal-loop-wire" ~trace_id:"trace-goal-loop-wire"
+        ~absolute_turn:1 ~blocks:((Prompt_block_id.Keeper_instructions, existing_override)
+          :: Keeper_context_assembly.logical_blocks issued)
+        ~assembled:issued.extra_system_context ~system_prompt:issued.system_prompt;
+      AdjustParams {current_params with extra_system_context = issued.extra_system_context;
+        system_prompt_override = Keeper_context_assembly.system_prompt_override
+          ~previous:current_params.system_prompt_override issued}
+    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _
+    | PostToolUseFailure _ | OnStop _ | OnError _ | OnToolError _ -> Continue) } in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String "goal-loop-wire"; "trace_id", `String "trace-goal-loop-wire"]) with
+    | Ok meta -> meta | Error detail -> fail detail in
+  let bundle = Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle ~config ~meta
+      ~publication_recovery:{provider=Keeper_publication_recovery_availability.non_runtime_provider;
+                             keeper_name=meta.name}
+      ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"") () in
+  Fun.protect ~finally:bundle.cleanup @@ fun () ->
+  let create_tool = match List.find_opt (fun (tool : Agent_core.Tool.t) ->
+      tool.schema.name = "keeper_task_create") bundle.tools with
+    | Some tool -> tool | None -> fail "actual Task creation tool is unavailable" in
+  let metric_path = Filename.concat base_path "metric.json" in
+  Fs_compat.save_file metric_path {|{"inspected":1,"required":2}|};
+  let read_tool = Agent_core.Tool.create ~name:"Read" ~description:"Read the fixture metric"
+      ~parameters:[] (fun _ -> Ok {Agent_core.Types.content=Fs_compat.load_file metric_path;
+                                  content_blocks=None; _meta=None}) in
+  let answer message finish = Yojson.Safe.to_string (`Assoc ["id",`String "goal-loop";
+    "model",`String model_id; "choices",`List [`Assoc ["index",`Int 0;
+      "message",message;"finish_reason",`String finish]];
+    "usage",`Assoc ["prompt_tokens",`Int 1;"completion_tokens",`Int 1;"total_tokens",`Int 2]]) in
+  let call id name args = answer (`Assoc ["role",`String "assistant";"content",`Null;
+    "tool_calls",`List [`Assoc ["id",`String id;"type",`String "function";
+      "function",`Assoc ["name",`String name;"arguments",`String (Yojson.Safe.to_string args)]]]]) "tool_calls" in
+  let responses = [|
+    call "read-metric" "Read" (`Assoc []);
+    call "create-linked-task" "keeper_task_create" (`Assoc ["title",`String "Inspect the remaining result";
+      "description",`String "Inspect the remaining declared Goal result and retain its persisted evidence.";
+      "goal_id",`String goal.id]);
+    answer (`Assoc ["role",`String "assistant";"content",`String "Task recorded."]) "stop" |] in
+  let received = ref [] in
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply_with (fun index body ->
+         received := body :: !received;
+         if index < Array.length responses then `OK,responses.(index)
+         else `Bad_request,"unexpected provider request")) in
+  let provider_cfg = Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture" ~model_id
+      ~base_url:server.base_url ~request_path:"/v1/chat/completions" ~tool_stream:false () in
+  let runtime = Runtime_agent.default_config ~name:"goal-loop-wire" ~provider_cfg
+      ~system_prompt:"Read the metric, then record the remaining work as a Task."
+      ~tools:[read_tool;create_tool] in
+  let result = match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
+      owner_request with
+    | Ok ({stop_reason=Runtime_agent.Completed _;_} as result) -> result
+    | Ok _ -> fail "tool-loop fixture did not complete"
+    | Error error -> fail (Agent_core.Error.to_string error) in
+  let bodies = List.rev !received in
+  check int "Read and actual Task creation traverse three provider requests" 3 (List.length bodies);
+  List.iteri (fun index body ->
+    let messages = Json.member "messages" (Yojson.Safe.from_string body) |> Json.to_list in
+    let contexts = List.filter_map (fun message -> match Json.member "content" message with
+      | `String text when contains ~needle:"[system context]" text -> Some text
+      | `String _ | `Null | `List _ | `Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> None) messages in
+    let context = match List.filter (fun message -> Json.member "role" message = `String "system") messages with
+      | [message] -> Json.member "content" message |> Json.to_string
+      | _ -> fail "one effective leading system prompt required" in
+    check bool "the prior system override survives the Goal suffix" true
+      (String.starts_with ~prefix:existing_override context);
+    let issued = match !previous with Some issued -> issued | None -> fail "issued assembly missing" in
+    let physical = match issued.system_prompt with Some value -> value | None -> fail "system receipt missing" in
+    check string "physical system receipt matches receiver bytes" physical.text context;
+    check int "physical system receipt covers the exact UTF8 bytes" (String.length context) physical.partition.bytes;
+    List.iter (fun (span : Keeper_context_assembly.span) ->
+      let bytes = String.sub context span.offset span.bytes in
+      check string "every issued physical span matches received bytes" span.sha256
+        Digestif.SHA256.(digest_string bytes |> to_hex)) physical.partition.spans;
+    List.iter (fun needle -> check bool "every receiver request retains the exact Goal snapshot" true
+      (contains ~needle context)) [goal.id;goal.criterion_revision;measurement.id;reported_value];
+    check bool "Goal is not duplicated in the extra User carrier" false
+      (List.exists (contains ~needle:goal.criterion_revision) contexts);
+    let extra = String.concat "" contexts in
+    List.iter (fun needle -> check bool "other world context stays first-request only" (index=0)
+      (contains ~needle extra)) ["INITIAL_GATE_SNAPSHOT";"INITIAL_OWNER_CONVERSATION";
+        "INITIAL_WORKTREE_SNAPSHOT";"INITIAL_TURN_INSTRUCTIONS";"INITIAL_CLOCK"];
+    if index > 0 then check bool "tool feedback remains the newest message" true
+      (Json.member "role" (List.hd (List.rev messages)) = `String "tool")) bodies;
+  let checkpoint = match result.checkpoint with Some checkpoint -> checkpoint | None -> fail "checkpoint missing" in
+  let task_results = List.concat_map (fun (message : Agent_core.Types.message) ->
+      List.filter_map (function
+        | Agent_core.Types.ToolResult {tool_use_id; content; outcome; _}
+          when String.equal tool_use_id "create-linked-task" -> Some (content, outcome)
+        | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult _ | Image _ | Document _ | Audio _ -> None) message.content)
+      checkpoint.messages in
+  let task_result, task_outcome = match task_results with
+    | [result] -> result
+    | _ -> fail "one actual create-linked-task result required in the runtime checkpoint" in
+  Printf.printf "actual keeper_task_create callback: %s\n%!" task_result;
+  check bool "actual bundled Task creation reports success" false
+    (Agent_core.Types.tool_result_outcome_is_error task_outcome);
+  let task_payload = match Yojson.Safe.from_string task_result with
+    | payload -> payload
+    | exception Yojson.Json_error detail ->
+      failf "Task creation returned invalid JSON: %s; actual callback: %s" detail task_result in
+  check bool "Task creation payload confirms success" true (Json.member "ok" task_payload = `Bool true);
+  check bool "Task creation payload confirms the explicit requested Goal" true
+    (Json.member "goal_id" task_payload = `String goal.id);
+  let links = match Workspace_goal_index.read_goal_task_links_authoritative_r config with
+    | Ok links -> links | Error detail -> fail detail in
+  check bool "real Task creation persisted its explicit Goal association" true
+    (match List.assoc_opt goal.id links with Some [_] -> true | None | Some [] | Some (_::_::_) -> false);
+  check (option string) "the per-request override is not written into the checkpoint"
+    (Some "Read the metric, then record the remaining work as a Task.") checkpoint.system_prompt;
+  let capture = match Keeper_prompt_capture.read ~config ~keeper:"goal-loop-wire" with
+    | Ok capture -> capture | Error error -> fail (Keeper_prompt_capture.read_error_to_string error) in
+  check (list string) "capture attributes base instructions and Goal once each"
+    ["keeper_instructions";"active_goals"]
+    (List.map (fun (block : Keeper_prompt_capture.block) -> Prompt_block_id.to_string block.id) capture.blocks);
+  check (option string) "post-tool capture has no fabricated extra carrier" None capture.assembled;
+  check (option string) "capture records the physical stable system value"
+    (Option.map (fun (issued : Keeper_context_assembly.system_prompt) -> issued.text)
+      (Option.bind !previous (fun issued -> issued.Keeper_context_assembly.system_prompt))) capture.system_prompt;
+  check bool "Goal snapshot carrier stays out of returned durable conversation" false
+    (List.exists (fun (message : Agent_core.Types.message) ->
+      List.exists (function Agent_core.Types.Text text -> contains ~needle:measurement.id text
+        | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content) checkpoint.messages)
+
 let () = run "direct Goal context on actual provider wire"
   ["direct owner requests",[
     test_case "current criterion and measurement reach HTTP receiver" `Quick (run_case Current);
     test_case "changed criterion never receives a stale measurement" `Quick (run_case Revised);
     test_case "measurement failure is explicit and does not hide Goal" `Quick (run_case Measurement_unavailable);
     test_case "Goal primary failure never borrows recovery context" `Quick (run_case Goal_unavailable);
-    test_case "independent work needs no synthetic Goal" `Quick (run_case Empty)]]
+    test_case "independent work needs no synthetic Goal" `Quick (run_case Empty);
+    test_case "Goal survives Read and actual Task creation without other world replay" `Quick
+      test_goal_survives_read_then_task_creation]]

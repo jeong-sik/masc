@@ -1746,6 +1746,85 @@ let test_terminal_disposition_sink_failure_fails_call () =
     (Eio.Path.is_file Eio.Path.(dir / "events.v1.commit"))
 ;;
 
+let test_trace_finalization_preserves_committed_success () =
+  with_execution_test_dir "agent_core-trace-postcommit-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let trace_path = Filename.temp_file "agent_core-terminal-observer-" ".jsonl" in
+  Eio.Switch.on_release sw (fun () ->
+    if Sys.is_directory trace_path then Unix.rmdir trace_path else Sys.remove trace_path);
+  let trace = unwrap_raw_trace (Raw_trace.create ~path:trace_path ()) in
+  let tool_calls = ref 0 in
+  let responses = ref
+    [ Ok (Provider_mock.tool_use_response ~tool_name:"durable_tool" ~tool_input:(`Assoc []) () [])
+    ; Ok (Provider_mock.text_response "committed answer" []) ] in
+  let next_response () = match !responses with
+    | response :: rest -> responses := rest; response
+    | [] -> Alcotest.fail "unexpected provider retry after committed execution" in
+  let transport = Llm_provider.Llm_transport.custom
+    { complete_sync = (fun _request ->
+        { Llm_provider.Llm_transport.response=next_response ();latency_ms=Some 0 })
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> next_response ()) } in
+  let tool = Tool.create ~name:"durable_tool" ~description:"committed external effect"
+      ~parameters:[] (fun _ -> incr tool_calls;
+        Ok {Types.content="settled";content_blocks=None;_meta=None}) in
+  let completion = ref None and locator = ref None and before = ref None in
+  let agent = Agent.create ~net:(Eio.Stdenv.net env)
+      ~config:{(Types.default_config ~model:"test-model") with name="trace-postcommit"}
+      ~tools:[tool]
+      ~options:{Agent.default_options with transport=Some transport;
+        provider_config=Some (Provider_mock.to_provider_config ());raw_trace=Some trace;
+        on_run_complete=Some (fun ok -> completion:=Some ok)} () in
+  let open_projection () = match !locator with
+    | None -> Alcotest.fail "scope locator missing"
+    | Some locator -> match Agent.open_execution_projection ~runtime ~dir locator with
+      | Ok projection -> projection
+      | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let terminal projection = match Agent.read_execution_terminal projection with
+    | Ok (Some terminal) -> terminal
+    | Ok None -> Alcotest.fail "canonical terminal missing"
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let read_page projection after = match Agent.Execution_projection.read_page projection
+      ~after ~limit:512 () with
+    | Ok page -> page
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let execution_store = Agent.execution_store ~runtime ~dir
+      ~on_scope_ready:(fun value -> locator:=Some value;Ok ())
+      ~on_terminal_disposition:(fun disposition ->
+        Alcotest.(check bool) "canonical success committed before trace fault" true
+          (disposition.Agent.outcome=Agent.Terminal_succeeded);
+        let projection=open_projection () in
+        let page=read_page projection (Agent.Execution_projection.beginning_cursor projection) in
+        before:=Some (terminal projection,page);
+        Sys.remove trace_path;
+        Unix.mkdir trace_path 0o700;
+        Ok ()) () in
+  let result=Agent.run ~sw ~execution_store agent "settle the effect" in
+  Alcotest.(check int) "external effect executed once" 1 !tool_calls;
+  Alcotest.(check bool) "fault occurs after canonical terminal observation" true
+    (Option.is_some !before);
+  (match result with
+   | Ok response -> Alcotest.(check string) "committed answer survives observer failure"
+       "committed answer" (Types.text_of_response response)
+   | Error error -> Alcotest.failf "observer relabeled committed success: %s" (Error.to_string error));
+  Alcotest.(check (option bool)) "completion callback observes execution success" (Some true) !completion;
+  (match Agent.lifecycle agent with
+   | Some snapshot -> Alcotest.(check bool) "lifecycle retains committed success" true
+       (snapshot.status=Agent.Completed)
+   | None -> Alcotest.fail "lifecycle missing");
+  let projection=open_projection () in
+  match !before with
+  | None -> Alcotest.fail "committed prefix missing"
+  | Some (expected,page) ->
+    Alcotest.(check bool) "fresh reader sees same canonical terminal" true
+      (terminal projection=expected);
+    let reread=read_page projection (Agent.Execution_projection.beginning_cursor projection) in
+    Alcotest.(check bool) "same occurrence identities and sequence after observer failure" true
+      (reread.events=page.events && reread.next_cursor=page.next_cursor);
+    let tail=read_page projection page.next_cursor in
+    Alcotest.(check int) "observer failure appends no compensating execution failure" 0
+      (List.length tail.events)
+;;
+
 let test_terminal_disposition_observes_cancellation () =
   with_execution_test_dir "agent_core-agent-terminal-cancel-"
   @@ fun ~env ~sw ~runtime ~dir ->
@@ -4378,6 +4457,10 @@ let () =
             "terminal disposition sink failure fails call"
             `Quick
             test_terminal_disposition_sink_failure_fails_call
+        ; Alcotest.test_case
+            "trace failure preserves committed execution success"
+            `Quick
+            test_trace_finalization_preserves_committed_success
         ; Alcotest.test_case
             "terminal disposition observes cancellation"
             `Quick

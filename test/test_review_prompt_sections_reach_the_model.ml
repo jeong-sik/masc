@@ -216,6 +216,7 @@ let test_goal_proof_prompt_renders_its_variables () =
       [ "goal_title", marker "goal_title"
       ; "metric", marker "metric"
       ; "target_value", marker "target_value"
+      ; "reported_measurement", marker "reported_measurement"
       ; "lookup_section", marker "lookup_section"
       ]
   with
@@ -225,7 +226,7 @@ let test_goal_proof_prompt_renders_its_variables () =
       (fun name ->
          check bool (name ^ " is rendered") true
            (Astring.String.is_infix ~affix:(marker name) text))
-      [ "goal_title"; "metric"; "target_value"; "lookup_section" ]
+      [ "goal_title"; "metric"; "target_value"; "reported_measurement"; "lookup_section" ]
 ;;
 
 (* The Goal lookup template describes the tools and the root they resolve

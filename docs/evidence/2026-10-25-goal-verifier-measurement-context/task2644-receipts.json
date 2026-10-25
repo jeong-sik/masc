@@ -1,0 +1,29 @@
+{
+  "schema": "masc.task2644.initial-receipts.public.v1",
+  "source_receipt_sha256": "fc8c71c8468bb28b69e94513f3208c88a97267d9be700671ff830d4408865fbe",
+  "publication_scope": "One Task creation and its claim/start; source-only contract is not Goal completion.",
+  "creation": {
+    "ok": true,
+    "task_id": "task-2644",
+    "creation_request_id": null,
+    "summary": "Added task-2644: Goal verifier에 현재 revision의 측정값과 근거 위치를 보존해 전달한다",
+    "title": "Goal verifier에 현재 revision의 측정값과 근거 위치를 보존해 전달한다",
+    "priority": 1,
+    "description": "실제 Goal 판정 run01a170b2-8083-7000-a7de-ce0fc1eee0b2에서 canonical acceptance는 읽었지만 원문 docs 상대경로 조회5건은 missing이었고 최신 measurement.evidence의 공개URL은 판정 입력에서 빠졌다. 현재 TUI Reopen과 기존 proof/실패 기록을 보존한다. 원문 접근권한을 넓히지 않고 exact Goal/revision의 reported/not_recorded/unavailable observation을 기존 immutable prompt에 운반하고, 측정 변경/조회불가가 retained original의 lookup 권한이나 복구를 깨지 않게 수리한다. Task량/Goal연결비율을 성공지표로 삼지 않고 독립Task도 유지한다.",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "predecessor_task_id": null,
+    "skills": []
+  },
+  "claim": {
+    "task_id": "task-2644",
+    "from": "todo",
+    "to": "claimed",
+    "isError": false
+  },
+  "start": {
+    "task_id": "task-2644",
+    "from": "claimed",
+    "to": "in_progress",
+    "isError": false
+  }
+}

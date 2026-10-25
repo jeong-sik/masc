@@ -21,7 +21,7 @@ let output_contract_text () =
   Printf.sprintf "Call the report_review_verdict tool exactly once with verdict one of: %s."
     (String.concat ", " Task.Anti_rationalization.valid_verdict_strings)
 
-let render_prompt ~subject ~lookup_schemas ~root_layout ~submitted_evidence =
+let render_prompt ~subject ~measurement ~lookup_schemas ~root_layout ~submitted_evidence =
   let* root_lines = match root_layout with
     | [] -> Result.map (fun text -> "  " ^ String.trim text)
         (Prompt_registry.render_prompt_template Prompt_names.verification_lookup_root_layout_empty [])
@@ -37,19 +37,23 @@ let render_prompt ~subject ~lookup_schemas ~root_layout ~submitted_evidence =
     | Some _ | None -> "(not declared)" in
   Prompt_registry.render_prompt_template Prompt_names.goal_verification_proof
     ["goal_title", title; "metric", declared metric;
-     "target_value", declared target_value; "lookup_section", lookup_section]
+     "target_value", declared target_value;
+     "reported_measurement", (Goal_measurement.observation_to_yojson measurement
+       |> Yojson.Safe.to_string);
+     "lookup_section", lookup_section]
 
 let prepare ~attempt ~authority =
   if attempt < 0 then Error "Goal verifier attempt must be non-negative"
   else
     let subject = A.goal_review_subject authority in
+    let measurement = A.goal_review_measurement authority in
     let base_path = A.goal_review_base_path authority in
     let submitted_evidence = A.goal_review_evidence authority in
     let lookup_binding = A.goal_review_binding authority in
     let root_layout = A.goal_review_root_layout authority in
     let lookup = A.goal_review_lookup authority in
     let lookup_schemas = List.map (fun (tool : Types_core.tool_schema) -> tool.name) lookup.schemas in
-    let* prompt = render_prompt ~subject ~lookup_schemas ~root_layout ~submitted_evidence in
+    let* prompt = render_prompt ~subject ~measurement ~lookup_schemas ~root_layout ~submitted_evidence in
     let* system_instructions = Prompt_registry.render_prompt_template Prompt_names.verification_system [] in
     Ok {subject; base_path; attempt; submitted_evidence; lookup_binding; lookup_schemas; root_layout;
       prompt; system_instructions; output_contract=output_contract_text ()}

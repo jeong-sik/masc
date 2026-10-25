@@ -12,8 +12,11 @@ val schema : string
 val prepare :
   attempt:int -> authority:Verification_authority_tools.goal_review ->
   (t, string) result
-(** Render the Goal's own metric/target question, shared-root layout and
-    submitted-source metadata using the current prompt templates. No Task
+(** Render the Goal's own metric/target question, current-revision reported
+    measurement and evidence locator, shared-root layout and submitted-source
+    metadata using the current prompt templates. The measurement is untrusted
+    context captured in the existing immutable prompt, not a lookup grant or
+    a substitute for reading the declared metric's source. No Task
     contract, generated producer or supplied prompt/dispatch closure is used. *)
 
 val subject : t -> Verification_authority_tools.goal_subject

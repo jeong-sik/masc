@@ -17,6 +17,11 @@ type t = private {
   recorded_at : string;
 }
 
+type observation = (t option, string) result
+(** [Ok None] means that the exact Goal and its current criterion revision
+    have no recorded measurement. [Error reason] means the measurement source
+    was unavailable, not that a measurement was absent or a target unmet. *)
+
 type receipt = private {
   measurement : t;
   goal_at_recording : Goal_store.goal;
@@ -49,15 +54,19 @@ val load : Workspace_utils.config -> (t list, string) result
     recovery mirror is an error, rather than an empty snapshot. There is at
     most one observation per Goal; a new one replaces its previous revision. *)
 
-val latest_for_goal :
-  (t list, string) result -> Goal_store.goal -> (t option, string) result
-(** Select only an observation of the exact current criterion revision.
-    [Ok None] means that revision has no recorded measurement. A failed
-    authoritative read stays [Error], independently of the Goal store. *)
+val latest_for_goal : (t list, string) result -> Goal_store.goal -> observation
+(** Select from an already-read source by exact Goal ID and current criterion
+    revision. A failed authoritative read stays [Error], independently of the
+    Goal store. This pure observation performs no source read or state change. *)
+
+val observation_to_yojson : observation -> Yojson.Safe.t
+(** The existing reported, not_recorded, or unavailable wire projection of
+    an observation. A reported value does not certify target attainment. *)
 
 val projection :
   (t list, string) result -> Goal_store.goal -> Yojson.Safe.t
-(** Explicit reported, not_recorded, or unavailable state for a Goal. *)
+(** Observe a Goal and serialize that observation with
+    {!observation_to_yojson}; the wire states and fields are unchanged. *)
 
 val record :
   Workspace_utils.config ->

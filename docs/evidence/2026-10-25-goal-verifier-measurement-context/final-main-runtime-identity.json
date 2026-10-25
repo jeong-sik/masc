@@ -1,0 +1,16 @@
+{
+  "schema": "masc.goal-measurement-final-main-identity.v1",
+  "observed_at": "2026-10-25T09:56:19.557476+00:00",
+  "source_health_sha256": "995ceae7d5c8a986b7f2b7407f5d817d7316aaf94f492b2630a14f8bfa644b02",
+  "health_status": "ok",
+  "binary_commit": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+  "binary_commit_source": "embedded",
+  "binary_sha256": "8086953bdc3764cc0976771f924ec817948697a150632056aba19778b9cff7c5",
+  "runtime_instance_id": "01a17255-92e9-7000-a674-3f5a86d74ac9",
+  "started_at": "2026-10-25T09:12:53Z",
+  "candidate_32282146_installed": false,
+  "main_goal_phase": "executing",
+  "main_goal_completion": "idle",
+  "measurement_id": "ff5d3c4d17dd26b6393a97b4d942e201",
+  "scope": "Later read-only identity observation. Earlier c75 captures remain historical; process was not installed or restarted by this canary work."
+}

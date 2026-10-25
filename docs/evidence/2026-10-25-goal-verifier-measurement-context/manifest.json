@@ -1,0 +1,107 @@
+{
+  "schema": "masc.goal-measurement-evidence-manifest.v1",
+  "created_at": "2026-10-25T10:05:44.717197+00:00",
+  "candidate_code_sha": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "fixture_only_commit": "ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38",
+  "scope": "Public allowlist projections and original browser captures; manifest excludes itself. Native, actual controlled model, historical baseline, dev UI and production identity remain separate.",
+  "files": [
+    {
+      "file": "README.md",
+      "bytes": 6427,
+      "sha256": "01e2214627dc9d39d6d8ef5a5dac9496c4bb73b1b74403b7e3ec176ef0d04557"
+    },
+    {
+      "file": "actual-verifier-controls.json",
+      "bytes": 39594,
+      "sha256": "5b3a57ef3aff1dd9ed5e71caaa0a2ad01bef98aa103df605019a3305b09a321d"
+    },
+    {
+      "file": "browser-observation.json",
+      "bytes": 3400,
+      "sha256": "e959c6140444233cbe9ff619dd5addb74e08323ad70696421d84bf4df9c610a5"
+    },
+    {
+      "file": "ci-dispatch-32282146.json",
+      "bytes": 1400,
+      "sha256": "2013d4394c9223950584b87e055e091df7cfa43b4406bbfd14b38ec7057f9c9e"
+    },
+    {
+      "file": "final-main-runtime-identity.json",
+      "bytes": 845,
+      "sha256": "de09a23a147292f7ec4d9ee8672d378c053bb652db441e4acace54ec4285dc5d"
+    },
+    {
+      "file": "goal-negative-measurement.png",
+      "bytes": 300213,
+      "sha256": "4a0ffe611403f9c23863a849575aa41c8283bfe696264476cc31355fdb445c3c"
+    },
+    {
+      "file": "goal-positive-measurement-full.png",
+      "bytes": 328998,
+      "sha256": "d8ed971e92a4b670dbeec89c73d95a9b19bfd2b7c0948ec0c5761cc4463d754f"
+    },
+    {
+      "file": "independent-actual-controls-review.json",
+      "bytes": 2151,
+      "sha256": "0b4a30dd8b28a89587b20a84abf4a9e2cb39402b7986d614ad7a670835cc63b9"
+    },
+    {
+      "file": "independent-code-review-32282146.json",
+      "bytes": 7548,
+      "sha256": "0afa01776588185e52e7df4b20e333497c10eac04763597adf6d5b69b2b9ae8f"
+    },
+    {
+      "file": "keeper-goal-context.json",
+      "bytes": 7372,
+      "sha256": "75f07537cb8d01ef398f3559ff41244e8e4533da4b5214f58d08dc5e86c064c8"
+    },
+    {
+      "file": "local-parse-receipt.json",
+      "bytes": 2323,
+      "sha256": "76fa7ad1a50669d1ba3ff03244d7b4ac6358ba48297b6ccfda12f449a17ae664"
+    },
+    {
+      "file": "main-goal-observation.json",
+      "bytes": 1927,
+      "sha256": "6d4af8eac35221be89d1ba79229b7bcaf7754b1c18bb63e5b19f2772c4c0567e"
+    },
+    {
+      "file": "native-and-artifact-result.json",
+      "bytes": 10704,
+      "sha256": "606b0eabc9180778d828ceac5dd9a4c8a2b90ed8fea86f60d225bf814b758fe4"
+    },
+    {
+      "file": "proof-reopen.json",
+      "bytes": 2621,
+      "sha256": "1fd51b79c8327e78ce67810b7de00517c2cd4a631a8ad5eae0705a310b2f33f1"
+    },
+    {
+      "file": "proof-run-observations.json",
+      "bytes": 6588,
+      "sha256": "a4a006f0cece8c82c16becc9e53c2f1634e2a4f40a1083c04754e083eeadba8f"
+    },
+    {
+      "file": "public-source-fixture.json",
+      "bytes": 255,
+      "sha256": "4c6f6a1f7a8b2f4333a1bc4f23966b77d46042379fe32143e889e9b75c97724a"
+    },
+    {
+      "file": "runtime-identity.json",
+      "bytes": 1923,
+      "sha256": "722fd9e77c6d05dac6fc2e19a939f0452187dd1824a79ad620c41b5b2dde7c13"
+    },
+    {
+      "file": "source-boundary.json",
+      "bytes": 21253,
+      "sha256": "4beaf6330754588d61b3cd5a5857b60cdcca358e52a536f93f70d4b18dde34a7"
+    },
+    {
+      "file": "task2644-receipts.json",
+      "bytes": 1603,
+      "sha256": "3524af1b87a673108602eba8dc269673272842c31cf01d914e2f011add994820"
+    }
+  ],
+  "private_sources_preserved_by_sha256": true,
+  "main_goal_complete_claimed": false,
+  "inventory_basis": "Complete committed Git tree at e97ea45fc9212bbdaf269580d9249d5fed017095, excluding only manifest.json itself; sparse working-tree absence does not exclude tracked files."
+}

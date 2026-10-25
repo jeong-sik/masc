@@ -1,0 +1,31 @@
+{
+  "created_at": "2026-10-25T09:23:42.107124+00:00",
+  "source_sha": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "source_base": "fe6785bb3cbd881cc642b673b24328f7e19dbcd5",
+  "task_id": "task-2644",
+  "goal_id": "goal-outcome-driven-work-20261024",
+  "native_ref": "codex/goal-verifier-measurement-validation-32282146",
+  "native_suites": [
+    "test_goal_verifier_original",
+    "test_goal_verifier_worker",
+    "test_review_prompt_sections_reach_the_model",
+    "test_goal_verification_gate"
+  ],
+  "selection_sha256": "a132cc0b197189bcd65eaa8f5850f2c135fbae47128d8fdcf17599ff93df0d72",
+  "scope": "Selected native direct consumers and canonical isolated macOS runtime artifact. No local Dune, full regression, production installation or existing-proof rerender claim.",
+  "workflow_sha256": {
+    ".github/workflows/test.yml": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191",
+    ".github/workflows/linux-x64-probe.yml": "2fe204542f5145c494ed785c681fb24e48daa376eef2144a10f95afebf6135bb",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72"
+  },
+  "native_dispatch": {
+    "exit": 0,
+    "stdout": "https://github.com/jeong-sik/masc/actions/runs/40180462120",
+    "stderr": ""
+  },
+  "artifact_dispatch": {
+    "exit": 0,
+    "stdout": "https://github.com/jeong-sik/masc/actions/runs/40180463894",
+    "stderr": ""
+  }
+}

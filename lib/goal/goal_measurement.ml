@@ -10,6 +10,8 @@ type t = {
   recorded_at : string;
 }
 
+type observation = (t option, string) result
+
 type receipt = {
   measurement : t;
   goal_at_recording : Goal_store.goal;
@@ -143,11 +145,11 @@ let latest rows (goal : Goal_store.goal) =
        && String.equal row.criterion_revision goal.criterion_revision)
     rows
 
-let latest_for_goal records (goal : Goal_store.goal) =
+let latest_for_goal records (goal : Goal_store.goal) : observation =
   Result.map (fun rows -> latest rows goal) records
 
-let projection records (goal : Goal_store.goal) =
-  match latest_for_goal records goal with
+let observation_to_yojson (observation : observation) =
+  match observation with
   | Error reason ->
       `Assoc [ "state", `String "unavailable"; "reason", `String reason ]
   | Ok measurement ->
@@ -156,6 +158,9 @@ let projection records (goal : Goal_store.goal) =
        | Some row ->
            `Assoc [ "state", `String "reported"
                   ; "record", to_yojson row ])
+
+let projection records goal =
+  observation_to_yojson (latest_for_goal records goal)
 
 let write config items =
   let json =

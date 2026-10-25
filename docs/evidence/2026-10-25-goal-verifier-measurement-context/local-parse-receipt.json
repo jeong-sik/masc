@@ -1,0 +1,65 @@
+{
+  "at": "2026-10-25T09:22:24.850909+00:00",
+  "base": "fe6785bb3cbd881cc642b673b24328f7e19dbcd5",
+  "scope": "OCaml parse and diff only; no local Dune, typing, native, HTTP/model verdict or installation claim.",
+  "checks": [
+    {
+      "file": "lib/goal/goal_measurement.ml",
+      "sha256": "3234b5ba46625ffc3b22ecc90d289a53236aafb4249f3d8d12e8d341c1567218",
+      "parse_exit": 0
+    },
+    {
+      "file": "lib/goal/goal_measurement.mli",
+      "sha256": "b9417a97fd790952b31ecbae5135fbaf591ed688a46cfedae94f35a972eb9158",
+      "parse_exit": 0
+    },
+    {
+      "file": "lib/keeper/goal_verifier_original.ml",
+      "sha256": "3a7628a68dc50c87e9efc192b4f0c1c6756d95caff8feb71462e15b79bdc7147",
+      "parse_exit": 0
+    },
+    {
+      "file": "lib/keeper/goal_verifier_original.mli",
+      "sha256": "d246bf6af50db5953dc2dd442cd007626defa3443dbf6c66ab8cda339b192185",
+      "parse_exit": 0
+    },
+    {
+      "file": "lib/verification_authority_tools.ml",
+      "sha256": "1a64f7820f88f90d00215e3373e0d017ec9befc9d12c40c85d5aed12e57492cc",
+      "parse_exit": 0
+    },
+    {
+      "file": "lib/verification_authority_tools.mli",
+      "sha256": "62e802f3697b6609d6b82e6df838e2e4a33845aa30f030fcbd034c1cec206bb6",
+      "parse_exit": 0
+    },
+    {
+      "file": "test/test_goal_verifier_original.ml",
+      "sha256": "8aa1c065da9fff77fa3d5fc60aacdba859c4be0c1a2b1e1c95c2e118b8122587",
+      "parse_exit": 0
+    },
+    {
+      "file": "test/test_goal_verifier_worker.ml",
+      "sha256": "bc72575727dd66a4c6eeaf66164a2a06b6a366b5f9ec57385791561da999d7fb",
+      "parse_exit": 0
+    },
+    {
+      "file": "test/test_review_prompt_sections_reach_the_model.ml",
+      "sha256": "21216fa1978fb3f7e39d51cfe85f59779ebd73c407aff2b397d939b2a5de5442",
+      "parse_exit": 0
+    }
+  ],
+  "files": [
+    "config/prompts/goal_verification.md",
+    "lib/goal/goal_measurement.ml",
+    "lib/goal/goal_measurement.mli",
+    "lib/keeper/goal_verifier_original.ml",
+    "lib/keeper/goal_verifier_original.mli",
+    "lib/verification_authority_tools.ml",
+    "lib/verification_authority_tools.mli",
+    "test/test_goal_verifier_original.ml",
+    "test/test_goal_verifier_worker.ml",
+    "test/test_review_prompt_sections_reach_the_model.ml"
+  ],
+  "diff_sha256": "8d38ab157da48f8ba82101d69e349b3b90a1fd7011e11950b5f5727e7044e7ef"
+}

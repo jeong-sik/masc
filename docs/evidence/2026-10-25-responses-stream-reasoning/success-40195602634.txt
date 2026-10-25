@@ -3,8 +3,8 @@ Source: https://github.com/jeong-sik/masc/actions/runs/40195602634
 
 test suite	Checkout	2026-10-25T13:00:17.3607898Z HEAD is now at 46f86417 fix(tui): propagate thinking replacement through log and live dispatch
 test suite	Test	2026-10-25T13:01:10.6240042Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite
-test suite	Test	2026-10-25T13:01:11.0252146Z [targeted] dune build packages/agent_core/test/test_responses_reasoning_stream.exe packages/agent_core/test/test_responses_reasoning_content.exe packages/agent_core/test/test_response_phase_replay.exe test/test_keeper_secret_redaction.exe test/test_keeper_chat_event_log.exe test/test_tui_keeper_chat_transcript.exe test/test_tui_keeper_chat_projection.exe 
-test suite	Test	2026-10-25T13:04:43.5149195Z [targeted] packages/agent_core/test/test_responses_reasoning_stream: stanza env 
+test suite	Test	2026-10-25T13:01:11.0252146Z [targeted] dune build packages/agent_core/test/test_responses_reasoning_stream.exe packages/agent_core/test/test_responses_reasoning_content.exe packages/agent_core/test/test_response_phase_replay.exe test/test_keeper_secret_redaction.exe test/test_keeper_chat_event_log.exe test/test_tui_keeper_chat_transcript.exe test/test_tui_keeper_chat_projection.exe
+test suite	Test	2026-10-25T13:04:43.5149195Z [targeted] packages/agent_core/test/test_responses_reasoning_stream: stanza env
 test suite	Test	2026-10-25T13:04:43.5174565Z [targeted] packages/agent_core/test/test_responses_reasoning_stream: start 2026-10-25T13:04:43Z
 test suite	Test	2026-10-25T13:04:43.5307281Z   [OK]          public SSE          0   full history.
 test suite	Test	2026-10-25T13:04:43.5311143Z   [OK]          public SSE          1   summary then full.
@@ -30,7 +30,7 @@ test suite	Test	2026-10-25T13:04:43.5328248Z   [OK]          public SSE         
 test suite	Test	2026-10-25T13:04:43.5328656Z   [OK]          public SSE         21   wrong block guard.
 test suite	Test	2026-10-25T13:04:43.5329280Z Test Successful in 0.002s. 22 tests run.
 test suite	Test	2026-10-25T13:04:43.5352829Z [targeted] packages/agent_core/test/test_responses_reasoning_stream: OK in 0s
-test suite	Test	2026-10-25T13:04:43.5712737Z [targeted] packages/agent_core/test/test_responses_reasoning_content: stanza env 
+test suite	Test	2026-10-25T13:04:43.5712737Z [targeted] packages/agent_core/test/test_responses_reasoning_content: stanza env
 test suite	Test	2026-10-25T13:04:43.5738028Z [targeted] packages/agent_core/test/test_responses_reasoning_content: start 2026-10-25T13:04:43Z
 test suite	Test	2026-10-25T13:04:43.5870708Z   [OK]          public history          0   full content through tool and lat...
 test suite	Test	2026-10-25T13:04:43.5876243Z   [OK]          public history          1   full text precedes summary.
@@ -50,7 +50,7 @@ test suite	Test	2026-10-25T13:04:43.6151495Z   [OK]          public history     
 test suite	Test	2026-10-25T13:04:43.6159142Z   [OK]          public history         15   opaque endpoint binding.
 test suite	Test	2026-10-25T13:04:43.6159492Z Test Successful in 0.028s. 16 tests run.
 test suite	Test	2026-10-25T13:04:43.6182257Z [targeted] packages/agent_core/test/test_responses_reasoning_content: OK in 0s
-test suite	Test	2026-10-25T13:04:43.6556274Z [targeted] packages/agent_core/test/test_response_phase_replay: stanza env 
+test suite	Test	2026-10-25T13:04:43.6556274Z [targeted] packages/agent_core/test/test_response_phase_replay: stanza env
 test suite	Test	2026-10-25T13:04:43.6581761Z [targeted] packages/agent_core/test/test_response_phase_replay: start 2026-10-25T13:04:43Z
 test suite	Test	2026-10-25T13:04:43.6934890Z   [OK]          sync            0   native groups.
 test suite	Test	2026-10-25T13:04:43.6947197Z   [OK]          sync            1   absent and null.

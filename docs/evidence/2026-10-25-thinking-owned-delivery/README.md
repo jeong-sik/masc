@@ -27,3 +27,9 @@ Source hashes bind all five production/fixture files at `c0f2f3032b0cb998bb66b74
 The joined scenario's cold reconstruction is a fresh log/transcript reading the same real journal in the same process. It is not an OS process restart, actual model request, provider SSE parse, rendered TUI/Dashboard, installed runtime, MiniMax native binding/HTTP, full regression or issue completion. The Dashboard test covers state batching; it is not an actual journal→browser execution.
 
 No local Dune build or typecheck was run. Changed OCaml parses and full whitespace/fragment checks are separate syntax/source checks. The issue stays OPEN. Native Stack submit again reports disabled; REST stack is null and this layer keeps #45950's branch as its exact base.
+
+## Observed intermediate joined execution
+
+[40196874006](https://github.com/jeong-sik/masc/actions/runs/40196874006) checked out exactly `abb125d4e13994e74d5490c71cf26407be61b82a` and completed SUCCESS: **109 actual cases**. The joined production collector→redactor/bridge→durable journal→TUI replay assertions passed, including retained replacement position, unaffected answer, readable projection, fresh same-process journal reader and sequence deduplication. The owned/anonymous append control passed too.
+
+This is intermediate source before the independently found earlier-response aggregate correction. It does not certify that later correction or its added control. The current110-case request40197182110 remains distinct and pending inspection. The actual109 success is retained even though the earlier-response concern remained outside that fixture's coverage. Neither this109 nor Dashboard139 is a rendered UI or OS restart result.

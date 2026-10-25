@@ -90,4 +90,6 @@ val of_json : Yojson.Safe.t -> (t, error) result
     ordered message metadata use the complete Librarian input codec. Complete
     source, input and raw counterpart JSON are retained as original JSON text
     so outer host-record canonicalization cannot rewrite payload JSON. Unknown,
-    duplicate, missing and internally inconsistent observations refuse. *)
+    duplicate, missing and internally inconsistent observations refuse. Message
+    origins are required; canonical checkpoints must pass the current checkpoint
+    decoder, including its explicit superseded-version refusal. *)

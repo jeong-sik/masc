@@ -106,14 +106,13 @@ val annotate
     where an atom begins. *)
 
 val atom_opening_digest
-  :  ?include_origin:bool
-  -> Agent_core.Types.message list
+  :  Agent_core.Types.message list
   -> int
   -> string option
 (** [atom_opening_digest history atom] is the SHA-256 hex of the message that
     opens atom [atom] of [history], as {!annotate} numbers the atoms: the
     first message labelled with that index. [None] when [history] has no
-    such atom.
+    such atom. The digest always includes the explicit typed message origin.
 
     A carried position is this index together with this digest (RFC
     keeper-context-window-in-tokens §10.4): the index alone cannot tell a

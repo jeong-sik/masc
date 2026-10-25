@@ -4,18 +4,16 @@
     signed text and provenance remain distinct. No I/O, prompt lookup, domain
     judgment or execution/commit authority is provided. *)
 val to_json : Keeper_librarian.input -> Yojson.Safe.t
-val to_json_with_origin : include_origin:bool -> Keeper_librarian.input -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (Keeper_librarian.input, string) result
 (** Strict complete wire decode. Structured objects reject unknown, repeated or
-    missing fields; payload JSON remains original data. Lists retain order and
+    missing fields, including message origin; metadata never supplies a missing
+    typed origin. Payload JSON remains original data. Lists retain order and
     multiplicity. JSON-valued options use []/[value] to preserve Some Null.
     Existing complete domain codecs own fact/Goal/Task/turn identity parsing.
     This data restoration does not confirm physical owner, source freshness,
     provenance truth, live configuration or permission to perform any effect. *)
 
 val message_json : Agent_core.Types.message -> Yojson.Safe.t
-val message_json_with_origin : include_origin:bool -> Agent_core.Types.message -> Yojson.Safe.t
-val message_json_has_origin : Yojson.Safe.t -> bool
 val message_of_json : Yojson.Safe.t -> (Agent_core.Types.message, string) result
 (** The same complete message codec for retained checkpoint and fragment data.
     This preserves fields omitted by provider/checkpoint projections and grants

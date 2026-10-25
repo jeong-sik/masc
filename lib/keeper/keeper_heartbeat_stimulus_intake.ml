@@ -810,6 +810,25 @@ let reconcile_spent_selection
     Ok Selection_actionable
 ;;
 
+type intake_source_scope =
+  | General_sources
+  | Addon_invocation of Keeper_event_queue.addon_operation_change
+
+let source_scope = function
+  | Keeper_event_queue.Addon_operation_changed change -> Addon_invocation change
+  | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
+  | Fusion_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
+  | Ask_answered _ | Completion_authority_rejected _ | Task_cancelled _
+  | Workspace_message _ | Delegate_completed _ | Composition_completed _
+  | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ -> General_sources
+
+let same_source_scope left right = match left,right with
+  | General_sources,General_sources -> true
+  | General_sources,Addon_invocation _ | Addon_invocation _,General_sources -> false
+  | Addon_invocation left,Addon_invocation right ->
+      left.ao_origin_id=right.ao_origin_id && left.ao_source=right.ao_source
+      && left.ao_channel=right.ao_channel
+
 let heartbeat_event_intake
       ~ctx
       ~meta_after_triage
@@ -910,6 +929,7 @@ let heartbeat_event_intake
        missing pointers in one linear pass without per-pointer reconciliation. *)
     let connector_snapshot = ref None in
     let ask_snapshot = ref None in
+    let admitted_scope = ref None in
     let prepare_connectors selections =
       let event_ids = List.filter_map
         (fun (selection : Keeper_event_queue_state.pending_selection) ->
@@ -964,6 +984,14 @@ let heartbeat_event_intake
         , List.rev selections_rev
         , first_withdrawn
         , None )
+      | _, (selection : Keeper_event_queue_state.pending_selection) :: rest
+        when (match !admitted_scope with
+          | None -> false
+          | Some scope -> not (same_source_scope scope (source_scope selection.source.payload))) ->
+        (* Another invocation/conversation, or a channel-less general source,
+           stays durable for its own turn. Skipping does not ACK it or spend
+           this batch's existing admission allowance. *)
+        loop remaining observations_rev selections_rev first_withdrawn rest
       | _, (selection : Keeper_event_queue_state.pending_selection) :: _
         when Option.is_none !connector_snapshot
              && Option.is_some (connector_attention_event_id selection.source) ->
@@ -1167,6 +1195,11 @@ let heartbeat_event_intake
                  , first_withdrawn
                  , Some (selection, Pending_selection_failed detail) ))
             | Stimulus_consumed observations ->
+              (* Choose only after canonical consumption succeeds. An unread
+                 Add-on must not anchor the batch and starve independent work. *)
+              (match !admitted_scope with
+               | None -> admitted_scope:=Some (source_scope selection.source.payload)
+               | Some _ -> ());
               loop
                 (remaining - 1)
                 (List.rev_append observations observations_rev)

@@ -135,10 +135,20 @@ not advance cycle failure state or manufacture an empty consumed result. The new
 type is explicit through queue persistence, reaction/disposition kinds, routing,
 paused-source handling, lifecycle selection and waiting inventory projections.
 There is still no executed original Keeper turn or private worker delivery proof.
-The existing ready-batch policy can mix notices from different conversations;
-its wake channel then becomes `None`. Connecting the private publisher must also
-preserve the original source/conversation boundary through actual turn admission.
-Canonical queue metadata alone does not prove that routing or task continuation.
+Intake now groups Add-on notices by the exact original invocation, source and
+captured channel. The first canonical source actually consumed sets the batch
+boundary. Same-invocation notices share that intake; other invocations and
+general sources remain durable for their own turns. An unreadable first notice
+does not anchor the group or starve a readable independent source. General-first
+intake likewise leaves Add-on notices for a separately routed turn. No new count
+limit, expiry or wake destination is introduced.
+
+Controlled fixtures call the real durable queue, heartbeat intake and wake
+channel projection. They check original-task/conversation grouping, deferred
+source retention, ordinary-first order and corrupt-source independence. Their
+completed-turn receipts are simulated; they do not prove a model ran, replied on
+that channel or continued the original website task. Canonical queue metadata
+alone is not task continuation.
 
 Delivery records must distinguish publication accepted, queue entry committed,
 original source consumed and resumed turn observed. Queue admission alone does

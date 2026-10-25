@@ -79,3 +79,10 @@ it('omits document metadata and comments without adding blank paragraphs before 
   expect(paragraphs).toHaveLength(1)
   expect(paragraphs[0]!.getElementsByTagNameNS(word,'t')[0]!.textContent).toBe('본문 제목')
 })
+it('keeps a heading with its next paragraph when Word paginates the document',async()=>{
+  const {xml}=await unpack('# 첫 제목\n\n본문\n\n## 다음 제목\n\n다음 본문')
+  const headings=Array.from(xml.getElementsByTagNameNS(word,'p')).filter(paragraph=>paragraph.getElementsByTagNameNS(word,'pStyle').length>0)
+  expect(headings).toHaveLength(2)
+  for(const heading of headings)expect(heading.getElementsByTagNameNS(word,'keepNext')).toHaveLength(1)
+  for(const paragraph of Array.from(xml.getElementsByTagNameNS(word,'p')).filter(paragraph=>paragraph.getElementsByTagNameNS(word,'pStyle').length===0))expect(paragraph.getElementsByTagNameNS(word,'keepNext')).toHaveLength(0)
+})

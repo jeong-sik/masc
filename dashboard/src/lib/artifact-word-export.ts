@@ -161,7 +161,7 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
       if(!tree.isElementNode(node)){if(tree.isTextNode(node))pending.push(node);continue}
       if(omitted.has(node.tagName))continue
       if(node.namespaceURI!==html.NS.HTML||dynamic.has(node.tagName)){flush();notices.add('앱·영상·도형의 실행 화면은 포함하지 않았습니다.');continue}
-      if(Object.hasOwn(headings,node.tagName)){flush();result.push(paragraph(node.childNodes,context,{heading:headings[node.tagName as keyof typeof headings]}))}
+      if(Object.hasOwn(headings,node.tagName)){flush();result.push(paragraph(node.childNodes,context,{heading:headings[node.tagName as keyof typeof headings],keepNext:true}))}
       else if(node.tagName==='ul'||node.tagName==='ol'){flush();result.push(...list(node,context))}
       else if(node.tagName==='table'){flush();result.push(...table(node))}
       else if(node.tagName==='blockquote'){flush();result.push(...blocks(node.childNodes,{...context,quote:true}))}

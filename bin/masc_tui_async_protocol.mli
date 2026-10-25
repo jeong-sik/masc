@@ -491,6 +491,7 @@ type async_msg =
   | Keeper_tool_approvals_loaded of
       Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
   | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
+  | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * (string, string) result
   | Sent_image_ready of {
       generation : int;
       view : surface;

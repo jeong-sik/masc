@@ -241,8 +241,11 @@ let terminal_outcome_mismatch ~terminal_event rows =
 
 (* Rule 3: the persisted terminal text is [Reply_details.reply]; both sides
    are already the redacted view. An empty reply with no assistant row is the
-   tool-calls-only / no-visible-reply shape, not a divergence. *)
-let assistant_text_mismatch ~reply_details rows =
+   tool-calls-only / no-visible-reply shape, not a divergence. A typed settled
+   Dashboard effect instead owns the original-turn post body: the server
+   suppresses a second assistant row for its diagnostic model reply. Without
+   that matching effect event, the ordinary text comparison still applies. *)
+let assistant_text_mismatch ~entries ~reply_details rows =
   (* Owner settlement records the accepted verdict, not provider reply text.
      Compare Reply_details with the earlier stream result it describes. *)
   let rows = List.filter (fun (row : Store.chat_message) ->
@@ -256,9 +259,20 @@ let assistant_text_mismatch ~reply_details rows =
   match reply_details with
   | None -> false
   | Some (details : Events.reply_details) ->
+    let dashboard_effect =
+      Keeper_turn_outcome.equal details.turn_outcome Keeper_turn_outcome.Terminal_effect_settled
+      && List.exists (fun (entry : Journal.journaled_event) ->
+        entry.event = Events.External_effect_completed
+          {target = Keeper_surface_post.Delivered_to_dashboard}) entries
+    in
     (match terminal_result_row rows with
+     | Some row when dashboard_effect ->
+         not (Store.Role.equal row.role Store.Role.Assistant
+           && row.delivery_provenance = None
+           && row.surface = Some (Surface_ref.Dashboard {session_id = None})
+           && Option.exists (Ids.Turn_ref.equal details.turn_ref) row.turn_ref)
      | Some row -> not (String.equal row.content details.reply)
-     | None -> String.equal (String.trim details.reply) "" |> not)
+     | None -> dashboard_effect || not (String.equal (String.trim details.reply) ""))
 ;;
 
 (* Rule 4: the sorted execution_id multisets of Tool_result_ready events and
@@ -334,6 +348,7 @@ let compare entries rows =
             then [ Terminal_outcome ]
             else [])
            @ (if assistant_text_mismatch
+                     ~entries
                      ~reply_details:(last_reply_details entries)
                      joined
               then [ Assistant_text ]

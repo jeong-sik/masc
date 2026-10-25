@@ -206,12 +206,17 @@ val discord_rest_error : Discord_rest_client.error -> Keeper_tool_execution.t
 val handle_surface_post_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
+  -> ?turn_ref:Ids.Turn_ref.t
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
   -> ?gate_grant:Keeper_gate.cycle_grant
   -> args:Yojson.Safe.t
   -> unit
   -> Keeper_tool_execution.t
+(** Dashboard posts retain the original invocation's outer Keeper [turn_ref].
+    [None] means the caller has no turn context; metadata is not used to infer
+    one. Connector delivery authority and the post's terminal receipt are
+    independent of this transcript provenance. *)
 
 val handle_person_note_set
   :  config:Workspace.config

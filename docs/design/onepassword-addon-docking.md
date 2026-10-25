@@ -104,6 +104,14 @@ and this does not establish actual OAuth, approval or credential fill. The
 surface-post row also lacked a turn link; its provenance was joined through
 the actual tool execution and Keeper decision records.
 
+The Dashboard post source now forwards the invocation's frozen outer Keeper
+turn reference into that existing transcript row. A caller without a turn
+keeps it absent. Journal comparison recognizes a matching typed settled
+Dashboard effect as the posted body, independently of the suppressed model
+reply; other journals retain their ordinary text comparison. The focused
+descriptor/store/transcript/history/audit scenario is source only until its
+exact candidate is built and executed. No updated visible UI is claimed here.
+
 [Run 40153689511](https://github.com/jeong-sik/masc/actions/runs/40153689511)
 built `d02f48fea5a523d3b66aab850b1c6a41d6566517`. All seven selected suites
 passed, 113 tests, and both early and late native artifact retention passed.

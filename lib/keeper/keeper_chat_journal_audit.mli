@@ -4,9 +4,11 @@
     shell; the sweep is driven from the server maintenance fiber.
 
     The comparison encodes the known dual-write skews explicitly rather than
-    discovering them: surface-post mid-turn rows carry no join keys and are an
-    exclusion class, never a mismatch; a crashed turn leaves a truncated
-    journal (no terminal event), which is its own verdict. *)
+    discovering them: anonymous in-window assistant rows are an exclusion
+    class. A Dashboard post joined by its original turn is checked against the
+    typed terminal Dashboard effect, whose model reply is not a second posted
+    body. A crashed turn leaves a truncated journal (no terminal event), which
+    is its own verdict. *)
 
 type mismatch_kind =
   | Terminal_outcome
@@ -16,7 +18,11 @@ type mismatch_kind =
   | Assistant_text
       (** The terminal assistant row's content differs from the journal's
           [Reply_details.reply] (both sides are the post-redaction view), or
-          the journal carries a non-empty reply that no store row persists. *)
+          the journal carries a non-empty reply that no store row persists.
+          A settled outcome with a matching typed Dashboard effect event
+          instead requires its assistant post row
+          on the exact original turn and surface, without terminal delivery
+          provenance; its body is independent of the suppressed model reply. *)
   | Tool_rows
       (** A [Tool_result_ready] [execution_id] has no joined tool row, or a
           joined tool row has no [Tool_result_ready]. *)
@@ -85,11 +91,10 @@ type operation_liveness =
     once per process life. *)
 module Audited : Set.S with type elt = string * string
 
-(** The exclusion class: assistant rows written mid-turn by the surface-post
-    tool carry neither [turn_ref] nor delivery provenance
-    (keeper_tool_in_process_runtime.ml). They are identifiable only by landing
-    inside the turn's [first_ts..last_ts] journal window, and are never a
-    mismatch. *)
+(** The anonymous exclusion class: assistant rows with neither [turn_ref] nor
+    delivery provenance inside the turn's [first_ts..last_ts] journal window.
+    Current Dashboard posts retain their turn and are checked by {!compare}'s
+    typed terminal-effect contract instead of this anonymous exclusion. *)
 val is_surface_post_row :
   first_ts:float -> last_ts:float -> Keeper_chat_store.chat_message -> bool
 

@@ -1683,57 +1683,61 @@ let test_catalog_of_toml contents =
   |> Result.get_ok
 ;;
 
-let test_catalog_entry model_id fields =
-  let catalog = test_catalog_of_toml
-      (Printf.sprintf "[[models]]\nmodel_id = %S\n%s" model_id fields) in
-  match Model_catalog.model_entries catalog with
-  | [ entry ] -> entry
-  | _ -> invalid_arg "capabilities fixture must declare one row"
-;;
+let%test_module "named tool choice catalog" =
+  (module struct
+    let test_catalog_entry model_id fields =
+      let catalog = test_catalog_of_toml
+          (Printf.sprintf "[[models]]\nmodel_id = %S\n%s" model_id fields) in
+      match Model_catalog.model_entries catalog with
+      | [ entry ] -> entry
+      | _ -> invalid_arg "capabilities fixture must declare one row"
+    ;;
 
-let%test "named tool choice needs its own declaration, not a sibling override" =
-  (* A row that turns tool_choice on and says nothing about named choice used
-     to be answered `true`, so the record advertised a capability the catalog
-     never declared. 21 rows in models.toml are shaped this way. *)
-  let entry =
-    test_catalog_entry "named-choice-omitted" {|base = "openai_chat"
+    let%test "named tool choice needs its own declaration, not a sibling override" =
+      (* A row that turns tool_choice on and says nothing about named choice used
+         to be answered `true`, so the record advertised a capability the catalog
+         never declared. 21 rows in models.toml are shaped this way. *)
+      let entry =
+        test_catalog_entry "named-choice-omitted" {|base = "openai_chat"
 supports_tools = true
 supports_tool_choice = true
 |}
-  in
-  let derived = apply_catalog_entry ~provider_entry:None ~wire:None entry in
-  let base =
-    match capabilities_for_provider_label "openai_chat" with
-    | Some c -> c
-    | None -> default_capabilities
-  in
-  derived.supports_tool_choice
-  && derived.supports_named_tool_choice = base.supports_named_tool_choice
-;;
+      in
+      let derived = apply_catalog_entry ~provider_entry:None ~wire:None entry in
+      let base =
+        match capabilities_for_provider_label "openai_chat" with
+        | Some c -> c
+        | None -> default_capabilities
+      in
+      derived.supports_tool_choice
+      && derived.supports_named_tool_choice = base.supports_named_tool_choice
+    ;;
 
-let%test "named tool choice honours an explicit declaration" =
-  let entry =
-    test_catalog_entry "named-choice-declared" {|base = "openai_chat"
+    let%test "named tool choice honours an explicit declaration" =
+      let entry =
+        test_catalog_entry "named-choice-declared" {|base = "openai_chat"
 supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = true
 |}
-  in
-  (apply_catalog_entry ~provider_entry:None ~wire:None entry).supports_named_tool_choice
-;;
+      in
+      (apply_catalog_entry ~provider_entry:None ~wire:None entry).supports_named_tool_choice
+    ;;
 
-let%test "named tool choice cannot outlive tool choice" =
-  (* Declaring named choice while tool choice is off stays false: the sibling
-     fields are conjoined, not independent. *)
-  let entry =
-    test_catalog_entry "named-choice-without-tool-choice" {|base = "openai_chat"
+    let%test "named tool choice cannot outlive tool choice" =
+      (* Declaring named choice while tool choice is off stays false: the sibling
+         fields are conjoined, not independent. *)
+      let entry =
+        test_catalog_entry "named-choice-without-tool-choice" {|base = "openai_chat"
 supports_tools = true
 supports_tool_choice = false
 supports_named_tool_choice = true
 |}
-  in
-  not
-    (apply_catalog_entry ~provider_entry:None ~wire:None entry).supports_named_tool_choice
+      in
+      not
+        (apply_catalog_entry ~provider_entry:None ~wire:None entry).supports_named_tool_choice
+    ;;
+  end)
 ;;
 
 let test_catalog : Model_catalog.t =

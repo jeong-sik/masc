@@ -109,3 +109,23 @@ fixture failure, which remains recorded above. It is a parent execution,
 separate from the provider-snapshot five-suite request. No provider HTTP,
 installed runtime, whole build/regression, formal approval, merge or issue
 completion follows from99 focused parent cases.
+
+
+## Actual corrected provider snapshot execution
+
+[40221415380](https://github.com/jeong-sik/masc/actions/runs/40221415380)
+checked out exactly8e9c17904710dc1ccc7822ac321bb3b62b5e3650 and completed
+SUCCESS: **101 actual cases PASS** (registry45 + runtime binding28 + snapshot9
++ model labels15 + auth4). Independent providers survived registry/runtime
+listing, alias selection and actual config construction with their own identity,
+endpoint and reasoning policy. Replacement/old-alias removal, exact registry
+spelling, typed collision errors, missing preset refusal, global fail-fast,
+immutable captured selection and explicit credential observation controls ran.
+
+All13 corrected source/fixture/data hashes match that executed source and later
+evidence-only heads. The first100 PASS/1 FAIL result remains a failed historical
+workflow; the removed fixed inventory was not repaired into a pass. The changed
+45/9 registry/snapshot counts are explicit. Parent99 remains a separate source
+execution, not added to101. No local build/typecheck, live provider HTTP,
+installed runtime, full executable/release build, full regression, formal
+approval, merge or complete #27898 hard cut follows from these focused results.

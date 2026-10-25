@@ -3,7 +3,7 @@
   "restacked_source": "31c54f850a382c4c0d82bb08b5e86500952833a4",
   "direct_base": "49d7861c95dff413810fbab99f70b2f3d95637ff",
   "run": 40220623907,
-  "result": "unverified",
+  "result": "FAILED;100 PASS/1 FAIL across101 actual cases",
   "sha256": {
     "packages/agent_core/lib/llm_provider/provider_declarations.ml": "99ef2663fe30abf769f08d7e301c7bb568ca3cc9c94f16d8101d96878e94932b",
     "packages/agent_core/lib/llm_provider/provider_declarations.mli": "69d10b3988d2864c83d46d289b9a61c43cd0ff4e36f60e1e6578f089d9db9a14",
@@ -17,5 +17,6 @@
     "test/test_runtime_model_label_binding.ml": "52d85136a3e0fdb8252298b1b5e0533b9ae6c289a2dd26991ef6980820fd6847",
     "test/test_runtime_binding_auth_available.ml": "2a2c17c7ef91673aa41dfce377904ca5573cf26e2adb4893e81770155c18dc91",
     "packages/agent_core/test/dune": "963059340c6d054044ea5669beff99f02e6d193000250a69021006bd0fffff92"
-  }
+  },
+  "requested_source_base": "8f0179c72f26589e4e7830450489b7f5f1fb739d"
 }

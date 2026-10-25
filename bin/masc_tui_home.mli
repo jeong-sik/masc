@@ -15,11 +15,18 @@ val home_decision_rows :
 (** Format only the requested viewport from the same immutable reading used by
     {!home_decision_window}. Request identity, currentness, first-seen order and
     selection are resolved before formatting. No labels or reading survive the
-    synchronous UI operation. Negative [first] or [capacity] raises
-    [Invalid_argument], as for [List.drop] and [List.take]. *)
+    synchronous UI operation. As for [List.drop] and [List.take], a nonpositive
+    [first] starts at the beginning and a nonpositive [capacity] returns no rows. *)
 val clear_ask_answering : Masc_tui_types.state -> unit
 val reconcile_home_request_detail : Masc_tui_types.state -> unit
 val home_continue_rows : prepared -> (Masc_tui_types.home_action * string) list
+val home_destination_window :
+  prepared -> height:int -> int * int * (Masc_tui_types.home_action * string) list
+(** [first, total, rows] for an extremely short terminal. The window follows
+    the selected identity across the complete decision and continuation
+    population, formatting only its decision labels. Its positioning matches
+    the ordinary full destination list; negative [height] raises
+    [Invalid_argument]. *)
 val home_selected_action : prepared -> Masc_tui_types.home_action option
 val home_selection_changed : prepared -> bool
 val home_initial_reading_ready : prepared -> bool

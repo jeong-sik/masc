@@ -266,13 +266,13 @@ let render_overview (state : state) home =
         let gaps = spare - List.length shown_readings in
         (match decisions with
          | [] -> c.push_styled ~style:(Theme.recede ())
-             (if all_decisions = [] then " No decision is waiting on you."
+             (if decision_count = 0 then " No decision is waiting on you."
               else " Decision rows above · j/k to choose")
          | _ :: _ ->
              c.push_styled ~style:Ansi.bold
-               (if List.length decisions = List.length all_decisions then " Needs your decision"
+               (if List.length decisions = decision_count then " Needs your decision"
                 else Printf.sprintf " Needs your decision · rows %d-%d/%d · j/k for more"
-                  (first + 1) (first + List.length decisions) (List.length all_decisions));
+                  (first + 1) (first + List.length decisions) decision_count);
              List.iter draw_row decisions);
         if gaps > 0 then c.push_empty ();
         c.push_styled ~style:Ansi.bold " Continue";
@@ -283,18 +283,11 @@ let render_overview (state : state) home =
         (* Extremely short terminals show destinations around the selected
            identity. j/k reaches every destination; this is a viewport limit,
            never a limit on requests or execution. *)
-        let actions = all_decisions @ continuation in
         let available = max 0 (budget - warning_rows) in
-        let count = List.length actions in
-        let index =
-          match List.find_index (fun (action, _) -> Some action = selected) actions with
-          | Some index -> index
-          | None -> 0
-        in
         let show_position = available > 1 in
         let height = max 0 (available - if show_position then 1 else 0) in
-        let first = max 0 (min index (count - height)) in
-        let window = List.drop first actions |> List.take height in
+        let first, count, window =
+          Masc_tui_home.home_destination_window home ~height in
         if show_position then
           c.push_styled ~style:(Theme.recede ())
             (Printf.sprintf " Home destinations · %d-%d/%d · j/k to choose"

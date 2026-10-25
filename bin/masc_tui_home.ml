@@ -17,6 +17,28 @@ module Action_table = Hashtbl.Make (struct
   let hash = Hashtbl.hash
 end)
 
+let ordered_decision_rows ~merge_agenda rows =
+  (* The index belongs to this projection. The reversed list, never table
+     iteration, owns the first-seen order; only the shared Agenda destination
+     combines labels from more than one source. *)
+  let labels = Action_table.create (List.length rows) in
+  let reversed =
+    List.fold_left (fun reversed (action, label) ->
+      match Action_table.find_opt labels action with
+      | None ->
+          let held = ref label in
+          Action_table.add labels action held;
+          (action, held) :: reversed
+      | Some held ->
+          (match action with
+           | Home_agenda -> held := merge_agenda !held label
+           | Home_approvals | Home_request _ | Home_resume _ | Home_read_last _
+           | Home_choose_keeper | Home_create_keeper -> ());
+          reversed) [] rows
+  in
+  List.rev_map (fun (action, label) -> action, !label) reversed
+
+
 type decision_label =
   | Label_text of string
   | Approval_label of { kind : string; who : string; request_id : string; why : string }
@@ -58,26 +80,6 @@ let rec decision_label_text label =
   | Agenda_labels labels ->
       String.concat "; " (List.map decision_label_text labels)
 
-let ordered_decision_rows rows =
-  (* The index belongs to this projection. The reversed list, never table
-     iteration, owns the first-seen order; only the shared Agenda destination
-     combines labels from more than one source. *)
-  let labels = Action_table.create (List.length rows) in
-  let reversed =
-    List.fold_left (fun reversed (action, label) ->
-      match Action_table.find_opt labels action with
-      | None ->
-          let held = ref label in
-          Action_table.add labels action held;
-          (action, held) :: reversed
-      | Some held ->
-          (match action with
-           | Home_agenda -> held := Agenda_labels [!held; label]
-           | Home_approvals | Home_request _ | Home_resume _ | Home_read_last _
-           | Home_choose_keeper | Home_create_keeper -> ());
-          reversed) [] rows
-  in
-  List.rev_map (fun (action, label) -> action, !label) reversed
 
 (* Current successes survive another source's failure. Stale snapshots are
    reachable through their source reading, never offered as current requests. *)
@@ -159,7 +161,9 @@ let decision_rows_of_state (state : state) =
   in
   (* Equality is kind plus authoritative request ID, never a Keeper/task
      grouping key. Distinct calls belonging to one Keeper remain distinct. *)
-  ordered_decision_rows (approval_rows @ questions @ goals @ tasks @ approvals)
+  ordered_decision_rows
+    ~merge_agenda:(fun first later -> Agenda_labels [first; later])
+    (approval_rows @ questions @ goals @ tasks @ approvals)
 
 let clear_ask_answering state =
   state.ask_answer_mode <- Ask_browsing;
@@ -369,6 +373,24 @@ let home_decision_rows prepared ~first ~capacity =
   prepared.decisions |> List.drop first |> List.take capacity
   |> List.map (fun (action, label) -> action, decision_label_text label)
 let home_continue_rows prepared = prepared.continuation
+let home_destination_window prepared ~height =
+  if height < 0 then invalid_arg "home_destination_window: negative height";
+  let count = prepared.decision_count + List.length prepared.continuation in
+  let matches (action, _) = Some action = prepared.selected in
+  let index =
+    match List.find_index matches prepared.decisions with
+    | Some index -> index
+    | None ->
+        (match List.find_index matches prepared.continuation with
+         | Some index -> prepared.decision_count + index
+         | None -> 0)
+  in
+  let first = max 0 (min index (count - height)) in
+  let decisions = home_decision_rows prepared ~first ~capacity:height in
+  let continuation = prepared.continuation
+    |> List.drop (max 0 (first - prepared.decision_count))
+    |> List.take (height - List.length decisions) in
+  first, count, decisions @ continuation
 let home_selected_action prepared = prepared.selected
 let home_selection_changed prepared = prepared.selection_changed
 let home_initial_reading_ready prepared = prepared.initial_ready

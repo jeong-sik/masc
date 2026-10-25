@@ -6,9 +6,11 @@ Example:
     --before-ref <40-character-sha> --output-dir /tmp/home-aggregation-new
 
 Requires existing ocaml, ocamlfind, mtime and mtime.clock.os. No build is run.
-The generated probe copies source types and aggregation expressions; it only
-recreates their enclosing module. Results are median/worst batch means, not
-per-call percentiles, complete Home projection, native TUI or live-agent proof.
+The generated probe copies source types and the aggregation core. When source
+uses private decision labels, only its Agenda merge argument is adapted to
+semicolon-joined string labels; full label formatting is outside this probe.
+Results are median/worst batch means, not per-call percentiles, complete Home
+projection, native TUI or live-agent proof.
 """
 
 import argparse
@@ -26,7 +28,8 @@ import sys
 HOME = "bin/masc_tui_home.ml"
 TYPES = "bin/masc_tui_types.ml"
 ASKS = "lib/tui_decode_asks.ml"
-SCOPE = ("Exact extracted Home decision aggregation under the OCaml interpreter; "
+SCOPE = ("Exact extracted Home aggregation core under the OCaml interpreter, "
+         "with an explicit string-label Agenda merge adapter for private labels; "
          "not complete Home projection, native frame timing, terminal paint, "
          "live-agent scale, installed performance or a latency target verdict")
 BENCHMARK = r"""let installation title declaration id =
@@ -122,6 +125,27 @@ def aggregation(source):
     return source[first:source.index("\nlet clear_ask_answering", first)].strip()
 
 
+def aggregation_parts(source):
+    expression = aggregation(source)
+    helper = ""
+    if "module Action_table =" in source:
+        end = ("\ntype decision_label =" if "\ntype decision_label =" in source
+               else "\n(* Current successes survive")
+        helper = extract(source, "module Action_table =", end)
+    executable = expression
+    adapter = None
+    if "let ordered_decision_rows ~merge_agenda rows =" in helper:
+        native_merge = "~merge_agenda:(fun first later -> Agenda_labels [first; later])"
+        text_merge = '~merge_agenda:(fun first later -> first ^ "; " ^ later)'
+        if expression.count(native_merge) != 1:
+            raise ValueError("private-label aggregation merge shape differs")
+        executable = expression.replace(native_merge, text_merge)
+        adapter = {"source": native_merge, "probe": text_merge,
+                   "scope": "Aggregation of string labels only; not private-label formatting"}
+    return {"helper": helper, "expression": expression,
+            "executable": executable, "adapter": adapter}
+
+
 def declarations(files):
     return (extract(files[ASKS], "type ask_asker =", "\nlet ask_asker_label"),
             extract(files[ASKS], "type ask_key =", "\nlet ask_key "),
@@ -150,9 +174,8 @@ def main():
         if declarations(before) != declarations(after):
             parser.error("baseline and candidate action type declarations differ")
         asker, ask_key, home_types = declarations(after)
-        old = aggregation(before[HOME])
-        helper = extract(after[HOME], "module Action_table =", "\n(* Current successes survive")
-        new = aggregation(after[HOME])
+        old = aggregation_parts(before[HOME])
+        new = aggregation_parts(after[HOME])
         mtime = Path(subprocess.check_output([ocamlfind, "query", "mtime"], text=True).strip())
         clock = Path(subprocess.check_output(
             [ocamlfind, "query", "mtime.clock.os"], text=True).strip())
@@ -163,9 +186,10 @@ def main():
         parser.error(str(error))
     probe = ("module Masc = struct module Tui_decode_asks = struct\n"
              + asker + "\n" + ask_key + "\nend end\n" + home_types
-             + "\nlet before approval_rows questions goals tasks approvals =\n" + old
-             + "\n" + helper
-             + "\nlet after approval_rows questions goals tasks approvals =\n" + new
+             + "\n" + old["helper"]
+             + "\nlet before approval_rows questions goals tasks approvals =\n" + old["executable"]
+             + "\n" + new["helper"]
+             + "\nlet after approval_rows questions goals tasks approvals =\n" + new["executable"]
              + "\n" + BENCHMARK)
     args.output_dir.mkdir(parents=True, exist_ok=False)
     out = args.output_dir.resolve()
@@ -182,8 +206,15 @@ def main():
         "type_shim": "Only enclosing Masc.Tui_decode_asks module recreated; declarations copied exactly",
         "before_files_sha256": {name: digest(value) for name, value in before.items()},
         "after_files_sha256": {name: digest(value) for name, value in after.items()},
-        "before_aggregation_sha256": digest(old),
-        "after_helper_sha256": digest(helper), "after_aggregation_sha256": digest(new),
+        "before_aggregation_sha256": digest(old["expression"]),
+        "after_helper_sha256": digest(new["helper"]),
+        "after_aggregation_sha256": digest(new["expression"]),
+        "aggregation_bindings": {
+            name: {"helper_sha256": digest(parts["helper"]),
+                   "source_expression_sha256": digest(parts["expression"]),
+                   "executable_expression_sha256": digest(parts["executable"]),
+                   "agenda_merge_adapter": parts["adapter"]}
+            for name, parts in (("before", old), ("after", new))},
         "probe_sha256": digest(probe), "runner_sha256": digest(Path(__file__).read_text()),
         "mtime_archives_sha256": {
             str(path): hashlib.sha256(path.read_bytes()).hexdigest()

@@ -1,0 +1,73 @@
+{
+  "at": "2026-10-25T23:44:03.743Z",
+  "rows": [
+    {
+      "candidateOnly": true,
+      "viewport": {
+        "width": 1020,
+        "height": 600
+      },
+      "nav": {
+        "height": 497,
+        "content": 906,
+        "overflow": "auto"
+      },
+      "settings": {
+        "x": 5.5,
+        "y": 542,
+        "width": 46,
+        "height": 46,
+        "top": 542,
+        "right": 51.5,
+        "bottom": 588,
+        "left": 5.5
+      },
+      "routed": "#settings"
+    },
+    {
+      "candidateOnly": true,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "mobileNav": {
+        "x": 0,
+        "y": 786,
+        "width": 390,
+        "height": 58,
+        "top": 786,
+        "right": 390,
+        "bottom": 844,
+        "left": 0
+      },
+      "buttons": [
+        {
+          "title": "개요",
+          "width": 77.1953125,
+          "height": 56
+        },
+        {
+          "title": "Keepers",
+          "width": 77.203125,
+          "height": 56
+        },
+        {
+          "title": "작업",
+          "width": 77.1953125,
+          "height": 56
+        },
+        {
+          "title": "Gate",
+          "width": 77.203125,
+          "height": 56
+        },
+        {
+          "title": "더보기",
+          "width": 77.203125,
+          "height": 56
+        }
+      ],
+      "desktopRuleApplied": false
+    }
+  ]
+}

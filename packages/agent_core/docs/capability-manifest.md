@@ -61,6 +61,13 @@ The exact model `my-llama-q4` (ASCII case-insensitive) can use this declaration
 when no model catalog row matches. Other release or quantization IDs need their
 own explicit declarations.
 
+Installation makes the manifest available to the capability lookup APIs shown
+below. Provider-bound request resolution has its own authority contract:
+declared providers and anonymous OpenAI-compatible requests do not borrow the
+global manifest. Installing it alone does not change those request policies.
+Custom deployments can apply a validated entry explicitly through their
+provider configuration, or declare the exact model with its provider in the model catalog.
+
 ## Schema Reference
 
 See [`docs/example-capability-manifest.json`](example-capability-manifest.json)
@@ -177,9 +184,10 @@ let caps =
 
 ## Bundling with a Model Deployment
 
-For Ollama or llama-server deployments, place a `caps.json` alongside the
-model files and have the embedding application load and install it during
-bootstrap:
+A deployment can bundle `caps.json` alongside model files. The embedding
+application loads it for its explicit capability lookup or applies the parsed
+capabilities to its request configuration. Installing globally only affects
+lookup paths that admit manifest authority:
 
 ```ocaml
 let manifest = Capability_manifest.load_file "/models/caps.json" |> Result.get_ok in

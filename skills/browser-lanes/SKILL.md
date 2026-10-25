@@ -24,12 +24,13 @@ lane을 생략한 BrowserSession open을 사용한다. 여러 작업 세션이 �
 ## Ego Lite에서 관측하고 입력하기
 
 선택한 연결이 `ego_task_space`이면 `BrowserRead mode=snapshot`을 기본으로 쓴다.
-Ego 자신의 접근성 트리와 ref를 읽으며, 같은 탭의 click·fill·hover·double_click에는
-`BrowserInteract target: {ref: 12}`처럼 관측한 ref를 전달한다. `expectedUrl`은
+Ego 자신의 접근성 트리와 ref를 읽으며, 같은 탭의 click·fill·hover·double_click·select_option·press_key에는
+`BrowserInteract target: {ref: 12}`처럼 관측한 ref를 전달하고, drag_to에는 `source`·`destination`에
+snapshot target을 전달한다. `expectedUrl`은
 snapshot에 나온 최상위 탭의 URL이다. 조작 뒤에는 새 snapshot으로 실제 결과를 확인하고,
 페이지 변경이나 stale/unknown ref 오류 뒤에도 같은 탭에서 ref를 새로 읽는다.
 
-`selector`를 쓰는 click·fill·hover·double_click·select_option도 Ego SDK가 직접 해석한다.
+`selector`를 쓰는 click·fill·hover·double_click·select_option·drag_to도 Ego SDK가 직접 해석한다.
 관측한 ref(`@12`), role·text locator, CSS를 사용할 수 있다. click·fill·hover는 SDK가
 대상을 화면 안으로 스크롤하므로 먼저 좌표를 찾거나 수동 스크롤하지 않는다.
 CSS는 열린 shadow root를 찾고, locator는 최상위 문서에 실행 가능한 대상이 없으면

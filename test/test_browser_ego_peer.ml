@@ -502,7 +502,8 @@ let test_selector_input_uses_ego_sdk () =
        | Lane.Scroll _ | Lane.Hover _ | Lane.Drag_to _ | Lane.Hover_at _ | Lane.Tap_at _
        | Lane.Swipe _ | Lane.Click_at _ | Lane.Scroll_at _ | Lane.Drag _ | Lane.Follow_link _
        | Lane.Click_node _ | Lane.Fill_node _ | Lane.Click_target _ | Lane.Fill_target _
-       | Lane.Hover_target _ | Lane.Double_click_target _ -> ())
+       | Lane.Hover_target _ | Lane.Double_click_target _ | Lane.Select_option_target _
+       | Lane.Press_target _ | Lane.Drag_target _ -> ())
     | other -> failf "native selector was %s" (failure_kind other)) actions;
   check int "one native run per input" (List.length actions) (List.length !asked);
   let drag = Lane.Drag_to {source=Lane.Selector "@12";destination=Lane.Selector "loc=css:#destination";via=[];duration_ms=0} in
@@ -934,13 +935,16 @@ const page = {
   fill: async (target, text, options) => { seen.push("fill " + target + " " + text + (options === undefined ? "" : " with options")); %s },
   hover: async target => { seen.push("hover " + target); %s },
   dblclick: async target => { seen.push("double_click " + target); %s },
+  selectOption: async (target, selection, options) => { seen.push("select_option " + target + " " + JSON.stringify(selection) + (options === undefined ? "" : " with options")); return ["kr"]; },
+  press: async (target, keys, options) => { seen.push("press_key " + target + " " + keys + (options === undefined ? "" : " with options")); %s },
+  dragAndDrop: async (source, destination, options) => { seen.push("drag_to " + source + " " + destination); labels.push(options === undefined ? null : options.label); %s },
 };
 const taskSpace = async () => ({
   ownership: "agent",
   tabs: async () => [{label: "p1", openedBy: "agent", url: currentUrl, title: "Slack"}],
   page: () => page,
 });
-|js} (Yojson.Safe.to_string (`String url)) blocked act act act act
+|js} (Yojson.Safe.to_string (`String url)) blocked act act act act act act
 
 let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   let url = ref observed_url and blocked = ref false and act = ref "return {};" in
@@ -992,6 +996,22 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   ignore (answer "double-click" (on (Lane.Double_click_target (Lane.Target_ref 12))));
   check string "double-click uses ego's element resolver and native input"
     {|["info","url","double_click @12"]|} (seen ());
+  let select_reply = answer "select-option"
+    (on (Lane.Select_option_target {target=Lane.Target_ref 7;selection=Lane.Single_option "kr"})) in
+  check string "select-option uses ego's native selectOption without options"
+    {|["info","url","select_option @7 {\"value\":\"kr\"}"]|} (seen ());
+  check bool "select-option receipt returns selectedValues" true
+    (contains select_reply {|"selectedValues":["kr"]|});
+  let chord ~key ~modifiers = match Lane.Keyboard.of_wire ~key ~modifiers with Ok chord -> chord | Error detail -> fail detail in
+  ignore (answer "press-key"
+    (on (Lane.Press_target {target=Lane.Target_ref 8;key=chord ~key:"Enter" ~modifiers:["Control"]})));
+  check string "press-key uses ego's native press without options"
+    {|["info","url","press_key @8 Control+Enter"]|} (seen ());
+  ignore (answer "drag-target"
+    (on (Lane.Drag_target {source=Lane.Target_ref 9;destination=Lane.Target_ref 10})));
+  check string "drag-target uses ego's native dragAndDrop"
+    {|["info","url","drag_to @9 @10"]|} (seen ());
+  check string "drag-target carries the cursor label" {|["MASC · agent · drag_to"]|} (printed "labels ");
   act := {|return {popups: [{label: "p7", targetId: "T7"}]};|};
   check bool "an opened page is answered with its tab number" true
     (contains (answer "popup" (click (Lane.Target_ref 4))) {|"popups":[{"tabId":4,"label":"p7"}]|});

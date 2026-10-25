@@ -19,10 +19,12 @@ let snapshot = ["urlBefore",str "https://example.test/start";"url",str "https://
 let failure index method_ = obj ["index",`Int index;"method",str method_;"message",str "SDK error"]
 let roundtrip () =
   let calls=[click;step "dblclick" ["selector",str "loc=css:#row"];step "hover" ["selector",str "@3"];
+    step "focus" ["selector",str "@3"];
     step "fill" ["selector",str "@4";"text",str ""];
     step "press" ["selector",str "@4";"key",str "Enter"];
     step "selectOption" ["selector",str "@5";"values",`List []];
-    step "goto" ["url",str "https://example.test/done"];wait;
+    step "goto" ["url",str "https://example.test/done"];
+    step "reload" [];wait;
     step "waitForSelector" ["selector",str "@6";"state",str "hidden";"timeoutMs",`Int 0];
     step "waitForLoadState" ["state",str "networkidle"]] in
   let parsed=request calls in
@@ -41,6 +43,8 @@ let strict_inputs () =
      obj (base [step "click" ["selector",str "#x";"timeoutMs",`Int (-1)]]);
      obj (base [step "click" ["selector",str "#x";"timeoutMs",`Int 9007199254740992]]);
      obj (base [step "goto" ["url",str "javascript:alert(1)"]]);
+     obj (base [step "reload" ["url",str "https://example.test/done"]]);
+     obj (base [step "focus" ["selector",str "#x";"text",str "nope"]]);
      obj (base [step "selectOption" ["selector",str "#x";"values",`List [str "a";str "a"]]])]
 let complete () =
   let value=obj (snapshot @ result ~started:true ~completed_effect:true

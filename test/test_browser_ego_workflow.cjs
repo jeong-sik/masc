@@ -16,7 +16,7 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
    return snapshot;
   },
  };
- for(const method of ['click','dblclick','hover','fill','press','selectOption','goto','waitForURL','waitForSelector','waitForLoadState'])page[method]=async(...args)=>{
+ for(const method of ['click','dblclick','hover','focus','fill','press','selectOption','goto','reload','waitForURL','waitForSelector','waitForLoadState'])page[method]=async(...args)=>{
   calls.push([method,...args]);if(method===fail)throw Error('native '+method+' failed');
   if(method==='fill')value=args[1];if(method==='goto'||method==='click')url=destination;
   if(method==='waitForURL')assert.equal(url,args[0]);
@@ -30,16 +30,21 @@ test('known native sequence navigates, waits and returns one final snapshot',asy
  const f=fixture();const result=await run(f.page,request([
   {method:'click',selector:'@12'},
   {method:'waitForURL',url:destination},
+  {method:'focus',selector:'loc=css:#editor'},
   {method:'fill',selector:'loc=css:#editor',text:'changed'},
   {method:'waitForSelector',selector:'loc=css:#ready',state:'visible',timeoutMs:90},
+  {method:'reload'},
   {method:'waitForLoadState',state:'load'},
  ]));
  assert.equal(result.failure,null);assert.equal(result.url,destination);assert.equal(result.snapshot,'native result');
- assert.equal(result.completed.length,5);assert.equal(result.completedEffect,true);
+ assert.equal(result.completed.length,7);assert.equal(result.completedEffect,true);
  assert.equal(f.calls.filter(c=>Array.isArray(c)&&c[0]==='snapshot').length,1);
  assert.equal(f.calls.find(c=>Array.isArray(c)&&c[0]==='snapshot')[1],undefined,'viewport uses the SDK default, not a MASC scope name');
  assert.equal(f.calls[2][0],'waitForURL');
- assert.equal(f.calls[4][2].timeout,90);assert.equal(f.calls[4][2].state,'visible');
+ assert.equal(f.calls[3][0],'focus');
+ assert.equal(Object.hasOwn(f.calls[3][2],'label'),false,'focus does not receive a pointer cursor label');
+ assert.equal(f.calls[5][2].timeout,90);assert.equal(f.calls[5][2].state,'visible');
+ assert.equal(f.calls[6][0],'reload');
  assert.equal(Object.hasOwn(f.calls[1][2],'timeout'),false,'SDK defaults are not replaced');
 });
 test('full-page workflow snapshot uses the native full_page scope',async()=>{

@@ -5,11 +5,11 @@ type element_state = Attached | Detached | Visible | Hidden
 type load_state = Dom_content_loaded | Load | Network_idle
 type selection = One of string | Many of string list
 type action =
-  | Click of string | Double_click of string | Hover of string
+  | Click of string | Double_click of string | Hover of string | Focus of string
   | Fill of { selector : string; text : string }
   | Press of { selector : string; key : string }
   | Select_option of { selector : string; selection : selection }
-  | Goto of string | Wait_for_url of string
+  | Goto of string | Reload | Wait_for_url of string
   | Wait_for_selector of { selector : string; state : element_state }
   | Wait_for_load_state of load_state
 type step = { action : action; timeout_ms : int option }

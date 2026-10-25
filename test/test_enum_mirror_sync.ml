@@ -543,7 +543,9 @@ let test_interact_arguments_match_the_schema () =
     (list string)
     "masc_browser_interact arguments match the names the parser accepts"
     (List.sort_uniq String.compare
-       (Masc.Browser_interaction.route_names @ Masc.Browser_interaction.wire_fields))
+       (Masc.Browser_interaction.route_names
+        @ Masc.Browser_interaction.wire_fields
+        @ [ "steps"; "snapshotScope"; "maxChars" ]))
     (List.sort_uniq String.compare properties)
 ;;
 

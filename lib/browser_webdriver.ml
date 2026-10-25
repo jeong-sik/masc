@@ -687,7 +687,7 @@ let rec execute_unlocked t = function
         | Browser_lane.Set_viewport size -> set_viewport t session size args
         | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
           Error (Protocol "unresolved semantic pointer target")
-        | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Error (Protocol Browser_lane.snapshot_target_refused)
+        | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ | Browser_lane.Select_option_target _ | Browser_lane.Press_target _ | Browser_lane.Drag_target _ -> Error (Protocol Browser_lane.snapshot_target_refused)
         | Browser_lane.Type_text {text;_} ->
           (match Browser_lane.Keyboard.text_source ~id:"masc-browser-keyboard" text with
            | Error message -> Ok (`Assoc ["interactionFailure", `Assoc ["message",`String message;"effectStarted",`Bool false]])
@@ -723,7 +723,7 @@ let rec execute_unlocked t = function
             | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Select_option _
             | Browser_lane.Scroll _ | Browser_lane.Follow_link _
             | Browser_lane.Click_node _ | Browser_lane.Fill_node _
-            | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Browser_lane.Pointer.Click Browser_lane.Pointer.Primary in
+            | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ | Browser_lane.Select_option_target _ | Browser_lane.Press_target _ | Browser_lane.Drag_target _ -> Browser_lane.Pointer.Click Browser_lane.Pointer.Primary in
           let actions = `Assoc ["actions", Browser_lane.Pointer.input_sources
             ~pointer_id:"masc-browser-pointer" ~wheel_id:"masc-browser-wheel"
             ~viewport ~start:point gesture] in
@@ -740,7 +740,7 @@ let rec execute_unlocked t = function
             | Browser_lane.Scroll _ | Browser_lane.Click_at _ | Browser_lane.Drag _
             | Browser_lane.Tap_at _ | Browser_lane.Swipe _
             | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _
-            | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> let released = ref None in
+            | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ | Browser_lane.Select_option_target _ | Browser_lane.Press_target _ | Browser_lane.Drag_target _ -> let released = ref None in
             let applied = Eio.Switch.run (fun sw ->
               Eio.Switch.on_release sw (fun () ->
                 let result = call t session `DELETE "/actions" None in
@@ -900,7 +900,7 @@ let execute t verb =
       Browser_lane.Rejected_before_effect "set_zoom requires a connected WebExtension browser"
     | Browser_lane.Page_interact {action=Browser_lane.Activate_tab;_} ->
       Browser_lane.Rejected_before_effect "activate_tab requires live lane; automation observations already select their explicit tab"
-    | Browser_lane.Page_interact {action=(Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _);_} ->
+    | Browser_lane.Page_interact {action=(Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ | Browser_lane.Select_option_target _ | Browser_lane.Press_target _ | Browser_lane.Drag_target _);_} ->
       Browser_lane.Rejected_before_effect Browser_lane.snapshot_target_refused
     | Browser_lane.Page_instruct _ | Browser_lane.Page_extract _ ->
       Browser_lane.Rejected_before_effect Browser_lane.sentence_verbs_refused

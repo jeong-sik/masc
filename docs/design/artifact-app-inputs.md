@@ -62,6 +62,9 @@
 읽은 뒤 저장된 문서·버전·사용자도 대조합니다. owned-path와 stable lock,
 cursor 조건부 atomic rewrite를 사용합니다. 다른 창이 먼저 저장하면
 그 상태에서 버전 조건과 요청 이력을 다시 확인합니다.
+데이터와 잠금 파일의 관측 권한은 0600이어야 합니다. 권한이 달라진
+기존 파일을 읽거나 저장하지 않으며, 권한을 바꿔 신뢰 가능한 파일로
+취급하지도 않습니다.
 
 rename 이후 fsync나 잠금 해제가 실패하면 HTTP 503
 `artifact_app_data_commit_uncertain`과 `attempted`를 반환합니다. 서버는

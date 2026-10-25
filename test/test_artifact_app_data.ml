@@ -187,6 +187,18 @@ let storage_tests = [
     unavailable (Store.set ~base_path ~actor:"human" (request ~version:1 target (inputs "after")));
     Alcotest.(check string) "external lock target untouched" "external" (Fs_compat.load_file outside);
     Alcotest.(check string) "input state untouched" original (Fs_compat.load_file file)));
+  "unsafe data file permissions refuse reads and writes without repair", `Quick, (fun () -> with_base (fun base_path ->
+    let target = publish ~base_path "<input>" in
+    ignore (Store.set ~base_path ~actor:"human" (request target (inputs "private")) |> stored);
+    let _, file = file_for ~base_path in let original = Fs_compat.load_file file in
+    Fun.protect ~finally:(fun () -> Unix.chmod file 0o600) (fun () ->
+      List.iter (fun permissions ->
+        Unix.chmod file permissions;
+        unavailable (Store.read ~base_path ~actor:"human" target);
+        unavailable (Store.set ~base_path ~actor:"human" (request ~version:1 target (inputs "overwrite")));
+        Alcotest.(check int) "unsafe mode is not silently repaired" permissions ((Unix.stat file).Unix.st_perm land 0o7777);
+        Alcotest.(check string) "unsafe state bytes stay untouched" original (Fs_compat.load_file file))
+        [0o666; 0o644; 0o620; 0o604; 0o400])));
 ]
 let () = Eio_main.run (fun _ -> Alcotest.run "Personal artifact application data"
   ["strict domain", schema_tests; "durable authenticated scope", storage_tests])

@@ -39,8 +39,14 @@ let authorize ~base_path ~actor target =
   | Markdown -> Error (Invalid "application inputs require a published HTML revision")
 let load ~base_path empty =
   let file = Filename.concat (root ~base_path) (filename ~actor:empty.Data.actor empty.target) in
-  let check file = Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
-    ~ownership_root:base_path file |> Result.map_error (fun _ -> Unavailable "application input path is not an owned regular file") in
+  let check file =
+    let* observed = Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
+      ~ownership_root:base_path file
+      |> Result.map_error (fun _ -> Unavailable "application input path is not an owned regular file") in
+    match observed with
+    | Some observed when observed.snapshot.permissions <> 0o600 ->
+      Error (Unavailable "application input files must have private 0600 permissions")
+    | None | Some _ -> Ok () in
   let* _ = check file in let* _ = check (Fs_compat.private_jsonl_lock_path file) in
   let* snapshot = Fs_compat.read_private_jsonl_durable_locked_result file ~after:None
     |> Result.map_error (fun error -> Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error)) in

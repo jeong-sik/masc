@@ -1,9 +1,9 @@
 import * as Y from 'yjs'
 import { sendArtifactDraftCommand, type ArtifactDraftView } from '../api/artifact-drafts'
-import { streamArtifactDraft, sendArtifactPresence, type ArtifactDraftPeer, type ArtifactDraftLiveFrame, type ArtifactDraftPosition } from '../api/artifact-draft-live'
+import { streamArtifactDraft, sendArtifactPresence, sameDraftTarget, type ArtifactDraftPeer, type ArtifactDraftLiveFrame, type ArtifactDraftPosition } from '../api/artifact-draft-live'
 import { retainArtifactDraft, discardArtifactDraftRecovery } from './artifact-draft-recovery'
 import type { ArtifactWorkspace } from '../api/published-artifacts'
-import { restoreSharedDocument, sharedSource, selectSharedSource, type SourceSelection } from './artifact-shared-document'
+import { restoreSharedDocument, sharedSource, selectSharedSource, resolveSharedSelection, type SourceSelection } from './artifact-shared-document'
 
 export function draftBytes(text: string): Uint8Array { return Uint8Array.from(atob(text), char => char.charCodeAt(0)) }
 export function draftBase64(bytes: Uint8Array): string { return btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join('')) }
@@ -14,6 +14,7 @@ function samePosition(a: ArtifactDraftPosition | null, b: ArtifactDraftPosition 
     && a.anchor.every((value, index) => value === b.anchor[index])
     && a.head.every((value, index) => value === b.head[index])
 }
+export type ArtifactSourceAnchor = { position: ArtifactDraftPosition; quote: string; mode: 'source' | 'html_text'; state: string }
 export type ArtifactLiveState = {
   connection: 'connecting' | 'connected' | 'disconnected'; saving: boolean; pending: boolean;
   message: string; recoveryPersisted: boolean; peers: readonly ArtifactDraftPeer[]; sessionId: string | null; view: ArtifactDraftView;
@@ -29,6 +30,7 @@ export class ArtifactLiveSession {
   private positionSending = false
   private position: ArtifactDraftPosition | null = null
   private announcedPosition: { sessionId: string; position: ArtifactDraftPosition | null } | null = null
+  private lastSelection: Omit<ArtifactSourceAnchor, 'state'> | null = null
   private positionDirty = false
   private connection: AbortController | null = null
   private disposed = false
@@ -41,6 +43,19 @@ export class ArtifactLiveSession {
   }
   get snapshot(): ArtifactLiveState { return this.state }
   get content(): string { return sharedSource(this.doc) }
+  get current(): boolean { return !this.disposed && this.isCurrent() }
+  captureSource(): ArtifactSourceAnchor {
+    if (!this.current || !this.lastSelection) throw new Error('원문에서 문장을 먼저 선택해 주세요.')
+    const range = resolveSharedSelection(this.doc, { anchor: [...this.lastSelection.position.anchor], head: [...this.lastSelection.position.head] })
+    if (!range || this.content.slice(Math.min(range.anchor, range.head), Math.max(range.anchor, range.head)) !== this.lastSelection.quote) {
+      throw new Error('선택한 원문이 바뀌었습니다. 문장을 다시 선택해 주세요.')
+    }
+    return { ...this.lastSelection, position: structuredClone(this.lastSelection.position), state: draftBase64(Y.encodeStateAsUpdate(this.doc)) }
+  }
+  acceptServerView(view: ArtifactDraftView): boolean {
+    if (!this.current || !sameDraftTarget(view.draft.target, this.state.view.draft.target)) return false
+    this.receive(view); return true
+  }
   private emit(patch: Partial<ArtifactLiveState> = {}): void {
     if (this.disposed) return
     this.state = { ...this.state, ...patch, pending: this.pending !== null || this.sending, saving: this.sending, recoveryPersisted: this.persisted }
@@ -110,9 +125,13 @@ export class ArtifactLiveSession {
     }
     if (this.state.connection === 'connected') void this.flush()
   }
-  select(selection: SourceSelection | null): void {
+  select(selection: SourceSelection | null, mode: ArtifactSourceAnchor['mode'] = 'source'): void {
+    if (this.disposed) return
     this.position = selection ? selectSharedSource(this.doc, selection) : null
+    if (selection && this.position) this.lastSelection = { position: this.position, mode,
+      quote: this.content.slice(Math.min(selection.anchor, selection.head), Math.max(selection.anchor, selection.head)) }
     this.positionDirty = true
+    this.emit()
     void this.flushPosition()
   }
   private async flushPosition(): Promise<void> {

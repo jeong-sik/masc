@@ -51,7 +51,7 @@ export function ArtifactHtmlEditor({ session, state, onPending }: {
       if (sentence) discard([sentence.id, ...sentence.recoveredFrom])
       setSentence({ id: crypto.randomUUID(), recoveredFrom: [], expected: part.raw, original: part.text, selection, input: part.text,
         state: draftBase64(sharedState(session.doc)) }); setMessage('')
-      session.select(resolveSharedSelection(session.doc, selection))
+      session.select(resolveSharedSelection(session.doc, selection), 'html_text')
     }
     window.addEventListener('message', selected)
     return () => window.removeEventListener('message', selected)
@@ -66,7 +66,7 @@ export function ArtifactHtmlEditor({ session, state, onPending }: {
     if (!sentence || !dirty) return
     try {
       const selection = replaceSharedSelection(session.doc, sentence.selection, sentence.expected, escapeArtifactHtmlText(sentence.input))
-      session.select(resolveSharedSelection(session.doc, selection))
+      session.select(resolveSharedSelection(session.doc, selection), 'html_text')
       applied.current.add(sentence.id); sentence.recoveredFrom.forEach(id => applied.current.add(id))
       discardApplied()
       setSentence(null); setMessage('문장을 공유 원고에 반영했습니다.')

@@ -286,8 +286,10 @@ module type S = sig
     ; high_watermark : cursor
     ; has_more : bool
     }
-  (** Committed attempt admission and result facts, in source sequence order.
-      [run] selects one exact Agent run; omission includes recursive children.
+  (** Committed attempt admission and result facts from the whole journal, in
+      source sequence order, matching [read_page]. [run] selects one exact
+      Agent run in that journal; omission includes all top-level and nested
+      runs. The locator must identify a top-level run, not a child run.
       Empty filtered pages still advance their source cursor. A receiver may
       persist [through] only after accepting that observation; delivery is at
       least once, and queue admission is not subscriber acknowledgement. *)

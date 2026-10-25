@@ -774,8 +774,13 @@ let settled_tool_invocations t =
                    | Event.Agent_run _ | Event.Agent_turn _ | Event.Provider_attempt _
                    | Event.Output_block _ | Event.Tool_invocation _ -> false)
                 view.children in
-            let invocation = Tool_contract.Invocation.create ~tool_use_id:use.id ~turn
-                ~schedule ~completion in
+            let* occurrence=Tool_contract.Occurrence.of_strings
+                ~run_id:(Event.Run_id.to_string (Event.node_run_id view.node))
+                ~node_id:(Event.Node_id.to_string (Event.node_id view.node))
+                |> Result.map_error (fun _ -> Semantic_failure
+                  {seq=settlement_seq;detail="invalid settled tool occurrence identity"}) in
+            let invocation = Tool_contract.Invocation.of_occurrence occurrence
+                ~tool_use_id:use.id ~turn ~schedule ~completion in
             visit ({invocation; tool_name; input=use.input; result=block;
                     attempt_admitted; settlement_seq} :: records) rest
           | Journal.Tool_invocation_state {input=None; result=Some _}

@@ -1975,6 +1975,17 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) () =
     let acknowledgement=first.Agent.Execution_projection.through in
     let reopened=match Agent.open_execution_projection ~runtime ~dir locator with
       | Ok projection->projection |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+    let settled=match Agent.Execution_projection.settled_tool_invocations reopened with
+      | Ok records->records
+      | Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+    Alcotest.(check bool) "reconstructed settlement retains live canonical occurrence" true
+      (match settled,second.event.payload with
+       | [record],ToolCompleted {invocation;_}->
+         (match Tool_contract.Invocation.occurrence record.invocation,
+                Tool_contract.Invocation.occurrence invocation with
+          | Some restored,Some live->Tool_contract.Occurrence.equal restored live
+          | None,_ | _,None->false)
+       | _->false);
     let retry=read_tools reopened acknowledgement 1024 in
     Alcotest.(check bool) "reopened cursor retries the identical undelivered event" true
       (match retry.observations with [observation]->observation.event=second.event

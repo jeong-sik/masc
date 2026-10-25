@@ -1355,11 +1355,11 @@ let schema_observe_cmd =
       & info ["observation-directory"] ~docv:"NEW_DIRECTORY"
           ~doc:"Create an exclusive diagnostic output directory. After the server scheduler exits, write report.json. A forced exit leaves no final report.")
   in
-  let workspace =
-    Arg.(required & opt (some string) None & info ["base-path"] ~docv:"PATH"
-      ~doc:"Explicit owned diagnostic workspace; normal Keeper scheduling remains active.")
-  in
-  let run mode directory host port workspace =
+  let run mode directory host port = function
+    | None ->
+      prerr_endline "schema-observe requires an explicit --base-path for its owned workspace";
+      Cmd.Exit.cli_error
+    | Some workspace ->
     Unix.mkdir directory 0o700;
     let observer = Observation.create ~mode in
     let identity = Build_identity.current () in
@@ -1381,7 +1381,7 @@ let schema_observe_cmd =
   in
   Cmd.v (Cmd.info "schema-observe"
     ~doc:"Run an owned server experiment and record actual schema work until shutdown.")
-    Term.(const run $ mode $ directory $ host $ port $ workspace)
+    Term.(const run $ mode $ directory $ host $ port $ run_base_path)
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in

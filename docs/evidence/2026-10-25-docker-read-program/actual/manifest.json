@@ -1,0 +1,19 @@
+{
+  "schema": "masc.read-program.actual-review.publication.v1",
+  "state": "FINAL_FROZEN",
+  "files": [
+    {
+      "file": "actual-read-program-review.json",
+      "bytes": 8053,
+      "sha256": "f1553d414856cfda472e6eec8949d4a8bda598773cb8b2345db53bcdf418c030"
+    },
+    {
+      "file": "README.md",
+      "bytes": 1917,
+      "sha256": "4793876ef6a4457bc1ba91a158807ff9502c6dbb42d63a03c685fbf564637cc6"
+    }
+  ],
+  "private_input_manifest_sha256": "9f1ba361dc4fecc0a15bc36ec9f763e4ffdeb887bac628061fa417463f7637bb",
+  "source_and_originals_unchanged": true,
+  "additional_runtime_calls_by_reviewer": 0
+}

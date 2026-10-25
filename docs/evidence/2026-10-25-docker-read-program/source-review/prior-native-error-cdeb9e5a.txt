@@ -1,0 +1,7 @@
+test suite	Test	2026-10-25T11:46:34.6892717Z File "test/test_keeper_sandbox_read_backend.ml", line 2132, characters 60-64:
+test suite	Test	2026-10-25T11:46:34.6893638Z 2132 |   ensure_dir (Keeper_sandbox.host_root_abs_of_meta ~config ~meta);
+test suite	Test	2026-10-25T11:46:34.6894360Z                                                                    ^^^^
+test suite	Test	2026-10-25T11:46:34.6894978Z Error: The function applied to this argument has type
+test suite	Test	2026-10-25T11:46:34.6895599Z          Masc.Keeper_meta_contract.keeper_meta -> string
+test suite	Test	2026-10-25T11:46:34.6896199Z This argument cannot be applied with label ~meta
+test suite	Test	2026-10-25T11:46:36.4658757Z ##[error]Process completed with exit code 1.

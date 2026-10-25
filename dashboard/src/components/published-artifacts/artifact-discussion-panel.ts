@@ -148,9 +148,9 @@ export function ArtifactDiscussionPanel({ session, state, onPending, onReveal }:
       <div class="flex gap-4"><button type="submit" disabled=${!ready || actor!==composer.actor || !composer.input.body.trim() || (state.pending&&composer.input.kind==='comment')}>댓글 보내기</button>
         <button type="button" onClick=${()=>{const current=composerRef.current;if(current&&meaningful(current.input)&&!window.confirm('작성 중인 댓글을 지울까요?'))return;if(current)discard([...(current.record?[current.record]:[]),...current.recoveredFrom]);updateComposer(null)}}>작성 취소</button></div>
     </form>` : null}
-    ${records.filter(record=>record.id!==composer?.id).map(record=>{
+    ${records.filter(record=>record.revision!==composer?.record?.revision).map(record=>{
       const command=requestOf(record).command
-      return html`<details key=${record.id} class="rounded border p-3">
+      return html`<details key=${record.revision} class="rounded border p-3">
       <summary>${record.value.kind==='request'?'확인할 전송':'복구할 입력'} · ${new Date(record.at).toLocaleString()}</summary>
       <pre class="whitespace-pre-wrap">${record.value.kind==='input'?record.value.input.body:record.value.request.command.kind==='comment'||record.value.request.command.kind==='reply'?record.value.request.command.body:'댓글 처리 요청'}</pre>
       ${command.kind==='comment'&&command.proposal!==null&&command.proposal!==undefined?html`<p>변경 제안</p><pre class="whitespace-pre-wrap">${command.proposal}</pre>`:null}

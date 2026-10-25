@@ -104,13 +104,13 @@ it('preserves an unknown request if its receipt was attributed to a different ac
 })
 it('keeps a frozen request in memory and its durable input during quota failure, then preserves newer input while the old response arrives',async()=>{
   const f=fixture();await start(f)
-  const input=pending()[0]!, stored=localStorage.getItem(`masc.artifact-discussion-local.v1:${input.id}`)
+  const input=pending()[0]!, key=`masc.artifact-discussion-local.v1:${input.id}:${input.revision}`, stored=localStorage.getItem(key)
   const storage=localStorage
   vi.stubGlobal('localStorage',{get length(){return storage.length},key:storage.key.bind(storage),getItem:storage.getItem.bind(storage),removeItem:storage.removeItem.bind(storage),setItem(){throw new DOMException('full','QuotaExceededError')}})
   let acknowledge!:(view:ArtifactDraftView)=>void
   vi.mocked(sendArtifactDraftCommand).mockImplementation(()=>new Promise(resolve=>{acknowledge=resolve}))
   fireEvent.click(screen.getByRole('button',{name:'댓글 보내기'}))
-  expect(localStorage.getItem(`masc.artifact-discussion-local.v1:${input.id}`)).toBe(stored)
+  expect(localStorage.getItem(key)).toBe(stored)
   expect(pending()[0]?.persisted).toBe(false)
   fireEvent.click(screen.getByRole('button',{name:'선택한 원문에 댓글'}))
   fireEvent.input(screen.getByLabelText('댓글 내용'),{target:{value:'새로 쓰는 댓글'}})

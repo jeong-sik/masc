@@ -123,7 +123,7 @@ def validate_record(value: dict):
     pending = base | {"connection_id"}
     tokens = pending | {"integration_key", "access_token", "refresh_token", "expires_at"}
     fields = {
-        Phase.DISCONNECTED: base,
+        Phase.DISCONNECTED: base | ({"declined_callback"} if "declined_callback" in value else set()),
         Phase.AUTHORIZING: pending | {"state", "verifier"},
         Phase.EXCHANGING: pending | {"integration_key"},
         Phase.CONNECTED: tokens,
@@ -137,14 +137,22 @@ def validate_record(value: dict):
     identifier = text(value["configuration_id"], "invalid_connection_record")
     if len(identifier) != 64 or any(character not in "0123456789abcdef" for character in identifier):
         raise ConnectionError("invalid_connection_record")
-    for key in fields[phase] - {"phase", "configuration_id", "expires_at"}:
+    for key in fields[phase] - {"phase", "configuration_id", "expires_at", "declined_callback"}:
         text(value[key], "invalid_connection_record")
-    if "connection_id" in value:
+    connections = [value["connection_id"]] if "connection_id" in value else []
+    if "declined_callback" in value:
+        declined = value["declined_callback"]
+        if (not isinstance(declined, dict) or set(declined) != {"kind", "connection_id", "state"}
+                or declined["kind"] != "declined"):
+            raise ConnectionError("invalid_connection_record")
+        text(declined["state"], "invalid_connection_record")
+        connections.append(text(declined["connection_id"], "invalid_connection_record"))
+    for identity in connections:
         try:
-            connection = uuid.UUID(value["connection_id"])
+            connection = uuid.UUID(identity)
         except ValueError:
             raise ConnectionError("invalid_connection_record") from None
-        if str(connection) != value["connection_id"] or connection.version != 4:
+        if str(connection) != identity or connection.version != 4:
             raise ConnectionError("invalid_connection_record")
     if "expires_at" in value and not positive_finite(value["expires_at"]):
         raise ConnectionError("invalid_connection_record")
@@ -475,6 +483,40 @@ class Connector:
                 raise ConnectionError("authorization_cancel_refused")
             self.store.write(root, self._disconnected())
             return {"phase": Phase.DISCONNECTED.value, "connected": False}
+
+    def decline_authorization(self, *, expected_state: str, expected_connection_id: str) -> dict:
+        """Commit the exact callback acknowledgement with its cancellation.
+
+        Redelivery may recover only this same state/connection receipt. A new
+        attempt replaces it, while ordinary cancellation and views do not
+        manufacture a declined callback. The protected record alone owns it.
+        """
+        def matches(identity):
+            if not isinstance(expected_state, str) or not isinstance(expected_connection_id, str):
+                return False
+            try:
+                return (secrets.compare_digest(expected_state.encode(), identity["state"].encode())
+                        and secrets.compare_digest(expected_connection_id.encode(),
+                                                   identity["connection_id"].encode()))
+            except UnicodeError:
+                return False
+
+        with self.store.locked() as root:
+            record = self._read(root)
+            phase = Phase(record["phase"])
+            if phase is Phase.AUTHORIZING and matches(record):
+                declined = {"kind": "declined", "connection_id": record["connection_id"],
+                            "state": record["state"]}
+                self.store.write(root, {**self._disconnected(), "declined_callback": declined})
+            elif (phase is Phase.DISCONNECTED and "declined_callback" in record
+                  and matches(record["declined_callback"])):
+                declined = record["declined_callback"]
+                # A prior reference rename can be visible after its directory
+                # sync failed. Confirm that same commit before acknowledging it.
+                os.fsync(root)
+            else:
+                raise ConnectionError("authorization_decline_refused")
+            return {"kind": declined["kind"], "connection_id": declined["connection_id"]}
 
     def _tokens(self, value: dict) -> dict:
         if not isinstance(value, dict):

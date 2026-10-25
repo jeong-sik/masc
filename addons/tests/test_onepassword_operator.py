@@ -3,6 +3,7 @@ import contextlib
 from concurrent.futures import ThreadPoolExecutor
 import io
 import json
+import os
 from pathlib import Path
 import stat
 import sys
@@ -291,14 +292,99 @@ class OperatorTests(unittest.TestCase):
         self.assertEqual(confirmed["callback_receipt"]["connection_id"], arguments["connection_id"])
         self.assertEqual(len(self.calls), 1)
 
-    def test_decline_receipt_is_only_the_direct_exact_cancel_result(self):
+    def test_decline_receipt_survives_lost_response_and_reconstructed_connector(self):
         begun = self.call("connect")
         identity = begun["callback"]["arguments"]
         arguments = {**identity, "callback_url": self.connector.configuration.redirect_uri + "?" + urlencode({
             "state": identity["state"], "error": "access_denied"})}
+        expected = {"kind": "declined", "connection_id": identity["connection_id"]}
+        self.assertEqual(self.call("complete", arguments)["callback_receipt"], expected)
+        # Discard the first response and reconstruct a Worker, then separately
+        # reconstruct the Connector/Store against the retained protected fixture.
+        worker = server.Worker(self.worker.configuration)
+        self.assertEqual(worker.operator({"action": "complete", "arguments": arguments})["callback_receipt"], expected)
+        restarted = Connector(self.connector.configuration,
+                              PrivateStore(self.connector.store.directory, records=self.connector.store.records),
+                              transport=self.transport)
+        self.assertEqual(restarted.decline_authorization(expected_state=identity["state"],
+                                                       expected_connection_id=identity["connection_id"]), expected)
+        self.assertEqual(json.loads(active_raw(self.connector.store))["declined_callback"], {**expected, "state": identity["state"]})
+        self.assertNotIn("callback_receipt", self.call("view"))
+        self.assertEqual(self.calls, [])
+        public = json.dumps([self.worker.status(), self.worker.observe({"binding": {"sources": []}, "sources": []})])
+        for private in ["declined_callback", "callback_receipt", identity["state"], identity["connection_id"]]:
+            self.assertNotIn(private, public)
+        for path in self.connector.store.directory.iterdir():
+            self.assertNotIn(identity["state"].encode(), path.read_bytes())
+
+    def test_decline_replay_requires_exact_identity_and_valid_callback(self):
+        begun = self.call("connect")
+        identity = begun["callback"]["arguments"]
+        callback = self.connector.configuration.redirect_uri + "?" + urlencode({
+            "state": identity["state"], "error": "access_denied"})
+        arguments = {**identity, "callback_url": callback}
+        self.call("complete", arguments)
+        before = active_raw(self.connector.store)
+        for changed in [{"state": "other"}, {"connection_id": "other"},
+                        {"callback_url": callback.replace("masc.example", "attacker.example")},
+                        {"callback_url": callback.replace("access_denied", "other_error")},
+                        {"callback_url": callback + "&error=access_denied"}]:
+            with self.subTest(changed=changed):
+                self.assertNotIn("callback_receipt", self.call("complete", {**arguments, **changed}))
+                self.assertEqual(active_raw(self.connector.store), before)
+        replacement = self.call("connect")
+        self.assertNotIn("callback_receipt", self.call("complete", arguments))
+        self.assertEqual(self.connector.authorization_identity(), replacement["callback"]["arguments"])
+        self.assertEqual(self.calls, [])
+
+    def test_decline_write_failure_preserves_pending_attempt_and_does_not_acknowledge(self):
+        begun = self.call("connect")
+        identity = begun["callback"]["arguments"]
+        arguments = {**identity, "callback_url": self.connector.configuration.redirect_uri + "?" + urlencode({
+            "state": identity["state"], "error": "access_denied"})}
+        before = active_raw(self.connector.store)
+        with patch.object(self.connector.store.records, "write", side_effect=oauth.ConnectionError("protected_store_unavailable")):
+            self.assertNotIn("callback_receipt", self.call("complete", arguments))
+        self.assertEqual(active_raw(self.connector.store), before)
+        self.assertEqual(self.connector.authorization_identity(), identity)
         self.assertEqual(self.call("complete", arguments)["callback_receipt"], {
             "kind": "declined", "connection_id": identity["connection_id"]})
-        self.assertNotIn("callback_receipt", self.call("complete", arguments))
+        self.assertEqual(self.calls, [])
+
+    def test_decline_replay_confirms_uncertain_commit_before_acknowledging(self):
+        begun = self.call("connect")
+        identity = begun["callback"]["arguments"]
+        arguments = {**identity, "callback_url": self.connector.configuration.redirect_uri + "?" + urlencode({
+            "state": identity["state"], "error": "access_denied"})}
+        fsync = os.fsync
+
+        def fail_directory(fd):
+            if os.fstat(fd).st_ino == self.connector.store.directory.stat().st_ino:
+                raise OSError("PRIVATE_SYNC_FAILURE")
+            return fsync(fd)
+
+        with patch.object(oauth.os, "fsync", side_effect=fail_directory):
+            for _ in range(2):
+                uncertain = self.call("complete", arguments)
+                self.assertNotIn("callback_receipt", uncertain)
+                self.assertNotIn("PRIVATE_SYNC_FAILURE", json.dumps(uncertain))
+        self.assertEqual(self.connector.status()["phase"], "disconnected")
+        self.assertEqual(self.call("complete", arguments)["callback_receipt"], {
+            "kind": "declined", "connection_id": identity["connection_id"]})
+        self.assertEqual(self.calls, [])
+
+    def test_concurrent_matching_declines_replay_one_protected_cancellation(self):
+        begun = self.call("connect")
+        identity = begun["callback"]["arguments"]
+        expected = {"kind": "declined", "connection_id": identity["connection_id"]}
+        another = Connector(self.connector.configuration,
+                            PrivateStore(self.connector.store.directory, records=self.connector.store.records),
+                            transport=self.transport)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda connector: connector.decline_authorization(
+                expected_state=identity["state"], expected_connection_id=identity["connection_id"]),
+                [self.connector, another]))
+        self.assertEqual(results, [expected, expected])
         self.assertNotIn("callback_receipt", self.call("view"))
         self.assertEqual(self.calls, [])
 

@@ -41,6 +41,7 @@ let make_routes ~port ~host:_ ~sw ~clock =
   |> Server_routes_http_routes_artifacts.add_routes
   |> Server_routes_http_routes_published_artifacts.add_routes
   |> Server_routes_http_routes_artifact_drafts.add_routes
+  |> Server_routes_http_routes_artifact_app_data.add_routes
   |> Server_routes_http_routes_artifact_draft_live.add_routes
   |> Server_routes_http_routes_voice.add_routes
   |> Server_routes_http_routes_multimodal.add_routes

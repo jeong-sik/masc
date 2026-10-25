@@ -141,8 +141,31 @@ observation decoding now share the initial consumer-shape guard. Generic result
 decoding, fresh package baseline and original consumer authority checks remain
 independent requirements. This guard is not a full JSON Schema validator.
 Focused object/null scenarios cover the actual loopback HTTP walk, proof reopen,
-retained observation and Browser model delivery; their new behavior and the
-corrected real Chromium path still require exact-candidate execution.
+retained observation and Browser model delivery.
+
+[Run 40156196175](https://github.com/jeong-sik/masc/actions/runs/40156196175)
+built both selected Exact suites at `4ffd8dc1719a58f8011f75a6744d57fbb07ab10b`.
+The retention suite passed all 44 tests. The runner suite passed 42 of 43;
+the new null scenario completed, while the object scenario returned an answer
+but failed its fixture's structural equality check against an uncanonicalized
+nested object. The expected fixture is now canonicalized before comparison;
+the remaining proof/replay/delivery assertions stay in place and require rerun.
+
+[Run 40156196116](https://github.com/jeong-sik/masc/actions/runs/40156196116)
+exercised the actual Chromium lane at that same source. Both private and
+persistent profiles passed, including the model-selected `act` click and
+screenshot assertion that had failed at `d02f48fe`. Its four retained Browser
+binaries and archive digest were verified. This is a real-browser probe with
+a scripted model and synthetic loopback website, not an actual Keeper model
+turn, 1Password extension, account sign-in or production installation.
+
+The same four Browser binaries were also exercised locally with Chrome for
+Testing `156.0.8078.47`. The private profile passed `act` and screenshot, but
+replacement-browser close returned unconfirmed shutdown. The persistent
+profile's initial open failed, followed by SingletonLock refusals. That local
+run failed; the CI profile results do not establish local teardown/startup
+reliability. No matching test-owned Browser process remained after the driver
+exited, and the original profile/state was preserved for diagnosis.
 
 ## Earlier status installation
 

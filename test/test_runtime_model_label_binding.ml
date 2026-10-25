@@ -75,6 +75,11 @@ let policy () = with_catalog (fun () ->
     (caps first).supports_required_tool_choice;
   Alcotest.(check bool) "B retains its separate forcing declaration" true
     (caps second).supports_required_tool_choice;
+  let rotated = {first with Provider_config.base_url=second.base_url} in
+  Alcotest.(check (option string)) "endpoint override preserves selected provider"
+    (Some "label-a") rotated.provider_id;
+  Alcotest.(check bool) "endpoint override cannot borrow B's policy" false
+    (caps rotated).supports_required_tool_choice;
   Alcotest.(check bool) "A rejects required choice before dispatch" true
     (Result.is_error (Complete_common.validate_all {first with tool_choice=Some Types.Any}));
   Alcotest.(check bool) "B admits required choice" true

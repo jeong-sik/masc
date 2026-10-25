@@ -17,6 +17,9 @@ type thinking_control_format = Capability_vocab.thinking_control_format =
           the system turn; the token is carried in the constructor. *)
   | Ollama_think
   | Reasoning_effort
+  | Reasoning_effort_default_on
+  (** Categorical depth with reasoning enabled when effort is omitted.
+      Explicit enable is already satisfied; disable still requires an accepted [none]. *)
 [@@deriving show, eq]
 
 type preserve_thinking_control_format =

@@ -392,6 +392,9 @@ let validate_request_path (config : Provider_config.t) =
      OpenAI-compatible serializer can emit the corresponding activation field.
      A categorical [Reasoning_effort] dialect therefore also requires an
      explicit effort value; merely naming the dialect emits no wire control.
+     [Reasoning_effort_default_on] additionally declares that omitted depth
+     already reasons; its distinct receipt satisfies enable without inventing
+     an effort value or claiming that a field was encoded.
 
    Absence remains absence: [enable_thinking = None] never invents a policy.
    Explicit disable on a non-reasoning model remains a satisfied no-op, except
@@ -450,7 +453,8 @@ let thinking_control_request_rejection
         | Some (Error rejection) -> Some (Request_control_invalid rejection)
         | Some (Ok artifact) ->
           (match artifact.Reasoning_dialect.explicit_enable_receipt with
-           | Reasoning_dialect.Explicit_enable_encoded _ -> None
+           | Reasoning_dialect.Explicit_enable_encoded _
+           | Reasoning_dialect.Explicit_enable_satisfied_by_default -> None
            | Reasoning_dialect.Explicit_enable_not_requested -> Some Enable_not_encodable
            | Reasoning_dialect.Explicit_enable_not_encoded ->
              (match thinking_control_format, caps.supports_reasoning with
@@ -462,7 +466,8 @@ let thinking_control_request_rejection
                   | Capabilities.Chat_template_kwargs
                   | Capabilities.Chat_template_token _
                   | Capabilities.Ollama_think
-                  | Capabilities.Reasoning_effort )
+                  | Capabilities.Reasoning_effort
+                  | Capabilities.Reasoning_effort_default_on )
                 , (false | true) ) -> Some Enable_not_encodable)))
      | Provider_config.Anthropic
      | Provider_config.Kimi
@@ -503,7 +508,8 @@ let thinking_control_request_rejection
          faults that stand whatever the toggle says; only the disable one is
          this arm's question. *)
       match caps.Capabilities.thinking_control_format with
-      | Capabilities.Reasoning_effort -> (
+      | Capabilities.Reasoning_effort
+      | Capabilities.Reasoning_effort_default_on -> (
         match Provider_config.validate_reasoning_effort_request_typed config with
         | Error (Provider_config.Explicit_disable_outside_ladder { accepted; _ }) ->
           Some (Disable_outside_effort_ladder { accepted })

@@ -464,7 +464,8 @@ val validate_tool_choice_request : t -> (unit, string) result
     absent declaration fails closed.
 
     The value checked is the one the wire will carry: on a
-    {!Capabilities.Reasoning_effort} row an explicit [enable_thinking = Some
+    categorical effort row ([Reasoning_effort] or [Reasoning_effort_default_on])
+    an explicit [enable_thinking = Some
     false] travels as the effort [none] ({!Reasoning_effort.under_explicit_toggle}),
     so a ladder without [none] rejects that disable with
     [Explicit_disable_outside_ladder] instead of letting the request keep the

@@ -35,7 +35,8 @@ val of_string : string -> t option
 val values_for_log : string
 
 (** The effort a categorical-effort wire carries once an explicit thinking
-    toggle is applied. That wire ({!Capabilities.Reasoning_effort}) has no
+    toggle is applied. Categorical effort wires ([Reasoning_effort] and
+    [Reasoning_effort_default_on]) have no
     boolean field: its only control is the effort, and [None_] is its off
     value. [enable_thinking = Some false] therefore replaces the caller's
     effort with [None_]; [Some true] and absence keep the caller's effort.

@@ -23,6 +23,7 @@ type thinking_control_format = Capability_vocab.thinking_control_format =
           the system turn; the token is carried in the constructor. *)
   | Ollama_think
   | Reasoning_effort
+  | Reasoning_effort_default_on
 [@@deriving show, eq]
 
 let%test "thinking_control_format derives equal and show" =

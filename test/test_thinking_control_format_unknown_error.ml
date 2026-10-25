@@ -61,6 +61,8 @@ let test_valid_values_load_and_map_to_agent_core_variants () =
       ; "ollama-think", Ollama_think
       ; "reasoning_effort", Reasoning_effort
       ; "reasoning-effort", Reasoning_effort
+      ; "reasoning_effort_default_on", Reasoning_effort_default_on
+      ; "reasoning-effort-default-on", Reasoning_effort_default_on
       ]
   in
   List.iter

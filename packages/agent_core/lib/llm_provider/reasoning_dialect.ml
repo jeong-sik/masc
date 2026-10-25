@@ -60,6 +60,7 @@ type explicit_enable_receipt =
   | Explicit_enable_not_requested
   | Explicit_enable_encoded of explicit_enable_encoding
   | Explicit_enable_not_encoded
+  | Explicit_enable_satisfied_by_default
 
 type request_control_artifact =
   { fields : (string * Yojson.Safe.t) list
@@ -210,6 +211,14 @@ let base_of_capabilities (caps : Capabilities.capabilities) =
   | Reasoning_effort ->
     { default with
       toggle_wire = Reasoning_effort
+    ; preserve_wire
+    ; streaming = Delta_field "reasoning"
+    ; output_wire
+    }
+  | Reasoning_effort_default_on ->
+    { default with
+      toggle_default = Enabled
+    ; toggle_wire = Reasoning_effort
     ; preserve_wire
     ; streaming = Delta_field "reasoning"
     ; output_wire
@@ -528,7 +537,14 @@ let request_control_fields
        let explicit_enable_receipt =
          match enable_thinking, explicit_enable_encoding with
          | Some true, Some encoding -> Explicit_enable_encoded encoding
-         | Some true, None -> Explicit_enable_not_encoded
+         | Some true, None ->
+           (match dialect.toggle_wire, dialect.toggle_default, reasoning_effort with
+            | Reasoning_effort, Enabled, None -> Explicit_enable_satisfied_by_default
+            | (No_toggle | Thinking_object _ | Thinking_object_adaptive
+              | Thinking_object_only | Chat_template_kwargs | Chat_template_token
+              | Ollama_think | Anthropic_thinking | Gemini_thinking_config), _, _
+            | Reasoning_effort, (Provider_default | Disabled), _
+            | Reasoning_effort, Enabled, Some _ -> Explicit_enable_not_encoded)
          | Some false, _ | None, _ -> Explicit_enable_not_requested
        in
        Ok { fields = output_fields @ fields; explicit_enable_receipt })

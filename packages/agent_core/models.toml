@@ -996,8 +996,10 @@ supports_tool_choice = false
 supports_required_tool_choice = false
 supports_named_tool_choice = false
 supports_reasoning = true
-# Thinking cannot be disabled on this model; no off toggle is sent.
-thinking_control_format = "none"
+# Native Chat depth control; thinking cannot be disabled.
+# https://platform.minimax.io/docs/api-reference/text-openai-api (2026-10-25)
+thinking_control_format = "reasoning_effort_default_on"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 preserve_thinking_control_format = "always_preserved"
 reasoning_output_format = "split_reasoning_fields"
 reasoning_streaming_format = "delta_details:reasoning_content"

@@ -4598,7 +4598,7 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
         VS.Evidence_artifact_binary
           { reference = "artifact:shot.png"
           ; bytes = String.length png_bytes
-          ; sha256 = "e3b0c442"
+          ; sha256 = Digestif.SHA256.(digest_string png_bytes |> to_hex)
           ; format = "png"
           ; body
           }
@@ -4612,6 +4612,7 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
        | Error VS.Body_not_filed -> Alcotest.fail "the body was filed"
        | Error (VS.Body_unreadable reason) ->
          Alcotest.failf "the filed body was unreadable: %s" reason
+       | Error (VS.Body_identity_mismatch _) -> Alcotest.fail "the filed bytes match the snapshot"
        | Error (VS.Over_delivery_ceiling { bytes; ceiling }) ->
          Alcotest.failf "%d bytes is not over the %d ceiling" bytes ceiling);
       (match
@@ -4629,6 +4630,7 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
        | Error VS.Not_binary -> Alcotest.fail "a bodyless binary is still binary"
        | Error (VS.Body_unreadable reason) ->
          Alcotest.failf "no body was filed, nothing to read: %s" reason
+       | Error (VS.Body_identity_mismatch _) -> Alcotest.fail "no body was filed, nothing to compare"
        | Error (VS.Over_delivery_ceiling _) ->
          Alcotest.fail "no body was filed, nothing to measure");
       (* A body above the capture ceiling is not delivered — the judge falls
@@ -4645,7 +4647,7 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
            (VS.Evidence_artifact_binary
               { reference = "artifact:big.png"
               ; bytes = String.length oversized
-              ; sha256 = "y"
+              ; sha256 = Digestif.SHA256.(digest_string oversized |> to_hex)
               ; format = "png"
               ; body = big_body
               })
@@ -4663,6 +4665,7 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
            VS.verification_evidence_max_bytes ceiling
        | Error VS.Not_binary -> Alcotest.fail "an oversized image is binary"
        | Error VS.Body_not_filed -> Alcotest.fail "the oversized body was filed"
+       | Error (VS.Body_identity_mismatch _) -> Alcotest.fail "the delivery ceiling is checked before comparing bytes"
        | Error (VS.Body_unreadable reason) ->
          Alcotest.failf "the oversized body was unreadable: %s" reason);
       Alcotest.(check (option string))
@@ -4674,6 +4677,67 @@ let test_a_filed_binary_body_reads_back_and_only_images_attach () =
       Alcotest.(check (option string))
         "a markdown diff does not attach" None
         (VS.image_media_type_of_binary_format "md"))
+
+let test_changed_filed_binary_bodies_do_not_reach_the_judge () =
+  with_temp_dir (fun base_path ->
+      let original = "\x89PNG\r\n\x1a\nA" in
+      let sha256 data = Digestif.SHA256.(digest_string data |> to_hex) in
+      let changed = [ "\x89PNG\r\n\x1a\nB"; "short"; original ^ "extra" ] in
+      let items = List.mapi
+        (fun index replacement ->
+          let body = VS.persist_binary_body ~base_path ~request_id:"vrf-changed" ~index original in
+          let path = match body with
+            | Some relative -> Filename.concat (Common.masc_dir_from_base_path ~base_path) relative
+            | None -> Alcotest.fail "the captured body was filed" in
+          Fs_compat.save_file path replacement;
+          let item = VS.Evidence_artifact_binary
+            { reference = Printf.sprintf "artifact:changed-%d.png" index
+            ; bytes = String.length original; sha256 = sha256 original; format = "png"; body } in
+          (match VS.read_binary_body_base64 ~base_path item with
+           | Error (VS.Body_identity_mismatch mismatch) ->
+             Alcotest.(check (pair int int)) "both measured sizes are retained"
+               (String.length original, String.length replacement)
+               (mismatch.expected_bytes, mismatch.actual_bytes);
+             Alcotest.(check (pair string string)) "both content digests are retained"
+               (sha256 original, sha256 replacement)
+               (mismatch.expected_sha256, mismatch.actual_sha256)
+           | Ok _ -> Alcotest.fail "changed bytes must not be delivered"
+           | Error (VS.Not_binary | VS.Body_not_filed | VS.Body_unreadable _
+                   | VS.Over_delivery_ceiling _) ->
+             Alcotest.fail "a complete readable replacement has an identity mismatch");
+          item) changed in
+      let request : VS.request_header =
+        { id = "vrf-changed"; task_id = "task-changed"; worker = "omega"; created_at = 42.0 } in
+      let { CA.For_testing.images; unread } =
+        CA.For_testing.evidence_images_of_snapshot ~base_path
+          (VS.Evidence_available { request; items }) in
+      Alcotest.(check int) "no replacement is attached to the judge" 0 (List.length images);
+      Alcotest.(check int) "every changed body remains in the unread evidence" 3 (List.length unread);
+      List.iter (fun (_, reason) -> match reason with
+        | VS.Body_identity_mismatch _ -> ()
+        | VS.Not_binary | VS.Body_not_filed | VS.Body_unreadable _ | VS.Over_delivery_ceiling _ ->
+          Alcotest.fail "the judge must retain the identity mismatch") unread)
+
+let test_filed_binary_symlinks_are_not_read () =
+  with_temp_dir (fun base_path ->
+      let data = "\x89PNG\r\n\x1a\n" in
+      let body = VS.persist_binary_body ~base_path ~request_id:"vrf-symlink" ~index:0 data in
+      let path = match body with
+        | Some relative -> Filename.concat (Common.masc_dir_from_base_path ~base_path) relative
+        | None -> Alcotest.fail "the captured body was filed" in
+      let target = Filename.concat base_path "other.png" in
+      Fs_compat.save_file target data;
+      Unix.unlink path;
+      Unix.symlink target path;
+      let item = VS.Evidence_artifact_binary
+        { reference = "artifact:shot.png"; bytes = String.length data
+        ; sha256 = Digestif.SHA256.(digest_string data |> to_hex); format = "png"; body } in
+      match VS.read_binary_body_base64 ~base_path item with
+      | Error (VS.Body_unreadable _) -> ()
+      | Ok _ -> Alcotest.fail "a symlink must not borrow a matching file's bytes"
+      | Error (VS.Not_binary | VS.Body_not_filed | VS.Body_identity_mismatch _
+              | VS.Over_delivery_ceiling _) ->
+        Alcotest.fail "the symlink is refused at the file read boundary")
 
 (* F401: an image artifact whose filed body is gone used to vanish from the
    review with its read failure discarded, so the committed verdict read as
@@ -4701,7 +4765,7 @@ let test_an_unreadable_image_body_is_named_in_the_review_record () =
         VS.Evidence_artifact_binary
           { reference
           ; bytes = String.length png_bytes
-          ; sha256 = "e3b0c442"
+          ; sha256 = Digestif.SHA256.(digest_string png_bytes |> to_hex)
           ; format = "png"
           ; body
           }
@@ -4747,6 +4811,8 @@ let test_an_unreadable_image_body_is_named_in_the_review_record () =
          Alcotest.fail "the body was filed before it was removed"
        | [ ("artifact:gone.png", VS.Over_delivery_ceiling _) ] ->
          Alcotest.fail "an 8-byte body is under the ceiling"
+       | [ ("artifact:gone.png", VS.Body_identity_mismatch _) ] ->
+         Alcotest.fail "the missing body is not a different readable body"
        | [] -> Alcotest.fail "the removed body must be kept as unread"
        | (reference, _) :: _ ->
          Alcotest.failf "unexpected unread list starting at %s" reference);
@@ -5206,6 +5272,10 @@ let () =
         test_a_binary_payload_is_adopted_and_filed;
       Alcotest.test_case "a filed body reads back and only images attach" `Quick
         test_a_filed_binary_body_reads_back_and_only_images_attach;
+      Alcotest.test_case "changed filed bodies do not reach the judge" `Quick
+        test_changed_filed_binary_bodies_do_not_reach_the_judge;
+      Alcotest.test_case "filed binary symlinks are not read" `Quick
+        test_filed_binary_symlinks_are_not_read;
       Alcotest.test_case "an unreadable image body is named in the review record" `Quick
         test_an_unreadable_image_body_is_named_in_the_review_record;
     ];

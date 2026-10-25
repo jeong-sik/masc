@@ -22,6 +22,8 @@ type withheld_reason =
   | Body_not_filed
       (** the snapshot was decoded from persistence, so no body was filed *)
   | Body_unreadable  (** the filed body cannot be read back *)
+  | Body_identity_mismatch of Workspace_verification_store.binary_body_identity_mismatch
+      (** The filed bytes differ from the size or SHA-256 recorded at submission. *)
   | Over_delivery_ceiling of { bytes : int; ceiling : int }
       (** the body is [bytes] long and one image may be [ceiling] *)
   | Over_response_budget

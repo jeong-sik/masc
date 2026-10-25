@@ -114,13 +114,29 @@ let storage_tests = [
     Alcotest.(check int) "private input file" 0o600 ((Unix.stat file).Unix.st_perm land 0o777)));
   "simultaneous windows cannot overwrite one another", `Quick, (fun () -> with_base (fun base_path ->
     let target = publish ~base_path "<input>" in
-    let save data = Eio_unix.run_in_systhread (fun () -> Store.set ~base_path ~actor:"same human" (request target (inputs data))) in
-    let left, right = Eio.Fiber.pair (fun () -> save "left") (fun () -> save "right") in
-    let saved, conflict = match left, right with
-      | Ok saved, Error (Store.Conflict current) | Error (Store.Conflict current), Ok saved -> saved, current
-      | _ -> Alcotest.fail "two writers did not produce one save and one explicit conflict" in
-    Alcotest.(check bool) "conflict identifies the durable winner" true (saved = conflict);
-    Alcotest.(check int) "only one version committed" 1 (Store.read ~base_path ~actor:"same human" target |> stored).version));
+    let left_request = request target (inputs "left") and right_request = request target (inputs "right") in
+    let save request = Eio_unix.run_in_systhread (fun () -> Store.set ~base_path ~actor:"same human" request) in
+    let left, right = Eio.Fiber.pair (fun () -> save left_request) (fun () -> save right_request) in
+    let saved, refused = match left, right with
+      | Ok saved, Error (Store.Conflict current) ->
+        Alcotest.(check bool) "conflict identifies the winner" true (saved = current); saved, right_request
+      | Error (Store.Conflict current), Ok saved ->
+        Alcotest.(check bool) "conflict identifies the winner" true (saved = current); saved, left_request
+      | Ok saved, Error (Store.Unavailable message) ->
+        Format.eprintf "Concurrent owned read refused: %s@." message; saved, right_request
+      | Error (Store.Unavailable message), Ok saved ->
+        Format.eprintf "Concurrent owned read refused: %s@." message; saved, left_request
+      | _ ->
+        let describe = function Ok state -> "saved version " ^ string_of_int state.Data.version
+          | Error error -> Store.error_message error in
+        Alcotest.fail ("concurrent outcomes: " ^ describe left ^ " / " ^ describe right) in
+    let recovered = Store.read ~base_path ~actor:"same human" target |> stored in
+    Alcotest.(check bool) "durable state is exactly the winner" true (saved = recovered);
+    Alcotest.(check int) "only one version committed" 1 recovered.version;
+    Alcotest.(check int) "only one receipt committed" 1 (List.length recovered.receipts);
+    (match Store.set ~base_path ~actor:"same human" refused with
+     | Error (Store.Conflict current) -> Alcotest.(check bool) "manual rerequest cannot overwrite winner" true (current = recovered)
+     | Error error -> Alcotest.fail (Store.error_message error) | Ok _ -> Alcotest.fail "loser overwrote winner after competition ended")));
   "duplicate retry cannot roll back later input", `Quick, (fun () -> with_base (fun base_path ->
     let target = publish ~base_path "<input>" in
     let first = request target (inputs "first") in

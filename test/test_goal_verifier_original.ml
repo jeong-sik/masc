@@ -146,7 +146,108 @@ let test_malformed_original_refuses () = with_workspace (fun config _root ->
   reject "unknown nested evidence grant admitted"
     (`Assoc (("submitted_evidence", changed_evidence)::List.remove_assoc "submitted_evidence" fields)))
 
+let reported config goal_id ~value ~source =
+  let goal = match Goal_store.find_goal config ~goal_id with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_absent | Store_unavailable _ -> Alcotest.fail "measurement Goal unavailable" in
+  match Goal_measurement.record config ~goal_id
+      ~criterion_revision:goal.criterion_revision ~observed_value:value
+      ~evidence:("note:" ^ source) ~actor:"measurement-owner" with
+  | Ok receipt -> receipt.Goal_measurement.measurement
+  | Error error -> Alcotest.fail (Goal_measurement.error_to_string error)
+
+let check_prompt_observation label prepared observation =
+  let json = Goal_measurement.observation_to_yojson observation |> Yojson.Safe.to_string in
+  Alcotest.(check bool) label true
+    (String_util.contains_substring (V.prompt prepared) json)
+
+let test_reported_source_is_captured_without_changing_authority () =
+  with_workspace (fun config _root ->
+    let goal_id = pending config in
+    let first = reported config goal_id ~value:"1/3"
+      ~source:"https://example.com/frozen/first-evidence" in
+    let admitted = authority config goal_id in
+    let prepared = original admitted in
+    check_prompt_observation "full current report and source reach original" prepared
+      (Ok (Some first));
+    let captured = V.to_json prepared in
+    let digest = get (V.digest prepared) in
+    let second = reported config goal_id ~value:"2/3"
+      ~source:"https://example.com/frozen/second-evidence" in
+    let fresh = authority config goal_id in
+    Alcotest.(check string) "reported context does not change lookup grants"
+      (A.goal_review_binding admitted) (A.goal_review_binding fresh);
+    Alcotest.(check bool) "new report cannot revoke a retained original" true
+      (V.matches_authority prepared fresh);
+    check_prompt_observation "new preparation sees newer report" (original fresh)
+      (Ok (Some second));
+    let restored = get (V.of_json captured) in
+    check_prompt_observation "restore keeps original report bytes" restored (Ok (Some first));
+    Alcotest.(check string) "later report cannot rerender captured prompt"
+      (V.prompt prepared) (V.prompt restored);
+    Alcotest.(check string) "later report cannot change original digest"
+      digest (get (V.digest restored));
+    (* The current schema still admits retained originals whose prompts were
+       captured before reported-measurement context existed. *)
+    let older = match captured with
+      | `Assoc fields -> `Assoc (("prompt", `String "Earlier immutable Goal proof input")
+          :: List.remove_assoc "prompt" fields)
+      | _ -> Alcotest.fail "original must be an object" in
+    let older = get (V.of_json older) in
+    Alcotest.(check bool) "earlier prompt schema keeps the same authority" true
+      (V.matches_authority older fresh))
+
+let test_only_current_goal_revision_is_reported () = with_workspace (fun config _root ->
+  let goal_id = pending config in
+  let other_id = pending config in
+  ignore (reported config other_id ~value:"other Goal's observation"
+    ~source:"https://example.com/other-goal");
+  let admitted = authority config goal_id in
+  Alcotest.(check bool) "another Goal cannot supply this measurement" true
+    (A.goal_review_measurement admitted = Ok None);
+  check_prompt_observation "missing report is explicit" (original admitted) (Ok None);
+  let stale = reported config goal_id ~value:"old criterion"
+    ~source:"https://example.com/old-criterion" in
+  ignore (stored (Goal_store.upsert_goal config ~id:goal_id ~target_value:"101" ()));
+  ignore (proof (Workspace_goals.request_current_proof config ~goal_id));
+  let current = authority config goal_id in
+  Alcotest.(check bool) "changed revision has no inherited report" true
+    (A.goal_review_measurement current = Ok None);
+  Alcotest.(check bool) "the old report is retained in storage, not reused" true
+    (match Goal_measurement.load config with
+     | Ok rows -> List.exists (fun (row:Goal_measurement.t) -> row.id = stale.id) rows
+     | Error _ -> false);
+  check_prompt_observation "stale report becomes current-revision missing"
+    (original current) (Ok None))
+
+let test_unavailable_report_keeps_original_and_lookup_authority () =
+  with_workspace (fun config _root ->
+    let goal_id = pending config in
+    let row = reported config goal_id ~value:"100"
+      ~source:"https://example.com/retained-report" in
+    let admitted = authority config goal_id in
+    let prepared = original admitted in
+    Out_channel.with_open_bin (Goal_measurement.path config)
+      (fun out -> output_string out "{\"version\":999,\"measurements\":[]}");
+    let unavailable = authority config goal_id in
+    let observation = A.goal_review_measurement unavailable in
+    (match observation with
+     | Error reason -> Alcotest.(check bool) "unavailable reason is preserved" true
+         (String.trim reason <> "")
+     | Ok _ -> Alcotest.fail "corrupt report store became missing or reported");
+    check_prompt_observation "new original explicitly carries lookup unavailability"
+      (original unavailable) observation;
+    Alcotest.(check string) "unavailable report cannot revoke lookup grants"
+      (A.goal_review_binding admitted) (A.goal_review_binding unavailable);
+    Alcotest.(check bool) "unavailable report does not invalidate original authority" true
+      (V.matches_authority prepared unavailable);
+    check_prompt_observation "retained original still has its captured report"
+      (get (V.of_json (V.to_json prepared))) (Ok (Some row)))
+
 let () = Alcotest.run "goal verifier original" ["host preparation", [
   Alcotest.test_case "retained prompt and actual shared-root visual lookup" `Quick test_stored_goal_preparation_and_actual_visual_lookup;
   Alcotest.test_case "exact subject, evidence and workspace authority" `Quick test_other_subject_evidence_and_workspace_refuse;
-  Alcotest.test_case "malformed immutable input refuses" `Quick test_malformed_original_refuses]]
+  Alcotest.test_case "malformed immutable input refuses" `Quick test_malformed_original_refuses;
+  Alcotest.test_case "reported source and immutable authority" `Quick test_reported_source_is_captured_without_changing_authority;
+  Alcotest.test_case "exact Goal and criterion measurement" `Quick test_only_current_goal_revision_is_reported;
+  Alcotest.test_case "unavailable report preserves original authority" `Quick test_unavailable_report_keeps_original_and_lookup_authority]]

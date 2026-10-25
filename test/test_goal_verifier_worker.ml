@@ -138,6 +138,131 @@ let test_actual_retained_lookup_and_restored_receipt () = with_workspace (fun co
           (goal.phase = Goal_phase.Verifying)
       | Goal_absent | Store_unavailable _ -> Alcotest.fail "original Goal is absent"))
 
+(* This is the actual retained-worker/reviewer-hook boundary, not HTTP or a
+   vendor-model verdict. Assertions stay outside the reviewer callback: AR
+   turns a raised callback into a typed evaluator error. *)
+let test_reported_measurement_snapshot_reaches_retained_worker () =
+  with_workspace (fun config store _ ->
+    let goal_id = pending config in
+    let goal = match Goal_store.find_goal config ~goal_id with
+      | Goal_store.Goal_found goal -> goal
+      | Goal_absent | Store_unavailable _ -> Alcotest.fail "pending Goal is absent" in
+    let record value evidence actor =
+      let receipt = get (Goal_measurement.record config ~goal_id
+        ~criterion_revision:goal.criterion_revision ~observed_value:value
+        ~evidence ~actor |> Result.map_error Goal_measurement.error_to_string) in
+      receipt.Goal_measurement.measurement in
+    let first = record "100" "note:https://example.invalid/proof/first" "first-reporter" in
+    let authority = get (A.create_goal_review ~config ~goal_id) in
+    Alcotest.(check bool) "authority captures the actual complete first report" true
+      (A.goal_review_measurement authority = Ok (Some first));
+    let original = get (V.prepare ~attempt:0 ~authority) in
+    let subject = V.subject original in
+    let identity : W.run_identity = {
+      run_id="measurement-review/" ^ subject.request_id; started_at=Time_compat.now ()} in
+    let retained = checked (W.retain ~store ~installation_id ~package_id ~run:identity original) in
+    let original_bytes = Yojson.Safe.to_string (V.to_json original) in
+    let first_json = Yojson.Safe.to_string (`Assoc [
+      "state", `String "reported";
+      "record", `Assoc [
+        "id", `String first.id; "goal_id", `String goal_id;
+        "criterion_revision", `String goal.criterion_revision;
+        "observed_value", `String "100";
+        "evidence", `String "note:https://example.invalid/proof/first";
+        "actor", `String "first-reporter"; "recorded_at", `String first.recorded_at]]) in
+    let updated = record "200" "note:https://example.invalid/proof/updated" "updated-reporter" in
+    let updated_authority = get (A.create_goal_review ~config ~goal_id) in
+    Alcotest.(check bool) "fresh authority sees the changed same-criterion report" true
+      (A.goal_review_measurement updated_authority = Ok (Some updated));
+    Alcotest.(check string) "a report update grants exactly the same lookup authority"
+      (A.goal_review_binding authority) (A.goal_review_binding updated_authority);
+    Alcotest.(check bool) "changed report does not revoke the captured original" true
+      (V.matches_authority original updated_authority);
+    let calls = ref 0 and received = ref [] and lookup_results = ref [] in
+    with_reviewer (fun ~base_path ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+        ?system_prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      incr calls;
+      received := (base_path, prompt, system_prompt) :: !received;
+      let input = `Assoc ["file_path", `String measurement_path] in
+      let result = lookup.AR.dispatch ~name:"tool_read_file" ~args:input in
+      lookup_results := result :: !lookup_results;
+      on_tool_result ~input result;
+      Ok {AR.selected_runtime_id="goal-reviewer"; evaluator_execution=None;
+        verdict=Some (AR.Approve "Fixture observed the actual source value.")}) (fun () ->
+      let first_receipt = checked (run store retained updated_authority) in
+      Alcotest.(check int) "one actual reviewer entry after the report changed" 1 !calls;
+      let actual_prompt = match !received with
+        | [(base_path, prompt, system_prompt)] ->
+          Alcotest.(check string) "actual consumer receives the captured workspace" config.base_path base_path;
+          Alcotest.(check (option string)) "actual consumer receives the captured system instructions"
+            (Some (V.system_instructions original)) system_prompt;
+          prompt
+        | _ -> Alcotest.fail "the reviewer did not receive exactly one original" in
+      Alcotest.(check string) "actual reviewer receives immutable original prompt" (V.prompt original) actual_prompt;
+      Alcotest.(check bool) "full first report JSON includes value, evidence URL, ID, actor and time" true
+        (String_util.contains_substring actual_prompt first_json);
+      let updated_json = Goal_measurement.observation_to_yojson (Ok (Some updated))
+        |> Yojson.Safe.to_string in
+      Alcotest.(check bool) "fresh report does not replace the retained reviewer input" false
+        (String_util.contains_substring actual_prompt updated_json);
+      (match !lookup_results with
+       | [Tool_result.Completed {data; _}] ->
+         Alcotest.(check bool) "actual lookup reports completed evidence" true
+           (Yojson.Safe.Util.member "evidence_lookup_succeeded" data = `Bool true);
+         let document = match Yojson.Safe.Util.member "lookup_result" data with
+           | `String text -> Yojson.Safe.from_string text
+           | json -> json in
+         let content = Yojson.Safe.Util.(member "content" document |> to_string) in
+         Alcotest.(check int) "actual shared-playground file still measures 100" 100
+           Yojson.Safe.Util.(Yojson.Safe.from_string content |> member "value" |> to_int)
+       | _ -> Alcotest.fail "the actual measurement source was not read successfully");
+      Alcotest.(check bool) "callback errors cannot masquerade as a judged fixture" true
+        (first_receipt.result.verdict = Some (AR.Approve "Fixture observed the actual source value."));
+      (match first_receipt.tools with
+       | [tool] ->
+         Alcotest.(check string) "worker retains its actual file consumer" "tool_read_file" tool.tool_name;
+         Alcotest.(check bool) "worker retains the exact read and completed outcome" true
+           (tool.input = `Assoc ["file_path", `String measurement_path]
+            && tool.disposition = Tool_result.Completed ())
+       | _ -> Alcotest.fail "the actual lookup observation was not retained");
+      let restored_store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+      let restored = load restored_store original in
+      Alcotest.(check string) "all original bytes survive report update and store reopening"
+        original_bytes (Yojson.Safe.to_string (V.to_json (W.original restored)));
+      let assert_restored authority =
+        let receipt = match checked (W.restored_receipt restored) with
+          | Some receipt -> receipt | None -> Alcotest.fail "original judgment was not restored" in
+        Alcotest.(check bool) "original result and actual lookup survive" true
+          (receipt = first_receipt);
+        Alcotest.(check bool) "worker reuses that receipt without consulting a new report" true
+          (checked (W.run ~store:restored_store ~retained:restored ~authority
+            ~provider_rest:(fun _ -> AR.No_stated_rest) ()) = first_receipt);
+        Alcotest.(check int) "restoration never reenters the reviewer" 1 !calls in
+      assert_restored updated_authority;
+      Out_channel.with_open_bin (Goal_measurement.path config)
+        (fun out -> output_string out "{unreadable measurement snapshot");
+      let unavailable_authority = get (A.create_goal_review ~config ~goal_id) in
+      (match A.goal_review_measurement unavailable_authority with
+       | Error _ -> () | Ok _ -> Alcotest.fail "unreadable source became a missing or reported measurement");
+      Alcotest.(check string) "unavailable informational source changes no lookup grant"
+        (A.goal_review_binding authority) (A.goal_review_binding unavailable_authority);
+      Alcotest.(check bool) "source unavailability does not revoke the retained original" true
+        (V.matches_authority original unavailable_authority);
+      assert_restored unavailable_authority;
+      Alcotest.(check string) "unavailable source never rewrites the retained original"
+        original_bytes (Yojson.Safe.to_string (V.to_json
+          (W.original (load restored_store original))));
+      (match Goal_store.find_goal config ~goal_id with
+       | Goal_store.Goal_found current ->
+         Alcotest.(check bool) "worker input and synthetic verdict never commit Goal proof" true
+           (current.phase = Goal_phase.Verifying)
+       | Goal_absent | Store_unavailable _ -> Alcotest.fail "original Goal disappeared");
+      match get (Goal_verification.get_record_authoritative config ~goal_id) with
+      | Some {completion=Goal_verification.Proof_pending pending; _} ->
+        Alcotest.(check string) "the same pending proof request remains" subject.request_id pending.request_id
+      | None | Some _ -> Alcotest.fail "worker fixture advanced the proof ledger"))
+
 let test_unknown_and_cancellation_never_redispatch () =
   with_workspace (fun config store _ ->
     let authority, retained = prepared config store in
@@ -749,6 +874,7 @@ let test_raised_review_retains_actual_tool_observation () = with_workspace (fun 
 
 let () = Alcotest.run "retained Goal worker" ["execution", [
   Alcotest.test_case "actual retained visual lookup and restart receipt" `Quick test_actual_retained_lookup_and_restored_receipt;
+  Alcotest.test_case "reported measurement reaches retained worker without changing recovery authority" `Quick test_reported_measurement_snapshot_reaches_retained_worker;
   Alcotest.test_case "unknown and cancellation never redispatch" `Quick test_unknown_and_cancellation_never_redispatch;
   Alcotest.test_case "same-original pre-admission repair" `Quick test_pre_admission_repair_keeps_original;
   Alcotest.test_case "authority destination and strict inventory" `Quick test_destination_authority_and_inventory;

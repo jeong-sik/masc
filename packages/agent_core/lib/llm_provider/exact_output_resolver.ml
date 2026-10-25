@@ -15,7 +15,6 @@ type target_identity =
   ; fingerprint : string
   }
 
-type resolver_io = { getenv : string -> (string option, unit) result }
 
 type catalog_document =
   { source : string
@@ -103,7 +102,6 @@ type resolver_snapshot_error =
       { target_ref : string
       ; cause : resolver_endpoint_error
       }
-  | Environment_read_failed of { environment_variable : string }
 
 (* Which wire this target's requests run on. A [[targets]] row in a catalog
    document names no binding, so the provider row it points at is the only
@@ -570,13 +568,6 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
   ("agent_core-exact-output-catalog-evidence-v5" :: providers) @ models @ targets
 ;;
 
-let frozen_environment ~io names =
-  String_set.fold
-    (fun name values -> String_map.add name (io.getenv name) values)
-    names
-    String_map.empty
-;;
-
 let read_full_replacement_file path =
   let path = String.trim path in
   if String.equal path ""
@@ -591,7 +582,6 @@ let read_full_replacement_file path =
 ;;
 
 let load_resolver_snapshot
-      ~io
       ?(target_binding_policy = Require_all_target_bindings)
       ?(catalog = Embedded_default)
       ()
@@ -738,31 +728,6 @@ let load_resolver_snapshot
       target_declarations
   in
   let rejected_target_bindings = List.rev rejected_target_bindings in
-  let environment_names =
-    List.fold_left
-      (fun names
-        ( (target : target_declaration)
-        , (provider : Model_catalog.provider_entry)
-        , (_ : Model_catalog.model_entry) ) ->
-         (* A binding carries its own endpoint and its own credential, and the
-            catalog rows no longer name environment variables, so no target
-            contributes an environment observation here. *)
-         match target.wire with
-         | Binding_wire _ | Catalog_provider_wire -> names)
-      String_set.empty
-      structural
-  in
-  let environment = frozen_environment ~io environment_names in
-  let observed_environment name =
-    match String_map.find_opt name environment with
-    | Some observation -> observation
-    | None -> Ok None
-  in
-  let getenv name =
-    match observed_environment name with
-    | Ok value -> value
-    | Error () -> None
-  in
   let* targets =
     List.fold_left
       (fun result

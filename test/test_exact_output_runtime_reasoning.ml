@@ -35,7 +35,6 @@ let test_missing_effort_has_typed_request_rejection () =
     ; credential = Resolver.Credential_not_declared
     ; body_timeout_s = Some exact_body_timeout_s } in
   let snapshot = Resolver.load_resolver_snapshot
-      ~io:{ getenv = (fun _ -> Ok None) }
       ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
     |> require_ok "resolver snapshot" in
   let admitted = Resolver.admit_target_ref snapshot target.target_ref
@@ -163,7 +162,6 @@ let test_explicit_effort_reaches_serialized_request () =
           Resolver.Credential_resolved (Llm_provider.Secret.of_string "synthetic-no-network")
       ; body_timeout_s = Some exact_body_timeout_s } in
     let snapshot = Resolver.load_resolver_snapshot
-        ~io:{ getenv = (fun _ -> Ok (Some "synthetic-no-network")) }
         ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
       |> require_ok "wire resolver snapshot" in
     let selected =
@@ -232,7 +230,6 @@ let publish_thinking_lane ~binding ~thinking =
     ; credential = EO.Credential_not_declared
     ; body_timeout_s = Some exact_body_timeout_s } in
   let snapshot = EO.load_resolver_snapshot
-      ~io:{ getenv = (fun _ -> Ok None) }
       ~catalog:(EO.Embedded_with_targets [ target ]) ()
     |> require_ok "resolver snapshot" in
   Registry.publish

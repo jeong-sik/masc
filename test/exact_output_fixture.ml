@@ -359,10 +359,9 @@ let resolver_snapshot
       ~source
       fixtures
   in
-  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   match
     EO.load_resolver_snapshot
-      ~io
       ~catalog:(EO.Full_replacement overlay)
       ()
   with

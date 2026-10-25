@@ -20,8 +20,8 @@ let () =
         "embedded model catalog: %d models, %d providers\n"
         model_count
         provider_count;
-      let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
-      match EO.load_resolver_snapshot ~io () with
+
+      match EO.load_resolver_snapshot () with
       | Error _ -> fail "embedded resolver snapshot failed"
       | Ok _ -> ())
 ;;

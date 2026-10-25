@@ -752,8 +752,6 @@ let resolver_snapshot_error_to_string = function
       "target %S endpoint is invalid: %s"
       target_ref
       (endpoint_error_to_string cause)
-  | Exact_output.Environment_read_failed { environment_variable } ->
-    Printf.sprintf "failed to read environment variable %s" environment_variable
 ;;
 
 let publication_error_to_string = function

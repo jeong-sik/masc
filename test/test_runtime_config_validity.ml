@@ -810,9 +810,8 @@ let declared_targets_of_config_path ?(environment = []) ~label path =
   @@ fun () ->
   (* A binding's key is read here, once, when the runtime loads it, and the
      exact slot carries that key rather than reading the name again. So the
-     credentials a scenario has are the process environment around this load,
-     not answers the resolver's [io] gives: [io] no longer decides a binding's
-     key. [None] unsets a name the suite's shell may have exported. *)
+     credentials a scenario has are the process environment around this load.
+     [None] unsets a name the suite's shell may have exported. *)
   let rec with_environment = function
     | [] -> fun f -> f ()
     | (name, value) :: rest ->
@@ -826,10 +825,9 @@ let declared_targets_of_config_path ?(environment = []) ~label path =
   | Ok () -> Runtime.exact_output_targets (Runtime.get_runtimes ())
 ;;
 
-let snapshot_of_config ?environment ~io ~label path =
+let snapshot_of_config ?environment ~label path =
   match
     Exact_output.load_resolver_snapshot
-      ~io
       ~target_binding_policy:Exact_output.Exclude_unbound_targets
       ~catalog:
         (Exact_output.Embedded_with_targets
@@ -850,7 +848,7 @@ let test_repo_seed_wizard_choices_have_an_exact_output_target () =
   match Runtime_toml.parse_file path with
   | Error errors -> failf "repo runtime.toml should parse: %d error(s)" (List.length errors)
   | Ok (cfg : Runtime_schema.config) ->
-    let snapshot = snapshot_of_config ~io:{ getenv = (fun _ -> Ok None) } ~label:"seed wizard" path in
+    let snapshot = snapshot_of_config ~label:"seed wizard" path in
     let offered =
       List.filter_map
         (fun (provider : Runtime_schema.provider) ->
@@ -2243,13 +2241,11 @@ let test_shipped_configs_declare_exact_slot_body_deadlines () =
 (* release-evidence.sh boots the installed binary with no environment secret,
    so the second startup gate (require_usable_mandatory_exact_output_lanes,
    which calls resolve_lane) only passes if the fixture's lane slots are
-   admitted and resolved from the fixture's synthetic inline credential. getenv
-   returns Ok None for every name here, which is stricter than CI: any fixture
-   slot that grows an api_key_env fails this test instead of failing a push to
-   main. *)
+   admitted and resolved from the fixture's synthetic inline credential. The
+   assertions below require the provider to own that inline credential. *)
 let test_release_evidence_fixture_lanes_resolve_without_environment_credentials () =
   let fixture_dir = release_evidence_fixture_dir () in
-  let io : Exact_output.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   let fixture_runtime_path = Filename.concat fixture_dir "runtime.toml" in
   match Runtime_toml.parse_file fixture_runtime_path with
   | Error errors ->
@@ -2274,7 +2270,7 @@ let test_release_evidence_fixture_lanes_resolve_without_environment_credentials 
     (match provider.credentials with
      | Some (Runtime_schema.Inline "release-evidence-loopback") -> ()
      | _ -> fail "release-evidence provider must own its synthetic inline credential");
-    let snapshot = snapshot_of_config ~io ~label:"release-evidence smoke" fixture_runtime_path in
+    let snapshot = snapshot_of_config ~label:"release-evidence smoke" fixture_runtime_path in
     let default_runtime_id =
       match config.default_runtime_id with
       | Some runtime_id -> runtime_id
@@ -2354,10 +2350,9 @@ let test_release_evidence_fixture_lanes_resolve_without_environment_credentials 
 let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let root = repo_root () in
   let runtime_path = Filename.concat root "config/runtime.toml" in
-  (* The names the seed's providers declare. They are process environment
-     around the runtime load, where a binding's key is read; the resolver's
-     [io] answers nothing about a binding's key any more. *)
-  let io : Exact_output.resolver_io = { getenv = (fun _ -> Ok None) } in
+  (* Seed credentials are resolved during the runtime load and carried by the
+     resulting exact target bindings. *)
+
   let every_seed_key =
     [ "ZAI_API_KEY", Some "exact-output-seed-test"
     ; "KIMI_API_KEY", Some "exact-output-seed-test"
@@ -2393,12 +2388,12 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
   | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
   | Ok config ->
     let snapshot =
-      snapshot_of_config ~environment:every_seed_key ~io ~label:"deployment seed" runtime_path
+      snapshot_of_config ~environment:every_seed_key ~label:"deployment seed" runtime_path
     in
     (* Every GLM binding the seed declares has to come up on the public key
        alone; a first install has no coding-plan key. *)
     let single_key_snapshot =
-      snapshot_of_config ~environment:public_key_only ~io ~label:"single-key GLM" runtime_path
+      snapshot_of_config ~environment:public_key_only ~label:"single-key GLM" runtime_path
     in
     List.iter
       (fun (binding : Runtime_schema.binding) ->
@@ -4456,7 +4451,7 @@ let exact_lane_runtime_toml ~lane ~slot =
 
 let test_off_exact_lanes_retain_unavailable_candidates () =
   let resolver = match Exact_output.load_resolver_snapshot
-    ~io:{getenv=(fun _ -> Ok None)} ~catalog:(Exact_output.Embedded_with_targets []) () with
+    ~catalog:(Exact_output.Embedded_with_targets []) () with
     | Ok value -> value | Error _ -> fail "empty resolver snapshot did not load" in
   let admission text =
     let config = match Runtime_toml.parse_string text with

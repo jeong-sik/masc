@@ -38,3 +38,23 @@ capabilities124, modality7 and provider coverage115 cases (273 total). This
 proves the corrected parent fixtures, not this deletion layer. Earlier six
 suites262 passed at23e6 in an overall failed run. No combined current-head
 execution or full-regression result is inferred from those separate runs.
+
+## Observed compiler failure and resolver input hard cut
+
+Initial run40150288619 checked out8b1230612ebe447d1d61ac48825508f647d60b6b
+and FAILED before suite execution: deleting the getter left an unused local
+getenv helper, fatal warning26. The earlier source PASS at8b is invalidated by
+this actual compile failure; it never proved compilation.
+
+The repair removes resolver_io and its load_resolver_snapshot argument, the
+empty environment-observation fold, and the now-unproducible snapshot
+Environment_read_failed variant. Public interfaces change first. Production
+runtime/CLI and direct test callers migrate together; no ignored-argument or
+compatibility adapter is introduced. Endpoints and credential facts already
+arrive through typed target bindings. Credential_resolved/unresolved outcomes
+and real runtime credential selection remain intact. Fixture-only getenv
+stubs had no observation consumer and are deleted with the parameter; their
+removal is not new proof of credential fault scenarios.
+
+A focused follow-up is requested after this correction. No successful repair
+execution or full executable build is claimed from source parsing.

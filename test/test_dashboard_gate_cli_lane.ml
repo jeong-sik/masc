@@ -28,7 +28,6 @@ model_id = "fixture-model"
 
 let snapshot () =
   match Exact.load_resolver_snapshot
-    ~io:{ getenv = (fun _ -> Ok None) }
     ~catalog:(Exact.Full_replacement { source = "<gate-projection-test>"; contents = catalog }) () with
   | Ok snapshot -> snapshot
   | Error _ -> fail "fixture exact catalog did not load"

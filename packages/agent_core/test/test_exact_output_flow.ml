@@ -152,14 +152,14 @@ let catalog_fixture_toml entry =
     target_options
 ;;
 
-let with_catalog ?(getenv = fun _ -> Ok None) entries f =
+let with_catalog entries f =
   let document : EO.catalog_document =
     { source = "exact-output outer-flow fixture"
     ; contents = String.concat "\n" (List.map catalog_fixture_toml entries)
     }
   in
-  let io : EO.resolver_io = { getenv } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement document) () with
+
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement document) () with
   (* Naming the rejected field beats "should load". Discarding the error made a
      catalog that the resolver refuses indistinguishable from any other load
      failure, so a fixture drift showed up only as an assertion label. *)
@@ -201,10 +201,9 @@ let with_bound_targets ?admission_priority_run_limit ~base_url ~body_timeout_s f
     ; body_timeout_s = Some body_timeout_s
     }
   in
-  let io : EO.resolver_io = { getenv = fun _ -> Ok None } in
+
   match
     EO.load_resolver_snapshot
-      ~io
       ~catalog:
         (EO.Embedded_with_targets
            [ target "bound-primary" (key_for "primary-test-key")
@@ -259,10 +258,9 @@ let with_bound_anthropic ~base_url ~body_timeout_s f =
     ; body_timeout_s = Some body_timeout_s
     }
   in
-  let io : EO.resolver_io = { getenv = fun _ -> Ok None } in
+
   match
     EO.load_resolver_snapshot
-      ~io
       ~catalog:(EO.Embedded_with_targets [ target ])
       ()
   with
@@ -296,13 +294,6 @@ let flow_candidate_as snapshot ~id ~target_ref =
 ;;
 
 let flow_candidate snapshot id = flow_candidate_as snapshot ~id ~target_ref:id
-
-let credential_getenv = function
-  | "MISSING_FLOW_KEY" -> Ok None
-  | "INVALID_FLOW_KEY" -> Ok (Some "secret\r\nX-Leak: yes")
-  | "READ_FAILED_FLOW_KEY" -> Error ()
-  | _ -> Ok None
-;;
 
 let snapshot_candidates
       ?(messages = [ msg "return one exact object" ])
@@ -800,7 +791,6 @@ let test_later_missing_credential_does_not_block_current_success () =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
-      ~getenv:credential_getenv
       [ catalog_entry ~id:"current-good" ~base_url ~native:true ~json:true ()
       ; catalog_entry
           ~requires_api_key:true
@@ -1245,7 +1235,6 @@ let test_missing_current_credential_advances_after_durable_settlement () =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
-      ~getenv:credential_getenv
       [ catalog_entry
           ~requires_api_key:true
           ~id:"current-missing"
@@ -1362,7 +1351,6 @@ let test_read_failed_current_credential_advances_to_good_successor () =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
-      ~getenv:credential_getenv
       [ catalog_entry
           ~requires_api_key:true
           ~id:"read-failed-current"
@@ -1420,7 +1408,6 @@ let test_credential_rejections_are_ordered_zero_dispatch_terminal () =
     with_server ~response:(openai_response {|{"name":"unused"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
-      ~getenv:credential_getenv
       [ catalog_entry
           ~requires_api_key:true
           ~id:"credential-missing"
@@ -1667,7 +1654,6 @@ let test_request_body_projection_is_exact_and_credential_free () =
   let messages = [ msg "measure the exact provider request body" ] in
   let project () =
     with_catalog
-      ~getenv:credential_getenv
       [ catalog_entry ~requires_api_key ~id ~base_url ~native:true ~json:true () ]
     @@ fun snapshot ->
     let target = admitted_target snapshot id in
@@ -3343,7 +3329,6 @@ let test_exception_after_durable_rejection_stops_before_successor () =
          with_server ~response:(openai_response {|{"name":"must-not-dispatch"}|})
          @@ fun ~sw:_ ~net ~clock ~base_url ->
          with_catalog
-           ~getenv:credential_getenv
            [ catalog_entry
                ~requires_api_key:true
                ~id:"rejection-committed"
@@ -4845,7 +4830,6 @@ let test_admission_and_semantic_rejections_share_one_declared_walk () =
     with_server ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
-      ~getenv:credential_getenv
       [ catalog_entry
           ~requires_api_key:true
           ~id:"mixed-missing"

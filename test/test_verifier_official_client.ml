@@ -148,8 +148,8 @@ candidates = ["forbidden.verifier", "official.verifier"]
   let declarations = match Runtime_toml.parse_string runtime_text with
     | Ok config -> config.Runtime_schema.exact_output_lane_decls
     | Error _ -> fail "fixture runtime declarations failed to parse" in
-  let io : Agent_core.Exact_output.resolver_io = {getenv=(fun _ -> Ok None)} in
-  let snapshot = match Agent_core.Exact_output.load_resolver_snapshot ~io () with
+
+  let snapshot = match Agent_core.Exact_output.load_resolver_snapshot () with
     | Ok snapshot -> snapshot | Error _ -> fail "embedded resolver snapshot unavailable" in
   (match Runtime.publish_exact_output_registry ~lanes:declarations snapshot with
    | Ok _ -> () | Error detail -> fail detail);

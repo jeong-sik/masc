@@ -3,8 +3,7 @@ open Llm_provider
 module EO = Agent_core.Exact_output
 
 let _load_resolver_snapshot_contract
-  :  io:EO.resolver_io
-  -> ?target_binding_policy:EO.target_binding_policy
+  :  ?target_binding_policy:EO.target_binding_policy
   -> ?catalog:EO.resolver_catalog_input
   -> unit
   -> (EO.resolver_snapshot, EO.resolver_snapshot_error) result
@@ -126,12 +125,12 @@ let target_catalog
        (Some (Option.value body_timeout_s ~default:30.0)))
 ;;
 
-let snapshot ?(getenv = fun _ -> Ok None) contents =
-  let io : EO.resolver_io = { getenv } in
+let snapshot contents =
+
   let overlay : EO.catalog_document =
     { source = "resolver snapshot fixture"; contents }
   in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement overlay) () with
   | Ok snapshot -> snapshot
   | Error _ -> fail "snapshot should load"
 ;;
@@ -331,13 +330,13 @@ let test_target_enable_thinking_is_typed_frozen_functional_identity () =
     "later target-policy snapshots do not mutate the old snapshot"
     true
     (absent_before = absent_after);
-  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   let overlay : EO.catalog_document =
     { source = "non-boolean target enable_thinking"
     ; contents = target_catalog () ^ "enable_thinking = \"true\"\n"
     }
   in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement overlay) () with
   | Error (EO.Target_catalog_invalid { detail; _ }) ->
     check
       bool
@@ -374,11 +373,11 @@ let with_temp_catalog contents f =
 ;;
 
 let replacement_snapshot contents =
-  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   let document : EO.catalog_document =
     { source = "in-memory full replacement"; contents }
   in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement document) () with
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement document) () with
   | Ok snapshot -> snapshot
   | Error _ -> fail "full replacement snapshot should load"
 ;;
@@ -402,9 +401,9 @@ let test_full_replacement_path_is_frozen_and_suppresses_embedded () =
   in
   with_temp_catalog first_contents
   @@ fun path ->
-  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   let load () =
-    match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement_file path) () with
+    match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement_file path) () with
     | Ok snapshot -> snapshot
     | Error _ -> fail "full replacement path should load"
   in
@@ -453,17 +452,17 @@ let test_full_replacement_path_is_frozen_and_suppresses_embedded () =
 ;;
 
 let test_invalid_full_replacement_inputs_fail_without_fallback () =
-  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   let invalid : EO.catalog_document =
     { source = "invalid full replacement"; contents = "[[providers]" }
   in
-  (match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement invalid) () with
+  (match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement invalid) () with
    | Error (EO.Catalog_parse_failed { source = EO.Full_replacement_catalog; _ }) -> ()
    | Ok _ | Error _ -> fail "invalid replacement must not fall back to embedded");
   let missing_path = Filename.temp_file "missing-exact-output-catalog-" ".toml" in
   Sys.remove missing_path;
   match
-    EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement_file missing_path) ()
+    EO.load_resolver_snapshot ~catalog:(EO.Full_replacement_file missing_path) ()
   with
   | Error (EO.Catalog_read_failed { path; _ }) ->
     check string "missing replacement path is preserved" missing_path path
@@ -479,12 +478,12 @@ let test_unbound_target_policy_is_explicit_and_observable () =
         "\n[[targets]]\nid = %S\nprovider_ref = \"missing-provider\"\nmodel_id = \"missing-model\"\n"
         unbound_target
   in
-  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   let catalog : EO.resolver_catalog_input =
     EO.Full_replacement
       { source = "unbound target policy fixture"; contents }
   in
-  (match EO.load_resolver_snapshot ~io ~catalog () with
+  (match EO.load_resolver_snapshot ~catalog () with
    | Error
        (EO.Target_binding_missing
           { target_ref; component = EO.Target_provider }) ->
@@ -494,7 +493,6 @@ let test_unbound_target_policy_is_explicit_and_observable () =
   let degraded =
     match
       EO.load_resolver_snapshot
-        ~io
         ~target_binding_policy:EO.Exclude_unbound_targets
         ~catalog
         ()
@@ -739,9 +737,9 @@ let test_old_and_new_whole_tuples_never_mix_across_domains_and_fibers () =
 ;;
 
 let expect_endpoint_error label expected_cause contents =
-  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   let overlay : EO.catalog_document = { source = label; contents } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement overlay) () with
   | Error (EO.Target_endpoint_invalid { cause; _ }) ->
     check bool (label ^ " exact typed cause") true (cause = expected_cause)
   | Error _ -> fail (label ^ " returned the wrong resolver error class")
@@ -802,9 +800,9 @@ let test_caller_headers_fail_closed () =
   let contents =
     target_catalog () ^ Printf.sprintf "headers = [\"Authorization: %s\"]\n" header_secret
   in
-  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   let overlay : EO.catalog_document = { source = "caller header"; contents } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement overlay) () with
   | Error (EO.Target_catalog_invalid { detail; _ }) ->
     check
       bool
@@ -816,9 +814,9 @@ let test_caller_headers_fail_closed () =
 ;;
 
 let expect_collision_error label expected contents =
-  let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   let overlay : EO.catalog_document = { source = label; contents } in
-  match EO.load_resolver_snapshot ~io ~catalog:(EO.Full_replacement overlay) () with
+  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement overlay) () with
   | Error (EO.Catalog_collision collision) ->
     check bool (label ^ " exact collision") true (collision = expected)
   | Error _ -> fail (label ^ " returned the wrong resolver error class")
@@ -905,10 +903,10 @@ let test_native_bare_target_binds_and_freezes () =
 
 let test_bare_target_permission_and_exact_identity () =
   List.iter (fun (serves, model_id) ->
-    let io : EO.resolver_io = {getenv = fun _ -> Ok None} in
+
     let catalog = EO.Full_replacement {source = "bare target refusal";
       contents = bare_target_catalog ~serves ~model_id ~scoped:false ~row_base:true} in
-    match EO.load_resolver_snapshot ~io ~catalog () with
+    match EO.load_resolver_snapshot ~catalog () with
     | Error (EO.Target_binding_missing {component = EO.Target_model; target_ref}) ->
       check string "exact refusal target" "bare-target" target_ref
     | Error _ -> fail "expected a typed missing-model refusal"

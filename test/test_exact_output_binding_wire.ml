@@ -195,7 +195,6 @@ let exact_view (keeper : PC.t) =
   in
   let snapshot =
     Resolver.load_resolver_snapshot
-      ~io:{ getenv = (fun _ -> Ok (Some "synthetic-no-network")) }
       ~catalog:(Resolver.Embedded_with_targets [ declared ])
       ()
     |> require_ok "resolver snapshot"

@@ -224,14 +224,14 @@ default = "replacement_provider.alternate"
 |}
 ;;
 
-let load_snapshot ~getenv catalog =
-  let io : Exact_output.resolver_io = { getenv } in
-  match Exact_output.load_resolver_snapshot ~io ~catalog () with
+let load_snapshot catalog =
+
+  match Exact_output.load_resolver_snapshot ~catalog () with
   | Ok snapshot -> snapshot
   | Error _ -> Alcotest.fail "AGENT_CORE control snapshot must load"
 ;;
 
-let load_control_snapshot catalog = load_snapshot ~getenv:(fun _ -> Ok None) catalog
+let load_control_snapshot catalog = load_snapshot catalog
 
 let require_admitted snapshot target_id =
   match Exact_output.admit_target_ref snapshot target_id with

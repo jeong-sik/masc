@@ -642,10 +642,9 @@ model_id = "verifier-model"
 ;;
 
 let load_verifier_snapshot () =
-  let io : Exact_output.resolver_io = { getenv = (fun _ -> Ok None) } in
+
   match
     Exact_output.load_resolver_snapshot
-      ~io
       ~target_binding_policy:Exact_output.Exclude_unbound_targets
       ~catalog:
         (Exact_output.Full_replacement

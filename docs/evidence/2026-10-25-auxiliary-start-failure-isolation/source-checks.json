@@ -13,7 +13,7 @@
     "lib/server/server_routes_http_runtime.mli": "c1b99b6c5a02ec601d6d48ef0996f58dc5a4438fc3ba19127623c49b7ef0de3e",
     "lib/server/server_routes_http_runtime.ml": "0d01999d002c867b3138d61fa80b7b896dd5b34209e30b5009ac06725a897c0e",
     "lib/server/server_health_rollup.ml": "33fbeabb64d34cb9c7fd23958ee40dad4cab23d191425cad660ec1659fdfb40d",
-    "test/test_server_auxiliary_startup.ml": "8915fea5fdb69ebbe6b781c7cef82c6a757fe87ebf78b878c39adbcfa170e0e0"
+    "test/test_server_auxiliary_startup.ml": "1304ad5f5941a7b96433df58a31eb03f871bc49eae74015d8b53bf485214cd55"
   },
   "requested_suites": [
     "test/test_server_auxiliary_startup",
@@ -27,5 +27,12 @@
     "conclusion": "success",
     "cases": 1,
     "scope": "held Session restoration plus Keeper lane boundary only; not this auxiliary startup change"
+  },
+  "prior_failed_run": {
+    "run": 40161241877,
+    "head": "115078e0d6d24b72fa596255ed6fdd27e3bf5171",
+    "result": "FAILURE",
+    "stage": "compile before selected execution",
+    "error": "test called private make_health_probe_json; use public make_health_response_json /health instead"
   }
 }

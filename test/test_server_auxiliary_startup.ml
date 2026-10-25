@@ -282,7 +282,7 @@ let test_public_health_projection_and_rollup () =
       match Server_request_authority.of_host_port ~host:"localhost" ~port:8935 with
       | Ok value -> value
       | Error `Malformed -> Alcotest.fail "fixture authority malformed" in
-    let probe = Server_routes_http_runtime.make_health_probe_json
+    let probe = Server_routes_http_runtime.make_health_response_json
       ~request_authority:authority (Httpun.Request.create `GET "/health") in
     Alcotest.(check bool) "real probe exposes the same attempt evidence" true
       (Yojson.Safe.equal observed (field "auxiliary_startup" probe));

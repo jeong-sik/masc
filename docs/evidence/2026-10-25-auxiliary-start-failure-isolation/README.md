@@ -68,3 +68,7 @@ their existing structured-concurrency scope, blocking callbacks still wait in
 sequence, and each gateway/listener owns actual readiness. This bounded repair
 does not certify full bootstrap injection, healthy model turns, installation or
 live fleet behavior. It adds no dependency graph, service timeout or numeric gate.
+
+## First selected execution and repair
+
+Run [40161241877](https://github.com/jeong-sik/masc/actions/runs/40161241877) checked out `115078e0d6d24b72fa596255ed6fdd27e3bf5171` and FAILED during compilation before selected cases executed. The new test referenced private `Server_routes_http_runtime.make_health_probe_json`, which is absent from its interface. The fixture now calls public `make_health_response_json` with `/health`, which selects the same actual probe builder. No production export or test-only wrapper was added. Earlier source COMMENT5641461022 missed this blocker and is superseded for test compilability. This is not a current-candidate execution success; the same three suites must run on the repaired head.

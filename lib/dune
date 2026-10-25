@@ -35,6 +35,7 @@
   keeper_fs_durable_directory
   keeper_runtime_trust_snapshot_core)
  (libraries
+  masc.artifact_document_engine
   masc.keeper_cost_coverage
   mcp_protocol
   mcp_protocol.eio

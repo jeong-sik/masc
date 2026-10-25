@@ -677,11 +677,11 @@ let batch_disposition_of_cycle_outcome
        ran with the admitted attention projected: a newer durable source
        arrived, the loop guard durably preserved the turn, a tool call was
        deferred to the Gate, or a chat operation took the slot. On the
-       agent-core lane the turn resumes from its checkpoint with that
-       attention already in its history; on an official-client lane the
-       vendor session carries it, and a session restart between the yield
-       and the resume (client, runtime, or tool-surface change) drops it,
-       which was already the case for the two reasons acked before #32602.
+       agent-core lane the checkpoint preserves canonical turn state, while
+       provider-specific dynamic context can remain request-only (in
+       particular on OpenAI-compatible requests). On an official-client lane
+       a session replacement can lose prior context. This delivery ACK is not
+       a guarantee that observation text survives in resumed model input.
        Retaining the batch replays the same attention into the
        continuation. For a HITL resolution the cost was a full turn per wake:
        the intake admits one resolution per turn and the resumed turn ended

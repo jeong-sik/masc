@@ -1,0 +1,21 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40187984732
+Head: 2d3ef156ed286b0843ff1c958fe0ddf84449fa91
+Full log SHA256: 9e3af648bd489c182d4ccdd126d55e238b2844edc5b1374d016f4d55b3e5e4fe
+Excerpt (trailing whitespace normalized):
+test suite	Checkout	2026-10-25T11:15:22.6165000Z   ref: 2d3ef156ed286b0843ff1c958fe0ddf84449fa91
+test suite	Checkout	2026-10-25T11:15:22.8620154Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 2d3ef156ed286b0843ff1c958fe0ddf84449fa91
+test suite	Checkout	2026-10-25T11:15:31.1593171Z  * branch              2d3ef156ed286b0843ff1c958fe0ddf84449fa91 -> FETCH_HEAD
+test suite	Checkout	2026-10-25T11:15:31.1603001Z [command]/usr/bin/git rev-parse --verify --quiet 2d3ef156ed286b0843ff1c958fe0ddf84449fa91^{object}
+test suite	Checkout	2026-10-25T11:15:31.1627724Z 2d3ef156ed286b0843ff1c958fe0ddf84449fa91
+test suite	Checkout	2026-10-25T11:15:31.1719632Z [command]/usr/bin/git checkout --progress --force 2d3ef156ed286b0843ff1c958fe0ddf84449fa91
+test suite	Checkout	2026-10-25T11:15:33.6675815Z Note: switching to '2d3ef156ed286b0843ff1c958fe0ddf84449fa91'.
+test suite	Checkout	2026-10-25T11:15:33.6682657Z HEAD is now at 2d3ef156 test(keeper): reopen checkpoint under its trace session directory
+test suite	Checkout	2026-10-25T11:15:33.6830174Z 2d3ef156ed286b0843ff1c958fe0ddf84449fa91
+test suite	Test	2026-10-25T11:20:53.3103966Z [2026-10-25 11:20:53] [INFO] [Keeper/informational-checkpoint-probe] checkpoint_save trace_id=trace-informational-checkpoint-probe stage=after_assistant_collected turn_count=1 start_s=1792927253.306288 end_s=1792927253.310145 duration_ms=3.857 canonical_bytes=92109 outcome=saved
+test suite	Test	2026-10-25T11:20:53.3382890Z [2026-10-25 11:20:53] [INFO] [Keeper/informational-checkpoint-probe] checkpoint_save trace_id=trace-informational-checkpoint-probe stage=after_tool_results_appended turn_count=1 start_s=1792927253.333475 end_s=1792927253.338004 duration_ms=4.528 canonical_bytes=94288 outcome=saved
+test suite	Test	2026-10-25T11:20:53.3413994Z [2026-10-25 11:20:53] [INFO] [Keeper/informational-checkpoint-probe] checkpoint_save trace_id=trace-informational-checkpoint-probe stage=after_context_injection turn_count=1 start_s=1792927253.338062 end_s=1792927253.341138 duration_ms=3.076 canonical_bytes=94542 outcome=saved
+test suite	Test	2026-10-25T11:20:53.3833831Z [2026-10-25 11:20:53] [INFO] [Keeper] informational-checkpoint-probe: keeper cycle checkpoint runtime_lane=runtime tokens=12 latency=137ms mode=tool_use stop=yielded_to_operation_queued(1)
+test suite	Test	2026-10-25T11:20:53.4176335Z model input or checkpoint omitted fusion-result-26165
+test suite	Test	2026-10-25T11:20:53.4179790Z Called from Dune__exe__Test_keeper_informational_checkpoint_ack.run.(fun) in file "test/test_keeper_informational_checkpoint_ack.ml", line 221, characters 2-38
+test suite	Test	2026-10-25T11:20:53.4258833Z [targeted] test/test_keeper_informational_checkpoint_ack: FAIL exit 1 in 0s
+test suite	Test	2026-10-25T11:20:53.6076948Z Test Successful in 0.002s. 16 tests run.

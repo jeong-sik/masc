@@ -86,15 +86,57 @@ let evidence config source =
   | Keeper_reaction_ledger.Evidence_quarantined _ -> failwith "reaction evidence quarantined"
 let check_sources_visible text =
   List.iter (fun marker -> require (Astring.String.is_infix ~affix:marker text)
-    ("model input or checkpoint omitted " ^ marker))
-    [ "fusion-result-26165"; "delegate-result-26165"; "composition-result-26165" ]
+    ("provider input omitted " ^ marker))
+    ([ "fusion-result-26165"; "delegate-result-26165"; "composition-result-26165" ]
+     @ List.map (fun (source : Q.stimulus) -> source.post_id) (informational_sources ()))
 let check_checkpoint config meta =
   let trace_id = Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id in
   let checkpoint = Keeper_checkpoint_store.load_agent_core
     ~session_dir:(Keeper_types_support.keeper_session_dir config trace_id)
     ~session_id:trace_id
     |> get Keeper_checkpoint_store.checkpoint_load_error_to_string in
-  check_sources_visible (Agent_core.Checkpoint.to_string checkpoint)
+  require (checkpoint.session_id=trace_id && checkpoint.turn_count=1)
+    "canonical checkpoint has the wrong session or turn";
+  let blocks = List.concat_map (fun (message : Agent_core.Types.message) -> message.content)
+      checkpoint.messages in
+  require (List.exists (function
+    | Agent_core.Types.ToolUse {id;name;_} ->
+      id="context-call-26165" && name="keeper_context_status"
+    | _ -> false) blocks) "canonical checkpoint lost its actual tool call";
+  require (List.exists (function
+    | Agent_core.Types.ToolResult {tool_use_id;_} -> tool_use_id="context-call-26165"
+    | _ -> false) blocks) "canonical checkpoint lost its actual tool result"
+let captured_request_path config = Filename.concat config.Workspace.base_path "observed-provider-request.json"
+let check_delivery_journal config meta =
+  (* The peer body is a fixture capture, never a replacement production ledger.
+     Compare it with the production journal's sealed serialization witness. *)
+  let body = Fs_compat.load_file (captured_request_path config) in
+  check_sources_visible body;
+  let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
+  let record = match Dated_jsonl.read_recent_result store 1 |> get Dated_jsonl.read_error_to_string with
+    | [Dated_jsonl.Parsed row] -> Turn_record.of_json row |> get Fun.id
+    | [] | _::_ -> failwith "one strict actual TurnRecord is required" in
+  require (record.trace_id=Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id)
+    "delivery record belongs to a different trace";
+  let observation = match record.request_observations with
+    | [observation] -> observation
+    | [] | _::_ -> failwith "expected one native request observation" in
+  let call_id, requests = match observation.Request_observation.evidence with
+    | Request_observation.Recorded {call_id;requests} -> call_id,requests
+    | Not_dispatched | No_durable_scope | No_matching_call | Read_failed _ ->
+      failwith "native request has no durable journal evidence" in
+  let journal = Keeper_request_execution.reopen ~base_path:config.base_path ~keeper_name ~call_id
+      |> get Fun.id in
+  let reopened = Keeper_request_execution.request_evidence journal in
+  require (Request_observation.to_json observation =
+    Request_observation.to_json {observation with evidence=reopened})
+    "native request journal disagrees with the persisted turn observation";
+  (match requests with
+   | [{Request_observation.provenance=Some (Llm_provider.Completion_outcome.Serialized request);_}] ->
+     require (request.body_bytes=String.length body &&
+       request.body_sha256=Digestif.SHA256.(digest_string body |> to_hex))
+       "durable native request witness differs from the actual peer body"
+   | [] | _::_ -> failwith "expected one serialized native HTTP request")
 let queue_chat config =
   let operation_id = Keeper_chat_operation.Operation_id.of_string "kmsg-checkpoint-person" |> get Fun.id in
   let thread_id = "keeper:" ^ keeper_name in
@@ -218,6 +260,8 @@ data: [DONE]
   let request = match Exact_output_fixture.request_bodies server with
     | [body] -> body | _ -> failwith "expected one captured provider request" in
   check_sources_visible request;
+  save (captured_request_path config) request;
+  check_delivery_journal config outcome.meta;
   check_checkpoint config outcome.meta;
   let pending = Keeper_event_queue.to_list (queue config keeper_name) in
   require (List.map (fun (s:Q.stimulus)->s.post_id) pending = [later_work.post_id])
@@ -225,13 +269,20 @@ data: [DONE]
   List.iter (fun source ->
     let observed=evidence config source in
     require (observed.event_queue_ack_seen && not observed.event_queue_cancelled_seen)
-      "completion has no durable ACK evidence") (informational_sources ());
+      "completion has no durable ACK evidence";
+    require (Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
+      ~not_before:0. ~base_path ~keeper_name ~post_id:source.post_id
+      ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
+      |> get Keeper_reaction_ledger.strict_delivery_evidence_error_to_string)
+      "exact source has no canonical durable delivery evidence") (informational_sources ());
   print_endline (Yojson.Safe.to_string (`Assoc ["phase",`String "actual-checkpoint"
     ;"provider_rounds",`Int 1;"informational_acks",`Int 3;"later_work_retained",`Bool true]))
 
 let reopen base_path =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Fs_compat.set_fs env#fs; Masc_test_deps.init_eio_clock ~sw env;
+  Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+    |> get Runtime_agent_execution_runtime.initialization_error_to_string;
   Masc_test_deps.ensure_rng_initialized ();
   Config_dir_resolver.reset ();
   let config=Workspace.default_config base_path in
@@ -243,13 +294,19 @@ let reopen base_path =
     {config;agent_name="informational-reader";sw;clock=env#clock;proc_mgr=None;net=None
     ;publication_recovery_provider=Masc_test_deps.non_runtime_publication_recovery_provider} in
   check_checkpoint config meta;
+  check_delivery_journal config meta;
   let intake=Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
     ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
   require (List.map (fun (s:Q.stimulus)->s.post_id)
     (Keeper_heartbeat_source_batch.stimuli intake.source_batch)=[later_work.post_id])
     "fresh process re-admitted delivered informational input or lost later work";
-  List.iter(fun source->require (evidence config source).event_queue_ack_seen
-    "fresh process lost ACK evidence") (informational_sources ());
+  List.iter(fun (source : Q.stimulus)->
+    require (evidence config source).event_queue_ack_seen "fresh process lost ACK evidence";
+    require (Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
+      ~not_before:0. ~base_path ~keeper_name ~post_id:source.post_id
+      ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
+      |> get Keeper_reaction_ledger.strict_delivery_evidence_error_to_string)
+      "fresh process lost exact source delivery evidence") (informational_sources ());
   print_endline (Yojson.Safe.to_string (`Assoc ["phase",`String "new-process-reopen"
     ;"pid",`Int (Unix.getpid ());"redelivered_completions",`Int 0;"later_work_admitted",`Bool true]))
 

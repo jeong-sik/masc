@@ -2,6 +2,7 @@
     A grant belongs to one admitted exported invocation. Its descriptor travels
     only in the private host context, never model arguments/results or storage. *)
 type error = Unavailable | Not_started | Outcome_unknown
+type shutdown_error = Listener_close_unconfirmed
 type selection = { browser_instance_id : string; tab_id : int }
 type completion = Released | Abandoned
 type binding = {
@@ -18,8 +19,7 @@ type binding = {
     It must never retire a replacement Browser. *)
 type t
 type grant
-val create : sw:Eio.Switch.t -> net:[> `Generic ] Eio.Net.ty Eio.Resource.t ->
-  directory:string -> max_message_bytes:int -> (t, error) result
+val create : sw:Eio.Switch.t -> directory:string -> max_message_bytes:int -> (t, error) result
 (** The caller supplies an existing canonical, owned 0700 directory outside
     retained Lane data and agent work disks. The owner switch joins connections;
     [revoke] ends admission and signals cancellation. [await_stopped] observes
@@ -36,6 +36,9 @@ val end_invocation : grant -> unit
 val cancel : grant -> unit
 (** Cancel an unused or claimed original invocation, including after dispatch. *)
 val revoke : t -> unit
-val await_stopped : t -> unit
+val await_stopped : t -> (unit, shutdown_error) result
 (** Joins this broker's listener/connections, not an external Browser's cleanup.
-    The caller owns the supplied directory and removes it only after this join. *)
+    [Ok ()] confirms the original listener descriptor was closed (or was never
+    created). Descriptor-close failure remains [Listener_close_unconfirmed].
+    Shutdown never unlinks the socket pathname or removes its directory: both
+    remain untouched because a later pathname may belong to a successor. *)

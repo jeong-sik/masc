@@ -425,8 +425,9 @@ max_reply_bytes=4194304
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
           | Ok image -> Some image | Error detail -> Alcotest.fail detail);
                 operator_schema=(fun () -> None);
+      companion_tools=(fun () -> []);
                 call_operator=(fun ~admit:_ ~arguments:_ -> Error Masc.Lane_addon_worker_protocol.Operator_unavailable);
-                host = None; resource=Masc.Lane_addon_lifecycle.Container_resource (Store.digest instance_id); exported_tools = (fun () -> []); call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools")); action_schema=(fun () -> None);
+                host = None; resource=Masc.Lane_addon_lifecycle.Container_resource (Store.digest instance_id); exported_tools = (fun () -> []); call_exported_tool = (fun ~companion:_ ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools")); action_schema=(fun () -> None);
         act=(fun ~arguments:_ -> Error "read-only fixture");
         observe=(fun ~binding:_ ~sources:_ -> Ok {Lane_addon_types.rows=[];coverage=[]});
         stop=(fun () -> Ok (Masc.Lane_addon_lifecycle.Released {engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine";container_id=Some (Store.digest instance_id)}))} in

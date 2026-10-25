@@ -64,10 +64,11 @@ type host_port = {
 type connection = {
   observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
   exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
-  call_exported_tool : on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
+  call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
     (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
   action_schema : unit -> Yojson.Safe.t option;
   operator_schema : unit -> Yojson.Safe.t option;
+  companion_tools : unit -> string list;
   call_operator : admit:(unit -> (unit, operator_error) result) -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result;
   act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
   stop : unit -> (Lifecycle.release, Lifecycle.failure) result;
@@ -102,9 +103,12 @@ type backend = {
     (Lane_addon_slot.sweep_item list, Lifecycle.failure) result;
   (* Removes the containers of this base path that no live incarnation owns. *)
 }
+type owned_companion = Lane_addon_companion_allocation.t
 type owned_connection =
   { export_owner : Lane_addon_tool_export.owner
   ; worker : connection
+  ; mutable companion:(owned_companion,Lane_addon_companion_allocation.creation_error) result Eio.Lazy.t option
+  ; mutable companion_active:Lane_addon_companion_broker.t option
   }
 type configuration_owner = { id : string; source_path : string; revision : string }
 type inventory_presence = Live | Retained
@@ -200,6 +204,10 @@ type entry = {
 }
 let retire_admission e =
   e.stopping <- true;
+  (* A broker allocation can still be starting. Its owner cleanup joins that
+     exact allocation; no replacement provider is inspected or adopted. *)
+  Option.iter (fun connection -> Option.iter Lane_addon_companion_broker.revoke
+    connection.companion_active) e.connection;
   Option.iter (fun cancel -> cancel Worker_detached) e.cancel_exact
 
 type configuration_reading = {
@@ -778,7 +786,21 @@ let log_cleanup_failure instance_id package_id resource failure =
 let stop_entry ~sw ~backend m e =
   if not e.cleanup_running then
     let cleanup = match e.connection, e.authority with
-      | Some c, _ -> Some (Some c.worker.resource, c.worker.stop)
+      | Some c, _ -> Some (Some c.worker.resource, fun () ->
+          let companion ()=match c.companion with
+            | None -> Ok ()
+            | Some allocation ->
+                (match Eio.Lazy.force allocation with
+                 | Error Lane_addon_companion_allocation.Unavailable -> Ok ()
+                 | Error Cleanup_unconfirmed -> Error "private companion startup cleanup unconfirmed"
+                 | Ok owned ->
+                     (match Lane_addon_companion_allocation.cleanup owned with
+                      | Ok (Paths_retained _) -> Ok ()
+                      | Error detail -> Error detail)) in
+          let private_result,worker_result=Eio.Fiber.pair companion c.worker.stop in
+          match private_result,worker_result with
+          | Ok (),result -> result
+          | Error _,(Ok _|Error _) -> Error (Lifecycle.Cleanup_unconfirmed "private companion cleanup unconfirmed"))
       | None, None when not e.running -> Some (None, fun () -> Ok Lifecycle.Never_created)
       | None, Some authority when not e.running -> Some (None, fun () ->
           let* state_owner = state_owner_for_entry m e
@@ -1306,7 +1328,7 @@ let run ~sw ~read_browser_document backend m e =
         let on_authority authority =
           e.authority <- Some authority;
           persist m e in
-        let created c = e.connection <- Some {export_owner;worker=c};
+        let created c = e.connection <- Some {export_owner;worker=c;companion=None;companion_active=None};
           e.resolved_image <- c.resolved_image;
           publish_resource Lane_addon_resource_events.Acquired e (Some c.resource) None;
           (match persist m e with Ok () -> () | Error message ->
@@ -1328,7 +1350,7 @@ let run ~sw ~read_browser_document backend m e =
               | Some _ -> stop_entry ~sw ~backend m e)
             else failed m e failure
         | Ok c ->
-            e.connection <- Some {export_owner;worker=c}; e.started <- true;
+            e.connection <- Some {export_owner;worker=c;companion=None;companion_active=None}; e.started <- true;
             notify_exports m e;
             (* Every stop this runtime asks for marks the entry stopping before
                the worker is told. A process that ends without that request
@@ -1707,9 +1729,10 @@ let backend ~store ~artifact_store () = match !override with
                 exported_tools=(fun () -> Lane_addon_native_worker.exported_tools worker);
                 action_schema=(fun () -> Lane_addon_native_worker.action_schema worker);
                 operator_schema=(fun () -> Lane_addon_native_worker.operator_schema worker);
+                companion_tools=(fun () -> Lane_addon_native_worker.companion_tools worker);
                 call_operator=(fun ~admit ~arguments -> Lane_addon_native_worker.call_operator worker ~admit ~arguments);
-                call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
-                  Lane_addon_native_worker.call_exported_tool ~on_result ?authorize ~principal ?finalize_result worker ~name ~arguments
+                call_exported_tool=(fun ~companion ~on_result ~authorize ~principal ~name ~arguments ->
+                  Lane_addon_native_worker.call_exported_tool ~on_result ?companion ?authorize ~principal ?finalize_result worker ~name ~arguments
                   |> Result.map_error (function
                     | Lane_addon_native_worker.Protocol (Lane_addon_worker_protocol.Host_refusal refusal) -> Lane_addon_call_context.Host_refusal refusal
                     | (Lane_addon_native_worker.Invalid_specification _ | Start_failed _ | Admission _
@@ -1769,9 +1792,10 @@ let backend ~store ~artifact_store () = match !override with
               deliver=(fun ~arguments -> Lane_addon_worker.host_result worker ~arguments |> Result.map_error Lane_addon_worker.error_to_string)});
             exported_tools=(fun () -> Lane_addon_worker.exported_tools worker);
             operator_schema=(fun () -> Lane_addon_worker.operator_schema worker);
+            companion_tools=(fun () -> Lane_addon_worker.companion_tools worker);
             call_operator=(fun ~admit ~arguments -> Lane_addon_worker.call_operator worker ~admit ~arguments);
-            call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
-              Lane_addon_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
+            call_exported_tool=(fun ~companion ~on_result ~authorize ~principal ~name ~arguments ->
+              Lane_addon_worker.call_exported_tool ~on_result ?companion ?authorize ~principal worker ~name ~arguments
               |> Result.map_error (function
                 | Lane_addon_worker.Host_refusal refusal -> Lane_addon_call_context.Host_refusal refusal
                 | (Lane_addon_worker.Stopped | Invalid_package _ | Docker_failed _ | Engine_failed _ | Engine_fault _ | Lifecycle _ | Protocol_failed _ | Invalid_observation _) as error ->
@@ -2253,6 +2277,147 @@ let capture_tool_request_owner ~config ~access ~reserved ~export ~scope ~request
           Host_refusal (Lane_addon_call_context.Rejected (Lane_addon_tool_request_owner.error_to_string error))) in
     Ok value)
 
+let companion_principal_reads principal visibility = match principal,visibility with
+  | Lane_addon_call_context.Operator,_ -> true
+  | Keeper _,Shared | Authenticated_agent _,Shared | Host_actor _,Shared -> true
+  | Keeper name,Keeper_only owner -> name=owner
+  | (Keeper _),(Operator_only) | (Authenticated_agent _|Host_actor _),(Operator_only|Keeper_only _)
+  | Anonymous,_ -> false
+
+let confirm_companion_owners m ~access ~principal owners =
+  let still_original ((e:entry),original,configuration) =
+    match Hashtbl.find_opt m.entries e.instance_id with
+    | Some current when current==e && current.configuration=configuration
+        && can_read access current.visibility && companion_principal_reads principal current.visibility ->
+        (match readiness current with
+         | Ready connection -> Lane_addon_tool_export.equal_owner original.export_owner connection.export_owner
+         | Unready _|Gone -> false)
+    | Some _|None -> false in
+  let* ()=if List.for_all still_original owners then Ok () else Error () in
+  let configured=List.filter_map (fun (e,_,configuration) ->
+    Option.map (fun owner -> e,owner) configuration) owners in
+  let* ()=match configured with
+    | [] -> Ok ()
+    | _::_ ->
+      let* reading=Option.to_result ~none:() m.configuration_status in
+      (* One fresh read authorizes every participating owner. A later read of
+         only the provider must not conceal a Browser denial in that snapshot. *)
+      let snapshot=offload (fun () -> Lane_addon_config.load ~directory:reading.directory) in
+      let directory_unchanged=match m.configuration_status with
+        | Some current -> current.directory=reading.directory | None -> false in
+      if directory_unchanged && snapshot.complete
+        && List.for_all (fun ((e:entry),(owner:configuration_owner)) ->
+          List.exists (fun (d:Lane_addon_config.declaration) ->
+            d.id=owner.id && d.source_path=owner.source_path && d.revision=owner.revision
+            && d.enabled && same_execution_package d.package e.package) snapshot.declarations) configured
+      then Ok () else Error () in
+  if List.for_all still_original owners then Ok () else Error ()
+
+let confirm_companion_owner m ~access ~principal e original configuration =
+  confirm_companion_owners m ~access ~principal [e,original,configuration]
+
+let private_companion_binding ~sw m ~access ~principal provider original provider_configuration allocation selection =
+  let module C=Lane_addon_companion_broker in
+  let module P=Browser_extension_protocol in
+  let* browser,browser_owner=match List.find_opt (fun ((e:entry),_) ->
+      e.instance_id=selection.C.browser_instance_id) (live_reading m access).ready with
+    | Some pair -> Ok pair | None -> Error C.Not_started in
+  let* client=Option.to_result ~none:C.Not_started browser_owner.worker.browser in
+  let browser_configuration=browser.configuration in
+  let original_browser ()=match Hashtbl.find_opt m.entries browser.instance_id,browser.connection with
+    | Some current,Some connection when current==browser
+        && Lane_addon_tool_export.equal_owner connection.export_owner browser_owner.export_owner ->
+        (match connection.worker.browser with Some original when original==client -> true | Some _|None -> false)
+    | (Some _|None),(Some _|None) -> false in
+  let admit () =
+    let result =
+      let* ()=confirm_companion_owners m ~access ~principal
+        [provider,original,provider_configuration;browser,browser_owner,browser_configuration] in
+      if original_browser () then Ok () else Error () in
+    Result.is_ok result in
+  let* ()=if admit () then Ok () else Error C.Not_started in
+  let retire_browser () =
+    Browser_addon_client.revoke client;
+    if original_browser () then (
+      retire_admission browser;
+      browser.state<-fail_state browser (Lifecycle.Effect_outcome_unknown "private browser operation outcome unknown");
+      notify_exports m browser;
+      ignore (persist m browser);
+      if original_browser () then
+        stop_entry ~sw ~backend:(backend ~store:m.store ~artifact_store:m.artifact_store ()) m browser) in
+  let operation=ref None in
+  let execute command =
+    let* ()=if (match command with P.Release _ -> original_browser () | P.Prepare _|Invoke _ -> admit ())
+      then Ok () else Error P.Not_started in
+    let previously_unbound=Option.is_none !operation in
+    operation:=Some (match command with P.Prepare {operation_id;_}|Invoke {operation_id;_}|Release operation_id -> operation_id);
+    let authorized ()=match command with P.Release _ -> original_browser () | P.Prepare _|Invoke _ -> admit () in
+    let result=match Browser_addon_client.call_companion client ~admit:authorized ~on_cancel_after_dispatch:retire_browser command with
+    | Ok (Browser_addon_wire.Extension_reply value) -> Ok value
+    | Ok (Service_refusal {disposition=Not_started;_}) -> Error P.Not_started
+    | Error (Browser_addon_client.Unavailable _) -> Error P.Not_started
+    | Ok (Service_refusal {disposition=Outcome_unknown;_}|Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _)
+    | Error (Browser_addon_client.Outcome_unknown _) ->
+        Eio.Cancel.protect retire_browser;Error P.Outcome_unknown in
+    (* A first proven pre-effect refusal owns no extension binding. A later
+       Invoke refusal cannot discard a previously prepared binding. *)
+    if previously_unbound && result=Error P.Not_started then operation:=None;
+    result in
+  let* finish=Lane_addon_companion_allocation.on_finish allocation (function
+    | C.Released -> Ok ()
+    | Abandoned ->
+      (match !operation with
+       | None -> Ok ()
+       | Some operation_id when original_browser () && not browser.stopping ->
+           (* Only settle this original memory binding after provider access
+              ends; this cannot load an extension or send page/credential input. *)
+           (match execute (P.Release operation_id) with
+            | Ok (`Assoc [("released",`Bool true)]) -> Ok ()
+            | Ok _|Error (P.Not_started|Outcome_unknown) -> Error "private browser settlement unconfirmed")
+       | Some _ -> Error "private browser settlement unconfirmed")) |> Result.map_error (fun _ -> C.Not_started) in
+  Ok {C.execute;finish}
+
+let invoke_companion_export ~sw m ~access ~principal e original invoke =
+  let module C=Lane_addon_companion_broker in
+  let unavailable ()=Error (Lane_addon_call_context.Host_refusal (Unavailable "private companion is unavailable")) in
+  let configuration=e.configuration in
+  match e.package.execution,e.package.worker_service with
+  | Container _,(Mcp_tools|Browser_service) | Host_process _,Browser_service -> unavailable ()
+  | Host_process _,Mcp_tools ->
+    (match confirm_companion_owner m ~access ~principal e original configuration,Eio_context.get_net_opt () with
+     | Error (),_ | Ok _,None -> unavailable ()
+     | Ok _,Some _ ->
+       let allocation=match original.companion with
+         | Some allocation -> allocation
+         | None ->
+           let allocation=Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
+             let* owned=Lane_addon_companion_allocation.create ~sw
+               ~max_message_bytes:(Lane_addon_types.max_reply_bytes e.package) in
+             let broker=Lane_addon_companion_allocation.broker owned in
+             original.companion_active<-Some broker;
+             if e.stopping then C.revoke broker;
+             Ok owned) in
+           original.companion<-Some allocation;allocation in
+       match Eio.Lazy.force allocation with
+       | Error _ -> unavailable ()
+       | Ok allocation ->
+         let bind=private_companion_binding ~sw m ~access ~principal e original configuration allocation in
+         match C.issue (Lane_addon_companion_allocation.broker allocation) ~bind with
+         | Error _ -> unavailable ()
+         | Ok grant ->
+           Fun.protect ~finally:(fun () -> C.end_invocation grant) (fun () ->
+             match Lane_addon_call_context.companion_of_json (C.descriptor grant) with
+             | Error _ -> C.cancel grant;unavailable ()
+             | Ok context ->
+               let companion={Lane_addon_worker_protocol.context;
+                 admit=(fun () -> Result.is_ok (confirm_companion_owner m ~access ~principal e original configuration))} in
+               try let result=invoke companion in
+                 (match result with Ok result when result.Mcp_protocol.Mcp_types.is_error<>Some true -> ()
+                  | Ok _|Error _ -> C.cancel grant);result
+               with
+               | Eio.Cancel.Cancelled _ as exn -> C.cancel grant;raise exn
+               | _ -> C.cancel grant;Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown")))
+
 let call_exported_tool_on_owner ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
     Fun.protect ~finally:on_complete (fun () ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -2264,9 +2429,9 @@ let call_exported_tool_on_owner ~on_complete ~on_result ~authorize ~principal ~c
     let* () = if List.exists (fun (current : tool_export) ->
         Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool = export.tool) exports then Ok ()
       else Error (ended_export ~ended:installation_ended reading export) in
-    let* e, connection = match Hashtbl.find_opt m.entries export.instance_id with
+    let* e, original = match Hashtbl.find_opt m.entries export.instance_id with
       | Some ({connection=Some connection; _} as e)
-        when Lane_addon_tool_export.equal_owner connection.export_owner export.owner -> Ok (e, connection.worker)
+        when Lane_addon_tool_export.equal_owner connection.export_owner export.owner -> Ok (e, connection)
       | _ -> Error (Unavailable "Add-on tool connection is unavailable") in
     let* sw = match Eio_context.get_root_switch_opt () with
       | Some sw -> Ok sw | None -> Error (Unavailable "Add-on background owner is unavailable") in
@@ -2280,7 +2445,12 @@ let call_exported_tool_on_owner ~on_complete ~on_result ~authorize ~principal ~c
           | Lane_addon_sources.Keeper name -> Lane_addon_call_context.Keeper name
           | Lane_addon_sources.Operator_configuration -> Lane_addon_call_context.Operator
           | Lane_addon_sources.Unauthenticated -> Lane_addon_call_context.Anonymous in
-      let result = connection.call_exported_tool ~on_result ~authorize ~principal ~name:export.tool.name ~arguments in
+      let connection=original.worker in
+      let result = if List.mem export.tool.name (connection.companion_tools ()) then
+          invoke_companion_export ~sw m ~access ~principal e original
+            (fun companion -> connection.call_exported_tool ~companion:(Some companion)
+              ~on_result ~authorize ~principal ~name:export.tool.name ~arguments)
+        else connection.call_exported_tool ~companion:None ~on_result ~authorize ~principal ~name:export.tool.name ~arguments in
       (* Worker-owned state is not an input source, so source-change hints alone
          cannot reveal a tool's effect. Refresh its observation after a completed
          reply, including a worker error that may have changed machine state.
@@ -4410,10 +4580,11 @@ module For_testing = struct
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
     exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
-    call_exported_tool : on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
+    call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
       (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
     operator_schema : unit -> Yojson.Safe.t option;
+    companion_tools : unit -> string list;
     call_operator : admit:(unit -> (unit, operator_error) result) -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (Lifecycle.release, Lifecycle.failure) result;

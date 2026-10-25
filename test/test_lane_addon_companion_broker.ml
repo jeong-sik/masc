@@ -12,7 +12,7 @@ let with_broker run =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree directory) (fun () ->
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10. (fun () ->
-        let broker=B.create ~sw ~net:(Eio.Stdenv.net env) ~directory ~max_message_bytes:16384 |> ok in
+        let broker=B.create ~sw ~directory ~max_message_bytes:16384 |> ok in
         Eio.Switch.on_release sw (fun () -> B.revoke broker);
         run env sw broker))))
 let connect env sw grant =
@@ -136,7 +136,8 @@ let revoke_signal_and_join_are_distinct () = with_broker (fun env sw broker ->
     check bool "revoke signal is not a cleanup receipt" false (Eio.Promise.is_resolved stopped);
     check bool "revocation refuses new grants" true
       (B.issue broker ~bind:(fun _ -> Error B.Not_started)=Error B.Unavailable);
-    Eio.Promise.resolve allow_cleanup ();Eio.Promise.await_exn stopped;
+    Eio.Promise.resolve allow_cleanup ();
+    check bool "listener descriptor close is confirmed" true (Eio.Promise.await_exn stopped = Ok ());
     check bool "joined revocation finished the original binding once" true (!completions=[B.Abandoned])))
 let cancelled_invocation_joins_bind () = with_broker (fun env sw broker ->
   let entered,enter=Eio.Promise.create () and cancelled,cancelled_resolver=Eio.Promise.create () in

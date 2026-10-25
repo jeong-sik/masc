@@ -139,6 +139,7 @@
   (re_export masc.ide_memo)
   (re_export masc.masc_backend)
   (re_export masc.masc_compression)
+  (re_export masc.masc_random_id)
   (re_export masc.mcp_session)
   (re_export masc.mcp_transport_protocol)
   (re_export masc.tool_input_contract)

@@ -288,8 +288,8 @@ module type S = sig
     }
   (** Committed attempt admission and result facts from the whole journal, in
       source sequence order, matching [read_page]. [run] selects one exact
-      Agent run in that journal; omission includes all top-level and nested
-      runs. The locator must identify a top-level run, not a child run.
+      Agent run in that journal; omission includes its one top-level run and
+      all nested runs. The locator must identify the top-level run.
       Empty filtered pages still advance their source cursor. A receiver may
       persist [through] only after accepting that observation; delivery is at
       least once, and queue admission is not subscriber acknowledgement. *)

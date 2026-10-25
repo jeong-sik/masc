@@ -57,6 +57,8 @@ claim follows.
 [source-review.json](source-review.json) and
 [source-response.json](source-response.json) assess the exact prompt and declared
 control inputs. They do not independently establish the model outcomes.
+The separate [cohort review](cohort-review.json) and
+[response](cohort-response.json) audit the actual execution and its limits.
 
 The prior operational omission is retained in
 [primary-omission-review.json](primary-omission-review.json) and

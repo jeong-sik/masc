@@ -58,8 +58,9 @@ when overwriting an already retained read-only executable, so the real Chromium
 probe was skipped and the overall run failed. These results do not cover the
 new invocation-acceptance and detected-owner-loss changes above that source.
 
-The retained server and 1Password package from that same source were run in a
-separate temporary workspace. The executable's embedded commit and effective
+The retained server and 1Password package from source
+`6e6491e9cec86347b6664d26821cba95eda080f7` were run in a separate temporary
+workspace. The executable's embedded commit and effective
 runtime roots were checked. The declaration API attached its native worker,
 and an initialized MCP client discovered all seven exports. An actual Keeper
 model turn invoked `onepassword_status` once and returned `not_configured`,

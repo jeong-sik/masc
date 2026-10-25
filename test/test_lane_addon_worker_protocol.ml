@@ -565,15 +565,20 @@ let actual_onepassword_package () = Eio_main.run (fun env ->
      && Sys.file_exists (Filename.concat package.directory executable));
   check bool "actual manifest executable passes production discovery" true
     (Native_addon_program.command_ready ~package_directory:package.directory executable);
+  (* Process admission resolves the executable before applying the child cwd. *)
+  let command=Filename.concat package.directory executable in
   let maximum=Lane_addon_types.max_reply_bytes package in
   let contract=Protocol.contract ~host_requests:false ~action_tool:package.action_tool
       ~tool_invocation:package.tool_invocation ~exported_tools:package.exported_tools
       ~tool_hooks:package.tool_hooks ~max_reply_bytes:maximum |> require in
   let protocol=Protocol.create ~instance_id:"actual-onepassword-package" ~contract () in
-  let client=Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
-      ~command:executable ~args:arguments
+  let client=match Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
+      ~command ~args:arguments
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / package.directory)
-      ~max_response_bytes:maximum () |> require in
+      ~max_response_bytes:maximum () with
+    | Ok client -> client
+    | Error error -> Alcotest.failf "actual package process start failed: %s"
+        (Agent_core.Error.to_string error) in
   Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Protocol.close protocol)) (fun () ->
     require (Protocol.initialize protocol client);
     check (list string) "actual package schemas publish all declared exports"

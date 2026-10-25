@@ -65,6 +65,7 @@ val is_resume : store -> bool
 
 val with_scope
   :  ?on_terminal_disposition:(terminal_disposition -> (unit, string) result)
+  -> event_bus:Event_bus.t option
   -> Execution_agent_scope.t
   -> (unit -> ('a, Provider_failure_attribution.detailed_error) result)
   -> ('a, Provider_failure_attribution.detailed_error) result

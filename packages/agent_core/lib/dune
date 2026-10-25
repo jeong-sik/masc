@@ -9,6 +9,8 @@
   execution_cause
   execution_provider_response_snapshot
   execution_tool_schedule
+  execution_tool_observation
+  agent_tool_observer
   execution_event
   execution_runtime
   execution_codec_executor

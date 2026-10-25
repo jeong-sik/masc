@@ -329,6 +329,8 @@ type page = private
   ; next_cursor : cursor
   ; high_watermark : cursor
   ; has_more : bool
+  ; snapshot : snapshot
+    (** The exact immutable reducer captured for this page. *)
   }
 
 (** Read a bounded immutable projection page. Omitting [through] captures the
@@ -343,6 +345,7 @@ val read_page
   -> unit
   -> (page, error) result
 
+val snapshot_find_node : snapshot -> Execution_event.Node_id.t -> node_view option
 val snapshot : t -> snapshot
 val find_node : t -> Execution_event.Node_id.t -> node_view option
 val find_run : t -> Execution_event.Run_id.t -> run_view option

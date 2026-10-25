@@ -275,4 +275,23 @@ module type S = sig
     -> limit:int
     -> unit
     -> (page, error) result
+  type tool_observation =
+    { event : Event_bus.event
+    ; through : cursor
+    }
+  type tool_observation_page = private
+    { observations : tool_observation list
+    ; next_cursor : cursor
+    ; high_watermark : cursor
+    ; has_more : bool
+    }
+  (** Committed attempt admission and result facts, in source sequence order.
+      [run] selects one exact Agent run; omission includes recursive children.
+      Empty filtered pages still advance their source cursor. A receiver may
+      persist [through] only after accepting that observation; delivery is at
+      least once, and queue admission is not subscriber acknowledgement. *)
+  val read_tool_observations :
+    t -> ?run:Run_id.t -> after:cursor -> ?through:cursor -> limit:int -> unit ->
+    (tool_observation_page, error) result
+
 end

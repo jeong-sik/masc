@@ -107,6 +107,7 @@ type page = private
   ; next_cursor : Execution_journal.cursor
   ; high_watermark : Execution_journal.cursor
   ; has_more : bool
+  ; snapshot : Execution_journal.snapshot
   }
 
 (** Run a fresh durability scope inside an AGENT_CORE-owned supervisor. The callback

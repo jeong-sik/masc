@@ -33,3 +33,12 @@ let take_resume_once () =
     pending := false;
     value
 ;;
+
+type tool_observer =
+  { register:run_id:Execution_event.Run_id.t -> event_bus:Event_bus.t option -> unit
+  ; flush:unit -> unit
+  }
+let tool_observer_key : tool_observer Eio.Fiber.key = Eio.Fiber.create_key ()
+let with_tool_observer observer run = Eio.Fiber.with_binding tool_observer_key observer run
+let tool_observer () = Eio.Fiber.get tool_observer_key
+let flush_tool_observations () = match tool_observer () with None -> () | Some observer -> observer.flush ()

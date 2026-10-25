@@ -1,0 +1,52 @@
+{
+  "schema": "masc.restored3067.preparation-response.v1",
+  "status": "FINAL_FROZEN",
+  "at_utc": "2026-10-25T21:01:33.655774+00:00",
+  "verdict": "AGREE_SCOPED_TRUSTED_PRESTART_FIXTURE_AND_SINGLE_REQUEST_PASS",
+  "review": {
+    "bytes": 10501,
+    "sha256": "1a5457cff8b91d72f9a02578d5bbe1e05184bbd1c217e2b837e15420b032a069",
+    "read_in_full": true
+  },
+  "selected_source_bindings": {
+    "driver_sha256": "8f54417bd13723b7412efb353215e36fbedc0a316dabf9f95969dd7e2a6c3c3c",
+    "cloned_canary_sha256": "a4b0cc9a88f3a7f303b620270dc29af45e4f4c8f0d20a04b68221ef128010b6d",
+    "snapshot_helper_sha256": "043d562314f7d878fcbfe32f4604237b3c5d58cb0d59c0ded0b641fb3b0404e4",
+    "nine_source_copy_manifest_sha256": "7bede601c03156c7d05a36370684f4de82b662463b279af43b8ef8a60e306f0e",
+    "nine_copies_match_original_bytes_hashes": true
+  },
+  "checks": [
+    "Read full driver/snapshot helper, cloned-canary delta and affected owned/write/launch/Client routes. Driver binds a.h/p.h to the new clone and privateROOT; isolated submission uses its base/client config. Preparation-only primary Client performs initialize and Goal-list reads, not writes.",
+    "Three bootstrap files match manifest bytes/SHA and selected canonical-row digests. Saved before/after normal API projections are equal; both decoded Goal-list replies match them. Goal3067, measurementada746 and exactlyIdle/no submitted_evidence survive unchanged.",
+    "Documents are new version1 single-record fixture wrappers, with empty Goal outboxes. They are not whole-primary-store bytecopies, old proof-job copies, a production restore or an atomic whole-workspace snapshot. Whole source-store hashes are metadata only.",
+    "Installer allowlists exactly three filenames, verifies bytes/SHA, requires absent saved server/proxy records and writes exclusively through owned/O_NOFOLLOW paths. It follows config-only init and precedes either Popen; goals.last-good is copied only inside the new base. Current process presence is not tested or contradicted by this prestart guard.",
+    "Selected submit path checks private health and exact normal API readback: title/metric/target,3067,Executing, full existing measurement andIdle. It has only Goal-list then one transition(request_complete), no upsert/measure/retry loop or forced verdict; exclusive receipts prevent whole-submit replay.",
+    "Same76 manifest and exact9182B0dc candidate selection agree. First reviewer supplied all76 copy checks; this response does not repeat that body audit or prior raw cohorts. Nine preserved source copies also cover the preparation-only primary client omitted from the eight-entry launch-input list; copies alone do not prove later executed source."
+  ],
+  "bootstrap_binding": {
+    "manifest_bytes": 2133,
+    "manifest_sha256": "a0259baa863d1e3f0982c9b30354a629544be3dea388d513018c634f13838944",
+    "before_after_bytes": 3594,
+    "before_after_sha256": "0b625ef27c4c1adca1e9078f63bd9182502a096caca68d1e10ab104411494437",
+    "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "measurement_id": "ada74682d5887de03fae493a8690a4c2",
+    "verification": "Idle",
+    "normal_saved_primary_reads_checked": 2
+  },
+  "execution_boundary": "Source4edc/0dc is separate from frozen3e executable and75c managed baseline. This trusted selected-record prestart fixture addresses the freshB39 construction confound without changing criterion, target, acceptance or authoritative primary records. Actual server acceptance and removal of the confound from model input still require later normal API/Original/provider evidence.",
+  "limits": "Static preparation PASS only. No actual runtime success or process absence is inferred now, and plan prepared_unexecuted is a historical snapshot. Old159 insufficient APPROVE and154 qualified identityREJECT remain unchanged. No new eleven-behavior execution, A3/A7 repair, primary3067 proof/update/completion, human confirmation, native4edc run, install, causalA/B, reliability, formal approval, stack admission or merge.",
+  "findings": {
+    "new_P0": [],
+    "new_P1": [],
+    "new_P2": []
+  },
+  "effects": {
+    "API_Git_build_model_test_CI_runtime_process_control_calls": 0,
+    "imports_or_target_function_execution": 0,
+    "source_Task_Goal_store_PR_runtime_existing_artifact_mutations": 0,
+    "new_agents": 0,
+    "external_messages": 0,
+    "only_new_output": "response.json"
+  },
+  "read_inputs_stable_at_freeze": true
+}

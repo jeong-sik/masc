@@ -1,0 +1,324 @@
+{
+  "schema": "masc.goal.originals.428e-replay.protocol-response.v1",
+  "assessment": "CONCUR_PROTOCOL_INTEGRITY_ONLY_SEMANTIC_SUFFICIENCY_NOT_APPROVED",
+  "summary": "The named protocol-only PASS and its stated limits are coherent. The selective comparisons below found no new protocol mismatch. This response confirms selected evidence transport and persistence joins, not correctness of the model APPROVE, satisfaction of the eleven behaviors, primary Goal proof or completion.",
+  "review_target": {
+    "label": "protocol-review/review.json",
+    "bytes": 51180,
+    "sha256": "c1fa4dd3239ce6022579e1eea683e60cc3b4102e421dac10adecabcb07093603",
+    "verdict": "PASS_PROTOCOL_INTEGRITY_ONLY_SEMANTIC_SUFFICIENCY_UNASSESSED"
+  },
+  "authority": "The constitution and contributor workflow were read during the immediately preceding preparation response in this same session. This is the bounded review response required by execution_protocol/review; it is not a formal GitHub approval.",
+  "label_convention": "safe-results/... and terminal-originals-private/... are relative to the replay evidence root. protocol-review/review.json labels the named separate reviewer artifact. No absolute host paths or raw payloads are reproduced.",
+  "direct_scope": {
+    "safe_artifacts": [
+      {
+        "label": "safe-results/result.json",
+        "bytes": 12167,
+        "sha256": "e2c86a51ba9bded8d2850083c7ca25327d0179890dcccce10a7a2117a25c75ac"
+      },
+      {
+        "label": "safe-results/actual-tool-sequence.json",
+        "bytes": 49190,
+        "sha256": "35acd3ff1860bc0532fdb8b1e0c61ccbb94f1080d4024b89e4b51dc33894e74b"
+      },
+      {
+        "label": "safe-results/persisted-outcome.json",
+        "bytes": 7297,
+        "sha256": "3e720125c04bfe60d017bae9ba492ed0abb92596dde90e3d4f723fffd76470a3"
+      },
+      {
+        "label": "safe-results/owned-stop.json",
+        "bytes": 1254,
+        "sha256": "124b6721be4a97d59a12871a2e51903fb09722863a9266bd4e4c1fcfb1fe1f5f"
+      },
+      {
+        "label": "safe-results/read-coverage-clarification.json",
+        "bytes": 3130,
+        "sha256": "b599c123d21ebe2662c9aee982cb35c995c834aa1dade7adddf99feb6edb8bdd"
+      }
+    ],
+    "frozen_manifest": {
+      "label": "terminal-originals-private/manifest.json",
+      "bytes": 33019,
+      "sha256": "aabafc30054b561115afb01984a76e7b75b26aa24c4c91ee2d82a09e8dd92b70",
+      "listed_leaves": 159,
+      "all159_leaves_reverified": false
+    },
+    "selective_original_comparison": "Verified 25 selected frozen leaf byte counts and SHA256 values against the existing manifest. Compared five selected actual read calls and their next-request results with safe protocol entries, review rows and exact source line slices. Compared the actual structured verdict with its next-request ACK, native events and three frozen stores. Compared first and last provider user/system inputs with the retained original. Compared saved stop and spawn identity records. No full re-audit of the 159 leaves, 14 provider exchanges, all 45 call/result identifiers or 44 returned pages was performed.",
+    "selected_frozen_leaf_count": 25,
+    "all_selected_frozen_hashes_match_manifest": true,
+    "selected_frozen_labels": [
+      "terminal-originals-private/inputs/codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification.log",
+      "terminal-originals-private/inputs/codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_anti_rationalization_empty_reject.log",
+      "terminal-originals-private/inputs/codex-mcp-client/goal-outcomes-delivery-20261026-v1/projections/G1-provider-goal-context.txt",
+      "terminal-originals-private/inputs/codex-mcp-client/goal-outcomes-delivery-20261026-v1/projections/G1-provider-input.json",
+      "terminal-originals-private/inputs/codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-playground-bootstrap/coding-boundary/actual-coding-boundary.json",
+      "terminal-originals-private/setup/proxy-process-private.json",
+      "terminal-originals-private/setup/server-process-private.json",
+      "terminal-originals-private/setup/spawn-identity-observed.json",
+      "terminal-originals-private/setup/stop-receipt.json",
+      "terminal-originals-private/snapshot/goal-verification-runs.jsonl",
+      "terminal-originals-private/snapshot/goal_measurements.json",
+      "terminal-originals-private/snapshot/goal_verifications.json",
+      "terminal-originals-private/snapshot/goals.json",
+      "terminal-originals-private/snapshot/lane-addons/tool-request-bodies/8d2bf3956456aeca16b8e71cd82e0cb7fcb8b58f9ec3dcf6a9470e26dab7f13b/dedcdb9d675c0b3b297101e70b7e9d17c8edd2c560e1c85cdf2e53624ff08ca6.json",
+      "terminal-originals-private/wire/request-000002.request",
+      "terminal-originals-private/wire/request-000008.response",
+      "terminal-originals-private/wire/request-000009.request",
+      "terminal-originals-private/wire/request-000009.response",
+      "terminal-originals-private/wire/request-000010.request",
+      "terminal-originals-private/wire/request-000010.response",
+      "terminal-originals-private/wire/request-000011.request",
+      "terminal-originals-private/wire/request-000012.response",
+      "terminal-originals-private/wire/request-000013.request",
+      "terminal-originals-private/wire/request-000014.response",
+      "terminal-originals-private/wire/request-000015.request"
+    ],
+    "aggregate_count_basis": "The aggregate counters below were checked in the safe protocol projection and named review. They are not a fresh exhaustive wire audit.",
+    "projection_counts": {
+      "steps": 45,
+      "model_call_rows": 14,
+      "read_steps": 44,
+      "ok_reads": 44,
+      "nonempty_reads": 42,
+      "empty_EOF_reads": 2
+    },
+    "sampled_provider_input_checks": [
+      {
+        "wire_id": "request-000002",
+        "user_equals_retained_original": true,
+        "system_equals_retained_original": true
+      },
+      {
+        "wire_id": "request-000015",
+        "user_equals_retained_original": true,
+        "system_equals_retained_original": true
+      }
+    ]
+  },
+  "responses": [
+    {
+      "topic": "Frozen originals and actual call counts",
+      "disposition": "CONCUR_WITH_SCOPE",
+      "response": "The manifest identity and safe result/protocol identities agree with the named review. The projection contains 14 model-call rows and 45 tool steps, consisting of 44 reads and one verdict. The review's exhaustive 159-leaf, 14-exchange and call/result-history checks remain that reviewer's work; the present response supplies only the stated selective corroboration. Fourteen tool-loop POSTs belong to the reported single Goal run and do not form fourteen independent samples."
+    },
+    {
+      "topic": "44 ok reads versus returned content",
+      "disposition": "CONCUR_WITH_EXPLICIT_LIMIT",
+      "response": "44 ok read responses include two empty EOF results, leaving 42 nonempty responses. Neither 44 nor 42 means complete originals. Both EOF cases were directly checked: A3 offset1193 and A6 offset3389 returned zero lines and zero bytes while ok remained true. The named review and safe clarification record later offset1 reads; those later page bytes were not separately re-audited here."
+    },
+    {
+      "topic": "A1 supplemental source",
+      "disposition": "CONCUR_WITH_PARTIAL_READ_LIMIT",
+      "response": "The selected actual A1 result contains exactly 19969 of 29007 source bytes, covering 537 lines at offset1 with truncated=true. Its result hash, content hash and exact source line slice match the safe protocol and review. The remaining bytes receive no reading credit. A partial page does not itself decide semantic sufficiency."
+    },
+    {
+      "topic": "G1 projection versus earlier raw request provenance",
+      "disposition": "CONCUR_WITH_PROJECTION_LIMIT",
+      "response": "The selected G1 metadata page is 825 bytes and the separate goal-context page is 1079 bytes. Both returned pages match their frozen source slices and recorded hashes. The cited 73127-byte raw-request provenance is a different object; it is not the delivered size of either projection and does not establish that the full raw request was read in this replay. No full raw G1 request was inspected in this response."
+    },
+    {
+      "topic": "Structured verdict, ACK, native events and stores",
+      "disposition": "CONCUR_WITH_PERSISTENCE_ONLY_SCOPE",
+      "response": "The actual response14 structured verdict arguments equal the safe protocol and safe result. Its result in request15 is 3134 bytes with the recorded ACK hash and contains the same reason. The native register/reviewed/committed records share the result run identity; registration joins the same request, Goal and fixture revision. Reviewed and committed are typed approved decisions, each recording45 tools, with the same reason. Safe persisted outcome equals the three selected frozen store records and ends at proof_proven/awaiting_confirmation. This establishes acceptance and storage of the isolated verdict, without establishing that the verdict is substantively correct."
+    },
+    {
+      "topic": "Owned cleanup chronology and command identity",
+      "disposition": "CONCUR_WITH_SAVED_RECEIPT_LIMIT",
+      "response": "The safe owned-stop projection is byte equal to the frozen stop receipt. It records one server SIGTERM, then an immediate full-command ps assertion failure before proxy signalling or receipt writing. That transient raw ps output was not retained and no cause is determined. The later saved reconciliation records the server PID absent without replaying its signal, and one subsequent proxy SIGTERM followed by that PID absent. The saved server command matches its spawn record. The proxy's script and argv tail match, while the saved argv0 spelling differs. The receipt's exact_spawn_identity_matched_before_signal field must not be read as proof of byte-for-byte proxy argv equality. No new process query or signal was issued, and no current, descendant or fleet-wide absence is certified."
+    }
+  ],
+  "selected_read_samples": [
+    {
+      "call_id": "call_-7138003545919321821",
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/projections/G1-provider-input.json",
+      "response_wire_id": "request-000008",
+      "result_request_wire_id": "request-000009",
+      "actual_name_and_arguments_match_projection": true,
+      "actual_result_hash_matches_safe_and_review": true,
+      "actual_ok": true,
+      "offset": 1,
+      "returned_lines": 17,
+      "returned_bytes": 825,
+      "source_bytes": 825,
+      "truncated": false,
+      "content_hash_matches_safe_and_review": true,
+      "source_hash_matches_safe_and_review": true,
+      "content_equals_exact_source_line_slice": true,
+      "actual_metadata_matches_safe_projection": true
+    },
+    {
+      "call_id": "call_-7138002686925858091",
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/projections/G1-provider-goal-context.txt",
+      "response_wire_id": "request-000009",
+      "result_request_wire_id": "request-000010",
+      "actual_name_and_arguments_match_projection": true,
+      "actual_result_hash_matches_safe_and_review": true,
+      "actual_ok": true,
+      "offset": 1,
+      "returned_lines": 7,
+      "returned_bytes": 1079,
+      "source_bytes": 1079,
+      "truncated": false,
+      "content_hash_matches_safe_and_review": true,
+      "source_hash_matches_safe_and_review": true,
+      "content_equals_exact_source_line_slice": true,
+      "actual_metadata_matches_safe_projection": true
+    },
+    {
+      "call_id": "call_-7138017873930218564",
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-playground-bootstrap/coding-boundary/actual-coding-boundary.json",
+      "response_wire_id": "request-000010",
+      "result_request_wire_id": "request-000011",
+      "actual_name_and_arguments_match_projection": true,
+      "actual_result_hash_matches_safe_and_review": true,
+      "actual_ok": true,
+      "offset": 1,
+      "returned_lines": 537,
+      "returned_bytes": 19969,
+      "source_bytes": 29007,
+      "truncated": true,
+      "content_hash_matches_safe_and_review": true,
+      "source_hash_matches_safe_and_review": true,
+      "content_equals_exact_source_line_slice": true,
+      "actual_metadata_matches_safe_projection": true
+    },
+    {
+      "call_id": "call_-7138003648998532503",
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification.log",
+      "response_wire_id": "request-000012",
+      "result_request_wire_id": "request-000013",
+      "actual_name_and_arguments_match_projection": true,
+      "actual_result_hash_matches_safe_and_review": true,
+      "actual_ok": true,
+      "offset": 1193,
+      "returned_lines": 0,
+      "returned_bytes": 0,
+      "source_bytes": 62709,
+      "truncated": false,
+      "content_hash_matches_safe_and_review": true,
+      "source_hash_matches_safe_and_review": true,
+      "content_equals_exact_source_line_slice": true,
+      "actual_metadata_matches_safe_projection": true
+    },
+    {
+      "call_id": "call_-7138003648998532501",
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_anti_rationalization_empty_reject.log",
+      "response_wire_id": "request-000012",
+      "result_request_wire_id": "request-000013",
+      "actual_name_and_arguments_match_projection": true,
+      "actual_result_hash_matches_safe_and_review": true,
+      "actual_ok": true,
+      "offset": 3389,
+      "returned_lines": 0,
+      "returned_bytes": 0,
+      "source_bytes": 13328,
+      "truncated": false,
+      "content_hash_matches_safe_and_review": true,
+      "source_hash_matches_safe_and_review": true,
+      "content_equals_exact_source_line_slice": true,
+      "actual_metadata_matches_safe_projection": true
+    }
+  ],
+  "verdict_join": {
+    "call_id": "call_-7138012135853914945",
+    "decision": "APPROVE",
+    "actual_arguments_equal_safe_protocol_and_result": true,
+    "ack_bytes": 3134,
+    "ack_sha256": "c610b27268c326620866106cba4174ef77ed7ffc268665b5ec8c4c81c9ef5e80",
+    "ack_identity_matches_safe_and_review": true,
+    "ack_contains_same_reason": true,
+    "reason_sha256": "2123f8674eec9fea61be50aeaf72fbb25eb3a1db650f94f70a34a637e2b4346c",
+    "native_event_outcomes": [
+      "register",
+      "reviewed",
+      "committed"
+    ],
+    "native_run_ids_equal_result": true,
+    "registration_request_goal_revision_equal_result": true,
+    "native_typed_decisions": [
+      "approved",
+      "approved"
+    ],
+    "native_tool_counts": [
+      45,
+      45
+    ],
+    "reason_equal_actual_safe_native_and_store": true,
+    "persisted_outcome_equals_three_frozen_store_records": true,
+    "store_run_request_goal_revision_join": true,
+    "phase": "awaiting_confirmation",
+    "completion": "proof_proven"
+  },
+  "cleanup_direct_comparisons": {
+    "safe_stop_byte_equals_frozen_stop": true,
+    "server_saved_argv_equals_spawn_command": true,
+    "proxy_saved_argv0_equals_spawn_executable_spelling": false,
+    "proxy_saved_argv_tail_equals_spawn_tail": true,
+    "saved_server_pid": 10278,
+    "saved_proxy_pid": 10276,
+    "saved_initial_assertion": {
+      "phase": "after the server SIGTERM, before proxy signalling or stop-receipt write",
+      "observation": "Immediate full-command ps identity comparison failed; its transient raw output was not retained. A later read found the server PID absent. No cause such as zombie state is asserted.",
+      "server_SIGTERM_calls": 1,
+      "proxy_SIGTERM_calls_before_reconciliation": 0,
+      "server_signal_replayed": false
+    },
+    "saved_terminal_flags": [
+      {
+        "record": "server-process-private.json",
+        "signal": "SIGTERM",
+        "same_pid_absent": true
+      },
+      {
+        "record": "proxy-process-private.json",
+        "signal": "SIGTERM",
+        "same_pid_absent": true
+      }
+    ],
+    "new_process_observation_or_signal": false
+  },
+  "clarification_provenance": {
+    "artifact": {
+      "label": "safe-results/read-coverage-clarification.json",
+      "bytes": 3130,
+      "sha256": "b599c123d21ebe2662c9aee982cb35c995c834aa1dade7adddf99feb6edb8bdd"
+    },
+    "result_sha_matches": true,
+    "manifest_sha_matches": true,
+    "outside_frozen159": true,
+    "response": "The clarification links the unchanged safe result and frozen manifest identities. It is a later artifact outside the frozen159 scope, not a retroactive extra original or rewritten result."
+  },
+  "identity_and_operational_boundaries": {
+    "candidate_source": "577e6e10a5eb10869796fc4f7f862f3ea3d7e17d",
+    "prompt_sha256": "428e2d7fd1db9ea920ff67ac1a959fa9e91867776b0ee40bef8b7f022307a47d",
+    "runtime_binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "managed_baseline_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "fixture_criterion_revision": "d6f0451381b7f9076e956759253e0fae",
+    "primary_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "response": "The review separates the3e executable,75c managed baseline and428e normal prompt overrides. The current comparison did not revalidate binary bytes, Git/source identity, all prompt sections or the76 copies; those remain the preparation/protocol reviews' evidence. The isolatedD6 verdict cannot update primary3067. No compiled577 binary, fresh eleven-behavior execution, production application, model-weight independence, reliability or causal A/B is established."
+  },
+  "semantic_review_boundary": {
+    "status": "NOT_ADJUDICATED_BY_THIS_RESPONSE",
+    "parent_reported_parallel_findings": "The parent reports a separate semantic reviewer identified P2 gaps concerning the unqueried A3 judge-image ASSERT evidence and A7 fitness evidence; that reviewer was still finalizing its report at handoff. This response has not independently adjudicated those findings.",
+    "effect": "Protocol-only concurrence does not clear those concerns, convert path coverage into11/11 proof, endorse the model reason, overturn the earlier149/529f sufficiency FAIL, or provide final human confirmation.",
+    "historical_controls": "The separately scoped75-original controls are not pooled with this159-original replay."
+  },
+  "findings": {
+    "new_protocol_P0": [],
+    "new_protocol_P1": [],
+    "new_protocol_P2": [],
+    "semantic_sufficiency": "No PASS issued"
+  },
+  "reviewer_effects": {
+    "new_API_Git_model_test_process_CI_Board_Task_Goal_or_source_actions": 0,
+    "existing_artifact_mutations": 0,
+    "runtime_queries_or_signals": 0,
+    "subagents_or_external_messages": 0,
+    "only_new_artifact": "response.json"
+  },
+  "disposition": "No correction is needed to the named protocol-only verdict within the inspected scope. Preserve the empty/partial/projection and cleanup qualifications and keep the separate semantic findings open for their own report. No formal approval, merge, primary mutation or Goal completion follows from this response.",
+  "responded_at_utc": "2026-10-25T19:40:01.326100+00:00"
+}

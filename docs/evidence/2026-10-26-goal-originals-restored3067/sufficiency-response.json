@@ -1,0 +1,141 @@
+{
+  "schema": "masc.restored3067.semantic-response.v1",
+  "status": "FINAL_FROZEN",
+  "at_utc": "2026-10-25T21:24:17.316841+00:00",
+  "verdict": "AGREE_SCOPED_SINGLE_ISOLATED_HISTORICAL_EVIDENCE_ALL11_PASS",
+  "review": {
+    "label": "restored3067-sufficiency-review/review.json",
+    "bytes": 16456,
+    "sha256": "d9348dc29be9a6be76e9e28ad6553d688d517582d59751df23308566e0da1ba1",
+    "read_in_full": true
+  },
+  "identity": {
+    "candidate_source_head": "4edcba731f79a4e0297c98cc5df3960b4d5263d1",
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "candidate_prompt_file_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "fixture_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "original_main_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "request_id": "ca40f5934e4b849dafd0c0f414254029",
+    "run_id": "01a174db-7962-7000-a964-2e11d67a800f",
+    "measurement_id": "ada74682d5887de03fae493a8690a4c2",
+    "requested_models": [
+      "glm-5.3-flash"
+    ],
+    "reported_models": [
+      "glm-5.3-flash"
+    ]
+  },
+  "assessment": "Agree: all11 unchanged requirements are supported at their declared retained source/native/isolated-execution scopes in this one restored-evidence rejudgment. Actual APPROVE/proof_proven/awaiting_confirmation is preserved. This is not11 newly executed behaviors, a primary Goal verdict, unqualified product success or causal prompt validation.",
+  "decisive_checks": [
+    "The actual first provider User equals retained Original with current3067 and existing measurementada746. Stored isolated records retain those identifiers; the earlierB39 construction confound is absent. Identical identifiers in a separate base do not create primary effects.",
+    "Nine derivative pages equal actual terminal-wire Tool contents and exact retained source ranges, including all declared bytes/hashes/offsets. G2 checkpoint has no owner Goal hint, actual chosen create arguments/contract and authoritative link.",
+    "A1 consecutive pages47+48 equal the full29007B3228 original. They contain retained image127 failure, verify/regression/build0 with identical manifests and fresh failing capture7. This is Python fixture sandbox dispatch, not project compilation or microVM execution.",
+    "A3 returned23-line judge tail includes measured sizes/digests, no changed image attached, unread-evidence retention, symlink handling and typed missing-image reason. Separate full operator/TUI evidence supports that route. The34-line A6 tail also contains actual guards.",
+    "A7 actual approval explicitly says human_operator; Done readback and later lifecycle_success1.0/outcome_basis task_lifecycle/external_acceptance unobserved1 are returned separately from Goal/proof/human state. Unlike earlier runs, the later non-null taxonomy is actually observed.",
+    "Selected additional actual anchors support G1 wire/context, G3 action/receipt/diagnosis, goalless G4, Node oracle A2, cohort/resume A4/A5 and unknown/identity A6. The full independent review supplies the remaining52-page classification; no whole203 protocol re-audit is repeated."
+  ],
+  "nonblocking_qualifications": [
+    "A7 original fixture is controlled operator-proxy approval, not an actual independent LLM verdict. The broad LLM-approval wording must not relabel that source; the current203 verifier APPROVE is a separate event. Declared historical separation scope is supported without adding a new independent-model criterion.",
+    "102/103 are complete-suite footer provenance, not proof that all test bodies were read. Actual returned23/34-line tails contain the required guard assertions; suite name/total alone would not suffice.",
+    "Fourteen owned temporary fixture locators were considered. Source-path omission is optional metadata minimization, not a blanket temporary-path ban. Latest provenance labels its nine-file source_path omission as a public metadata projection; exact Tool pages remain unchanged with five harmless owned fixture locators. No credential, user-home or unrelated-primary payload was identified in these selected derivatives."
+  ],
+  "selected_page_bindings": {
+    "columns": [
+      "step",
+      "bytes",
+      "content_sha256"
+    ],
+    "rows": [
+      [
+        22,
+        10858,
+        "274853f11422b41e1d34fbff7c3d532f8ac80f3e7d62c99339484eee49d17ae1"
+      ],
+      [
+        36,
+        121,
+        "801681d8ae775700997306c0dcc639ae7f863a5d1908740c400a456ac204ab13"
+      ],
+      [
+        37,
+        2920,
+        "fd765483471c471fc3868e1ccfe1382b6c84dd28d65afde3f0ed904c8f5647cf"
+      ],
+      [
+        38,
+        2212,
+        "1391f0eb56991349238cc8ef74eba40b05c22a7c6fe0024144154010f07b9d0f"
+      ],
+      [
+        43,
+        999,
+        "2e626db5819af5f3192288ac5ab99977935a19bcc1deac48de914397f40b3055"
+      ],
+      [
+        47,
+        19969,
+        "a11125acc1b3f2585760636c126fff3a037edf530caea56ce54abc2f3108a941"
+      ],
+      [
+        48,
+        9038,
+        "95a94ae8f9c814380ecd2c6449cd0dd37ce202bd7712af56ba5cd67482cfba3b"
+      ],
+      [
+        49,
+        1099,
+        "0b918bbe41af4db9a70bb177155fa652d6f32aa484de179b4841465b87e068b3"
+      ],
+      [
+        50,
+        1589,
+        "dbfb1ce812ad70d860bd7b373e866f8fc319d2eb17314558ea5e1ea376c53ac7"
+      ]
+    ],
+    "all9_exact_to_terminal_wire_and_retained_slices": true
+  },
+  "derivative_bindings": [
+    {
+      "label": "observed-required-pages.json",
+      "bytes": 58450,
+      "sha256": "799b072fc8d9032e8f64dee15e04c194a8a849607b46523d2a2df53761c3eb21"
+    },
+    {
+      "label": "fixture-provenance.json",
+      "bytes": 5961,
+      "sha256": "435e2ac8224e2fc2e9232a1b8e6d001e596719cf6868eb259b8740f49100cb88"
+    },
+    {
+      "label": "README.md",
+      "bytes": 5255,
+      "sha256": "3cffe91a43a661548240dd5fd61606509581a30bd2b8af5984e141ca2772b22b"
+    }
+  ],
+  "provenance_checks": "Bootstrap projection equals frozen bootstrap metadata; prestart-install projection equals frozen installation receipt; saved normal-primary before/after bytes are equal and match its selected metadata. Harness projection preserves labels/lengths/hashes while expressly omitting source_path. Version1 selected-record/empty-outbox fixture is not an atomic whole-store copy. This response does not repeat the whole setup/process protocol audit.",
+  "source_bindings": {
+    "203_manifest_bytes": 40587,
+    "203_manifest_sha256": "8f2bb92dce336dc13c29c9873fffd34b06c07596f5caf12de227ddebace7f5fb",
+    "safe_result_bytes": 14985,
+    "safe_result_sha256": "27c5755aec474d5d9dabcd0419e136aa08ab45522260aa7c753c83b14d158bf9",
+    "safe_tool_sequence_sha256": "4373b281cc90c87927814c9b0f4be73a1524c741ff11f874e42c1b71af150439",
+    "actual_reason_sha256": "12228db76db135b4662f7cf5c9652755dbc3ccc82faca1ec9f6c272e1896cc27"
+  },
+  "remaining_limits": "One configured/reported GLM5.3Flash sample; source4edc/0dc overrides on frozen3e. No weight independence, general reliability, pooling, matched causalA/B, new11 behavior run, primary3067 proof/update, human final confirmation, new native build/install, formal approval or whole-stack merge. Historical159 insufficient approval and154 confounded rejection remain immutable; these new reads do not backfill them.",
+  "findings": {
+    "agree": true,
+    "new_actionable_P0": [],
+    "new_actionable_P1": [],
+    "new_actionable_P2": [],
+    "remaining": "Retain A7 role and suite-tail qualifications; no substantive blocker within this bounded semantic scope."
+  },
+  "effects": {
+    "API_Git_model_build_test_CI_runtime_process_control_calls": 0,
+    "source_Task_Goal_store_PR_existing_artifact_mutations": 0,
+    "new_agents": 0,
+    "external_messages": 0,
+    "only_new_output": "response.json"
+  },
+  "stable_inputs_rechecked": true
+}

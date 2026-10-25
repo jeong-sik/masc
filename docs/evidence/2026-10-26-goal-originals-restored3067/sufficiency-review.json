@@ -1,0 +1,314 @@
+{
+  "schema": "masc.goal.restored3067.independent-semantic-review.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T21:14:17.147345+00:00",
+  "verdict": "PASS_SCOPED_ISOLATED_HISTORICAL_EVIDENCE_REJUDGEMENT_ALL11",
+  "summary": "The actual returned contents now support all11 unchanged requirements at their declared retained source/native/isolated-execution scopes. A3 judge guards, A7 later metric taxonomy, G2 creation/link and A1 actual stage records are present in this run. Preserve the actual APPROVE/proof_proven/awaiting_confirmation. This is one isolated rejudgment of historical evidence, not new execution of11 behaviors or primary Goal proof.",
+  "identity": {
+    "candidate_source_head": "4edcba731f79a4e0297c98cc5df3960b4d5263d1",
+    "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "candidate_prompt_file_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "fixture_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "original_main_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "request_id": "ca40f5934e4b849dafd0c0f414254029",
+    "run_id": "01a174db-7962-7000-a964-2e11d67a800f",
+    "measurement_id": "ada74682d5887de03fae493a8690a4c2",
+    "requested_models": [
+      "glm-5.3-flash"
+    ],
+    "reported_models": [
+      "glm-5.3-flash"
+    ]
+  },
+  "effect": {
+    "verdict": "APPROVE",
+    "completion": "proof_proven",
+    "phase": "awaiting_confirmation",
+    "actual_Goal_runs": 1,
+    "POSTs": 20,
+    "tools": 53,
+    "nonempty_Read_results": 52,
+    "reason_matches_structured_call_and_persisted_evidence": true,
+    "reason_sha256": "12228db76db135b4662f7cf5c9652755dbc3ccc82faca1ec9f6c272e1896cc27"
+  },
+  "restored_identity_boundary": {
+    "actual_first_user_and_stored_revision": "306708facbfb9379a9e51b8f7c815678",
+    "actual_existing_measurement_id": "ada74682d5887de03fae493a8690a4c2",
+    "record_equals_safe_retained_measurement": true,
+    "canonical_acceptance_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+    "scope": "Trusted prestart fixture restores existing criterion/measurement; actual first user and stored isolated record now match3067/ada746 and the read index. The B39 confound is absent. Setup/full203 protocol verification is separately assigned; raw primary captures/other Goal data are not exported. Same identifiers in a separate workspace are not primary effects.",
+    "no_new_goal_or_measurement_claim": "The declared restored path uses normal readback and one request_complete, not upsert/measure or forced verdict. This semantic review does not repeat the full setup mutation/protocol audit."
+  },
+  "method": "Decoded only actual role=tool lookup contents; all52 returned pages were classified against11 conditions. Selected9 decisive page/envelope/source-slice bindings were independently checked. No whole203 inventory/provider join re-audit; no raw headers, hidden thinking, primary-other-Goal data or full provider bodies exported. Counts and suite totals are not evidence-sufficiency gates.",
+  "case_assessments": [
+    {
+      "id": "G1",
+      "assessment": "SUPPORTED_AT_DECLARED_RETAINED_SCOPE",
+      "actual_steps": [
+        19,
+        20,
+        23,
+        34
+      ],
+      "basis": "Actual825B metadata and1079B Goal slice contain current historical Goal/revision/measurement0of3/evidence; native7707B log has five executed current/stale/unavailable/independent-work wire checks.",
+      "limit": "73127B is referenced raw-request size, not this replay’s read size. Live local Ollama input and native deterministic HTTP cases are separate historical scopes."
+    },
+    {
+      "id": "G2",
+      "assessment": "SUPPORTED_AT_DECLARED_RETAINED_SCOPE",
+      "actual_steps": [
+        22
+      ],
+      "basis": "Actual checkpoint returns no-Goal-hint owner request, model keeper_task_create goal_id, full alpha-only contract, authoritative external link and immutable/current55B alpha-only equality.",
+      "limit": "One328 GLM cohort, not all models. Gate checkpoint, unavailable judge/resubmission and later controlled approval are not erased or called automatic first-attempt judge success."
+    },
+    {
+      "id": "G3",
+      "assessment": "SUPPORTED_AT_DECLARED_RETAINED_SCOPE",
+      "actual_steps": [
+        15,
+        21,
+        35
+      ],
+      "basis": "Actual receipts show approved partial Task followed by Read→1of3→remaining Edit→Read→3of3→Task2Awaiting→Goal request_complete/proof_pending. Diagnosis retains authoritative tasks, measurement receipts, accurate final public human/proof-pending report and exact source ACK.",
+      "limit": "One sleep Gate permission and one operator-proxy approval. Task2 planning may precede measurement; artifact edits follow it. ACK/3of3 is not Goal completion; no causal/population claim."
+    },
+    {
+      "id": "G4",
+      "assessment": "SUPPORTED_AT_DECLARED_RETAINED_SCOPE",
+      "actual_steps": [
+        16,
+        17,
+        24,
+        25
+      ],
+      "basis": "Actual goalless creation, real pinned Node Docker exit0/stdout4, verification submission and controlled human_operator Done are returned.",
+      "limit": "External-agent control, not Keeper inference or independent LLM judgment; legitimate independent Tasks remain allowed."
+    },
+    {
+      "id": "A1",
+      "assessment": "SUPPORTED_AT_DECLARED_RETAINED_SCOPE",
+      "actual_steps": [
+        26,
+        47,
+        48
+      ],
+      "basis": "Both actual pages return the full29007B3228 supplement: incapable image127 retained, capable-image Docker dispatch with verify/regression/build0 and identicalb04488… manifests, protected guest flags and fresh failing capture7. README states Docker-only driver/microVM boundary.",
+      "limit": "Three wrapper scripts share the fixture check; this proves sandbox stage dispatch, not project compilation or independent test coverage.3228 is not relabelled dca; no microVM E2E or cancellation/fleet guarantee."
+    },
+    {
+      "id": "A2",
+      "assessment": "SUPPORTED_AT_DECLARED_RETAINED_SCOPE",
+      "actual_steps": [
+        18,
+        26
+      ],
+      "basis": "Actual Node Docker observations show both oracle-only edits rejected(exit1) with broken implementation unchanged and paired reference controls passing(exit0).",
+      "limit": "Finite protected-grading controls, not arbitrary solution correctness or a live coding population."
+    },
+    {
+      "id": "A3",
+      "assessment": "SUPPORTED_AT_DECLARED_RETAINED_SCOPE",
+      "actual_steps": [
+        38,
+        49,
+        50
+      ],
+      "basis": "Actual judge tail includes measured-size/digest retention, no changed image attached, unread-evidence preservation, symlink check and typed missing-image reason. Full operator log separately returns changed-body withholding and both sizes/digests through TUI.",
+      "limit": "A3/A6 verification reads are23/34-line tails, not full62709/63713-byte suites. Their102/103 totals are footer provenance; sufficient guards are the actual returned assertions."
+    },
+    {
+      "id": "A4",
+      "assessment": "SUPPORTED_AT_DECLARED_RETAINED_SCOPE",
+      "actual_steps": [
+        27,
+        28,
+        29,
+        30,
+        33,
+        41
+      ],
+      "basis": "Actual report probes split model1/0 versus pooled0.5, preserve null/unreported cost and failed spend/cohorts; duplicate-key rejection, production Python result and original runtime/run identity tests are returned.",
+      "limit": "Source/helper/controlled consumer probes; not a live multi-provider benchmark or population pass rate."
+    },
+    {
+      "id": "A5",
+      "assessment": "SUPPORTED_AT_DECLARED_RETAINED_SCOPE",
+      "actual_steps": [
+        30,
+        33,
+        41
+      ],
+      "basis": "Read1276B root original explicitly passes changed-input and complete run-field resume tests. Its content equals the preserved A5 mirror, allowing shared-original use.",
+      "limit": "Seven listed tests include one explicit actual-Docker skip. No separate-path/read-count requirement or full live resume claim."
+    },
+    {
+      "id": "A6",
+      "assessment": "SUPPORTED_AT_DECLARED_RETAINED_SCOPE",
+      "actual_steps": [
+        39,
+        40,
+        42,
+        46
+      ],
+      "basis": "Actual identity log reports18 checks; full calibration22 contains unknown/null/alias/pair coverage observations. Both anti-rationalization pages return all23 tests for exact winning verdict/runtime, immutable lookup provenance, failover and structured verdict boundaries.",
+      "limit": "Controlled native/source tests and API-reported identity, not model weights or live-cloud independence. Unread full streaming/persistence branches are not newly credited."
+    },
+    {
+      "id": "A7",
+      "assessment": "SUPPORTED_AT_DECLARED_RETAINED_SCOPE",
+      "actual_steps": [
+        31,
+        32,
+        36,
+        37,
+        38,
+        43,
+        44,
+        45
+      ],
+      "basis": "Actual controlled approval and Done readback are separate from later lifecycle_success1.0/outcome_basis task_lifecycle/external_acceptance kind unobserved. Goal readback remains Executing/Idle0of3; native verdict policy and actual typed/TUI consumer records remain distinct.",
+      "limit": "The approval is human_operator/controlled operator-proxy, not an actual independent LLM verdict. The later non-null taxonomy is not the earlier null read. Goal proof/human confirmation is not inferred."
+    }
+  ],
+  "previous_gaps": {
+    "A1": "Actual pages47+48 now include all three stage exits/manifests, with failed-image127 and failing-capture7 preserved.",
+    "A3": "Step49 really includes judge image guards atlocal850–872; step38 operator guard is separately present. It is not merely a successful footer or source name.",
+    "A7": "Step37 is the correct later2920B fitness reread with lifecycle1.0/unobserved fields;36/43 independently carry controlled approval/Done.",
+    "G2": "Step22 now actually supplies selected create arguments, no owner hint and authoritative link.",
+    "history": "These are observations in this new replay. Older428e159 A3/A7 FAIL and0dc154 qualified identity REJECT/unread conditions are not rewritten or backfilled."
+  },
+  "reason_scope_notes": {
+    "A7_wording": "The phrase LLM approval/external acceptance/human confirmation is broader than the specific A7 approval source. Actual source explicitly says human_operator/controlled operator-proxy, with no independent LLM claim. Scoped separation PASS does not transform that approval into an LLM verdict.",
+    "suite_reading": "The102/103 test counts describe complete suite outcomes; the model read only their23/34-line tails. Required image guard assertions are visible there. No full-suite-read claim or independent trials count follows.",
+    "extra_chain": "The additional3228 keeper-chain artifact is separately scoped, including operator wait approval and pending human confirmation. It is not pooled with328 or used to relabel the older proxy A7 fixture as an LLM approval.",
+    "hash_scope": "Model reason discloses declaration-level hash comparison and no web fetch of CI URLs. Reviewer checks selected actual bytes and canonical4fdd; no hash-tool gate or original-network-page requirement is invented."
+  },
+  "findings": {
+    "new_actionable_P0": [],
+    "new_actionable_P1": [],
+    "new_actionable_P2": [],
+    "nonblocking_qualification": "A7 role wording and suite-size/totals must retain the narrower actual-source/read scope above.",
+    "assessment": "Scoped semantic PASS for this isolated restored input. Not generic verifier reliability, causal0dc improvement or unqualified current-product success."
+  },
+  "selected_actual_page_bindings": [
+    {
+      "step": 15,
+      "source": "repository/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json",
+      "next_request": "request-000008.request",
+      "offset": 1,
+      "lines": 249,
+      "bytes": 10317,
+      "page_sha256": "739631556cc1787e6eb647023597f4c2827bc673d9acaa032384f8f1e24b600b"
+    },
+    {
+      "step": 22,
+      "source": "repository/docs/evidence/2026-10-25-goal-continuation-glm/preapproval/g2-alpha-checkpoint.json",
+      "next_request": "request-000009.request",
+      "offset": 1,
+      "lines": 201,
+      "bytes": 10858,
+      "page_sha256": "274853f11422b41e1d34fbff7c3d532f8ac80f3e7d62c99339484eee49d17ae1"
+    },
+    {
+      "step": 35,
+      "source": "repository/docs/evidence/2026-10-25-goal-continuation-glm/postapproval/diagnosis.json",
+      "next_request": "request-000013.request",
+      "offset": 1,
+      "lines": 335,
+      "bytes": 19261,
+      "page_sha256": "bcac55d465afdfe99e3c6e87ee9201890792ca01d542975f922e34ceb217eb0b"
+    },
+    {
+      "step": 37,
+      "source": "repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-fitness-reread.json",
+      "next_request": "request-000013.request",
+      "offset": 1,
+      "lines": 1,
+      "bytes": 2920,
+      "page_sha256": "fd765483471c471fc3868e1ccfe1382b6c84dd28d65afde3f0ed904c8f5647cf"
+    },
+    {
+      "step": 38,
+      "source": "native/A3/test_verification_operator_evidence.log",
+      "next_request": "request-000014.request",
+      "offset": 1,
+      "lines": 44,
+      "bytes": 2212,
+      "page_sha256": "1391f0eb56991349238cc8ef74eba40b05c22a7c6fe0024144154010f07b9d0f"
+    },
+    {
+      "step": 43,
+      "source": "repository/docs/evidence/2026-10-24-outcome-api-runtime/a7-task-readback.json",
+      "next_request": "request-000015.request",
+      "offset": 1,
+      "lines": 21,
+      "bytes": 999,
+      "page_sha256": "2e626db5819af5f3192288ac5ab99977935a19bcc1deac48de914397f40b3055"
+    },
+    {
+      "step": 47,
+      "source": "repository/docs/evidence/2026-10-25-goal-playground-bootstrap/coding-boundary/actual-coding-boundary.json",
+      "next_request": "request-000017.request",
+      "offset": 1,
+      "lines": 537,
+      "bytes": 19969,
+      "page_sha256": "a11125acc1b3f2585760636c126fff3a037edf530caea56ce54abc2f3108a941"
+    },
+    {
+      "step": 48,
+      "source": "repository/docs/evidence/2026-10-25-goal-playground-bootstrap/coding-boundary/actual-coding-boundary.json",
+      "next_request": "request-000018.request",
+      "offset": 538,
+      "lines": 213,
+      "bytes": 9038,
+      "page_sha256": "95a94ae8f9c814380ecd2c6449cd0dd37ce202bd7712af56ba5cd67482cfba3b"
+    },
+    {
+      "step": 49,
+      "source": "native/A3/test_verification.log",
+      "next_request": "request-000019.request",
+      "offset": 850,
+      "lines": 23,
+      "bytes": 1099,
+      "page_sha256": "0b918bbe41af4db9a70bb177155fa652d6f32aa484de179b4841465b87e068b3"
+    }
+  ],
+  "input_receipts": [
+    {
+      "label": "safe-results/result.json",
+      "bytes": 14985,
+      "sha256": "27c5755aec474d5d9dabcd0419e136aa08ab45522260aa7c753c83b14d158bf9"
+    },
+    {
+      "label": "safe-results/actual-tool-sequence.json",
+      "bytes": 59792,
+      "sha256": "4373b281cc90c87927814c9b0f4be73a1524c741ff11f874e42c1b71af150439"
+    },
+    {
+      "label": "safe-results/persisted-outcome.json",
+      "bytes": 8200,
+      "sha256": "f468dffddc1305025d7f98d9a8883a295fcc4a4d5f53b3b1aee37a92fd0ea6e1"
+    },
+    {
+      "label": "terminal-originals-private/manifest.json",
+      "bytes": 40587,
+      "sha256": "8f2bb92dce336dc13c29c9873fffd34b06c07596f5caf12de227ddebace7f5fb"
+    }
+  ],
+  "limits": [
+    "No rerun of original11 behaviors, all-current-head/native regression, installation or operational application.",
+    "One configured/reported GLM-5.3-Flash verifier sample; API name is not weight identity/independence. No causal A/B or pooling with earlier cohorts.",
+    "Source4edc/0dc override runs on frozen3e; this is not a new4edc binary or formal GitHub/whole-stack approval.",
+    "Isolated3067/ada746 approval does not update/prove the primary Goal or supply human final confirmation.",
+    "Historical failures remain immutable; this replay is not evidence that earlier insufficient approvals were valid."
+  ],
+  "effects": {
+    "API_Git_model_test_build_process_CI_Docker_Board_calls": 0,
+    "Task_Goal_source_store_existing_artifact_mutations": 0,
+    "new_agents": 0,
+    "only_new_output": "review.json in the requested external directory"
+  }
+}

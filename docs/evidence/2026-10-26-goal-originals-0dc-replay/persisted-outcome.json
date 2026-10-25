@@ -1,0 +1,51 @@
+{
+  "goal": {
+    "id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "b39a4c8dc8d4af965c4d87ef802c17db",
+    "title": "Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다",
+    "metric": "MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.",
+    "target_value": "G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다.",
+    "due_date": null,
+    "priority": 3,
+    "phase": "executing",
+    "last_review_note": "선언된 측정값은 존재하고 대부분 원문으로 확인됨: metric이 지정한 codex-mcp-client/goal-outcomes-20261024/acceptance.json을 전체 읽어(376행 2회 페이지) required_case_ids가 정확히 [G1~G4,A1~A7] 11개, cases 11개 각 1회 보존, summary required 11/measured_pass 11/remaining[]/measured_fail_case_ids[] 및 not_measured=0(delivery index scoped_observation 일치)을 확인. 11개 케이스 각각의 실제 행동 원문도 직접 읽음: G1 provider-input projection(wire SHA a8428060…)+native direct-wire 5 tests OK+server-extraction-receipt, G2/G3 GLM-5.3 actual-tool-sequence-and-receipts(masc_goal_measure 1/3→3/3, Edit, task-002 submit, request_complete proof_pending)+README, G4 goalless create/execution(node 2+2 exit 0)/submit/approval 원본(goal_id null), A1 boundary README+테스트, A2 observations.json(oracle-only verify_exit 1×2, reference exit 0×2), A3 native operator-evidence 11 tests OK, A4/A5 cohort observations+duplicate-key 거부 exit 1×4+cohort-identities after.json(6 pass/1 Docker skip/4 fixtures)+root-check.txt(7 tests OK skipped=1), A6 native blocks(response identity 18 checks, eval_calibration 22 tests), A7 outcome-api README+a7-goal-readback(Executing 0/3)+a7-fitness. 소스/후보빌드/격리실행/운영 구분, 3228 보조 분리, 이력 실패 보존도 관측상 유지됨. 그러나 target의 'Goal 현재 revision과 증거 identity 불일치=0'이 충족됨으로 확인할 수 없음: 제출 record는 현재 revision b39a4c8dc8d4af965c4d87ef802c17db에 귀속되는데, 그 record가 인용하는 증거 원문들(delivery index.json, manifest.json, actor evidence 문구 'criterion 306708facbfb9379a9e51b8f7c815678 unchanged')은 전부 다른 revision 306708fa에 고정되어 있고, 원문 acceptance.json에는 criterion revision 필드가 없어 두 해시의 관계를 화해할 조회 수단이 없음. 현재 revision과 증거 identity 간 최소 1건의 불일치(또는 미확인)가 관측되어 11/11을 현재 revision의 측정값으로 수용할 수 없음. 부수적으로 acceptance.json SHA-256 4fdd1ec8 동일성 주장은 해시 재계산 도구가 없어 미검증(바이트 수 26469만 일치 확인). 조회 도구 실패가 아니라 선언된 identity 조건의 관측 불일치·미확인이 REJECT 사유임.",
+    "last_review_at": "2026-10-25T20:00:53Z",
+    "created_at": "2026-10-25T19:55:28Z",
+    "updated_at": "2026-10-25T20:00:53Z"
+  },
+  "verification": {
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "completion": {
+      "state": "proof_refuted",
+      "verdict": {
+        "outcome": "refuted",
+        "reason": "선언된 측정값은 존재하고 대부분 원문으로 확인됨: metric이 지정한 codex-mcp-client/goal-outcomes-20261024/acceptance.json을 전체 읽어(376행 2회 페이지) required_case_ids가 정확히 [G1~G4,A1~A7] 11개, cases 11개 각 1회 보존, summary required 11/measured_pass 11/remaining[]/measured_fail_case_ids[] 및 not_measured=0(delivery index scoped_observation 일치)을 확인. 11개 케이스 각각의 실제 행동 원문도 직접 읽음: G1 provider-input projection(wire SHA a8428060…)+native direct-wire 5 tests OK+server-extraction-receipt, G2/G3 GLM-5.3 actual-tool-sequence-and-receipts(masc_goal_measure 1/3→3/3, Edit, task-002 submit, request_complete proof_pending)+README, G4 goalless create/execution(node 2+2 exit 0)/submit/approval 원본(goal_id null), A1 boundary README+테스트, A2 observations.json(oracle-only verify_exit 1×2, reference exit 0×2), A3 native operator-evidence 11 tests OK, A4/A5 cohort observations+duplicate-key 거부 exit 1×4+cohort-identities after.json(6 pass/1 Docker skip/4 fixtures)+root-check.txt(7 tests OK skipped=1), A6 native blocks(response identity 18 checks, eval_calibration 22 tests), A7 outcome-api README+a7-goal-readback(Executing 0/3)+a7-fitness. 소스/후보빌드/격리실행/운영 구분, 3228 보조 분리, 이력 실패 보존도 관측상 유지됨. 그러나 target의 'Goal 현재 revision과 증거 identity 불일치=0'이 충족됨으로 확인할 수 없음: 제출 record는 현재 revision b39a4c8dc8d4af965c4d87ef802c17db에 귀속되는데, 그 record가 인용하는 증거 원문들(delivery index.json, manifest.json, actor evidence 문구 'criterion 306708facbfb9379a9e51b8f7c815678 unchanged')은 전부 다른 revision 306708fa에 고정되어 있고, 원문 acceptance.json에는 criterion revision 필드가 없어 두 해시의 관계를 화해할 조회 수단이 없음. 현재 revision과 증거 identity 간 최소 1건의 불일치(또는 미확인)가 관측되어 11/11을 현재 revision의 측정값으로 수용할 수 없음. 부수적으로 acceptance.json SHA-256 4fdd1ec8 동일성 주장은 해시 재계산 도구가 없어 미검증(바이트 수 26469만 일치 확인). 조회 도구 실패가 아니라 선언된 identity 조건의 관측 불일치·미확인이 REJECT 사유임.",
+        "request_id": "44a299a96b28b6ff2d9bd2081ce0cfbc",
+        "criterion": {
+          "revision": "b39a4c8dc8d4af965c4d87ef802c17db",
+          "title": "Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다",
+          "metric": "MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.",
+          "target_value": "G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다."
+        },
+        "verification_run_id": "01a174a1-e0fb-7000-8c82-614a62d90870",
+        "authority": {
+          "kind": "system_llm_agent",
+          "actor": "verifier_exact"
+        },
+        "evidence": "선언된 측정값은 존재하고 대부분 원문으로 확인됨: metric이 지정한 codex-mcp-client/goal-outcomes-20261024/acceptance.json을 전체 읽어(376행 2회 페이지) required_case_ids가 정확히 [G1~G4,A1~A7] 11개, cases 11개 각 1회 보존, summary required 11/measured_pass 11/remaining[]/measured_fail_case_ids[] 및 not_measured=0(delivery index scoped_observation 일치)을 확인. 11개 케이스 각각의 실제 행동 원문도 직접 읽음: G1 provider-input projection(wire SHA a8428060…)+native direct-wire 5 tests OK+server-extraction-receipt, G2/G3 GLM-5.3 actual-tool-sequence-and-receipts(masc_goal_measure 1/3→3/3, Edit, task-002 submit, request_complete proof_pending)+README, G4 goalless create/execution(node 2+2 exit 0)/submit/approval 원본(goal_id null), A1 boundary README+테스트, A2 observations.json(oracle-only verify_exit 1×2, reference exit 0×2), A3 native operator-evidence 11 tests OK, A4/A5 cohort observations+duplicate-key 거부 exit 1×4+cohort-identities after.json(6 pass/1 Docker skip/4 fixtures)+root-check.txt(7 tests OK skipped=1), A6 native blocks(response identity 18 checks, eval_calibration 22 tests), A7 outcome-api README+a7-goal-readback(Executing 0/3)+a7-fitness. 소스/후보빌드/격리실행/운영 구분, 3228 보조 분리, 이력 실패 보존도 관측상 유지됨. 그러나 target의 'Goal 현재 revision과 증거 identity 불일치=0'이 충족됨으로 확인할 수 없음: 제출 record는 현재 revision b39a4c8dc8d4af965c4d87ef802c17db에 귀속되는데, 그 record가 인용하는 증거 원문들(delivery index.json, manifest.json, actor evidence 문구 'criterion 306708facbfb9379a9e51b8f7c815678 unchanged')은 전부 다른 revision 306708fa에 고정되어 있고, 원문 acceptance.json에는 criterion revision 필드가 없어 두 해시의 관계를 화해할 조회 수단이 없음. 현재 revision과 증거 identity 간 최소 1건의 불일치(또는 미확인)가 관측되어 11/11을 현재 revision의 측정값으로 수용할 수 없음. 부수적으로 acceptance.json SHA-256 4fdd1ec8 동일성 주장은 해시 재계산 도구가 없어 미검증(바이트 수 26469만 일치 확인). 조회 도구 실패가 아니라 선언된 identity 조건의 관측 불일치·미확인이 REJECT 사유임.",
+        "recorded_at": "2026-10-25T20:00:53Z"
+      }
+    },
+    "submitted_evidence": [],
+    "updated_at": "2026-10-25T20:00:53Z"
+  },
+  "measurement": {
+    "id": "9c3a71e210ca7cf762e87f1563afdd12",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "b39a4c8dc8d4af965c4d87ef802c17db",
+    "observed_value": "11/11 original fixed behavior cases within retained per-source and isolated actual execution scopes; not_measured=0. G1/G4/A1-A7 historical scopes and 328 G2/G3 preserved, 3228 supplements separate. Not a single-head rerun or production-install result.",
+    "evidence": "note:Shared Goal-tool playground-root relative delivery index codex-mcp-client/goal-outcomes-delivery-20261026-v1/index.json links exact11 case leaf files and byte-exact pinned repository/result mirrors; manifest codex-mcp-client/goal-outcomes-delivery-20261026-v1/manifest.json SHA256 2003ed2a127f1dfdbf9d174685d982632c6af99c42c78deed607ad5e749018a8. Canonical codex-mcp-client/goal-outcomes-20261024/acceptance.json stays byte-for-byte SHA2564fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e and criterion306708facbfb9379a9e51b8f7c815678 unchanged. Delivery-only mirror, no new execution or pooled cohorts. The actual source/result files are provided for separate verifier judgment; reported11/11 is not that judgment or human final confirmation.",
+    "actor": "originals-0dc-replay-operator",
+    "recorded_at": "2026-10-25T19:55:28Z"
+  }
+}

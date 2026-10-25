@@ -1,0 +1,76 @@
+{
+  "schema": "masc.originals0dc.semantic-response.v1",
+  "status": "FINAL_FROZEN",
+  "at_utc": "2026-10-25T20:13:17.773375+00:00",
+  "verdict": "AGREE_QUALIFIED_IDENTITY_REJECT_HARNESS_CONFOUND_FULL11_UNPROVEN",
+  "review": {
+    "label": "originals0dc-sufficiency-review/review.json",
+    "bytes": 24219,
+    "sha256": "05baa2f66da150a21c9abb02f7f501bf9f38ed971cffa498158832478832cf5e",
+    "read_in_full": true
+  },
+  "protocol": {
+    "bytes": 11029,
+    "sha256": "30100f8f7008a79ccaa897887a6df3892528427addc8d8d007f0520d3b6cea49",
+    "unchanged": "Protocol-only PASS preserves actualREJECT; it does not endorse semantic correctness. No154-inventory or complete protocol re-audit repeated."
+  },
+  "identity": {
+    "run_id": "01a174a1-e0fb-7000-8c82-614a62d90870",
+    "fixture_revision": "b39a4c8dc8d4af965c4d87ef802c17db",
+    "historical_primary_revision": "306708facbfb9379a9e51b8f7c815678",
+    "source": "9099/0dc",
+    "binary": "frozen3e"
+  },
+  "adjudication": [
+    "AGREE: target requires zero current-revision/evidence-identity mismatch. Actual user binds measurement toB39 while read index/evidence retain3067; no model-visible authoritative reconciliation is established. Conservatively declining approval is defensible.",
+    "QUALIFY: the private plan preserves identical title/metric/target, but normal fresh-Goal creation intentionally generatesB39 while historical inputs preserve3067. That harness identity confound prevents attributing theREJECT to repaired read-scope behavior. The fixture measurement itself is correctly bound; no stale-measurement, tampering, or primary3067 mismatch is proved.",
+    "AGREE: claiming actual originals for every11 case were checked exceeds returned evidence. Rejecting an unresolved required conjunct need not exhaust all other conditions, but it does not validate these supporting claims.",
+    "G2: read postapproval sequence lacks selected keeper_task_create arguments and authoritative link; available checkpoint is unread. A1: README/Node verify observations do not supply unread same-snapshot verify/regression/build receipts. A3: operator/TUI withholding is observed; separate judge attachment guard is unread. A7: actual early fitness components/metrics are null; unread later record distinguishes lifecycle1.0 from external_acceptance unobserved1. Null is not that taxonomy.",
+    "These are unproved subconditions and supporting-claim overreach, not underlying behavior failures or a false-approval event. No full11PASS or A3/A7 repair follows. Prior428e A1 content cannot be credited into this run.",
+    "Lack of a hash tool is an epistemic limit, not an observed digest mismatch or a new acceptance requirement. No new read-count, full-file, model-independence or success criterion is added."
+  ],
+  "selected_actual_page_bindings": {
+    "columns": [
+      "step",
+      "returned_bytes",
+      "content_sha256"
+    ],
+    "rows": [
+      [
+        2,
+        5086,
+        "0e52042fcd450c08024b068a6b139516b2cef8e26dceb9d4d7bf04772086d3c7"
+      ],
+      [
+        23,
+        10317,
+        "739631556cc1787e6eb647023597f4c2827bc673d9acaa032384f8f1e24b600b"
+      ],
+      [
+        35,
+        1380,
+        "8f5ec6dcb340496cede1203690fc3dc4078c99ef8270088fa6acf9d1b511ffcd"
+      ],
+      [
+        37,
+        2212,
+        "1391f0eb56991349238cc8ef74eba40b05c22a7c6fe0024144154010f07b9d0f"
+      ],
+      [
+        39,
+        1165,
+        "032a86ca7fbdf1031d0292ce4d76416de8b503935d1bf562dc5e76bc384eb98f"
+      ]
+    ]
+  },
+  "method": "Compared selected actual role=tool contents to retained slices and inspected the four available-but-unread decisive originals. Reviewer access does not backfill model observation. Hidden reasoning and private payloads are not exported.",
+  "limits": "ActualREJECT/proof_refuted/executing is unchanged. OriginalGoal remains a separate incomplete objective; Executing/Idle is parent-reported, not freshly queried. No new replay/prompt revision, underlying11 rerun, primary proof, human confirmation, causalA/B, reliability, install, formal approval or merge.",
+  "effects": {
+    "API_Git_model_build_test_CI_runtime_process_control_or_Board_calls": 0,
+    "source_Task_Goal_store_PR_existing_artifact_mutations": 0,
+    "new_agents": 0,
+    "external_messages": 0,
+    "only_new_output": "response.json"
+  },
+  "stable_inputs_rechecked": true
+}

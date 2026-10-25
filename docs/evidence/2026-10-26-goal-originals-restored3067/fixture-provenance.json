@@ -1,0 +1,140 @@
+{
+  "schema": "masc.goal.restored3067.fixture-provenance.v1",
+  "bootstrap": {
+    "schema": "masc.goal.restored3067.fixture-bootstrap.v1",
+    "captured_at_utc": "2026-10-25T20:51:18.468310+00:00",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "measurement_id": "ada74682d5887de03fae493a8690a4c2",
+    "source_files_metadata_only": [
+      {
+        "file": "goals.json",
+        "bytes": 60660,
+        "sha256": "db80d9313e4f9c2ce43915f83c9350651b53a69662d100657b778b90428064c3",
+        "selected_row_canonical_sha256": "c8036df6e8f73a68bba98352c97335a82d8b0df1731042207c4c7f640ad305c6"
+      },
+      {
+        "file": "goal_measurements.json",
+        "bytes": 22946,
+        "sha256": "8c28f4eafa7a7bc8b4a3ff58460404de898f6479e5f03024bed77cbd2f5da429",
+        "selected_row_canonical_sha256": "5611cd16ae7cc17f218bbb7bf61890eb533686f17f97ddde98f16d52e857bddc"
+      },
+      {
+        "file": "goal_verifications.json",
+        "bytes": 939518,
+        "sha256": "7123eb6b48be2e2cb5332eefa4903247896b66298046b3a1b4d7dc0bf0c54f86",
+        "selected_row_canonical_sha256": "1575930c8649eaaaa28deb6ed179951c99f54ba9143e2e9606d9493f7c5b9474"
+      }
+    ],
+    "files": [
+      {
+        "path": "goals.json",
+        "bytes": 2204,
+        "sha256": "c5828fef99e3feab880a404b72f23f9ea674e3a7c48f8dfe5c4bed3574068f66"
+      },
+      {
+        "path": "goal_measurements.json",
+        "bytes": 1366,
+        "sha256": "41ca4fd4388cab10bf9977718546a5a55ef90114589d1265ab1f57dfd723b496"
+      },
+      {
+        "path": "goal_verifications.json",
+        "bytes": 275,
+        "sha256": "8c7d2669a0eeb7321acd43b4deef98a7a60f41619698a36adefdfaeb2fbdaa4c"
+      }
+    ],
+    "selected_records_value_equal_to_authoritative_files_and_before_after_normal_API": true,
+    "wrapper_versions_are_new_fixture_envelopes": true,
+    "goal_outbox_is_empty": true,
+    "normal_primary_Goal_mutations": 0,
+    "scope": "Trusted prestart isolated fixture extraction, not normal new Goal creation, an atomic whole-workspace snapshot, byte-exact copies of whole primary stores, a primary restore or a forged verdict. Same selected record values preserve current3067 identity. Historical76 evidence files remain a separately byte-exact packet."
+  },
+  "actual_prestart_install": {
+    "files": [
+      {
+        "path": "goals.json",
+        "bytes": 2204,
+        "sha256": "c5828fef99e3feab880a404b72f23f9ea674e3a7c48f8dfe5c4bed3574068f66"
+      },
+      {
+        "path": "goals.json.last-good",
+        "bytes": 2204,
+        "sha256": "c5828fef99e3feab880a404b72f23f9ea674e3a7c48f8dfe5c4bed3574068f66"
+      },
+      {
+        "path": "goal_measurements.json",
+        "bytes": 1366,
+        "sha256": "41ca4fd4388cab10bf9977718546a5a55ef90114589d1265ab1f57dfd723b496"
+      },
+      {
+        "path": "goal_verifications.json",
+        "bytes": 275,
+        "sha256": "8c7d2669a0eeb7321acd43b4deef98a7a60f41619698a36adefdfaeb2fbdaa4c"
+      }
+    ],
+    "runtime_server_or_proxy_started_before_install": false,
+    "scope": "Only this new unstarted isolated base; no production files are written."
+  },
+  "normal_primary_selected_before_after": {
+    "bytes": 3594,
+    "sha256": "0b625ef27c4c1adca1e9078f63bd9182502a096caca68d1e10ab104411494437",
+    "equal": true,
+    "phase": "executing",
+    "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "measurement_id": "ada74682d5887de03fae493a8690a4c2",
+    "verification_completion": "idle"
+  },
+  "harness_manifest": {
+    "schema": "masc.goal.restored3067.harness-sources.v1",
+    "files": [
+      {
+        "file": "masc-goal-originals-restored3067-20261026.py",
+        "bytes": 10238,
+        "sha256": "8f54417bd13723b7412efb353215e36fbedc0a316dabf9f95969dd7e2a6c3c3c"
+      },
+      {
+        "file": "masc-goal-restored3067-canary-20261026.py",
+        "bytes": 24356,
+        "sha256": "a4b0cc9a88f3a7f303b620270dc29af45e4f4c8f0d20a04b68221ef128010b6d"
+      },
+      {
+        "file": "masc-goal-restored3067-snapshot-20261026.py",
+        "bytes": 3941,
+        "sha256": "043d562314f7d878fcbfe32f4604237b3c5d58cb0d59c0ded0b641fb3b0404e4"
+      },
+      {
+        "file": "masc-goal-declared-aggregate-control-20261026.py",
+        "bytes": 8191,
+        "sha256": "f169f09d39825acca30f7179d8dab8d1fb17cc87fc1dae35e6e1d66ef2d44b21"
+      },
+      {
+        "file": "masc-goal-proof-provenance-controls-20261026.py",
+        "bytes": 13498,
+        "sha256": "27eddedaa65bede3cd6b9e6bc13404f420db6a00ccf81e1c6d8ef3b5e1c09b98"
+      },
+      {
+        "file": "masc-goal-required-originals-negative-20261026.py",
+        "bytes": 8813,
+        "sha256": "0f541215675151c4efa45b2c271417aaee30e854289d38b41a5fee49a87c33d9"
+      },
+      {
+        "file": "canary.py",
+        "bytes": 23079,
+        "sha256": "a60067e9d5d3ba8c6ce194056db0754f49171a68b4715d821f9c7193fab89830"
+      },
+      {
+        "file": "wire_proxy.py",
+        "bytes": 5021,
+        "sha256": "9ec19df518e28d16cb0bfb42a843115b4b820db4384a7787cd8ab517eca3bf60"
+      },
+      {
+        "file": "masc-goal-delivery-mcp-20261026.py",
+        "bytes": 3193,
+        "sha256": "08d97ffd1307aac32dae31df1cffbed276f0609eccf25fbee59f60b4ee32790c"
+      }
+    ],
+    "scope": "Exact prelaunch source copies, not an execution result.",
+    "public_projection": "Source path locators omitted; file labels, bytes and SHA256 retain exact nine frozen source identities. This is a metadata projection, not a byte-exact source manifest copy."
+  },
+  "scope": "Selected values equal authoritative files and normal API before/after. New fixture envelopes with empty outbox, not whole-store byte copies or an atomic primary snapshot. Only selected Goal/measurement/Idle records installed in the new private base before runtime launch. Zero isolate upsert/measure calls. Same restored identifiers never make primary effects or authorize copying the isolated verdict back."
+}

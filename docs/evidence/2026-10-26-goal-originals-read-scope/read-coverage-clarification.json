@@ -1,0 +1,82 @@
+{
+  "schema": "masc.goal.originals.428e.read-coverage-clarification.v1",
+  "recorded_at_utc": "2026-10-25T19:30:15.908999+00:00",
+  "source_result_sha256": "e2c86a51ba9bded8d2850083c7ca25327d0179890dcccce10a7a2117a25c75ac",
+  "frozen_private_originals_manifest_sha256": "aabafc30054b561115afb01984a76e7b75b26aa24c4c91ee2d82a09e8dd92b70",
+  "successful_lookup_calls": 44,
+  "nonempty_lookup_pages": 42,
+  "empty_EOF_lookup_calls": [
+    {
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification.log",
+      "requested_offset": 1193,
+      "returned_lines": 0,
+      "ok": true
+    },
+    {
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_anti_rationalization_empty_reject.log",
+      "requested_offset": 3389,
+      "returned_lines": 0,
+      "ok": true
+    }
+  ],
+  "truncated_lookup_pages": [
+    {
+      "path": "codex-mcp-client/goal-outcomes-20261024/acceptance.json",
+      "offset": 1,
+      "bytes": 19721,
+      "file_bytes": 26469,
+      "returned_lines": 301
+    },
+    {
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/manifest.json",
+      "offset": 1,
+      "bytes": 19912,
+      "file_bytes": 34933,
+      "returned_lines": 251
+    },
+    {
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/repository/docs/evidence/2026-10-25-goal-playground-bootstrap/coding-boundary/actual-coding-boundary.json",
+      "offset": 1,
+      "bytes": 19969,
+      "file_bytes": 29007,
+      "returned_lines": 537
+    },
+    {
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/originals/A6/masc-goal-native-7501-clean.log",
+      "offset": 1799,
+      "bytes": 631,
+      "file_bytes": 667501,
+      "returned_lines": 6
+    },
+    {
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_tui_decode.log",
+      "offset": 2111,
+      "bytes": 1410,
+      "file_bytes": 115621,
+      "returned_lines": 30
+    },
+    {
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A3/test_verification.log",
+      "offset": 1,
+      "bytes": 1297,
+      "file_bytes": 62709,
+      "returned_lines": 25
+    },
+    {
+      "path": "codex-mcp-client/goal-outcomes-delivery-20261026-v1/native/A6/test_anti_rationalization_empty_reject.log",
+      "offset": 1,
+      "bytes": 1407,
+      "file_bytes": 13328,
+      "returned_lines": 25
+    }
+  ],
+  "interpretation": "The result counts44 successful lookup calls, including2 empty EOF responses; it does not claim44 nonempty pages or44 complete original files. Both EOF files were subsequently read at offset1. Large source size in the verdict reason is metadata, not proof of reading every byte.",
+  "G1_scope": {
+    "metadata_projection_bytes": 825,
+    "goal_context_slice_bytes": 1079,
+    "referenced_raw_request_bytes": 73127,
+    "whole_raw_request_read_in_this_replay": false
+  },
+  "sufficiency": "Whether the actual returned content satisfies every required condition is decided separately. Partial/empty reads do not automatically prove failure or success.",
+  "existing_frozen_result_or_originals_modified": false
+}

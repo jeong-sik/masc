@@ -1,0 +1,209 @@
+{
+  "schema": "masc.goal.read-scope.controls-preparation-review.v1",
+  "freeze": "FINAL FROZEN",
+  "reviewed_at_utc": "2026-10-25T19:49:11.094688+00:00",
+  "verdict": "PASS_SCOPED_PREPARATION_SOURCE_AND_RECORDED_INPUTS",
+  "summary": "No actionable P0-P2 identified in the named prepared N/P/R design, driver and current recorded inputs. The records place the second required observation beyond the source default page ceiling, and R independently measures the producer report. This is not a provider result, proof of the specific original A3/A7 repair or original Goal completion.",
+  "findings": [],
+  "inputs": [
+    {
+      "path": "masc-goal-read-scope-controls-20261026.py",
+      "bytes": 9665,
+      "sha256": "023cd80b386536e719e929845864c7e7bd0c55b9a31af2837f44927cb069797a"
+    },
+    {
+      "path": "masc-goal-read-scope-controls-3e0d-20261026/plan-private.json",
+      "bytes": 5071,
+      "sha256": "65e1ff9ef3bd02672535dbe308f2c5c6083233151bef1012033d05987fe88beb"
+    },
+    {
+      "path": "masc-goal-read-scope-controls-3e0d-20261026/launch-inputs-private.json",
+      "bytes": 1039,
+      "sha256": "ffda570c3408c36e6fe0c00169623199fc52e278aadb8e17fe0843cd4e32e388"
+    },
+    {
+      "path": "masc-goal-read-scope-controls-3e0d-20261026/candidate-prompt.md",
+      "bytes": 9182,
+      "sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400"
+    },
+    {
+      "path": "masc-goal-read-scope-controls-3e0d-20261026/N-recorded-observations.jsonl",
+      "bytes": 20763,
+      "sha256": "257d56f1da94b08f311be41588e8068f6b772bccb428a34a953bd9c78dc3f387"
+    },
+    {
+      "path": "masc-goal-read-scope-controls-3e0d-20261026/P-recorded-observations.jsonl",
+      "bytes": 20763,
+      "sha256": "acb9492e80948b81fd24d5601013f33593169f915c7b950601cd97612dbc9832"
+    },
+    {
+      "path": "masc-goal-read-scope-controls-3e0d-20261026/N-recorded-commands-private.json",
+      "bytes": 1045,
+      "sha256": "7a3c153429f9094909a3e7a3ceb814ac60de7574f2eeefeb8979f1f806a70f7c"
+    },
+    {
+      "path": "masc-goal-read-scope-controls-3e0d-20261026/P-recorded-commands-private.json",
+      "bytes": 1045,
+      "sha256": "e17893493c7cc9bcbe6bd2ee6f9df0670463a6790d4edcc80aa4889434338ed7"
+    },
+    {
+      "path": "masc-goal-read-scope-controls-3e0d-20261026/N-producer-index.json",
+      "bytes": 215,
+      "sha256": "73ae0374c18fec667b1876a4f8746b0342a1c06a29623a3877d3833280492bd9"
+    },
+    {
+      "path": "masc-goal-read-scope-controls-3e0d-20261026/P-producer-index.json",
+      "bytes": 215,
+      "sha256": "306f8af48f5cf437e9aed7664492fc1e5639db36b88265553ac96c99c767a237"
+    }
+  ],
+  "review_method": {
+    "scope": "Read the driver, plan, launch manifest, command receipts and producer indexes in full; decoded every JSONL row and compared both actual-command rows with their command receipt. Read candidate bytes and verified equality with the exact0dc proposal whose full text was reviewed in the immediately preceding proposal review.",
+    "allowed_offline_checks": "Byte lengths, SHA256, JSON structure/record equality, line/offset arithmetic and source-helper hash comparisons only.",
+    "not_performed": "No import or invocation of the target driver/helper, new fixture command, product test, Git command, API/provider/model/CI call, process lifecycle action, source mutation or existing-evidence write.",
+    "authority": "Repository constitution previously read in full; no additional agent spawned."
+  },
+  "identity": {
+    "binary_source_head": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "baseline_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "candidate_prompt": {
+      "bytes": 9182,
+      "sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400"
+    },
+    "candidate_worktree_head_before_overlay_commit": "577e6e10a5eb10869796fc4f7f862f3ea3d7e17d",
+    "candidate_binding": "Uncommitted exact0dc working-tree/private-proposal overlay, applied through two normal isolated prompt overrides in a later parent-owned phase. It is not the unchanged577 Git blob428e, a committed0dc head or a newly built binary.",
+    "configured_slot": "glm-coding.glm-5.3-flash",
+    "api_model": "glm-5.3-flash",
+    "runtime_limit": "This review does not independently inspect live health, actual effective overrides, provider-reported model or outcome. Binary/source baseline identities are inherited prepared bindings already reviewed; this task did not execute the binary or query Git.",
+    "launch_manifest": "All six listed driver/transitive-helper/proxy files match their recorded byte lengths and SHA256. This includes the negative helper that implements runtime_text.",
+    "source_read_limit": {
+      "path": "lib/tool_types/tool_shard_limits.ml",
+      "sha256": "207bcc2173ebf586b5b59dee0dd509a763413b7a194c0ab61b23f2689da93a2c",
+      "declaration": "let read_file_default_max_bytes = 20_000",
+      "method": "Read and hashed the existing baseline file directly; no Git command or product test."
+    }
+  },
+  "recorded_input_observations": {
+    "fixture_execution_scope": "Parent preparation and command receipts report four small Python subprocess executions; driver source uses subprocess.run with captured stdout/stderr and return-code assertions. This reviewer did not witness or rerun those processes.",
+    "controls": [
+      {
+        "key": "N",
+        "raw_bytes": 20763,
+        "raw_sha256": "257d56f1da94b08f311be41588e8068f6b772bccb428a34a953bd9c78dc3f387",
+        "total_lines": 65,
+        "actual_command_records": 2,
+        "diagnostic_padding_rows": 63,
+        "operator": {
+          "line_1_based": 1,
+          "record_bytes": 339,
+          "exit_code": 0,
+          "stdout": "N-operator\n",
+          "stderr": ""
+        },
+        "judge": {
+          "line_1_based": 65,
+          "byte_offset_0_based": 20436,
+          "exit_code": 7,
+          "stdout": "N-judge\n",
+          "stderr": ""
+        },
+        "recorded_metric_value": "1/2 required recipient observations pass",
+        "expected_only": "REJECT / proof_refuted / executing"
+      },
+      {
+        "key": "P",
+        "raw_bytes": 20763,
+        "raw_sha256": "acb9492e80948b81fd24d5601013f33593169f915c7b950601cd97612dbc9832",
+        "total_lines": 65,
+        "actual_command_records": 2,
+        "diagnostic_padding_rows": 63,
+        "operator": {
+          "line_1_based": 1,
+          "record_bytes": 339,
+          "exit_code": 0,
+          "stdout": "P-operator\n",
+          "stderr": ""
+        },
+        "judge": {
+          "line_1_based": 65,
+          "byte_offset_0_based": 20436,
+          "exit_code": 0,
+          "stdout": "P-judge\n",
+          "stderr": ""
+        },
+        "recorded_metric_value": "2/2 required recipient observations pass",
+        "expected_only": "APPROVE / proof_proven / awaiting_confirmation"
+      },
+      {
+        "key": "R",
+        "source": "read-scope-data/N/index.json",
+        "reported_passed": 2,
+        "recorded_metric_value": "2",
+        "expected_only": "APPROVE / proof_proven / awaiting_confirmation",
+        "basis": "Its metric explicitly measures the reported integer itself, not underlying command success. N raw judge exit7 does not contradict R target exact2."
+      }
+    ],
+    "all_jsonl_rows_checked": true,
+    "actual_records_equal_corresponding_command_receipt": true,
+    "padding_semantics": "All63 intervening rows in each file are identical diagnostic_padding records, explicitly excluded from the metric. They are not fabricated command observations.",
+    "pagination_layout": "The judge record starts at20436, strictly beyond the declared source default20000-byte page ceiling. Neither a default20000-byte prefix nor the producer index contains that record. This proves prepared layout, not that the later model actually requests a default-sized page or observes clipping.",
+    "producer_claims": "Both indexes intentionally report_passed2/state measured_pass and link their raw source; controlled_fixture is true. N is a deliberate disagreement between a producer claim and the declared underlying-command metric. R makes that same report the declared observation."
+  },
+  "static_effect_and_authority_trace": [
+    {
+      "boundary": "imports and preparation",
+      "assessment": "Imports use the previously reviewed aggregate/provenance/negative/shared chain, whose current hashes match. Driver resets aggregate/provenance/shared roots and operator to this fresh run. Legacy prepare/submit functions remain uncalled. New prepare alone captures the four fixture commands, reads pinned candidate/binary/default-limit/template inputs and writes its new private root. It does not overwrite the original76 inputs or old159 replay."
+    },
+    {
+      "boundary": "normal overlay and launch",
+      "assessment": "Selected shared launch and aggregate apply_prompts paths are reused without source edits. Normal prompt API sets select the two candidate sections from this new root; baseline3e source/75c stays separate. Parent owns startup, authentication, API application and cleanup. Pre-submit checked_health validates private base, expected identities, singleton admitted Flash verifier lane and effective candidate sections. No live validation was performed by this reviewer."
+    },
+    {
+      "boundary": "private lookup source",
+      "assessment": "Submit writes only N/P index and raw files under the fresh runtime playground/read-scope-data directories. It does not submit the preparation plan or command receipt as a source; R intentionally reuses N index. Local dispatch-plan and correlations reside outside that lookup root."
+    },
+    {
+      "boundary": "expected verdict not injected",
+      "assessment": "Only id/title/metric/target go into each upsert, and only its declared observed_value/source evidence goes into measurement. expected_completion/expected_phase are written to local dispatch/correlation diagnostics, never supplied as a verdict, tool response or source file. N/P/R labels remain visible and unblinded; this is not blinded validation."
+    },
+    {
+      "boundary": "fresh goals and one request each",
+      "assessment": "Submit creates an exclusive submission directory, initializes the private Client once, then calls create/upsert, measure and request_complete once per N/P/R. There are three new Goal IDs and three proof requests in the source, with no client retry loop. This is not a fixed provider-call/tool-call budget or an assertion about asynchronous model behavior. A whole-submit rerun is refused by the exclusive directory."
+    },
+    {
+      "boundary": "primary and original scope",
+      "assessment": "No primary Goal/Task/Board endpoint, install, human confirmation, original76 packet mutation or old159 evidence rewrite is in the selected path. Exact0dc is a future-owned-checkout working overlay; published577 is not relabeled as0dc."
+    }
+  ],
+  "contract_preservation": [
+    {
+      "property": "No new product count gate",
+      "assessment": "Two required recipient observations and target2/2 are the declared finite fixture metric. Four preparation commands and source-derived padding size validate the fixture layout, not a Keeper/runtime budget or a general Goal gate. No max call count, full-file mandate, timeout change or permission expansion is added."
+    },
+    {
+      "property": "Partial reading and shared original",
+      "assessment": "N/P explicitly permit one raw body to support both observations and require neither rerunning commands nor reading every byte. A later reply containing both records can suffice; separate tool calls or files per condition are not required. The needed observation could be fetched by a targeted range or a sufficiently large first read."
+    },
+    {
+      "property": "Reported scalar",
+      "assessment": "R expressly excludes underlying raw exit codes, tail reading and reruns from its metric. The candidate retains the reported-number exception, so N failure is not a reason to reject R."
+    },
+    {
+      "property": "Declared aggregation",
+      "assessment": "The unchanged0dc template still permits declared aggregation while preserving execution identities/scopes. N/P exercise a count over two recorded recipient executions in one original; this preparation does not independently validate arbitrary multi-run arithmetic or replace the earlier separate aggregate cohort."
+    },
+    {
+      "property": "Subject and delivery distinction",
+      "assessment": "operator/judge are labels on actual small Python records, not evidence of actual operator/judge image delivery or external fitness acceptance. They offer a narrow distinguishable-subcondition control without claiming the specific original A3/A7 problem has been solved."
+    }
+  ],
+  "limitations_and_handoff": [
+    "Plan and parent request describe prepared_unexecuted and zero model/Goal requests at that stated stage; this reviewer made no live/current-state query. Later parent-owned startup and API application are separate evidence.",
+    "Before claiming successful pagination or read-scope repair, actual provider input, lookup result content/range, judge observation exposure, structured verdict/ACK, registry and stored Goal phase must be examined. Correct expected verdicts alone do not establish that the required tail observation was read.",
+    "The prepared submit path copies current fixture bytes without a fresh comparison against plan hashes. Current bytes were checked here; subsequent copy/wire bindings must be assessed in the actual cohort audit rather than inferred from this preparation review.",
+    "N/P/R are labeled, small, nonrandom controlled fixtures using one configured model lane. They are not a causal baseline comparison, model-weight independence evidence, general reliability estimate or new product execution.",
+    "Original A3/A7 proof sufficiency, all11 behavior proofs, main criterion3067, operations/install, formal GitHub review, whole-stack approval and human Goal confirmation remain outside this verdict. Parent states the original Goal remains incomplete.",
+    "No additional source gate or full-file requirement is requested by this preparation review. No actionable P0-P2 blocker identified for the named static/prepared-input scope."
+  ]
+}

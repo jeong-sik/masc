@@ -1,0 +1,113 @@
+{
+  "schema": "masc.goal.read-scope.proposal-review.v1",
+  "freeze": "FINAL FROZEN",
+  "reviewed_at_utc": "2026-10-25T19:39:36.362110+00:00",
+  "verdict": "PASS_SCOPED_PRIVATE_SOURCE_PROPOSAL",
+  "summary": "The two additions address distinct declared subconditions and the content actually returned by lookup. No new actionable P0-P2 was found within the four-file proposal. Existing reported-number, declared aggregation and shared-original rules remain intact. This verdict establishes neither application nor measured repair effectiveness.",
+  "findings": [],
+  "scope": {
+    "read_in_full": [
+      "baseline.md",
+      "candidate.md",
+      "plan.json",
+      "proposal.patch"
+    ],
+    "baseline_head": "577e6e10a5eb10869796fc4f7f862f3ea3d7e17d",
+    "baseline_binding": "Baseline bytes match the previously reviewed exact577 prompt identity428e. This task did not make a new Git/API query.",
+    "proposal_state": "Plan declares PROPOSED_NOT_APPLIED_UNEXECUTED; parent reports no source checkout or PR change. This review read the private proposal only, without independently interrogating source checkouts or runtime state.",
+    "method": "Full text reading, SHA256, JSON inspection and an offline exact unified-diff comparison. No proposal application, product/helper execution, test/model/native/CI call, API or process lifecycle action.",
+    "authority": "Repository constitution was previously read in full. No additional reviewer was spawned."
+  },
+  "inputs": [
+    {
+      "path": "masc-goal-read-scope-proposal-20261026-v1/baseline.md",
+      "bytes": 8143,
+      "sha256": "428e2d7fd1db9ea920ff67ac1a959fa9e91867776b0ee40bef8b7f022307a47d"
+    },
+    {
+      "path": "masc-goal-read-scope-proposal-20261026-v1/candidate.md",
+      "bytes": 9182,
+      "sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400"
+    },
+    {
+      "path": "masc-goal-read-scope-proposal-20261026-v1/plan.json",
+      "bytes": 1864,
+      "sha256": "76de74b72fd92df51aff36112091d714c70819b4cc054a47eed7ac866110565f"
+    },
+    {
+      "path": "masc-goal-read-scope-proposal-20261026-v1/proposal.patch",
+      "bytes": 2237,
+      "sha256": "3d997fc82fac3b44f2bbe8930be40b1e60287a7b7fe56bc46b344d47b79ba2b5"
+    }
+  ],
+  "delta_identity": {
+    "exact_patch_matches_baseline_to_candidate_diff": true,
+    "added_lines": 12,
+    "removed_lines": 0,
+    "byte_increase": 1039,
+    "hunks": [
+      {
+        "candidate_lines": "47-50",
+        "purpose": "Distinguish declared observations by subject, state and delivery path within one item; distinguish preparatory or review conclusions from the observations supporting them."
+      },
+      {
+        "candidate_lines": "91-98",
+        "purpose": "Use returned content and range as read coverage; distinguish file metadata and original-log coordinates from current excerpt offsets; do not turn an empty EOF or an unread page into a substantive result."
+      }
+    ],
+    "template_interfaces": "Proof/lookup section names, variables, verdict tool contract and all baseline lines remain unchanged."
+  },
+  "adjudication": [
+    {
+      "axis": "Declared subconditions within one item",
+      "decision": "PASS",
+      "basis": "The addition is conditional on the metric requiring different subject/state/delivery-path observations. It prevents one observed condition or a preparation summary from being substituted for another required observation. It does not require all metrics to include such distinctions, invent a new condition, or prescribe a path/actor list.",
+      "relevance_to_reported_counterexample": "It is a suitable generic instruction for separating judge-input observations and external-acceptance observations from other observations in the same item. The actual159 replay omissions and their severity are a separate semantic audit; this review did not read that cohort."
+    },
+    {
+      "axis": "Actual returned content versus locator metadata",
+      "decision": "PASS",
+      "basis": "File name, total byte size and source-coordinate metadata do not establish that the response contained the required observation. The new paragraph explicitly follows returned content/ranges, permits another targeted read or an honestly unverified condition, and does not infer failure or absence from empty EOF.",
+      "locator_scope": "Original full-log coordinates may differ from offsets in an extracted local file. The proposal distinguishes them without rewriting any locator, retained input or canonical criterion.",
+      "interface_limit": "The instruction refers to returned offset/next_offset values; it does not create a tool field or permission. This four-file review does not independently validate every lookup adapter schema or observed pagination response."
+    },
+    {
+      "axis": "Reported-number metrics",
+      "decision": "PRESERVED",
+      "basis": "Candidate lines42-43 retain the explicit prohibition on undeclared reruns or extra proof for metrics measuring a reported number. The new separation of summaries and underlying observations does not turn a declared reported-number metric into an execution metric. No source/raw-read requirement is added to every metric."
+    },
+    {
+      "axis": "Declared aggregation",
+      "decision": "PRESERVED",
+      "basis": "The unchanged lookup ending permits aggregation of multiple executions according to the declared method while preserving their identifiers/scopes. The additions introduce no one-run-only rule, numeric gate, fixed call count or ban on combining declared observations. Whole-CI failure and individual successful checks can still coexist."
+    },
+    {
+      "axis": "Shared original supporting multiple conditions",
+      "decision": "PRESERVED",
+      "basis": "Candidate line46 explicitly permits one original that actually contains observations for several conditions; unchanged reason instructions also permit explaining such conditions together. Distinguishing observations does not require separate files or tool calls for each condition. A single returned body containing both relevant observations remains usable for both."
+    },
+    {
+      "axis": "Partial reading and unavailable evidence",
+      "decision": "PASS",
+      "basis": "The proposal requires the necessary observations, not every byte or every page. A partial reply can suffice if it contains those observations. If it does not, the prompt permits further targeted lookup or keeping the condition unverified. Existing REJECT rules apply only where the declared target cannot be established; EOF itself is not made a negative observation."
+    },
+    {
+      "axis": "Authority, permissions and completion",
+      "decision": "UNCHANGED",
+      "basis": "No host gate, timeout, budget, schema, lookup permission, lifecycle transition, extra approval actor or Goal requirement is introduced. Read-only lookup, the separation of verifier judgment from human confirmation, and rejection of role-changing instructions remain as before. Existing verdict/reason requirements are retained rather than newly expanded by this patch."
+    }
+  ],
+  "proposal_plan_assessment": {
+    "narrow_design": "Fresh finite partial-content negative/positive controls with recorded observations after a page boundary, plus a reported-number control, are relevant to the proposed instructions. They are a prospective design, not existing execution evidence.",
+    "locator_followup": "Separately identifying original versus excerpt coordinates is compatible with preserving the76 retained inputs. That proposed followup has not been implemented or evaluated by this reviewer.",
+    "independent_axes_limit": "The stated partial-content controls would primarily exercise content-range reasoning. Success there alone would not establish correct actor/state/delivery-path distinctions in arbitrary metrics or close the specific A3/A7 omissions.",
+    "no_reliability_claim": "Any later finite-control verdicts need their actual inputs, tool results and stored outcomes. This review predicts neither model compliance nor a success rate."
+  },
+  "retained_scope_limits": [
+    "The parent-reported159-original replay with14POST/45tools/44 successful read replies including2EOF and APPROVE is not independently re-audited here. Its possible A3/A7 proof-sufficiency P2 remains separate from this proposal-source PASS.",
+    "No actual new control, original-eleven behavior rerun, successful repair, primary criterion3067 proof, human confirmation, operation/install, formal GitHub approval or whole-stack approval is established.",
+    "The four private proposal files and this new report do not themselves modify the published577 source, old428e/529f cohorts, existing evidence packet, original metric or runtime.",
+    "A prompt instruction is guidance to a model rather than a host-enforced guarantee of complete evidence reading. Later actual returned content and the scope of the verdict must still be examined."
+  ],
+  "handoff": "No source-proposal blocker identified in the requested scope. Keep application, exact effective prompt, actual controls, semantic replay audit and formal review as separate evidence layers."
+}

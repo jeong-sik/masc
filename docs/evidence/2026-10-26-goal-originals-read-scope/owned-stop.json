@@ -1,0 +1,32 @@
+{
+  "schema": "masc.goal.originals.428e.owned-process-stop.v1",
+  "stopped_at_utc": "2026-10-25T19:26:19.328222+00:00",
+  "processes": [
+    {
+      "record": "server-process-private.json",
+      "pid": 10278,
+      "exact_spawn_identity_matched_before_signal": true,
+      "signal": "SIGTERM",
+      "signal_replayed": false,
+      "same_pid_absent_on_reconciliation": true,
+      "reconciliation_ps_returncode": 1
+    },
+    {
+      "record": "proxy-process-private.json",
+      "pid": 10276,
+      "exact_spawn_identity_matched_before_signal": true,
+      "signal": "SIGTERM",
+      "same_birth_identity_while_waiting": true,
+      "post_signal_ps_returncode": 1,
+      "same_pid_absent": true
+    }
+  ],
+  "initial_cleanup_assertion": {
+    "phase": "after the server SIGTERM, before proxy signalling or stop-receipt write",
+    "observation": "Immediate full-command ps identity comparison failed; its transient raw output was not retained. A later read found the server PID absent. No cause such as zombie state is asserted.",
+    "server_SIGTERM_calls": 1,
+    "proxy_SIGTERM_calls_before_reconciliation": 0,
+    "server_signal_replayed": false
+  },
+  "scope": "Only the two owned process identities; no descendant or fleet-wide cleanup claim."
+}

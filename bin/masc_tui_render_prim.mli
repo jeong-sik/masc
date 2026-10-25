@@ -634,6 +634,10 @@ val path_from_root : root:string -> string -> string
 val config_pane_strip :
   cols:int -> before:string -> after:string -> Masc_tui_types.state -> string
 
+val system_subnav_row : Masc_tui_types.state -> string
+(** Clickable System sub-navigation bar (9:Runtime, s:Resources, t:Tools&Skills,
+    A:Activity, L:Logs) and UI language toggle badge (KO/EN). *)
+
 val config_pane_title_head :
   room:int -> name:string -> reading:string -> string
 (** The head of a Config pane's title row in [room] cells: the pane's name and

@@ -752,10 +752,11 @@ let secret_lines (state : state) (k : keeper) =
                 Printf.sprintf "  %s  %s" lead (Terminal_text.single_line name))
               names
       in
-      [ status_line
-      ; Printf.sprintf "  Root:    %s" (Terminal_text.single_line p.ksp_root)
-      ; ""
-      ]
+      detail_section_lines ~first:true "1. 시크릿 상태 · 루트 경로 (Status & Root)"
+      @ [ status_line
+        ; Printf.sprintf "  Root:    %s" (Terminal_text.single_line p.ksp_root)
+        ]
+      @ detail_section_lines "2. 환경변수 · 시크릿 파일 (Env & Files)"
       @ entry_lines "Env: " p.ksp_env_names
       @ (match p.ksp_file_paths with
          | [] -> []
@@ -1630,6 +1631,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                   ^ Terminal_text.single_line connector.cn_display_name
                   ^ Ansi.reset
                 ]
+                @ detail_section_lines "1. 연결 상태 · 트리거 및 응답 정책 (Connection & Routing Policy)"
                 @ field "Binding target"
                     (match selected_binding with
                      | None -> "(no binding selected)"
@@ -1657,6 +1659,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 @ optional_row "Trigger policy" connector.cn_trigger_policy
                 @ optional_row "Reply mode" connector.cn_reply_mode
                 @ optional_row "Chat database" connector.cn_chat_db_path
+                @ detail_section_lines "2. 봇 자격증명 · 프로세스 상태 (Bot Credentials & Process)"
                 @ optional_row "Bot user" connector.cn_bot_user_name
                 @ optional_row "Bot user id" connector.cn_bot_user_id
                 @ optional_bool_row "Bot token ready" connector.cn_bot_token_present
@@ -1664,6 +1667,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 @ optional_bool_row "Gate healthy" connector.cn_gate_healthy
                 @ optional_int_row "Server pid" connector.cn_pid
                 @ optional_int_row "Guilds" connector.cn_guild_count
+                @ detail_section_lines "3. 디렉토리 동기화 · 이름 매핑 파일 (Directory & Name Mapping)"
                 @ optional_row "Directory state"
                     (Option.map
                        (function
@@ -1711,7 +1715,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 @ optional_row "Updated" connector.cn_updated_at
                 @ optional_row "Connection error" connector.cn_error
                 @ optional_row "Store error" connector.cn_binding_store_error
-                @ [ ""; Ansi.bold ^ "  Channel → Keeper bindings" ^ Ansi.reset ]
+                @ detail_section_lines "4. 채널 → 키퍼 바인딩 (Channel → Keeper Bindings)"
                 @ binding_lines
                 @ (match connector.cn_name_mappings with
                    | [] -> []

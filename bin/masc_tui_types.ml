@@ -5199,6 +5199,61 @@ let config_panes =
   ; (Config_voice, "voice")
   ]
 
+(** UI display language for top-level navigation, System/Configuration tabs,
+    and categorized detail headers. Defaults to [Lang_ko] and is switchable at
+    runtime via the command palette ([:language]), the System sub-navigation
+    bar, or the Themes pane. *)
+type ui_language =
+  | Lang_ko
+  | Lang_en
+
+let default_ui_language () = Lang_ko
+
+let ui_language_code = function
+  | Lang_ko -> "KO"
+  | Lang_en -> "EN"
+
+let ui_language_label = function
+  | Lang_ko -> "한국어 (KO)"
+  | Lang_en -> "English (EN)"
+
+let next_ui_language = function
+  | Lang_ko -> Lang_en
+  | Lang_en -> Lang_ko
+
+let surface_ring_display_label ~lang ~bilingual (surface : surface) fallback =
+  match lang with
+  | Lang_en -> fallback
+  | Lang_ko ->
+      let ko =
+        match surface with
+        | Overview -> "대시보드"
+        | Planning -> "작업"
+        | Keepers _ -> "키퍼"
+        | Metrics -> "사용량"
+        | Board -> "보드"
+        | Repositories -> "워크스페이스"
+        | Config -> "시스템"
+        | Acting | Memory | Lanes | Clients | Approvals | Schedules
+        | Verification | Harness | Fusion | Code | Changes | Connectors
+        | Runtime | Resources | Tools | System_logs ->
+            fallback
+      in
+      if bilingual then ko ^ " " ^ fallback else ko
+
+let config_pane_display_label ~lang pane fallback =
+  match lang with
+  | Lang_en -> fallback
+  | Lang_ko ->
+      (match pane with
+       | Config_runtime -> "설정파일"
+       | Config_models -> "모델"
+       | Config_params -> "파라미터"
+       | Config_prompts -> "프롬프트"
+       | Config_presets -> "프리셋"
+       | Config_themes -> "테마·언어"
+       | Config_voice -> "음성")
+
 (* Which section the Tools surface is showing. They used to be one scrolling
    list: five sections concatenated, and the first of them is the effective
    surface, which is one row per tool. At ninety-five tools that list ran to
@@ -8165,6 +8220,7 @@ type resource_save_prompt = {
 
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
+  mutable ui_language : ui_language;
   (* Opening process store; workspace withdrawal never replaces its owner. *)
   mutable observation_store : Masc_tui_observation_store.t option;
   mutable home_selected : home_action option;
@@ -15353,6 +15409,14 @@ let complete_task_history_read (state : state) request result =
     state.task_history <- Masc_tui_fetched.complete ~equal:String.equal state.task_history request.thr_ticket result
   end
 
+let ui_text (state : state) ~ko ~en =
+  match state.ui_language with
+  | Lang_ko -> ko
+  | Lang_en -> en
+
+let toggle_ui_language (state : state) =
+  state.ui_language <- next_ui_language state.ui_language
+
 let withdraw_detail_histories (state : state) =
   clear_task_documents state;
   state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
@@ -15371,6 +15435,7 @@ let create_state
   {
   observation_instance = Masc_tui_observation_origin.create_instance
     ~id:(Random_id.uuid_v7 ()) ~client_version:Build_version.current;
+  ui_language = default_ui_language ();
   observation_store = None;
   home_selected = None;
   home_decision_scroll = 0;

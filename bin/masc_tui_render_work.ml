@@ -976,8 +976,16 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
   in
   let optional = function Some value -> value | None -> Masc_tui_theme.Glyph.no_value in
   let _, next_text = planning_next_step goal in
+  let section title =
+    Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
+    |> List.map (fun line -> { Planning_detail.tone = Note; text = "  " ^ line })
+  in
+  let gap = [ { Planning_detail.tone = Quiet; text = "" } ] in
   let metadata =
-    field "Title" goal.pg_title @ field "Goal" goal.pg_id
+    section
+      (ui_text state ~ko:"1. 목표 개요 · 단계 및 지표 (Goal Stage & Target)"
+         ~en:"1. Goal Stage & Target")
+    @ field "Title" goal.pg_title @ field "Goal" goal.pg_id
     @ field "Stage" (Masc_tui_theme.strip_sgr (planning_stage_rail goal.pg_phase ^ "  " ^ planning_proof_mark goal.pg_proof))
     @ field "Next" next_text
     @ field "Metric" (optional goal.pg_metric)
@@ -991,7 +999,12 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
     @ (match state.goal_action_error with None -> [] | Some error -> field ~tone:Planning_detail.Refused "Error" error)
   in
   let linked_tasks = List.filter (fun (row : Tui_decode.task) -> List.mem goal.pg_id row.goal_ids) state.tasks in
-  let linked = match linked_tasks with
+  let linked =
+    gap
+    @ section
+        (ui_text state ~ko:"2. 연결된 작업 (Linked Tasks)"
+           ~en:"2. Linked Tasks")
+    @ match linked_tasks with
     | [] ->
         let note = match state.task_reading with
           | Masc_tui_overview_tasks.Rows_unavailable _ -> page_failed_note
@@ -1026,9 +1039,14 @@ let planning_detail_lines (state : state) ~confirmation ~cols (goal : planning_g
     @ Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
   let wrapped_proof = planning_proof_rows ~width proof in
   (match confirmation with
-   | `Inspect Masc_tui_fetched.Absent -> metadata @ linked @ wrapped_proof
+   | `Inspect Masc_tui_fetched.Absent ->
+       metadata @ linked @ gap
+       @ section
+           (ui_text state ~ko:"3. 검증 판정 · 측정 및 이력 (Verification & Measurement)"
+              ~en:"3. Verification & Measurement")
+       @ wrapped_proof
    | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
-       wrapped_proof @ metadata @ linked)
+       wrapped_proof @ gap @ metadata @ linked)
 
 let planning_detail_header_rows (state : state) ~cols (goal : planning_goal) =
   let phase = "  " ^ bracketed ~max_cells:planning_phase_column

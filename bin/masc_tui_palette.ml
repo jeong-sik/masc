@@ -49,6 +49,7 @@ type palette_action =
   | Palette_goto of surface
   | Palette_usage_scope of string option
   | Palette_config of config_pane
+  | Palette_ui_language of ui_language
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
   | Palette_chat of string
   | Palette_task of string
@@ -236,6 +237,9 @@ let palette_entries (state : state) =
   @ List.map
       (fun (pane, label) -> ("go System / " ^ label, Palette_config pane))
       config_panes
+  @ [ "language: 한국어 (Korean)", Palette_ui_language Lang_ko
+    ; "language: English (영문)", Palette_ui_language Lang_en
+    ]
   @ ["usage account / all accounts", Palette_usage_scope None]
   @ List.map (fun scope_id ->
       let accounts = match state.overview_providers with
@@ -318,20 +322,48 @@ let palette_subsequence ~needle haystack =
 let palette_action_words = function
   | Palette_goto surface ->
       let aliases = match surface with
-        | Resources -> [ "artifacts"; "reports"; "resources" ]
-        | Metrics -> [ "metrics"; "telemetry"; "charts"; "stats" ]
-        | Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
-        | Approvals | Planning | Schedules | Verification | Harness | Fusion
-        | Repositories | Code | Changes | Connectors | Runtime | Config
-        | Tools | System_logs -> [] in
+        | Resources -> [ "artifacts"; "reports"; "resources"; "리소스"; "산출물" ]
+        | Metrics -> [ "metrics"; "telemetry"; "charts"; "stats"; "사용량"; "비용" ]
+        | Overview -> [ "대시보드"; "홈" ]
+        | Planning -> [ "작업"; "플래닝"; "목표" ]
+        | Keepers _ -> [ "키퍼"; "에이전트" ]
+        | Board -> [ "보드"; "게시판" ]
+        | Repositories -> [ "워크스페이스"; "저장소" ]
+        | Config -> [ "시스템"; "설정"; "환경설정" ]
+        | Approvals -> [ "승인"; "결재" ]
+        | Verification -> [ "작업리뷰"; "검증" ]
+        | Harness -> [ "작업판정"; "판정" ]
+        | Memory -> [ "메모리"; "기억" ]
+        | Lanes -> [ "기능"; "레인" ]
+        | Clients -> [ "클라이언트" ]
+        | Schedules -> [ "스케줄"; "일정" ]
+        | Fusion -> [ "퓨전" ]
+        | Code -> [ "코드" ]
+        | Changes -> [ "변경사항" ]
+        | Connectors -> [ "커넥터"; "채널" ]
+        | Runtime -> [ "런타임" ]
+        | Tools -> [ "도구"; "스킬" ]
+        | Acting -> [ "활동"; "이벤트" ]
+        | System_logs -> [ "로그"; "시스템로그" ] in
       Option.to_list (List.assoc_opt surface surface_ring) @ aliases
+  | Palette_config pane ->
+      (match pane with
+       | Config_runtime -> [ "설정파일"; "런타임설정" ]
+       | Config_models -> [ "모델"; "모델바인딩" ]
+       | Config_params -> [ "파라미터"; "런타임파라미터" ]
+       | Config_prompts -> [ "프롬프트" ]
+       | Config_presets -> [ "프리셋" ]
+       | Config_themes -> [ "테마"; "언어" ]
+       | Config_voice -> [ "음성"; "보이스" ])
+  | Palette_ui_language Lang_ko -> [ "한글"; "한국어"; "언어"; "한영" ]
+  | Palette_ui_language Lang_en -> [ "영문"; "영어"; "언어"; "한영" ]
   | Palette_usage_scope (Some scope_id) -> [scope_id]
   | Palette_addon_results id -> [id]
   | Palette_task_creation _ -> ["task-inspect"; "original Task"]
   | Palette_lane_history lane -> [Lane_run_identity.to_id lane]
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
   | Palette_collab | Palette_msx | Palette_dos
-  | Palette_lane_addons | Palette_usage_scope None | Palette_config _ | Palette_gate_mode _
+  | Palette_lane_addons | Palette_usage_scope None | Palette_gate_mode _
   | Palette_chat _ | Palette_task _ | Palette_board_hearth _
   | Palette_board_post _ | Palette_lsp _ | Palette_code_file _ ->
       []
@@ -353,7 +385,7 @@ let palette_matches (state : state) =
                  , ( Palette_browser_lane | Palette_hide_browser_lane
                    | Palette_connectors | Palette_collab | Palette_msx
                    | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _ | Palette_goto _
-                   | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
+                   | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
                    | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _
                    | Palette_board_post _ | Palette_code_file _
                    | Palette_code_location _ ) ) -> false) entries
@@ -401,7 +433,7 @@ let selected_file state =
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
     | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _
     | Palette_goto _
-    | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
+    | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
     | Palette_code_location _))
   | None -> None
@@ -414,7 +446,7 @@ let selected_location state =
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
     | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _
     | Palette_goto _
-    | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
+    | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
     | Palette_code_file _))
   | None -> None

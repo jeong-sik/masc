@@ -176,7 +176,8 @@ let contents_lines (d : D.preset_detail) =
              (List.map (fun (name, bytes) -> Printf.sprintf "%s(%dB)" name bytes) rows))
       ]
   in
-  [ (match d.D.pd_settings_match with
+  [ "2. 현재 설정과의 비교 · 기본 프롬프트 차이 (Drift & Default Comparison)"
+  ; (match d.D.pd_settings_match with
      | D.Preset_settings_match -> "설정 상태 · 저장 당시와 동일"
      | D.Preset_settings_differ -> "설정 상태 · 현재 설정과 다름"
      | D.Preset_settings_unavailable reason -> "설정 비교 불가 · " ^ reason)
@@ -184,7 +185,7 @@ let contents_lines (d : D.preset_detail) =
   @ default_prompt_lines d.D.pd_default_prompts
   @ preserved_settings_lines d.D.pd_preserved_lane_settings
   @ List.map (fun (lane, reason) -> "레인 복원 제외 · " ^ lane ^ ": " ^ reason) d.D.pd_skipped_lanes
-  @ [ ""; "저장된 설정" ]
+  @ [ ""; "3. 저장된 구성 · 프롬프트 / 지시문 / 배정 / 레인 (Saved Snapshot Contents)" ]
   @ sized "프롬프트" d.D.pd_overrides
   @ sized "지시문" d.D.pd_instructions
   @ (match d.D.pd_assignments with
@@ -197,17 +198,18 @@ let contents_lines (d : D.preset_detail) =
   @ (match d.D.pd_lanes with
      | [] -> []
      | lanes -> [ "레인 " ^ String.concat ", " lanes ])
+  @ [ ""; "4. 현재 프롬프트 파일 · 프리셋 저장 위치 (Active Prompt Files & Directory)" ]
   @ (match d.D.pd_prompt_files with
      | [] -> []
-     | files -> [ ""; "현재 프롬프트" ]
-       @ List.concat_map (fun (key, path, source) ->
+     | files ->
+       List.concat_map (fun (key, path, source) ->
          [ key ^ " · " ^ (match source with
              | D.Prompt_override -> "사용자 설정"
              | D.Prompt_file -> "기본값"
              | D.Prompt_missing -> "없음")
          ; "  " ^ (match path with Some path -> path | None -> "등록된 파일 없음")
          ]) files)
-  @ [ ""; "저장 위치"; "  " ^ d.D.pd_directory ]
+  @ [ "저장 위치"; "  " ^ d.D.pd_directory ]
 ;;
 
 let detail_lines ~(selected : D.preset_manifest option)
@@ -217,7 +219,8 @@ let detail_lines ~(selected : D.preset_manifest option)
     match selected with
     | None -> [ "선택한 프리셋이 없습니다" ]
     | Some m ->
-      [ Printf.sprintf "Selected: %s · %s" m.D.pm_name (counts m)
+      [ "1. 프리셋 개요 · 복원 범위 (Preset Overview & Restore Scope)"
+      ; Printf.sprintf "Selected: %s · %s" m.D.pm_name (counts m)
       ; (if String.equal m.D.pm_description "" then "설명 없음" else m.D.pm_description)
       ; "저장 시각 " ^ m.D.pm_created_at
       ; "복원 범위 · override, Keeper 지시문, Runtime 배정·레인"

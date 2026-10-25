@@ -283,7 +283,7 @@ let profile_label = function
   | None -> "not reported"
 
 let status_lines ~width reading =
-  let header = [ " " ^ styled Masc_tui_theme.Sgr.bold "status" ] in
+  let header = [ " " ^ styled Masc_tui_theme.Sgr.bold "1. 샌드박스 상태 (status)" ] in
   match reading.container_error, reading.containers with
   | Some detail, Some (_ :: _ as containers) ->
     header
@@ -346,7 +346,7 @@ let container_lines ~width containers =
   match containers with
   | None | Some [] -> []
   | Some containers ->
-    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "live instance" ]
+    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "3. 실행 인스턴스 (live instance)" ]
     @ (containers
       |> List.concat_map (fun container ->
       let tone = if container.running = Some true then `Ok else `Warn in
@@ -442,7 +442,7 @@ let image_rows ~width reading =
   | None, None -> []
 
 let configured_lines ~width reading =
-  [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "configured" ]
+  [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "2. 구성 · 이미지 및 리소스 (configured)" ]
   @ wrapped_rows ~width ~label:"Backend" ~tone:`Info
       (profile_label reading.sandbox_profile)
   @ image_rows ~width reading
@@ -453,7 +453,7 @@ let configured_lines ~width reading =
 let path_lines ~width = function
   | None -> []
   | Some paths ->
-    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "filesystem" ]
+    [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "4. 파일시스템 마운트 (filesystem)" ]
     @ wrapped_rows ~width ~label:"Workspace" ~tone:`Info
         (value paths.guest_workspace)
     @ wrapped_rows ~width ~label:"HOME" ~tone:`Muted
@@ -473,9 +473,9 @@ let view_lines ~width reading =
   @ (match reading.keeper_last_error with
      | None -> []
      | Some detail ->
-       [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "diagnostics" ]
+       [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "5. 진단 오류 (diagnostics)" ]
        @ wrapped_rows ~width ~label:"Keeper error" ~tone:`Bad detail)
-  @ [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "related" ]
+  @ [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "6. 연관 화면 (related)" ]
   @ wrapped_rows ~width ~label:"Container stdio" ~tone:`Info "o  actual logs"
   @ wrapped_rows ~width ~label:"Sandbox calls" ~tone:`Info "t  tool calls"
 
@@ -615,7 +615,7 @@ let decode_logs ~sanitize json =
 ;;
 
 let logs_view_lines ~width logs =
-  let title = [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "container logs" ] in
+  let title = [ ""; " " ^ styled Masc_tui_theme.Sgr.bold "7. 컨테이너 로그 (container logs)" ] in
   let backend_label = function
     | Docker_log_backend -> "Docker"
     | Apple_container_log_backend -> "Apple Container"

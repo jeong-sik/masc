@@ -15099,6 +15099,10 @@ let press_marked_target state ~mailbox (target : press_target) =
         enter_memory_category state category
   | Press_theme_filter filter ->
       if filter <> state.theme_filter then enter_theme_filter state filter
+  | Press_ui_language ->
+      toggle_ui_language state;
+      report_action state "info"
+        ("UI 언어: " ^ ui_language_label state.ui_language)
   | Press_runtime_mode mode ->
       if mode <> state.runtime_mode || state.view <> Runtime then
         enter_runtime_mode state ~mailbox mode
@@ -28574,6 +28578,7 @@ and is loaded on demand through keeper_skill.
                         | Masc_tui_palette.Palette_goto _
                         | Masc_tui_palette.Palette_usage_scope _
                         | Masc_tui_palette.Palette_config _
+                        | Masc_tui_palette.Palette_ui_language _
                         | Masc_tui_palette.Palette_gate_mode _
                         | Masc_tui_palette.Palette_chat _
                         | Masc_tui_palette.Palette_task _
@@ -28654,6 +28659,10 @@ and is loaded on demand through keeper_skill.
                      state.runtime_param_edit <- None;
                      state.runtime_params_notice <- None;
                      goto_surface state ~mailbox:async_messages Config
+                 | Some (_, Masc_tui_palette.Palette_ui_language lang) ->
+                     state.ui_language <- lang;
+                     report_action state "info"
+                       ("UI 언어: " ^ ui_language_label lang)
                  | Some (_, Masc_tui_palette.Palette_chat keeper_name) ->
                      enter_keeper_chat ~return_to:Keeper_chat_return_list state ~mailbox:async_messages
                        ~keeper_name ~drain_queue:(fun () ->

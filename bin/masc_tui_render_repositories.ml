@@ -48,12 +48,29 @@ let selected_repository_reading (state : state) =
   | None ->
       if errors=[] then None else Some (capture ~title:"Workspace / inventory" errors)
   | Some (repo : Masc.Tui_decode.repository) ->
+      let format_fields fields =
+        fields
+        |> List.map (fun (label, value) -> Printf.sprintf "%s: %s" label value)
+        |> String.concat "\n"
+      in
       Some (capture ~title:("Workspace / " ^ repo.rp_name)
-        (errors @ ["Repository", repo.rp_name; "ID", repo.rp_id;
-          "Status", Masc.Tui_decode.repository_status_word repo.rp_status;
-          "Remote", repo.rp_url; "Default branch", repo.rp_default_branch;
-          "Auto sync", (if repo.rp_auto_sync then "on" else "off")]
-         @ repository_context_fields repo))
+        (errors
+         @ [ ( ui_text state
+                 ~ko:"1. 저장소 기본 정보 (Repository & Remote)"
+                 ~en:"1. Repository & Remote"
+             , format_fields
+                 [ "Repository", repo.rp_name
+                 ; "ID", repo.rp_id
+                 ; "Status", Masc.Tui_decode.repository_status_word repo.rp_status
+                 ; "Remote", repo.rp_url
+                 ; "Default branch", repo.rp_default_branch
+                 ; "Auto sync", (if repo.rp_auto_sync then "on" else "off")
+                 ] )
+           ; ( ui_text state
+                 ~ko:"2. 로컬 경로 · 배정된 키퍼 (Local Path & Keepers)"
+                 ~en:"2. Local Path & Keepers"
+             , format_fields (repository_context_fields repo) )
+           ]))
 
 type workspace_activity_column = Activity_date | Activity_keeper | Activity_task | Activity_result | Activity_path
 

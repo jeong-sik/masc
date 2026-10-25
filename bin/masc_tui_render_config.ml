@@ -36,7 +36,9 @@ let render_runtime_params (state : state) =
   let buf = Buffer.create 4096 in
   box_top buf cols;
   box_line buf cols
-    (config_pane_title ~cols ~name:(screen_title " MASC System") state);
+    (config_pane_title ~cols
+       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·파라미터" ~en:" MASC Params"))
+       state);
   (* Where the overrides live leads, because it is the only thing on this row
      the reader cannot get anywhere else, and it was what the row cut first:
      at eighty columns it read "overrides persist in .masc/run\xe2\x80\xa6" and at
@@ -53,7 +55,9 @@ let render_runtime_params (state : state) =
   (match state.runtime_params_notice with
    | None ->
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  overrides persist in .masc/runtime_params.json · E is advanced JSON"
+       (ui_text state
+          ~ko:"  저장 위치: .masc/runtime_params.json · Enter/e:값 편집 · E:JSON 편집 · u:기본값 복원"
+          ~en:"  overrides persist in .masc/runtime_params.json · E is advanced JSON")
    | Some (ok, detail) ->
      box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
        ("  " ^ Terminal_text.single_line detail));
@@ -79,28 +83,45 @@ let render_runtime_params (state : state) =
      | Some (ok, text) -> field (if ok then "Result" else "Refused") text)
     @
     match selected with
-    | None -> ["  Select a row to see its contract"]
+    | None ->
+      [ ui_text state ~ko:"  행을 선택하면 파라미터 명세와 허용 범위를 표시합니다"
+          ~en:"  Select a row to see its contract" ]
     | Some row ->
       let open Tui_decode in
-      field "Key" row.rpr_key
-      @ value_field "Current" row.rpr_current_json
-      @ value_field "Default" row.rpr_default_json
-      @ field "Type" (if String.trim row.rpr_value_type = "" then "typed value" else row.rpr_value_type)
-      @ (match row.rpr_min_json with None -> [] | Some value -> value_field "Minimum" value)
-      @ (match row.rpr_max_json with None -> [] | Some value -> value_field "Maximum" value)
+      detail_section_lines ~first:true
+        (ui_text state ~ko:"1. 파라미터 설명 · 현재 값 (Description & Current Value)"
+           ~en:"1. Description & Current Value")
+      @ field (ui_text state ~ko:"키 (Key)" ~en:"Key") row.rpr_key
+      @ field (ui_text state ~ko:"설명 (Contract)" ~en:"Contract") row.rpr_description
+      @ value_field (ui_text state ~ko:"현재 값 (Current)" ~en:"Current") row.rpr_current_json
+      @ value_field (ui_text state ~ko:"기본값 (Default)" ~en:"Default") row.rpr_default_json
+      @ detail_section_lines
+          (ui_text state ~ko:"2. 타입 · 허용 범위 및 선택지 (Type & Constraints)"
+             ~en:"2. Type & Constraints")
+      @ field (ui_text state ~ko:"타입 (Type)" ~en:"Type")
+          (if String.trim row.rpr_value_type = "" then "typed value" else row.rpr_value_type)
+      @ (match row.rpr_min_json with None -> [] | Some value -> value_field (ui_text state ~ko:"최소값 (Minimum)" ~en:"Minimum") value)
+      @ (match row.rpr_max_json with None -> [] | Some value -> value_field (ui_text state ~ko:"최대값 (Maximum)" ~en:"Maximum") value)
       @ (row.rpr_choices
          |> List.mapi (fun index choice ->
               value_field (Printf.sprintf "Choice %d" (index + 1))
                 (Yojson.Safe.to_string (`String choice)))
          |> List.concat)
-      @ field "Contract" row.rpr_description
-      @ field "Source" (if row.rpr_has_override then "override" else "default")
+      @ detail_section_lines
+          (ui_text state ~ko:"3. 적용 상태 · 소속 그룹 (Source & Group)"
+             ~en:"3. Source & Group")
+      @ field (ui_text state ~ko:"적용 상태 (Source)" ~en:"Source")
+          (if row.rpr_has_override
+           then ui_text state ~ko:"사용자 오버라이드 (override)" ~en:"override"
+           else ui_text state ~ko:"기본값 (default)" ~en:"default")
       @ (match row.rpr_surface with
          | None -> []
-         | Some surface -> field "Group" (surface.rps_id ^ " · " ^ surface.rps_description))
+         | Some surface ->
+           field (ui_text state ~ko:"소속 그룹 (Group)" ~en:"Group")
+             (surface.rps_id ^ " · " ^ surface.rps_description))
   in
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  j/k selects · PgUp/PgDn reads the complete value and contract";
+    (system_subnav_row state);
   box_divider buf cols;
   (* Editing adds a divider and two form rows.  Spend those rows out of the
      list budget so the footer remains visible instead of falling underneath
@@ -337,6 +358,10 @@ let prompts_detail_lines (state : state) ~cols =
   let status = match prompt_catalog_status_row prompts with
     | None -> [] | Some (_, text) -> wrap text
   in
+  let section ?(first = false) title =
+    let heading = [ Theme.info () ^ Ansi.bold ^ "[ " ^ title ^ " ]" ^ Ansi.reset ] in
+    if first then heading else "" :: heading
+  in
   let document = match Masc_tui_fetched.value prompts with
     | None -> wrap "선택한 프롬프트가 없습니다"
     | Some snapshot when state.prompts_show_runtime_assets ->
@@ -346,12 +371,14 @@ let prompts_detail_lines (state : state) ~cols =
         (match selected with
          | None -> wrap "런타임 프롬프트 자산이 없습니다"
          | Some asset ->
-             wrap "이 자산은 registry override·편집 대상이 아닙니다"
-             @ body asset.pra_value
+             section ~first:true "1. 런타임 자산 메타데이터 (Runtime Asset Metadata)"
+             @ wrap "이 자산은 registry override·편집 대상이 아닙니다"
              @ List.concat_map wrap
                  [field "자산" asset.pra_path;
                   field "소스" (if asset.pra_file_exists then "런타임 파일" else "누락");
-                  field "파일" asset.pra_file_path])
+                  field "파일" asset.pra_file_path]
+             @ section "2. 자산 본문 (Asset Body)"
+             @ body asset.pra_value)
     | Some snapshot ->
         let rows = Tui_decode.prompt_rows_for_operator
             ~show_fragments:state.prompts_show_fragments snapshot in
@@ -394,12 +421,12 @@ let prompts_detail_lines (state : state) ~cols =
                        && not (Option.exists
                             (fun (key, _) -> String.equal key row.pr_key)
                             state.prompts_librarian_input) then
-                 ["최근 실제 Librarian 입력"; "(Admin 실행 상세를 불러오는 중...)"]
+                 ["(Admin 실행 상세를 불러오는 중...)"]
                else match state.prompts_librarian_input_error with
-                 | Some detail -> ["최근 실제 Librarian 입력"; "불러올 수 없음: " ^ Terminal_text.single_line detail]
+                 | Some detail -> ["불러올 수 없음: " ^ Terminal_text.single_line detail]
                  | None ->
                      (match state.prompts_librarian_input with
-                      | Some (key, lines) when String.equal key row.pr_key -> lines @ [""]
+                      | Some (key, lines) when String.equal key row.pr_key -> lines
                       | Some _ | None -> [])
              in
              let source = match row.pr_source with
@@ -412,8 +439,9 @@ let prompts_detail_lines (state : state) ~cols =
                  wrap "입력: Keeper 지침 | 현재 기억 | 제한된 대화 | 상대 관측 | 사실 최대 바이트"
                else []
              in
-             notices @ moved @ authoring @ List.concat_map wrap actual_input
-             @ wrap "유효 템플릿 본문" @ body row.pr_effective
+             let has_notices = notices <> [] || moved <> [] || authoring <> [] in
+             notices @ moved @ authoring
+             @ section ~first:(not has_notices) "1. 프롬프트 메타데이터 · 템플릿 변수 (Metadata & Variables)"
              @ List.concat_map wrap
                  [field "키" row.pr_key; field "소스" source;
                   field "파일" row.pr_file_path; field "분류" row.pr_category;
@@ -423,7 +451,14 @@ let prompts_detail_lines (state : state) ~cols =
                   field "읽기" (match row.pr_operator_surface with
                     | Tui_decode.Prompt_primary -> "주 프롬프트"
                     | Tui_decode.Prompt_fragment -> "내부 조각")]
-             @ contract)
+             @ contract
+             @ section "2. 유효 템플릿 본문 (Effective Template Body)"
+             @ body row.pr_effective
+             @ (match actual_input with
+                | [] -> []
+                | lines ->
+                    section "3. 최근 실제 Librarian 입력 (Recent Librarian Input)"
+                    @ List.concat_map wrap lines))
   in
   status @ document
 
@@ -519,7 +554,9 @@ let render_prompt_registry (state : state) =
       Ansi.reset
   in
   box_line buf cols
-    (config_pane_title ~cols ~name:(screen_title " MASC 프롬프트") ~reading state);
+    (config_pane_title ~cols
+       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·프롬프트" ~en:" MASC Prompts"))
+       ~reading state);
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
@@ -747,8 +784,9 @@ let render_presets (state : state) =
   box_top buf cols;
   let reading = Printf.sprintf "%s%s%s" Ansi.dim count_text Ansi.reset in
   box_line buf cols
-    (config_pane_title ~cols ~name:(screen_title " MASC 프리셋") ~reading
-       state);
+    (config_pane_title ~cols
+       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·프리셋" ~en:" MASC Presets"))
+       ~reading state);
   box_divider buf cols;
   let detail = preset_detail_lines state ~cols ~selected in
   let count = List.length detail in
@@ -868,7 +906,8 @@ let render_themes (state : state) =
   let name_width = theme_name_width ~cols in
   box_top buf cols;
   box_line buf cols
-    (config_pane_title ~cols ~name:(screen_title " MASC Themes")
+    (config_pane_title ~cols
+       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·테마" ~en:" MASC Themes"))
        ~reading:
          (Printf.sprintf "%s%d themes · %d native-pass%s" Ansi.dim
             (List.length entries) native_count Ansi.reset)
@@ -950,15 +989,21 @@ let render_themes (state : state) =
          Theme.Syntax.diff_added Ansi.reset
          Theme.Syntax.diff_removed Ansi.reset);
   end;
+  let lang_toggle =
+    pressable Press_ui_language
+      (ui_text state
+         ~ko:("[UI 언어: " ^ ui_language_label state.ui_language ^ " · 클릭 또는 :language 전환]")
+         ~en:("[UI Language: " ^ ui_language_label state.ui_language ^ " · click or :language]"))
+  in
   box_line_styled buf cols ~style:Ansi.dim
     (* What is in force, then its keys in the footer's spelling. [f] is on
        the filter row above, so it is not said twice. *)
     (match chosen with
      | None ->
-       "  terminal colours  \xc2\xb7  Enter:pick a theme"
+       "  terminal colours  \xc2\xb7  Enter:pick a theme  \xc2\xb7  " ^ lang_toggle
      | Some name ->
-       Printf.sprintf "  %s  \xc2\xb7  Enter:pick another  x:follow terminal"
-         (Terminal_text.single_line name));
+       Printf.sprintf "  %s  \xc2\xb7  Enter:pick another  x:follow terminal  \xc2\xb7  %s"
+         (Terminal_text.single_line name) lang_toggle);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -1037,8 +1082,12 @@ let selected_model_reading (state : state) =
              [{Masc_tui_detail_reading.heading="Refresh failed · retained reading";body=reason}])
         @ (match state.runtime_config_view with
            | None -> [] | Some reading ->
-               [{Masc_tui_detail_reading.heading="Source"; body=reading.rcv_path}])
-        @ [{Masc_tui_detail_reading.heading="Account / model";
+               [{Masc_tui_detail_reading.heading=
+                   ui_text state ~ko:"1. 설정 출처 · 파일 경로 (Source)" ~en:"1. Source";
+                 body=reading.rcv_path}])
+        @ [{Masc_tui_detail_reading.heading=
+              ui_text state ~ko:"2. 계정 · 모델 바인딩 및 배정 키퍼 (Account / Model & Keepers)"
+                ~en:"2. Account / Model & Keepers";
             body=String.concat "\n" (config_models_detail state row)}] in
       Some (Masc_tui_detail_reading.create
         ~title:("System / Models / " ^ row.provider ^ " / " ^ row.model) sections))
@@ -1061,8 +1110,9 @@ let render_config_models (state : state) =
   box_top buf cols;
   let path_note = config_path_note state in
   box_line buf cols
-    (config_pane_title ~cols ~name:(screen_title " MASC Models") ~note:path_note
-       state);
+    (config_pane_title ~cols
+       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·모델" ~en:" MASC Models"))
+       ~note:path_note state);
   box_divider buf cols;
   let content_height = max 1 (rows_avail - 5) in
   (match state.runtime_model_form with
@@ -1315,9 +1365,10 @@ let config_identity_rows ~cols (state : state) =
         if room > 0 then lead ^ Message_layout.truncate_middle room reason ^ trail
         else Message_layout.truncate_middle max_cells (lead ^ reason ^ trail)
       in
-      ("  " ^ notice) :: rows
+      system_subnav_row state :: ("  " ^ notice) :: rows
   | Workspace_identity_unread | Workspace_identity_match
-  | Workspace_identity_mismatch _ -> rows
+  | Workspace_identity_mismatch _ ->
+      system_subnav_row state :: rows
 
 (* What the runtime.toml body spends above the source: the server identity,
    one row per metadata line, and the rule under them. *)
@@ -1345,7 +1396,11 @@ let render_runtime_config_status state =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
     ~surface_key:"config-status"
-    ~title:(screen_title " MASC System / runtime.toml status")
+    ~title:
+      (screen_title
+         (ui_text state
+            ~ko:" MASC 시스템 / 설정 검증 및 적용 상태 (runtime.toml status)"
+            ~en:" MASC System / runtime.toml status"))
     ~hints:"j/k:scroll  PgUp/PgDn:page  v/Esc:source  r:reload"
     ~body:(fun ~budget c ->
       let lines = runtime_config_status_lines state ~cols in
@@ -1671,8 +1726,16 @@ let render_voice (state : state) =
   in
   box_top head cols;
   box_line head cols
-    (config_pane_title ~cols ~name:(screen_title " MASC Voice") state);
-  voice_body_line buf cols "";
+    (config_pane_title ~cols
+       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·음성" ~en:" MASC Voice"))
+       state);
+  let voice_section ?(first = false) title =
+    List.iter (fun row -> voice_body_line buf cols row)
+      (detail_section_lines ~first title)
+  in
+  voice_section ~first:true
+    (ui_text state ~ko:"1. 음성 엔진 로드 상태 (Voice Engine Status)"
+       ~en:"1. Voice Engine Status");
   (* Two independent reads feed this pane: the public config says what loaded,
      and the setup read says which endpoints are declared. They used to share
      one match, so a failed config read also erased the endpoint identities the
@@ -1697,16 +1760,18 @@ let render_voice (state : state) =
        field "status"
          (Option.value (string_of [ "status" ] json)
             ~default:Masc_tui_theme.Glyph.no_value));
-  voice_body_line buf cols "";
-  voice_body_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
+  voice_section
+    (ui_text state ~ko:"2. 음성 합성 · 출력 (TTS — Text to Speech)"
+       ~en:"2. TTS (Text to Speech)");
   from_config (fun json ->
     field "model"
       (Option.value (string_of [ "tts"; "default_model" ] json) ~default:Masc_tui_theme.Glyph.no_value);
     field "voice"
       (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:Masc_tui_theme.Glyph.no_value));
   show_endpoints "tts";
-  voice_body_line buf cols "";
-  voice_body_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
+  voice_section
+    (ui_text state ~ko:"3. 음성 인식 · 입력 (STT — Speech to Text)"
+       ~en:"3. STT (Speech to Text)");
   from_config (fun json ->
     field "model"
       (Option.value (string_of [ "stt"; "default_model" ] json) ~default:Masc_tui_theme.Glyph.no_value);
@@ -1728,8 +1793,9 @@ let render_voice (state : state) =
        voice_body_line_styled buf cols ~style:(Theme.warn ())
          "  the endpoint list could not be read";
        voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (Terminal_text.single_line message) Ansi.reset));
-  voice_body_line buf cols "";
-  voice_body_line buf cols (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
+  voice_section
+    (ui_text state ~ko:"4. 마이크 입력 장치 · 선언 출처 (Input Device & Config Source)"
+       ~en:"4. Input Device & Config Source");
   field "device" (Option.value state.voice_input_device ~default:"unknown");
   voice_body_line buf cols "";
   (* Where the endpoints above come from. With no [voice] section the loader
@@ -1759,7 +1825,9 @@ let render_config (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let path_note = config_path_note state in
   let title =
-    config_pane_title ~cols ~name:(screen_title " MASC System") ~note:path_note
+    config_pane_title ~cols
+      ~name:(screen_title (ui_text state ~ko:" MASC 시스템·설정" ~en:" MASC System"))
+      ~note:path_note
       ~clock:
         (Printf.sprintf "%s%s%s" Ansi.dim
            (let now = Unix.localtime (Unix.gettimeofday ()) in

@@ -35,7 +35,10 @@ let history_rows = function
               events
 
 let history_status_lines ~width ~(view : Masc.Tui_decode_task_inspection.history Masc_tui_fetched.view) ~in_flight =
-  let header = "  HISTORY" in
+  let header =
+    Masc_tui_text_block.rows ~max_cells:width "[ 4. 상태 전환 이력 (HISTORY) ]"
+    |> List.map (fun line -> "  " ^ line)
+  in
   let rows =
     match view with
     | Masc_tui_fetched.Ready _ -> []
@@ -64,7 +67,7 @@ let history_status_lines ~width ~(view : Masc.Tui_decode_task_inspection.history
       "    " ^ (match source with Tui_decode.Task_activity -> "Lifecycle" | Tui_decode.Task_audit -> "Audit")
       ^ (match state with Masc.Tui_decode_task_inspection.Source_observed -> ": observed stored prefix"
         | Masc.Tui_decode_task_inspection.Source_not_created -> ": store not yet created; no observations available")) history.history_sources in
-  ("" :: header :: (pending @ rows @ sources @ boundary))
+  ("" :: header @ (pending @ rows @ sources @ boundary))
 
 let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
   let width = max 1 (framed_inner_width cols - 2) in
@@ -105,26 +108,51 @@ let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
         labeled_lines "status" "cancelled" @ labeled_lines "actor" cancelled_by
         @ labeled_lines "cancelled" cancelled_at @ some_lines "reason" reason
   in
-  labeled_lines "title" task.title @ labeled_lines "id" task.id @ goal_lines
-  @ status_lines
-  @ labeled_lines "created" task.created_at
-  @ labeled_lines "creator" (match task.created_by with Some by -> by | None -> Masc_tui_theme.Glyph.no_value)
-  @ labeled_lines "priority" (string_of_int task.priority)
-  @ labeled_lines "cycles" (string_of_int task.cycle_count)
-  @ some_lines "predecessor" task.predecessor_task_id
-  @ some_lines "operation" task.execution_links.operation_id
-  @ some_lines "session" task.execution_links.session_id
-  @ some_lines "reclaim policy"
-      (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy)
-  @ some_lines "do not reclaim" task.do_not_reclaim_reason
-  @ List.concat_map (fun skill ->
-      labeled_lines "skill" (Yojson.Safe.to_string (Skill_reference.to_yojson skill))) task.skills
-  @ (if String.equal task.description "" then [] else labeled_lines "what" task.description)
-  @ (match task.handoff_context with
+  let section_head title =
+    Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
+    |> List.map (fun line -> "  " ^ line)
+  in
+  let identity_section =
+    section_head "1. 작업 식별 · 상태 및 목표 (Task Identity & Status)"
+    @ labeled_lines "title" task.title
+    @ labeled_lines "id" task.id
+    @ goal_lines
+    @ status_lines
+    @ labeled_lines "created" task.created_at
+    @ labeled_lines "creator"
+        (match task.created_by with Some by -> by | None -> Masc_tui_theme.Glyph.no_value)
+    @ labeled_lines "priority" (string_of_int task.priority)
+    @ labeled_lines "cycles" (string_of_int task.cycle_count)
+    @ some_lines "predecessor" task.predecessor_task_id
+    @ some_lines "operation" task.execution_links.operation_id
+    @ some_lines "session" task.execution_links.session_id
+    @ some_lines "reclaim policy"
+        (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy)
+    @ some_lines "do not reclaim" task.do_not_reclaim_reason
+    @ List.concat_map
+        (fun skill ->
+          labeled_lines "skill" (Yojson.Safe.to_string (Skill_reference.to_yojson skill)))
+        task.skills
+  in
+  let description_items =
+    (if String.equal task.description "" then [] else labeled_lines "what" task.description)
+    @ list_lines "file" task.files
+  in
+  let description_section =
+    match description_items with
+    | [] -> []
+    | items ->
+        [ "" ]
+        @ section_head "2. 작업 설명 · 대상 파일 (Description & Files)"
+        @ items
+  in
+  let handoff_and_contract_items =
+    (match task.handoff_context with
      | None -> []
      | Some handoff ->
          some_lines "why" handoff.Masc_domain.reason
-         @ (if String.equal handoff.Masc_domain.summary "" then [] else labeled_lines "handoff" handoff.Masc_domain.summary)
+         @ (if String.equal handoff.Masc_domain.summary "" then []
+            else labeled_lines "handoff" handoff.Masc_domain.summary)
          @ some_lines "next" handoff.Masc_domain.next_step
          @ some_lines "failure" handoff.Masc_domain.failure_mode
          @ some_lines "handoff reclaim policy"
@@ -133,15 +161,25 @@ let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
          @ some_lines "handoff updated" handoff.Masc_domain.updated_at
          @ some_lines "handoff updater" handoff.Masc_domain.updated_by
          @ list_lines "evidence" handoff.Masc_domain.evidence_refs)
-  @ (match task.contract with
-     | None -> []
-     | Some contract ->
-         (if contract.Masc_domain.strict then ["  contract strict"] else [])
-         @ list_lines "done-when" contract.Masc_domain.completion_contract
-         @ list_lines "evidence" contract.Masc_domain.required_evidence
-         @ list_lines "inspection evidence" contract.Masc_domain.inspect_gate_evidence
-         @ list_lines "verification evidence" contract.Masc_domain.verify_gate_evidence)
-  @ list_lines "file" task.files
+    @
+    match task.contract with
+    | None -> []
+    | Some contract ->
+        (if contract.Masc_domain.strict then [ "  contract strict" ] else [])
+        @ list_lines "done-when" contract.Masc_domain.completion_contract
+        @ list_lines "evidence" contract.Masc_domain.required_evidence
+        @ list_lines "inspection evidence" contract.Masc_domain.inspect_gate_evidence
+        @ list_lines "verification evidence" contract.Masc_domain.verify_gate_evidence
+  in
+  let contract_section =
+    match handoff_and_contract_items with
+    | [] -> []
+    | items ->
+        [ "" ]
+        @ section_head "3. 인수인계 · 완료 계약 (Handoff & Completion Contract)"
+        @ items
+  in
+  identity_section @ description_section @ contract_section
 
 
 type goals = Unread | Unavailable of string | Membership of string list | Canonical of string option

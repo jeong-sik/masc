@@ -614,18 +614,19 @@ let render_acting_evidence (state : state) entry =
     (" " ^ Terminal_text.single_line (observer_replay_description state.observer_replay));
   box_divider buf cols;
   let lines =
-    Masc_tui_acting.evidence_fields entry
-    |> List.concat_map (fun (label, value) ->
-        let prefix = "  " ^ label ^ ": " in
-        let text = match value with
-          | None -> "not carried"
-          | Some "" -> "(empty string)"
-          | Some value -> Terminal_text.single_line value in
-        let continuation = String.make (Message_layout.display_width prefix) ' ' in
-        match Message_layout.wrap_words
-                ~max_cells:(max 1 (framed_inner_width cols - Message_layout.display_width prefix)) text with
-        | [] -> [prefix]
-        | first :: rest -> (prefix ^ first) :: List.map (fun line -> continuation ^ line) rest)
+    detail_section_lines ~first:true "1. 이벤트 식별 · 실행 컨텍스트 (Event Identity & Execution Context)"
+    @ (Masc_tui_acting.evidence_fields entry
+       |> List.concat_map (fun (label, value) ->
+           let prefix = "  " ^ label ^ ": " in
+           let text = match value with
+             | None -> "not carried"
+             | Some "" -> "(empty string)"
+             | Some value -> Terminal_text.single_line value in
+           let continuation = String.make (Message_layout.display_width prefix) ' ' in
+           match Message_layout.wrap_words
+                   ~max_cells:(max 1 (framed_inner_width cols - Message_layout.display_width prefix)) text with
+           | [] -> [prefix]
+           | first :: rest -> (prefix ^ first) :: List.map (fun line -> continuation ^ line) rest))
   in
   let io_lines =
     match entry.Masc_tui_acting.ae_event with
@@ -644,7 +645,7 @@ let render_acting_evidence (state : state) entry =
               :: (document_markdown ~width:(max 1 (framed_inner_width cols - 3))
                     (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
                   |> List.map (fun line -> "  " ^ line)) in
-        [""; "  INPUT / OUTPUT OBSERVATIONS"]
+        detail_section_lines "2. 입출력 관측 기록 (INPUT / OUTPUT OBSERVATIONS)"
         @ json "Input" call.kt_tool_args
         @ preview "Input preview" call.kt_tool_args_preview
         @ json "Output" call.kt_tool_result

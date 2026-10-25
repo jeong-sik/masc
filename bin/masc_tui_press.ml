@@ -20,6 +20,7 @@ type press_target =
   | Press_tools_pane of tools_pane
   | Press_memory_category of memory_category_filter
   | Press_theme_filter of [ `All | `Dark | `Light ]
+  | Press_ui_language
   | Press_runtime_mode of runtime_mode
   | Press_standalone_lanes
   | Press_context_tab of Masc_tui_context_inspector.tab
@@ -33,7 +34,7 @@ type press_target =
 let press_changes_the_surface = function
   | Press_surface _ | Press_ring_edge _ | Press_keeper_tab _
   | Press_config_pane _ | Press_metrics_section _ | Press_tools_pane _
-  | Press_memory_category _ | Press_theme_filter _ | Press_runtime_mode _
+  | Press_memory_category _ | Press_theme_filter _ | Press_ui_language | Press_runtime_mode _
   | Press_standalone_lanes | Press_keeper_row _ | Press_lane_row _ | Press_chat_call _ ->
       true
   | Press_context_tab _ -> false

@@ -24,6 +24,7 @@ type palette_action =
   | Palette_goto of Masc_tui_types.surface
   | Palette_usage_scope of string option
   | Palette_config of Masc_tui_types.config_pane
+  | Palette_ui_language of Masc_tui_types.ui_language
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
   | Palette_chat of string
   | Palette_task of string

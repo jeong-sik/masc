@@ -521,6 +521,16 @@ let test_lifecycle_identity_is_exact () =
   | Error error -> fail (Chat.stream_error_to_string error)
   | Ok _ -> fail "unknown custom event was accepted"
 
+let test_thinking_snapshot_requires_owner () =
+  let snapshot = event "CUSTOM"
+    ["runId", `String run_id; "name", `String "KEEPER_THINKING_SNAPSHOT";
+     "value", `Assoc ["index", `Int 0; "snapshot", `String "full"]] in
+  match decode [acceptance (); run_started; text_start; snapshot;
+                reply_details (); text_end; run_finished] with
+  | Error (Chat.Malformed_event _) -> ()
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "unowned thinking replacement was accepted"
+
 let test_runtime_attempt_payload_contract () =
   let malformed_scalar =
     event "CUSTOM"
@@ -670,6 +680,9 @@ let test_current_nonterminal_event_set () =
                                        ; retry_delay_ms = 250
                                        ; error_status = Some 529 }
           ]
+      else if String.equal name "KEEPER_THINKING_SNAPSHOT" then
+        `Assoc ["index", `Int 0; "snapshot", `String "full reasoning";
+                "response", `Assoc ["content_generation", `Int 0; "stream_scope", `Int 0]]
       else if String.equal name "KEEPER_THINKING_DELTA" then
         (* The strict decoder requires an object with an integer index; a Null
            falls through and is rejected. The server writes this exact shape
@@ -1678,6 +1691,8 @@ let () =
         ; test_case "current wire only" `Quick test_current_wire_only
         ; test_case "exact lifecycle identities" `Quick
             test_lifecycle_identity_is_exact
+        ; test_case "thinking replacement requires owner" `Quick
+            test_thinking_snapshot_requires_owner
         ; test_case "runtime attempt payload contract" `Quick
             test_runtime_attempt_payload_contract
         ; test_case "current nonterminal event set" `Quick

@@ -826,7 +826,7 @@ let current_custom_names =
   ; "KEEPER_STREAM_MESSAGE_DELTA"; "KEEPER_STREAM_MESSAGE_STOP"
   ; "KEEPER_STREAM_PING"; "KEEPER_CONTENT_BLOCK_START"
   ; "KEEPER_CONTENT_BLOCK_STOP"; "KEEPER_THINKING_DELTA"; "KEEPER_MODEL_CONTENT_ACTIVITY"
-  ; "KEEPER_THINKING_SIGNATURE_DELTA"; "KEEPER_MEDIA_DELTA"
+  ; "KEEPER_THINKING_SNAPSHOT"; "KEEPER_THINKING_SIGNATURE_DELTA"; "KEEPER_MEDIA_DELTA"
   ; "KEEPER_STREAM_PROTOCOL_ERROR"; "KEEPER_CONTINUATION_CHECKPOINT"
   ; "KEEPER_TOOL_CALL_ADMITTED"; "KEEPER_CHAT_BATCH_BOUND"; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
   ; "KEEPER_TOOL_APPROVAL_REQUESTED"; "KEEPER_TOOL_APPROVAL_SETTLED"
@@ -904,6 +904,21 @@ let validate_custom_value ~name value =
     Masc.Keeper_chat_events.generated_media_of_json value
     |> Result.map (fun _ -> ())
     |> Result.map_error (fun detail -> Malformed_event detail)
+  else if String.equal name "KEEPER_THINKING_SNAPSHOT" then
+    let surface = "KEEPER_THINKING_SNAPSHOT.value" in
+    let* fields = exact_object_fields ~surface
+        ~allowed:["index"; "snapshot"; "response"] value
+        |> Result.map_error (fun detail -> Malformed_event detail) in
+    let* () = match List.assoc_opt "index" fields with
+      | Some (`Int _) -> Ok ()
+      | Some _ | None -> Error (Malformed_event (surface ^ " needs an integer index")) in
+    let* _ = required_string ~surface "snapshot" fields
+      |> Result.map_error (fun detail -> Malformed_event detail) in
+    let* owner = Masc.Keeper_chat_events.optional_response_identity_of_fields fields
+      |> Result.map_error (fun detail -> Malformed_event detail) in
+    (match owner with
+     | Some _ -> Ok ()
+     | None -> Error (Malformed_event (surface ^ " requires response identity")))
   else if String.equal name "KEEPER_THINKING_DELTA" then
     (* The reasoning block a delta belongs to is read from [index]; a frame
        without one would be undecodable in the live view, so the strict pass

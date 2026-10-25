@@ -1395,9 +1395,9 @@ and with_token_permission_auth ~permission handler request reqd =
 
 let with_private_token_permission_auth ~permission handler request reqd =
   let refuse status message =
-    Http.Response.with_scoped_headers
+    Http_server_eio.Response.with_scoped_headers
       ["cache-control","no-store";"referrer-policy","no-referrer";"x-content-type-options","nosniff"]
-      (fun () -> Http.Response.json_value ~status ~compress:false ~request
+      (fun () -> Http_server_eio.Response.json_value ~status ~compress:false ~request
         (`Assoc ["error",`String message]) reqd) in
   match current_server_state () with
   | None -> refuse `Service_unavailable "private operator service unavailable"
@@ -1406,7 +1406,7 @@ let with_private_token_permission_auth ~permission handler request reqd =
       match authorize_token_bound_permission_request ~base_path ~permission request with
       | Error error ->
           let status = http_status_of_auth_error error in
-          log_auth_refusal ~protocol:"h1" ~path:(Http.Request.path request)
+          log_auth_refusal ~protocol:"h1" ~path:(Http_server_eio.Request.path request)
             ~status:(Httpun.Status.to_code (status :> Httpun.Status.t));
           refuse (status :> Httpun.Status.t) "private operator authorization refused"
       | Ok actor ->

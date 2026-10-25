@@ -1,6 +1,6 @@
 {
   "schema": "masc.goal-measurement-evidence-manifest.v1",
-  "created_at": "2026-10-25T10:03:30.003454+00:00",
+  "created_at": "2026-10-25T10:05:44.717197+00:00",
   "candidate_code_sha": "32282146ed980d48baa661aa7db0ce99376d3c2a",
   "fixture_only_commit": "ef5a4c707e29f1a4ff1fc5983b7ed0d64950fe38",
   "scope": "Public allowlist projections and original browser captures; manifest excludes itself. Native, actual controlled model, historical baseline, dev UI and production identity remain separate.",
@@ -81,6 +81,11 @@
       "sha256": "a4a006f0cece8c82c16becc9e53c2f1634e2a4f40a1083c04754e083eeadba8f"
     },
     {
+      "file": "public-source-fixture.json",
+      "bytes": 255,
+      "sha256": "4c6f6a1f7a8b2f4333a1bc4f23966b77d46042379fe32143e889e9b75c97724a"
+    },
+    {
       "file": "runtime-identity.json",
       "bytes": 1923,
       "sha256": "722fd9e77c6d05dac6fc2e19a939f0452187dd1824a79ad620c41b5b2dde7c13"
@@ -97,5 +102,6 @@
     }
   ],
   "private_sources_preserved_by_sha256": true,
-  "main_goal_complete_claimed": false
+  "main_goal_complete_claimed": false,
+  "inventory_basis": "Complete committed Git tree at e97ea45fc9212bbdaf269580d9249d5fed017095, excluding only manifest.json itself; sparse working-tree absence does not exclude tracked files."
 }

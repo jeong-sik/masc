@@ -1,4 +1,4 @@
-# 1Password connector
+# 1Password connector (Experimental)
 
 Backend connection foundation for [#45736](https://github.com/jeong-sik/masc/issues/45736).
 This package is under development. It exports safe connection status through a
@@ -89,6 +89,25 @@ The client secret file must be an owned regular 0600 file. The store must be a
 dedicated 0700 directory outside Lane retention and agent work disks. Avoid
 putting a credential value in the declaration, package skill or config document.
 No configuration is required to discover the tool and observe `not_configured`.
+
+## Disable or remove the connector
+
+Set `enabled = false` in this connector's installed declaration under the
+runtime's resolved `lane-addons` directory and save it. Configuration
+reconciliation requests worker cleanup once the declaration and retained-binding
+inventory can be read completely; it keeps the declaration. Saving the setting
+does not confirm shutdown. Inspect the Add-on's application/lifecycle state and
+any cleanup errors.
+
+To remove an attached installation, open the TUI Add-on command input with `A`
+and submit `detach <instance-ID>` for the connector's displayed instance ID.
+Detach checks the applied declaration and waits for cleanup before removing the
+matching TOML declaration. A changed declaration or unconfirmed cleanup is
+reported as an error and does not authorize deleting the retained state. See
+the [TUI Add-on removal guide](../../docs/guides/tui-lane-addons.md).
+
+Disabling or detaching is separate from confirmed remote 1Password revocation;
+it does not erase the operator-owned private connection store.
 
 Protocol references: [partner guide](https://www.1password.dev/agentic-autofill/partners),
 [connect](https://www.1password.dev/agentic-autofill/partners/connect),

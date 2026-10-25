@@ -61,7 +61,7 @@ let bytes_of_message_content (m : Agent_core.Types.message) : int =
 
 let bytes_of_tool_schema_json (tools : Agent_core.Tool.t list) : int =
   List.fold_left
-    (fun acc t ->
+    (fun acc (t : Agent_core.Tool.t) ->
       acc
       + Agent_core.Tool.wire_bytes_of_schema t.schema)
     0 tools

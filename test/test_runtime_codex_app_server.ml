@@ -3675,6 +3675,7 @@ let test_no_deadline_keeps_turn_started_callback_bounded () =
 ;;
 
 let test_no_deadline_keeps_post_accept_writes_bounded () =
+  let retained = ref [] in
   let tool : Runtime_codex_app_server.dynamic_tool =
     { name = "masc_probe"
     ; description = "Return enough data to fill an unread transport pipe"
@@ -3692,12 +3693,16 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
     }
   in
   with_fixture
+    ~await_dynamic_tools:false
     ~before_final_stdin_drain_s:0.75
     [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request ]
     (fun path ->
        match
          run_fixture
            ~dynamic_tools:[ tool ]
+           ~on_undelivered_tool_result:(fun receipt ->
+             retained := receipt :: !retained;
+             Ok ())
            ~admission_timeout_s:0.3
            ~no_turn_deadline:true
            path
@@ -3705,7 +3710,8 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
        | Error
            (Runtime_codex_app_server.Timeout
               { seconds; turn_accepted = true }) ->
-         check (float 0.001) "post-accept write timeout" 0.3 seconds
+         check (float 0.001) "post-accept write timeout" 0.3 seconds;
+         check int "the unwritten result has a durable owner" 1 (List.length !retained)
        | Error
            (Runtime_codex_app_server.Timeout
               { turn_accepted = false; _ }) ->
@@ -4400,6 +4406,11 @@ let run_production_keeper_turn_as ~input_speaker ~turn_kind ~write_cost_ledger ~
                 Eio.Switch.run (fun sw ->
                   Fs_compat.set_fs (Eio.Stdenv.fs env);
                   Eio_context.set_env env;
+                  (match Runtime_agent_execution_runtime.initialize
+                     ~sw ~domain_mgr:env#domain_mgr ~domain_count:1 with
+                   | Ok () -> ()
+                   | Error error ->
+                     fail (Runtime_agent_execution_runtime.initialization_error_to_string error));
                   Eio_context.with_test_env
                     ~net:(Eio.Stdenv.net env)
                     ~clock:(Eio.Stdenv.clock env)
@@ -5128,6 +5139,8 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
        with_runtime_config ~model cli_path (fun runtime_path ->
          Eio_main.run (fun env ->
            Eio.Switch.run (fun sw ->
+             Fs_compat.set_fs (Eio.Stdenv.fs env);
+             Eio.Switch.on_release sw Fs_compat.clear_fs;
              Eio_context.set_env env;
              Eio_context.with_test_env
                ~net:(Eio.Stdenv.net env)
@@ -7640,22 +7653,15 @@ let test_keeper_resume_sends_changed_working_state_once () =
          (String_util.contains_substring fifth "WORKING_STATE_VERSION_TWO"))
 ;;
 
-(* Every request carries the frozen Librarian unread observation, ahead of the
-   per-turn context. The first request of a fixture with no snapshot or Memory
-   reader yet sends the "unavailable" observation; once the readers answer with
-   nothing unread, the next request sends the empty one. *)
+(* A new frozen Librarian unread observation precedes the per-turn context.
+   This fixture provides real filesystem readers: absent files yield available
+   empty lists. A resumed thread already holds that unchanged observation. *)
 let unread_envelope ~snapshot ~memory =
   let unread = Keeper_librarian_request_unread.of_results ~snapshot ~memory in
   match Keeper_librarian_request_unread.attach ~include_empty:true
       ~role:Agent_core.Types.System unread [] with
   | [carrier] -> Keeper_official_client_host.encode_history_message carrier
   | [] | _ :: _ :: _ -> failwith "an unread observation must have one carrier"
-;;
-
-let unavailable_unread_envelope =
-  unread_envelope
-    ~snapshot:(Error "fixture has no snapshot reader")
-    ~memory:(Error "fixture has no Memory reader")
 ;;
 
 let empty_unread_envelope = unread_envelope ~snapshot:(Ok []) ~memory:(Ok [])
@@ -7796,7 +7802,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        in
        check string "start config includes current context"
          (String.concat "\n\n"
-            [ system_prompt; posture_note; unavailable_unread_envelope; envelope dynamic_context ])
+            [ system_prompt; posture_note; empty_unread_envelope; envelope dynamic_context ])
          start_instructions;
        (* The thread holds the conversation, so the resumed instructions name
           only the current system prompt; the per-turn context rides in front
@@ -7846,8 +7852,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        check string "start prompt stays exact" goal (turn_prompt start_capture);
        check string "resume prompt carries the current context in front of the goal"
          (String.concat "\n\n"
-            [ "SYSTEM:\n" ^ empty_unread_envelope
-            ; "SYSTEM:\n" ^ envelope "UPDATED_CONTEXT"
+            [ "SYSTEM:\n" ^ envelope "UPDATED_CONTEXT"
             ; goal
             ])
          (turn_prompt resume_capture))

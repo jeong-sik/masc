@@ -1696,6 +1696,8 @@ type turn_input =
       ; outcome : (unit, error) result
       }
 
+type turn_reader_state = Reader_ready | Reader_inflight | Reader_closed
+
 let host_stop_of_error = function
   | Stopped_by_host stop -> Some stop
   | Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
@@ -1719,6 +1721,7 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
       let barrier = ref None in
       let concurrent = ref [] in
       let calls = Hashtbl.create 8 in
+      let reader_state = ref Reader_ready in
       let vendor_terminal = ref None in
       let vendor_closed = ref false in
       let stopped = ref None in
@@ -1736,13 +1739,26 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
           handoff := Handoff_pending;
           handoff_waiting := false
         | (Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected), _, _ -> () in
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-        let rec read () =
-          let message = io.receive () in
-          Eio.Stream.add incoming (Provider_message message);
-          match message with Ok _ -> read () | Error _ -> `Stop_daemon
-        in
-        read ());
+      let take_input () =
+        (* One demand owns one stdout read, including its queued frame. The
+           consumer must apply an item's native/model idle phase before the
+           next read samples it. A worker settlement or scheduling wake does
+           not consume that demand: the existing partial read stays alive. *)
+        (match !reader_state with
+         | Reader_ready ->
+           reader_state := Reader_inflight;
+           Eio.Fiber.fork_daemon ~sw (fun () ->
+             let message = io.receive () in
+             Eio.Stream.add incoming (Provider_message message);
+             `Stop_daemon)
+         | Reader_inflight | Reader_closed -> ());
+        let input = Eio.Stream.take incoming in
+        (match input with
+         | Provider_message (Ok _) -> reader_state := Reader_ready
+         | Provider_message (Error _) -> reader_state := Reader_closed
+         | Tool_settled _ | Scheduling_handoff -> ());
+        input
+      in
       Option.iter (fun await ->
         Eio.Fiber.fork_daemon ~sw (fun () ->
           if await () then Eio.Stream.add incoming Scheduling_handoff;
@@ -1817,6 +1833,10 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
            if !vendor_closed then retain ()
            else
              (try io.send frame json; Ok () with
+              | Idle_timeout seconds ->
+                close_delivery ();
+                stopped := Some (Timeout {seconds; turn_accepted = true});
+                retain ()
               | exn ->
                 Llm_provider.Reserved_exn.reraise_if_reserved exn;
                 close_delivery ();
@@ -1845,7 +1865,7 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
           (match !stopped with None -> Ok terminal | Some error -> Error error)
         | None, 0, Some error -> Error error
         | (Some _ | None), _, (Some _ | None) ->
-          match Eio.Stream.take incoming with
+          match take_input () with
           | Provider_message (Ok (Server_request {id; method_ = "item/tool/call"; params})) ->
             let* () = dispatch ~id params in
             receive ()
@@ -1897,7 +1917,7 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
         close_delivery ();
         let rec drain () =
           if !pending > 0 then begin
-            (match Eio.Stream.take incoming with
+            (match take_input () with
              | Tool_settled {call_id; tool_name; arguments; response; outcome} ->
                settle ~call_id ~tool_name ~arguments ~response ~outcome
              | Provider_message _ | Scheduling_handoff -> ());

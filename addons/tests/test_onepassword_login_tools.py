@@ -11,6 +11,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "onepassword"))
 import server
+import oauth
+from onepassword_store_fixture import MemoryRecords
 from companion import BridgeError
 from login import Extension, Logins
 from service import Service
@@ -19,6 +21,9 @@ from test_onepassword_login import APP_LINK, BROWSER, CALLER, REFERENCE, Bridge,
 
 class LoginToolTests(unittest.TestCase):
     def setUp(self):
+        backend = patch.object(oauth, "ProtectedRecords", MemoryRecords)
+        backend.start()
+        self.addCleanup(backend.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -135,6 +140,11 @@ class LoginToolTests(unittest.TestCase):
 
 
 class SettingsRetirementTests(unittest.TestCase):
+    def setUp(self):
+        backend = patch.object(oauth, "ProtectedRecords", MemoryRecords)
+        backend.start()
+        self.addCleanup(backend.stop)
+
     """Actual private-file reload and durable service; fabricated Browser/1P."""
 
     def private_configuration(self, root):

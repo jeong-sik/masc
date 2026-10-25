@@ -18,7 +18,9 @@ TUI thinking deltas with an explicit response generation/scope and block index a
 
 Dashboard reconstructs a pending delta's prefix from the same exact owned block even when a sibling is the final trace step. Anonymous/indexless lookups retain their existing last-stretch rule. No event type, persisted codec, server control, capability or model catalog changes.
 
-The same Dashboard command then passed **139 cases**. Source hashes bind all five production/fixture files at `abb125d4e13994e74d5490c71cf26407be61b82a`. Corrected TUI [40196874006](https://github.com/jeong-sik/masc/actions/runs/40196874006) targets that exact head; result pending inspection. Earlier corrected40196789259 targeted05dab5e1cd5 before the contiguous-append optimization and cannot certify its final performance behavior.
+The same Dashboard command then passed **139 cases**. Independent review of that correction found another P2 by source: rebuilding only the newest response's buffers lost earlier responses in the same attempt. This was not an executed failure in the108-case baseline; its new controls did not exist there. The helper now rebuilds all reasoning in the current attempt/continuation segment, stopping at superseded or segment boundaries. New controls preserve a previous response through interleaved append and snapshot replacement, then exclude it after supersession. The earlier independent PASS missed this and is superseded.
+
+Source hashes bind all five production/fixture files at `c0f2f3032b0cb998bb66b74b29433c242d63df34`. Corrected TUI [40197182110](https://github.com/jeong-sik/masc/actions/runs/40197182110) targets that exact head; result pending inspection. Earlier40196789259 at05d preceded the contiguous-append optimization, and40196874006 atabb preceded earlier-response preservation. Neither certifies the final source.
 
 ## Scope limits
 

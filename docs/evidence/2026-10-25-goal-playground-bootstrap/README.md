@@ -11,7 +11,7 @@
 - `test_workspace_bootstrap`: fresh init의 빈 공유 root, root가 사라진 뒤 re-init, 기존 state와 producer 증거 보존.
 - `test_goal_verifier_original`: Keeper나 수동 mkdir 없이 공개 Goal `request_complete → create_goal_review → Original.prepare`; exact Goal/request/criterion 보존. root가 없으면 authority는 오류를 돌려주고 생성하지 않으며, re-init 후 같은 pending proof와 retained authority로 복구한다.
 
-로컬에서는 변경한 3개 파일의 parse만 수행했다. [선택 native 실행](https://github.com/jeong-sik/masc/actions/runs/40186754980)은 두 suite로 명시했다. 결과는 native-result.json이 추가될 때까지 미관측이다. 전체 회귀는 미실행이며, 이전 전체 회귀의 run/head/TARGET_SUITES는 확인하지 못했다. fixture에서 모델을 호출하지 않는다.
+로컬에서는 변경한 3개 파일의 parse만 수행했다. [선택 native 실행](https://github.com/jeong-sik/masc/actions/runs/40186754980)은 exact source a052에서 두 suite 모두 성공했다. Workspace bootstrap은 assertion group 8개, Original은 Alcotest case 7개이며 `native-result.json`에 원본 로그와 선택 목록 해시를 기록한다. 전체 회귀는 미실행이며, 이전 전체 회귀의 run/head/TARGET_SUITES는 확인하지 못했다. fixture에서 모델을 호출하지 않는다.
 
 ## 같은 source3228에서 실제 Keeper와 Goal 판정 연결
 

@@ -1,0 +1,47 @@
+{
+  "schema": "masc.goal-bootstrap.native-result.v1",
+  "source_sha": "a0523385b9a5475fcb3998795d09307f262daf32",
+  "run_id": 40186754980,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/40186754980",
+  "job_id": 121149076144,
+  "conclusion": "success",
+  "completed_at": "2026-10-25T11:00:24Z",
+  "selection": {
+    "source_sha": "a0523385b9a5475fcb3998795d09307f262daf32",
+    "suites": [
+      "test_workspace_bootstrap",
+      "test_goal_verifier_original"
+    ],
+    "runner": "scripts/ci-run-targeted-tests.sh",
+    "minimal": true
+  },
+  "selection_canonical_json_sha256": "aba168024901b2b76503b917a52888be706e5fe6fd123725098d8504cd4caa21",
+  "results": [
+    {
+      "suite": "test_workspace_bootstrap",
+      "result": "PASS",
+      "assertion_groups_in_source": 8,
+      "runtime_receipt": "test_workspace_bootstrap: all assertions passed"
+    },
+    {
+      "suite": "test_goal_verifier_original",
+      "result": "PASS",
+      "alcotest_cases": 7,
+      "runtime_receipt": "Test Successful in 0.197s. 7 tests run."
+    }
+  ],
+  "actual_build_command": "dune build test/test_workspace_bootstrap.exe test/test_goal_verifier_original.exe test/fixtures/verifier-image-lookup.png",
+  "raw_log": {
+    "bytes": 121410,
+    "sha256": "d6e00bfe94a13471fc90a62b7ca6e0817dc797df04f86b5e6d76ca7472fec333",
+    "public_run_log_available": true
+  },
+  "local_dune_run": false,
+  "model_provider_called_by_tests": false,
+  "full_regression": "not_run",
+  "previous_full_regression_run_head_suites": "not_established",
+  "limits": [
+    "Focused native fixtures only; not a new executable bundle, installed runtime, actual fresh-provider Goal proof or human confirmation.",
+    "Source3228 actual Keeper/Docker cohort remains separate from this new source a052."
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "tested_source": "1ede23a6877fc4834e30a98fc6cd096324b11981",
+  "sha256": {
+    "packages/agent_core/test/test_execution_projection.ml": "2a2a2fba070880f7d64652f5a8daccc69b49c83ea89c47a6be5fc48aa7346032",
+    "packages/agent_core/lib/agent/agent_tool_observer.ml": "9bd4628c4e152c722a4b63c660730683b2df9c44118c0edebb7790e9832a992e",
+    "packages/agent_core/lib/execution_agent_scope.ml": "675be9b7031881a7cc2a85b86f9ff661969a8085dcea780a696e5c713b1f5261",
+    "packages/agent_core/lib/execution_context.ml": "a20ab51e74e34e2fb56280b984ddc8b78a13ed53225fc542150e97f2f8c29938"
+  },
+  "logs": [
+    {
+      "run": 40213817713,
+      "raw_sha256": "6de28b5810a9e75cb11e2749e0ac8a847aeb0e4f9cc5996a414b89d1324b9a46",
+      "raw_bytes": 126137,
+      "selected_lines": 20
+    }
+  ]
+}

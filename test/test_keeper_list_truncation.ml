@@ -566,6 +566,21 @@ let test_another_list_query_does_not_repeat_completed_work () =
     check string "both query keys coexist in the same generation" "detailed"
       (Yojson.Safe.Util.to_string cached_detailed))
 
+let test_expired_list_query_releases_payload_without_evicting_live_queries () =
+  with_empty_roster_cache (fun () ->
+    let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+    ignore (read ~key:"detailed" ~ttl_s:3600. (fun () ->
+      ignore (read ~key:"expired" ~ttl_s:0. (fun () -> `String "expired payload"));
+      ignore (read ~key:"names" ~ttl_s:3600. (fun () -> `String "names"));
+      `String "detailed"));
+    check int "expired payload is released while both live queries remain" 2
+      (Keeper_tool_surface.For_testing.keeper_list_cache_entry_count ());
+    List.iter (fun key ->
+      let cached = read ~key ~ttl_s:3600.
+        (fun () -> fail "releasing an expired query evicted a live query") in
+      check string "live query is retained" key (Yojson.Safe.Util.to_string cached))
+      ["detailed"; "names"])
+
 let test_explicit_invalidation_repeats_the_obsolete_read () =
   with_empty_roster_cache (fun () ->
     let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
@@ -761,6 +776,8 @@ let () =
     ; ( "cache publication"
       , [ test_case "a competing query does not repeat completed work" `Quick
             test_another_list_query_does_not_repeat_completed_work
+        ; test_case "expired queries release payloads without evicting live queries" `Quick
+            test_expired_list_query_releases_payload_without_evicting_live_queries
         ; test_case "explicit invalidation rejects obsolete work" `Quick
             test_explicit_invalidation_repeats_the_obsolete_read
         ] )

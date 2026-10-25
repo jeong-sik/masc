@@ -90,8 +90,14 @@ let invalidate_keeper_list_cache () = invalidate_json_cache keeper_list_cache
 let rec publish_json_cache_entry cache_ref ~expected ~generation ~key ~entry =
   if not (Int.equal expected.generation generation) then false
   else
+    let now = Time_compat.now () in
+    let live_entries =
+      Cache_map.filter
+        (fun _ cached -> Stdlib.Float.compare now cached.expires_at < 0)
+        expected.entries
+    in
     let next =
-      { expected with entries = Cache_map.add key entry expected.entries }
+      { expected with entries = Cache_map.add key entry live_entries }
     in
     if Atomic.compare_and_set cache_ref expected next then true
     else begin
@@ -125,6 +131,8 @@ module For_testing = struct
   let invalidate_keeper_list_cache = invalidate_keeper_list_cache
   let cached_keeper_list_data ~key ~ttl_s compute =
     cached_json_by_key keeper_list_cache ~key ~ttl_s compute
+  let keeper_list_cache_entry_count () =
+    Cache_map.cardinal (Atomic.get keeper_list_cache).entries
 end
 let annotate_keeper_json ~runtime_class json =
   match json with

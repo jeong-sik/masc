@@ -234,16 +234,18 @@ jobs:
           PROOF_BROWSER: ${{ inputs.browser }}
           COMPANION_CHECKS: ${{ inputs.companion_checks }}
         run: |
-          mkdir -p proof/native-browser/binaries
-          cp "_build/default/test/$PROBE_TARGET.exe" proof/native-browser/binaries/
-          cp _build/default/bin/masc_native_addon_launcher.exe proof/native-browser/binaries/
-          cp _build/default/bin/masc_browser_process_owner.exe proof/native-browser/binaries/
-          cp _build/default/bin/masc_browser_addon_worker.exe proof/native-browser/binaries/
-          if [[ "$PROOF_BROWSER" == webextension ]]; then
-            cp _build/default/bin/masc_browser_host.exe proof/native-browser/binaries/
-          fi
+          set -euo pipefail
           if [[ "$COMPANION_CHECKS" == true ]]; then
-            cp _build/default/bin/main_eio.exe proof/native-browser/binaries/
+            (cd proof/native-browser && shasum -a 256 -c NATIVE_BUILD_SHA256SUMS)
+          else
+            mkdir -p proof/native-browser/binaries
+            cp "_build/default/test/$PROBE_TARGET.exe" proof/native-browser/binaries/
+            cp _build/default/bin/masc_native_addon_launcher.exe proof/native-browser/binaries/
+            cp _build/default/bin/masc_browser_process_owner.exe proof/native-browser/binaries/
+            cp _build/default/bin/masc_browser_addon_worker.exe proof/native-browser/binaries/
+            if [[ "$PROOF_BROWSER" == webextension ]]; then
+              cp _build/default/bin/masc_browser_host.exe proof/native-browser/binaries/
+            fi
           fi
           (cd proof/native-browser && shasum -a 256 binaries/*.exe > SHA256SUMS)
           if [[ "$PROOF_BROWSER" == firefox || "$PROOF_BROWSER" == gecko || "$PROOF_BROWSER" == webextension ]]; then

@@ -108,35 +108,31 @@ let test_container_path_translation_under_sandbox () =
           (Filename.concat base "explicit-local-allowed")
       in
       Unix.mkdir explicit_cwd 0o755;
-      let local_meta =
-        { (make_docker_meta ~name:"local-explicit-path") with
+      let ssh_meta =
+        { (make_docker_meta ~name:"ssh-unresolved-path") with
           sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
         }
       in
-      let raw =
-        Keeper_tool_execute_runtime.handle_tool_execute ~result_projection:Tool_output.default_model_projection
-          ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
-          ~turn_sandbox_factory:None
-          ~config
-          ~meta:local_meta
-          ~args:
-            (`Assoc
-              [ "argv", `List []
-              ; "cwd", `String explicit_cwd
-              ])
-          ()
+      let response =
+        Keeper_tool_execute_runtime.For_testing.model_execute_location_fields
+          ~remote_workspace_root:None ~config ~meta:ssh_meta
+          ~args:(`Assoc [ "cwd", `String explicit_cwd ]) ~cwd:explicit_cwd
       in
-      let response = Yojson.Safe.from_string raw in
-      let open Yojson.Safe.Util in
-      check string "Local explicit cwd remains visible at top level"
-        explicit_cwd
-        (response |> member "cwd" |> to_string);
-      check string "Local explicit cwd remains visible in execution_location"
-        explicit_cwd
-        (response
-         |> member "execution_location"
-         |> member "cwd"
-         |> to_string))
+      check bool "unresolved SSH explicitly returns a null top-level cwd" true
+        (List.assoc_opt "cwd" response = Some `Null);
+      let location =
+        match List.assoc_opt "execution_location" response with
+        | Some (`Assoc fields) -> fields
+        | _ -> fail "unresolved SSH must retain its typed location evidence"
+      in
+      check bool "unresolved SSH location is unavailable" true
+        (List.assoc_opt "scope" location = Some (`String "unavailable"));
+      check bool "unresolved SSH names its namespace failure" true
+        (List.assoc_opt "reason" location = Some (`String "remote_ssh_namespace_unresolved"));
+      List.iter (fun field ->
+        check bool ("unresolved SSH explicitly returns null " ^ field) true
+          (List.assoc_opt field location = Some `Null))
+        [ "cwd"; "playground_root"; "repo_root"; "relative_cwd" ])
 
 let test_typed_execute_response_cwd_uses_container_path () =
   Eio_main.run @@ fun _env ->

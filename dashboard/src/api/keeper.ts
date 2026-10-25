@@ -769,7 +769,7 @@ export async function cancelKeeperChatOperation(
   return operation
 }
 
-export async function listQueuedKeeperChatOperations(
+async function fetchQueuedKeeperChatOperationPage(
   keeperName: string,
   afterSequence?: string,
 ): Promise<KeeperChatOperation[]> {
@@ -792,6 +792,30 @@ export async function listQueuedKeeperChatOperations(
     throw new Error('Keeper chat operation list contains a non-queued operation')
   }
   return operations
+}
+
+/** Reconstruct the queue from durable pages, including rows past the HTTP page limit.
+ * Pages are live reads, not a snapshot: an operation moved to a later sequence
+ * replaces its earlier occurrence. Never publish a partial queue after a read error.
+ */
+export async function listQueuedKeeperChatOperations(
+  keeperName: string,
+  afterSequence?: string,
+): Promise<KeeperChatOperation[]> {
+  const operations = new Map<string, KeeperChatOperation>()
+  let cursor = afterSequence
+  for (;;) {
+    const page = await fetchQueuedKeeperChatOperationPage(keeperName, cursor)
+    if (page.length === 0) return [...operations.values()]
+    for (const operation of page) {
+      if (cursor !== undefined && BigInt(operation.sequence) <= BigInt(cursor)) {
+        throw new Error('Keeper chat operation page sequence did not advance')
+      }
+      cursor = operation.sequence
+      operations.delete(operation.operationId)
+      operations.set(operation.operationId, operation)
+    }
+  }
 }
 
 async function mutateQueuedKeeperChatOperation(

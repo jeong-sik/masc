@@ -94,6 +94,36 @@ The original record, queue receipt, both tool contexts and resumed turn retained
 remained in progress. This is controlled failure continuation; it does not
 establish successful sign-in or work on an authenticated website.
 
+The retained `60303e6d` server and a Dashboard bundle built from that same
+source were then exercised in an actual browser. The Keeper conversation
+displayed `task-001`, operation `4cd1169f-c1e7-45f1-812a-edab6cec00d3` and
+`outcome_unknown`; the private connection panel displayed that same operation.
+Screenshots, bundle identity, persisted message and source-joined continuation
+are retained in the development report. The connected account was fabricated,
+and this does not establish actual OAuth, approval or credential fill. The
+surface-post row also lacked a turn link; its provenance was joined through
+the actual tool execution and Keeper decision records.
+
+[Run 40153689511](https://github.com/jeong-sik/masc/actions/runs/40153689511)
+built `d02f48fea5a523d3b66aab850b1c6a41d6566517`. All seven selected suites
+passed, 113 tests, and both early and late native artifact retention passed.
+The actual Chromium probe failed in both private and persistent profiles at
+the model-mediated `act` operation. Screenshot capture returned image data;
+its subsequent clicked-title assertion failed after `act` did not finish.
+The overall run failed, and its binary is not a production installation.
+
+The act response exposed a source contract mismatch: initial and Browser-worker
+checks apply the package baseline plus the consumer's partial required-shape
+guard, but original proof retention had reinterpreted the consumer schema as
+a Host tool input schema. A nested object under `anyOf(object, null)` could
+therefore be rejected only during proof publication. Original proof and retained
+observation decoding now share the initial consumer-shape guard. Generic result
+decoding, fresh package baseline and original consumer authority checks remain
+independent requirements. This guard is not a full JSON Schema validator.
+Focused object/null scenarios cover the actual loopback HTTP walk, proof reopen,
+retained observation and Browser model delivery; their new behavior and the
+corrected real Chromium path still require exact-candidate execution.
+
 ## Earlier status installation
 
 On 2026-10-24, candidate `dc3e8ed35ff065c4cff859a8473531b4561373db`

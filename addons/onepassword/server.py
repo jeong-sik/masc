@@ -21,7 +21,7 @@ from protocol import INPUT_SCHEMA, OUTPUT_SCHEMA, InvalidInput, decode_json, enc
 
 
 EMPTY = {"type": "object", "properties": {}, "additionalProperties": False}
-COMPANION_SCHEMA = {"type": "object", "properties": {"version": {"type": "integer", "enum": [2]}},
+COMPANION_SCHEMA = {"type": "object", "properties": {"version": {"type": "integer", "enum": [3]}},
                     "required": ["version"], "additionalProperties": False}
 PHASES = ["not_configured", "unavailable", *(phase.value for phase in Phase)]
 STATUS_SCHEMA = {"type": "object", "additionalProperties": False,
@@ -75,6 +75,7 @@ LOGIN_TOOLS = [
 TOOLS = [STATUS_TOOL, *LOGIN_TOOLS]
 CONTROL_SCHEMA = closed({"tool": TEXT, "arguments": {"type": "object"}, "caller": {"type": "object"},
                          "companion": closed({"socket_path": TEXT, "invocation_id": TEXT,
+                                              "publication_id": {"type": ["string", "null"]},
                                               "max_message_bytes": {"type": "integer"}})},
                         ["tool", "arguments", "caller"])
 OPERATOR_ACTIONS = ["view", "connect", "complete", "cancel", "login_approval", "login_opened", "login_confirmed", "login_cancel"]
@@ -179,10 +180,10 @@ class Worker:
         return self._service_value
 
     def handshake(self, arguments):
-        if arguments != {"version": 2} or type(arguments["version"]) is not int:
+        if arguments != {"version": 3} or type(arguments["version"]) is not int:
             raise InvalidInput("invalid private companion handshake")
         self._negotiated = True
-        return {"version": 2, "tools": ["onepassword_login"]}
+        return {"version": 3, "tools": ["onepassword_login"]}
 
     def retire(self):
         self._retired = True

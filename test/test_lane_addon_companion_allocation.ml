@@ -27,7 +27,7 @@ let with_temp_root run =
       Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10. (fun () -> run root env)))
 
 let socket_path owned =
-  let grant = B.issue (A.broker owned) ~bind:(fun _ -> Error B.Not_started) |> ok in
+  let grant = B.issue (A.broker owned) ~publish:None ~bind:(fun _ -> Error B.Not_started) |> ok in
   let path = Yojson.Safe.Util.(B.descriptor grant |> member "socket_path" |> to_string) in
   B.end_invocation grant;
   path

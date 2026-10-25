@@ -28,7 +28,7 @@ let handshake grant=`Assoc ["invocation_id",field "invocation_id" (B.descriptor 
 let operation reader=receive reader |> field "operation_id" |> Yojson.Safe.Util.to_string
 let invoke operation_id=P.Invoke {operation_id;program="async()=>({})";arguments=`Assoc []}
 let released=`Assoc ["released",`Bool true]
-let issue broker ~bind=B.issue broker ~bind |> ok
+let issue broker ~bind=B.issue broker ~publish:None ~bind |> ok
 let normal_binding_and_consumption () = with_broker (fun env sw broker ->
   let calls=ref [] and finishes=ref [] and binds=ref 0 in
   let finished,finish=Eio.Promise.create () in
@@ -43,7 +43,7 @@ let normal_binding_and_consumption () = with_broker (fun env sw broker ->
   let flow,reader=connect env sw grant in
   send flow (handshake grant);
   let operation_id=operation reader in
-  B.end_invocation grant;
+  B.accept grant;B.end_invocation grant;
   let second,second_reader=connect env sw grant in
   send second (handshake grant);
   check bool "a claimed grant cannot bind a second socket" true
@@ -172,7 +172,7 @@ let revoke_signal_and_join_are_distinct () = with_broker (fun env sw broker ->
     Eio.Fiber.yield ();
     check bool "revoke signal is not a cleanup receipt" false (Eio.Promise.is_resolved stopped);
     check bool "revocation refuses new grants" true
-      (B.issue broker ~bind:(fun _ -> Error B.Not_started)=Error B.Unavailable);
+      (B.issue broker ~publish:None ~bind:(fun _ -> Error B.Not_started)=Error B.Unavailable);
     Eio.Promise.resolve allow_cleanup ();
     check bool "listener descriptor close is confirmed" true (Eio.Promise.await_exn stopped = Ok ());
     check bool "joined revocation finished the original binding once" true (!completions=[B.Abandoned])))
@@ -189,14 +189,89 @@ let cancelled_invocation_joins_bind () = with_broker (fun env sw broker ->
   let flow,reader=connect env sw grant in
   Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve allow_cleanup ())) (fun () ->
     send flow (handshake grant);Eio.Promise.await entered;
-    B.cancel grant;Eio.Promise.await cancelled;
+    B.cancel_invocation grant;Eio.Promise.await cancelled;
     check bool "invocation cancellation joins the original factory" false (Eio.Promise.is_resolved finished);
     Eio.Promise.resolve allow_cleanup ();Eio.Promise.await finished;
     check int "cancelled invocation admits no Browser command" 0 !calls;
     check bool "late binding is abandoned exactly once" true (!completions=[B.Abandoned]);
     check bool "late binding success never escapes cancellation" true
       (match Eio.Buf_read.line reader with _ -> false | exception End_of_file -> true)))
+let public_event=`Assoc ["publication_id",`String "0b000000-0000-4000-8000-000000000032";
+  "kind",`String "terminal";"output",`Assoc ["phase",`String "released"]]
+let publish_frame grant event=`Assoc ["publication_id",field "publication_id" (B.descriptor grant);"event",event]
+let publication_survives_browser_withdrawal_before_acceptance () = with_broker (fun env sw broker ->
+  let binds=ref 0 and events=ref [] in
+  let grant=B.issue broker ~publish:(Some (fun event -> events:=event::!events;Ok ()))
+    ~bind:(fun _ -> incr binds;Error B.Not_started) |> ok in
+  let browser,reader=connect env sw grant in
+  send browser (`Assoc ["invocation_id",field "invocation_id" (B.descriptor grant);"withdraw",`Bool true]);
+  check bool "Browser withdrawal is confirmed" true (receive reader=`Assoc ["withdrawn",`Bool true]);
+  let publisher,reader=connect env sw grant in send publisher (publish_frame grant public_event);
+  let reply=Eio.Fiber.fork_promise ~sw (fun () -> receive reader) in
+  Eio.Fiber.yield ();
+  check bool "publication cannot acknowledge an unaccepted invocation" false (Eio.Promise.is_resolved reply);
+  check int "unaccepted invocation dispatches no publication" 0 (List.length !events);
+  B.accept grant;B.end_invocation grant;
+  check bool "acceptance remains independent of withdrawn Browser" true
+    (Eio.Promise.await_exn reply=`Assoc ["accepted",`Bool true]);
+  let duplicate,reader=connect env sw grant in send duplicate (publish_frame grant public_event);
+  check bool "same event may reconcile original host admission" true (receive reader=`Assoc ["accepted",`Bool true]);
+  check bool "reconciliation preserves the complete envelope" true (!events=[public_event;public_event]);
+  check int "publication never binds another Browser" 0 !binds;
+  let forged,reader=connect env sw grant in
+  send forged (`Assoc ["publication_id",field "invocation_id" (B.descriptor grant);"event",public_event]);
+  check bool "Browser nonce conveys no publisher authority" true
+    (receive reader=`Assoc ["error",`String "not_started"]))
+let failed_invocation_revokes_claimed_browser_and_publisher () = with_broker (fun env sw broker ->
+  let calls=ref 0 and events=ref 0 in
+  let finished,finish=Eio.Promise.create () in
+  let grant=B.issue broker ~publish:(Some (fun _ -> incr events;Ok ()))
+    ~bind:(fun _ -> Ok {B.execute=(fun _ -> incr calls;Ok released);
+      finish=(fun _ -> Eio.Promise.resolve finish ())}) |> ok in
+  let browser,reader=connect env sw grant in send browser (handshake grant);
+  ignore (operation reader);
+  B.cancel_invocation grant;B.accept grant;B.end_invocation grant;
+  Eio.Promise.await finished;
+  let publisher,reader=connect env sw grant in send publisher (publish_frame grant public_event);
+  check bool "failed invocation never restores publication admission" true
+    (receive reader=`Assoc ["error",`String "not_started"]);
+  check int "failed invocation publishes no event" 0 !events;
+  check int "failed invocation sends no Browser input" 0 !calls)
+let publication_ack_waits_for_confirmed_host_admission () = with_broker (fun env sw broker ->
+  let entered,enter=Eio.Promise.create () and committed,commit=Eio.Promise.create () in
+  let grant=B.issue broker ~publish:(Some (fun _ -> Eio.Promise.resolve enter ();
+    Eio.Promise.await committed;Ok ())) ~bind:(fun _ -> Error B.Not_started) |> ok in
+  B.accept grant;B.end_invocation grant;
+  let publisher,reader=connect env sw grant in send publisher (publish_frame grant public_event);
+  let reply=Eio.Fiber.fork_promise ~sw (fun () -> receive reader) in
+  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve commit ())) (fun () ->
+    Eio.Promise.await entered;
+    check bool "an entered callback is not durable admission" false (Eio.Promise.is_resolved reply);
+    Eio.Promise.resolve commit ();
+    check bool "confirmed callback permits acknowledgement" true
+      (Eio.Promise.await_exn reply=`Assoc ["accepted",`Bool true])))
+let provider_revocation_joins_original_publication () = with_broker (fun env sw broker ->
+  let entered,enter=Eio.Promise.create () and cancelled,cancel=Eio.Promise.create () in
+  let cleanup,allow_cleanup=Eio.Promise.create () and never,_=Eio.Promise.create () in
+  let grant=B.issue broker ~publish:(Some (fun _ -> Eio.Promise.resolve enter ();
+    (try Eio.Promise.await never with Eio.Cancel.Cancelled _ ->
+      Eio.Promise.resolve cancel ();Eio.Cancel.protect (fun () -> Eio.Promise.await cleanup));
+    Ok ())) ~bind:(fun _ -> Error B.Not_started) |> ok in
+  B.accept grant;B.end_invocation grant;
+  let publisher,reader=connect env sw grant in send publisher (publish_frame grant public_event);
+  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve allow_cleanup ())) (fun () ->
+    Eio.Promise.await entered;B.revoke broker;Eio.Promise.await cancelled;
+    let stopped=Eio.Fiber.fork_promise ~sw (fun () -> B.await_stopped broker) in
+    Eio.Fiber.yield ();
+    check bool "provider revoke has not yet joined publication cleanup" false (Eio.Promise.is_resolved stopped);
+    Eio.Promise.resolve allow_cleanup ();Eio.Promise.await_exn stopped;
+    check bool "late callback success cannot acknowledge retired authority" true
+      (match Eio.Buf_read.line reader with _ -> false | exception End_of_file -> true)))
 let ()=run "private companion broker" ["invocation authority",[
+  test_case "publisher survives Browser withdrawal before acceptance" `Quick publication_survives_browser_withdrawal_before_acceptance;
+  test_case "failed invocation revokes both private authorities" `Quick failed_invocation_revokes_claimed_browser_and_publisher;
+  test_case "publication ACK follows confirmed admission" `Quick publication_ack_waits_for_confirmed_host_admission;
+  test_case "provider revocation joins original publication" `Quick provider_revocation_joins_original_publication;
   test_case "one original connection and safe release" `Quick normal_binding_and_consumption;
   test_case "unused invocation grant is withdrawn" `Quick unused_grant;
   test_case "accepted grant binds after public invocation return" `Quick accepted_grant_binds_after_return;

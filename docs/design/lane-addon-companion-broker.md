@@ -59,8 +59,8 @@ Browser/process cleanup. The caller removes its private directory after that joi
 
 ## Host connection and call context
 
-An optional reserved MCP `lane_companion` handshake requires a version-2 request
-and declares version 2 plus the
+An optional reserved MCP `lane_companion` handshake requires a version-3 request
+and declares version 3 plus the
 exact exported tools that need this channel. It requires host-context invocation;
 the reserved handshake cannot be exported or used as an action. Negotiation,
 schemas and exports become visible together at Ready. Companion exports require
@@ -135,3 +135,28 @@ this coding session. The 1Password package negotiates an empty tool list until
 its login lifecycle can use this transport, private approval controls
 and durable safe operation/continuation records. Existing exports continue to
 report `browser_login_available = false` until that path is usable.
+
+## Private publication authority
+
+Version 3 adds `publication_id` to the private descriptor. It is a separate
+unguessable capability, or explicit `null` for a caller without a captured
+Keeper continuation. The host seals the original source, export output schema
+and durable delivery callback before issuing it. Publication frames contain
+only that capability and the public event; they cannot name a route.
+
+Invocation acceptance is independent of Browser phase. A publication waits for
+a validated successful exported reply, even if its Browser was already released
+or withdrawn. Failed invocation cancels both authorities. Browser release,
+withdrawal and peer loss close Browser admission only; original provider revoke
+ends and joins both. Publication admission freshly checks that original
+provider, caller and configuration, without requiring Browser authority again.
+The original host callback validates canonical public output, commits it and
+admits the original Keeper queue before acknowledging. Repeated delivery may
+reconcile the same immutable event; this port never sends Browser commands.
+
+Python `Publisher` owns separate sockets, pins its original socket/directory
+identities and can be closed independently of `Companion`. It sends one event
+per connection and does not retry automatically. Its controlled socket tests
+exercise terminal delivery after Browser close, a lost ACK, shutdown interruption
+and replacement refusal. The Service-owned outbox pump that calls it remains
+unconnected; no actual Keeper continuation is claimed by these fixtures.

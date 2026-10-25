@@ -96,7 +96,7 @@ joins the worker. Unexpected background errors expose a fixed failure without
 printing private tracebacks.
 
 Initial host binding now runs on the same owned worker after admission returns.
-The version-2 companion contract retains the successful invocation's original
+The version-3 companion contract retains the successful invocation's original
 grant for that bind; unsupported hosts fail negotiation. Status reads and socket
 cancellation stay available while the initial bind waits. Worker exports now use
 this executor. Only `onepassword_login` receives a new host grant; later calls
@@ -127,7 +127,7 @@ the original session. Their results stay on the private backend path; these
 programs are not model tools. The independent host socket broker and two-phase
 Python client are [source implementation](../../docs/design/lane-addon-companion-broker.md).
 Runtime/private-context authority wiring is also source implementation. The
-package negotiates the login-start export through version 2 of the private
+package negotiates the login-start export through version 3 of the private
 companion contract. Installed-host execution and real account
 verification remain unfinished.
 

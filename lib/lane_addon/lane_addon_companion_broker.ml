@@ -8,9 +8,11 @@ type binding = {
   finish:completion -> unit;
 }
 type phase = Pending | Accepted | Claimed | Withdrawn
+type invocation_decision = Awaiting_decision | Admitted | Rejected
 type t = {
   socket_path:string; max_message_bytes:int;
   grants:(string,grant) Hashtbl.t;
+  publications:(string,grant) Hashtbl.t;
   retired:unit Eio.Promise.t; retire:unit Eio.Promise.u;
   stopped:(unit,shutdown_error) result Eio.Promise.t;
   stop:(unit,shutdown_error) result Eio.Promise.u;
@@ -21,9 +23,15 @@ and grant = {
   bind:selection -> (binding,error) result;
   cancelled:unit Eio.Promise.t; cancel:unit Eio.Promise.u;
   mutable phase:phase;
+  publication_id:string option;
+  publish:(Yojson.Safe.t -> (unit,error) result) option;
+  mutable decision:invocation_decision;
+  decided:unit Eio.Promise.t; decide:unit Eio.Promise.u;
+  publication_cancelled:unit Eio.Promise.t; cancel_publication:unit Eio.Promise.u;
 }
-type opening = Bind of string * selection | Withdraw of string
+type opening = Bind of string * selection | Withdraw of string | Publish of string * Yojson.Safe.t
 type connection_start = Binding of grant * selection | Withdrawal of string
+  | Publication of grant * Yojson.Safe.t
 let ( let* )=Result.bind
 let error_json = function
   | Unavailable -> `Assoc ["error",`String "unavailable"]
@@ -31,27 +39,44 @@ let error_json = function
   | Outcome_unknown -> `Assoc ["error",`String "outcome_unknown"]
 let revoke t =
   t.live<-false;ignore (Eio.Promise.try_resolve t.retire ());
-  Hashtbl.clear t.grants
+  Hashtbl.clear t.grants;Hashtbl.clear t.publications
 let await_stopped t = Eio.Promise.await t.stopped
-let cancel grant =
+let withdraw_browser grant =
   grant.phase<-Withdrawn;
   Hashtbl.remove grant.broker.grants grant.invocation_id;
   ignore (Eio.Promise.try_resolve grant.cancel ())
-let accept grant = match grant.phase with
-  | Pending when grant.broker.live && not (Eio.Promise.is_resolved grant.cancelled) -> grant.phase<-Accepted
-  | Pending | Accepted | Claimed | Withdrawn -> ()
-let end_invocation grant = match grant.phase with
-  | Pending -> cancel grant
-  | Accepted | Claimed | Withdrawn -> ()
+let cancel_invocation grant =
+  withdraw_browser grant;
+  grant.decision<-Rejected;
+  Option.iter (Hashtbl.remove grant.broker.publications) grant.publication_id;
+  ignore (Eio.Promise.try_resolve grant.decide ());
+  ignore (Eio.Promise.try_resolve grant.cancel_publication ())
+let accept grant = match grant.decision with
+  | Awaiting_decision when grant.broker.live ->
+      grant.decision<-Admitted;
+      (match grant.phase with Pending -> grant.phase<-Accepted | Accepted|Claimed|Withdrawn -> ());
+      ignore (Eio.Promise.try_resolve grant.decide ())
+  | Awaiting_decision | Admitted | Rejected -> ()
+let end_invocation grant = match grant.decision with
+  | Awaiting_decision | Rejected -> cancel_invocation grant
+  | Admitted -> ()
 let descriptor grant = `Assoc ["socket_path",`String grant.broker.socket_path;
-  "invocation_id",`String grant.invocation_id;"max_message_bytes",`Int grant.broker.max_message_bytes]
-let issue broker ~bind =
+  "invocation_id",`String grant.invocation_id;"max_message_bytes",`Int grant.broker.max_message_bytes;
+  "publication_id",(match grant.publication_id with None -> `Null | Some id -> `String id)]
+let nonce ()=Digestif.SHA256.(to_hex (digest_string (Crypto_rng.generate 32)))
+let issue broker ~publish ~bind =
   if not broker.live then Error Unavailable else
-  let invocation_id=Digestif.SHA256.(to_hex (digest_string (Crypto_rng.generate 32))) in
+  let invocation_id=nonce () in
+  let publication_id=Option.map (fun _ -> nonce ()) publish in
   let cancelled,cancel=Eio.Promise.create () in
+  let decided,decide=Eio.Promise.create () in
+  let publication_cancelled,cancel_publication=Eio.Promise.create () in
   let grant={broker;invocation_id;operation_id=Random_id.uuid_v7 ();bind;
-    cancelled;cancel;phase=Pending} in
-  Hashtbl.add broker.grants invocation_id grant;Ok grant
+    cancelled;cancel;phase=Pending;publication_id;publish;decision=Awaiting_decision;
+    decided;decide;publication_cancelled;cancel_publication} in
+  Hashtbl.add broker.grants invocation_id grant;
+  Option.iter (fun id -> Hashtbl.add broker.publications id grant) publication_id;
+  Ok grant
 let parse raw =
   match Yojson.Safe.from_string raw with
   | value -> Lane_addon_action.canonical value |> Result.map_error (fun _ -> Not_started)
@@ -61,6 +86,9 @@ let capability = function
       && String.for_all (fun c -> c>='0' && c<='9' || c>='a' && c<='f') value -> Ok value
   | _ -> Error Not_started
 let handshake = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=["event";"publication_id"] ->
+      let* publication_id=capability (List.assoc "publication_id" fields) in
+      Ok (Publish (publication_id,List.assoc "event" fields))
   | `Assoc fields when List.sort String.compare (List.map fst fields)=["invocation_id";"withdraw"] ->
       let* invocation_id=capability (List.assoc "invocation_id" fields) in
       (match List.assoc "withdraw" fields with
@@ -90,11 +118,11 @@ let matches grant selection = function
 let admitted grant = grant.broker.live && match grant.phase with
   | Claimed -> not (Eio.Promise.is_resolved grant.cancelled)
   | Pending | Accepted | Withdrawn -> false
-let while_peer_waits grant reader work =
+let while_peer_waits ~admit reader work =
   let departed=ref false in
   let result=Watched_work.run (fun () ->
     Eio.Fiber.check ();
-    if !departed || not (admitted grant) then None else Some (work ()))
+    if !departed || not (admit ()) then None else Some (work ()))
     ~watcher:(fun () ->
       (* Use the framing reader: it may already own pipelined bytes. Reading
          the raw flow here would miss that buffered input and admit effects. *)
@@ -112,6 +140,10 @@ let serve_connection t flow =
     let* opening=handshake value in
     match opening with
     | Withdraw invocation_id -> Ok (Withdrawal invocation_id)
+    | Publish (publication_id,event) ->
+        (match Hashtbl.find_opt t.publications publication_id with
+         | Some grant when t.live -> Ok (Publication (grant,event))
+         | Some _|None -> Error Not_started)
     | Bind (invocation_id,selection) ->
         match Hashtbl.find_opt t.grants invocation_id with
         | Some ({phase=(Pending|Accepted);_} as grant) when t.live ->
@@ -126,13 +158,28 @@ let serve_connection t flow =
       (* This credentialless control can only remove authority. Absence is an
          authoritative no-grant result, so lost acknowledgements are safely
          reconciled using the same nonce. No binding factory or Browser input. *)
-      Option.iter cancel (Hashtbl.find_opt t.grants invocation_id);
+      Option.iter withdraw_browser (Hashtbl.find_opt t.grants invocation_id);
       write t flow (`Assoc ["withdrawn",`Bool true])
+  | Ok (Publication (grant,event)) ->
+    let available ()=t.live && match grant.decision with
+      | Awaiting_decision|Admitted -> true | Rejected -> false in
+    let run ()=
+      let result,departed=while_peer_waits ~admit:available reader (fun () ->
+        Eio.Promise.await grant.decided;
+        match grant.decision,grant.publish with
+        | Admitted,Some publish when t.live -> publish event
+        | (Awaiting_decision|Admitted|Rejected),(Some _|None) -> Error Not_started) in
+      if departed || not (available ()) then () else
+      match result with
+      | Some (Ok ()) -> write t flow (`Assoc ["accepted",`Bool true])
+      | Some (Error error) -> write t flow (error_json error)
+      | None -> () in
+    Watched_work.run run ~watcher:(fun () -> Eio.Promise.await grant.publication_cancelled)
   | Ok (Binding (grant,selection)) ->
-    Fun.protect ~finally:(fun () -> cancel grant) (fun () ->
+    Fun.protect ~finally:(fun () -> withdraw_browser grant) (fun () ->
       let run () =
         if not (admitted grant) then write t flow (error_json Not_started) else
-        let binding,departed=while_peer_waits grant reader (fun () -> grant.bind selection) in
+        let binding,departed=while_peer_waits ~admit:(fun () -> admitted grant) reader (fun () -> grant.bind selection) in
         match binding with
         | None -> ()
         | Some (Error error) -> if not departed && admitted grant then write t flow (error_json error)
@@ -153,7 +200,7 @@ let serve_connection t flow =
                      running behind a released host scope. Clients send one
                      command and await its reply; pipelined bytes also abandon
                      the current uncertain operation. *)
-                  let result,departed=while_peer_waits grant reader (fun () -> binding.execute command) in
+                  let result,departed=while_peer_waits ~admit:(fun () -> admitted grant) reader (fun () -> binding.execute command) in
                   if departed || not (admitted grant) then () else
                   match result with
                   | None -> ()
@@ -202,7 +249,7 @@ let create ~sw ~directory ~max_message_bytes =
   let* ()=checked in
   let socket_path=Filename.concat directory "s" in
   let retired,retire=Eio.Promise.create () and stopped,stop=Eio.Promise.create () in
-  let t={socket_path;max_message_bytes;grants=Hashtbl.create 4;retired;retire;stopped;stop;live=true} in
+  let t={socket_path;max_message_bytes;grants=Hashtbl.create 4;publications=Hashtbl.create 4;retired;retire;stopped;stop;live=true} in
   let ready,resolve_ready=Eio.Promise.create () in
   let shutdown = ref (Ok ()) in
   let started=ref false in

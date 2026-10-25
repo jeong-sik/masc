@@ -12,7 +12,7 @@ There is no row TTL, tail guess, second writer, new store or persisted index. Ma
 
 Existing suite:test/test_keeper_approval_audit_timeline. Four new scenarios use actual Audit.record writes and verify clean receipts:650 foreign writes between target rows across physical days, immediate append freshness without store reset, full target EOF, global newest order and separate workspaces; malformed JSON between target rows versus corruption outside the selected suffix; missing/non-string/duplicate owner metadata; missing store versus an invalid file in place of its directory and zero-limit no-I/O.
 
-Three OCaml files parse; whitespace passes. No local Dune/typecheck or scenario execution claimed. Source hashes are listed separately. Full regression unrun. Independent source review and selected execution must be recorded against the final head.
+Initial run40163708651 at5d50121d78ff4c7ca8ff6fa8ecfcefe8231ff764 FAILED before scenarios: the backend-error record expression was inferred as write_failure because read_error and write_failure share stage/detail labels. Prior source audits missed this compilability blocker. The repair explicitly annotates the existing read_error type at that return; no behavior/API change. Initial failure is retained separately. Three OCaml files parse; whitespace passes. No local Dune/typecheck or repaired-head scenario execution claimed. Source hashes are listed separately. Full regression unrun. Independent source review and selected execution must be recorded against the final head.
 
 ## Remaining scope
 

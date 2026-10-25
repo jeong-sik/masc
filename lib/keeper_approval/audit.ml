@@ -569,9 +569,9 @@ let read_recent ~base_path ?keeper_name ?(n = 20) ()
         match Dated_jsonl.find_latest_entry_result store select with
         | Error error ->
           Error
-            { stage = Read_recent
-            ; detail = Dated_jsonl.read_error_to_string error
-            }
+            ({ stage = Read_recent
+             ; detail = Dated_jsonl.read_error_to_string error
+             } : read_error)
         | Ok (Some result) -> result
         | Ok None -> Ok (List.rev !rows)))
 ;;

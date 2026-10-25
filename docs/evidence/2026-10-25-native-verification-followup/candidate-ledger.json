@@ -1,0 +1,26 @@
+{
+  "recorded_at": "2026-10-25T01:17:00.789746+00:00",
+  "candidate_code_sha": "17583b006eaf0823587ba07a27ad50889ef8d498",
+  "candidate_base_sha": "b31260ebda2134c3c4b2527ee5f9455ddfd600f1",
+  "pr": 45874,
+  "stack": 45750,
+  "latest_full_regression": {
+    "run_id": null,
+    "head": null,
+    "TARGET_SUITES": null,
+    "state": "not observed in this campaign; not run on this candidate"
+  },
+  "selected_native": {
+    "run_id": 40149490208,
+    "head": "17583b006eaf0823587ba07a27ad50889ef8d498",
+    "TARGET_SUITES": [
+      "test_verification",
+      "test_completion_repair_delivery",
+      "test_keeper_claude_code_runtime"
+    ],
+    "state": "in_progress at last read; no PASS inferred"
+  },
+  "source_review_scope": "Independent code PASS at exact17583/baseb312. Archived documentation review binds e3ca plus named document hashes; not a GitHub current-head whole-stack approval.",
+  "main_goal": "verifying/proof_pending; no human confirmation",
+  "installation": "not performed"
+}

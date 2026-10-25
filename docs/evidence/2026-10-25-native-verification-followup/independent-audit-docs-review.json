@@ -1,0 +1,288 @@
+{
+  "verdict": "PASS",
+  "scope": "Factual and security review of these five dated documentation snapshots and bound local evidence only; not GitHub approval, self-fixture approval, native rerun, installation, merge, vendor or human Goal completion verdict",
+  "reviewed_at": "2026-10-25T01:14:53.639854+00:00",
+  "source_head": "e3ca42d75f9376fef30d322ad87417c4f9f8edff",
+  "worktree": "/tmp/masc-submission-evidence-integration-20261025",
+  "uncommitted_document_snapshot": true,
+  "documents": [
+    {
+      "path": "docs/audits/2026-10-25-agentic-verification-adversarial-audit.md",
+      "bytes": 11485,
+      "sha256": "4b2ec74f2eb30d0496a9d448fac9ff28a335d5a176094147f1101119faa73981"
+    },
+    {
+      "path": "docs/evidence/2026-10-24-goal-outcome-campaign/README.md",
+      "bytes": 12841,
+      "sha256": "a1ce5be994a3ba4dbcead07cc0f7df8997562238d6221df9268a1f632393b60d"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/README.md",
+      "bytes": 3744,
+      "sha256": "235cf9e6203aa231dfa1163e42a1c50f35876ee128e478b416fcd98fdb37e573"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-main-registration/README.md",
+      "bytes": 2868,
+      "sha256": "a20dc63be185abc3936c1ba65b5fea50f631b3a424ddfea49e289024daa6069c"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-native-verification-followup/README.md",
+      "bytes": 3600,
+      "sha256": "d54a778b2cd49a16e04a7bc79f02291cdfa4ce1bd00b5484670e87b6cfc2038b"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/experiment-intent.json",
+      "bytes": 975,
+      "sha256": "f8a814c291b30b4201e0618712f6e8d722e948cdec0bf4086d135d69cf559ee9"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/alpha-request-input.json",
+      "bytes": 658,
+      "sha256": "2e743234a3834c010b3e20c09d5f261bb0910780c7d003e336e522b4c4aff418"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/acceptance-11of11-snapshot.json",
+      "bytes": 26469,
+      "sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/preapproval/g2-alpha-checkpoint.json",
+      "bytes": 10858,
+      "sha256": "274853f11422b41e1d34fbff7c3d532f8ac80f3e7d62c99339484eee49d17ae1"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/preapproval/current-artifact-at-checkpoint.json",
+      "bytes": 55,
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/preapproval/submitted-artifact-at-checkpoint.json",
+      "bytes": 55,
+      "sha256": "f6bc3bec6d70ff5f11395adbe8e6ae752aba9e323a09a30ffea75b6b0458c9cc"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/20261024T182033823891Z.json",
+      "bytes": 198904,
+      "sha256": "2bc096ff79c7e35363c8afe9102e2670ce88dd8ab3d8af17b4795ad8e369d5cb"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/diagnosis.json",
+      "bytes": 19261,
+      "sha256": "bcac55d465afdfe99e3c6e87ee9201890792ca01d542975f922e34ceb217eb0b"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/actual-tool-sequence-and-receipts.json",
+      "bytes": 10317,
+      "sha256": "739631556cc1787e6eb647023597f4c2827bc673d9acaa032384f8f1e24b600b"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/artifact-current-final.json",
+      "bytes": 53,
+      "sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/artifact-task2-immutable.json",
+      "bytes": 53,
+      "sha256": "4d7abf84f904b05c3852288008ebc71eaa039032300e8730592e9a52ef7c9856"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/postapproval/source-terminal-state.json",
+      "bytes": 2216,
+      "sha256": "a51b6bf35788ea841ef07db088e34e6e2f0a525f9448f8cf5d99a2082724682d"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/operator/partial-inspection.json",
+      "bytes": 4397,
+      "sha256": "3c8bbef3ce306e81fafcd9c16094ceb9f9c49b0b96839a2437223fdd4ff261e5"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-continuation-glm/operator/approval-receipt.json",
+      "bytes": 118,
+      "sha256": "03f878421a564b40272bfffd05d1a9f1f5871e660acec76c2393b7128e0f3112"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-main-registration/measurement11/receipt.json",
+      "bytes": 4623,
+      "sha256": "b07743c04704205c1a2eeea9319252730715c47a422299dde85afcf10316579c"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-main-registration/task2620-submission/receipt.json",
+      "bytes": 1327,
+      "sha256": "0682a5c27d3ab537f40f07dd8a89b95e934f4866fee60ae0351f6c85998e80fc"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-main-registration/goal-proof-request/receipt.json",
+      "bytes": 8635,
+      "sha256": "71b010616347d5936a310e36ce1759418edcec760351734e0a600774e9fc0d10"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-main-registration/primary-state-010145.json",
+      "bytes": 6913,
+      "sha256": "febcba3ab4a2bee1f0deea738190fc4993e197bda78f872b6dc16adb62456611"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-main-registration/primary-state-011046.json",
+      "bytes": 4259,
+      "sha256": "da2ef3ffdc8cd6cbd8681e934a2bfde7a4c331d39e8257fb647e7e50aa305122"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-goal-main-registration/health-read-011038.json",
+      "bytes": 219,
+      "sha256": "771c45caeb6343790e413926c8bea274960a1cbecac130d16d9ec3b43e16a789"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-native-verification-followup/parent-be9a-native-result.json",
+      "bytes": 3704,
+      "sha256": "85b861053f34f05fee83b49818ba245db2e7858a2bf38db8d323de564858741f"
+    },
+    {
+      "path": "docs/evidence/2026-10-25-native-verification-followup/followup-17583b00-dispatch.json",
+      "bytes": 911,
+      "sha256": "ec4fc2e331ae33c2a8282c2123b26b78e903b1290e6c0efef1ec5dc6d28095ee"
+    }
+  ],
+  "p0_p2_findings": [],
+  "nonblocking_notes": [],
+  "confirmed_facts": {
+    "glm_sequence": [
+      {
+        "request": 29,
+        "reported_models": [
+          "glm-5.3"
+        ],
+        "tools": [
+          {
+            "name": "Read",
+            "ordinal": 0
+          },
+          {
+            "name": "keeper_tool_search",
+            "ordinal": 1
+          },
+          {
+            "name": "keeper_task_create",
+            "ordinal": 2
+          }
+        ]
+      },
+      {
+        "request": 30,
+        "reported_models": [
+          "glm-5.3"
+        ],
+        "tools": [
+          {
+            "name": "masc_ask_withdraw",
+            "ordinal": 0
+          },
+          {
+            "name": "keeper_task_claim",
+            "ordinal": 1
+          },
+          {
+            "name": "masc_goal_measure",
+            "ordinal": 2
+          }
+        ]
+      },
+      {
+        "request": 31,
+        "reported_models": [
+          "glm-5.3"
+        ],
+        "tools": [
+          {
+            "name": "Edit",
+            "ordinal": 0
+          }
+        ]
+      },
+      {
+        "request": 32,
+        "reported_models": [
+          "glm-5.3"
+        ],
+        "tools": [
+          {
+            "name": "Read",
+            "ordinal": 0
+          }
+        ]
+      },
+      {
+        "request": 33,
+        "reported_models": [
+          "glm-5.3"
+        ],
+        "tools": [
+          {
+            "name": "masc_goal_measure",
+            "ordinal": 0
+          },
+          {
+            "name": "keeper_task_done",
+            "ordinal": 1
+          }
+        ]
+      },
+      {
+        "request": 35,
+        "reported_models": [
+          "glm-5.3"
+        ],
+        "tools": [
+          {
+            "name": "masc_goal_transition",
+            "ordinal": 0
+          }
+        ]
+      },
+      {
+        "request": 36,
+        "reported_models": [
+          "glm-5.3"
+        ],
+        "tools": []
+      }
+    ],
+    "glm_claim_boundary": "request29 Task002 creation and request30 claim precede 1/3 measurement; actual beta/gamma artifact Edit follows it. No all-planning-before-measure claim is accepted.",
+    "glm_current_result": "reported_only 3/3, final verifying/proof_pending, Task002 awaiting_verification; one controlled Gate permission and one inspected Task verdict; no final Goal/human acceptance",
+    "main_measurement_id": "ff5d3c4d17dd26b6393a97b4d942e201",
+    "main_task_verification_id": "vrf-6267bb77e2da35dc33f8991eddf2a446",
+    "main_goal_request_id": "b0792fb9b86e66445ccd673bc6463ce2",
+    "main_later_primary_goal": "verifying/proof_pending at01:10:46, no submitted evidence snapshots",
+    "main_health": "01:10:38 Connection refused; no current API availability inferred",
+    "native_original": "be9a/run40147287888: five suites251 tests247PASS/4FAIL, two suitesPASS/threeFAIL, no suite timeout; published result is byte-identical to original external result",
+    "followup_changed_files": [
+      "test/test_completion_repair_delivery.ml",
+      "test/test_keeper_claude_code_runtime.ml",
+      "test/test_verification.ml"
+    ],
+    "followup_run": "40149490208 at17583: dispatched3selected suites; no finished verdict reviewed or inferred"
+  },
+  "security_checks": {
+    "json_documents_scanned": 65,
+    "nonempty_token_authorization_thinking_reasoning_fields": 0,
+    "exact_glm_private_operator_token_matches": 0,
+    "scope": "Three reviewed evidence directories only; no comprehensive historical secret audit"
+  },
+  "limits": [
+    "No network refresh or CI watch/poll was performed; Root must update dated pending native result when evidence arrives.",
+    "Did not rerun all eleven historical acceptance controls or infer a single-head full regression.",
+    "UI artifacts and Claude case49 repair were authored by this session earlier; this report is not independent approval of those implementations or a repeat browser run.",
+    "Original Substack interpretation and remote Native Stack membership/approvals were not independently reverified in this documentation scope."
+  ],
+  "resolved_review_notes": [
+    {
+      "priority": "P3",
+      "finding": "The standalone strict G3 emphasis could imply all planning followed measurement.",
+      "resolution": "Current GLM README emphasizes a scoped pass for association, remaining-artifact edit order and completion reporting, and explicitly includes request29 Task creation plus request30 claim index1 before measure index2. Frozen diagnosis/acceptance receipts remain unchanged.",
+      "status": "verified_resolved"
+    }
+  ],
+  "final_read_at": "2026-10-25T01:15:26.924746+00:00",
+  "additional_current_document_review": "Re-read the uncommitted audit priorities and GLM qualification delta at e3ca; no P0-P2 factual/security finding."
+}

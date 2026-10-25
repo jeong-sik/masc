@@ -1696,6 +1696,15 @@ type turn_input =
       ; outcome : (unit, error) result
       }
 
+let host_stop_of_error = function
+  | Stopped_by_host stop -> Some stop
+  | Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+  | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
+  | Subscription_required _ | Unsupported_server_request _
+  | Context_window_exceeded _ | Turn_failed _ | Turn_interrupted
+  | Runtime_shutting_down | Process_exited _ | Timeout _ -> None
+;;
+
 (* Keep the RPC reader alive while tools execute. Codex's functions.exec can
    yield a cell and issue another dynamic call before the first one returns.
    Running a handler in the reader serialized even Concurrent tools, and a
@@ -1785,8 +1794,10 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
                   ~thread_id ~turn_id ~tool_call_count ~tool_effect_attempted
                   ~on_stream_event ~id params in
             (match outcome with
-             | Error (Stopped_by_host _) -> terminal_tools_closed := true
-             | Ok () | Error _ -> ());
+             | Error error ->
+               Option.iter (fun _ -> terminal_tools_closed := true)
+                 (host_stop_of_error error)
+             | Ok () -> ());
             Eio.Stream.add incoming
               (Tool_settled {call_id; tool_name; arguments; response = !response; outcome});
             Eio.Promise.resolve resolve ());
@@ -1816,9 +1827,15 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
          | Error error -> stopped := Some error);
         send_handoff ();
         (match outcome with
-         | Error (Stopped_by_host (Terminal_tool_boundary {outcome = Terminal_completed; _}))
-           when !handoff = Handoff_pending || !handoff = Handoff_accepted -> ()
-         | Error error -> if Option.is_none !stopped then stopped := Some error
+         | Error error ->
+           let scheduling_terminal = match host_stop_of_error error with
+             | Some (Terminal_tool_boundary {outcome = Terminal_completed; _}) ->
+               !handoff = Handoff_pending || !handoff = Handoff_accepted
+             | Some (Terminal_tool_boundary
+                 {outcome = Durable_stimulus_deferred | Terminal_failed _; _})
+             | Some (Repeated_tool_call _) | None -> false in
+           if not scheduling_terminal && Option.is_none !stopped then
+             stopped := Some error
          | Ok () -> ())
       in
       let rec receive () =
@@ -1855,11 +1872,14 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
               vendor_terminal := Some terminal;
               receive ()
             end
-          | Provider_message (Error error) when !pending > 0 ->
-            close_delivery ();
-            if Option.is_none !vendor_terminal then stopped := Some error;
-            receive ()
-          | Provider_message message -> message
+          | Provider_message (Error error) ->
+            if !pending > 0 then begin
+              close_delivery ();
+              if Option.is_none !vendor_terminal then stopped := Some error;
+              receive ()
+            end else Error error
+          | Provider_message (Ok ((Response _ | Response_error _
+              | Notification _ | Server_request _) as message)) -> Ok message
           | Tool_settled {call_id; tool_name; arguments; response; outcome} ->
             settle ~call_id ~tool_name ~arguments ~response ~outcome;
             receive ()

@@ -9,7 +9,7 @@
   },
   {
     "path": "packages/agent_core/lib/llm_provider/backend_openai_responses.ml",
-    "sha256": "a17ef1214b56fe875a61df224804ef9224a27a33a0c7f778ef7a0ee0dcbee6e8"
+    "sha256": "32506568808384b7e29867612d964cb9d8d65df48e51e674789be25334287144"
   },
   {
     "path": "packages/agent_core/lib/llm_provider/backend_openai_responses.mli",

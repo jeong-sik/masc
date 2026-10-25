@@ -35,12 +35,6 @@ let json_int_opt = function
   | `Float _ | `String _ | `Assoc _ | `List _ | `Bool _ | `Null -> None
 ;;
 
-let non_blank_json_string json =
-  match json_string_opt json with
-  | Some s when not (Api_common.string_is_blank s) -> Some s
-  | Some _ | None -> None
-;;
-
 let assoc_remove keys fields =
   List.filter (fun (key, _) -> not (List.mem key keys)) fields
 ;;

@@ -30,9 +30,11 @@ Thinking under an admitting declared policy. Policy and source identity checks
 still run first. In particular, OpenAI Provider_opaque_state still excludes
 plaintext and preserves its opaque objects. No provider/model-name checks or shipped catalog activation are added.
 
-The first corrected run40191951639 at a3a still failed because the transport
-unconditionally replaced even an explicit generic preserve-always declaration
-with opaque-only. Source review caught the same seam. The corrected contract
+The first corrected run40191951639 at a3a failed compilation before the suites:
+extraction left an unused non_blank_json_string helper (warning32 is fatal).
+The helper is removed. Separately, source review found that the transport still
+unconditionally replaced an explicit generic preserve-always declaration with
+opaque-only. That policy failure was not executed in this run. The corrected contract
 adds a Responses-only member to the existing typed replay capability vocabulary:
 `preserve_responses_text`. Only this declaration admits plaintext on Responses;
 ordinary Chat preserve-always cannot enable it. Stable response stamping and

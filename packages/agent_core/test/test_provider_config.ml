@@ -1205,7 +1205,7 @@ let test_reasoning_effort_typed_config_value () =
 let test_validate_reasoning_effort_subset_rejects_unsupported () =
   let manifest =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"effort-subset-model","base":"openai_chat_extended","accepted_reasoning_efforts":["low"]}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"effort-subset-model","base":"openai_chat_extended","accepted_reasoning_efforts":["low"]}]}|}
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
@@ -1326,11 +1326,11 @@ let test_an_auto_enabling_wire_needs_a_declared_effort () =
 let test_validate_reasoning_effort_checks_the_explicit_disable () =
   let manifest =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[
-          {"id_prefix":"effort-off-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low"]},
-          {"id_prefix":"effort-off-ok-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low"]},
-          {"id_prefix":"effort-off-undeclared-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort"},
-          {"id_prefix":"effort-off-object-model","base":"openai_chat_extended","thinking_control_format":"thinking_object","accepted_reasoning_efforts":["low"]}]}|}
+      {|{"schema_version":2,"models":[
+          {"model_id":"effort-off-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low"]},
+          {"model_id":"effort-off-ok-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low"]},
+          {"model_id":"effort-off-undeclared-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort"},
+          {"model_id":"effort-off-object-model","base":"openai_chat_extended","thinking_control_format":"thinking_object","accepted_reasoning_efforts":["low"]}]}|}
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
@@ -1392,9 +1392,9 @@ let test_validate_reasoning_effort_checks_the_explicit_disable () =
 let test_thinking_admission_asks_the_effort_ladder_about_a_disable () =
   let manifest =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[
-          {"id_prefix":"admit-off-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low"]},
-          {"id_prefix":"admit-off-ok-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low"]}]}|}
+      {|{"schema_version":2,"models":[
+          {"model_id":"admit-off-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low"]},
+          {"model_id":"admit-off-ok-model","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low"]}]}|}
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
@@ -1455,7 +1455,7 @@ let test_thinking_admission_asks_the_effort_ladder_about_a_disable () =
 let test_the_router_base_answers_a_row_that_names_it () =
   let manifest =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"router-row","base":"openrouter"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"router-row","base":"openrouter"}]}|}
     |> Capability_manifest.of_json
     |> Result.get_ok
   in
@@ -2748,7 +2748,7 @@ let test_manifest_authority_and_frozen_missing_policy () =
         | Some manifest -> Capability_manifest.set_global manifest
         | None -> Capability_manifest.clear_global ()) (fun () ->
         let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
-          {|{"schema_version":1,"models":[{"id_prefix":"manifest-only","max_context_tokens":44444}]}|})
+          {|{"schema_version":2,"models":[{"model_id":"manifest-only","max_context_tokens":44444}]}|})
           |> Result.get_ok in
         Capability_manifest.set_global manifest;
         Alcotest.(check (option int)) "anonymous native wire retains manifest facts"
@@ -2786,10 +2786,15 @@ let test_catalog_policy_native_and_proxy () =
       check_bool (label ^ " policy presence") expected
         (Option.is_some (Provider_config.anthropic_thinking_control config));
       let body = Backend_anthropic.build_request ~config ~messages:[] () in
-      check_bool (label ^ " serialized thinking presence") expected
+      (* A catalog policy does not itself request a wire toggle. In particular,
+         always-adaptive Claude intentionally omits the thinking field. *)
+      check_bool (label ^ " default request omits thinking toggle") false
         (List.mem_assoc "thinking" (Yojson.Safe.Util.to_assoc (Yojson.Safe.from_string body)))
     in
     check "declared native" true (config ~provider_id:"claude" ());
+    check_bool "native policy is always adaptive" true
+      (Provider_config.anthropic_thinking_control (config ~provider_id:"claude" ())
+       = Some Capabilities.Anthropic_always_adaptive);
     let proxy = config ~provider_id:"deepseek-anthropic" () in
     check "declared proxy" false proxy;
     let usage : Types.api_usage =
@@ -2884,7 +2889,7 @@ let test_thinking_manifest_is_anonymous_native_only () =
       | Some manifest -> Capability_manifest.set_global manifest
       | None -> Capability_manifest.clear_global ()) (fun () ->
       let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
-        {|{"schema_version":1,"models":[{"id_prefix":"manifest-only","anthropic_thinking_control":"adaptive_default"}]}|})
+        {|{"schema_version":2,"models":[{"model_id":"manifest-only","anthropic_thinking_control":"adaptive_default"}]}|})
         |> Result.get_ok in
       Capability_manifest.set_global manifest;
       let policy provider = Capabilities.anthropic_thinking_control_for_provider_model_id

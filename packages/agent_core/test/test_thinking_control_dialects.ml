@@ -498,7 +498,7 @@ let test_openai_reasoning_dialect_uses_reasoning_effort () =
 
 let test_openai_reasoning_request_uses_reasoning_effort () =
   with_manifest
-    {|{"schema_version":1,"models":[{"id_prefix":"openai-reasoning-test-9fx","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low","medium","high"]}]}|}
+    {|{"schema_version":2,"models":[{"model_id":"openai-reasoning-test-9fx","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low","medium","high"]}]}|}
     (fun () ->
        let config =
          PC.make
@@ -525,7 +525,7 @@ let test_openai_reasoning_request_uses_reasoning_effort () =
 
 let test_openai_reasoning_request_renders_explicit_disable_as_none () =
   with_manifest
-    {|{"schema_version":1,"models":[{"id_prefix":"openai-reasoning-off-test-2kq","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low","high"]}]}|}
+    {|{"schema_version":2,"models":[{"model_id":"openai-reasoning-off-test-2kq","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["none","low","high"]}]}|}
     (fun () ->
        let config ~enable_thinking =
          PC.make
@@ -562,7 +562,7 @@ let test_openai_reasoning_request_renders_explicit_disable_as_none () =
 
 let test_openai_reasoning_request_rejects_disable_outside_ladder () =
   with_manifest
-    {|{"schema_version":1,"models":[{"id_prefix":"openai-reasoning-no-off-test-7pd","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low","high"]}]}|}
+    {|{"schema_version":2,"models":[{"model_id":"openai-reasoning-no-off-test-7pd","base":"openai_chat_extended","thinking_control_format":"reasoning_effort","accepted_reasoning_efforts":["low","high"]}]}|}
     (fun () ->
        let config =
          PC.make
@@ -860,29 +860,34 @@ let assistant_with_reasoning ?(tool = false) config =
   }
 ;;
 
-let test_deepseek_replays_reasoning_only_for_tool_call_turns () =
+let test_deepseek_replays_reasoning_when_request_has_tools () =
   let config =
     declared_catalog_openai_compat_config
       ~base_url:"https://api.deepseek.com"
       ~provider_id:"deepseek"
       "deepseek-v4-flash"
   in
-  let plain =
-    BOR.build_request ~config ~messages:[ assistant_with_reasoning config ] ()
-    |> json_of_body
+  let calc =
+    `Assoc
+      [ "name", `String "calc"
+      ; "description", `String "Calculate an expression"
+      ; "parameters", `Assoc
+          [ "type", `String "object"
+          ; "properties", `Assoc [ "expr", `Assoc [ "type", `String "string" ] ]
+          ; "required", `List [ `String "expr" ]
+          ]
+      ]
   in
-  let tool =
-    BOR.build_request ~config ~messages:[ assistant_with_reasoning ~tool:true config ] ()
-    |> json_of_body
-  in
-  let plain_assistant = plain |> member "messages" |> index 0 in
-  let tool_assistant = tool |> member "messages" |> index 0 in
-  check_member_absent "reasoning_content" plain_assistant;
-  check
-    string
-    "tool reasoning_content"
-    "use calculator"
-    (tool_assistant |> member "reasoning_content" |> to_string)
+  List.iter (fun (had_tool_call, reasoning) ->
+    let messages = [ assistant_with_reasoning ~tool:had_tool_call config ] in
+    let without_tools = BOR.build_request ~config ~messages () |> json_of_body in
+    check_member_absent "reasoning_content"
+      (without_tools |> member "messages" |> index 0);
+    let with_tools =
+      BOR.build_request ~config ~messages ~tools:[ calc ] () |> json_of_body in
+    check string "request tools retain prior assistant reasoning" reasoning
+      (with_tools |> member "messages" |> index 0 |> member "reasoning_content" |> to_string))
+    [ false, "plain thought"; true, "use calculator" ]
 ;;
 
 let test_qwen_preserve_replays_reasoning_content () =
@@ -954,7 +959,7 @@ let test_declared_reasoning_content_accumulates_as_typed_thinking () =
 ;;
 
 let keep_all_axis_manifest =
-  {|{"schema_version":1,"models":[{"id_prefix":"keep-all-axis-test","base":"openai_chat","supports_reasoning":true,"thinking_control_format":"thinking_object_only","preserve_thinking_control_format":"thinking_object_keep_all"}]}|}
+  {|{"schema_version":2,"models":[{"model_id":"keep-all-axis-test","base":"openai_chat","supports_reasoning":true,"thinking_control_format":"thinking_object_only","preserve_thinking_control_format":"thinking_object_keep_all"}]}|}
 ;;
 
 let test_thinking_object_keep_all_axis_uses_keep_all () =
@@ -1627,9 +1632,9 @@ let () =
               `Quick
               test_deepseek_disabled_thinking_keeps_sampling
           ; test_case
-              "deepseek replays reasoning only for tool call turns"
+              "deepseek replay depends on current request tools"
               `Quick
-              test_deepseek_replays_reasoning_only_for_tool_call_turns
+              test_deepseek_replays_reasoning_when_request_has_tools
           ; test_case
               "qwen preserve replays reasoning_content"
               `Quick

@@ -21,7 +21,7 @@ catalog row for the same model prefix.
 ```
 Explicit model catalog override or embedded agent_core model catalog row (prefix match)
     ↓ miss
-Explicitly installed manifest entry (prefix match)
+Explicitly installed manifest entry (exact model ID, ASCII case-insensitive)
     ↓ miss
 No declaration (`Capabilities.for_model_id` returns `None`)
 ```
@@ -32,10 +32,10 @@ Create `~/.config/agent_core/caps.json` (or any path):
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "models": [
     {
-      "id_prefix": "my-llama-q4",
+      "model_id": "my-llama-q4",
       "base": "openai_chat",
       "max_context_tokens": 131072,
       "supports_tools": true,
@@ -57,8 +57,16 @@ in
 Capability_manifest.set_global manifest
 ```
 
-Any model whose ID starts with `my-llama-q4` (case-insensitive) will now use
-these capabilities when no model catalog row matches that model prefix.
+The exact model `my-llama-q4` (ASCII case-insensitive) can use this declaration
+when no model catalog row matches. Other release or quantization IDs need their
+own explicit declarations.
+
+Installation makes the manifest available to the capability lookup APIs shown
+below. Provider-bound request resolution has its own authority contract:
+declared providers and anonymous OpenAI-compatible requests do not borrow the
+global manifest. Installing it alone does not change those request policies.
+Custom deployments can apply a validated entry explicitly through their
+provider configuration, or declare the exact model with its provider in the model catalog.
 
 ## Schema Reference
 
@@ -69,14 +77,14 @@ and `lib/llm_provider/capability_manifest.mli` for the authoritative schema cont
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `schema_version` | integer (must be `1`) | ✅ | Version discriminator. |
-| `models` | array of entries | ✅ | Ordered list; earlier entries win on prefix collision. |
+| `schema_version` | integer (must be `2`) | ✅ | Version discriminator. |
+| `models` | array of entries | ✅ | Explicit declarations; duplicate normalized IDs are rejected and order does not affect lookup. |
 
 ### Model entry
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `id_prefix` | string | — | **Required.** Case-insensitive prefix matched against the model ID. |
+| `model_id` | string | — | **Required.** Exact model ID; ASCII case-insensitive equality, with no family or separator fallback. |
 | `base` | string | `default_capabilities` | Provider preset. See [Base presets](#base-presets) below. |
 | `max_context_tokens` | integer | from base | Context window size in tokens. |
 | `max_output_tokens` | integer | from base | Maximum output tokens. |
@@ -119,7 +127,7 @@ must update the parser and this schema together.
 
 The `base` field names a provider preset from
 `Capabilities.capabilities_for_provider_label`.  When `base` is absent, agent_core uses
-`default_capabilities` (all flags false, no limits).  Unrecognised `base` values
+`default_capabilities`; undeclared fields keep that base's values.  Unrecognised `base` values
 are rejected when the manifest is parsed.
 
 | Label | Description |
@@ -145,7 +153,7 @@ are rejected when the manifest is parsed.
 let manifest = Capability_manifest.load_file "caps.json" |> Result.get_ok
 
 (* Look up a specific model *)
-let caps = Capabilities.for_model_id_with_manifest manifest "my-llama-q4-k4"
+let caps = Capabilities.for_model_id_with_manifest manifest "my-llama-q4"
 ```
 
 ### Process-wide manifest
@@ -155,39 +163,31 @@ let manifest = Capability_manifest.load_file "caps.json" |> Result.get_ok in
 Capability_manifest.set_global manifest;
 
 (* for_model_id checks the embedded/explicit model catalog first, then this manifest *)
-let caps = Capabilities.for_model_id "my-llama-q4-k4"
+let caps = Capabilities.for_model_id "my-llama-q4"
 ```
 
 ### Apply a manifest entry directly
 
 ```ocaml
-let base_label =
-  match Capability_manifest.base_label_of_string "openai_chat" with
-  | Ok label -> label
-  | Error msg -> invalid_arg msg
+let manifest =
+  Capability_manifest.of_json (Yojson.Safe.from_string
+    {|{"schema_version":2,"models":[{"model_id":"my-model","base":"openai_chat","max_context_tokens":65536,"supports_tools":true}]}|})
+  |> Result.get_ok
 in
+let id = Model_identifiers.Model_id.of_string_exn "my-model" in
+let caps =
+  match Capability_manifest.lookup manifest id with
+  | Some entry -> Capabilities.apply_manifest_entry entry
+  | None -> invalid_arg "model is not declared"
 
-let entry : Capability_manifest.entry =
-  { id_prefix = Model_identifiers.Id_prefix.of_string_exn "my-model"
-  ; base_label = Some base_label
-  ; max_context_tokens = Some 65536
-  ; supports_tools = Some true
-  ; (* all other fields: None = inherit from base *)
-    supports_tool_choice = None
-  ; supports_required_tool_choice = None
-  ; supports_named_tool_choice = None
-  ; supports_parallel_tool_calls = None
-  ; (* ... *)
-  }
-in
-let caps = Capabilities.apply_manifest_entry entry
 ```
 
 ## Bundling with a Model Deployment
 
-For Ollama or llama-server deployments, place a `caps.json` alongside the
-model files and have the embedding application load and install it during
-bootstrap:
+A deployment can bundle `caps.json` alongside model files. The embedding
+application loads it for its explicit capability lookup or applies the parsed
+capabilities to its request configuration. Installing globally only affects
+lookup paths that admit manifest authority:
 
 ```ocaml
 let manifest = Capability_manifest.load_file "/models/caps.json" |> Result.get_ok in
@@ -196,13 +196,17 @@ Capability_manifest.set_global manifest
 
 ## Notes
 
-- Prefix matching is **first-match-wins**.  The manifest is scanned in order
-  and the first entry whose `id_prefix` is a prefix of the requested model ID
-  is used.  If you need priority control (e.g. a general prefix and a more
-  specific one), place the more-specific entry earlier in the list.
+- Schema version 2 requires `model_id` on every entry and an explicit `models`
+  list at the root. `models: []` deliberately declares no overrides. Older
+  versions and `id_prefix` fields are rejected rather than converted.
+- Lookup uses the exact model ID with ASCII case-insensitive equality. Unknown
+  variants do not inherit a declaration. Every served quantization or release
+  ID needs its own entry. Duplicate normalized IDs are rejected; declaration
+  order cannot change which entry an exact model receives.
 - agent_core never discovers a manifest from the process environment. File selection,
   reload policy, and error handling belong to the embedding application.
 - `load_file` returns an explicit `Result`; install only a successfully parsed
   manifest with `set_global`.
-- The embedded model catalog remains the primary capability source. A manifest
-  supplies facts only when no model-catalog row matches.
+- Global `Capabilities.for_model_id` lookup keeps the model catalog primary.
+  The explicit `for_model_id_with_manifest` API instead checks the supplied
+  exact manifest entry first, then falls back to the catalog on a miss.

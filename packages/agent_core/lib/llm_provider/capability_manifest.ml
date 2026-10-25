@@ -21,7 +21,7 @@ let base_label_of_string raw =
 let base_label_to_string label = label
 
 type entry =
-  { id_prefix : Model_identifiers.Id_prefix.t
+  { model_id : Model_identifiers.Model_id.t
   ; base_label : base_label option
   ; max_context_tokens : int option
   ; max_output_tokens : int option
@@ -319,7 +319,7 @@ let known_manifest_keys = [ "_comment"; "schema_version"; "models" ]
 
 let known_entry_keys =
   [ "_comment"
-  ; "id_prefix"
+  ; "model_id"
   ; "base"
   ; "max_context_tokens"
   ; "max_output_tokens"
@@ -411,11 +411,11 @@ let validate_closed_object ~scope ~known = function
 let parse_entry json =
   let open Result_syntax in
   let* () = validate_closed_object ~scope:"entry" ~known:known_entry_keys json in
-  let* id_prefix =
-    match member_string_closed "id_prefix" json with
+  let* model_id =
+    match member_string_closed "model_id" json with
     | Error _ as error -> error
-    | Ok None -> Error "entry missing required \"id_prefix\" field"
-    | Ok (Some raw) -> Model_identifiers.Id_prefix.of_string raw
+    | Ok None -> Error "entry missing required \"model_id\" field"
+    | Ok (Some raw) -> Model_identifiers.Model_id.of_string raw
   in
   (* Validate [base] against the closed preset vocab at parse time (mirrors the
      other canonical fields below) so an unknown label fails closed instead of
@@ -442,7 +442,7 @@ let parse_entry json =
     |> Result.map_error (fun error ->
       Printf.sprintf
         "entry %S %s"
-        (Model_identifiers.Id_prefix.to_string id_prefix)
+        (Model_identifiers.Model_id.to_string model_id)
         (Capability_vocab.thinking_control_format_codec_error_to_string error))
   in
   let* anthropic_thinking_control =
@@ -543,7 +543,7 @@ let parse_entry json =
   let* emits_usage_tokens = member_bool "emits_usage_tokens" json in
   let* supported_models = exact_non_empty_string_list "supported_models" json in
   Ok
-    { id_prefix
+    { model_id
     ; base_label
     ; max_context_tokens
     ; max_output_tokens
@@ -592,16 +592,16 @@ let validate_unique_model_ids entries =
   let rec loop index seen = function
     | [] -> Ok entries
     | (entry : entry) :: rest ->
-      let key = Model_identifiers.Id_prefix.equality_key entry.id_prefix in
+      let key = Model_identifiers.Model_id.equality_key entry.model_id in
       (match Model_ids.find_opt key seen with
-       | None -> loop (index + 1) (Model_ids.add key (index, entry.id_prefix) seen) rest
+       | None -> loop (index + 1) (Model_ids.add key (index, entry.model_id) seen) rest
        | Some (first_index, first) ->
          Error
            (Printf.sprintf
-              "duplicate manifest id_prefix %S at entry %d conflicts with %S at entry %d"
-              (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+              "duplicate manifest model_id %S at entry %d conflicts with %S at entry %d"
+              (Model_identifiers.Model_id.to_string entry.model_id)
               index
-              (Model_identifiers.Id_prefix.to_string first)
+              (Model_identifiers.Model_id.to_string first)
               first_index))
   in
   loop 0 Model_ids.empty entries
@@ -615,17 +615,16 @@ let of_json json =
     | `Int n -> n
     | _ -> 0
   in
-  if schema_version <> 1
+  if schema_version <> 2
   then
     Error
       (Printf.sprintf
-         "unsupported capability manifest schema_version: %d (expected 1)"
+         "unsupported capability manifest schema_version: %d (expected 2)"
          schema_version)
   else
     let* model_items =
       match Yojson.Safe.Util.member "models" json with
       | `List items -> Ok items
-      | `Null -> Ok []
       | actual ->
         Error
           (Printf.sprintf
@@ -659,7 +658,7 @@ let load_file path =
 
 let lookup (t : t) model_id =
   List.find_opt
-    (fun entry -> Model_identifiers.Model_id.starts_with ~prefix:entry.id_prefix model_id)
+    (fun entry -> Model_identifiers.Model_id.equal entry.model_id model_id)
     t
 ;;
 
@@ -681,11 +680,11 @@ let global () = Atomic.get runtime_override
 let%test "of_json: valid manifest parses successfully" =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"my-llm","base":"openai_chat","max_context_tokens":131072,"supports_tools":true}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"my-llm","base":"openai_chat","max_context_tokens":131072,"supports_tools":true}]}|}
   in
   match of_json json with
   | Ok [ entry ] ->
-    Model_identifiers.Id_prefix.to_string entry.id_prefix = "my-llm"
+    Model_identifiers.Model_id.to_string entry.model_id = "my-llm"
     && entry.base_label = Some "openai_chat"
     && entry.max_context_tokens = Some 131072
     && entry.supports_tools = Some true
@@ -695,7 +694,7 @@ let%test "of_json: valid manifest parses successfully" =
 let%test "of_json: parses Anthropic thinking policy as typed declaration" =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"claude-future","anthropic_thinking_control":"adaptive_default"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"claude-future","anthropic_thinking_control":"adaptive_default"}]}|}
   in
   match of_json json with
   | Ok [ { anthropic_thinking_control; _ } ] ->
@@ -709,7 +708,7 @@ let%test "of_json: rejects unknown Anthropic thinking policy" =
        let json =
          Yojson.Safe.from_string
            (Printf.sprintf
-              {|{"schema_version":1,"models":[{"id_prefix":"claude-future","anthropic_thinking_control":%S}]}|}
+              {|{"schema_version":2,"models":[{"model_id":"claude-future","anthropic_thinking_control":%S}]}|}
               policy)
        in
        Result.is_error (of_json json))
@@ -717,7 +716,7 @@ let%test "of_json: rejects unknown Anthropic thinking policy" =
 ;;
 
 let%test "of_json: wrong schema_version returns error" =
-  let json = Yojson.Safe.from_string {|{"schema_version":2,"models":[]}|} in
+  let json = Yojson.Safe.from_string {|{"schema_version":1,"models":[]}|} in
   match of_json json with
   | Error msg -> String.length msg > 0
   | Ok _ -> false
@@ -730,9 +729,9 @@ let%test "of_json: missing schema_version returns error" =
   | Ok _ -> false
 ;;
 
-let%test "of_json: entry missing id_prefix returns error" =
+let%test "of_json: entry missing model_id returns error" =
   let json =
-    Yojson.Safe.from_string {|{"schema_version":1,"models":[{"base":"openai_chat"}]}|}
+    Yojson.Safe.from_string {|{"schema_version":2,"models":[{"base":"openai_chat"}]}|}
   in
   match of_json json with
   | Error _ -> true
@@ -740,34 +739,34 @@ let%test "of_json: entry missing id_prefix returns error" =
 ;;
 
 let%test "of_json: empty models list is valid" =
-  let json = Yojson.Safe.from_string {|{"schema_version":1,"models":[]}|} in
+  let json = Yojson.Safe.from_string {|{"schema_version":2,"models":[]}|} in
   match of_json json with
   | Ok entries -> entries = []
   | Error _ -> false
 ;;
 
-let%test "of_json: missing models defaults to empty manifest" =
-  let json = Yojson.Safe.from_string {|{"schema_version":1}|} in
+let%test "of_json: missing models is rejected" =
+  let json = Yojson.Safe.from_string {|{"schema_version":2}|} in
   match of_json json with
-  | Ok entries -> entries = []
-  | Error _ -> false
+  | Error _ -> true
+  | Ok _ -> false
 ;;
 
 let%test "of_json: non-list models returns error" =
-  let json = Yojson.Safe.from_string {|{"schema_version":1,"models":"oops"}|} in
+  let json = Yojson.Safe.from_string {|{"schema_version":2,"models":"oops"}|} in
   match of_json json with
   | Error msg -> String.contains msg 'm'
   | Ok _ -> false
 ;;
 
-let%test "lookup: prefix match is case-insensitive" =
+let%test "lookup: exact identity is case-insensitive" =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"My-Model","supports_tools":true}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"My-Model","supports_tools":true}]}|}
   in
   match of_json json with
   | Ok manifest ->
-    (match lookup manifest (Model_identifiers.Model_id.of_string_exn "my-model-q4") with
+    (match lookup manifest (Model_identifiers.Model_id.of_string_exn "my-model") with
      | Some entry -> entry.supports_tools = Some true
      | None -> false)
   | Error _ -> false
@@ -775,7 +774,7 @@ let%test "lookup: prefix match is case-insensitive" =
 
 let%test "lookup: no match returns None" =
   let json =
-    Yojson.Safe.from_string {|{"schema_version":1,"models":[{"id_prefix":"model-a"}]}|}
+    Yojson.Safe.from_string {|{"schema_version":2,"models":[{"model_id":"model-a"}]}|}
   in
   match of_json json with
   | Ok manifest -> lookup manifest (Model_identifiers.Model_id.of_string_exn "model-b") = None
@@ -784,15 +783,15 @@ let%test "lookup: no match returns None" =
 
 let%test "of_json: duplicate model identity is rejected" =
   match of_json (Yojson.Safe.from_string
-    {|{"schema_version":1,"models":[{"id_prefix":"model","supports_tools":true},{"id_prefix":"MODEL","supports_tools":false}]}|}) with
+    {|{"schema_version":2,"models":[{"model_id":"model","supports_tools":true},{"model_id":"MODEL","supports_tools":false}]}|}) with
   | Error _ -> true
   | Ok _ -> false
 ;;
 
-let%test "lookup: exact prefix match" =
+let%test "lookup: exact model match" =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"exact-model"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"exact-model"}]}|}
   in
   match of_json json with
   | Ok manifest ->
@@ -804,7 +803,7 @@ let%test "lookup: exact prefix match" =
 let%test "of_json: unknown entry fields return error" =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"m","base_label":"openai_chat"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"m","base_label":"openai_chat"}]}|}
   in
   match of_json json with
   | Error msg -> String.equal msg "entry contains unknown field(s): base_label"
@@ -814,7 +813,7 @@ let%test "of_json: unknown entry fields return error" =
 let%test "of_json: unknown root fields return error" =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"m"}],"future_field":"ignored"}|}
+      {|{"schema_version":2,"models":[{"model_id":"m"}],"future_field":"ignored"}|}
   in
   match of_json json with
   | Error msg -> String.equal msg "manifest contains unknown field(s): future_field"
@@ -826,7 +825,7 @@ let%test "of_json: unknown base preset returns error, not silent default" =
      rather than resolve to [default_capabilities] downstream (Agent Core contract). *)
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"m","base":"not_a_preset"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"m","base":"not_a_preset"}]}|}
   in
   match of_json json with
   | Error _ -> true
@@ -836,7 +835,7 @@ let%test "of_json: unknown base preset returns error, not silent default" =
 let%test "set_global / clear_global: runtime override roundtrips" =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"runtime-override-token-9fX","base":"openai_chat"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"runtime-override-token-9fX","base":"openai_chat"}]}|}
   in
   match of_json json with
   | Error _ -> false
@@ -851,7 +850,7 @@ let%test "set_global / clear_global: runtime override roundtrips" =
         | Some entries ->
           List.exists
             (fun e ->
-               Model_identifiers.Id_prefix.to_string e.id_prefix
+               Model_identifiers.Model_id.to_string e.model_id
                = "runtime-override-token-9fX")
             entries
         | None -> false
@@ -864,7 +863,7 @@ let%test "set_global / clear_global: runtime override roundtrips" =
 let%test "set_global installs runtime override and returns it from global ()" =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"override-precedence-test"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"override-precedence-test"}]}|}
   in
   match of_json json with
   | Error _ -> false

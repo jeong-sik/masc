@@ -214,9 +214,9 @@ let test_gemini3_uses_thinking_level () =
 let test_native_effort_requires_reasoning_support () =
   List.iter (fun supports_reasoning ->
     let manifest = `Assoc
-      [ "schema_version", `Int 1
+      [ "schema_version", `Int 2
       ; "models", `List [ `Assoc
-          [ "id_prefix", `String "native-effort-fixture"
+          [ "model_id", `String "native-effort-fixture"
           ; "supports_reasoning", `Bool supports_reasoning
           ; "accepted_reasoning_efforts", `List [ `String "high" ] ] ] ] in
     let capabilities = match Capability_manifest.of_json manifest |> Result.map Capability_manifest.entries with

@@ -558,16 +558,16 @@ let test_lookup_provider_m_qwen3_mtp_explicit_provider () =
       (Reasoning_dialect.replay_policy_to_string dialect.replay_policy);
     check
       bool
-      "catalog resolves the closed latest-user replay policy"
+      "catalog resolves the initial-system latest-user replay policy"
       true
-      (c.reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls);
+      (c.reasoning_replay_override = Capabilities.Force_initial_system_latest_user_turn_tool_calls);
     (match Capabilities.for_model_id "qwen36-35b-a3b-mtp" with
      | Some bare ->
        check
          bool
-         "bare runtime row resolves the same latest-user replay policy"
+         "bare runtime row resolves the same initial-system replay policy"
          true
-         (bare.reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls)
+         (bare.reasoning_replay_override = Capabilities.Force_initial_system_latest_user_turn_tool_calls)
      | None -> fail "bare qwen3.6 runtime row should resolve")
   | None -> fail "explicit provider/model lookup should match qwen3.6 model id"
 ;;
@@ -768,7 +768,7 @@ let test_lookup_qwen3_thinking_control () =
   let non_matching =
     match
       Capability_manifest.of_json
-        (Yojson.Safe.from_string {|{"schema_version":1,"models":[]}|})
+        (Yojson.Safe.from_string {|{"schema_version":2,"models":[]}|})
     with
     | Ok m -> m
     | Error e -> Alcotest.failf "manifest parse error: %s" e
@@ -1715,9 +1715,9 @@ let test_with_context_size () =
 
 (* ── Capability manifest ─────────────────────────────── *)
 
-let make_manifest_json ?(base = "default_capabilities") ?(extra_fields = []) prefix =
+let make_manifest_json ?(base = "default_capabilities") ?(extra_fields = []) model_id =
   let fields =
-    [ "id_prefix", Printf.sprintf {|"%s"|} prefix ]
+    [ "model_id", Printf.sprintf {|"%s"|} model_id ]
     @ (if base = "default_capabilities"
        then []
        else [ "base", Printf.sprintf {|"%s"|} base ])
@@ -1726,11 +1726,11 @@ let make_manifest_json ?(base = "default_capabilities") ?(extra_fields = []) pre
   let inner =
     fields |> List.map (fun (k, v) -> Printf.sprintf {|"%s":%s|} k v) |> String.concat ","
   in
-  Printf.sprintf {|{"schema_version":1,"models":[{%s}]}|} inner
+  Printf.sprintf {|{"schema_version":2,"models":[{%s}]}|} inner
 ;;
 
-let make_manifest ?(base = "default_capabilities") ?(extra_fields = []) prefix =
-  let json = Yojson.Safe.from_string (make_manifest_json ~base ~extra_fields prefix) in
+let make_manifest ?(base = "default_capabilities") ?(extra_fields = []) model_id =
+  let json = Yojson.Safe.from_string (make_manifest_json ~base ~extra_fields model_id) in
   match Capability_manifest.of_json json with
   | Ok m -> m
   | Error e -> Alcotest.failf "manifest parse error: %s" e
@@ -1765,6 +1765,46 @@ let test_explicit_manifest_lookup_falls_back_to_catalog () =
   | None -> fail "should fall through to model catalog"
 ;;
 
+let test_manifest_exact_identity_and_order () =
+  let parse entries = Capability_manifest.of_json
+      (`Assoc ["schema_version",`Int 2;"models",`List entries]) |> Result.get_ok in
+  let entry name tools = `Assoc ["model_id",`String name;"supports_tools",`Bool tools] in
+  let broad = entry "custom-exact-fixture" false
+  and exact = entry "custom-exact-fixture-q4" true in
+  List.iter (fun entries ->
+    let manifest = parse entries in
+    let caps id = Capabilities.for_model_id_with_manifest manifest id in
+    (match caps "CUSTOM-EXACT-FIXTURE-Q4" with
+     | Some caps -> check bool "exact row owns its tool permission" true caps.supports_tools
+     | None -> fail "exact case-folded row must resolve");
+    (match caps "custom-exact-fixture" with
+     | Some caps -> check bool "other declared row remains independent" false caps.supports_tools
+     | None -> fail "other exact row must resolve");
+    List.iter (fun id ->
+      check bool ("undeclared identity does not inherit: " ^ id) true (caps id=None))
+      ["custom-exact-fixture-q8";"custom-exact-fixture-q4-extra";
+       "vendor/custom-exact-fixture-q4";"vendor:custom-exact-fixture-q4"])
+    [[broad;exact];[exact;broad]];
+  let qualified = parse [entry "vendor/custom-exact-fixture:q4" true] in
+  (match Capabilities.for_model_id_with_manifest qualified "VENDOR/CUSTOM-EXACT-FIXTURE:Q4" with
+   | Some caps -> check bool "an explicitly declared qualified ID remains exact" true caps.supports_tools
+   | None -> fail "qualified exact declaration must resolve");
+  check bool "qualified declaration does not grant bare identity" true
+    (Capabilities.for_model_id_with_manifest qualified "custom-exact-fixture:q4"=None)
+;;
+
+let test_manifest_requires_explicit_v2_model_identity () =
+  List.iter (fun json ->
+    match Capability_manifest.of_json (Yojson.Safe.from_string json) with
+    | Error _ -> () | Ok _ -> fail "manifest must reject an ambiguous declaration")
+    [ {|{"schema_version":1,"models":[]}|}
+    ; {|{"schema_version":2}|}
+    ; {|{"schema_version":2,"models":null}|}
+    ; {|{"schema_version":2,"models":[{"id_prefix":"custom-exact-fixture"}]}|}
+    ; {|{"schema_version":2,"models":[{"model_id":"custom-exact-fixture"},{"model_id":"CUSTOM-EXACT-FIXTURE"}]}|}
+    ]
+;;
+
 let test_manifest_unknown_model_still_none () =
   (* Neither manifest nor model catalog knows this model. *)
   let m = make_manifest "known-prefix" in
@@ -1789,7 +1829,7 @@ let test_manifest_base_label_openai_chat () =
     make_manifest
       ~base:"openai_chat"
       ~extra_fields:[ "max_context_tokens", "65536" ]
-      "custom-gpt"
+      "custom-gpt-v2"
   in
   match Capabilities.for_model_id_with_manifest m "custom-gpt-v2" with
   | Some c ->
@@ -1804,7 +1844,7 @@ let test_manifest_base_label_anthropic () =
     make_manifest
       ~base:"anthropic"
       ~extra_fields:[ "max_context_tokens", "512000" ]
-      "my-claude"
+      "my-claude-custom"
   in
   match Capabilities.for_model_id_with_manifest m "my-claude-custom" with
   | Some c ->
@@ -1817,7 +1857,7 @@ let test_manifest_base_absent_uses_default () =
   let m =
     make_manifest
       ~extra_fields:[ "supports_tools", "true"; "max_context_tokens", "32768" ]
-      "my-special-model"
+      "my-special-model-q4"
   in
   match Capabilities.for_model_id_with_manifest m "my-special-model-q4" with
   | Some c ->
@@ -1875,33 +1915,33 @@ let test_example_manifest_base_labels_are_canonical () =
     let entries = Capability_manifest.entries manifest in
     List.iter
       (fun (entry : Capability_manifest.entry) ->
-         let id_prefix = Model_identifiers.Id_prefix.to_string entry.id_prefix in
+         let model_id = Model_identifiers.Model_id.to_string entry.model_id in
          match entry.base_label with
          | None ->
            (* The Codex Spark entry intentionally does not inherit a public
               chat-completions preset; every other example entry must specify a
               base so the manifest actually applies the intended preset. *)
-           if id_prefix <> "gpt-5.3-codex-spark"
+           if model_id <> "gpt-5.3-codex-spark"
            then
-             check bool (Printf.sprintf "expected base for %s" id_prefix) true false
+             check bool (Printf.sprintf "expected base for %s" model_id) true false
          | Some label ->
            let label = Capability_manifest.base_label_to_string label in
            check
              bool
-             (Printf.sprintf "base label resolves for %s: %s" id_prefix label)
+             (Printf.sprintf "base label resolves for %s: %s" model_id label)
              true
              (Option.is_some (Capabilities.capabilities_for_provider_label label)))
       entries
 ;;
 
-let test_explicit_manifest_prefix_precedes_catalog_fallback () =
+let test_explicit_manifest_exact_model_precedes_catalog_fallback () =
   (* Explicit manifest lookup lets callers test or apply a manifest before
      consulting the global catalog fallback. *)
   let m =
     make_manifest
       ~base:"openai_chat"
       ~extra_fields:[ "supports_reasoning", "false" ]
-      "qwen3"
+      "qwen3.5-35b-a3b-q4"
   in
   match Capabilities.for_model_id_with_manifest m "qwen3.5-35b-a3b-q4" with
   | Some c ->
@@ -1919,7 +1959,7 @@ let test_global_catalog_precedes_global_manifest () =
         ; "supports_tools", "false"
         ; "thinking_control_format", {|"thinking_object"|}
         ]
-      "s9-precedence-model"
+      "s9-precedence-model-v1"
   in
   with_temp_model_catalog
     {|
@@ -2030,10 +2070,10 @@ thinking_control_token = "<|provider|>"
 ;;
 
 let test_apply_manifest_entry_all_none_uses_base () =
-  (* Entry with only id_prefix set — should be identical to base. *)
+  (* Entry with only model_id set — should be identical to base. *)
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"x","base":"anthropic"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"x","base":"anthropic"}]}|}
   in
   let manifest = Capability_manifest.of_json json |> Result.get_ok in
   let entry = List.hd (Capability_manifest.entries manifest) in
@@ -2046,9 +2086,9 @@ let test_apply_manifest_entry_all_none_uses_base () =
 let check_manifest_rejects_typed_field ~field ~value ~expected_type =
   let json =
     `Assoc
-      [ "schema_version", `Int 1
+      [ "schema_version", `Int 2
       ; ( "models"
-        , `List [ `Assoc [ "id_prefix", `String "typed-manifest-field"; field, value ] ] )
+        , `List [ `Assoc [ "model_id", `String "typed-manifest-field"; field, value ] ] )
       ]
   in
   match Capability_manifest.of_json json with
@@ -2077,11 +2117,11 @@ let test_manifest_rejects_wrong_type_string_list () =
     (fun (label, value) ->
        let json =
          `Assoc
-           [ "schema_version", `Int 1
+           [ "schema_version", `Int 2
            ; ( "models"
              , `List
                  [ `Assoc
-                     [ "id_prefix", `String "typed-string-list"
+                     [ "model_id", `String "typed-string-list"
                      ; "accepted_reasoning_efforts", value
                      ]
                  ] )
@@ -2095,32 +2135,32 @@ let test_manifest_rejects_wrong_type_string_list () =
     [ "scalar", `String "low"; "non-string item", `List [ `String "low"; `Bool true ] ]
 ;;
 
-let test_manifest_rejects_empty_id_prefix () =
+let test_manifest_rejects_empty_model_id () =
   let json =
-    Yojson.Safe.from_string {|{"schema_version":1,"models":[{"id_prefix":""}]}|}
+    Yojson.Safe.from_string {|{"schema_version":2,"models":[{"model_id":""}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
-    check_contains "mentions id_prefix" msg "id_prefix";
+    check_contains "mentions model_id" msg "model_id";
     check_contains "mentions empty" msg "must not be empty"
-  | Ok _ -> Alcotest.fail "empty manifest id_prefix should reject"
+  | Ok _ -> Alcotest.fail "empty manifest model_id should reject"
 ;;
 
-let test_manifest_rejects_padded_id_prefix () =
+let test_manifest_rejects_padded_model_id () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":" padded-model "}]}|}
+      {|{"schema_version":2,"models":[{"model_id":" padded-model "}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
-    check_contains "mentions id_prefix" msg "id_prefix";
+    check_contains "mentions model_id" msg "model_id";
     check_contains "mentions exact value" msg "leading or trailing whitespace"
-  | Ok _ -> Alcotest.fail "padded manifest id_prefix should reject"
+  | Ok _ -> Alcotest.fail "padded manifest model_id should reject"
 ;;
 
 let test_manifest_rejects_duplicate_root_field () =
   let json =
-    `Assoc [ "schema_version", `Int 1; "models", `List []; "schema_version", `Int 1 ]
+    `Assoc [ "schema_version", `Int 2; "models", `List []; "schema_version", `Int 2 ]
   in
   match Capability_manifest.of_json json with
   | Error msg ->
@@ -2132,11 +2172,11 @@ let test_manifest_rejects_duplicate_root_field () =
 let test_manifest_rejects_duplicate_entry_field () =
   let json =
     `Assoc
-      [ "schema_version", `Int 1
+      [ "schema_version", `Int 2
       ; ( "models"
         , `List
             [ `Assoc
-                [ "id_prefix", `String "duplicate-entry"
+                [ "model_id", `String "duplicate-entry"
                 ; "supports_tools", `Bool true
                 ; "supports_tools", `Bool false
                 ]
@@ -2153,7 +2193,7 @@ let test_manifest_rejects_duplicate_entry_field () =
 let test_manifest_rejects_wrong_type_base () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"bad-base","base":17}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"bad-base","base":17}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
@@ -2165,7 +2205,7 @@ let test_manifest_rejects_wrong_type_base () =
 let test_manifest_rejects_wrong_type_policy_string () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"bad-policy","thinking_control_format":false}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"bad-policy","thinking_control_format":false}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
@@ -2177,7 +2217,7 @@ let test_manifest_rejects_wrong_type_policy_string () =
 let test_manifest_accepts_ollama_think_policy_string () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"ollama-manifest","thinking_control_format":"ollama_think"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"ollama-manifest","thinking_control_format":"ollama_think"}]}|}
   in
   match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
@@ -2193,7 +2233,7 @@ let test_manifest_accepts_ollama_think_policy_string () =
 let test_manifest_accepts_thinking_control_token () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"token-model","thinking_control_format":"chat_template_token","thinking_control_token":"<|custom_think|>"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"token-model","thinking_control_format":"chat_template_token","thinking_control_token":"<|custom_think|>"}]}|}
   in
   match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
@@ -2209,11 +2249,11 @@ let test_manifest_accepts_thinking_control_token () =
 let test_manifest_rejects_tokenless_chat_template_token () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"tokenless-template-model","thinking_control_format":"chat_template_token"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"tokenless-template-model","thinking_control_format":"chat_template_token"}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
-    check_contains "names the offending id_prefix" msg "tokenless-template-model";
+    check_contains "names the offending model_id" msg "tokenless-template-model";
     check_contains "mentions the required token" msg "thinking_control_token"
   | Ok _ -> Alcotest.fail "chat_template_token without a token should fail closed"
 ;;
@@ -2221,7 +2261,7 @@ let test_manifest_rejects_tokenless_chat_template_token () =
 let test_manifest_rejects_blank_thinking_control_token () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"token-model","thinking_control_token":"   "}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"token-model","thinking_control_token":"   "}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
@@ -2233,7 +2273,7 @@ let test_manifest_rejects_blank_thinking_control_token () =
 let test_manifest_rejects_padded_thinking_control_token () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"token-model","thinking_control_token":" <|custom_think|> "}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"token-model","thinking_control_token":" <|custom_think|> "}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
@@ -2245,7 +2285,7 @@ let test_manifest_rejects_padded_thinking_control_token () =
 let test_manifest_accepts_thinking_object_adaptive_policy_string () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"adaptive-manifest","thinking_control_format":"thinking_object_adaptive"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"adaptive-manifest","thinking_control_format":"thinking_object_adaptive"}]}|}
   in
   match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
@@ -2261,7 +2301,7 @@ let test_manifest_accepts_thinking_object_adaptive_policy_string () =
 let test_manifest_accepts_reasoning_output_format () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"split-manifest","reasoning_output_format":"split_reasoning_fields"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"split-manifest","reasoning_output_format":"split_reasoning_fields"}]}|}
   in
   match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
@@ -2278,7 +2318,7 @@ let test_manifest_accepts_reasoning_output_format () =
 let test_manifest_accepts_reasoning_streaming_format () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"stream-manifest","reasoning_streaming_format":"delta:reasoning"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"stream-manifest","reasoning_streaming_format":"delta:reasoning"}]}|}
   in
   match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
@@ -2295,7 +2335,7 @@ let test_manifest_accepts_reasoning_streaming_format () =
 let test_manifest_applies_ignored_sampling_parameters () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"sampling-manifest","ignored_sampling_parameters":["temperature","top_p"]}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"sampling-manifest","ignored_sampling_parameters":["temperature","top_p"]}]}|}
   in
   match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
@@ -2314,7 +2354,7 @@ let test_manifest_applies_ignored_sampling_parameters () =
 let test_manifest_rejects_unknown_ignored_sampling_parameter () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"sampling-manifest","ignored_sampling_parameters":["temp"]}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"sampling-manifest","ignored_sampling_parameters":["temp"]}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg -> check_contains "mentions field" msg "ignored_sampling"
@@ -2324,7 +2364,7 @@ let test_manifest_rejects_unknown_ignored_sampling_parameter () =
 let test_manifest_rejects_unknown_preserve_thinking_control_format () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"bad-preserve","preserve_thinking_control_format":"memory_palace"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"bad-preserve","preserve_thinking_control_format":"memory_palace"}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg -> check_contains "mentions field" msg "preserve_thinking_control_format"
@@ -2334,7 +2374,7 @@ let test_manifest_rejects_unknown_preserve_thinking_control_format () =
 let test_manifest_rejects_unknown_reasoning_output_format () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"bad-output","reasoning_output_format":"split_thoughts"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"bad-output","reasoning_output_format":"split_thoughts"}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
@@ -2346,7 +2386,7 @@ let test_manifest_rejects_unknown_reasoning_output_format () =
 let test_manifest_rejects_unknown_reasoning_streaming_format () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"bad-stream","reasoning_streaming_format":"delta:"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"bad-stream","reasoning_streaming_format":"delta:"}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
@@ -2358,7 +2398,7 @@ let test_manifest_rejects_unknown_reasoning_streaming_format () =
 let test_manifest_rejects_unknown_reasoning_replay () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"bad-replay","reasoning_replay":"preserve-allways"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"bad-replay","reasoning_replay":"preserve-allways"}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
@@ -2375,7 +2415,7 @@ let test_manifest_rejects_unknown_reasoning_replay () =
 let test_manifest_rejects_retired_reasoning_visibility_key () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"retired-visibility","reasoning_visibility":"visible_text"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"retired-visibility","reasoning_visibility":"visible_text"}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
@@ -2387,7 +2427,7 @@ let test_manifest_rejects_retired_reasoning_visibility_key () =
 let test_manifest_applies_accepted_reasoning_efforts () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"effort-ok","supports_reasoning":true,"accepted_reasoning_efforts":["none","low","high"]}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"effort-ok","supports_reasoning":true,"accepted_reasoning_efforts":["none","low","high"]}]}|}
   in
   match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
@@ -2404,7 +2444,7 @@ let test_manifest_applies_accepted_reasoning_efforts () =
 let test_manifest_rejects_unknown_accepted_reasoning_effort () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"effort-bad","accepted_reasoning_efforts":["turbo"]}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"effort-bad","accepted_reasoning_efforts":["turbo"]}]}|}
   in
   match Capability_manifest.of_json json with
   | Error msg ->
@@ -2418,11 +2458,11 @@ let test_manifest_intlit_in_range_accepted () =
      constructor rather than relying on parser/platform representation. *)
   let json =
     `Assoc
-      [ "schema_version", `Int 1
+      [ "schema_version", `Int 2
       ; ( "models"
         , `List
             [ `Assoc
-                [ "id_prefix", `String "intlit-ok"
+                [ "model_id", `String "intlit-ok"
                 ; "max_context_tokens", `Intlit (string_of_int max_int)
                 ]
             ] )
@@ -2439,11 +2479,11 @@ let test_manifest_intlit_out_of_range_rejects () =
   let first_out_of_range = Int64.add (Int64.of_int max_int) 1L |> Int64.to_string in
   let json =
     `Assoc
-      [ "schema_version", `Int 1
+      [ "schema_version", `Int 2
       ; ( "models"
         , `List
             [ `Assoc
-                [ "id_prefix", `String "intlit-overflow"
+                [ "model_id", `String "intlit-overflow"
                 ; "max_context_tokens", `Intlit first_out_of_range
                 ]
             ] )
@@ -2467,7 +2507,7 @@ let parse_single_manifest_entry json_text =
 let test_manifest_applies_modality_priority () =
   let entry =
     parse_single_manifest_entry
-      {|{"schema_version":1,"models":[{"id_prefix":"visual-manifest","base":"anthropic","modality_priority":"visual_first"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"visual-manifest","base":"anthropic","modality_priority":"visual_first"}]}|}
   in
   (match Capabilities.anthropic_capabilities.modality_priority with
    | Modality.Preserve_input_order -> ()
@@ -2481,7 +2521,7 @@ let test_manifest_applies_modality_priority () =
 let test_manifest_applies_emits_usage_tokens () =
   let entry =
     parse_single_manifest_entry
-      {|{"schema_version":1,"models":[{"id_prefix":"usage-manifest","base":"anthropic","emits_usage_tokens":false}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"usage-manifest","base":"anthropic","emits_usage_tokens":false}]}|}
   in
   check
     bool
@@ -2498,7 +2538,7 @@ let test_manifest_applies_emits_usage_tokens () =
 let test_manifest_applies_supported_models () =
   let entry =
     parse_single_manifest_entry
-      {|{"schema_version":1,"models":[{"id_prefix":"restricted-manifest","base":"anthropic","supported_models":["model-a","model-b"]}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"restricted-manifest","base":"anthropic","supported_models":["model-a","model-b"]}]}|}
   in
   check
     (option (list string))
@@ -2515,7 +2555,7 @@ let test_manifest_applies_supported_models () =
 let test_manifest_newer_fields_inherit_base_when_absent () =
   let entry =
     parse_single_manifest_entry
-      {|{"schema_version":1,"models":[{"id_prefix":"inherit-manifest","base":"kimi"}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"inherit-manifest","base":"kimi"}]}|}
   in
   let caps = Capabilities.apply_manifest_entry entry in
   let base = Capabilities.kimi_capabilities in
@@ -2537,9 +2577,9 @@ let test_manifest_rejects_bad_newer_field_values () =
     (fun (label, field, value, expected) ->
        let json =
          `Assoc
-           [ "schema_version", `Int 1
+           [ "schema_version", `Int 2
            ; ( "models"
-             , `List [ `Assoc [ "id_prefix", `String "bad-newer-field"; field, value ] ]
+             , `List [ `Assoc [ "model_id", `String "bad-newer-field"; field, value ] ]
              )
            ]
        in
@@ -2582,7 +2622,7 @@ let test_manifest_load_file_missing_returns_error () =
 ;;
 
 let test_manifest_load_file_malformed_returns_error () =
-  with_temp_manifest {|{"schema_version":1,"models":[|} (fun path ->
+  with_temp_manifest {|{"schema_version":2,"models":[|} (fun path ->
     match Capability_manifest.load_file path with
     | Error msg ->
       check_contains "mentions JSON parse" msg "capability manifest JSON parse error";
@@ -2805,9 +2845,9 @@ let test_manifest_and_catalog_common_override_parity () =
     let json =
       Yojson.Safe.from_string
         {|{
-          "schema_version": 1,
+          "schema_version": 2,
           "models": [{
-            "id_prefix": "parity-model",
+            "model_id": "parity-model",
             "max_context_tokens": 123456,
             "max_output_tokens": 7890,
             "supports_tools": true,
@@ -3005,7 +3045,7 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
 let test_a_declared_effort_ladder_survives_its_own_row () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema_version":1,"models":[{"id_prefix":"declares-efforts","supports_reasoning":true,"accepted_reasoning_efforts":["none","low","high"]}]}|}
+      {|{"schema_version":2,"models":[{"model_id":"declares-efforts","supports_reasoning":true,"accepted_reasoning_efforts":["none","low","high"]}]}|}
   in
   match Capability_manifest.of_json json |> Result.map Capability_manifest.entries with
   | Ok [ entry ] ->
@@ -3433,6 +3473,8 @@ let () =
             "explicit manifest falls back to catalog"
             `Quick
             test_explicit_manifest_lookup_falls_back_to_catalog
+        ; test_case "exact model identity and order" `Quick test_manifest_exact_identity_and_order
+        ; test_case "explicit v2 model identity" `Quick test_manifest_requires_explicit_v2_model_identity
         ; test_case "unknown model → None" `Quick test_manifest_unknown_model_still_none
         ; test_case
             "malformed model id does not fall back to manifest"
@@ -3454,9 +3496,9 @@ let () =
             `Quick
             test_example_manifest_base_labels_are_canonical
         ; test_case
-            "explicit manifest prefix precedes catalog fallback"
+            "explicit exact manifest precedes catalog fallback"
             `Quick
-            test_explicit_manifest_prefix_precedes_catalog_fallback
+            test_explicit_manifest_exact_model_precedes_catalog_fallback
         ; test_case
             "global catalog precedes global manifest"
             `Quick
@@ -3471,11 +3513,11 @@ let () =
             "wrong-type string list rejects"
             `Quick
             test_manifest_rejects_wrong_type_string_list
-        ; test_case "empty id_prefix rejects" `Quick test_manifest_rejects_empty_id_prefix
+        ; test_case "empty model_id rejects" `Quick test_manifest_rejects_empty_model_id
         ; test_case
-            "padded id_prefix rejects"
+            "padded model_id rejects"
             `Quick
-            test_manifest_rejects_padded_id_prefix
+            test_manifest_rejects_padded_model_id
         ; test_case
             "duplicate root field rejects"
             `Quick

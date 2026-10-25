@@ -1,0 +1,66 @@
+{
+  "scope": "actual standalone production modules and interfaces with inline-test declarations excluded",
+  "source_ref": null,
+  "before": false,
+  "sources": {
+    "model_identifiers.mli": {
+      "source_sha256": "16b93bcb13adfe5262930ae761d1f771b2469dd4f00a2d05c59401ac2c3e1ba3",
+      "compiled_sha256": "16b93bcb13adfe5262930ae761d1f771b2469dd4f00a2d05c59401ac2c3e1ba3",
+      "inline_tests_excluded": 0
+    },
+    "model_identifiers.ml": {
+      "source_sha256": "8ce8c2ae936b7d6f141f7dc864acaaf0742b4f15a32e31f7272b61d77f02f779",
+      "compiled_sha256": "8ce8c2ae936b7d6f141f7dc864acaaf0742b4f15a32e31f7272b61d77f02f779",
+      "inline_tests_excluded": 0
+    },
+    "capability_vocab.mli": {
+      "source_sha256": "1c3f5477fb529b00ea0f5e53bb36908b1fcd48383d1624f88561bfc52633c416",
+      "compiled_sha256": "1c3f5477fb529b00ea0f5e53bb36908b1fcd48383d1624f88561bfc52633c416",
+      "inline_tests_excluded": 0
+    },
+    "capability_vocab.ml": {
+      "source_sha256": "a04bf5380835d81710bb84026cabd3ec1d28b8647bec14018aec4051ab14462f",
+      "compiled_sha256": "e6ced47cda79669c851983ff6633b5a93c4503bad20961d54572d40d0870fb2a",
+      "inline_tests_excluded": 19
+    },
+    "reasoning_effort.mli": {
+      "source_sha256": "302d79716c15353863683fb278b09b3948d96729074027269efc489e2d93e666",
+      "compiled_sha256": "302d79716c15353863683fb278b09b3948d96729074027269efc489e2d93e666",
+      "inline_tests_excluded": 0
+    },
+    "reasoning_effort.ml": {
+      "source_sha256": "143a311cbd071ba7834b5d9e83f910afe12ad2d6b77033477b06454a2d4fc601",
+      "compiled_sha256": "143a311cbd071ba7834b5d9e83f910afe12ad2d6b77033477b06454a2d4fc601",
+      "inline_tests_excluded": 0
+    },
+    "capability_manifest.mli": {
+      "source_sha256": "ac6c64aa9b3596c56411f60c2c6a0190e439a483dbae8d6d7d3a285083055e33",
+      "compiled_sha256": "ac6c64aa9b3596c56411f60c2c6a0190e439a483dbae8d6d7d3a285083055e33",
+      "inline_tests_excluded": 0
+    },
+    "capability_manifest.ml": {
+      "source_sha256": "a6d53702ad9e836c5e5433ab3ba72f9267b67489443029f79bb181c35ed39c00",
+      "compiled_sha256": "3e56cf05a249550b84b02476f887231f250a62571789b7effeea33ca949e2cf6",
+      "inline_tests_excluded": 18
+    }
+  },
+  "checks": {
+    "exact_model_uses_own_permission": true,
+    "reordering_preserves_exact_target": true,
+    "other_exact_model_keeps_own_permission": true,
+    "unknown_suffix_has_no_authority": true,
+    "unknown_quantization_has_no_authority": true,
+    "provider_qualified_id_not_stripped": true,
+    "case_folded_exact_id": true,
+    "duplicate_case_identity_rejected": true,
+    "old_schema_rejected": true,
+    "prefix_field_rejected": true,
+    "missing_model_id_rejected": true,
+    "missing_models_rejected": true,
+    "null_models_rejected": true,
+    "explicit_empty_is_valid": true
+  },
+  "project_linked": false,
+  "request_resolver_executed": false,
+  "provider_called": false
+}

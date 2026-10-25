@@ -55,23 +55,9 @@ let with_microvm_inventory_lock f =
 
 let sweep_abandoned_microvm_guests
       ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv =
-  (* A CLI exception leaves an inventory to re-read, not a broken in-memory
-     invariant. Release the mutex before re-raising so an optional maintenance
-     failure cannot poison every subsequent boot and teardown. *)
-  match
-    with_microvm_inventory_lock (fun () ->
-      try
-        Ok (Keeper_sandbox_microvm.sweep_abandoned_guests
-          ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv)
-      (* This catch carries the exception out of the lock and the [Error] arm
-         below re-raises it with its backtrace, so cancellation propagates
-         rather than being absorbed. It is
-         caught here only because [use_rw ~protect:true] poisons the mutex for
-         every later boot and teardown if the body raises. *)
-      with exn -> Error (exn, Printexc.get_raw_backtrace ())) (* re-raised below *)
-  with
-  | Ok outcomes -> outcomes
-  | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+  with_microvm_inventory_lock (fun () ->
+    Keeper_sandbox_microvm.sweep_abandoned_guests
+      ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv)
 ;;
 
 let microvm_identity_snapshot container_name =

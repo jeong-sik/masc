@@ -3651,6 +3651,7 @@ let test_cancelled_inventory_wait_reopens_keeper_admission () =
     let release, signal = Eio.Promise.create () in
     let waiting, signal_waiting = Eio.Promise.create () in
     let cancelled, signal_cancelled = Eio.Promise.create () in
+    let next_ready, signal_next_ready = Eio.Promise.create () in
     let inventory_ran = ref false in
     let next_started = ref false in
     Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_keeper lifecycle ~keeper_name:"alpha" (fun () ->
@@ -3662,11 +3663,13 @@ let test_cancelled_inventory_wait_reopens_keeper_admission () =
        with Eio.Cancel.Cancelled _ -> ());
       Eio.Promise.resolve signal_cancelled ());
     Eio.Fiber.fork ~sw (fun () -> Lifecycle.with_keeper lifecycle ~keeper_name:"beta" (fun () ->
-      next_started := true));
+      next_started := true;
+      Eio.Promise.resolve signal_next_ready ()));
     Eio.Cancel.cancel (Eio.Promise.await waiting) Exit;
     Eio.Promise.resolve signal ();
     Eio.Promise.await cancelled;
     Alcotest.(check bool) "cancelled inventory never lists or deletes" false !inventory_ran;
+    Eio.Promise.await next_ready;
     Lifecycle.with_inventory lifecycle (fun () ->
       Alcotest.(check bool) "Keeper admission reopens after cancellation" true !next_started)))
 ;;

@@ -11,6 +11,10 @@ val equipment : t -> keeper:string -> (Keeper_portrait_look.equipment, string) r
     this revision; real relevant facts or policy changes invalidate it. Off has
     no account revision. *)
 val account_revision : t -> keeper:string -> string option
+val account_revision_reader : t -> keeper:string -> string option
+(** Precompute keeper-independent policy, supply, catalog, and event encodings
+    once for [t] and return a per-keeper revision lookup for multi-keeper
+    response projections. *)
 val ready_account_revision : events:Candle_event.t list -> policy:Candle_config.policy -> balance:Candle_balance.t -> keeper:string -> string
 (** The same durable account identity, for a response derived from one current
     view's events, policy and balance without rereading its policy or ledger.

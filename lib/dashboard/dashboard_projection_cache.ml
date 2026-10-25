@@ -69,13 +69,68 @@ let candle_observation_sequence ~base_path ~request_sequence observation =
       Hashtbl.add candle_observations base_path (request_sequence, request_sequence, observation);
       request_sequence)
 
+let keeper_names_in_snapshot snapshot =
+  let seen = Hashtbl.create 16 in
+  let acc = ref [] in
+  let note_row = function
+    | `Assoc _ as json ->
+        (match Json_util.assoc_string_opt "name" json with
+         | Some keeper when not (Hashtbl.mem seen keeper) ->
+             Hashtbl.add seen keeper ();
+             acc := keeper :: !acc
+         | Some _ | None -> ())
+    | _ -> ()
+  in
+  let note_rows rows = List.iter note_row rows in
+  (match snapshot with
+   | `Assoc fields ->
+       List.iter
+         (function
+           | "keepers", `Assoc section_fields ->
+               List.iter
+                 (function
+                   | "items", `List rows -> note_rows rows
+                   | _ -> ())
+                 section_fields
+           | ("keepers" | "keeper_briefs" | "continuity_briefs"), `List rows ->
+               note_rows rows
+           | "operator_targets", `Assoc target_fields ->
+               List.iter
+                 (function
+                   | "keepers", `List rows -> note_rows rows
+                   | _ -> ())
+                 target_fields
+           | _ -> ())
+         fields
+   | _ -> ());
+  List.rev !acc
+
 let with_current_keeper_observations_using ~read ~(config : Workspace_utils.config) snapshot =
   (* Execution and briefing read operator rows, not the Keeper HTTP roster.
      Equipment, balances and supply share one fresh ledger view per response. *)
   let request_sequence = Atomic.fetch_and_add candle_read_sequence 1 in
   let candle = read () in
   let equipment = Candle_observe.equipment candle in
+  let account_revision = Candle_observe.account_revision_reader candle in
   let summary = Candle_observation.to_json (Candle_observe.summary candle) in
+  let board_addresses =
+    match keeper_names_in_snapshot snapshot with
+    | [] -> Hashtbl.create 0
+    | names ->
+        let pairs =
+          Eio_guard.run_in_systhread
+            ~label:"dashboard-keeper-board-addresses"
+            (fun () ->
+              List.map
+                (fun keeper -> keeper, Keeper_board_address.read config keeper)
+                names)
+        in
+        let table = Hashtbl.create (List.length pairs) in
+        List.iter
+          (fun (keeper, address) -> Hashtbl.replace table keeper address)
+          pairs;
+        table
+  in
   let set key value fields =
     if List.mem_assoc key fields then
       List.map (fun (name, previous) -> name, if name = key then value else previous) fields
@@ -94,9 +149,14 @@ let with_current_keeper_observations_using ~read ~(config : Workspace_utils.conf
           let portrait = match equipment ~keeper with
             | Ok value -> Keeper_portrait_equipment.Ready value
             | Error reason -> Keeper_portrait_equipment.Unavailable reason in
+          let address =
+            match Hashtbl.find_opt board_addresses keeper with
+            | Some address -> address
+            | None -> Keeper_board_address.read config keeper
+          in
           portrait, Candle_observe.balance candle ~keeper,
-          Candle_observe.account_revision candle ~keeper,
-          Keeper_board_address.read config keeper
+          account_revision ~keeper,
+          address
         | None ->
           Keeper_portrait_equipment.Unavailable "Keeper name unavailable", None, None,
           Keeper_board_address.Unavailable Keeper_board_address.Metadata_absent in

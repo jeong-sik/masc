@@ -6,7 +6,7 @@ Refs #25920 and its original #25100. Base:3cce9a517b25863c00b48cfb3dd79b994ebc10
 
 The scoped reader read max(500,n*64) global physical rows before filtering. Two target events separated by650 foreign events returned only the newer target for n=2. The repaired reader uses the existing strict reverse Dated_jsonl cursor until n matching rows or EOF, retaining only selected rows and the reverse reader's current chunk/line. It uses the same Domain_pool_ref.submit_io_or_inline boundary as the prior strict recent reader; no new pool or fallback is introduced.
 
-There is no row TTL, tail guess, second writer, new store or persisted index. Malformed JSON, ambiguous owner metadata and I/O/layout failures in the visited suffix return typed Read_recent errors. Keeper identities compare exactly; prose never selects control flow. Global reads retain existing raw-row semantics. Rows older than a complete selected suffix are not audited. Append/writer locking and separately coverage-labelled resolved-history scan limits remain unchanged.
+There is no row TTL, tail guess, second writer, new store or persisted index. Malformed JSON, ambiguous owner metadata and I/O/layout failures in the visited suffix return typed Read_recent errors. Keeper identities compare exactly; prose never selects control flow. Global reads retain existing raw-row semantics. Row corruption older than a complete selected suffix is unvisited; directory layout validation can still reject older invalid entries. Append/writer locking and separately coverage-labelled resolved-history scan limits remain unchanged.
 
 ## Defined verification
 

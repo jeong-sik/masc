@@ -117,7 +117,8 @@ val recent_resolved_max_window_minutes : int
     Visited malformed JSON, layout and I/O failures return [Read_recent] errors.
     For a scoped read each visited JSON row must name exactly one string Keeper;
     ambiguous or missing ownership is an error, never an omitted row.
-    Errors older than the selected suffix are outside this read's scope.
+    Row corruption older than a complete selected suffix is unvisited; directory
+    layout validation can still reject older invalid entries.
     [n <= 0] returns [Ok []] without opening the store. *)
 val read_recent :
   base_path:string ->

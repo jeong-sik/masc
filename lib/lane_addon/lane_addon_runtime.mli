@@ -104,6 +104,18 @@ type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
 type tool_call_error = Unavailable of string | Outcome_unknown of string
   | Host_refusal of Lane_addon_call_context.host_refusal
+type operator_error = Lane_addon_worker_protocol.operator_error =
+  Operator_unavailable | Operator_rejected | Operator_outcome_unknown
+val operator_schema : config:Workspace.config -> access:Lane_addon_sources.access ->
+  instance_id:string -> expected_incarnation:string -> (Yojson.Safe.t option, operator_error) result
+val call_operator : config:Workspace.config -> access:Lane_addon_sources.access ->
+  instance_id:string -> expected_incarnation:string -> arguments:Yojson.Safe.t ->
+  (Yojson.Safe.t, operator_error) result
+(** Admin-only private control, pinned to the original live incarnation and
+    generative connection owner. No tool receipt, trace callback, raw failure
+    detail or retained observation receives its arguments/result. The source
+    credential must be [Operator_configuration]; caller strings confer no
+    authority. Neither entrypoint starts or adopts a worker. *)
 type export_reading = { exports : tool_export list; unready : Lane_addon_unready.t list }
 (** The usable exports and, from the same read, every visible non-detached
     installation that cannot serve now. A caller that finds no export for a
@@ -485,6 +497,8 @@ module For_testing : sig
     call_exported_tool : on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
       (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
+    operator_schema : unit -> Yojson.Safe.t option;
+    call_operator : admit:(unit -> (unit, operator_error) result) -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (Lane_addon_lifecycle.release, Lane_addon_lifecycle.failure) result;
     await_exit : unit -> string;

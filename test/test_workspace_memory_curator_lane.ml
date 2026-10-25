@@ -190,6 +190,8 @@ let backend env base_path delivery : Runtime.For_testing.backend = {
       call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
         Protocol.call_exported_tool ~on_result ?authorize ~principal protocol ~name ~arguments
         |> Result.map_error invocation_error);
+      operator_schema=(fun () -> None);
+      call_operator=(fun ~admit:_ ~arguments:_ -> Error Masc.Lane_addon_worker_protocol.Operator_unavailable);
       action_schema=(fun () -> Protocol.action_schema protocol);
       act=(fun ~arguments -> Protocol.act protocol ~arguments |> Result.map_error protocol_error);
       stop=(fun () -> Protocol.close protocol;Ok (Lane_addon_lifecycle.Released

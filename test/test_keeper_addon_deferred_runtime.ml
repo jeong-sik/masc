@@ -56,6 +56,8 @@ let backend env base_path calls : R.For_testing.backend = {
          | Ok result -> calls := {instance=instance_id;arguments;result} :: !calls
          | Error _ -> ());
         result);
+      operator_schema=(fun () -> None);
+      call_operator=(fun ~admit:_ ~arguments:_ -> Error Masc.Lane_addon_worker_protocol.Operator_unavailable);
       action_schema=(fun () -> P.action_schema protocol);
       act=(fun ~arguments -> P.act protocol ~arguments |> Result.map_error protocol_error);
       stop=(fun () -> P.close protocol;Ok (Lane_addon_lifecycle.Released {

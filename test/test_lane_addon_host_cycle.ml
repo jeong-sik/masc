@@ -116,6 +116,8 @@ let backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?expor
           let result = invoke arguments in
           (match result with Ok reply -> on_result reply | Error _ -> ());
           result);
+      operator_schema=(fun () -> None);
+      call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);
       action_schema = (fun () -> None); act = (fun ~arguments:_ -> Error "read-only");
       stop = (fun () -> before_stop (); Ok (Lane_addon_lifecycle.Released
         { engine = Lane_addon_lifecycle.Docker_engine "fixture-engine"; container_id = Some instance_id }));

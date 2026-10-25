@@ -497,6 +497,13 @@ val with_token_permission_auth :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Like [with_permission_auth] but threads the token id into the
     handler so the handler can audit the call. *)
+val with_private_token_permission_auth :
+  permission:Masc_domain.permission ->
+  (Mcp_server.server_state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** The same token-bound permission and operation quota, with fixed refusal
+    bodies, no reflected CORS and no-store on every auth/startup/quota response.
+    Handlers still own their private body/response policy. *)
 
 module For_testing : sig
   val snapshot_server_state : unit -> Mcp_server.server_state option

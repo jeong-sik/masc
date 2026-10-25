@@ -437,6 +437,120 @@ let save_declaration request reqd =
           | Ok args -> Runtime.save_declaration ~access ~config:(Mcp_server.workspace_config state) args in
         respond_declaration request reqd result)) request reqd
 
+type operator_command = Describe_operator | Invoke_operator of Yojson.Safe.t
+type operator_request = {
+  instance_id : string; expected_incarnation : string; command : operator_command;
+}
+let decode_operator_request body =
+  let* json = decode_body body |> Result.map_error (fun _ -> ()) in
+  match json with
+  | `Assoc fields ->
+      let names = List.map fst fields |> List.sort String.compare in
+      let identity name = match List.assoc_opt name fields with
+        | Some (`String value) when value <> "" && String.trim value = value -> Ok value
+        | Some _ | None -> Error () in
+      let* instance_id = identity "instance_id" in
+      let* expected_incarnation = identity "expected_incarnation" in
+      let* command = match List.assoc_opt "mode" fields, List.assoc_opt "arguments" fields with
+        | Some (`String "describe"), None
+          when names = ["expected_incarnation";"instance_id";"mode"] -> Ok Describe_operator
+        | Some (`String "invoke"), Some (`Assoc _ as arguments)
+          when names = ["arguments";"expected_incarnation";"instance_id";"mode"] -> Ok (Invoke_operator arguments)
+        | (Some _ | None), (Some _ | None) -> Error () in
+      Ok {instance_id;expected_incarnation;command}
+  | _ -> Error ()
+
+let private_headers = ["cache-control","no-store";"referrer-policy","no-referrer";
+  "x-content-type-options","nosniff"]
+let operator_callback _request reqd =
+  (* Static page: no query/fragment is interpolated into server HTML or logs.
+     Only its original same-origin opener can receive the private return. *)
+  let script = {|const returned=window.location.href;
+const originalOpener=window.opener;
+const query=new URL(returned).searchParams;
+const state=query.getAll("state").length===1?query.get("state"):null;
+const receiptKind=query.get("error")==="access_denied"?"declined":"captured";
+let connectionId=null;
+let cleared=false;
+const status=document.getElementById("status");
+function deliver(){
+  if(cleared || !originalOpener || originalOpener===window || state===null){
+    status.textContent="The original connection window is unavailable. Keep this return open; its capture has not been confirmed.";
+    return;
+  }
+  originalOpener.postMessage({kind:"masc-addon-oauth-callback",url:returned},window.location.origin);
+  status.textContent="Waiting for the original connection to confirm capture. Keep this window open.";
+}
+window.addEventListener("message",event=>{
+  if(cleared || state===null || event.source!==originalOpener || event.origin!==window.location.origin)return;
+  const data=event.data;
+  if(typeof data!=="object" || data===null || data.state!==state
+    || typeof data.connection_id!=="string" || data.connection_id==="")return;
+  if(data.kind==="masc-addon-oauth-pending"){
+    if(connectionId===null)connectionId=data.connection_id;
+    return;
+  }
+  if(data.kind!=="masc-addon-oauth-captured" || connectionId===null
+    || data.connection_id!==connectionId || data.receipt_kind!==receiptKind)return;
+  window.history.replaceState(null,"",window.location.pathname);
+  cleared=true;
+  originalOpener.postMessage({kind:"masc-addon-oauth-cleared",url:returned,connection_id:connectionId},window.location.origin);
+  status.textContent="Return captured by the original connection. You can close this window.";
+  window.close();
+});
+document.getElementById("retry").addEventListener("click",deliver);
+deliver();
+|} in
+  let hash = Digestif.SHA256.digest_string script |> Digestif.SHA256.to_raw_string |> Base64.encode_string in
+  let policy = "default-src 'none'; script-src 'sha256-" ^ hash ^ "'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" in
+  Http.Response.html ~headers:(private_headers @ ["content-security-policy",policy;
+    "cross-origin-opener-policy","same-origin-allow-popups"])
+    ("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>Connection return</title>"
+     ^ "<p id=\"status\">Returning to connection settings…</p><button id=\"retry\" type=\"button\">Retry original return</button><script>" ^ script ^ "</script></html>") reqd
+let operator_control request reqd =
+  Http.Response.with_scoped_headers private_headers (fun () ->
+  with_private_token_permission_auth ~permission:Masc_domain.CanAdmin (fun state _actor request reqd ->
+    let reply ?(status=`OK) value =
+      Http.Response.with_scoped_headers private_headers (fun () ->
+        Http.Response.json_value ~status ~compress:false ~request value reqd) in
+    (* No reflected CORS and no dev-origin widening for private OAuth material.
+       Native operator clients can omit Origin; browser clients must match. *)
+    let origin = classify_request_origin
+      ~request_authority:(Server_request_authority.current_exn ()) request in
+    let allowed = match origin with
+      | Single_origin {admission=Same_origin;_} -> true
+      | Missing_origin ->
+          (match Httpun.Headers.get_multi request.Httpun.Request.headers "sec-fetch-site" with
+           | [] -> true | [_] | _::_::_ -> false)
+      | Single_origin {admission=(Allowed_dev_origin|Rejected);_}
+      | Multiple_origins | Malformed_origin -> false in
+    let config = Mcp_server.workspace_config state in
+    match allowed, request_credential_standing ~base_path:config.Workspace.base_path request with
+    | false, _ -> reply ~status:`Forbidden (error_json "private operator origin refused")
+    | true, Unreadable_credential -> reply ~status:`Service_unavailable (error_json "operator credential unavailable")
+    | true, (Agent_credential | Player_credential | No_credential) ->
+        reply ~status:`Forbidden (error_json "operator credential required")
+    | true, Operator_credential ->
+        Http.Request.read_body_async_with_limit reqd ~max_bytes:Http.Request.max_body_bytes
+          ~on_error:(function
+            | `Too_large _ -> reply ~status:`Payload_too_large (error_json "private operator request too large")
+            | `Internal _ -> reply ~status:`Internal_server_error (error_json "private operator operation unavailable"))
+          ~on_body:(fun body ->
+          match decode_operator_request body with
+          | Error () -> reply ~status:`Bad_request (error_json "invalid private operator request")
+          | Ok {instance_id;expected_incarnation;command} ->
+              let access = Lane_addon_sources.Operator_configuration in
+              let result = match command with
+                | Describe_operator -> Runtime.operator_schema ~config ~access ~instance_id ~expected_incarnation
+                    |> Result.map (fun schema -> `Assoc ["schema", match schema with Some value -> value | None -> `Null])
+                | Invoke_operator arguments -> Runtime.call_operator ~config ~access ~instance_id ~expected_incarnation ~arguments in
+              match result with
+              | Ok value -> reply value
+              | Error Runtime.Operator_unavailable -> reply ~status:`Conflict (error_json "original operator control unavailable")
+              | Error Runtime.Operator_rejected -> reply ~status:`Bad_request (error_json "operator request refused")
+              | Error Runtime.Operator_outcome_unknown -> reply ~status:`Conflict (error_json "operator outcome unknown; inspect before another attempt")))
+    request reqd)
+
 (* RFC operator-quiz §4.6: an installation's questions, beside the Keeper
    questions in Approvals. Questions and resolutions use the Keeper wire form,
    so one editor answers both. *)
@@ -584,6 +698,8 @@ let add_routes ~sw ~clock router =
              respond request reqd result)))
   |> Http.Router.get "/api/v1/lane-addons/declaration" read_declaration
   |> Http.Router.post "/api/v1/lane-addons/declaration" save_declaration
+  |> Http.Router.post "/api/v1/lane-addons/operator" operator_control
+  |> Http.Router.get "/addons/oauth/callback" operator_callback
   |> Http.Router.get "/api/v1/lane-addons" get_inspect
   |> Http.Router.get "/api/v1/lane-addons/slice" get_slice
   |> Http.Router.get "/api/v1/lane-addons/actions" get_action

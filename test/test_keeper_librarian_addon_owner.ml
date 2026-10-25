@@ -109,6 +109,8 @@ let backend env base_path delivery delivery_observed observation_observed after_
         (match member "kind" arguments with `String "submit" -> after_submit ()
          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> ());
         Result.map (transform_reply arguments) result);
+      operator_schema=(fun () -> None);
+      call_operator=(fun ~admit:_ ~arguments:_ -> Error Masc.Lane_addon_worker_protocol.Operator_unavailable);
       action_schema=(fun () -> Protocol.action_schema protocol);
       act=(fun ~arguments -> Protocol.act protocol ~arguments |> Result.map_error protocol_error);
       stop=(fun () -> Protocol.close protocol;Ok (Lane_addon_lifecycle.Released

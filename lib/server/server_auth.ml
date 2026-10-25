@@ -1393,6 +1393,28 @@ and with_token_permission_auth ~permission handler request reqd =
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)
 
+let with_private_token_permission_auth ~permission handler request reqd =
+  let refuse status message =
+    Http_server_eio.Response.with_scoped_headers
+      ["cache-control","no-store";"referrer-policy","no-referrer";"x-content-type-options","nosniff"]
+      (fun () -> Http_server_eio.Response.json_value ~status ~compress:false ~request
+        (`Assoc ["error",`String message]) reqd) in
+  match current_server_state () with
+  | None -> refuse `Service_unavailable "private operator service unavailable"
+  | Some state ->
+      let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+      match authorize_token_bound_permission_request ~base_path ~permission request with
+      | Error error ->
+          let status = http_status_of_auth_error error in
+          log_auth_refusal ~protocol:"h1" ~path:(Http_server_eio.Request.path request)
+            ~status:(Httpun.Status.to_code (status :> Httpun.Status.t));
+          refuse (status :> Httpun.Status.t) "private operator authorization refused"
+      | Ok actor ->
+          match agent_rl_key_of_request request with
+          | Some key when not (Rate_limit.check_agent_global ~key) ->
+              refuse `Too_many_requests "private operator quota unavailable"
+          | Some _ | None -> handler state actor request reqd
+
 module For_testing = struct
   let snapshot_server_state = current_server_state
   let restore_server_state state = Atomic.set server_state state

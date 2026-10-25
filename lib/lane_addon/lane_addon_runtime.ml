@@ -23,6 +23,8 @@ type browser_service_status = Browser_ready of browser_service
   | Browser_refresh_needed of browser_service | Browser_unavailable | Browser_retired
 type tool_call_error = Unavailable of string | Outcome_unknown of string
   | Host_refusal of Lane_addon_call_context.host_refusal
+type operator_error = Lane_addon_worker_protocol.operator_error =
+  Operator_unavailable | Operator_rejected | Operator_outcome_unknown
 let tool_change_handler = ref (fun () -> ())
 let register_tool_change_handler handler = tool_change_handler := handler
 let notify_tool_change (package : package) =
@@ -65,6 +67,8 @@ type connection = {
   call_exported_tool : on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
     (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
   action_schema : unit -> Yojson.Safe.t option;
+  operator_schema : unit -> Yojson.Safe.t option;
+  call_operator : admit:(unit -> (unit, operator_error) result) -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result;
   act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
   stop : unit -> (Lifecycle.release, Lifecycle.failure) result;
   await_exit : unit -> string;
@@ -1702,6 +1706,8 @@ let backend ~store ~artifact_store () = match !override with
                           Lane_addon_host_request.availability_of_json value)});
                 exported_tools=(fun () -> Lane_addon_native_worker.exported_tools worker);
                 action_schema=(fun () -> Lane_addon_native_worker.action_schema worker);
+                operator_schema=(fun () -> Lane_addon_native_worker.operator_schema worker);
+                call_operator=(fun ~admit ~arguments -> Lane_addon_native_worker.call_operator worker ~admit ~arguments);
                 call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
                   Lane_addon_native_worker.call_exported_tool ~on_result ?authorize ~principal ?finalize_result worker ~name ~arguments
                   |> Result.map_error (function
@@ -1762,6 +1768,8 @@ let backend ~store ~artifact_store () = match !override with
               list_requests=(fun () -> Lane_addon_worker.host_requests worker |> Result.map_error Lane_addon_worker.error_to_string);
               deliver=(fun ~arguments -> Lane_addon_worker.host_result worker ~arguments |> Result.map_error Lane_addon_worker.error_to_string)});
             exported_tools=(fun () -> Lane_addon_worker.exported_tools worker);
+            operator_schema=(fun () -> Lane_addon_worker.operator_schema worker);
+            call_operator=(fun ~admit ~arguments -> Lane_addon_worker.call_operator worker ~admit ~arguments);
             call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
               Lane_addon_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
               |> Result.map_error (function
@@ -1960,6 +1968,73 @@ let with_tool_call_owner work =
   with Eio.Cancel.Cancelled _ as exn ->
     ignore (Eio.Promise.try_resolve signal_cancelled exn);
     raise exn
+
+let with_operator_connection ~config ~access ~instance_id ~expected_incarnation use =
+  let* () = match access with
+    | Lane_addon_sources.Operator_configuration -> Ok ()
+    | Keeper _ | Unauthenticated -> Error Operator_rejected in
+  let* () = if instance_id = expected_incarnation then Ok () else Error Operator_unavailable in
+  with_tool_call_owner (fun () ->
+    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    let* m = Option.to_result ~none:Operator_unavailable (Hashtbl.find_opt managers root) in
+    (* Capture the original generative owner before a fresh disk read yields.
+       No global serializer is acquired under the per-worker RPC mutex: the
+       captured-request path acquires those in the opposite order. *)
+    let* e, original = match List.find_opt (fun ((e : entry), _) ->
+        e.instance_id = instance_id) (live_reading m access).ready with
+      | Some pair -> Ok pair | None -> Error Operator_unavailable in
+    let original_configuration = e.configuration in
+    let confirm () =
+      let still_original () = match Hashtbl.find_opt m.entries instance_id with
+        | Some current when current == e && current.configuration=original_configuration ->
+            (match readiness current with
+             | Ready connection when Lane_addon_tool_export.equal_owner
+                 original.export_owner connection.export_owner -> Ok connection.worker
+             | Ready _ | Gone | Unready _ -> Error Operator_unavailable)
+        | Some _ | None -> Error Operator_unavailable in
+      let* _ = still_original () in
+      let* () = match original_configuration with
+        | None -> Ok ()
+        | Some owner ->
+            let* reading = Option.to_result ~none:Operator_unavailable m.configuration_status in
+            let snapshot = offload (fun () -> Lane_addon_config.load ~directory:reading.directory) in
+            if snapshot.complete && List.exists (fun (d : Lane_addon_config.declaration) ->
+                d.id=owner.id && d.source_path=owner.source_path && d.revision=owner.revision
+                && d.enabled && same_execution_package d.package e.package) snapshot.declarations
+            then Ok () else Error Operator_unavailable in
+      still_original () in
+    let* connection = confirm () in
+    let admit () = confirm () |> Result.map (fun _ -> ()) in
+    use m e connection ~admit)
+
+let operator_schema ~config ~access ~instance_id ~expected_incarnation =
+  with_operator_connection ~config ~access ~instance_id ~expected_incarnation
+    (fun _m _e connection ~admit:_ -> Ok (connection.operator_schema ()))
+
+let call_operator ~config ~access ~instance_id ~expected_incarnation ~arguments =
+  with_operator_connection ~config ~access ~instance_id ~expected_incarnation
+    (fun m e connection ~admit ->
+      let* _ = Option.to_result ~none:Operator_unavailable (connection.operator_schema ()) in
+      let* sw = Option.to_result ~none:Operator_unavailable (Eio_context.get_root_switch_opt ()) in
+      let retire () =
+        (* No provider error, request or result enters retained lifecycle state. *)
+        retire_admission e;
+        e.state <- fail_state e (Lifecycle.Effect_outcome_unknown "private operator call outcome unknown");
+        notify_exports m e;
+        ignore (persist m e);
+        stop_entry ~sw ~backend:(backend ~store:m.store ~artifact_store:m.artifact_store ()) m e in
+      e.active_tool_calls <- e.active_tool_calls + 1;
+      Fun.protect ~finally:(fun () -> e.active_tool_calls <- e.active_tool_calls - 1) (fun () ->
+        try
+          let result = connection.call_operator ~admit ~arguments in
+          (match result with
+           | Ok _ -> if not e.stopping then wake e
+           | Error (Operator_unavailable | Operator_rejected) -> ()
+           | Error Operator_outcome_unknown -> Eio.Cancel.protect retire);
+          result
+        with Eio.Cancel.Cancelled _ as exn ->
+          Eio.Cancel.protect retire;
+          raise exn))
 
 type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
 let browser_reading (reading : live_reading) =
@@ -4338,6 +4413,8 @@ module For_testing = struct
     call_exported_tool : on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
       (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
+    operator_schema : unit -> Yojson.Safe.t option;
+    call_operator : admit:(unit -> (unit, operator_error) result) -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (Lifecycle.release, Lifecycle.failure) result;
     await_exit : unit -> string;

@@ -311,6 +311,12 @@ let test_shared_endpoint_is_disambiguated_by_explicit_provider_id () =
     in
     Alcotest.(check string) "alpha binding" "shared-alpha" alpha_binding.id;
     Alcotest.(check string) "beta alias canonical binding" "shared-beta" beta_binding.id;
+    Alcotest.(check bool) "raw beta identity alone grants no reasoning policy" false
+      (Provider_runtime_binding.capabilities_for_provider_config beta).supports_reasoning;
+    let alpha = expect_ok (Provider_runtime_binding.to_provider_config
+      ~model:"shared-model" alpha_binding) in
+    let beta = expect_ok (Provider_runtime_binding.to_provider_config
+      ~model:"shared-model" beta_binding) in
     let alpha_caps = Provider_runtime_binding.capabilities_for_provider_config alpha in
     let beta_caps = Provider_runtime_binding.capabilities_for_provider_config beta in
     Alcotest.(check bool) "alpha provider capability" false alpha_caps.supports_reasoning;

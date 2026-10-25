@@ -1,0 +1,169 @@
+{
+  "generated_at": "2026-10-24T18:30:23Z",
+  "approval_queue_state": {
+    "state": "ready"
+  },
+  "tree": [
+    {
+      "id": "goal-canary-three-results",
+      "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+      "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+      "verification": {
+        "goal_id": "goal-canary-three-results",
+        "completion": {
+          "state": "proof_pending",
+          "requested_at": "2026-10-24T18:19:55Z",
+          "request_id": "cd97da098881f0de109d028d3de5b57e",
+          "criterion": {
+            "revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+            "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+            "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+            "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread"
+          }
+        },
+        "submitted_evidence": [
+          {
+            "kind": "collaboration",
+            "reference": "board:p-9d29e90b0d8bb894450bb96beee6172d",
+            "sha256": "8e90a777f309091a4d4d5b598a3e7b526b72f3651fbfe3b414e403f5e03a075f",
+            "bytes": 1310,
+            "content_omitted": true
+          }
+        ],
+        "updated_at": "2026-10-24T18:19:55Z"
+      },
+      "measurement": {
+        "state": "reported",
+        "record": {
+          "id": "ff7a4f86482a94260ba642d65c5ae6b2",
+          "goal_id": "goal-canary-three-results",
+          "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+          "observed_value": "3/3: alpha=true, beta=true, gamma=true; reread after task-002 edit (alpha from approved task-001)",
+          "evidence": "artifact:workspace/acceptance.json",
+          "actor": "goal-canary",
+          "recorded_at": "2026-10-24T18:19:18Z"
+        }
+      },
+      "phase": "verifying",
+      "resume_phase": null,
+      "phase_color": "#a78bfa",
+      "goal_fsm": {
+        "state": "verifying",
+        "resume_phase": null,
+        "source": "goal.phase",
+        "state_kind": "verifying",
+        "next_actions": [
+          "drop",
+          "reopen",
+          "pause",
+          "block"
+        ],
+        "activity_observation": "runtime"
+      },
+      "priority": 1,
+      "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+      "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+      "due_date": null,
+      "tasks": [
+        {
+          "id": "task-001",
+          "title": "workspace/acceptance.json의 alpha를 true로 변경한다",
+          "status": "done",
+          "status_color": "#4ade80",
+          "priority": 2,
+          "assignee": "goal-canary",
+          "is_terminal": true,
+          "created_at": "2026-10-24T18:02:32Z",
+          "updated_at": "2026-10-24T18:16:32Z"
+        },
+        {
+          "id": "task-002",
+          "title": "workspace/acceptance.json의 beta와 gamma를 true로 변경한다",
+          "status": "awaiting_verification",
+          "status_color": "#a78bfa",
+          "priority": 3,
+          "assignee": "goal-canary",
+          "is_terminal": false,
+          "created_at": "2026-10-24T18:18:35Z",
+          "updated_at": "2026-10-24T18:19:19Z"
+        }
+      ],
+      "task_count": 2,
+      "task_done_count": 1,
+      "task_summary": {
+        "total": 2,
+        "done": 1,
+        "open": 1,
+        "terminal": 1,
+        "awaiting_verification": 1,
+        "cancelled": 0,
+        "unassigned": 0,
+        "completion_pct": 50,
+        "by_status": {
+          "todo": 0,
+          "claimed": 0,
+          "in_progress": 0,
+          "awaiting_verification": 1,
+          "done": 1,
+          "cancelled": 0
+        }
+      },
+      "timeline_events": [
+        {
+          "ts": "2026-10-24T18:02:10Z",
+          "kind": "goal_created",
+          "lane": "goal",
+          "title": "Goal Created",
+          "summary": "created by goal-canary-operator: alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+          "severity": "ok"
+        },
+        {
+          "ts": "2026-10-24T18:19:55Z",
+          "kind": "goal_phase",
+          "lane": "goal",
+          "title": "Goal Phase",
+          "summary": "phase=verifying by goal-canary",
+          "severity": "ok"
+        }
+      ],
+      "children": [],
+      "child_count": 0,
+      "last_activity_at": "2026-10-24T18:20:20Z",
+      "stagnation_seconds": 603,
+      "activity_observation": "runtime",
+      "linked_keeper_names": [
+        "goal-canary"
+      ],
+      "pending_approval_count": 0,
+      "latest_keeper_ref": "goal-canary",
+      "latest_turn_ref": 4,
+      "created_at": "2026-10-24T18:02:10Z",
+      "updated_at": "2026-10-24T18:19:55Z"
+    }
+  ],
+  "summary": {
+    "total_goals": 1,
+    "active_goals": 0,
+    "phase_counts": {
+      "executing": 0,
+      "verifying": 1,
+      "awaiting_confirmation": 0,
+      "completed": 0,
+      "dropped": 0,
+      "paused": 0,
+      "blocked": 0
+    },
+    "total_tasks": 2,
+    "done_tasks": 1,
+    "pending_approvals": 0
+  },
+  "goal_history": {
+    "unlisted": [],
+    "coverage": {
+      "unordered_snapshot_rows": 0,
+      "malformed_event_lines": 0,
+      "rows_without_goal_id": 0,
+      "unrecognised_event_types": []
+    }
+  }
+}

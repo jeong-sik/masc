@@ -15,9 +15,9 @@ val note_evidence_ref : string -> string option
 val verification_submission_evidence_refs :
   Masc_domain.task ->
   notes:string ->
-  Masc_domain.task_handoff_context option ->
   string list
-(** Return the producer's submitted evidence refs plus explicit [note:] entries
+(** Read the current submission's already-transitioned immutable Task, returning
+    its producer evidence refs plus explicit [note:] entries
     for completion notes and handoff summaries. Contract requirements are not
     submitted evidence; the verification request carries them separately as
     [required_artifacts]. This helper makes no semantic sufficiency decision. *)

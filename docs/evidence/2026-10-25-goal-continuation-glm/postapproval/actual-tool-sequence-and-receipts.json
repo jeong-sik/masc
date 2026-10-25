@@ -1,0 +1,249 @@
+[
+  {
+    "response_sequence": 29,
+    "request_sha256": "3007b2e2489427d40c5093970011032f4b2f2d5d751e43bd57b680c141b2bc27",
+    "response_sha256": "c5a60ad4c6a4b173d2cdc1f9a6a1cba9e1c945b70c2229b69da188105315f76c",
+    "call": {
+      "choice_index": 0,
+      "tool_index": 0,
+      "id": "call_1d1d05fa64b64c7ba521e1e5",
+      "name": "Read",
+      "arguments": {
+        "file_path": "workspace/acceptance.json"
+      }
+    },
+    "actual_receipt_in_next_request": {
+      "ok": true,
+      "path": "/private/tmp/masc-goal-canary-32805eb7-glm53/.masc/playground/docker/goal-canary/workspace/acceptance.json",
+      "bytes": 55,
+      "truncated": false,
+      "offset": 1,
+      "returned_lines": 5,
+      "content": "{\n  \"alpha\": true,\n  \"beta\": false,\n  \"gamma\": false\n}\n",
+      "via": "docker"
+    }
+  },
+  {
+    "response_sequence": 30,
+    "request_sha256": "f6e21bc727502b9516f7f49370b2fb6ca60210606c607a7f61c46ff0fc23e156",
+    "response_sha256": "d06c139e58a290e14aa8739621405333add65b8ae0349425b8054ac71b056dcf",
+    "call": {
+      "choice_index": 0,
+      "tool_index": 2,
+      "id": "call_55e9e72f43bb4d718f7349d8",
+      "name": "masc_goal_measure",
+      "arguments": {
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "evidence": "artifact:workspace/acceptance.json",
+        "goal_id": "goal-canary-three-results",
+        "observed_value": "1/3: alpha=true, beta=false, gamma=false; task-001 approved (done, 2026-10-24T18:16:32Z), file reread before starting beta/gamma work"
+      }
+    },
+    "actual_receipt_in_next_request": {
+      "status": "ok",
+      "measurement_status": "reported_only",
+      "measurement": {
+        "id": "c43ffbe4723f28980bb1e9972babd7e6",
+        "goal_id": "goal-canary-three-results",
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "observed_value": "1/3: alpha=true, beta=false, gamma=false; task-001 approved (done, 2026-10-24T18:16:32Z), file reread before starting beta/gamma work",
+        "evidence": "artifact:workspace/acceptance.json",
+        "actor": "goal-canary",
+        "recorded_at": "2026-10-24T18:18:45Z"
+      },
+      "goal_at_recording": {
+        "id": "goal-canary-three-results",
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+        "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+        "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+        "due_date": null,
+        "priority": 1,
+        "phase": "executing",
+        "last_review_note": null,
+        "last_review_at": null,
+        "created_at": "2026-10-24T18:02:10Z",
+        "updated_at": "2026-10-24T18:02:10Z"
+      },
+      "completion_effect": "unchanged"
+    }
+  },
+  {
+    "response_sequence": 31,
+    "request_sha256": "6a4dd00bc49204f39197ceadd7c7a2d742960f42659e2bc5fe4feb9d65886228",
+    "response_sha256": "f3f2e412ebf195781dd2f4f6aadd4bc6ec0df0d46829435e225e3ca95d07da7d",
+    "call": {
+      "choice_index": 0,
+      "tool_index": 0,
+      "id": "call_3be6973cb84348fbadda12af",
+      "name": "Edit",
+      "arguments": {
+        "file_path": "workspace/acceptance.json",
+        "new_string": "  \"beta\": true,\n  \"gamma\": true",
+        "old_string": "  \"beta\": false,\n  \"gamma\": false"
+      }
+    },
+    "actual_receipt_in_next_request": {
+      "public_content": "[masc:blob sha256=87c625e56bd5c1fff2285000d15bee1601d95893f26c0767289b8ed9619c2e9c bytes=1295 mime=application/vnd.masc.tool-result-manifest+json preview=\"\"]"
+    }
+  },
+  {
+    "response_sequence": 32,
+    "request_sha256": "70c9c55c1f59d90b48474bf66a267d17ec210caaec362fa5dd2544d8201df80d",
+    "response_sha256": "3537838da3ed6342ccb2e4e9ef59806365811ebb8004b6f3d481bf1bf1372d2d",
+    "call": {
+      "choice_index": 0,
+      "tool_index": 0,
+      "id": "call_10140a4c26ff42728c05d141",
+      "name": "Read",
+      "arguments": {
+        "file_path": "workspace/acceptance.json"
+      }
+    },
+    "actual_receipt_in_next_request": {
+      "ok": true,
+      "path": "/private/tmp/masc-goal-canary-32805eb7-glm53/.masc/playground/docker/goal-canary/workspace/acceptance.json",
+      "bytes": 53,
+      "truncated": false,
+      "offset": 1,
+      "returned_lines": 5,
+      "content": "{\n  \"alpha\": true,\n  \"beta\": true,\n  \"gamma\": true\n}\n",
+      "via": "docker"
+    }
+  },
+  {
+    "response_sequence": 33,
+    "request_sha256": "dc699af9feb31deb52ba6ba04dddce42e6e342a97bc482e98b3fb6ae7ede8d0b",
+    "response_sha256": "7bd5b5ba6ebf8c1e336ecf7c787001ed0643d0d0e937627bf9bc1b935883af8c",
+    "call": {
+      "choice_index": 0,
+      "tool_index": 0,
+      "id": "call_d890750f947f405c937794d7",
+      "name": "masc_goal_measure",
+      "arguments": {
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "evidence": "artifact:workspace/acceptance.json",
+        "goal_id": "goal-canary-three-results",
+        "observed_value": "3/3: alpha=true, beta=true, gamma=true; reread after task-002 edit (alpha from approved task-001)"
+      }
+    },
+    "actual_receipt_in_next_request": {
+      "status": "ok",
+      "measurement_status": "reported_only",
+      "measurement": {
+        "id": "ff7a4f86482a94260ba642d65c5ae6b2",
+        "goal_id": "goal-canary-three-results",
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "observed_value": "3/3: alpha=true, beta=true, gamma=true; reread after task-002 edit (alpha from approved task-001)",
+        "evidence": "artifact:workspace/acceptance.json",
+        "actor": "goal-canary",
+        "recorded_at": "2026-10-24T18:19:18Z"
+      },
+      "goal_at_recording": {
+        "id": "goal-canary-three-results",
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+        "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+        "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+        "due_date": null,
+        "priority": 1,
+        "phase": "executing",
+        "last_review_note": null,
+        "last_review_at": null,
+        "created_at": "2026-10-24T18:02:10Z",
+        "updated_at": "2026-10-24T18:02:10Z"
+      },
+      "completion_effect": "unchanged"
+    }
+  },
+  {
+    "response_sequence": 33,
+    "request_sha256": "dc699af9feb31deb52ba6ba04dddce42e6e342a97bc482e98b3fb6ae7ede8d0b",
+    "response_sha256": "7bd5b5ba6ebf8c1e336ecf7c787001ed0643d0d0e937627bf9bc1b935883af8c",
+    "call": {
+      "choice_index": 0,
+      "tool_index": 1,
+      "id": "call_dc0e8e0bd2134297b70ad279",
+      "name": "keeper_task_done",
+      "arguments": {
+        "evidence_refs": [
+          "artifact:workspace/acceptance.json"
+        ],
+        "result": "workspace/acceptance.json의 beta와 gamma를 false에서 true로 변경했다(유일한 수정). 변경 후 파일을 다시 읽어 alpha=true, beta=true, gamma=true(53바이트, 유효한 JSON)임을 확인했다. alpha=true는 승인 완료된 task-001의 결과를 그대로 유지한 것이다. Goal 목표 3/3 달성 상태를 masc_goal_measure로 기록했다(측정값 reported_only).",
+        "task_id": "task-002"
+      }
+    },
+    "actual_receipt_in_next_request": {
+      "result": "task-002 in_progress → awaiting_verification",
+      "evidence_capture": {
+        "verification_id": "vrf-6206a9fbd9d587cba81331282b0e2ee5",
+        "diagnostics": []
+      },
+      "disposition": "completed",
+      "typed_outcome": {
+        "kind": "Progress"
+      }
+    }
+  },
+  {
+    "response_sequence": 35,
+    "request_sha256": "34bdc8191bd134a0d0d77d11edb46b34f23d97c9f88ee94847e91caf32622c3f",
+    "response_sha256": "c2487efb8ab486c124ff902818734cada3af43bdb037418e193de3eca4d29279",
+    "call": {
+      "choice_index": 0,
+      "tool_index": 0,
+      "id": "call_b5c563a77a53437dba0b5d07",
+      "name": "masc_goal_transition",
+      "arguments": {
+        "action": "request_complete",
+        "evidence_refs": [
+          "board:p-9d29e90b0d8bb894450bb96beee6172d"
+        ],
+        "goal_id": "goal-canary-three-results"
+      }
+    },
+    "actual_receipt_in_next_request": {
+      "status": "ok",
+      "goal_id": "goal-canary-three-results",
+      "action": "request_complete",
+      "goal": {
+        "id": "goal-canary-three-results",
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+        "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+        "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+        "due_date": null,
+        "priority": 1,
+        "phase": "verifying",
+        "last_review_note": null,
+        "last_review_at": null,
+        "created_at": "2026-10-24T18:02:10Z",
+        "updated_at": "2026-10-24T18:19:55Z"
+      },
+      "verification": {
+        "goal_id": "goal-canary-three-results",
+        "completion": {
+          "state": "proof_pending",
+          "requested_at": "2026-10-24T18:19:55Z",
+          "request_id": "cd97da098881f0de109d028d3de5b57e",
+          "criterion": {
+            "revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+            "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+            "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+            "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread"
+          }
+        },
+        "submitted_evidence": [
+          {
+            "kind": "collaboration",
+            "reference": "board:p-9d29e90b0d8bb894450bb96beee6172d",
+            "sha256": "8e90a777f309091a4d4d5b598a3e7b526b72f3651fbfe3b414e403f5e03a075f",
+            "bytes": 1310,
+            "content_omitted": true
+          }
+        ],
+        "updated_at": "2026-10-24T18:19:55Z"
+      }
+    }
+  }
+]

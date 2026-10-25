@@ -1,0 +1,126 @@
+{
+  "base": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "scope": "Source/test byte binding and recorded bounded checks; no linked full MASC/native/HTTP/model candidate execution",
+  "source_files": [
+    {
+      "path": "lib/task/tool_task_completion_review.ml",
+      "base_git_blob": "44ff988ce1ee8cfd206319ff254f2d3e6250285b",
+      "candidate_sha256": "d9f940fe5898ec6aef33c99259637e6ac168fe0b39ad88167203bb94b4a5d6c2",
+      "bytes": 3963
+    },
+    {
+      "path": "lib/task/tool_task_completion_review.mli",
+      "base_git_blob": "fa7305a4585610506d6fef810d74189f80fdeb2d",
+      "candidate_sha256": "17848ac47c9ebb79b514b826b3739d4b0f83de8bcc653cb8e92ea7872da42ab3",
+      "bytes": 2679
+    },
+    {
+      "path": "lib/types/types_core.mli",
+      "base_git_blob": "6868ed461c62ad4c3f6db999a9de7a288e3634e0",
+      "candidate_sha256": "8fa008eeebea9c2f19e243041a692e3af5aede047ab8c0cc50fab08d9685291e",
+      "bytes": 20468
+    },
+    {
+      "path": "lib/verification_protocol.ml",
+      "base_git_blob": "72484c72b7e8d04f7924f1423c04bccd7437547d",
+      "candidate_sha256": "ac5e8ac491e1b8985aa9dbb9e14b03ed88615bba4bd183716842246af59c316c",
+      "bytes": 28805
+    },
+    {
+      "path": "lib/verification_protocol.mli",
+      "base_git_blob": "ca16286b847c7d1b53687bc6845bfc5593edbdbe",
+      "candidate_sha256": "65c5ff70322dae63aef7956ed41e7f6a0b345608ca11dc6ab66ae41229fdd159",
+      "bytes": 7293
+    },
+    {
+      "path": "lib/workspace/workspace_hooks.mli",
+      "base_git_blob": "4ea05162ca957e1afc1a5e6703061933043a3aa1",
+      "candidate_sha256": "a290b8bdb81bc940e258c1c81dfc2f84eba061cd304cfba9e68759af13e79ce9",
+      "bytes": 10758
+    },
+    {
+      "path": "lib/workspace/workspace_task.ml",
+      "base_git_blob": "5718466494f0f42e5fde9c995a8f02b3f8ca4796",
+      "candidate_sha256": "704302e7f31064cc2260c25d7c00f6871bdf4fb66a80168b4b942e75ce107ae5",
+      "bytes": 24897
+    },
+    {
+      "path": "lib/workspace/workspace_task_transition_executor.ml",
+      "base_git_blob": "65cb1d103022aed81232f2c5429cfdd894cfcab9",
+      "candidate_sha256": "be41c69eed480e5fb49b180325129d4f89bc9a5fd67c57a429a146d8f0f0fb87",
+      "bytes": 4355
+    },
+    {
+      "path": "lib/workspace/workspace_task_transition_executor.mli",
+      "base_git_blob": "b3fb553ea3cdbd5e184a9d53449d04c7c4f136c8",
+      "candidate_sha256": "a299bd6988eb5cce73f20a5de9e6df2ec35cf5250e99c0de676f594cfdae794a",
+      "bytes": 1941
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "base_git_blob": "f23de2ddee35102b2e0f8a921d2bf700eeb13d88",
+      "candidate_sha256": "b69bb1a2323c9989d1863f1aad187ec190130651af972a58bfafdb5c6a329cda",
+      "bytes": 58287
+    },
+    {
+      "path": "lib/workspace/workspace_task_verification.ml",
+      "base_git_blob": "c59d6ce083d6613bbf7defb0e068de29c620e405",
+      "candidate_sha256": "6e1b4ba489590b24a1cdd7ad3e82c455563aa380c23a1626aa25af21a33906a6",
+      "bytes": 1500
+    },
+    {
+      "path": "lib/workspace/workspace_task_verification.mli",
+      "base_git_blob": "c2a0e8f74c952f06c60b98b865a9807a80ca3e36",
+      "candidate_sha256": "a2166a2071d83fa8bba94736d57406a3e19cf4caece3e5edcbb30bd049c424e3",
+      "bytes": 1079
+    },
+    {
+      "path": "test/test_completion_repair_delivery.ml",
+      "base_git_blob": "d20a9a3d0335a4f5ae36f19499aabe6dc9dcc385",
+      "candidate_sha256": "6d399a0edd5b52af050a3a1cd4718eebdb2c07f7e591a8dd230ee45c8023f176",
+      "bytes": 53100
+    },
+    {
+      "path": "test/test_verification.ml",
+      "base_git_blob": "79d37b41a51f2855b567878549402be9aebe4bea",
+      "candidate_sha256": "d87e9e7e849957389c642dccb05b31c9c6d6566061b3bdb21b1556ff666fc104",
+      "bytes": 242211
+    },
+    {
+      "path": "test/test_workspace_handoff_boundary.ml",
+      "base_git_blob": "9d024d5298e53b8a0f72abbb60f0b04c50d8fd21",
+      "candidate_sha256": "b2d38e77ae61ad986e532e20ea160e31ce7d28f61d7d9da21be23931c6e5e701",
+      "bytes": 10987
+    },
+    {
+      "path": "test/test_workspace_task_verification_phase_e.ml",
+      "base_git_blob": "2fa57cc4d5985061df09b69d988f6aa8dc5c4ed5",
+      "candidate_sha256": "1ab83b7f4c8bc48e160fadf900aef7f77042ce99dbae74020722d0d62ec895b3",
+      "bytes": 4073
+    }
+  ],
+  "check_files": [
+    {
+      "path": "docs/evidence/2026-10-25-submission-evidence-snapshot/README.md",
+      "sha256": "239743575b586b7655f05bfd20dfdbf2bf70512e9136d7d3bedf978d7764f7dc",
+      "bytes": 5177
+    },
+    {
+      "path": "docs/evidence/2026-10-25-submission-evidence-snapshot/probe_submission.py",
+      "sha256": "8ce4683deffc7848bb78bf4b2b1839971908e1fbfc2a7d95083cd37bd0ebe513",
+      "bytes": 13231
+    },
+    {
+      "path": "docs/evidence/2026-10-25-submission-evidence-snapshot/source-check.json",
+      "sha256": "015e68ed5a73cbf50627f9f6be9ed631a1cd5af34afc42b47849ad9e069a51fb",
+      "bytes": 15890
+    },
+    {
+      "path": "docs/evidence/2026-10-25-submission-evidence-snapshot/parse-check.json",
+      "sha256": "83979780ee3f5a8f072b3b4e859375ca9fdef4ecaacb17125b13b8c7b00ce035",
+      "bytes": 1857
+    }
+  ],
+  "native": "authored, unrun",
+  "runtime": "unrun"
+}

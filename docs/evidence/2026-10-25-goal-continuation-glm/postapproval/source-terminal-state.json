@@ -1,0 +1,59 @@
+{
+  "scope": "Field allowlist on typed source queue and boundary events only; no raw model/event content",
+  "observed_at_utc": "2026-10-24T18:21:56.914086+00:00",
+  "queue_path": "/tmp/masc-goal-canary-32805eb7-glm53/.masc/keepers/goal-canary/event-queue-v19.json",
+  "queue_sha256": "558ceef070504c3b693e62d8235d5f565fb4c9dd12a1d981a8ca6323a34efb2e",
+  "queue_revision": 4,
+  "pending": [],
+  "last_transition": {
+    "recorded_at": null,
+    "kind": "ack_source_terminal",
+    "source": {
+      "post_id": "task-outcome:task-001",
+      "payload": {
+        "task_id": "task-001",
+        "verification_id": "vrf-9990ff88de3eb7953ce427f8e3a0ad07",
+        "authority_kind": "human_operator",
+        "authority_actor": "goal-canary-operator"
+      }
+    },
+    "source_receipt_kind": "turn_completed",
+    "source_incarnation": 2
+  },
+  "goal_state": {
+    "version": 4,
+    "updated_at": "2026-10-24T18:19:55Z",
+    "goals": [
+      {
+        "id": "goal-canary-three-results",
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "title": "alpha, beta, gamma 세 결과를 실제 파일에서 확인한다",
+        "metric": "playground/docker/goal-canary/workspace/acceptance.json의 alpha,beta,gamma 중 true인 항목 수; isolated canary local file metric",
+        "target_value": "3/3: alpha=true, beta=true, gamma=true, each persisted and reread",
+        "due_date": null,
+        "priority": 1,
+        "phase": "verifying",
+        "last_review_note": null,
+        "last_review_at": null,
+        "created_at": "2026-10-24T18:02:10Z",
+        "updated_at": "2026-10-24T18:19:55Z"
+      }
+    ],
+    "pending_events": [],
+    "pending_notifications": []
+  },
+  "goal_measurements": {
+    "version": 1,
+    "measurements": [
+      {
+        "id": "ff7a4f86482a94260ba642d65c5ae6b2",
+        "goal_id": "goal-canary-three-results",
+        "criterion_revision": "cfc96c4817084cd5b0bfd0f66af42e1b",
+        "observed_value": "3/3: alpha=true, beta=true, gamma=true; reread after task-002 edit (alpha from approved task-001)",
+        "evidence": "artifact:workspace/acceptance.json",
+        "actor": "goal-canary",
+        "recorded_at": "2026-10-24T18:19:18Z"
+      }
+    ]
+  }
+}

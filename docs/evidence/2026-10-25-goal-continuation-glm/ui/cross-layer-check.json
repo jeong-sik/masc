@@ -1,0 +1,20 @@
+{
+  "scope": "Read-only actual API, persisted stores and rendered DOM comparison; not final Goal acceptance",
+  "observed_at": "2026-10-25T00:08:44.026934+00:00",
+  "criterion_dom_kind": "Labelled container text, exactly compared with label plus canonical revision",
+  "checks": {
+    "dom_measurement_state_matches_api": true,
+    "dom_observed_value_matches_api_and_store": true,
+    "dom_labelled_criterion_matches_api_and_store": true,
+    "dom_labelled_evidence_matches_exact_api_reference": true,
+    "api_and_store_phase_verifying": true,
+    "api_and_store_proof_pending": true,
+    "api_and_store_same_request": true,
+    "task001_api_done": true,
+    "task002_api_awaiting": true,
+    "task_status_dom_displays_ids_and_awaiting": true,
+    "dom_keeps_measurement_separate_from_verdict": true,
+    "dom_phase_verifying": true
+  },
+  "result": "PASS"
+}

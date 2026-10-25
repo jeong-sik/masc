@@ -1,0 +1,336 @@
+{
+  "scope": "Execute actual pure submission modules and receipt with named effect ports.\n\nNo Dune/native Workspace lock/store, sandbox backend, SDK or model is exercised.\nA small adapter names the baseline/current transition-to-prepare ordering; the\n real transaction and native actor provenance are covered by the authored,\n unrun test_verification consumer fixture, not proved by this adapter.\n",
+  "base": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "results": [
+    {
+      "name": "baseline",
+      "base": "32805eb764eab2710262446e925b0ea5c3a44c08",
+      "inputs": [
+        {
+          "file": "masc_domain.ml",
+          "scope": "Task/backlog DTO port containing consumed fields, not full wire schema",
+          "sha256": "421202055b55cab1672d3f51a42dc63f331a26b3a65cd1625d865de79cc6d0d4"
+        },
+        {
+          "file": "workspace_task_claim.ml",
+          "scope": "unrelated reclaim policy port; submit branches do not invoke these effects",
+          "sha256": "14338ea6c86f271da4ddb5a35f986f35a0155fa4b70c52bb514a227096441d77"
+        },
+        {
+          "file": "workspace_state.ml",
+          "scope": "actual pure normalizer fragment",
+          "sha256": "2b80339c556ead9be115cf287ab1841efebef6173c1da45eb8db907fe3041e95"
+        },
+        {
+          "file": "json_kind.mli",
+          "scope": "full actual module/interface",
+          "sha256": "d1d066b151a8ecb809e5d2a24388ff60c4c650a4db535b6ceb16d556ea8367e3"
+        },
+        {
+          "file": "json_kind.ml",
+          "scope": "full actual module/interface",
+          "sha256": "da7b24b5e91dca844f1cfcc39ab588c0fc0a7fad864b578352e7bd762a6c1fe9"
+        },
+        {
+          "file": "string_util.ml",
+          "scope": "full actual module/interface",
+          "sha256": "a3164b20317bea9f8f680eddbbc4b18ed976bfbf3592baa8a8d0ae3aa48f5f60"
+        },
+        {
+          "file": "json_util.ml",
+          "scope": "full actual module/interface",
+          "sha256": "b1fea064f3da9252986044b2d6087ea95bbb229a944119ed84d38cc1a2f43281"
+        },
+        {
+          "file": "tool_shard_limits.ml",
+          "scope": "full actual module/interface",
+          "sha256": "207bcc2173ebf586b5b59dee0dd509a763413b7a194c0ab61b23f2689da93a2c"
+        },
+        {
+          "file": "workspace_verification_snapshot.mli",
+          "scope": "full actual module/interface",
+          "sha256": "582d4a210c2aa0479e1225e830c471c2691b45c76292bac49e6a0ceb4c4f9c55"
+        },
+        {
+          "file": "workspace_verification_snapshot.ml",
+          "scope": "full actual module/interface",
+          "sha256": "5f5123e9fc847d3a01caa077d2583aeeb41470dfb17ef529be634c881b954b7c"
+        },
+        {
+          "file": "workspace_task_transition_executor.mli",
+          "scope": "full actual module/interface",
+          "sha256": "101725da23aeba4fb933f7767bbec06968095c002cfde44bb8c02bf0656ecf0d"
+        },
+        {
+          "file": "workspace_task_transition_executor.ml",
+          "scope": "full actual module/interface",
+          "sha256": "57480ffa6cc0ab692d816814c17a2eef1a4d5b9738bd5fe2773d3fe95053071a"
+        },
+        {
+          "file": "workspace_task_verification.mli",
+          "scope": "full actual module/interface",
+          "sha256": "899dbf98a4f7534f3b2674b991eba5952bc5150af563ff1bab6962b2fe7618a2"
+        },
+        {
+          "file": "workspace_task_verification.ml",
+          "scope": "full actual module/interface",
+          "sha256": "bf536c0c5b765a6e8e20263f205eeacc0d933eb4115e10ec676731d7002a99e5"
+        },
+        {
+          "file": "tool_task_completion_review.mli",
+          "scope": "full actual module/interface",
+          "sha256": "00288eb7242fd6925f7c5bf7218cfe0869c8f5a00186bb6d9876dd7d84fba240"
+        },
+        {
+          "file": "tool_task_completion_review.ml",
+          "scope": "full actual module/interface",
+          "sha256": "eaf8d55d006b3de9dc9113325861db48e43a10ee068bd3fccbab030ecc421d73"
+        },
+        {
+          "file": "shared_types.ml",
+          "scope": "actual Json_kind namespace alias",
+          "sha256": "9df0fcb0af2a22924a5ae6ec182f386e7340d88827cf507554950dd0cefa38e2"
+        },
+        {
+          "file": "workspace_verification_store.ml",
+          "scope": "actual grammar and complete receipt function; explicit acquisition/load ports",
+          "sha256": "3b24b979aa0587396a02dd872f763e1c2456470b2029153d4e9b38bdf03e618b"
+        },
+        {
+          "file": "workspace.ml",
+          "scope": "unused configuration port for pure spec",
+          "sha256": "9a2a7fafa304bbd70ca6f608ee0138394bdde19ed5c37e65440fce07a76780f5"
+        },
+        {
+          "file": "verification.ml",
+          "scope": "criterion DTO port",
+          "sha256": "8bdf1acdfcd6ccc457a6a43b9f297d029321894a76f4cc20a58462c7d767c9f9"
+        },
+        {
+          "file": "masc_task_handlers.ml",
+          "scope": "actual implementation alias",
+          "sha256": "ea513494a6b458d3c2fbc7e570d2e6fd174d53af96dd4dab59e2035f651b67e3"
+        },
+        {
+          "file": "protocol.ml",
+          "scope": "complete actual request-spec type and constructor",
+          "sha256": "a00baffd7350a5538a0f2b7c84b0cce5d4d8a7c09346e87a16cbd53d5ce68493"
+        },
+        {
+          "file": "probe.ml",
+          "scope": "driver; baseline/current ordering adapter explicit, not full transaction proof",
+          "sha256": "3f106edde5a8d7755c1c1f679b9072c8596be20b835e2bcade7558f924d378d3"
+        }
+      ],
+      "compile": {
+        "command": [
+          "ocamlfind",
+          "ocamlc",
+          "-w",
+          "+4+32+69",
+          "-warn-error",
+          "+4+32+69",
+          "-package",
+          "yojson,digestif.ocaml,uutf,ppx_deriving_yojson",
+          "-linkpkg",
+          "masc_domain.ml",
+          "string_util.ml",
+          "workspace_task_claim.ml",
+          "workspace_state.ml",
+          "json_kind.mli",
+          "json_kind.ml",
+          "shared_types.ml",
+          "json_util.ml",
+          "tool_shard_limits.ml",
+          "workspace_verification_snapshot.mli",
+          "workspace_verification_snapshot.ml",
+          "workspace_verification_store.ml",
+          "workspace_task_transition_executor.mli",
+          "workspace_task_transition_executor.ml",
+          "workspace_task_verification.mli",
+          "workspace_task_verification.ml",
+          "tool_task_completion_review.mli",
+          "tool_task_completion_review.ml",
+          "workspace.ml",
+          "verification.ml",
+          "masc_task_handlers.ml",
+          "protocol.ml",
+          "probe.ml",
+          "-o",
+          "probe"
+        ],
+        "exit": 0,
+        "output": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\nFile \"workspace_task_transition_executor.ml\", line 112, characters 14-36:\n112 |   { backlog = { backlog with tasks }\n                    ^^^^^^^^^^^^^^^^^^^^^^\nWarning 23 [useless-record-with]: all the fields are explicitly listed in this record:\n  the with clause is useless.\n"
+      },
+      "execution": {
+        "exit": 0,
+        "output": "PASS current Task carries the exact new handoff\nPASS current Task carries the pending request identity\nPASS current Task preserves original input immutability\nPASS claim contains current artifact and narrative only\nPASS contract artifacts stay separate\nPASS required artifacts do not become submitted evidence\nPASS baseline reproduces inherited correlation ref in first capture\nPASS baseline first receipt contains invalid-reference diagnostic\nPASS same claim after handoff replacement has no correlation ref\nPASS same claim after handoff replacement captures without diagnostics\nPASS an absent exit handoff clears the previous handoff\nPASS request receipt refuses a mismatched producer\nPASS explicit malformed submitted evidence is not silently filtered\nPASS explicit malformed reference remains a typed diagnostic\n14 actual-source checks passed\n"
+      }
+    },
+    {
+      "name": "candidate",
+      "base": "32805eb764eab2710262446e925b0ea5c3a44c08",
+      "inputs": [
+        {
+          "file": "masc_domain.ml",
+          "scope": "Task/backlog DTO port containing consumed fields, not full wire schema",
+          "sha256": "421202055b55cab1672d3f51a42dc63f331a26b3a65cd1625d865de79cc6d0d4"
+        },
+        {
+          "file": "workspace_task_claim.ml",
+          "scope": "unrelated reclaim policy port; submit branches do not invoke these effects",
+          "sha256": "14338ea6c86f271da4ddb5a35f986f35a0155fa4b70c52bb514a227096441d77"
+        },
+        {
+          "file": "workspace_state.ml",
+          "scope": "actual pure normalizer fragment",
+          "sha256": "2b80339c556ead9be115cf287ab1841efebef6173c1da45eb8db907fe3041e95"
+        },
+        {
+          "file": "json_kind.mli",
+          "scope": "full actual module/interface",
+          "sha256": "d1d066b151a8ecb809e5d2a24388ff60c4c650a4db535b6ceb16d556ea8367e3"
+        },
+        {
+          "file": "json_kind.ml",
+          "scope": "full actual module/interface",
+          "sha256": "da7b24b5e91dca844f1cfcc39ab588c0fc0a7fad864b578352e7bd762a6c1fe9"
+        },
+        {
+          "file": "string_util.ml",
+          "scope": "full actual module/interface",
+          "sha256": "a3164b20317bea9f8f680eddbbc4b18ed976bfbf3592baa8a8d0ae3aa48f5f60"
+        },
+        {
+          "file": "json_util.ml",
+          "scope": "full actual module/interface",
+          "sha256": "b1fea064f3da9252986044b2d6087ea95bbb229a944119ed84d38cc1a2f43281"
+        },
+        {
+          "file": "tool_shard_limits.ml",
+          "scope": "full actual module/interface",
+          "sha256": "207bcc2173ebf586b5b59dee0dd509a763413b7a194c0ab61b23f2689da93a2c"
+        },
+        {
+          "file": "workspace_verification_snapshot.mli",
+          "scope": "full actual module/interface",
+          "sha256": "582d4a210c2aa0479e1225e830c471c2691b45c76292bac49e6a0ceb4c4f9c55"
+        },
+        {
+          "file": "workspace_verification_snapshot.ml",
+          "scope": "full actual module/interface",
+          "sha256": "5f5123e9fc847d3a01caa077d2583aeeb41470dfb17ef529be634c881b954b7c"
+        },
+        {
+          "file": "workspace_task_transition_executor.mli",
+          "scope": "full actual module/interface",
+          "sha256": "a299bd6988eb5cce73f20a5de9e6df2ec35cf5250e99c0de676f594cfdae794a"
+        },
+        {
+          "file": "workspace_task_transition_executor.ml",
+          "scope": "full actual module/interface",
+          "sha256": "be41c69eed480e5fb49b180325129d4f89bc9a5fd67c57a429a146d8f0f0fb87"
+        },
+        {
+          "file": "workspace_task_verification.mli",
+          "scope": "full actual module/interface",
+          "sha256": "a2166a2071d83fa8bba94736d57406a3e19cf4caece3e5edcbb30bd049c424e3"
+        },
+        {
+          "file": "workspace_task_verification.ml",
+          "scope": "full actual module/interface",
+          "sha256": "6e1b4ba489590b24a1cdd7ad3e82c455563aa380c23a1626aa25af21a33906a6"
+        },
+        {
+          "file": "tool_task_completion_review.mli",
+          "scope": "full actual module/interface",
+          "sha256": "17848ac47c9ebb79b514b826b3739d4b0f83de8bcc653cb8e92ea7872da42ab3"
+        },
+        {
+          "file": "tool_task_completion_review.ml",
+          "scope": "full actual module/interface",
+          "sha256": "d9f940fe5898ec6aef33c99259637e6ac168fe0b39ad88167203bb94b4a5d6c2"
+        },
+        {
+          "file": "shared_types.ml",
+          "scope": "actual Json_kind namespace alias",
+          "sha256": "9df0fcb0af2a22924a5ae6ec182f386e7340d88827cf507554950dd0cefa38e2"
+        },
+        {
+          "file": "workspace_verification_store.ml",
+          "scope": "actual grammar and complete receipt function; explicit acquisition/load ports",
+          "sha256": "3b24b979aa0587396a02dd872f763e1c2456470b2029153d4e9b38bdf03e618b"
+        },
+        {
+          "file": "workspace.ml",
+          "scope": "unused configuration port for pure spec",
+          "sha256": "9a2a7fafa304bbd70ca6f608ee0138394bdde19ed5c37e65440fce07a76780f5"
+        },
+        {
+          "file": "verification.ml",
+          "scope": "criterion DTO port",
+          "sha256": "8bdf1acdfcd6ccc457a6a43b9f297d029321894a76f4cc20a58462c7d767c9f9"
+        },
+        {
+          "file": "masc_task_handlers.ml",
+          "scope": "actual implementation alias",
+          "sha256": "ea513494a6b458d3c2fbc7e570d2e6fd174d53af96dd4dab59e2035f651b67e3"
+        },
+        {
+          "file": "protocol.ml",
+          "scope": "complete actual request-spec type and constructor",
+          "sha256": "a00baffd7350a5538a0f2b7c84b0cce5d4d8a7c09346e87a16cbd53d5ce68493"
+        },
+        {
+          "file": "probe.ml",
+          "scope": "driver; baseline/current ordering adapter explicit, not full transaction proof",
+          "sha256": "33c20ab4982447195be59d240da35f6b858bc23c3c0792fc31805feadc71043b"
+        }
+      ],
+      "compile": {
+        "command": [
+          "ocamlfind",
+          "ocamlc",
+          "-w",
+          "+4+32+69",
+          "-warn-error",
+          "+4+32+69",
+          "-package",
+          "yojson,digestif.ocaml,uutf,ppx_deriving_yojson",
+          "-linkpkg",
+          "masc_domain.ml",
+          "string_util.ml",
+          "workspace_task_claim.ml",
+          "workspace_state.ml",
+          "json_kind.mli",
+          "json_kind.ml",
+          "shared_types.ml",
+          "json_util.ml",
+          "tool_shard_limits.ml",
+          "workspace_verification_snapshot.mli",
+          "workspace_verification_snapshot.ml",
+          "workspace_verification_store.ml",
+          "workspace_task_transition_executor.mli",
+          "workspace_task_transition_executor.ml",
+          "workspace_task_verification.mli",
+          "workspace_task_verification.ml",
+          "tool_task_completion_review.mli",
+          "tool_task_completion_review.ml",
+          "workspace.ml",
+          "verification.ml",
+          "masc_task_handlers.ml",
+          "protocol.ml",
+          "probe.ml",
+          "-o",
+          "probe"
+        ],
+        "exit": 0,
+        "output": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\nFile \"workspace_task_transition_executor.ml\", line 114, characters 14-36:\n114 |   { backlog = { backlog with tasks }\n                    ^^^^^^^^^^^^^^^^^^^^^^\nWarning 23 [useless-record-with]: all the fields are explicitly listed in this record:\n  the with clause is useless.\n"
+      },
+      "execution": {
+        "exit": 0,
+        "output": "PASS executor shares the immutable committed Task\nPASS current Task carries the exact new handoff\nPASS current Task carries the pending request identity\nPASS current Task preserves original input immutability\nPASS claim contains current artifact and narrative only\nPASS contract artifacts stay separate\nPASS required artifacts do not become submitted evidence\nPASS candidate first capture excludes stale correlation and correction\nPASS candidate first receipt has no diagnostics\nPASS candidate snapshot contains corrected artifact values\nPASS same claim after handoff replacement has no correlation ref\nPASS same claim after handoff replacement captures without diagnostics\nPASS executor shares the immutable committed Task\nPASS an absent exit handoff clears the previous handoff\nPASS note-only retry does not revive old handoff\nPASS projection reads supplied claim even if handed a prior Task\nPASS request receipt refuses a mismatched producer\nPASS explicit malformed submitted evidence is not silently filtered\nPASS explicit malformed reference remains a typed diagnostic\n19 actual-source checks passed\n"
+      }
+    }
+  ]
+}

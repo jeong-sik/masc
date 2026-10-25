@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "id": "appr_01a16f14-f0fb-7000-8760-679a7fc70346",
+  "decision": "approve",
+  "rule_id": null,
+  "rule_expires_at": null,
+  "audit_receipts": [
+    {
+      "recorded": true,
+      "event": "resolved"
+    }
+  ]
+}

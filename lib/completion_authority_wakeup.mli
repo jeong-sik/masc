@@ -70,7 +70,8 @@ val reconcile_pending :
     release just failed at, so a backlog that cannot be written leaves keeping
     it as the only option. An obligation carrying an unusable task id or
     authority ends there rather than becoming the permanent retry this path
-    was built to remove. The verdict's reason and
-    verification id travel with it on the handoff context. Delivery is at
+    was built to remove. The verdict's reason travels on the handoff context;
+    typed verdict, rejection and delivery records carry the verification id.
+    Delivery is at
     least once across the queue-write/source-ack crash window; the
     verification-keyed stimulus is information, not permission to mutate. *)

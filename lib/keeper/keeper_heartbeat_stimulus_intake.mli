@@ -4,7 +4,11 @@
     snapshot. Payload families share queue order except for explicit
     owner-lane manual durable stimulus admission at persisted turn boundaries, and
     Connector attention, which admits only the first ready conversation. An
-    unready input remains queued without blocking later ready work. *)
+    Add-on batch contains only notices for one exact original invocation/source
+    and captured channel. It never shares a turn with general sources. The
+    first successfully read/admitted source chooses this boundary; an unreadable
+    notice remains queued without excluding later independent readable work.
+    An unready input remains queued without blocking later ready work. *)
 
 open Keeper_types
 open Keeper_meta_contract

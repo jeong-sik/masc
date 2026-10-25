@@ -532,6 +532,8 @@ let test_minimax_m31_native_effort () =
   let accepted = [Reasoning_effort.Low;Medium;High;XHigh;Max] in
   let messages = [msg User [Text "Compare the receipts"]] in
   let request stream config =
+    check_bool "native request passes full public admission" true
+      (Result.is_ok (Complete_common.validate_all config));
     match Complete_common.serialize_http_request ~stream ~config ~messages ~tools:[] with
     | Ok request -> Yojson.Safe.from_string request.Complete_common.body
     | Error _ -> Alcotest.fail "native M3.1 effort rejected by final request serializer" in
@@ -547,15 +549,18 @@ let test_minimax_m31_native_effort () =
           Yojson.Safe.Util.(member "reasoning_effort" body |> to_string);
         check_bool "no competing thinking object" true
           (Yojson.Safe.Util.member "thinking" body = `Null)) [None;Some true]) accepted;
-    let body = request stream config in
-    check_bool "omission preserves the provider's default depth" true
-      (Yojson.Safe.Util.member "reasoning_effort" body = `Null)) [false;true];
+    List.iter (fun enable_thinking ->
+      let body = request stream {config with enable_thinking} in
+      check_bool "omission preserves the provider's default depth" true
+        (Yojson.Safe.Util.member "reasoning_effort" body = `Null)) [None;Some true]) [false;true];
   List.iter (fun effort ->
     let selected = {config with Provider_config.reasoning_effort=Some effort} in
     (match Provider_config.validate_reasoning_effort_request_typed selected with
      | Error (Provider_config.Unsupported_reasoning_effort {accepted=ladder;_}) ->
        check_bool "rejection retains the documented ladder" true (ladder=accepted)
      | Ok () | Error _ -> Alcotest.fail "unsupported native depth lacks typed ladder rejection");
+    check_bool "unsupported depth fails public admission" true
+      (Result.is_error (Complete_common.validate_all selected));
     check_bool "unsupported depth cannot reach a final request" true
       (Result.is_error (Complete_common.serialize_http_request
         ~stream:false ~config:selected ~messages ~tools:[])))
@@ -565,6 +570,8 @@ let test_minimax_m31_native_effort () =
     (match Provider_config.validate_reasoning_effort_request_typed disabled with
      | Error (Provider_config.Explicit_disable_outside_ladder _) -> ()
      | Ok () | Error _ -> Alcotest.fail "always-thinking model lacks typed disable rejection");
+    check_bool "explicit disable fails public admission" true
+      (Result.is_error (Complete_common.validate_all disabled));
     check_bool "explicit disable cannot reach a final request" true
       (Result.is_error (Complete_common.serialize_http_request
         ~stream:false ~config:disabled ~messages ~tools:[]))) [None;Some Reasoning_effort.High]

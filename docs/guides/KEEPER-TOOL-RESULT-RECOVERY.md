@@ -23,3 +23,9 @@ An uncertain or post-effect runtime failure can be recovered when the recipient 
 Focused source tests cover restart discovery, duplicate notification, failure followed by retry, exact snapshot acknowledgement, paused owners, corrupt entries, route changes and recipient reconciliation. Tests using callbacks or a Docker stand-in do not establish actual microVM behavior, crash durability, full fleet latency or installed runtime state. Those require separate execution evidence for the exact candidate.
 
 Cold VM preparation, filesystem reclaim and Apple Container control-plane failures remain separate operations. This recovery does not remove maintenance work or restart a healthy backend merely because a client deadline elapsed.
+
+## Apple volume creation after a client timeout
+
+A timed-out Apple Container CLI does not establish whether its storage service finished creating the requested volume. The provisioning call performs one authoritative probe for the exact volume name. Confirmed presence satisfies the request as an already-present volume, without another create command or a claim about which actor created it. If that probe reports absence or cannot read authoritative state, the original create failure remains. Other command failures, cancellation, current deadlines and backend lifecycle decisions are unchanged.
+
+This is reconciliation within the current provisioning call. It does not persist a pending provisioning operation or guarantee recovery across calls or server restart. It is separate from the durable Codex tool-result delivery described above.

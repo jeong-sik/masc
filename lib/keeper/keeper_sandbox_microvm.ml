@@ -1632,16 +1632,28 @@ let ensure_apple_volume role ~volume_name ~size ~timeout_sec =
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
      | Unix.WEXITED 0, _, _ -> Ok `Created
      | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
-       Error
-         (Printf.sprintf
-            "%s_create_failed: %s (%s; %s)"
-            error_code
-            volume_name
-            (match status with
-             | Unix.WEXITED code -> Printf.sprintf "exit %d" code
-             | Unix.WSIGNALED n -> Printf.sprintf "signalled %d" n
-             | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
-            (output_for_log ~stdout ~stderr)))
+       let failure =
+         Error
+           (Printf.sprintf
+              "%s_create_failed: %s (%s; %s)"
+              error_code
+              volume_name
+              (match status with
+               | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+               | Unix.WSIGNALED n -> Printf.sprintf "signalled %d" n
+               | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+              (output_for_log ~stdout ~stderr))
+       in
+       match Process_eio.exit_reason_of_status status with
+       | Process_eio.Timed_out ->
+         (* Killing the CLI does not prove that the backend stopped creating
+            its volume. Observe the exact goal once; never replay create.
+            Process_eio also classifies a native exit 124 as Timed_out, so
+            that ambiguous outcome gets the same conservative observation. *)
+         (match apple_volume_probe ~volume_name ~timeout_sec with
+          | Volume_present -> Ok `Already_present
+          | Volume_absent | Volume_probe_failed _ -> failure)
+       | Process_eio.Completed _ | Process_eio.Signaled _ | Process_eio.Stopped _ -> failure)
 ;;
 
 (** Volume names in an [msb volume list --format json] payload: each row

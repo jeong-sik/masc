@@ -9,7 +9,7 @@ let models =
   ; "MiniMax-M2.7-highspeed"; "MiniMax-M3"; "MiniMax-M3.1-Flash" ]
 let part kind text = `Assoc ["type",`String kind;"text",`String text]
 let thought = `Assoc ["type",`String "reasoning";"id",`String "r1";
-  "summary",`List [];"content",`List [part "reasoning_text" "full thought"]]
+  "summary",`List [part "summary_text" "short"];"content",`List [part "reasoning_text" "full thought"]]
 let call = `Assoc ["type",`String "function_call";"id",`String "item-call";
   "call_id",`String "call";"name",`String "lookup";"arguments",`String "{}"]
 let tools = [`Assoc ["type",`String "function";"function",`Assoc [
@@ -57,8 +57,10 @@ let native_replay model =
     | Some caps -> caps | None -> Alcotest.fail "exact native Responses model is absent" in
   Alcotest.(check bool) "dedicated Responses plaintext declaration" true
     (caps.reasoning_replay_override=Capabilities.Force_preserve_responses_text);
-  let producer = Reasoning_dialect.replay_contract (Reasoning_dialect.stable_dialect_for_provider_config config) in
-  let consumer = Reasoning_dialect.replay_contract (Reasoning_dialect.for_provider_config config) in
+  let capability = match Reasoning_dialect.replay_capability_for_provider_config config with
+    | Ok capability -> capability | Error detail -> Alcotest.fail detail in
+  let producer = capability.target.replay_contract in
+  let consumer = capability.contract in
   Alcotest.(check bool) "native producer and consumer contract agree" true
     (producer=consumer && producer.replay_policy=All_assistant_messages);
   let sync = match Backend_openai_responses.parse_response_result

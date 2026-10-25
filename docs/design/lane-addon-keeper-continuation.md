@@ -83,8 +83,13 @@ withdrawal never complete this separate publication notification.
 This is source implementation for detected provider retirement while the host
 owner is alive. A cancelled root switch or failed storage remains unconfirmed
 under the allocation's existing cleanup contract. It does not promise recovery
-from whole-host power loss. The owner-loss source fixture has only been parsed;
-its native execution and provider-kill scenario remain unverified.
+from whole-host power loss. Source fixtures enter the actual Runtime Attach and
+exported invocation paths with an external worker replaced by an exit barrier.
+They release that barrier without Detach, require canonical owner-loss admission
+and IPC settlement, and check that explicit Detach still owns worker resource
+release. Known-terminal and rejected-invocation variants require no false loss
+notice. Those new fixtures have only been parsed; native execution and an actual
+process-kill scenario remain unverified.
 
 ## Commit, deliver and acknowledge
 

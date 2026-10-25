@@ -1350,14 +1350,17 @@ let run ~sw ~read_browser_document backend m e =
               | Some _ -> stop_entry ~sw ~backend m e)
             else failed m e failure
         | Ok c ->
-            e.connection <- Some {export_owner;worker=c;companion=None;companion_active=None}; e.started <- true;
+            let owner={export_owner;worker=c;companion=None;companion_active=None} in
+            e.connection <- Some owner; e.started <- true;
             notify_exports m e;
             (* Every stop this runtime asks for marks the entry stopping before
                the worker is told. A process that ends without that request
                cannot serve again, so the entry turns failed and stopping. Its
                owner retires it as it retires a failed start: a declaration on
                the next configuration pass, which then starts a new instance,
-               and an instance attached without one on the operator's Detach. *)
+               and an instance attached without one on the operator's Detach.
+               The original private companion settles at detected exit without
+               waiting for that resource-retention decision. *)
             fork_isolated ~sw:worker_sw (fun () ->
               let ended = c.await_exit () in
               if not e.stopping then (
@@ -1368,7 +1371,17 @@ let run ~sw ~read_browser_document backend m e =
                 e.state <- fail_state e cause;
                 notify_exports m e;
                 (match persist m e with Ok () -> wake_dependents m e | Error detail ->
-                  Log.Misc.error "Lane Add-on instance %s exit state persistence: %s" e.instance_id detail)));
+                  Log.Misc.error "Lane Add-on instance %s exit state persistence: %s" e.instance_id detail);
+                Option.iter (fun allocation ->
+                  fork_isolated ~sw (fun () ->
+                    let result=match Eio.Lazy.force allocation with
+                      | Error Lane_addon_companion_allocation.Unavailable -> Ok ()
+                      | Error Cleanup_unconfirmed -> Error "private companion startup cleanup unconfirmed"
+                      | Ok owned -> Lane_addon_companion_allocation.cleanup owned in
+                    match result with
+                    | Ok () -> ()
+                    | Error _ -> Log.Misc.warn "Original companion settlement remains unconfirmed after provider exit"))
+                  owner.companion));
             Option.iter (fun port -> Option.iter
               (run_host_watch ~sw:worker_sw ~cleanup_sw:sw ~backend m e port) port.await_change) c.host;
             (match c.host, e.configuration with

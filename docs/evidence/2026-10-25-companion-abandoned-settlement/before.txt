@@ -1,0 +1,40 @@
+runtime sha256=c44ee6de42d372e658d0f8275be0a43dfcab20adc6df96a96822c2bf9d580c69
+allocation sha256=2b1ae889316486b817896b541cad896715800cd1ede043dc84fd020db9268a1b
+ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.
+PASS no extension operation: allocation decision
+PASS no extension operation: original Release dispatch count
+PASS no extension operation: exact original operation
+PASS no extension operation: stable cleanup
+PASS confirmed original Release: allocation decision
+PASS confirmed original Release: original Release dispatch count
+PASS confirmed original Release: exact original operation
+PASS confirmed original Release: stable cleanup
+FAIL replacement Browser: allocation decision
+PASS replacement Browser: original Release dispatch count
+PASS replacement Browser: exact original operation
+PASS replacement Browser: stable cleanup
+FAIL stopping original Browser: allocation decision
+PASS stopping original Browser: original Release dispatch count
+PASS stopping original Browser: exact original operation
+PASS stopping original Browser: stable cleanup
+FAIL lost stopping Browser: allocation decision
+PASS lost stopping Browser: original Release dispatch count
+PASS lost stopping Browser: exact original operation
+PASS lost stopping Browser: stable cleanup
+PASS unconfirmed Release receipt: allocation decision
+PASS unconfirmed Release receipt: original Release dispatch count
+PASS unconfirmed Release receipt: exact original operation
+PASS unconfirmed Release receipt: stable cleanup
+PASS Release pre-effect refusal: allocation decision
+PASS Release pre-effect refusal: original Release dispatch count
+PASS Release pre-effect refusal: exact original operation
+PASS Release pre-effect refusal: stable cleanup
+PASS Release unknown outcome: allocation decision
+PASS Release unknown outcome: original Release dispatch count
+PASS Release unknown outcome: exact original operation
+PASS Release unknown outcome: stable cleanup
+PASS broker confirmed Release: allocation decision
+PASS broker confirmed Release: original Release dispatch count
+PASS broker confirmed Release: exact original operation
+PASS broker confirmed Release: stable cleanup
+assertions=36 failures=3

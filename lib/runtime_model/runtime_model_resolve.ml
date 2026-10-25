@@ -142,6 +142,21 @@ let endpoint_port_is_lossless url uri =
     | Some _ | None -> Uri.port uri = None
 ;;
 
+(* Uri's compatibility grammar accepts arbitrary path octets. Validate the
+   RFC3986 character/percent-escape envelope before its structural projection. *)
+let endpoint_uri_octets url =
+  let open Angstrom in
+  let hex = satisfy (function
+    | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true | _ -> false) in
+  let escaped = char '%' *> count 2 hex *> return () in
+  let plain = satisfy (function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9'
+    | '-' | '.' | '_' | '~' | ':' | '/' | '?' | '#' | '[' | ']' | '@'
+    | '!' | '$' | '&' | '\'' | '(' | ')' | '*' | '+' | ',' | ';' | '=' -> true
+    | _ -> false) *> return () in
+  parse_string ~consume:All (skip_many (escaped <|> plain)) url
+;;
+
 let parse_custom_model selection =
   match String.index_opt selection '@' with
   | None -> Error Missing_endpoint
@@ -150,6 +165,7 @@ let parse_custom_model selection =
     let url = String.sub selection (at_idx + 1) (String.length selection - at_idx - 1)
       |> String.trim in
     if model = "" then Error Empty_model
+    else if Result.is_error (endpoint_uri_octets url) then Error Invalid_endpoint
     else
       match Angstrom.parse_string ~consume:All Uri.Parser.uri_reference url with
       | Error _ -> Error Invalid_endpoint

@@ -42,42 +42,11 @@ let non_empty_trimmed_strings values =
          if blank_evidence_ref value then None else Some (String.trim value))
   |> List.sort_uniq String.compare
 
-let note_evidence_ref = Workspace_task_verification.note_evidence_ref
-
-(* Raw (uncleaned) evidence sources, shared by the flat [evidence_refs]
-   projection and the typed [verification_evidence] split (task-1664) so a new
-   source is declared in exactly one place. [required_*] are what the contract
-   demands; [submitted_*] are what the agent actually referenced. *)
+(* Contract requirements and current producer claims are separate inputs. *)
 let required_evidence_sources (task : Masc_domain.task) =
   match task.contract with
   | Some contract -> contract.verify_gate_evidence @ contract.required_evidence
   | None -> []
-
-let submitted_evidence_sources ?(notes = "") ?handoff_context
-    ?(submitted_evidence_refs = [])
-    (task : Masc_domain.task) =
-  let resolved_handoff_context =
-    match handoff_context with
-    | Some _ -> handoff_context
-    | None -> task.handoff_context
-  in
-  let handoff_refs =
-    match resolved_handoff_context with
-    | Some hc -> hc.evidence_refs
-    | None -> []
-  in
-  let summary_refs =
-    match resolved_handoff_context with
-    | Some hc ->
-      let trimmed = String.trim hc.summary in
-      Option.to_list (note_evidence_ref trimmed)
-    | None -> []
-  in
-  let notes_refs =
-    let trimmed = String.trim notes in
-    Option.to_list (note_evidence_ref trimmed)
-  in
-  submitted_evidence_refs @ handoff_refs @ summary_refs @ notes_refs
 
 let clean_evidence_refs = non_empty_trimmed_strings
 
@@ -96,17 +65,11 @@ type verification_evidence =
   }
 [@@deriving yojson]
 
-let concrete_verification_evidence ?(notes = "") ?handoff_context
-    ?submitted_evidence_refs
+let concrete_verification_evidence ~submitted_evidence_refs
     (task : Masc_domain.task) : verification_evidence =
   { required_artifacts = clean_evidence_refs (required_evidence_sources task)
   ; submitted_evidence =
-      clean_evidence_refs
-        (submitted_evidence_sources
-           ~notes
-           ?handoff_context
-           ?submitted_evidence_refs
-           task)
+      clean_evidence_refs submitted_evidence_refs
   }
 
 (* JSON object fields for the typed split, spliced into the verification

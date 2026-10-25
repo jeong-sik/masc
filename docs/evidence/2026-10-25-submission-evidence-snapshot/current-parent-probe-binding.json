@@ -1,0 +1,5 @@
+{
+  "original_script_sha256": "8ce4683deffc7848bb78bf4b2b1839971908e1fbfc2a7d95083cd37bd0ebe513",
+  "modification": "Output directory only; source root and actual modules remain current checkout",
+  "current_parent": "ab763974086124c723a7c8d84a8f205f93cb39c1"
+}

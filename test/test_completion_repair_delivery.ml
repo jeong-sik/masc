@@ -456,6 +456,14 @@ let test_release_before_acknowledgement_replays_idempotently () =
        Alcotest.fail "current unroutable rejection was not released"
      | Error detail -> Alcotest.fail detail);
     let released = only_task config in
+    (match released.handoff_context with
+     | Some handoff ->
+       Alcotest.(check (list string))
+         "unroutable rejection does not turn its verification ID into evidence"
+         [] handoff.evidence_refs;
+       Alcotest.(check (option string)) "release retains the correction reason"
+         (Some reason) handoff.reason
+     | None -> Alcotest.fail "unroutable release must retain the correction handoff");
     check_pending config 0;
     (match Wake.release_unroutable_task ~config obligation with
      | Ok `Superseded -> ()

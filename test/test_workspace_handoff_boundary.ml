@@ -57,7 +57,7 @@ let apply ~action ~new_status ~handoff_context task =
   let update =
     Executor.build_backlog_update
       ~backlog:(backlog_of [ task ])
-      ~task_id:task.Domain.id
+      ~task
       ~action
       ~new_status
       ~handoff_context

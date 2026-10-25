@@ -1,0 +1,211 @@
+{
+  "verdict": "PASS_SOURCE",
+  "reviewed_at_utc": "2026-10-25T00:13:26.802686+00:00",
+  "head": "62e4c1667e9cbbd89b557e58c68b767c6532f3e9",
+  "base": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "author_worktree": "/tmp/masc-submission-evidence-20261025",
+  "author_clean_verified": true,
+  "full_diff_sha256": "b62694fd3d91b0659358c9d8fbe5f89849bf725512581d36ddc14138897bdec7",
+  "product_test_diff_sha256": "a5c50c1892f85b9847c5b18ae47d884fbe8752236521a211e9639e32c274ef26",
+  "scope": "Independent read-only source/P0-P2 review of the current-submission evidence repair; reviewer diagnosed the runtime bug but did not author this code. No author/root mutation, Dune/CI watch, full native transaction, sandbox/SDK/vendor/model execution or GitHub approval.",
+  "p0_p2_findings": [],
+  "resolved_problem": "The current submission no longer prepares evidence by remerging the previous Task handoff. A single transitioned_task supplies the current handoff/status to claim construction, request preparation, committed backlog and verification notification. Rejection/unroutable-release producers keep correlation in existing typed records instead of adding a bare verification ID as evidence.",
+  "production_trace": [
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "lines": "329-394",
+      "finding": "Builds current immutable Task inside the existing locked transaction before deriving current claim or preparing the request; preparation precedes commit as before."
+    },
+    {
+      "path": "lib/workspace/workspace_task_transition_executor.ml",
+      "lines": "100-116",
+      "finding": "The returned Task is physically the same value inserted for the selected authoritative member; untouched Tasks remain unchanged."
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "lines": "470-484,782-812",
+      "finding": "Backlog commit and postcommit verification_notify use the same transitioned value; old status remains only for superseded identity, transition/audit and prior-owner semantics."
+    },
+    {
+      "path": "lib/verification_protocol.ml",
+      "lines": "47-52,127-205,232-273",
+      "finding": "Preparation and public notification share the current-claim-only projection; required artifacts/criteria remain separate. Sandbox acquisition, producer execution identity capture and typed receipt are unchanged."
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "lines": "963-1018,1179-1231",
+      "finding": "Rejected correction text/authority and typed pending outbox/event/activity verification identity are retained; only the incorrectly classified handoff evidence reference is removed."
+    },
+    {
+      "path": "lib/workspace/workspace_task.ml",
+      "lines": "474-519",
+      "finding": "Unroutable release retains correction reason and explicit verification_id activity field while retiring the exact old obligation; no bare correlation is converted into an artifact."
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "lines": "334-350,541",
+      "finding": "Operator cancellation still preserves the producer-owned handoff in both returned Task and backlog. persisted_handoff_context retains authored-by-this-transition meaning rather than relabeling inherited owner content."
+    }
+  ],
+  "all_api_consumers_checked": {
+    "concrete_verification_evidence": "Only production direct caller is Verification_protocol; all remaining former optional argument/helper names searched. The MLI now requires an explicit current claim.",
+    "verification_submission_evidence_refs": "Transition and all phase_e native callers updated; takes one already-transitioned Task rather than a parallel optional handoff.",
+    "build_backlog_update": "Transition and native handoff-boundary caller updated; all transition_backlog_update constructions/field uses searched.",
+    "correlation_consumers": "Completion_authority_wakeup and task rejection outbox consume typed task/verification identities; no production consumer was found interpreting bare handoff evidence as a verification ID."
+  },
+  "unchanged_semantics_examined": [
+    "No new note-only gate, permission, cap, numeric comparison, or spelling-based reference suppression. Explicit invalid current evidence still surfaces typed diagnostics.",
+    "Absent exit handoff clears previous data; entry preserves it without claiming new authorship. Required artifact contract strings remain separate from submitted evidence.",
+    "Noop checks, request compensation on failed commit, cancellation policy, supersede-delete order, stale verdict refusal and actor/model identity paths remain as before."
+  ],
+  "independent_checks": {
+    "author_probe_reexecuted": {
+      "baseline_passed": 14,
+      "candidate_passed": 19,
+      "scope": "Actual pure modules/interfaces, grammar/codecs and receipt with named DTO/acquisition/load ports and an explicit ordering adapter; not the full Workspace transaction."
+    },
+    "additional_controls": {
+      "additional_passed": 8,
+      "candidate_total_passed": 27,
+      "scope": "Sibling Task identity, exact returned backlog member, authored metadata, entry handoff provenance, empty current claim, contract separation, correlation-looking narrative, note-only receipt."
+    },
+    "parse_passed": 16,
+    "diff_check_exit": 0
+  },
+  "native_fixture_assessment": "The authored native Workspace submit->reject->changed-file->first-retry fixture meaningfully checks shared capture/notification Task, actual snapshot bytes, first request immutability, producer/model/tool source identity, no capture diagnostics and stale verdict rejection. Existing release/outbox and independent Task behavior are covered. None of those native fixtures was executed in this review. Existing Operator_cancel handoff preservation coverage is in test_workspace outside the four recommended minimal suites.",
+  "nonblocking_findings": [
+    {
+      "priority": "P3",
+      "path": "lib/completion_authority_wakeup.mli",
+      "line": 74,
+      "finding": "Comment still says verification ID travels on the handoff context, but this repair correctly keeps it in typed verdict/outbox/activity correlation. Documentation cleanup only."
+    },
+    {
+      "priority": "P3",
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "line": 643,
+      "finding": "verification_submitted_fn scheduling hook still receives the pre-existing status-only old Task reconstruction. Current production install_callback reads only task.id and uses a fresh backlog review, so it does not recontaminate evidence and is not a current P0-P2. Avoid claiming every hook receives the same snapshot; a later cleanup can pass transitioned_task there too."
+    }
+  ],
+  "integrated_binding": {
+    "head": "d74ae4b23f18269f2ba6c29d7733aa1234c336f4",
+    "scope": "Only the16 changed source/test files are byte-identical by git blob; no whole parent stack or documentation approval inferred.",
+    "files": [
+      {
+        "path": "lib/task/tool_task_completion_review.ml",
+        "git_blob_oid": "9f1c56f88a411a4a4f1915d4557f3389336b0cf6",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "lib/task/tool_task_completion_review.mli",
+        "git_blob_oid": "64d3b323ea4a21dbb2aad16692ae5936905c0b80",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "lib/types/types_core.mli",
+        "git_blob_oid": "c6078574e6311cd8330af128ca76a81cf2a5dbd8",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "lib/verification_protocol.ml",
+        "git_blob_oid": "a150ef8a8d0cc9b7b28a1643b59ea6fef3ef2d4e",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "lib/verification_protocol.mli",
+        "git_blob_oid": "a3821c470022ababee0512b2696ad60b466a6667",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "lib/workspace/workspace_hooks.mli",
+        "git_blob_oid": "01b6f5a6afa1585f8ffc15e3e89b21bdbbb8e87b",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "lib/workspace/workspace_task.ml",
+        "git_blob_oid": "aee80314816fddae7b70199704d27bf991ff902b",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "lib/workspace/workspace_task_transition_executor.ml",
+        "git_blob_oid": "6184d0e3cb426c76832839e755bd2df3b803c94b",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "lib/workspace/workspace_task_transition_executor.mli",
+        "git_blob_oid": "f55fff01f68c07ffac5a54b0fbc5ce32460a2089",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "lib/workspace/workspace_task_transitions.ml",
+        "git_blob_oid": "66e78f1cbc89b9548046788cef93132892f44bbe",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "lib/workspace/workspace_task_verification.ml",
+        "git_blob_oid": "9f4fc095480c5541450d12b9c63120b0b4ffd235",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "lib/workspace/workspace_task_verification.mli",
+        "git_blob_oid": "cce98004d63e7052dd622691efd4ed4dcd855b9b",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "test/test_completion_repair_delivery.ml",
+        "git_blob_oid": "a706795f068203bfdcc58b57d4096c3484384d87",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "test/test_verification.ml",
+        "git_blob_oid": "ae05d63dd9e3f59ddd903e5d6832fba8e6b00cfa",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "test/test_workspace_handoff_boundary.ml",
+        "git_blob_oid": "214be0d5d69239dc7b8a883e3dcc1edf2802d816",
+        "equal_at_integrated_head": true
+      },
+      {
+        "path": "test/test_workspace_task_verification_phase_e.ml",
+        "git_blob_oid": "4f55c574b7cbada9baa9959b23226486292165ee",
+        "equal_at_integrated_head": true
+      }
+    ]
+  },
+  "remaining_unproven": [
+    "Full native typing/linking and actual Workspace lock/store callback execution",
+    "Actual first-retry on a new candidate binary",
+    "GLM runtime328 success occurred before this repair and is not runtime validation of this code"
+  ],
+  "artifacts": [
+    {
+      "path": "/tmp/masc-independent-submission-review-62e4-20261025/review.diff",
+      "sha256": "b62694fd3d91b0659358c9d8fbe5f89849bf725512581d36ddc14138897bdec7"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-62e4-20261025/product.diff",
+      "sha256": "a5c50c1892f85b9847c5b18ae47d884fbe8752236521a211e9639e32c274ef26"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-62e4-20261025/independent-check.json",
+      "sha256": "6b0bf15c7ddcddad11e32f9c353bae008c0178e4b6dbd043fc33086a710e2bf7"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-62e4-20261025/source-check.json",
+      "sha256": "3ce5cdb08a2823f020ef6e65d71f5e5ba28f98cf542a123c30fd76ca297684d7"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-62e4-20261025/run_probe.py",
+      "sha256": "51df661b39ec90246c9633598087494d64368b1bee20ed08d04966dfc121e7f7"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-62e4-20261025/extra/source-check.json",
+      "sha256": "bf57cb97bfb520dc88b0d0473177f4e0b89e5b3610f01bf7846d64177643bf63"
+    },
+    {
+      "path": "/tmp/masc-independent-submission-review-62e4-20261025/extra/run.py",
+      "sha256": "8dd6e2beef79769a0accad634e2cc64d5a3ee3769d1d2da85f6debb9e09278f0"
+    }
+  ]
+}

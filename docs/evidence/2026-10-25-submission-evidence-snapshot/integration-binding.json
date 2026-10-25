@@ -1,0 +1,89 @@
+{
+  "author_head": "62e4c1667e9cbbd89b557e58c68b767c6532f3e9",
+  "author_base": "32805eb764eab2710262446e925b0ea5c3a44c08",
+  "integrated_head": "d74ae4b23f18269f2ba6c29d7733aa1234c336f4",
+  "integrated_parent": "2bc6ae8fa1904d8232c8ea0738e0b14bab824945",
+  "source_files": [
+    {
+      "path": "lib/task/tool_task_completion_review.ml",
+      "author_and_integrated_sha256": "d9f940fe5898ec6aef33c99259637e6ac168fe0b39ad88167203bb94b4a5d6c2",
+      "author_base_and_parent_sha256": "eaf8d55d006b3de9dc9113325861db48e43a10ee068bd3fccbab030ecc421d73"
+    },
+    {
+      "path": "lib/task/tool_task_completion_review.mli",
+      "author_and_integrated_sha256": "17848ac47c9ebb79b514b826b3739d4b0f83de8bcc653cb8e92ea7872da42ab3",
+      "author_base_and_parent_sha256": "00288eb7242fd6925f7c5bf7218cfe0869c8f5a00186bb6d9876dd7d84fba240"
+    },
+    {
+      "path": "lib/types/types_core.mli",
+      "author_and_integrated_sha256": "8fa008eeebea9c2f19e243041a692e3af5aede047ab8c0cc50fab08d9685291e",
+      "author_base_and_parent_sha256": "1b3767b3de71726ab395926c6f6093bde5afbd18a924046e615bc086f07b2430"
+    },
+    {
+      "path": "lib/verification_protocol.ml",
+      "author_and_integrated_sha256": "ac5e8ac491e1b8985aa9dbb9e14b03ed88615bba4bd183716842246af59c316c",
+      "author_base_and_parent_sha256": "9911a557f9536b39c6a6f059e037e37b973a92cd57676d28ef13c912c0262894"
+    },
+    {
+      "path": "lib/verification_protocol.mli",
+      "author_and_integrated_sha256": "65c5ff70322dae63aef7956ed41e7f6a0b345608ca11dc6ab66ae41229fdd159",
+      "author_base_and_parent_sha256": "3256a01cab8e0cb37764be95af2c9554bf8a812b2e0468675df00e0c70a83353"
+    },
+    {
+      "path": "lib/workspace/workspace_hooks.mli",
+      "author_and_integrated_sha256": "a290b8bdb81bc940e258c1c81dfc2f84eba061cd304cfba9e68759af13e79ce9",
+      "author_base_and_parent_sha256": "50bda15e764a2c0e354d6d97545dcfe070484ac4b46e3b991144924265aa1547"
+    },
+    {
+      "path": "lib/workspace/workspace_task.ml",
+      "author_and_integrated_sha256": "704302e7f31064cc2260c25d7c00f6871bdf4fb66a80168b4b942e75ce107ae5",
+      "author_base_and_parent_sha256": "805d49a77d63c5642912ec41c36810e1d4b6888b693cc2408d1ebde49eb32e13"
+    },
+    {
+      "path": "lib/workspace/workspace_task_transition_executor.ml",
+      "author_and_integrated_sha256": "be41c69eed480e5fb49b180325129d4f89bc9a5fd67c57a429a146d8f0f0fb87",
+      "author_base_and_parent_sha256": "57480ffa6cc0ab692d816814c17a2eef1a4d5b9738bd5fe2773d3fe95053071a"
+    },
+    {
+      "path": "lib/workspace/workspace_task_transition_executor.mli",
+      "author_and_integrated_sha256": "a299bd6988eb5cce73f20a5de9e6df2ec35cf5250e99c0de676f594cfdae794a",
+      "author_base_and_parent_sha256": "101725da23aeba4fb933f7767bbec06968095c002cfde44bb8c02bf0656ecf0d"
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "author_and_integrated_sha256": "b69bb1a2323c9989d1863f1aad187ec190130651af972a58bfafdb5c6a329cda",
+      "author_base_and_parent_sha256": "3ea4a72707e50dd4fa0af3b9ec4e7478faf358100805237af68f0f4876280fa0"
+    },
+    {
+      "path": "lib/workspace/workspace_task_verification.ml",
+      "author_and_integrated_sha256": "6e1b4ba489590b24a1cdd7ad3e82c455563aa380c23a1626aa25af21a33906a6",
+      "author_base_and_parent_sha256": "bf536c0c5b765a6e8e20263f205eeacc0d933eb4115e10ec676731d7002a99e5"
+    },
+    {
+      "path": "lib/workspace/workspace_task_verification.mli",
+      "author_and_integrated_sha256": "a2166a2071d83fa8bba94736d57406a3e19cf4caece3e5edcbb30bd049c424e3",
+      "author_base_and_parent_sha256": "899dbf98a4f7534f3b2674b991eba5952bc5150af563ff1bab6962b2fe7618a2"
+    },
+    {
+      "path": "test/test_completion_repair_delivery.ml",
+      "author_and_integrated_sha256": "6d399a0edd5b52af050a3a1cd4718eebdb2c07f7e591a8dd230ee45c8023f176",
+      "author_base_and_parent_sha256": "f5cd61e883819b11667268f38aef317611929dbeff72ed26d422baf7ef373f11"
+    },
+    {
+      "path": "test/test_verification.ml",
+      "author_and_integrated_sha256": "d87e9e7e849957389c642dccb05b31c9c6d6566061b3bdb21b1556ff666fc104",
+      "author_base_and_parent_sha256": "a34a1222104d235dcdb51b4ef7e90c87e249d704ae2eb4aea0e63ff4a9b8bef4"
+    },
+    {
+      "path": "test/test_workspace_handoff_boundary.ml",
+      "author_and_integrated_sha256": "b2d38e77ae61ad986e532e20ea160e31ce7d28f61d7d9da21be23931c6e5e701",
+      "author_base_and_parent_sha256": "5b35b452e4b2f26879527bcb56222522a4e2e7db3d92bd8d850dc68aaf1b1ed9"
+    },
+    {
+      "path": "test/test_workspace_task_verification_phase_e.ml",
+      "author_and_integrated_sha256": "1ab83b7f4c8bc48e160fadf900aef7f77042ce99dbae74020722d0d62ec895b3",
+      "author_base_and_parent_sha256": "0701c4d9c4edcdddccf466d0ec7e8e4b35df354a447f7e0ee28ea2e202c638fd"
+    }
+  ],
+  "scope": "Exact changed product/direct-test bytes; not compilation, native/runtime execution, whole-stack approval or later head identity."
+}

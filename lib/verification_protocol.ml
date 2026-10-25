@@ -11,10 +11,9 @@
    types_core.ml):
    - [criteria]: the operator-facing "must be true" statements →
      [task.contract.completion_contract] as exact criterion strings.
-   - [evidence_refs]: the artefact list the completion authority expects to see →
-     [task.contract.verify_gate_evidence] plus required evidence refs,
-     passed in by the caller at task-state lifecycle so this function does
-     not reach into task.contract twice for different fields. *)
+   - [required_artifacts]: the Task contract's required and verify-gate refs.
+   - [submitted_evidence]: only the current producer claim, derived by the
+     Task FSM caller from its immutable submission snapshot and notes. *)
 type submit_request_spec =
   { criteria : Verification.criterion list
   ; output : Yojson.Safe.t

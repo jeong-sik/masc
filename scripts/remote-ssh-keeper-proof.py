@@ -22,6 +22,13 @@ SPEC = importlib.util.spec_from_file_location('keeper_first_turn', HELPER)
 smoke = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(smoke)
 
+SHELL_IO_FILES = {
+    'redirect input.txt': 'alpha\n',
+    'redirect output.txt': 'alpha\nbeta\n',
+    'redirect stdout.txt': 'separate-out\n',
+    'redirect stderr.txt': 'separate-err\n',
+}
+
 
 def transport_refusal(content):
     """Require one Execute payload's typed unavailable receipt, never error prose."""
@@ -39,13 +46,14 @@ def transport_refusal(content):
 
 
 class FilesFixture(smoke.ModelFixture):
-    def __init__(self, marker, output):
+    def __init__(self, marker, output, *, exercise_shell_io=False):
         super().__init__(marker, output)
         self.final = 'REMOTE_SSH_FILES_COMPLETED_' + marker
         self.results, self.sent, self.step = [], None, 0
         self.phase = 0
         self.expect_failure = False
         self.filename = 'ssh-proof.json'
+        self.exercise_shell_io = exercise_shell_io
         initial = ('import json,os,socket; from pathlib import Path; '
                    'p={"marker":' + repr(marker) + ',"cwd":os.getcwd(),'
                    '"hostname":socket.gethostname(),"uid":os.getuid()}; '
@@ -54,7 +62,21 @@ class FilesFixture(smoke.ModelFixture):
                  'p=json.loads(Path("ssh-proof.json").read_text()); '
                  'b=Path("notes.txt").read_bytes(); assert b==b"after\\n"; '
                  'p.update(notes=b.decode(),sha256=hashlib.sha256(b).hexdigest(),'
-                 'files=sorted(os.listdir("."))); print(json.dumps(p))')
+                 'files=sorted(os.listdir("."))); ')
+        if exercise_shell_io:
+            # The public command form deliberately names a real remote shell.
+            # Spaces in all filenames exercise the shell's quoting boundary.
+            final += ('p["shell_io"]={n:Path(n).read_bytes().decode("utf-8") for n in '
+                      + repr(list(SHELL_IO_FILES)) + '}; ')
+        final += 'print(json.dumps(p))'
+        if exercise_shell_io:
+            shell_io = (
+                "printf '%s\\n' alpha > 'redirect input.txt' && "
+                "cat < 'redirect input.txt' > 'redirect output.txt' && "
+                "printf '%s\\n' beta >> 'redirect output.txt' && "
+                "{ printf '%s\\n' separate-out; printf '%s\\n' separate-err >&2; } "
+                "> 'redirect stdout.txt' 2> 'redirect stderr.txt' && "
+                + shlex.join(['python3', '-c', final]))
         self.steps = [
             ('Execute', {'argv': ['python3', '-c', initial]}),
             ('Write', {'file_path': 'notes.txt', 'content': 'before\n'}),
@@ -63,6 +85,9 @@ class FilesFixture(smoke.ModelFixture):
             ('Grep', {'path': 'notes.txt', 'pattern': '^after$'}),
             ('Execute', {'argv': ['python3', '-c', final]}),
         ]
+        if exercise_shell_io:
+            self.steps[-1] = ('Execute', {'command': shell_io, 'shell': 'sh',
+                                          'intent': 'request_effect'})
         self.final_step = self.steps[-1]
 
     def resume_after_restart(self):
@@ -105,6 +130,8 @@ class FilesFixture(smoke.ModelFixture):
                         or any(type(filename) is not str for filename in files)
                         or not {'notes.txt', self.filename}.issubset(files)):
                     raise smoke.SmokeError('final Execute did not verify edited bytes and enumeration')
+                if self.exercise_shell_io and proof.get('shell_io') != SHELL_IO_FILES:
+                    raise smoke.SmokeError('shell redirects did not return exact split file bytes')
             self.proof = proof
         elif name in ('Read', 'Write', 'Edit', 'Grep'):
             if self.proof is None:
@@ -269,7 +296,7 @@ def run(args):
     home = base / 'home'
     home.mkdir(mode=0o700)
     marker = uuid.uuid4().hex
-    fixture = FilesFixture(marker, output)
+    fixture = FilesFixture(marker, output, exercise_shell_io=args.exercise_shell_io)
     model, server = None, None
     receipt = {'schema': 'masc.remote_ssh_keeper_files.v1', 'result': 'FAIL',
                'keeper': args.keeper, 'expected_binary_commit': args.expected_commit,
@@ -378,11 +405,15 @@ def run(args):
                 if fixture.error or fixture.step != len(fixture.steps):
                     raise smoke.SmokeError(fixture.error or 'pin restoration did not recover')
                 pin_observation(url, token, args, output, 'restored', previous=denied_dispatch)
+            shell_io_fields = (
+                '"shell_io":{n:(p/n).read_bytes().decode("utf-8") for n in '
+                + repr(list(SHELL_IO_FILES)) + '},') if args.exercise_shell_io else ''
             reread = ('import hashlib,json,os,socket,sys; from pathlib import Path; '
                       'p=Path(sys.argv[1]); b=(p/"notes.txt").read_bytes(); '
                       'print(json.dumps({"cwd":str(p),"hostname":socket.gethostname(),'
                       '"notes":b.decode(),"sha256":hashlib.sha256(b).hexdigest(),'
                       '"denied_effect_exists":(p/"pin-rotation-must-not-exist").exists(),'
+                      + shell_io_fields +
                       '"initial":json.loads((p/"ssh-proof.json").read_text())}))')
             actual = json.loads(ssh(args, ['python3', '-c', reread, remote]))
             (output / 'endpoint-after.json').write_text(json.dumps(actual, indent=2))
@@ -390,6 +421,11 @@ def run(args):
                     or actual['hostname'] != before['hostname']
                     or actual['initial']['marker'] != marker or actual['sha256'] != fixture.proof['sha256']):
                 raise smoke.SmokeError('endpoint bytes or identity differ from Keeper ToolResult')
+            if args.exercise_shell_io:
+                if actual.get('shell_io') != SHELL_IO_FILES:
+                    raise smoke.SmokeError('independent SSH read differs from shell redirect bytes')
+                if any((Path(fixture.proof['cwd']) / name).exists() for name in SHELL_IO_FILES):
+                    raise smoke.SmokeError('a remote redirect also exists in the projected host cwd')
             smoke.stop_server(server)
             after_stop = json.loads(ssh(args, ['python3', '-c', reread, remote]))
             if after_stop != actual:
@@ -428,6 +464,10 @@ def run(args):
                         'canonical ledger records completed SSH tools'])
             if args.exercise_pin_rotation:
                 receipt['claims'].append('same-path pin replacement denied Execute; explicit restoration recovered')
+            if args.exercise_shell_io:
+                receipt['claims'].append('public command form performed remote stdin, truncate, append and split output redirects')
+                receipt['not_measured'].remove('redirects and long jobs')
+                receipt['not_measured'].append('typed internal IR redirects and long jobs')
             receipt['successful_tools'] = sum(not r['expected_failure'] for r in fixture.results)
             receipt['expected_refusals'] = sum(r['expected_failure'] for r in fixture.results)
     except (smoke.SmokeError, OSError, ValueError, urllib.error.URLError) as error:
@@ -450,6 +490,7 @@ def main():
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--port', type=int, default=22)
     parser.add_argument('--exercise-pin-rotation', action='store_true')
+    parser.add_argument('--exercise-shell-io', action='store_true')
     args = parser.parse_args()
     if not args.keeper or any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for c in args.keeper):
         parser.error('--keeper must be a lowercase safe Keeper name')

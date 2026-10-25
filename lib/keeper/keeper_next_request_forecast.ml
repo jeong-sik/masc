@@ -466,119 +466,22 @@ let candidate
   }
 ;;
 
-type atom_boundary =
-  { end_atom : int  (** Atoms the saved history holds. *)
-  ; last_atom_digest : string
-        (** {!Runtime_model_input_tail_window.atom_opening_digest} of atom
-            [end_atom - 1], as the turn record states it. *)
-  }
-
-let latest_atom_position ~config ~keeper_name ~trace_id =
-  match
-    Keeper_turn_boundaries.read
-      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
-  with
-  | Error _ -> None
-  | Ok lines ->
-    (* The last line of this trace that states an atom position, in file
-       order: the turns of one keeper do not overlap, so the newest line is
-       where the last completed turn left the history. *)
-    List.fold_left
-      (fun acc (_, record) ->
-        match record with
-        | Error _ -> acc
-        | Ok record -> (
-            match Keeper_turn_boundaries.atom_position_stated ~trace_id record with
-            | Some (_, end_atom, last_atom_digest) -> Some { end_atom; last_atom_digest }
-            | None -> acc))
-      None lines
-;;
-
-let boundary_forecast ~config ~keeper_name ~meta ~trace_id ~(boundary : atom_boundary) =
-  let wake, wake_line_bytes = wake_line () in
-  (* The turn the forecast predicts composes the wake line onto a history
-     only the boundary line describes; the carried range this forecast
-     projects opens on the wake line itself, which is the start
-     [From_turn_boundary] names for a boundary the history in hand does not
-     carry. Measuring the wake line alone keeps the figure honest about
-     what the forecast read: the history's own bytes are behind the
-     boundary, not behind this parse. *)
-  let messages = [ wake ] in
-  let _labelled, history_atoms = Runtime_model_input_tail_window.annotate messages in
-  let digest_at = Some boundary.last_atom_digest in
-  (* [candidate] asks for the digest of an atom opening; the boundary line
-     already states the newest one, so every question gets that same answer. *)
-  let digest_at_fn _ = digest_at in
-  let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta in
-  (* NDT-OK: one wall-clock read at the boundary, compared with stored expiries. *)
-  let now = Unix.gettimeofday () in
-  let records, records_read = records_of_store ~config ~keeper_name in
-  let readings = readings_of_records records in
-  let turn_start = Keeper_carried_front.Turn_boundary { end_atom = boundary.end_atom } in
-  let seed =
-    lazy ((Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id).seed)
-  in
-  let walk, candidates =
-    let walk =
-      Keeper_turn_driver.Fresh_walk_by
-        (Runtime_candidate_backpressure.keeper_recorder ~keeper_name:meta.name)
-    in
-    match Keeper_turn_driver.assignment_walk_order ~now ~walk assignment_id with
-    | Error refusal -> Error refusal, []
-    | Ok { Keeper_turn_driver.lane_id; declared; order } ->
-      ( Ok { lane_id; declared }
-      , List.mapi
-          (fun walks_at runtime_id ->
-             candidate
-               ~keeper_name
-               ~trace_id
-               ~messages
-               ~digest_at:digest_at_fn
-               ~history_atoms
-               ~wake_bytes:wake_line_bytes
-               ~readings
-               ~records_read
-               ~seed
-               ~continuity:Keeper_turn_driver_try_provider.without_snapshot
-               ~turn_start
-               ~place:
-                 { walks_at
-                 ; declared_at = declared_at ~declared runtime_id
-                 ; rest = Keeper_turn_driver.path_rest ~now runtime_id
-                 }
-               runtime_id)
-          order )
-    in
-  Ok
-    { keeper = keeper_name
-    ; trace_id
-    ; checkpoint_messages = boundary.end_atom
-    ; wake_line_bytes
-    ; walk
-    ; candidates
-    }
-;;
-
 let forecast ~config ~keeper_name =
   match Keeper_meta_store.read_meta config keeper_name with
   | Error message -> Error message
   | Ok None -> Error (Printf.sprintf "keeper %S not found" keeper_name)
   | Ok (Some meta) ->
     let trace_id = Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id in
-    match latest_atom_position ~config ~keeper_name ~trace_id with
-    | Some boundary ->
-      (* The forecast answers from the turn record alone: the boundary line
-         names where the last completed turn left the history, so no
-         checkpoint is parsed on this path. The request the forecast
-         predicts measures atoms the boundary does not describe; the figure
-         the walk and the marks need is the ledger's own count, which the
-         candidates read from their pair's ledger as before. *)
-      boundary_forecast ~config ~keeper_name ~meta ~trace_id ~boundary
-    | None ->
     let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+    (* Read the actual history through the Keeper's existing checkpoint
+       lineage. A cold read fills that same encoding/decode memo for its
+       next save; unchanged files reuse it without another read or parse.
+       Boundary lines attest only their named positions, not an arbitrary
+       carried front or the checkpoint's message bytes. *)
     (match
        Keeper_checkpoint_store.turn_history_of_load
-         (Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id)
+         (Keeper_checkpoint_store.load_agent_core_for_save
+            ~keeper_name ~session_dir ~session_id:trace_id)
      with
      | Error error ->
        Error (Keeper_checkpoint_store.checkpoint_load_error_to_string error)

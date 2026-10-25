@@ -908,7 +908,7 @@ let test_unregistered_openai_compat_identity_remains_typed () =
     (Provider_runtime_binding.provider_id_of_provider_config cfg)
 ;;
 
-let test_registry_fallback_preserves_provider_authority () =
+let test_wire_fallback_preserves_provider_authority () =
   with_model_catalog
     {|[[providers]]
 id = "proxy"
@@ -926,17 +926,21 @@ capabilities_base = "openai_chat_extended"
       let anonymous = config () in
       Alcotest.(check bool) "primary anonymous lookup has no scoped or bare fact" true
         (Llm_provider.Provider_config.capabilities_for_config_model anonymous = None);
-      Alcotest.(check bool) "registry fallback retains anonymous wire base" true
-        (Provider_runtime_binding.capabilities_for_provider_config anonymous
-          = Llm_provider.Capabilities.gemini_capabilities);
+      let check_native_fallback label config =
+        let caps = Provider_runtime_binding.capabilities_for_provider_config config in
+        Alcotest.(check bool) (label ^ " native tools remain supported") true caps.supports_tools;
+        Alcotest.(check bool) (label ^ " tool choice is undeclared") false caps.supports_tool_choice;
+        Alcotest.(check bool) (label ^ " required choice is undeclared") false caps.supports_required_tool_choice;
+        Alcotest.(check bool) (label ^ " named choice is undeclared") false caps.supports_named_tool_choice;
+        Alcotest.(check bool) (label ^ " public admission rejects undeclared forcing") true
+          (Result.is_error (Llm_provider.Complete_common.validate_all
+            {config with tool_choice=Some Llm_provider.Types.Any})) in
+      check_native_fallback "anonymous wire" anonymous;
       Alcotest.(check bool) "declared wire alias resolves its provider base" true
         (Provider_runtime_binding.capabilities_for_provider_config
           (config ~provider_id:"gemini" ())
           = Llm_provider.Capabilities.openai_compat_chat_extended_capabilities);
-      Alcotest.(check bool) "unknown declaration never acquires proxy authority" true
-        (Provider_runtime_binding.capabilities_for_provider_config
-          (config ~provider_id:"unknown" ())
-          = Llm_provider.Capabilities.gemini_capabilities))
+      check_native_fallback "unknown declaration" (config ~provider_id:"unknown" ()))
 ;;
 
 (* A frozen missing policy is an observed absence, not permission for the
@@ -1042,8 +1046,8 @@ let () =
         ; Alcotest.test_case "selected binding carries provider facts" `Quick
             test_selected_binding_carries_provider_capabilities ])
     ; ( "catalog"
-      , [ Alcotest.test_case "registry fallback preserves provider authority" `Quick
-            test_registry_fallback_preserves_provider_authority
+      , [ Alcotest.test_case "wire fallback preserves provider authority" `Quick
+            test_wire_fallback_preserves_provider_authority
         ; Alcotest.test_case
             "alias default capabilities"
             `Quick
@@ -1058,7 +1062,7 @@ let () =
             `Quick
             test_endpoint_only_config_does_not_select_catalog_facts
         ; Alcotest.test_case
-            "explicit provider id selects catalog capabilities"
+            "provider capabilities require selected binding"
             `Quick
             test_explicit_provider_id_requires_selected_catalog_capabilities
         ; Alcotest.test_case

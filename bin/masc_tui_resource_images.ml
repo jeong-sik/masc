@@ -8,11 +8,21 @@ let is_image mime =
   | [ "image"; subtype ] -> subtype <> ""
   | _ -> false
 
+let is_markdown mime =
+  List.mem (essence mime)
+    ["text/markdown"; "text/x-markdown"; "application/markdown"]
+
 let images ~mime_type contents =
   List.mapi (fun index (part : Masc_tui_mcp.resource_content) ->
     let mime = match part.rc_mime_type with Some _ as mime -> mime | None -> mime_type in
     let name = Printf.sprintf "Resource image · part %d" (index + 1) in
     let candidates = match mime, part.rc_kind with
+      | Some mime, Resource_text source when is_markdown mime ->
+        Masc_tui_markdown.mermaid_sources source
+        |> List.mapi (fun diagram source ->
+          Masc_tui_image_preview.mermaid
+            ~name:(Printf.sprintf "Mermaid · part %d · diagram %d" (index + 1) (diagram + 1))
+            source)
       | Some mime, Masc_tui_mcp.Resource_blob {base64} when is_image mime ->
         [Masc_tui_image_preview.inline_payload ~name
           (Masc_tui_image_payload.of_base64 ~mime_type:mime base64)]

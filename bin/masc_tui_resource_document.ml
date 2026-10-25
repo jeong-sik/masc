@@ -111,10 +111,6 @@ let resource_language_of_mime mime =
   else if String.equal mime "text/html" then Some "html"
   else None
 
-let resource_mime_is_markdown mime =
-  List.mem (resource_mime_essence mime)
-    [ "text/markdown"; "text/x-markdown"; "application/markdown" ]
-
 let pretty_resource_text ~mime text =
   (* Parse only the source fragment's own line breaks. Doing this after
      fencing or joining parts would pair a final standalone CR with a
@@ -123,7 +119,7 @@ let pretty_resource_text ~mime text =
   match resource_language_of_mime mime with
   | Some "json" -> fenced_pretty_json text
   | Some language -> Masc_tui_markdown_theme.fenced ~language text
-  | None when resource_mime_is_markdown mime -> text
+  | None when Masc_tui_resource_images.is_markdown mime -> text
   | None -> text
 
 type piece = Markdown_text of string | Html_text of string

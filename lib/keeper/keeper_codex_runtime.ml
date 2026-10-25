@@ -350,7 +350,7 @@ let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?r
           record_usage_windows ~quota_scope report
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
-        | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+        | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _ | Tool_delivery_closed _
         | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
         | Compaction_observed | Turn_finished _ -> ())
   | _ ->
@@ -452,6 +452,12 @@ let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?r
                    Agent_core.Types.InputJsonSnapshot
                      (Yojson.Safe.to_string arguments)
                })
+        | Runtime_codex_app_server.Tool_delivery_closed {pending_tool_calls} ->
+          Option.iter (fun active ->
+            ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Tool_finish (fun () ->
+              Agent_core.Raw_trace.record_hook_invoked active
+                ~hook_name:"codex_tool_delivery_closed" ~hook_decision:"retain_for_next_turn"
+                ~hook_detail:(string_of_int pending_tool_calls) ()))) raw_trace_run
         | Runtime_codex_app_server.Dynamic_tool_finished { call_id } ->
           Option.iter (fun receipts -> Keeper_official_client_tool_receipts.finish receipts ~call_id) receipts;
           Option.iter
@@ -1086,9 +1092,13 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
     let context_frontier = { context_frontier with held_context } in
     let settled_held_context = ref held_context in
     let developer_instructions = Some (Keeper_context_submission_link.text composed_developer_instructions) in
-    (* No developer items: a Start carries the per-turn context in
-       [developerInstructions], a Resume in front of its goal. *)
-    let developer_context = [] in
+    (* Ordinary context keeps its existing placement. Receipts that outlived
+       a cancelled vendor cell enter both Start and Resume as acknowledged
+       developer items, independently of the previous session's survival. *)
+    let* tool_outbox = Keeper_codex_tool_outbox.load ~base_path ~keeper_name
+      |> Result.map_error internal_error in
+    let developer_context = Keeper_codex_tool_outbox.developer_context tool_outbox in
+    let terminal_error = ref None in
     (* Reported only after the complete turn/start write. A Resume sent none of
        the conversation; the thread holds it. *)
     let report_transmitted_input () =
@@ -1121,7 +1131,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       ; output_schema = None
       }
     in
-    let terminal_error = ref None in
     let* host_dynamic_tools =
       Host.dynamic_tools
         ~base_path
@@ -1374,7 +1383,10 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          | Ok settled ->
            session_state := settled;
            on_session_settled settled;
-           projected)
+           let* result = projected in
+           let* () = Keeper_codex_tool_outbox.acknowledge tool_outbox
+             |> Result.map_error internal_error in
+           Ok result)
       | Ready | Start _ | Active _ | Turn_inflight { turn_id = None; _ }
       | Recovery_required _ | Settled _ ->
         Error
@@ -1430,7 +1442,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
               | Context_window_filled _ -> settled_held_context := []
               | Counted { last = Request_usage _; _ } -> ())
            | Native_tool_progress _ | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _
-           | Dynamic_tool_finished _ | Elicitation_cancelled _
+           | Dynamic_tool_finished _ | Tool_delivery_closed _ | Elicitation_cancelled _
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
         in
@@ -1482,6 +1494,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ~thread_mode
          ~history
          ~developer_context
+         ~on_undelivered_tool_result:
+           (Keeper_codex_tool_outbox.retain ~base_path ~keeper_name)
          ~on_stream_event
          ~on_thread_ready:(fun ~thread_id ->
            update_session "active transition" (fun expected ->
@@ -1639,6 +1653,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          | Error detail ->
            Error (internal_error ("Codex session settlement failed: " ^ detail))
        in
+       let* () = Keeper_codex_tool_outbox.acknowledge tool_outbox
+         |> Result.map_error internal_error in
        let capture, _metrics =
          Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()
        in

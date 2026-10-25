@@ -210,6 +210,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; input_schema : Yojson.Safe.t
   ; loading : Runtime_official_client_tool.loading
   ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
@@ -221,6 +222,15 @@ type elicitation_cancel_reason = Host_input_unavailable
 type reasoning_part = Summary of int | Content of int
 
 type text_completion_source = Item_content | Adopted_anonymous_content
+
+type undelivered_tool_result =
+  { thread_id : string
+  ; turn_id : string
+  ; call_id : string
+  ; tool_name : string
+  ; arguments : Yojson.Safe.t
+  ; response : Yojson.Safe.t
+  }
 
 type stream_event =
   | Turn_started of
@@ -244,6 +254,7 @@ type stream_event =
       ; arguments : Yojson.Safe.t
       }
   | Dynamic_tool_finished of { call_id : string }
+  | Tool_delivery_closed of { pending_tool_calls : int }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.finished
   | Native_tool_progress of { item_id : string; progress : Runtime_native_tools.progress }
@@ -1677,37 +1688,204 @@ let request_scheduling_handoff io ~thread_id ~turn_id =
 type turn_input =
   | Provider_message of (wire_message, error) result
   | Scheduling_handoff
+  | Tool_settled of
+      { call_id : string
+      ; tool_name : string
+      ; arguments : Yojson.Safe.t
+      ; response : (outbound_frame * Yojson.Safe.t) option
+      ; outcome : (unit, error) result
+      }
 
-let with_scheduling_handoff io ~await_handoff ~handoff ~thread_id ~turn_id run =
-  match await_handoff with
-  | None -> run io
-  | Some await ->
+(* Keep the RPC reader alive while tools execute. Codex's functions.exec can
+   yield a cell and issue another dynamic call before the first one returns.
+   Running a handler in the reader serialized even Concurrent tools, and a
+   turn/completed already written by Codex was read only after its cancelled
+   tool calls had finished on the host. *)
+let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
+    ~tools ~tool_call_count ~tool_effect_attempted ~on_stream_event
+    ~on_undelivered_tool_result ~thread_id ~turn_id run =
     Eio.Switch.run (fun sw ->
       let incoming = Eio.Stream.create max_int in
+      let pending = ref 0 in
+      let barrier = ref None in
+      let concurrent = ref [] in
+      let calls = Hashtbl.create 8 in
+      let vendor_terminal = ref None in
+      let vendor_closed = ref false in
+      let stopped = ref None in
+      let close_delivery () =
+        if not !vendor_closed then begin
+          vendor_closed := true;
+          if !pending > 0 then emit_stream_event on_stream_event
+            (Tool_delivery_closed {pending_tool_calls = !pending})
+        end in
+      let handoff_waiting = ref false in
+      let send_handoff () =
+        match !handoff, !vendor_closed, !handoff_waiting with
+        | Handoff_unrequested, false, true ->
+          request_scheduling_handoff io ~thread_id ~turn_id;
+          handoff := Handoff_pending;
+          handoff_waiting := false
+        | (Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected), _, _ -> () in
       Eio.Fiber.fork_daemon ~sw (fun () ->
-        if await () then Eio.Stream.add incoming Scheduling_handoff;
-        `Stop_daemon);
-      let receive () =
-        (* Exactly one reader owns stdout. A wake never cancels or restarts a
-           partially read frame, and only this consumer can write stdin. *)
-        Eio.Fiber.fork_daemon ~sw (fun () ->
+        let rec read () =
           let message = io.receive () in
           Eio.Stream.add incoming (Provider_message message);
-          `Stop_daemon);
-        let rec next () =
-          match Eio.Stream.take incoming with
-          | Provider_message message -> message
-          | Scheduling_handoff ->
-            (match !handoff with
-             | Handoff_unrequested ->
-               request_scheduling_handoff io ~thread_id ~turn_id;
-               handoff := Handoff_pending
-             | Handoff_pending | Handoff_accepted | Handoff_rejected -> ());
-            next ()
+          match message with Ok _ -> read () | Error _ -> `Stop_daemon
         in
-        next ()
+        read ());
+      Option.iter (fun await ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+          if await () then Eio.Stream.add incoming Scheduling_handoff;
+          `Stop_daemon)) await_handoff;
+      let dispatch ~id params =
+        let stage = "item/tool/call" in
+        let* fields = assoc_at stage params in
+        let* request_thread = required_string stage "threadId" fields in
+        let* request_turn = required_string stage "turnId" fields in
+        let* call_id = required_string stage "callId" fields in
+        let* tool_name = required_string stage "tool" fields in
+        let* arguments = required_member stage "arguments" fields in
+        let* tool = match find_dynamic_tool tools tool_name with
+          | Some tool -> Ok tool
+          | None -> protocol_error stage (Printf.sprintf "unknown dynamic tool %S" tool_name) in
+        if request_thread <> thread_id || request_turn <> turn_id then
+          protocol_error stage "tool call identity does not match the active turn"
+        else if Hashtbl.mem calls call_id then
+          protocol_error stage "duplicate dynamic tool call id"
+        else begin
+          let settled, resolve = Eio.Promise.create () in
+          let predecessors = match tool.execution_mode arguments with
+            | Agent_core.Tool_contract.Concurrent ->
+              concurrent := settled :: !concurrent;
+              Option.to_list !barrier
+            | Agent_core.Tool_contract.Serial ->
+              let preceding = Option.to_list !barrier @ !concurrent in
+              concurrent := [];
+              barrier := Some settled;
+              preceding in
+          Hashtbl.add calls call_id ();
+          incr pending;
+          Eio.Fiber.fork ~sw (fun () ->
+            Eio.Fiber.yield ();
+            List.iter Eio.Promise.await predecessors;
+            let response = ref None in
+            (* Only the consumer writes stdin and its context receipts. The
+               worker retains the exact response until that consumer can
+               decide whether the vendor turn still exists. *)
+            let tool_io = { io with send = (fun frame json -> response := Some (frame, json)) } in
+            let outcome =
+              if !vendor_closed && tool.call_effect arguments = Agent_core.Tool.Effect_possible then begin
+                send_dynamic_tool_response tool_io ~thread_id ~id
+                  {success = false; content = "The vendor turn ended before this call started. No execution was attempted. Reassess the request in the next turn.";
+                   content_blocks = None; abort_turn = None};
+                Ok ()
+              end else
+                handle_dynamic_tool_call tool_io ~tools ~terminal_tools_closed
+                  ~thread_id ~turn_id ~tool_call_count ~tool_effect_attempted
+                  ~on_stream_event ~id params in
+            (match outcome with
+             | Error (Stopped_by_host _) -> terminal_tools_closed := true
+             | Ok () | Error _ -> ());
+            Eio.Stream.add incoming
+              (Tool_settled {call_id; tool_name; arguments; response = !response; outcome});
+            Eio.Promise.resolve resolve ());
+          Ok ()
+        end
       in
-      run { io with receive })
+      let settle ~call_id ~tool_name ~arguments ~response ~outcome =
+        decr pending;
+        let delivery = match response with
+         | None -> Ok ()
+         | Some (frame, json) ->
+           let retain () =
+             on_undelivered_tool_result
+               {thread_id; turn_id; call_id; tool_name; arguments; response = json}
+             |> Result.map_error (fun detail -> Protocol_error
+                  {stage = "undelivered tool result"; detail}) in
+           if !vendor_closed then retain ()
+           else
+             (try io.send frame json; Ok () with
+              | exn ->
+                Llm_provider.Reserved_exn.reraise_if_reserved exn;
+                vendor_closed := true;
+                stopped := Some (Turn_input_write_failed (Printexc.to_string exn));
+                retain ()) in
+        (match delivery with
+         | Ok () -> ()
+         | Error error -> stopped := Some error);
+        send_handoff ();
+        (match outcome with
+         | Error (Stopped_by_host (Terminal_tool_boundary {outcome = Terminal_completed; _}))
+           when !handoff = Handoff_pending || !handoff = Handoff_accepted -> ()
+         | Error error -> if Option.is_none !stopped then stopped := Some error
+         | Ok () -> ())
+      in
+      let rec receive () =
+        match !vendor_terminal, !pending, !stopped with
+        | Some terminal, 0, _ ->
+          vendor_terminal := None;
+          (match !stopped with None -> Ok terminal | Some error -> Error error)
+        | None, 0, Some error -> Error error
+        | (Some _ | None), _, (Some _ | None) ->
+          match Eio.Stream.take incoming with
+          | Provider_message (Ok (Server_request {id; method_ = "item/tool/call"; params})) ->
+            let* () = dispatch ~id params in
+            receive ()
+          | Provider_message (Ok (Notification {method_ = "turn/completed"; params} as terminal)) ->
+            (* Only the exact active terminal closes this dispatch scope. A
+               foreign or malformed terminal remains the protocol reader's
+               responsibility and cannot cancel this Keeper's tools. *)
+            let* fields = assoc_at "turn/completed" params in
+            let* terminal_thread = required_string "turn/completed" "threadId" fields in
+            let* turn = required_member "turn/completed" "turn" fields in
+            let* turn_fields = assoc_at "turn/completed.turn" turn in
+            let* terminal_turn = required_string "turn/completed.turn" "id" turn_fields in
+            if terminal_thread = thread_id && terminal_turn = turn_id then begin
+              close_delivery ();
+              vendor_terminal := Some terminal;
+              receive ()
+            end else Ok terminal
+          | Provider_message (Ok (Notification {method_ = "error"; params} as terminal)) ->
+            let* fields = assoc_at "error notification" params in
+            let* will_retry = required_bool "error notification" "willRetry" fields in
+            if will_retry then Ok terminal
+            else begin
+              close_delivery ();
+              vendor_terminal := Some terminal;
+              receive ()
+            end
+          | Provider_message (Error error) when !pending > 0 ->
+            close_delivery ();
+            if Option.is_none !vendor_terminal then stopped := Some error;
+            receive ()
+          | Provider_message message -> message
+          | Tool_settled {call_id; tool_name; arguments; response; outcome} ->
+            settle ~call_id ~tool_name ~arguments ~response ~outcome;
+            receive ()
+          | Scheduling_handoff ->
+            handoff_waiting := true;
+            if !pending = 0 then send_handoff ();
+            receive ()
+      in
+      let result = run { io with receive } in
+      (* Any protocol terminal can return from the outer consumer, including
+         a malformed frame or unsupported request. Settle admitted workers
+         before releasing their turn scope, retaining results on every such
+         exit rather than only on a successful turn/completed. *)
+      if !pending > 0 then begin
+        close_delivery ();
+        let rec drain () =
+          if !pending > 0 then begin
+            (match Eio.Stream.take incoming with
+             | Tool_settled {call_id; tool_name; arguments; response; outcome} ->
+               settle ~call_id ~tool_name ~arguments ~response ~outcome
+             | Provider_message _ | Scheduling_handoff -> ());
+            drain ()
+          end in
+        drain ()
+      end;
+      match !stopped with Some error -> Error error | None -> result)
 ;;
 
 let complete_reasoning_item ~stage ~on_stream_event streamed_texts item =
@@ -1785,36 +1963,6 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
     continue ()
   | Response _ | Response_error _ ->
     protocol_error "turn" "received an unsolicited JSON-RPC response"
-  | Server_request { id; method_ = "item/tool/call"; params } ->
-    let* () =
-      match handle_dynamic_tool_call
-        io
-        ~tools ~terminal_tools_closed
-        ~thread_id
-        ~turn_id
-        ~tool_call_count ~tool_effect_attempted
-        ~on_stream_event
-        ~id
-        params
-      with
-      | Error (Stopped_by_host (Terminal_tool_boundary { outcome = Terminal_completed; _ }))
-        when !handoff = Handoff_pending || !handoff = Handoff_accepted ->
-        terminal_tools_closed := true;
-        Ok ()
-      | (Error (Stopped_by_host (Terminal_tool_boundary { outcome = (Durable_stimulus_deferred | Terminal_failed _);_})) | Error (Stopped_by_host (Repeated_tool_call _)) | Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | (Process_exited _ | Timeout _))))))))))))) | Ok _ | Error (Stopped_by_host (Terminal_tool_boundary {outcome=Terminal_completed; _ }))) as result -> result
-    in
-    await_turn_terminal
-      io ~handoff ~terminal_tools_closed
-      ~tools
-      ~tool_call_count ~tool_effect_attempted ~model_context_window
-      ~thread_id
-      ~turn_id
-      ~model
-      ~seen_final
-      ~seen_fallback
-      ~seen_usage
-      ~open_tool_call_ids
-      ~streamed_texts ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
     await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call_count ~tool_effect_attempted ~model_context_window ~thread_id ~turn_id ~model
@@ -2264,7 +2412,7 @@ let history_item (message : history_message) =
     ]
 ;;
 
-let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tools ~reasoning_effort
+let run_protocol io (config : config) ~await_handoff ~on_undelivered_tool_result ~protocol_cwd ~dynamic_tools ~reasoning_effort
     ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent
     ~on_turn_started ~on_stream_event ~on_reasoning_effort_resolved =
   send_control_request io ~id:1 ~method_:"initialize"
@@ -2463,7 +2611,9 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
   let handoff = ref Handoff_unrequested in
   let terminal_tools_closed = ref false in
   let* text, turn_usage =
-    with_scheduling_handoff io ~await_handoff ~handoff ~thread_id ~turn_id (fun io ->
+    with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
+      ~tools:dynamic_tools ~tool_call_count ~tool_effect_attempted ~on_stream_event
+      ~on_undelivered_tool_result ~thread_id ~turn_id (fun io ->
     await_turn_terminal
       io ~handoff ~terminal_tools_closed
       ~tools:dynamic_tools
@@ -2813,7 +2963,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
            }))
 ;;
 
-let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~dynamic_tools ~on_context_submission
+let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~on_undelivered_tool_result ~dynamic_tools ~on_context_submission
     ~reasoning_effort ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready
     ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event
     ~on_reasoning_effort_resolved =
@@ -2830,6 +2980,7 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~await_handoff ~dynamic_to
       io
       config
       ~await_handoff
+      ~on_undelivered_tool_result
       ~protocol_cwd
       ~dynamic_tools
       ~reasoning_effort
@@ -2979,7 +3130,7 @@ let read_rate_limits ~mgr ~clock ~cwd config =
   probe_metadata ~mgr ~clock ~cwd config rate_limits_read_protocol
 ;;
 
-let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
+let run_turn ?await_handoff ?(on_undelivered_tool_result = fun _ -> Error "No durable owner is configured for the undelivered tool result") ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
     ?(history = [])
     ?(developer_context = [])
     ?(on_context_submission = fun _ -> ())
@@ -3028,6 +3179,7 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
               ~protocol_cwd
               config
               ~await_handoff
+              ~on_undelivered_tool_result
               ~dynamic_tools
               ~on_context_submission
               ~reasoning_effort

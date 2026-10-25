@@ -341,6 +341,7 @@ let recording_dynamic_tool ~(schema : Masc_domain.tool_schema) ~seen =
   ; input_schema = schema.input_schema
   ; loading = Runtime_official_client_tool.On_demand
   ; result_bound = Runtime_official_client_tool.Unbounded
+  ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
   ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
     ; call =
       (fun ~call_id:_ _arguments ->

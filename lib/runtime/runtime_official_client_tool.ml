@@ -45,6 +45,7 @@ type dynamic_tool =
   ; input_schema : Yojson.Safe.t
   ; loading : loading
   ; result_bound : result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }

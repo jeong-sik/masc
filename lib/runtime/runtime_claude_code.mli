@@ -193,6 +193,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; input_schema : Yojson.Safe.t
   ; loading : Runtime_official_client_tool.loading
   ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }

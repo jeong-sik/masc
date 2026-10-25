@@ -1180,6 +1180,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; input_schema : Yojson.Safe.t
   ; loading : Runtime_official_client_tool.loading
   ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
@@ -1597,6 +1598,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
   ; input_schema = Yojson.Safe.Util.member "input_schema" (Agent_core.Tool.schema_to_json tool)
   ; loading = loading_of_plan loading_plan tool.schema.name
   ; result_bound = result_bound_of_plan loading_plan tool.schema.name
+  ; execution_mode = (fun input -> Agent_core.Tool.execution_mode tool ~input)
   ; call_effect = Agent_core.Tool.call_effect tool
   ; call =
       (fun ~call_id input ->

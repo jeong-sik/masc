@@ -82,6 +82,9 @@ type dynamic_tool =
   ; input_schema : Yojson.Safe.t
   ; loading : loading
   ; result_bound : result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
+    (** Producer scheduling contract. Concurrent calls may overlap; Serial calls
+        wait for earlier calls and fence later calls until settlement. *)
   ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
       (** Pure, total producer contract for [call], valid even if [call] fails
           or is cancelled. It may be evaluated more than once before dispatch. *)

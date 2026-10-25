@@ -50,7 +50,7 @@ class BootstrapTest(unittest.TestCase):
         self.shim.write_text("#!" + sys.executable + "\n" +
                              "mode_path = " + repr(str(self.shim_mode)) + "\n" +
                              "config_path = " + repr(str(self.config)) + "\n" + '''
-import json, os, pathlib, struct, subprocess, sys
+import base64, json, os, pathlib, struct, subprocess, sys
 if sys.argv[1:] == ["--probe"]:
     if os.environ.get("PROBE_EXIT"):
         raise SystemExit(int(os.environ["PROBE_EXIT"]))
@@ -58,6 +58,9 @@ if sys.argv[1:] == ["--probe"]:
     raise SystemExit(0)
 header = sys.stdin.buffer.read(8)
 request = json.loads(sys.stdin.buffer.read(struct.unpack(">Q", header)[0]))
+request["argv"] = [base64.b64decode(value, validate=True).decode() for value in request["argv"]]
+for field in ("cwd", "remote_root"):
+    request[field] = base64.b64decode(request[field], validate=True).decode()
 mode = pathlib.Path(mode_path).read_text()
 if mode == "config-error":
     print('remote_ssh_shim_config_error: unknown key "env_file"', file=sys.stderr)

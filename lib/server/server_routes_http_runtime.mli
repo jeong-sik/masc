@@ -151,8 +151,7 @@ val make_health_json :
     [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
     [keeper_config_schema_status] / [keeper_config_schema_blocking] /
     [keeper_config_schema_terminal_reason] /
-    [keeper_config_operator_action_required] /
-    [lazy_task_boot_guard_fires_total].
+    [keeper_config_operator_action_required].
 
     [status] is the HTTP OK envelope/readiness status.  Full-health
     operator diagnostics are summarized by [overall_status],
@@ -207,17 +206,7 @@ val make_health_json :
     [keeper_reaction_ledger] summarizes recent durable stimulus -> reaction
     rows per keeper.  It reports [degraded] when a persisted stimulus has no
     later reaction/cursor/receipt row in the scanned window, making a stopped
-    reaction chain visible without scraping keeper-local JSONL files.
-
-    {2 lazy_task_boot_guard_fires_total contract (P2 silent-
-    failure fix)}
-
-    Surfaces {!Otel_metric_store.metric_total} for
-    [masc_lazy_task_boot_guard_fired_total].  Without this
-    field, an operator hitting [/health] would see ["status":
-    "ok"] while keepers had silently failed to start.  Pinning
-    at the contract seam: a future "drop unused metric" PR
-    must touch this. *)
+    reaction chain visible without scraping keeper-local JSONL files. *)
 
 val make_health_response_json :
   ?timing:Server_timing.t ->

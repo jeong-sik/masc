@@ -15,9 +15,7 @@
 
 module KeeperBootstrap : sig
   val enabled : unit -> bool
-  val lazy_startup_poll_interval_sec : float
   val keeper_listener_retry_interval_sec : float
-  val post_startup_settle_sec : float
 end
 (** {1 Keeper reactive turns} *)
 

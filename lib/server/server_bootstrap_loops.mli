@@ -151,7 +151,10 @@ val start_keeper_loops :
     it before spawning, rejects concurrent or repeated use, and revalidates the
     current state BasePath against the preparation's canonical identity.
     Synchronous startup failure is retained in the lifecycle and raised as
-    [Keeper_persistence_start_failed]. *)
+    [Keeper_persistence_start_failed]. Autoboot waits for explicit runtime
+    availability and uses the claimed persistence report for admission. Agent
+    session discovery is independent background work; it does not gate Keeper
+    bootstrap, and elapsed discovery time does not authorize a failure. *)
 
 exception Keeper_lifecycle_surfaces_partly_dropped of string list
 (** A keeper lifecycle refresh came back naming cache prefixes it could not

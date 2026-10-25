@@ -1,0 +1,3 @@
+### Fixed
+
+- Start Keepers after their runtime and persistence prerequisites without waiting for unrelated agent session discovery or falsely failing that discovery by elapsed time. (Refs #25899)

@@ -10,8 +10,7 @@ module R = Server_health_rollup
 let rollup ?(sections = []) ?(runtime_startup_degradation = `Assoc [])
     ?(keeper_config_schema_status = "ok") ?(keeper_config_schema_blocking = false)
     ?(keeper_config_schema_terminal_reason = "")
-    ?(keeper_config_operator_action_required = false)
-    ?(lazy_task_boot_guard_fires_total = 0) () =
+    ?(keeper_config_operator_action_required = false) () =
   R.operator_summary
     ~sections
     ~runtime_startup_degradation
@@ -19,27 +18,26 @@ let rollup ?(sections = []) ?(runtime_startup_degradation = `Assoc [])
     ~keeper_config_schema_blocking
     ~keeper_config_schema_terminal_reason
     ~keeper_config_operator_action_required
-    ~lazy_task_boot_guard_fires_total
 
 (* The three the operator-action cases below read. [status_lines] reads the
    fourth, which answers a different question. *)
 let summary ?sections ?runtime_startup_degradation ?keeper_config_schema_status
     ?keeper_config_schema_blocking ?keeper_config_schema_terminal_reason
-    ?keeper_config_operator_action_required ?lazy_task_boot_guard_fires_total () =
+    ?keeper_config_operator_action_required () =
   let r =
     rollup ?sections ?runtime_startup_degradation ?keeper_config_schema_status
       ?keeper_config_schema_blocking ?keeper_config_schema_terminal_reason
-      ?keeper_config_operator_action_required ?lazy_task_boot_guard_fires_total ()
+      ?keeper_config_operator_action_required ()
   in
   (r.R.overall_status, r.R.operator_action_required, r.R.operator_action_reasons)
 
 let status_lines ?sections ?runtime_startup_degradation ?keeper_config_schema_status
     ?keeper_config_schema_blocking ?keeper_config_schema_terminal_reason
-    ?keeper_config_operator_action_required ?lazy_task_boot_guard_fires_total () =
+    ?keeper_config_operator_action_required () =
   let r =
     rollup ?sections ?runtime_startup_degradation ?keeper_config_schema_status
       ?keeper_config_schema_blocking ?keeper_config_schema_terminal_reason
-      ?keeper_config_operator_action_required ?lazy_task_boot_guard_fires_total ()
+      ?keeper_config_operator_action_required ()
   in
   r.R.overall_status_reasons
 
@@ -265,11 +263,6 @@ let test_every_raised_section_leaves_a_line () =
          [ section "keeper_owner" "degraded"; section "keeper_event_queue" "blocked" ]
        ())
 
-let test_the_boot_guard_explains_the_grade_it_raises () =
-  check (list string) "the fired count is the explanation"
-    [ "lazy_task_boot_guard_fires_total:2" ]
-    (status_lines ~lazy_task_boot_guard_fires_total:2 ())
-
 let test_the_worst_grade_wins () =
   let status, _, _ =
     summary
@@ -281,13 +274,6 @@ let test_the_worst_grade_wins () =
       ()
   in
   check string "the worst cached grade is the overall status" "blocked" status
-
-let test_lazy_task_boot_guard_degrades () =
-  let status, action, reasons = summary ~lazy_task_boot_guard_fires_total:2 () in
-  check string "a fired boot guard degrades" "degraded" status;
-  check bool "a fired boot guard needs an operator" true action;
-  check (list string) "the count is the reason"
-    [ "lazy_task_boot_guard_fires_total:2" ] reasons
 
 let () =
   run
@@ -315,8 +301,6 @@ let () =
             test_an_ok_section_leaves_no_line
         ; test_case "every raised section leaves a line" `Quick
             test_every_raised_section_leaves_a_line
-        ; test_case "the boot guard explains the grade it raises" `Quick
-            test_the_boot_guard_explains_the_grade_it_raises
         ; test_case "a state name is not a grade" `Quick
             test_a_state_name_is_not_a_grade
         ; test_case "a field without a status is skipped" `Quick
@@ -332,8 +316,6 @@ let () =
             test_a_section_declaring_no_action_reasons_falls_back
         ; test_case "status_reasons win over the fallback" `Quick
             test_status_reasons_win_over_the_fallback
-        ; test_case "a fired boot guard degrades" `Quick
-            test_lazy_task_boot_guard_degrades
         ] )
     ]
 ;;

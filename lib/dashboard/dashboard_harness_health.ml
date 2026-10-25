@@ -544,30 +544,20 @@ let overview_json
     then 0.0
     else float_of_int fallback_count /. float_of_int total_verdicts
   in
-  (* Cross-model enforcement ratio: of verdicts that recorded both a
-     generator and an evaluator runtime, what fraction used distinct
-     runtimes? This is the *runtime* rate at which the cross-model
-     review policy (anti_rationalization.mli, #3067) actually fired. *)
-  let verdicts_with_generator =
-    Safe_ops.json_int ~default:0 "verdicts_with_generator_runtime" calibration
-  in
-  let cross_model_match =
-    Safe_ops.json_int ~default:0 "cross_model_match_count" calibration
-  in
-  let cross_model_rate =
-    if verdicts_with_generator = 0
-    then 0.0
-    else float_of_int cross_model_match /. float_of_int verdicts_with_generator
-  in
+  (* The ledger owns these observations. Project its unavailable rate and
+     model-identity coverage intact rather than recalculate missing data as
+     a successful zero measurement. *)
+  let measurement name = Yojson.Safe.Util.member name calibration in
   `Assoc
     [ ( "evaluator_status"
       , `String (status_to_string (evaluator_status ~calibration verdict_last)) )
     ; "last_signal_at", Json_util.float_opt_to_json verdict_last
     ; "evaluator_last_event_at", Json_util.float_opt_to_json verdict_last
     ; "fallback_ratio", `Float fallback_ratio
-    ; "cross_model_rate", `Float cross_model_rate
-    ; "cross_model_match_count", `Int cross_model_match
-    ; "verdicts_with_generator_runtime", `Int verdicts_with_generator
+    ; "distinct_runtime_rate", measurement "distinct_runtime_rate"
+    ; "distinct_runtime_count", measurement "distinct_runtime_count"
+    ; "verdicts_with_generator_runtime", measurement "verdicts_with_generator_runtime"
+    ; "model_identity_observation", measurement "model_identity_observation"
     ]
 ;;
 

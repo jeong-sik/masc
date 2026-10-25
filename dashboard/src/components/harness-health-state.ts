@@ -29,11 +29,11 @@ interface HarnessOverview {
   last_signal_at: number | null
   evaluator_last_event_at: number | null
   fallback_ratio: number
-  // Added by lib/dashboard/dashboard_harness_health.ml as part of #6565.
-  // Ratio of verdicts whose generator_runtime ≠ evaluator_runtime among
-  // verdicts that carried a generator_runtime. undefined when the backend
-  // had zero eligible verdicts to compute the ratio.
-  cross_model_rate?: number
+  // Runtime identifiers can refer to the same model. No pair means null.
+  distinct_runtime_rate?: number | null
+  distinct_runtime_count?: number
+  verdicts_with_generator_runtime?: number
+  model_identity_observation?: { kind: 'unobserved'; verdict_count: number }
 }
 
 export interface HarnessVerdictItem {

@@ -363,7 +363,7 @@ let runtime_worker_exit mode env fs config original =
     let ended,end_worker=Eio.Promise.create () in
     let delivered,deliver_notice=Eio.Promise.create () in
     let acknowledged,acknowledge=Eio.Promise.create () in
-    let directory=ref None and events=ref [] and stops=ref 0 in
+    let socket=ref None and events=ref [] and stops=ref 0 in
     let empty=`Assoc ["type",`String "object";"properties",`Assoc [];"additionalProperties",`Bool false] in
     let tool=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "owner_loss_probe";
       "inputSchema",empty;"outputSchema",output_schema]) |> string_ok in
@@ -383,7 +383,8 @@ let runtime_worker_exit mode env fs config original =
           call_exported_tool=(fun ~companion ~on_result ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->
             let admitted=match companion with Some value -> value | None -> fail "companion missing" in
             check bool "fake external worker receives original host admission" true (admitted.admit ());
-            directory:=Some (Filename.dirname admitted.context.socket_path);
+            let path=admitted.context.socket_path in
+            socket:=Some (path,Unix.lstat (Filename.dirname path),Unix.lstat path);
             (match mode with
              | Missing_terminal | Rejected_invocation -> ()
              | Known_terminal ->
@@ -459,9 +460,32 @@ max_reply_bytes = 65536
       (match mode with Known_terminal -> Eio.Promise.await acknowledged | Missing_terminal | Rejected_invocation -> ());
       Eio.Promise.resolve end_worker ();
       (match mode with Missing_terminal -> Eio.Promise.await delivered | Known_terminal | Rejected_invocation -> ());
-      let captured=match !directory with Some path -> path | None -> fail "original socket not captured" in
-      await (fun () -> not (Sys.file_exists captured));
-      check int "detected exit settles only IPC before operator Detach" 0 !stops;
+      await (fun () ->
+        match inspect () |> Yojson.Safe.Util.member "lifecycle" |> L.state_of_json |> string_ok with
+        | L.Failed _ -> true
+        | L.Attached | L.Observing -> false
+        | L.Detaching _ | L.Detached _ -> fail "original worker retired before operator Detach");
+      let captured,directory_identity,socket_identity=match !socket with
+        | Some original -> original | None -> fail "original socket not captured" in
+      (* Listener refusal is observable before Detach; it does not claim that
+         every Browser settlement has joined. Detach below joins the owner. *)
+      await (fun () ->
+        let connection=Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+        Fun.protect ~finally:(fun () -> Unix.close connection) (fun () ->
+          Unix.set_nonblock connection;
+          match Unix.connect connection (Unix.ADDR_UNIX captured) with
+          | () -> false
+          | exception Unix.Unix_error (Unix.ECONNREFUSED,_,_) -> true
+          | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINPROGRESS),_,_) -> false));
+      let check_retained () =
+        let same expected path =
+          let current=Unix.lstat path in
+          current.st_dev=expected.Unix.st_dev && current.st_ino=expected.st_ino
+          && current.st_kind=expected.st_kind in
+        check bool "original stopped IPC pathnames stay retained" true
+          (same directory_identity (Filename.dirname captured) && same socket_identity captured) in
+      check_retained ();
+      check int "detected exit closes IPC admission without stopping worker resource" 0 !stops;
       let expected=match mode with Missing_terminal -> [P.Owner_lost] | Known_terminal -> [P.Terminal]
         | Rejected_invocation -> [] in
       check bool "one original outcome and no false owner-loss notice" true (!events=expected);
@@ -475,6 +499,7 @@ max_reply_bytes = 65536
       ignore (dispatch Runtime.Detach ["instance_id",`String id]);
       Runtime.For_testing.await_run_stopped ~config ~instance_id:id;
       check int "explicit Detach still owns worker resource release" 1 !stops;
+      check_retained ();
       check bool "Detach reuses the same settlement without another notice" true (!events=expected))))))
 let ()=run "Original companion publication" ["publication",[
   test_case "manual worker exit publishes owner loss without Detach" `Quick (with_origin (runtime_worker_exit Missing_terminal));

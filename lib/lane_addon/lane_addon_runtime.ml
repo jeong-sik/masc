@@ -793,7 +793,10 @@ let stop_entry ~sw ~backend m e =
                 (match Eio.Lazy.force allocation with
                  | Error Lane_addon_companion_allocation.Unavailable -> Ok ()
                  | Error Cleanup_unconfirmed -> Error "private companion startup cleanup unconfirmed"
-                 | Ok owned -> Lane_addon_companion_allocation.cleanup owned) in
+                 | Ok owned ->
+                     (match Lane_addon_companion_allocation.cleanup owned with
+                      | Ok (Paths_retained _) -> Ok ()
+                      | Error detail -> Error detail)) in
           let private_result,worker_result=Eio.Fiber.pair companion c.worker.stop in
           match private_result,worker_result with
           | Ok (),result -> result

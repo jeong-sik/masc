@@ -216,7 +216,16 @@ let projected_defaults () = with_catalog (fun () ->
             ["label-b:overlap"] (Provider_runtime_projection.default_execution_model_strings "fixture");
           with_env "MASC_DEFAULT_PROVIDER" (Some "label-a") (fun () ->
             Alcotest.(check (list string)) "incomplete explicit configuration cannot trigger a fallback"
-              [] (Provider_runtime_projection.default_execution_model_strings "fixture")))))))
+              [] (Provider_runtime_projection.default_execution_model_strings "fixture"));
+          List.iter (fun key -> List.iter (fun value ->
+            with_env key (Some value) (fun () ->
+              Alcotest.(check (list string)) "present blank configuration cannot trigger catalog defaults"
+                [] (Provider_runtime_projection.default_execution_model_strings "fixture"))) ["";"  "])
+            ["MASC_DEFAULT_RUNTIME";"MASC_DEFAULT_PROVIDER";"MASC_DEFAULT_MODEL"];
+          with_env "MASC_DEFAULT_PROVIDER" (Some "") (fun () ->
+            with_env "MASC_DEFAULT_MODEL" (Some " ") (fun () ->
+              Alcotest.(check (list string)) "blank explicit pair cannot trigger catalog defaults"
+                [] (Provider_runtime_projection.default_execution_model_strings "fixture"))))))))
 
 let () = Alcotest.run "runtime model label binding"
   ["provider authority",["identity",`Quick,identity;"context",`Quick,context;"policy and wire",`Quick,policy];

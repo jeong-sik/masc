@@ -8,19 +8,19 @@ let split_csv_nonempty raw =
   |> List.filter (fun value -> not (String.equal value ""))
 ;;
 
-let nonempty_env name = Option.bind (Sys.getenv_opt name) String_util.trim_nonempty
-
-
 let configured_default_model_label_result () =
-  match Env_config.Model_defaults.default_runtime_opt () with
+  match Sys.getenv_opt "MASC_DEFAULT_RUNTIME" with
   | Some raw ->
     let labels = split_csv_nonempty raw in
     (match labels with
      | first :: _ -> Ok (Some first)
      | [] -> Error "MASC_DEFAULT_RUNTIME is set but empty")
   | None ->
-    (match nonempty_env "MASC_DEFAULT_PROVIDER", nonempty_env "MASC_DEFAULT_MODEL" with
-     | Some provider, Some model_id -> Ok (Some (provider ^ ":" ^ model_id))
+    (match Sys.getenv_opt "MASC_DEFAULT_PROVIDER", Sys.getenv_opt "MASC_DEFAULT_MODEL" with
+     | Some provider, Some model_id ->
+       (match String_util.trim_nonempty provider, String_util.trim_nonempty model_id with
+        | Some provider, Some model_id -> Ok (Some (provider ^ ":" ^ model_id))
+        | None, _ | _, None -> Error "Explicit provider and model must be nonempty")
      | Some _, None ->
        Error "MASC_DEFAULT_MODEL is required when MASC_DEFAULT_PROVIDER is set"
      | None, Some _ ->

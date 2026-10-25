@@ -3,11 +3,11 @@ import { artifactDraftRecoveries, discardArtifactDraftRecovery, retainArtifactDr
 const workspace = { basePath: '/recovery-fixture', mascRoot: '/recovery-fixture/.masc' }
 const target = { artifact_id: `artifact-${'d'.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
 const ids = ['recovery-a', 'recovery-b']
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); ids.forEach(discardArtifactDraftRecovery) })
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); artifactDraftRecoveries(workspace,target.artifact_id).forEach(discardArtifactDraftRecovery) })
 it('preserves retired owners separately and acknowledges only that owner’s recovery', () => {
   retainArtifactDraft(ids[0]!, workspace, target, 'first-owner')
-  retainArtifactDraft(ids[1]!, workspace, target, 'second-owner')
-  discardArtifactDraftRecovery(ids[1]!)
+  const second=retainArtifactDraft(ids[1]!, workspace, target, 'second-owner')
+  discardArtifactDraftRecovery(second)
   expect(artifactDraftRecoveries(workspace, target.artifact_id).map(record => record.state)).toEqual(['first-owner'])
   expect(artifactDraftRecoveries({ ...workspace, mascRoot: '/other/.masc' }, target.artifact_id)).toEqual([])
   expect(artifactDraftRecoveries(workspace, `artifact-${'e'.repeat(32)}`)).toEqual([])
@@ -19,7 +19,7 @@ it('can load durable recovery after module reload and keeps older generations fo
   const record = reloaded.artifactDraftRecoveries(workspace, target.artifact_id)[0]!
   expect(record.state).toBe('full CRDT snapshot'); expect(record.persisted).toBe(true)
   expect(record.target.generation).toBe(target.generation)
-  reloaded.discardArtifactDraftRecovery(ids[0]!)
+  reloaded.discardArtifactDraftRecovery(record)
 })
 it('retains the newer in-page snapshot and reports a storage failure', () => {
   retainArtifactDraft(ids[0]!, workspace, target, 'old')

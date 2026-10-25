@@ -1,7 +1,7 @@
 import * as Y from 'yjs'
 import { sendArtifactDraftCommand, type ArtifactDraftView } from '../api/artifact-drafts'
 import { streamArtifactDraft, sendArtifactPresence, sameDraftTarget, type ArtifactDraftPeer, type ArtifactDraftLiveFrame, type ArtifactDraftPosition } from '../api/artifact-draft-live'
-import { retainArtifactDraft, discardArtifactDraftRecovery } from './artifact-draft-recovery'
+import { retainArtifactDraft, discardArtifactDraftRecovery, type ArtifactDraftRecovery } from './artifact-draft-recovery'
 import type { ArtifactWorkspace } from '../api/published-artifacts'
 import { restoreSharedDocument, sharedSource, selectSharedSource, resolveSharedSelection, type SourceSelection } from './artifact-shared-document'
 
@@ -35,6 +35,7 @@ export class ArtifactLiveSession {
   private connection: AbortController | null = null
   private disposed = false
   private recoveryId = crypto.randomUUID()
+  private recoveryCopy: ArtifactDraftRecovery | null = null
   private persisted = true
   constructor(view: ArtifactDraftView, readonly workspace: ArtifactWorkspace, private changed: (state: ArtifactLiveState) => void, private isCurrent: () => boolean = () => true) {
     this.doc = restoreSharedDocument(draftBytes(view.draft.state))
@@ -67,7 +68,8 @@ export class ArtifactLiveSession {
     this.retain(); this.emit(); void this.flush()
   }
   private retain(): void {
-    this.persisted = retainArtifactDraft(this.recoveryId, this.workspace, this.state.view.draft.target, draftBase64(Y.encodeStateAsUpdate(this.doc))).persisted
+    this.recoveryCopy = retainArtifactDraft(this.recoveryId, this.workspace, this.state.view.draft.target, draftBase64(Y.encodeStateAsUpdate(this.doc)))
+    this.persisted = this.recoveryCopy.persisted
   }
   recover(state: Uint8Array): void { Y.applyUpdate(this.doc, state) }
   private receive(view: ArtifactDraftView): void {
@@ -120,7 +122,9 @@ export class ArtifactLiveSession {
       this.emit({ message: error instanceof Error ? error.message : '공유 원고 저장 결과를 확인하지 못했습니다.' })
     } finally {
       this.sending = false
-      if (!this.disposed && !this.pending) discardArtifactDraftRecovery(this.recoveryId)
+      if (!this.disposed && !this.pending && this.recoveryCopy) {
+        discardArtifactDraftRecovery(this.recoveryCopy); this.recoveryCopy = null
+      }
       this.emit()
     }
     if (this.state.connection === 'connected') void this.flush()

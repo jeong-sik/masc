@@ -37,7 +37,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   for (const char of ['a', 'b', 'c']) {
-    for (const record of artifactDraftRecoveries(workspace, `artifact-${char.repeat(32)}`)) discardArtifactDraftRecovery(record.id)
+    for (const record of artifactDraftRecoveries(workspace, `artifact-${char.repeat(32)}`)) discardArtifactDraftRecovery(record)
   }
   for (const doc of documents.splice(0)) doc.destroy()
   vi.restoreAllMocks()
@@ -219,9 +219,18 @@ it('retains the old durable recovery during an in-flight resume when browser quo
   expect(reopened.state.doc.toString()).toBe(`durable unacknowledged ${f.doc.content}`)
   expect(storage.getItem(oldKey)).toBe(durable)
   expect(artifactDraftRecoveries(workspace, f.target.artifact_id).some(record => record.id === old.id && record.persisted)).toBe(true)
+  const otherTab=new Y.Doc();documents.push(otherTab);Y.applyUpdate(otherTab,draftBytes(old.state));otherTab.getText('content').insert(0,'other tab ')
+  const external={...JSON.parse(durable!),revision:crypto.randomUUID(),state:draftBase64(sharedState(otherTab)),at:'2026-10-26T03:11:12Z'}
+  const externalKey=`masc.artifact-draft-recovery.v1:${external.id}:${external.revision}`
+  storage.setItem(externalKey,JSON.stringify(external));window.dispatchEvent(new Event('storage'))
+  await screen.findByText(`복구 원고 · ${new Date(external.at).toLocaleString()}`)
+  expect(reopened.state.doc.toString()).not.toContain('other tab ')
   acknowledge()
   await waitFor(() => expect(storage.getItem(oldKey)).toBeNull())
-  await waitFor(() => expect(artifactDraftRecoveries(workspace, f.target.artifact_id)).toHaveLength(0))
+  expect(storage.getItem(externalKey)).not.toBeNull()
+  await waitFor(() => expect(artifactDraftRecoveries(workspace, f.target.artifact_id)).toHaveLength(1))
+  expect(artifactDraftRecoveries(workspace,f.target.artifact_id)[0]?.revision).toBe(external.revision)
+  expect(screen.getAllByRole('button',{name:'공유 원고에 합치기'})).toHaveLength(1)
 })
 
 

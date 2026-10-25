@@ -74,7 +74,15 @@
       "raw_bytes": 264763,
       "selected_lines": 21,
       "file": "canonical-40212409214.txt"
+    },
+    {
+      "run": 40212994708,
+      "raw_sha256": "6ce09e22b2e0eeadbe57445708ad591520f465efa84d84e61eb33b9906deaaf9",
+      "raw_bytes": 212910,
+      "selected_lines": 30,
+      "file": "final-40212994708.txt"
     }
   ],
-  "comment_delta": "Keeper_event_bridge admission comment clarified after tested cd54792ad1f3448b42e8e6098465438fba08d952; executable behavior unchanged."
+  "comment_delta": "Keeper_event_bridge admission comment clarified after tested cd54792ad1f3448b42e8e6098465438fba08d952; executable behavior unchanged.",
+  "tested_source": "cd54792ad1f3448b42e8e6098465438fba08d952"
 }

@@ -22,7 +22,7 @@ ToolCompleted waits until post-effect observers unwind. The hold affects deliver
 | [40210824598](https://github.com/jeong-sik/masc/actions/runs/40210824598) | ff9a2aa7959b8605fcf43cfda77c1ad16ea1e311 | Pipeline fixture compile failure; no Pipeline cases. Other suites 48 PASS = 6 + 20 + 22. |
 | [40211727747](https://github.com/jeong-sik/masc/actions/runs/40211727747) | b481391fd3e9bf48114821385f62c0edaa2d88a0 | Pipeline79 PASS, product bridge 28 PASS / 2 FAIL on completion ordering and product association. |
 | [40212409214](https://github.com/jeong-sik/masc/actions/runs/40212409214) | 60b34cc77cba2a25abcb4d29a92b76f008d286f3 | SDK127 PASS = 79 + 6 + 20 + 22. Product fixture did not run: incorrect Masc.Ids module path. |
-| [40212994708](https://github.com/jeong-sik/masc/actions/runs/40212994708) | cd54792ad1f3448b42e8e6098465438fba08d952 | Requested Pipeline, projection and product bridge after fixing the fixture module path and settled-reader identity; outcome not yet read. |
+| [40212994708](https://github.com/jeong-sik/masc/actions/runs/40212994708) | cd54792ad1f3448b42e8e6098465438fba08d952 | **115 PASS = Pipeline79 + projection6 + product bridge30** after fixing the fixture module path and settled-reader identity. Both reproduced MASC failures now pass, along with the transient control and reopened canonical identity assertion. |
 
 The cases use local custom transports, not provider HTTP. Reopening creates a new reader in the same process, not an OS restart. Partial-publication injection accepts an actual bus event and raises before cursor acknowledgement; retry keeps its event identity and the handler executes once. Recursive fixtures cover shared/distinct/absent child buses and concurrent children with explicit barriers. Earlier successes do not prove later assertions or product integration.
 
@@ -30,6 +30,10 @@ Source hashes cover the changed OCaml interfaces, implementations, Dune registra
 
 ## Review and remaining scope
 
-Two independent source reviewers returned PASS at 373e98fbbd769f67e65a0c829b87194ce3bec638 against parent a2d37a3053b5b0ddb71db52f87e1d014d6bd2d93, full diff SHA256 74178e2d5e03e651f9e1a35ba62586bda3bbe9a6d13c91cb0a238fd775b1b04c. This is source review, not formal GitHub approval. The subsequent source delta only fixes the test module path and adds the changelog. PR #45999 is draft; REST stack is null and native stack submission was unavailable for this repository.
+Two independent source reviewers returned PASS at 373e98fbbd769f67e65a0c829b87194ce3bec638 against parent a2d37a3053b5b0ddb71db52f87e1d014d6bd2d93, full diff SHA256 74178e2d5e03e651f9e1a35ba62586bda3bbe9a6d13c91cb0a238fd775b1b04c. This is source review, not formal GitHub approval. The subsequent source delta only fixes the test module path and adds the changelog. PR #45999 was draft at this review boundary; REST stack is null and native stack submission was unavailable for this repository.
 
 Only durable Tool bus occurrences move in this unit. Agent/turn/provider bus lifecycle facts, Raw_trace export, typed checkpoint commits/recovery and explicit finite-run retention still need the original hard cut. Full canonical dashboard history is also outstanding. No merge, installed runtime, UI, deployment, OS restart or whole-issue completion is claimed. Both issues remain OPEN.
+
+## Final execution boundary
+
+Run 40212994708 completed SUCCESS at exact cd54792ad1f3448b42e8e6098465438fba08d952. All 115 selected cases passed; the product ordering, association and transient controls executed, rather than merely compiling. The previous journal20/lane22 result belongs to 60b34cc77cba2a25abcb4d29a92b76f008d286f3 and is not added to the final 115 or represented as a final-head run. Subsequent source changes are the bridge comment and evidence only; the recorded source hashes make that boundary explicit. Whole #27890 / #25338 acceptance, reserved-publication behavior execution, formal approval, merge and runtime proof remain outstanding.

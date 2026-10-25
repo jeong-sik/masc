@@ -4671,7 +4671,7 @@
 (test
  (name test_keeper_descriptor_schema)
  (modules test_keeper_descriptor_schema)
- (libraries alcotest yojson masc masc_test_deps eio eio_main))
+ (libraries alcotest yojson masc masc_test_deps mcp_protocol eio eio_main))
 
 (include stanzas/test_librarian_journal_failures.inc)
 

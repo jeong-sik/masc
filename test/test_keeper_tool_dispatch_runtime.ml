@@ -7515,7 +7515,7 @@ value = {surface="dashboard", content="must not run"}
         let result = (find "keeper_compose_navigate-read-recovery").call
           ~call_id:"composition-read-failure" (`Assoc []) in
         check bool "composition still reports failure" false result.success;
-        let payload = parse_json result.content in
+        let payload = structured_tool_output_exn ~base_path:config.base_path result.content in
         check string "aggregate effect evidence is unchanged"
           (if unknown_write then "effect_outcome_unknown" else "proven_post_effect")
           Yojson.Safe.Util.(payload |> member "effect_disposition" |> to_string);
@@ -7595,7 +7595,7 @@ value = {lane="automation", tabId=7, action="scroll", x=0, y=100, expectedUrl="h
 after = ["navigate"]
 [compositions.nodes.input]
 kind = "literal"
-value = {lane="automation", tabId=7, action="click", selector="#next"}
+value = {lane="automation", tabId=7, action="reload"}
 |} )
       in
       let declaration =
@@ -7638,7 +7638,7 @@ id = "second"
         check bool "the composition reports its failure" false result.success;
         check int "the navigation ran once" 1 !navigations;
         check int "the second node ran once" 1 !seconds;
-        let payload = parse_json result.content in
+        let payload = structured_tool_output_exn ~base_path:config.base_path result.content in
         check string "the completed navigation keeps the aggregate post-effect"
           "proven_post_effect"
           Yojson.Safe.Util.(payload |> member "effect_disposition" |> to_string);

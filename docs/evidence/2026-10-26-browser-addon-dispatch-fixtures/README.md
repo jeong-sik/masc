@@ -46,3 +46,22 @@ the dispatch wrapper keeps its existing Time_compat clock lifetime but delegates
 context ownership for these three cases. Other cases keep their previous binding.
 The helper restores the full environment with its existing scoped snapshot.
 Corrected execution and fresh source review are pending.
+
+The context correction at 5f3843d0e1f92ec2d5987418c9db94ccbd685d3e completed
+[40235485707](https://github.com/jeong-sik/masc/actions/runs/40235485707):
+120 executed, 112 PASS and eight composition cases FAIL; 15 separately skipped.
+The broad native browser output probe passed. The deadlock is no longer present,
+but this is not whole-suite success. Earlier SOURCE PASS did not identify two
+additional stale test assumptions now exposed by execution.
+
+The recovery cases now read the canonical durable structured result through the
+existing structured_tool_output_exn helper. It validates marker/envelope, fetches
+the actual manifest, checks its byte length and, for an inline envelope, checks
+its equality with that manifest. Native browser results contain retained artifact
+references, so the composition result can be reference-only on the provider wire;
+parsing that reference as the composition payload lost effect_disposition.
+The BrowserAct control now sends the supported reload action rather than click,
+which belongs to BrowserInteract and was refused during plan input validation.
+It still requires exactly one actual navigation and failed second-node call and
+the original terminal boundary; no expected effect or receipt assertion is removed.
+Selected execution for these corrections is pending.

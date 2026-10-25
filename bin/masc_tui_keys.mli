@@ -57,6 +57,10 @@ val mouse_toggle_label : string
 val roster_toggle_key : string
 (** Ctrl-B, as the roster pane's title names it. *)
 
+val chat_schedules_key : string
+val chat_schedules_label : string
+(** F9 folds/expands the current chat Keeper's upcoming Jobs. *)
+
 val keeper_calls_key : string
 (** [t] on a keeper: the Keeper Calls view, where a call's served input and
     output are drawn whole. *)

@@ -235,7 +235,19 @@ let test_schedule_responses_follow_keeper_and_generation () =
   check bool "A's identity action cannot mutate B's view" false
     (Types.keeper_detail_target_matches state "alpha");
   check bool "B's identity action can refresh its own view" true
-    (Types.keeper_detail_target_matches state "beta")
+    (Types.keeper_detail_target_matches state "beta");
+  state.view <- Types.Keepers Types.Keeper_message;
+  state.msg_target_keeper_name <- Some "alpha";
+  let chat_alpha = ask "alpha" in
+  Types.apply_keeper_schedules_read state chat_alpha (Ok (snapshot 4));
+  check (option string) "chat target owns its schedules even while roster selects B" (Some "alpha")
+    (Option.map fst state.keeper_schedules);
+  let off_target = ask "beta" in
+  Types.apply_keeper_schedules_read state off_target (Error "off-target failure");
+  check (option string) "another Keeper cannot replace chat observation" (Some "alpha")
+    (Option.map fst state.keeper_schedules);
+  check (option (pair string string)) "another Keeper cannot set chat read error" None
+    state.keeper_schedules_error
 
 let () =
   run "tui loading notice"

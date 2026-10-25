@@ -35,6 +35,12 @@ let test_legacy_tilde_keys () =
   check_name "end via 4" "end" "4" '~'
 ;;
 
+let test_chat_schedule_key () =
+  List.iter (fun (parameters, final) -> check_name "chat schedule toggle" "f9" parameters final)
+    ["20", '~'; "20;1", '~'; "57372;1", 'u'];
+  check_name "modified F9 stays distinct" "ctrl-f9" "20;5" '~'
+;;
+
 let test_mouse_toggle_is_separate_from_chat_queue () =
   List.iter (fun (parameters, final) ->
       check_name "mouse ownership key" "f2" parameters final)
@@ -205,6 +211,7 @@ let () =
     [ ( "legacy"
       , [ test_case "arrows keep bare names" `Quick test_legacy_arrows_keep_bare_names
         ; test_case "tilde keys" `Quick test_legacy_tilde_keys
+        ; test_case "chat schedule key" `Quick test_chat_schedule_key
         ; test_case "mouse and queue keys are distinct" `Quick
             test_mouse_toggle_is_separate_from_chat_queue
         ; test_case "Ghostty MSX checkpoint keys" `Quick test_msx_checkpoint_keys

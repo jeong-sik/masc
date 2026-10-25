@@ -955,7 +955,8 @@ let keeper_message_page_rows state =
      composer growth is already inside [keeper_message_status_rows]. Adding
      composer_max_rows here counted it twice, and every PgUp jumped four
      rows short of the screenful the comment promises. *)
-  let status_rows = keeper_message_status_rows state in
+  let status_frame = keeper_message_frame_for_viewport state ~now:(Unix.gettimeofday ()) ~terminal_rows:rows in
+  let status_rows = keeper_message_status_rows ~status_frame state in
   (* PgUp creates the reading-back notice and PgDn removes it. Reserve that
      possible row on both sides of the transition: using only the rows drawn
      right now made a 46-row pane move 38 up, then only 37 down, leaving the
@@ -1256,7 +1257,8 @@ let submit_chat_draft (state : state) ~(submit_message : string -> unit)
 
 let keeper_message_input_supported state =
   let rows, cols = get_terminal_size () in
-  let status_rows = keeper_message_status_rows state in
+  let status_frame = keeper_message_frame_for_viewport state ~now:(Unix.gettimeofday ()) ~terminal_rows:rows in
+  let status_rows = keeper_message_status_rows ~status_frame state in
   Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
     ~terminal_cols:cols
     ~status_rows:(keeper_message_support_status_rows state ~status_rows)
@@ -1346,6 +1348,10 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   (* A visible menu consumes Esc before interrupting a turn or leaving chat. *)
   | "esc" when Option.is_some command_menu ->
     state.msg_command_menu <- Masc_tui_command.Menu_dismissed (Masc_tui_message_input.contents state.msg_input);
+    true
+  | key when String.equal key Masc_tui_keys.chat_schedules_key
+             && state.view = Keepers Keeper_message ->
+    state.msg_schedules_expanded <- not state.msg_schedules_expanded;
     true
   | "\t" -> apply_autocomplete Masc_tui_command.Next
   | "shift-tab" -> apply_autocomplete Masc_tui_command.Prev
@@ -3789,6 +3795,14 @@ let launch_keeper_schedules_load state ~mailbox ~keeper_name =
       enqueue_async mailbox (Keeper_schedules_loaded (request, result)))
     (fun () ->
       Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target)
+
+(* Chat shares the exact target read with Automation. Cadence and entry share
+   an in-flight ticket instead of superseding a slow response every tick. *)
+let launch_keeper_chat_schedules_load state ~mailbox ~keeper_name =
+  if state.view = Keepers Keeper_message
+     && state.msg_target_keeper_name = Some keeper_name
+     && not (detail_read_waiting state ~tab:Detail_automation ~keeper:keeper_name) then
+    launch_keeper_schedules_load state ~mailbox ~keeper_name
 
 let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   if server_authority_ready state then begin
@@ -7709,6 +7723,9 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
 
 let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) state ~mailbox
     ~keeper_name =
+  (match state.keeper_schedules with
+   | Some (name, _) when String.equal name keeper_name && not force -> ()
+   | Some _ | None -> launch_keeper_chat_schedules_load state ~mailbox ~keeper_name);
   if force then state.msg_preparation_details <-
     Masc_tui_preparation_details.refresh ~keeper_name state.msg_preparation_details;
   launch_keeper_child_content_load
@@ -14790,7 +14807,8 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
   (if needs.Masc_tui_types.needs_keeper_chat then
      Option.iter (fun keeper_name ->
          launch_keeper_native_tasks_load state ~mailbox ~keeper_name;
-         launch_keeper_child_content_load state ~mailbox ~keeper_name)
+         launch_keeper_child_content_load state ~mailbox ~keeper_name;
+         launch_keeper_chat_schedules_load state ~mailbox ~keeper_name)
        state.msg_target_keeper_name);
   (* The chat pane's history comes down its own generation-guarded path, not
      in the surface bundle, so the tick asks for it here. Without this the

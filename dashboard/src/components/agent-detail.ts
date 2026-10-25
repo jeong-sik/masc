@@ -363,10 +363,11 @@ export function AgentDetailOverlay() {
           <${AgentWorkerBrief} agentName=${agentName} />
           ${agentFitness.value ? html`
             <${CollapsibleSection} title="관측된 작업 성과 (시작일 기준 7일)" mountWhenOpen=${true}>
+              <p class="text-xs text-[var(--color-fg-muted)]">Task 생명주기 기록입니다. 외부 수용 여부는 이 통계에서 미관측이며, Goal의 사람 확인은 별도입니다.</p>
               <div class="grid grid-cols-3 gap-3">
                 ${([
                   ['완료율', agentFitness.value.completion],
-                  ['신뢰도', agentFitness.value.reliability],
+                  ['작업 승인률', agentFitness.value.task_lifecycle_success],
                   ['인계 관련 작업 성공률', agentFitness.value.handoff_task_success],
                 ] as [string, number | null][]).map(([label, val]) => html`
                   <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3 text-center">

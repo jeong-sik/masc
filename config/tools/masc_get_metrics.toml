@@ -1,6 +1,6 @@
 name = "masc_get_metrics"
 description = """
-Observed Task performance for one exact agent identity, grouped by Task ID within the Task start-time window. Counts distinguish raw records, conflicting, completed, successful and failed Tasks. The latest terminal timestamp wins; contradictory latest outcomes or start times leave only that Task unresolved. Missing duration or outcome denominators are null. Handoff Task success describes outcomes with observed references, not delivery receipts."""
+Task success and fitness components measure recorded Task lifecycle outcomes only. Verifier approval does not establish external acceptance or Goal success; external acceptance coverage is explicitly unobserved in this stream and human Goal confirmation remains separate. Observed Task performance for one exact agent identity, grouped by Task ID within the Task start-time window. Counts distinguish raw records, conflicting, completed, successful and failed Tasks. The latest terminal timestamp wins; contradictory latest outcomes or start times leave only that Task unresolved. Missing duration or outcome denominators are null. Handoff Task success describes outcomes with observed references, not delivery receipts."""
 additional_properties = false
 
 

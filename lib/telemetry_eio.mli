@@ -41,6 +41,8 @@ type event =
       task_id : string;
       duration_ms : int;
       success : bool;
+      (** Task lifecycle approval/cancellation, not external acceptance or
+          Goal confirmation. Existing persisted event format is unchanged. *)
     }
   | Error_occurred of {
       code : string;
@@ -148,7 +150,7 @@ val track_task_completed :
   config ->
   task_id:string ->
   duration_ms:int ->
-  success:bool ->
+  terminal:Task_outcome_measurement.terminal ->
   unit
 
 val track_error :

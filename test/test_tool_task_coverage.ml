@@ -2840,12 +2840,12 @@ let () = test "handle_transition_cancel_metric_carries_the_stated_reason" (fun (
               ~task_id:_
               ~started_at:_
               ~completed_at:_
-              ~success
+              ~terminal
               ~error_message
               ~collaborators:_
               ~handoff_from:_
               ~handoff_to:_ ->
-            recorded := (success, error_message) :: !recorded);
+            recorded := (terminal, error_message) :: !recorded);
        let result =
          Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
            (`Assoc
@@ -2856,7 +2856,7 @@ let () = test "handle_transition_cancel_metric_carries_the_stated_reason" (fun (
              ])
        in
        if not (Tool_result.is_success result) then failwith (Tool_result.message result));
-  assert (!recorded = [ (false, Some "the premise this rests on is gone") ])
+  assert (!recorded = [ (Task_outcome_measurement.Cancelled, Some "the premise this rests on is gone") ])
 )
 
 let () = test "add_task_refuses_replaced_workspace_before_creation" (fun () ->
@@ -3178,11 +3178,11 @@ let () =
         Atomic.set Workspace_hooks.record_task_metric_fn previous_metric)
       (fun () ->
         Atomic.set Workspace_hooks.record_task_metric_fn
-          (fun config ~agent_id ~task_id ~started_at ~completed_at ~success
+          (fun config ~agent_id ~task_id ~started_at ~completed_at ~terminal
                ~error_message ~collaborators ~handoff_from ~handoff_to ->
-             metric_events := (agent_id, success, collaborators) :: !metric_events;
+             metric_events := (agent_id, terminal, collaborators) :: !metric_events;
              previous_metric config ~agent_id ~task_id ~started_at ~completed_at
-               ~success ~error_message ~collaborators ~handoff_from ~handoff_to);
+               ~terminal ~error_message ~collaborators ~handoff_from ~handoff_to);
         let approved =
           Workspace.commit_verdict_r
             ctx.config
@@ -3198,12 +3198,14 @@ let () =
         | Error error -> failwith (Masc_domain.masc_error_to_string error));
     (* Credited to the producer with no collaborators: the authority is not an
        agent, so it never enters the collaborator set. *)
-    assert (List.mem ("producer", true, []) !metric_events);
+    assert (List.mem ("producer", Task_outcome_measurement.Approved, []) !metric_events);
     match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:"producer" ~days:1 with
     | Ok (Some metrics) ->
         assert (metrics.record_count = 1 && metrics.total_tasks = 1);
         assert (metrics.completed_tasks = 1 && metrics.successful_tasks = 1);
-        assert (metrics.conflicting_tasks = 0)
+        assert (metrics.conflicting_tasks = 0);
+        assert (metrics.outcome_basis = Task_outcome_measurement.Task_lifecycle);
+        assert (metrics.external_acceptance = Task_outcome_measurement.Unobserved { completed_tasks = 1 })
     | Ok None -> failwith "approved Task has no metric observation"
     | Error error -> failwith (Metrics_store_eio.read_error_to_string error))
 ;;

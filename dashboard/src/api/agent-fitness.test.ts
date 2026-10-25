@@ -13,9 +13,10 @@ vi.mock('../api', async importOriginal => ({
 
 const pending = () => ({
   agent_id: ' Exact ',
-  components: { completion: 0, reliability: null, speed: null, handoff_task_success: null },
+  components: { completion: 0, task_lifecycle_success: null, speed: null, handoff_task_success: null },
   metrics: {
     agent_id: ' Exact ', period_start: 100, period_end: 200,
+    outcome_basis: 'task_lifecycle', external_acceptance: { kind: 'unobserved', completed_tasks: 0 },
     record_count: 2, total_tasks: 1, conflicting_tasks: 0, completed_tasks: 0, successful_tasks: 0, failed_tasks: 0,
     avg_completion_time_s: null, task_completion_rate: 0, task_success_rate: null, error_rate: null,
     handoff_tasks: 1, completed_handoff_tasks: 0, successful_handoff_tasks: 0,
@@ -25,9 +26,10 @@ const pending = () => ({
 const response = (row: unknown = pending()) => ({ count: 1, agents: [row] })
 const failed = () => ({
   agent_id: ' Exact ',
-  components: { completion: 1, reliability: 0, speed: null, handoff_task_success: 0 },
+  components: { completion: 1, task_lifecycle_success: 0, speed: null, handoff_task_success: 0 },
   metrics: {
     ...pending().metrics, completed_tasks: 1, failed_tasks: 1, avg_completion_time_s: 0,
+    external_acceptance: { kind: 'unobserved', completed_tasks: 1 },
     task_completion_rate: 1, task_success_rate: 0, error_rate: 1,
     completed_handoff_tasks: 1, handoff_task_success_rate: 0,
   },
@@ -57,8 +59,8 @@ describe('named Task performance delivery', () => {
       response({ ...row, agent_id: 'Exact' }),
       response({ ...row, metrics: { ...row.metrics, agent_id: 'Exact' } }),
       response({ ...row, metrics: null }),
-      response({ ...row, components: { completion: 0, reliability: null, speed: null } }),
-      response({ ...row, components: { ...row.components, reliability: undefined } }),
+      response({ ...row, components: { completion: 0, task_lifecycle_success: null, speed: null } }),
+      response({ ...row, components: { ...row.components, task_lifecycle_success: undefined } }),
       response({ ...row, components: { ...row.components, handoff_task_success: 1 } }),
       response({ ...row, metrics: { ...row.metrics, avg_completion_time_s: 0 } }),
       response({ ...row, metrics: { ...row.metrics, record_count: 0 } }),
@@ -84,6 +86,24 @@ describe('named Task performance delivery', () => {
       expect(() => parseAgentFitness(response({ ...row,
         metrics: { ...row.metrics, conflicting_tasks: value },
       }), ' Exact ')).toThrow()
+    }
+  })
+
+  it('scopes Task approval to lifecycle evidence and refuses invented external acceptance', () => {
+    const row = failed()
+    const approved = {
+      ...row,
+      components: { ...row.components, task_lifecycle_success: 1, handoff_task_success: 1 },
+      metrics: { ...row.metrics, successful_tasks: 1, failed_tasks: 0,
+        task_success_rate: 1, error_rate: 0, successful_handoff_tasks: 1, handoff_task_success_rate: 1 },
+    }
+    expect(parseAgentFitness(response(approved), ' Exact ')?.task_lifecycle_success).toBe(1)
+    for (const metrics of [
+      { ...approved.metrics, outcome_basis: 'external_acceptance' },
+      { ...approved.metrics, external_acceptance: { kind: 'accepted', completed_tasks: 1 } },
+      { ...approved.metrics, external_acceptance: { kind: 'unobserved', completed_tasks: 0 } },
+    ]) {
+      expect(() => parseAgentFitness(response({ ...approved, metrics }), ' Exact ')).toThrow()
     }
   })
 

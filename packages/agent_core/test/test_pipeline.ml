@@ -1863,6 +1863,68 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
       (List.length tail.events)
 ;;
 
+let test_durable_tool_bus_uses_canonical_facts () =
+  with_execution_test_dir "agent_core-tool-observation-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let bus=Event_bus.create () in
+  let config=match Event_bus.subscription_config ~capacity:16 ~overflow:Event_bus.Drop_newest with
+    | Ok config -> config | Error _ -> Alcotest.fail "invalid fixture subscription" in
+  let sub=Event_bus.subscribe ~config ~filter:Event_bus.filter_tools_only bus in
+  let during=ref [] and tool_calls=ref 0 and locator=ref None in
+  let tool=Tool.create ~name:"canonical_tool" ~description:"observe exact commit identity"
+      ~parameters:[] (fun _ ->
+        during:=Event_bus.drain sub;incr tool_calls;
+        Ok {Types.content="settled";content_blocks=None;_meta=None}) in
+  let responses=ref
+    [Provider_mock.tool_use_response ~tool_name:"canonical_tool" ~tool_input:(`Assoc []) () [];
+     Provider_mock.text_response "done" []] in
+  let next ()=match !responses with
+    | response::rest -> responses:=rest;Ok response
+    | [] -> Alcotest.fail "unexpected provider retry" in
+  let transport=Llm_provider.Llm_transport.custom
+    {complete_sync=(fun _ -> {Llm_provider.Llm_transport.response=next ();latency_ms=None});
+     complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> next ())} in
+  let agent=Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool]
+      ~config:{(Types.default_config ~model:"test-model") with name="canonical-bus"}
+      ~options:{Agent.default_options with transport=Some transport;event_bus=Some bus;
+        provider_config=Some (Provider_mock.to_provider_config ())} () in
+  let store=Agent.execution_store ~runtime ~dir
+      ~on_scope_ready:(fun value ->locator:=Some value;Ok ()) () in
+  (match Agent.run ~sw ~execution_store:store agent "observe the effect" with
+   | Ok _ -> () | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check int) "tool effect once" 1 !tool_calls;
+  Alcotest.(check int) "called observation arrives before effect" 1 (List.length !during);
+  let observations= !during @ Event_bus.drain sub in
+  Alcotest.(check int) "one called and one completed observation" 2 (List.length observations);
+  let locator=match !locator with Some locator->locator |None->Alcotest.fail "missing locator" in
+  let projection=match Agent.open_execution_projection ~runtime ~dir locator with
+    | Ok projection->projection |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let page=match Agent.Execution_projection.read_page projection
+      ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+    | Ok page->page |Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let fact is_called=List.find (fun (event:Agent.Execution_projection.event)->
+      match event.payload with
+      | Node_opened {kind=Tool_attempt;_}->is_called
+      | Node_updated {update=Tool_result _;_}->not is_called
+      | Node_opened _ | Node_updated _ | Node_closed _->false) page.events in
+  List.iter (fun (observation:Event_bus.event)->
+    let is_called=match observation.payload with
+      | ToolCalled _->true |ToolCompleted _->false
+      | _->Alcotest.fail "non-tool observation escaped filter" in
+    let source=fact is_called in
+    Alcotest.(check (option int)) "bus occurrence uses canonical sequence" (Some source.seq) observation.meta.seq;
+    Alcotest.(check string) "bus occurrence uses canonical event id"
+      (Agent.Execution_projection.Event_id.to_string source.event_id) observation.meta.event_id;
+    Alcotest.(check string) "bus occurrence uses canonical run id"
+      (Agent.Execution_projection.Run_id.to_string source.run_id) observation.meta.run_id;
+    Alcotest.(check string) "bus occurrence uses canonical correlation id"
+      (Agent.Execution_projection.Correlation_id.to_string source.correlation_id) observation.meta.correlation_id;
+    Alcotest.(check (option string)) "canonical parent event is preserved"
+      (Option.map Agent.Execution_projection.Event_id.to_string source.parent_event_id) observation.meta.parent_event_id;
+    Alcotest.(check (option string)) "no synthetic lifecycle causation replaces source facts" None observation.meta.caused_by)
+    observations
+;;
+
 let test_terminal_disposition_observes_cancellation () =
   with_execution_test_dir "agent_core-agent-terminal-cancel-"
   @@ fun ~env ~sw ~runtime ~dir ->
@@ -4511,6 +4573,10 @@ let () =
             "completion callback diagnostic preserves committed success"
             `Quick
             (test_trace_finalization_preserves_committed_success Callback_diagnostic_failed)
+        ; Alcotest.test_case
+            "durable tool bus uses canonical committed facts"
+            `Quick
+            test_durable_tool_bus_uses_canonical_facts
         ; Alcotest.test_case
             "terminal disposition observes cancellation"
             `Quick

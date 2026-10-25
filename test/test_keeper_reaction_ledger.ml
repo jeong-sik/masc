@@ -771,7 +771,7 @@ let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
   check_member_string "durable queue parse error path" path "path" read_error
 ;;
 
-let test_lock_free_observation_rejects_generation_change () =
+let test_lock_free_observation_rejects_generation_change ~full_state () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "observation-generation-change" in
   let first = schedule_due_stimulus ~schedule_id:"before-observation" () in
@@ -784,20 +784,24 @@ let test_lock_free_observation_rejects_generation_change () =
    with
    | Ok _ -> ()
    | Error error -> failf "failed to seed durable event queue: %s" error);
+  let between_samples () =
+    match
+      Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+        ~base_path ~keeper_name second
+    with
+    | Ok _ -> ()
+    | Error error -> failf "failed to mutate durable event queue: %s" error
+  in
   let observed =
-    Keeper_event_queue_persistence.For_testing
-    .observe_snapshot_with_errors_with_interleave
-      ~between_samples:(fun () ->
-        match
-          Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
-            ~base_path
-            ~keeper_name
-            second
-        with
-        | Ok _ -> ()
-        | Error error -> failf "failed to mutate durable event queue: %s" error)
-      ~base_path
-      ~keeper_name
+    if full_state then
+      match Keeper_event_queue_persistence.For_testing.observe_state_result_with_interleave
+        ~between_samples ~base_path ~keeper_name with
+      | Ok _ -> fail "generation change became a coherent full state"
+      | Error read_errors ->
+        { Keeper_event_queue_persistence.pending = Keeper_event_queue.empty; read_errors }
+    else
+      Keeper_event_queue_persistence.For_testing.observe_snapshot_with_errors_with_interleave
+        ~between_samples ~base_path ~keeper_name
   in
   check int
     "incoherent observation returns exactly one typed error"
@@ -1172,6 +1176,92 @@ let test_quarantine_is_keeper_local () =
     (healthy_summary |> member "pending_stimulus_count" |> to_int);
   check int "healthy keeper current reaction is preserved" 1
     (healthy_summary |> member "reaction_count" |> to_int)
+;;
+
+let durable_files root =
+  let rec collect path =
+    if Sys.is_directory path then
+      Sys.readdir path |> Array.to_list |> List.sort String.compare
+      |> List.concat_map (fun name -> collect (Filename.concat path name))
+    else [ path, In_channel.with_open_bin path In_channel.input_all ]
+  in
+  collect root
+;;
+
+let test_full_observation_keeps_unprojected_schedule_terminal () =
+  with_temp_base @@ fun base_path ->
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let keeper_name = "schedule-observation" in
+  let source = schedule_due_stimulus () in
+  let observe () =
+    match Keeper_event_queue_persistence.observe_state_result ~base_path ~keeper_name with
+    | Ok state -> state
+    | Error errors -> failf "full observation failed with %d errors" (List.length errors)
+  in
+  let empty = observe () in
+  check int "absent store observes empty pending" 0
+    (Keeper_event_queue.length (Keeper_event_queue_state.pending empty));
+  check int "absence creates no files" 0 (List.length (durable_files base_path));
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name source;
+  ignore (Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+    ~base_path ~keeper_name source |> require_ok "enqueue scheduled occurrence");
+  let selection =
+    match Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name
+      |> require_ok "select scheduled occurrence" with
+    | [ selection ] -> selection
+    | _ -> fail "expected one exact scheduled occurrence"
+  in
+  let captured = ref None in
+  let result = Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
+    ~base_path ~keeper_name ~applied_at:1235.0 ~selection
+    ~after_commit:(fun pending ->
+      (* The real transaction still owns its lock here. This read must neither
+         enter that lock again nor project/compact the committed evidence. *)
+      let before = durable_files base_path in
+      let state = observe () in
+      check int "callback pending agrees with full observed state"
+        (Keeper_event_queue.length pending)
+        (Keeper_event_queue.length (Keeper_event_queue_state.pending state));
+      check (list (pair string string)) "full observer leaves every durable byte unchanged"
+        before (durable_files base_path);
+      captured := Some state)
+    () |> require_ok "commit scheduled turn terminal"
+  in
+  let receipt = match result with
+    | Keeper_event_queue_persistence.Turn_terminal_committed
+        (Keeper_event_queue_persistence.Transition_applied receipt
+        | Keeper_event_queue_persistence.Transition_already_applied receipt) -> receipt
+    | Keeper_event_queue_persistence.Turn_terminal_committed
+        (Keeper_event_queue_persistence.Transition_committed_followup_failed { detail; _ }) -> fail detail
+    | Keeper_event_queue_persistence.Turn_selection_withdrawn -> fail "scheduled source was withdrawn"
+  in
+  let state = match !captured with Some state -> state | None -> fail "commit callback did not observe" in
+  check int "committed schedule has left pending" 0
+    (Keeper_event_queue.length (Keeper_event_queue_state.pending state));
+  (match Keeper_event_queue_state.transition_outbox state with
+   | [ entry ] ->
+     check bool "full observation retains the actual transaction receipt" true
+       (Keeper_event_queue_state.transition_receipt_equal receipt entry.receipt);
+     check bool "outbox retains exact schedule source" true (entry.stimuli = [ source ])
+   | _ -> fail "unprojected scheduled terminal was lost");
+  (match Keeper_event_queue_state.schedule_occurrences state with
+   | [ { occurrence_id; occurrence_state =
+       Occurrence_completed (Terminal_evidence_pending transition_id); _ } ] ->
+     check string "exact occurrence survives pending removal" source.post_id occurrence_id;
+     check string "pending projection names the real transition" receipt.transition_id transition_id
+   | _ -> fail "full observer concealed the pending terminal projection");
+  let evidence = Keeper_reaction_ledger.event_queue_reaction_evidence_result
+    ~base_path ~keeper_name ~stimulus_id:source.post_id in
+  (match evidence with
+   | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+     check bool "dispatch exists" true evidence.stimulus_seen;
+     check bool "observation does not invent a projected ACK" false evidence.event_queue_ack_seen
+   | Ok (Keeper_reaction_ledger.Evidence_quarantined _) | Error _ -> fail "expected readable dispatch-only ledger");
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+    ~base_path ~keeper_name ~expected_transition_id:receipt.transition_id
+    |> require_ok "project actual scheduled ACK";
+  check int "later observation sees outbox retirement" 0
+    (Keeper_event_queue_state.transition_outbox (observe ()) |> List.length)
 ;;
 
 let consume_delivery_source ~base_path ~keeper_name source =
@@ -1996,7 +2086,15 @@ let () =
         ; test_case
             "lock-free observation rejects generation change"
             `Quick
-            test_lock_free_observation_rejects_generation_change
+            (test_lock_free_observation_rejects_generation_change ~full_state:false)
+        ; test_case
+            "full-state observation rejects generation change"
+            `Quick
+            (test_lock_free_observation_rejects_generation_change ~full_state:true)
+        ; test_case
+            "full observation retains unprojected scheduled terminal under owner lock"
+            `Quick
+            test_full_observation_keeps_unprojected_schedule_terminal
         ; test_case
             "unknown reaction is quarantined without clearing pending"
             `Quick

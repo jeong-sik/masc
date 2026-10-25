@@ -178,6 +178,10 @@ val ready_hitl_resolution_peek
 type spent_selection_reconciliation =
   | Selection_actionable
   | Spent_grant_replay_acknowledged
+  | Tool_result_hint_retired
+      (** Retire only the queue hint because its exact receipt was ACKed or
+          the current route cannot consume Codex receipts. In the latter case
+          the result remains unread and is rediscovered if Codex returns. *)
   | Absent_grant_retired of
       { approval_id : string
       ; absence : Keeper_approval_queue_result.resolution_absence
@@ -199,6 +203,10 @@ val reconcile_spent_selection
     ([Keeper_approval_queue_result.resolution_absence]) retires it as
     [Absent_grant_retired]: reading again cannot change that answer, and a
     turn spent on it fails at the same replay lookup every cycle. *)
+(** Tool-result hints check the current route before reading the outbox. An
+    unreadable Codex receipt retains its selection. A receipt ACKed elsewhere,
+    or a route unable to consume Codex receipts, retires just the hint without
+    a model turn or receipt ACK; unsupported routes never read its body. *)
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events] reads one exact durable queue snapshot in queue

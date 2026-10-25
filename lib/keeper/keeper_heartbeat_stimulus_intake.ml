@@ -111,6 +111,7 @@ let pending_board_events_of_stimulus_result ~base_path ~meta_after_triage stim =
      | Ok event -> Stimulus_consumed [event]
      | Error error -> Stimulus_job_unavailable (completion.oj_job_id,error))
   | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Tool_result_ready _
   | Keeper_event_queue.Bootstrap | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _ | Keeper_event_queue.Ask_answered _
@@ -198,6 +199,8 @@ let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
 let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   match stim.payload with
   | Keeper_event_queue.Bootstrap -> Some Keeper_world_observation.Bootstrap_stimulus
+  | Keeper_event_queue.Tool_result_ready _ ->
+    Some Keeper_world_observation.Tool_result_ready_stimulus
   | Keeper_event_queue.Schedule_due _ ->
     Some Keeper_world_observation.Scheduled_automation_stimulus
   | Keeper_event_queue.Connector_attention _ ->
@@ -376,7 +379,7 @@ let consume_single_heartbeat_stimulus
          | Keeper_event_queue.Delegate_failed _ -> "failed")
         meta_after_triage.name;
       pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
-    | Keeper_event_queue.Owned_job_completed _ ->
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ ->
       pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
     | Keeper_event_queue.Composition_completed cc ->
       (* Same shape as [Delegate_completed]: work this Keeper started and did
@@ -474,7 +477,7 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Workspace_message _
   | Keeper_event_queue.Delegate_completed _
   | Keeper_event_queue.Composition_completed _
-  | Keeper_event_queue.Owned_job_completed _
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
   | Keeper_event_queue.Task_outcome _ ->
     true
 ;;
@@ -555,7 +558,7 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
          | Keeper_event_queue.Workspace_message _
          | Keeper_event_queue.Delegate_completed _
          | Keeper_event_queue.Composition_completed _
-         | Keeper_event_queue.Owned_job_completed _
+         | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
          | Keeper_event_queue.Task_outcome _ -> None)
       (Keeper_event_queue.to_list pending)
 ;;
@@ -569,6 +572,7 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
 type spent_selection_reconciliation =
   | Selection_actionable
   | Spent_grant_replay_acknowledged
+  | Tool_result_hint_retired
   | Absent_grant_retired of
       { approval_id : string
       ; absence : Keeper_approval_queue_result.resolution_absence
@@ -580,6 +584,25 @@ let reconcile_spent_selection
       (selection : Keeper_event_queue_state.pending_selection)
   =
   match selection.source.Keeper_event_queue.payload with
+  | Tool_result_ready receipt_id ->
+    let ( let* ) = Result.bind in
+    let base_path = config.Workspace_utils.base_path in
+    let retire_hint () =
+      let* () = Keeper_registry_event_queue.ack_pending_result ~base_path keeper_name ~selection in
+      Ok Tool_result_hint_retired
+    in
+    let* meta = Keeper_meta_store.read_effective_meta config keeper_name in
+    (match meta with
+     | Some meta when Keeper_codex_tool_outbox_wake.route_can_consume meta ->
+       let* snapshot = Keeper_codex_tool_outbox.load ~base_path ~keeper_name in
+       if Keeper_codex_tool_outbox.contains_receipt snapshot ~receipt_id then
+         Ok Selection_actionable
+       else retire_hint ()
+     | Some _ | None ->
+       (* Route retirement must not depend on a store that this client cannot
+          consume. Even unreadable evidence stays untouched while unrelated
+          work proceeds; Codex re-entry resumes authoritative receipt reads. *)
+       retire_hint ())
   | Schedule_due _ -> Ok Selection_actionable
   | Hitl_resolved {approval_id; decision=Keeper_event_queue.Hitl_approved; _}
     when Keeper_approval_queue.continuation_settled_chat_projection_present
@@ -808,7 +831,7 @@ let heartbeat_event_intake
     | Keeper_event_queue.Workspace_message _
     | Keeper_event_queue.Delegate_completed _
     | Keeper_event_queue.Composition_completed _
-    | Keeper_event_queue.Owned_job_completed _
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
     | Keeper_event_queue.Task_outcome _ ->
       None
   in
@@ -846,7 +869,7 @@ let heartbeat_event_intake
            | Keeper_event_queue.Workspace_message _
            | Keeper_event_queue.Delegate_completed _
            | Keeper_event_queue.Composition_completed _
-           | Keeper_event_queue.Owned_job_completed _
+           | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
            | Keeper_event_queue.Task_outcome _ ->
              true)
         selections
@@ -868,7 +891,7 @@ let heartbeat_event_intake
     | Keeper_event_queue.Workspace_message _
     | Keeper_event_queue.Delegate_completed _
     | Keeper_event_queue.Composition_completed _
-    | Keeper_event_queue.Owned_job_completed _
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
     | Keeper_event_queue.Task_outcome _ -> false
   in
   let consume_batch selections =
@@ -956,6 +979,9 @@ let heartbeat_event_intake
               keeper=%s"
              keeper_name;
            loop remaining observations_rev selections_rev first_withdrawn rest
+         | Ok Tool_result_hint_retired ->
+           Log.Keeper.info "turn entry: retired inactive tool result hint keeper=%s" keeper_name;
+           loop remaining observations_rev selections_rev first_withdrawn rest
          | Ok (Absent_grant_retired { approval_id; absence }) ->
            Log.Keeper.warn
              "turn entry: retired approved Gate resolution without a durable \
@@ -1031,7 +1057,7 @@ let heartbeat_event_intake
              | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
              | Keeper_event_queue.Hitl_resolved _ | Keeper_event_queue.Completion_authority_rejected _
              | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-             | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
+             | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
              | Keeper_event_queue.Task_outcome _ -> None
            in
            (match

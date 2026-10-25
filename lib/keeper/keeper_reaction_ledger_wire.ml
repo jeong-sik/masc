@@ -17,6 +17,7 @@ type stimulus_kind =
   | Delegate_completed  (* One Keeper's answer to a turn another asked it to run *)
   | Composition_completed  (* An async composition this Keeper submitted has settled *)
   | Owned_job_completed
+  | Tool_result_ready
 
 type reaction_kind =
   | Turn_started
@@ -46,6 +47,7 @@ let stimulus_kind_to_string = function
   | Delegate_completed -> "keeper_delegate_completed"
   | Composition_completed -> "keeper_composition_completed"
   | Owned_job_completed -> "owned_job_completed"
+  | Tool_result_ready -> "tool_result_ready"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -67,6 +69,7 @@ let stimulus_kind_of_string = function
   | "keeper_delegate_completed" -> Some Delegate_completed
   | "keeper_composition_completed" -> Some Composition_completed
   | "owned_job_completed" -> Some Owned_job_completed
+  | "tool_result_ready" -> Some Tool_result_ready
   | _ -> None
 ;;
 
@@ -514,7 +517,7 @@ let decode_current_row ~keeper_name row =
         | Task_cancelled
         | Workspace_message
         | Delegate_completed
-        | Composition_completed | Owned_job_completed ),
+        | Composition_completed | Owned_job_completed | Tool_result_ready ),
         _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in

@@ -692,6 +692,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     let reconcile_owned_job_completions () =
       Keeper_owned_job_completion_wake.pulse ~sw owned_job_completions
     in
+    let unread_tool_results = Keeper_codex_tool_outbox_wake.create ~config in
+    let reconcile_unread_tool_results () =
+      Keeper_codex_tool_outbox_wake.pulse ~sw unread_tool_results
+    in
     let ask_answers = Keeper_ask_answer_wake.create ~base_path:config.base_path () in
     let reconcile_ask_answers () =
       Keeper_ask_answer_wake.pulse ~sw ask_answers
@@ -699,6 +703,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     reconcile_goal_events ();
     reconcile_composition_completions ();
     reconcile_owned_job_completions ();
+    reconcile_unread_tool_results ();
     reconcile_prepared_continuations ();
     reconcile_ask_answers ();
     project_transition_outboxes Server_transition_outbox_recovery.Startup;
@@ -715,6 +720,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       reconcile_goal_events ();
       reconcile_composition_completions ();
       reconcile_owned_job_completions ();
+      reconcile_unread_tool_results ();
       reconcile_prepared_continuations ();
       reconcile_ask_answers ();
       (try

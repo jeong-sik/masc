@@ -9,6 +9,10 @@ val retain :
   Runtime_codex_app_server.undelivered_tool_result -> (unit, string) result
 
 val load : base_path:string -> keeper_name:string -> (snapshot, string) result
+val receipt_ids : snapshot -> string list
+(** Exact SHA256 identities of the validated committed receipts. Staging files
+    and provider execution cell numbers are not receipt identities. *)
+val contains_receipt : snapshot -> receipt_id:string -> bool
 val developer_context : snapshot -> string list
 
 val acknowledge : snapshot -> (unit, string) result

@@ -134,7 +134,7 @@ let connector_attention_pending_selections ~base_path ~keeper_name =
     | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
     | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-    | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
+    | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
     | Keeper_event_queue.Task_outcome _ -> false)
 
 let connector_attention_evidence ~keeper_name selections =
@@ -150,7 +150,7 @@ let connector_attention_evidence ~keeper_name selections =
             | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
             | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
             | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-            | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
+            | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
             | Keeper_event_queue.Task_outcome _ -> None)
   in
   let oldest =

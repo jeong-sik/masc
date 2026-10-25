@@ -69,6 +69,12 @@ let load ~base_path ~keeper_name =
     | Some json -> let* () = validate path json in Ok ({path; json} :: acc)) (Ok []) names in
   Ok {directory; entries = List.rev entries}
 
+let receipt_ids snapshot =
+  List.map (fun entry -> Filename.remove_extension (Filename.basename entry.path)) snapshot.entries
+
+let contains_receipt snapshot ~receipt_id =
+  List.exists (String.equal receipt_id) (receipt_ids snapshot)
+
 let developer_context snapshot =
   match snapshot.entries with
   | [] -> []

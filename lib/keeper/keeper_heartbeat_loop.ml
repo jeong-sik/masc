@@ -437,7 +437,7 @@ let stimulus_owns_turn_reaction (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Workspace_message _
   | Keeper_event_queue.Delegate_completed _
   | Keeper_event_queue.Composition_completed _
-  | Keeper_event_queue.Owned_job_completed _
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
   | Keeper_event_queue.Task_outcome _ -> false
 ;;
 
@@ -471,7 +471,7 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Workspace_message _
        | Keeper_event_queue.Delegate_completed _
        | Keeper_event_queue.Composition_completed _
-       | Keeper_event_queue.Owned_job_completed _
+       | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
        | Keeper_event_queue.Task_outcome _ -> ())
     stimuli
 ;;
@@ -630,7 +630,7 @@ let retain_connector_attention_sources ~base_path ~keeper_name selections =
        | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
        | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-       | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
+       | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
        | Keeper_event_queue.Task_outcome _ -> ())
     selections
 ;;
@@ -1188,7 +1188,7 @@ let run_keepalive_unified_turn
                   | Keeper_event_queue.Completion_authority_rejected _
                   | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
                   | Keeper_event_queue.Delegate_completed _
-                  | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> None)
+                  | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> None)
                 (Keeper_heartbeat_source_batch.stimuli !source_batch)
             with
             | Some resolution -> Some resolution
@@ -1368,7 +1368,7 @@ let run_keepalive_unified_turn
                | Keeper_event_queue.Completion_authority_rejected _
                | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
                | Keeper_event_queue.Delegate_completed _
-               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> true
+               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> true
              in
              let selections_to_ack, retained_selections =
                List.partition should_ack selections
@@ -1405,7 +1405,7 @@ let run_keepalive_unified_turn
                  | Keeper_event_queue.Completion_authority_rejected _
                  | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
                  | Keeper_event_queue.Delegate_completed _
-                 | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> true)
+                 | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> true)
            | Batch_no_action -> ());
       { meta = meta_after_cycle
       ; cycle_status =

@@ -440,7 +440,7 @@ let pending_asks ~base_path ~keeper_name =
           | Keeper_event_queue.Ask_answered payload -> Some (source, payload)
           | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
           | Fusion_completed _ | Composition_completed _ | Schedule_due _
-          | Owned_job_completed _
+          | Tool_result_ready _ | Owned_job_completed _
           | Connector_attention _ | Hitl_resolved _ | Completion_authority_rejected _
           | Task_outcome _ | Task_cancelled _ | Workspace_message _ | Delegate_completed _ -> None)
 ;;

@@ -34,6 +34,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Workspace_message _ -> Workspace_message
   | Keeper_event_queue.Delegate_completed _ -> Delegate_completed
   | Keeper_event_queue.Composition_completed _ -> Composition_completed
+  | Keeper_event_queue.Tool_result_ready _ -> Tool_result_ready
   | Keeper_event_queue.Owned_job_completed _ -> Owned_job_completed
 ;;
 
@@ -58,7 +59,7 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
       | Keeper_event_queue.Task_cancelled _
       | Keeper_event_queue.Workspace_message _
       | Keeper_event_queue.Delegate_completed _
-      | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
+      | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
       | Keeper_event_queue.Task_outcome _ )
     , (( Board_signal
        | Bootstrap
@@ -73,7 +74,7 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
        | Workspace_message
        | Delegate_completed
        | Composition_completed
-       | Owned_job_completed ) as kind) ) ->
+       | Owned_job_completed | Tool_result_ready ) as kind) ) ->
     digest_id
       "stimulus"
       (String.concat
@@ -201,7 +202,7 @@ let save_schedule_occurrence_receipt ~base_path ~keeper_name
   | Keeper_event_queue.Workspace_message _
   | Keeper_event_queue.Delegate_completed _
   | Keeper_event_queue.Composition_completed _
-  | Keeper_event_queue.Owned_job_completed _ -> Ok ()
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ -> Ok ()
 ;;
 
 let base_fields ~record_kind ~event_id ~keeper_name ~recorded_at =
@@ -311,6 +312,7 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
        | Keeper_event_queue.Composition_succeeded -> "succeeded"
        | Keeper_event_queue.Composition_failed _ -> "failed"
        | Keeper_event_queue.Composition_cancelled _ -> "cancelled")
+  | Keeper_event_queue.Tool_result_ready receipt_id -> "tool_result_ready receipt_id=" ^ receipt_id
   | Keeper_event_queue.Owned_job_completed completion ->
     "owned_job_completed job_id=" ^ Keeper_owned_job_identity.Job_id.to_string completion.oj_job_id
     ^ " source=" ^ Yojson.Safe.to_string (Keeper_owned_job_identity.source_to_json completion.oj_source)
@@ -337,7 +339,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Workspace_message _ -> None
     | Keeper_event_queue.Delegate_completed _ -> None
     | Keeper_event_queue.Composition_completed _
-    | Keeper_event_queue.Owned_job_completed _ -> None
+    | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ -> None
   in
   `Assoc
     (base_fields
@@ -1417,7 +1419,7 @@ let board_stimulus_token metadata stimulus_kind =
   | Task_cancelled
   | Workspace_message
   | Delegate_completed
-  | Composition_completed | Owned_job_completed -> None
+  | Composition_completed | Owned_job_completed | Tool_result_ready -> None
 ;;
 
 (* The per-keeper status this module publishes. The fleet roll-up used to

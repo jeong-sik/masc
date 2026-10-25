@@ -90,7 +90,7 @@ let queued_answers ~base_path ~keeper_name =
       | Event_queue.Task_outcome _
       | Event_queue.Task_cancelled _
       | Event_queue.Workspace_message _
-      | Event_queue.Owned_job_completed _
+      | Event_queue.Tool_result_ready _ | Event_queue.Owned_job_completed _
       | Event_queue.Composition_completed _ -> None)
 ;;
 

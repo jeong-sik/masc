@@ -10134,6 +10134,8 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
        | Some selection ->
          match Masc.Keeper_heartbeat_stimulus_intake.reconcile_spent_selection ~config ~keeper_name selection
            |> require "retire completed direct continuation wake" with
+         | Masc.Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired ->
+           Alcotest.fail "unexpected tool-result selection"
          | Masc.Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged -> ()
          | Masc.Keeper_heartbeat_stimulus_intake.Selection_actionable
          | Masc.Keeper_heartbeat_stimulus_intake.Absent_grant_retired _ -> fail "completed Gate requested another model turn");

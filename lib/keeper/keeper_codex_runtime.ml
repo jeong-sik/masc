@@ -1495,7 +1495,18 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          ~history
          ~developer_context
          ~on_undelivered_tool_result:
-           (Keeper_codex_tool_outbox.retain ~base_path ~keeper_name)
+           (fun receipt ->
+             let* () = Keeper_codex_tool_outbox.retain ~base_path ~keeper_name receipt in
+             (* The receipt is committed even if notification cannot commit.
+                Startup and the existing maintenance pulse rediscover it. *)
+             (match Keeper_codex_tool_outbox_wake.notify ~base_path ~keeper_name with
+              | Ok () -> ()
+              | Error detail -> Log.Keeper.warn ~keeper_name
+                  "retained tool result notification deferred: %s" detail
+              | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+              | exception exn -> Log.Keeper.warn ~keeper_name
+                  "retained tool result notification raised: %s" (Printexc.to_string exn));
+             Ok ())
          ~on_stream_event
          ~on_thread_ready:(fun ~thread_id ->
            update_session "active transition" (fun expected ->

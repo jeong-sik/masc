@@ -73,6 +73,7 @@ let continuation_binding_of_source source =
   | Keeper_event_queue.Owned_job_completed completion -> Routed completion.oj_channel
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Tool_result_ready _
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Completion_authority_rejected _

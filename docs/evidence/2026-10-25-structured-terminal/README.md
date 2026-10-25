@@ -20,9 +20,11 @@ production APIs or policy:
 - Anthropic actual SSE parser/accumulator: Thinking at index zero precedes
   terminal Text JSON; extraction does not index the first content block.
 
-The existing suite also proves tool-result/thinking exclusion, multiple Text
+The existing suite also contains assertions for tool-result/thinking exclusion, multiple Text
 whitespace boundaries, no-text versus malformed/schema failures, and typed
-state propagation through inspect/extract/schema-extractor forms.
+state propagation through inspect and typed extraction, plus safe public
+extractor failure labels. schema_extractor intentionally projects string
+errors and is not the typed response API.
 
 The new test parses and whitespace checks pass. No local Dune build or
 executable test result is claimed here. A separately requested focused CI run

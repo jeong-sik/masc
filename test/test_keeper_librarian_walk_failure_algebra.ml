@@ -4,6 +4,10 @@
    public API of [Keeper_exact_walk_failure] and
    [Keeper_librarian_input_refusal].
 
+   The suite links through [exact_output_fixture] like its Librarian
+   siblings and opens [Masc] so the wrapped library's modules resolve. *)
+
+open Masc
    Two boundaries had no test of their own:
 
    - [Input_refusal.union] returns the distinct causes in canonical

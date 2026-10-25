@@ -73,3 +73,31 @@ source 7a88cf1e8d99fd160fc3819ea7a5dbab032bdc68; its result was not observed
 when this update was authored. It cannot certify the subsequent correction.
 The changed serializer and fixture require the focused codec/reasoning replay
 checks at the corrected candidate. No exact corrected-candidate PASS yet.
+
+## Current strict-catalog integration
+
+Review response prepared from original PR head
+`908134915142e40765eee1b70c64236cbcc9d2ea` on main
+`88619fd00748bce2e053a00b77f4643c9545e43a`. Git replayed the PR cleanly,
+but the combined catalog retained nine new `id_prefix` rows. The current
+`Model_catalog` requires exact `model_id` and rejects unknown keys; any one
+of those rows prevents loading the complete embedded catalog. The new provider
+also retained `identity_hosts`, removed by the current strict provider contract.
+
+The nine declarations now use `model_id` with the same identifier bytes and
+`provider_name = "minimax"`. The retired provider metadata is removed while
+its declared endpoint, path, authentication and capability base remain. No
+parser admission is weakened. All other decoded TOML values and row order are
+identical to the cleanly rebased input. Native MiniMax, bare model and hosted
+Ollama declarations remain separate; original serializer and replay fixtures
+are unchanged.
+
+Python TOML parsing and validation against both current production key lists
+found nine missing model identities and one unknown provider field before the
+repair, and no such errors afterwards. All 244 model rows and 27 provider rows
+were checked, including uniqueness of provider-scoped exact model identities.
+The two changed OCaml source/fixture files parse; fragment and whitespace
+checks pass. These checks do not execute the complete OCaml catalog parser,
+codec/replay tests, provider HTTP, CI or an installed runtime. Earlier baseline
+and authored source receipts retain their original heads and are not current
+candidate execution evidence.

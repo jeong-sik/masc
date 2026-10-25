@@ -812,7 +812,7 @@ supports_native_streaming = true
 # field policy rather than infer acceptance from OpenAI wire compatibility.
 
 [[models]]
-id_prefix = "minimax-m2"
+model_id = "minimax-m2"
 provider_name = "minimax"
 base = "openai_chat"
 supports_tools = true
@@ -834,7 +834,7 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "minimax-m2.1"
+model_id = "minimax-m2.1"
 provider_name = "minimax"
 base = "openai_chat"
 supports_tools = true
@@ -856,7 +856,7 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "minimax-m2.1-highspeed"
+model_id = "minimax-m2.1-highspeed"
 provider_name = "minimax"
 base = "openai_chat"
 supports_tools = true
@@ -878,7 +878,7 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "minimax-m2.5"
+model_id = "minimax-m2.5"
 provider_name = "minimax"
 base = "openai_chat"
 supports_tools = true
@@ -900,7 +900,7 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "minimax-m2.5-highspeed"
+model_id = "minimax-m2.5-highspeed"
 provider_name = "minimax"
 base = "openai_chat"
 supports_tools = true
@@ -922,7 +922,7 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "minimax-m2.7"
+model_id = "minimax-m2.7"
 provider_name = "minimax"
 base = "openai_chat"
 supports_tools = true
@@ -944,7 +944,7 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "minimax-m2.7-highspeed"
+model_id = "minimax-m2.7-highspeed"
 provider_name = "minimax"
 base = "openai_chat"
 supports_tools = true
@@ -966,7 +966,7 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "minimax-m3"
+model_id = "minimax-m3"
 provider_name = "minimax"
 base = "openai_chat"
 max_context_tokens = 1000000
@@ -987,7 +987,7 @@ supports_image_input = true
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "minimax-m3.1-flash"
+model_id = "minimax-m3.1-flash"
 provider_name = "minimax"
 base = "openai_chat"
 max_context_tokens = 1000000
@@ -2429,7 +2429,6 @@ base_url = "https://api.minimax.io"
 request_path = "/v1/chat/completions"
 auth = "api-key"
 capabilities_base = "openai_chat"
-identity_hosts = ["api.minimax.io"]
 
 [[providers]]
 id = "nous"

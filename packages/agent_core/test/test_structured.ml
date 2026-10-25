@@ -517,10 +517,170 @@ let test_multiple_text_blocks_are_ambiguous_even_at_whitespace_boundaries () =
     [["{}";"{}"]; ["{";"}"]; [" \n";"{}"]; ["{}";"\t "]]
 ;;
 
+(* #27868: exercise wire parser -> canonical response -> structured outcome,
+   rather than constructing the terminal stop reason in the fixture. *)
+module Wire_stream = Llm_provider.Streaming
+module Wire_acc = Llm_provider.Complete_stream_acc
+
+let finalized_wire_response acc =
+  match Wire_acc.finalize_stream_acc acc with
+  | Ok response -> response
+  | Error _ -> Alcotest.fail "provider wire fixture did not finalize"
+;;
+
+let check_wire_ready response =
+  match Structured.inspect_response_json response with
+  | Ready json -> Alcotest.(check string) "terminal JSON" "{}" (Yojson.Safe.to_string json)
+  | Awaiting_tool_results | Refused _ | Truncated _ | Interrupted _ | Invalid _ ->
+    Alcotest.fail "normal terminal wire JSON was not accepted"
+;;
+
+let test_chat_wire_states_reach_structured () =
+  let call = `Assoc ["id", `String "call"; "type", `String "function";
+    "function", `Assoc ["name", `String "lookup"; "arguments", `String "{}"]] in
+  let cases =
+    [ "refusal", "stop", ["refusal", `String "declined"], `Null,
+        Some (Error.Refused_response Policy_refusal)
+    ; "refusal with JSON", "stop", ["refusal", `String "declined"], `String "{}",
+        Some (Error.Refused_response Policy_refusal)
+    ; "filter", "content_filter", [], `Null,
+        Some (Error.Refused_response Content_filtered)
+    ; "token limit with JSON", "length", [], `String "{}",
+        Some (Error.Truncated_response Token_limit)
+    ; "tool intermediate", "tool_calls", ["tool_calls", `List [call]], `Null,
+        Some Error.Awaiting_tool_results
+    ; "terminal", "stop", [], `String "{}", None ] in
+  List.iter (fun (label, finish, fields, content, expected) ->
+    let project response = match expected with
+      | Some state -> check_response_state state response
+      | None -> check_wire_ready response in
+    let wire_message = `Assoc (("content", content) :: ("role", `String "assistant") :: fields) in
+    let sync = `Assoc ["id", `String "structured-wire"; "model", `String "chat-fixture";
+      "choices", `List [`Assoc ["message", wire_message; "finish_reason", `String finish]]] in
+    (match Llm_provider.Backend_openai_parse.parse_openai_response_result_json sync with
+     | Ok response -> project response
+     | Error error -> Alcotest.failf "%s sync: %s" label
+         (Llm_provider.Backend_openai_parse.parse_error_to_string error));
+    let state = Wire_stream.create_openai_stream_state () in
+    let acc = Wire_acc.create_stream_acc () in
+    let feed wire =
+      let parsed = Wire_stream.parse_openai_sse_chunk
+          ~streaming_reasoning:Llm_provider.Reasoning_dialect.No_streaming_reasoning wire in
+      let events, _ = Wire_stream.openai_sse_parse_result_to_events state parsed in
+      List.iter (Wire_acc.accumulate_event acc) events in
+    let indexed_fields = List.map (fun (name, value) ->
+      match name, value with
+      | "tool_calls", `List [_] ->
+        (match call with
+         | `Assoc fields -> name, `List [`Assoc (("index", `Int 0) :: fields)]
+         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+           Alcotest.fail "tool fixture must be an object")
+      | _ -> name, value) fields in
+    feed (Yojson.Safe.to_string (`Assoc ["id", `String "structured-wire";
+      "model", `String "chat-fixture"; "choices", `List [`Assoc ["index", `Int 0;
+      "delta", `Assoc (("content", content) :: indexed_fields);
+      "finish_reason", `String finish]]]));
+    feed "[DONE]";
+    project (finalized_wire_response acc)) cases
+;;
+
+let test_responses_wire_states_reach_structured () =
+  let response ~status ~output extra = `Assoc
+      (["id", `String "structured-response"; "model", `String "responses-fixture";
+        "status", `String status; "output", `List output] @ extra) in
+  let text = `Assoc ["type", `String "message"; "id", `String "message";
+      "role", `String "assistant"; "content", `List
+      [`Assoc ["type", `String "output_text"; "text", `String "{}"; "annotations", `List []]]] in
+  let refused = `Assoc ["type", `String "message"; "role", `String "assistant";
+      "content", `List [`Assoc ["type", `String "refusal"; "refusal", `String "declined"]]] in
+  let call = `Assoc ["type", `String "function_call"; "id", `String "item-call";
+      "call_id", `String "call"; "name", `String "lookup"; "arguments", `String "{}"] in
+  List.iter (fun (wire, expected) ->
+    match Llm_provider.Backend_openai_responses.parse_response_result (Yojson.Safe.to_string wire) with
+    | Error detail -> Alcotest.fail detail
+    | Ok response -> (match expected with
+      | Some state -> check_response_state state response
+      | None -> check_wire_ready response))
+    [ response ~status:"completed" ~output:[refused] [], Some (Error.Refused_response Policy_refusal)
+    ; response ~status:"incomplete" ~output:[text]
+        ["incomplete_details", `Assoc ["reason", `String "max_output_tokens"]],
+        Some (Error.Truncated_response Token_limit)
+    ; response ~status:"completed" ~output:[call] [], Some Error.Awaiting_tool_results
+    ; response ~status:"completed" ~output:[text] [], None ];
+  (* Both refusal event families must survive even when the terminal snapshot
+     has no refusal item. JSON text already emitted must not become success. *)
+  List.iter (fun refusal_event ->
+    let state = Wire_stream.create_openai_stream_state () in
+    let acc = Wire_acc.create_stream_acc () in
+    let feed kind fields =
+      let events, _ = Wire_stream.responses_sse_to_events state (Some kind)
+          (Yojson.Safe.to_string (`Assoc fields)) in
+      List.iter (Wire_acc.accumulate_event acc) events in
+    feed "response.created" ["response", response ~status:"in_progress" ~output:[] []];
+    feed "response.output_text.delta" ["output_index", `Int 0; "content_index", `Int 0;
+      "delta", `String "{}"];
+    feed refusal_event ["delta", `String "declined"; "refusal", `String "declined"];
+    feed "response.completed" ["response", response ~status:"completed" ~output:[] []];
+    check_response_state (Error.Refused_response Policy_refusal) (finalized_wire_response acc))
+    ["response.refusal.delta"; "response.refusal.done"]
+;;
+
+let test_gemini_wire_states_reach_structured () =
+  List.iter (fun (finish, expected) ->
+    let wire = `Assoc ["responseId", `String "gemini-structured";
+      "modelVersion", `String "gemini-fixture"; "candidates", `List [`Assoc
+        ["content", `Assoc ["parts", `List [`Assoc ["text", `String "{}"]]];
+         "finishReason", `String finish]]] in
+    let project response = match expected with
+      | Some state -> check_response_state state response
+      | None -> check_wire_ready response in
+    project (Llm_provider.Backend_gemini.parse_response wire);
+    let state = Wire_stream.create_openai_stream_state () in
+    let acc = Wire_acc.create_stream_acc () in
+    let chunk = match Wire_stream.parse_gemini_sse_chunk (Yojson.Safe.to_string wire) with
+      | Gemini_chunk chunk -> chunk
+      | Gemini_unsupported_part _ | Gemini_unsupported_response _ | Gemini_parse_failed _ ->
+        Alcotest.fail "Gemini wire fixture did not parse" in
+    (match Wire_stream.gemini_chunk_to_events state chunk with
+     | Error error -> Alcotest.fail error.reason
+     | Ok (events, _) -> List.iter (Wire_acc.accumulate_event acc) events);
+    project (finalized_wire_response acc))
+    ["SAFETY", Some (Error.Refused_response Policy_refusal);
+     "MAX_TOKENS", Some (Error.Truncated_response Token_limit); "STOP", None]
+;;
+
+let test_anthropic_wire_thinking_precedes_terminal_text () =
+  let acc = Wire_acc.create_stream_acc () in
+  List.iter (fun wire ->
+    match Wire_stream.parse_sse_event None wire with
+    | Some event -> Wire_acc.accumulate_event acc event
+    | None -> Alcotest.fail "Anthropic structured wire fixture was ignored")
+    [ {|{"type":"message_start","message":{"id":"structured-anthropic","model":"claude-fixture"}}|}
+    ; {|{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}|}
+    ; {|{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"private thought"}}|}
+    ; {|{"type":"content_block_stop","index":0}|}
+    ; {|{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}|}
+    ; {|{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"{}"}}|}
+    ; {|{"type":"content_block_stop","index":1}|}
+    ; {|{"type":"message_delta","delta":{"stop_reason":"end_turn"}}|}
+    ; {|{"type":"message_stop"}|} ];
+  let response = finalized_wire_response acc in
+  (match response.content with
+   | Thinking _ :: Text "{}" :: [] -> ()
+   | _ -> Alcotest.fail "fixture must retain thinking before final text");
+  check_wire_ready response
+;;
+
 let () =
   Alcotest.run
     "structured"
-    [ ( "response states"
+    [ ( "provider wire conformance"
+      , [ Alcotest.test_case "Chat sync/SSE states reach extraction" `Quick test_chat_wire_states_reach_structured
+        ; Alcotest.test_case "Responses sync/refusal SSE reach extraction" `Quick test_responses_wire_states_reach_structured
+        ; Alcotest.test_case "Gemini sync/SSE states reach extraction" `Quick test_gemini_wire_states_reach_structured
+        ; Alcotest.test_case "Anthropic thinking precedes JSON text" `Quick test_anthropic_wire_thinking_precedes_terminal_text
+        ] )
+    ; ( "response states"
       , [ Alcotest.test_case "authoritative stops precede JSON" `Quick test_authoritative_stop_states_precede_valid_json
         ; Alcotest.test_case "tool turn then terminal JSON" `Quick test_tool_call_turn_requires_tool_results_before_json
         ; Alcotest.test_case "multiple Text whitespace boundaries" `Quick test_multiple_text_blocks_are_ambiguous_even_at_whitespace_boundaries

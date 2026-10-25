@@ -4554,6 +4554,7 @@ let test_unattempted_tool_has_no_bus_execution_observation () =
     {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
      complete_stream=(fun ?on_telemetry:_ ~on_event:_ _->next ())} in
   let agent=Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool]
+      ~config:{(Types.default_config ~model:"test-model") with name="blocked-observation"}
       ~options:{Agent.default_options with transport=Some transport;event_bus=Some bus;
         provider_config=Some (Provider_mock.to_provider_config ());
         hooks={Hooks.empty with pre_tool_use=Some (fun _->Block "not admitted")}} () in

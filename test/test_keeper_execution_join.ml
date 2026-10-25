@@ -789,6 +789,78 @@ let test_structured_state_projection_preserves_closed_reason () =
       ; Interrupted_response Unknown_stop
       ]
 
+let run_real_tool_bridge ~durable inspect =
+  Join.For_testing.clear ();
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let module Core=Agent_core in
+  let runtime=match Core.Agent.create_execution_runtime ~sw
+      ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~domain_count:1 with
+    | Ok runtime->runtime |Error error->fail (Core.Error.to_string error) in
+  let path=Filename.temp_file "masc-canonical-tool-join-" ".dir" in
+  Sys.remove path;
+  let dir=Eio.Path.(Eio.Stdenv.fs env / path) in
+  Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 dir;
+  Eio.Switch.on_release sw (fun ()->Eio.Path.rmtree ~missing_ok:true dir);
+  let bus=Core.Event_bus.create () in
+  let subscription=Core.Event_bus.subscribe
+      ~config:(Result.get_ok (Core.Event_bus.subscription_config ~capacity:16 ~overflow:Drop_newest))
+      ~filter:Core.Event_bus.filter_tools_only bus in
+  let during_hook=ref [] and hook_invocation=ref None and effects=ref 0 in
+  let tool=Core.Tool.create ~name:"joined_tool" ~description:"real joined Tool effect" ~parameters:[]
+      (fun _->incr effects;Ok {Core.Types.content="settled";content_blocks=None;_meta=None}) in
+  let response content stop_reason : Core.Types.api_response =
+    {id="join-response";model="test-model";content;stop_reason;usage=None;telemetry=None} in
+  let responses=ref
+    [response [Core.Types.ToolUse {id="same-provider-id";name="joined_tool";input=`Assoc []}] Core.Types.StopToolUse;
+     response [Core.Types.Text "done"] Core.Types.EndTurn] in
+  let next ()=match !responses with response::rest->responses:=rest;Ok response
+    | []->fail "unexpected joined provider retry" in
+  let transport=Llm_provider.Llm_transport.custom
+    {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
+     complete_stream=(fun ?on_telemetry:_ ~on_event:_ _->next ())} in
+  let provider=Llm_provider.Provider_config.make ~kind:OpenAI_compat ~provider_id:"test"
+      ~base_url:"http://test.invalid" ~model_id:"test-model" ~request_path:"/v1/chat/completions" () in
+  let hooks={Core.Hooks.empty with post_tool_use=Some (fun event->
+    during_hook:=Core.Event_bus.drain subscription;
+    Option.iter (fun invocation->
+      hook_invocation:=Some invocation;
+      Join.record ~invocation ~execution_id:"exec-real-joined") (Core.Hooks.invocation_of_event event);
+    Core.Hooks.Continue)} in
+  let agent=Core.Agent.create ~net:(Eio.Stdenv.net env) ~tools:[tool]
+      ~config:{(Core.Types.default_config ~model:"test-model") with name="real-joined"}
+      ~options:{Core.Agent.default_options with transport=Some transport;provider_config=Some provider;
+        event_bus=Some bus;hooks} () in
+  let store=if durable then Some (Core.Agent.execution_store ~runtime ~dir ()) else None in
+  (match Core.Agent.run ~sw ?execution_store:store agent "join the real effect" with
+   | Ok _->() |Error error->fail (Core.Error.to_string error));
+  check int "real Tool effect once" 1 !effects;
+  let source=match !hook_invocation with Some source->source |None->fail "post hook did not observe invocation" in
+  check (option string) "producer association exists before bridge consume" (Some "exec-real-joined")
+    (Join.peek ~invocation:source);
+  let completed (event:Core.Event_bus.event)=match event.payload with
+    | ToolCompleted _->true |ToolCalled _->false
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | TurnStarted _ | TurnReady _ | TurnCompleted _ | HandoffRequested _ | HandoffCompleted _
+    | ElicitationCompleted _ | ToolApprovalCompleted _ | InferenceTelemetry _ | Custom _->false in
+  let early=List.exists completed !during_hook in
+  let delivered= !during_hook @ Core.Event_bus.drain subscription in
+  let completion=List.find completed delivered in
+  let json=Bridge.native_event_to_json completion |> Option.get in
+  inspect early json
+
+let test_durable_completion_waits_for_product_observer () =
+  run_real_tool_bridge ~durable:true (fun early _json->
+    check bool "post-hook row commit precedes completion delivery" false early)
+let test_durable_completion_keeps_product_occurrence_association () =
+  run_real_tool_bridge ~durable:true (fun _early json->
+    check (option string) "real bridge resolves the completed canonical occurrence"
+      (Some "exec-real-joined") (string_of_field (payload_member "execution_id" json)))
+let test_transient_completion_keeps_product_occurrence_association () =
+  run_real_tool_bridge ~durable:false (fun early json->
+    check bool "transient post-hook still precedes completion" false early;
+    check (option string) "transient bridge control" (Some "exec-real-joined")
+      (string_of_field (payload_member "execution_id" json)))
+
 let () =
   run "keeper_execution_join"
     [ ( "join_table"
@@ -814,6 +886,12 @@ let () =
             test_tool_completed_stamps_execution_id
         ; test_case "non-keeper completion omits execution_id" `Quick
             test_tool_completed_without_entry_omits_execution_id
+        ; test_case "durable completion follows product observer" `Quick
+            test_durable_completion_waits_for_product_observer
+        ; test_case "durable completion retains product occurrence association" `Quick
+            test_durable_completion_keeps_product_occurrence_association
+        ; test_case "transient completion retains product occurrence association" `Quick
+            test_transient_completion_keeps_product_occurrence_association
         ; test_case "tool approval preserves exact occurrence" `Quick
             test_tool_approval_completed_preserves_exact_occurrence
         ; test_case "empty tool_use_id omitted" `Quick

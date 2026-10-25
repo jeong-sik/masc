@@ -4,8 +4,8 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 2911,
-      "sha256": "2cbcaed010bb9329345be9747999b79f6d22eda776d015ebe398cefe0cfb1bfb"
+      "bytes": 3616,
+      "sha256": "ca44b7196052a06f64e5867997e2b8a2358cdb6b4cf98b97e4b89a56b2f540d9"
     },
     {
       "path": "acceptance-11of11-snapshot.json",
@@ -262,5 +262,7 @@
       "bytes": 4732,
       "sha256": "7b1dd29c427036f163c928f8d8656cf020bab5cfccbbed10ec9a12ef17df19ae"
     }
-  ]
+  ],
+  "refreshed_at": "2026-10-25T01:12:12.922697+00:00",
+  "refresh_scope": "README qualification and main registration pointer only; original observer files unchanged. Prior inventory preserved in native-verification-followup/previous-glm-publication-manifest.json."
 }

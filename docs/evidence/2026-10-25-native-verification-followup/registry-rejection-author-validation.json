@@ -1,0 +1,97 @@
+{
+  "base": "be9a9d9da9d426c8babb691a9ebc4620ca4a517c",
+  "at": "2026-10-25T00:56:21.409220+00:00",
+  "scope": "Two test files only. Source/API/fixture review and parsing. No Dune/full typing/native/Registry disk replay or Workspace transaction execution on this candidate.",
+  "raw_native_log": {
+    "path": "/tmp/masc-native-integrity-be9a9d9d-job.log",
+    "sha256": "421e39925afa2c5498899a58edba05eed7ae9be821310059b32c36706bafcde0",
+    "bytes": 593320,
+    "observed_failures": [
+      "completion_authority22: volatile registry publication Commit_failed then5s timeout",
+      "completion_authority24: same",
+      "durable verdict delivery2: stale bare-verification-ID evidence expectation"
+    ],
+    "first_retry_fixture": "Actual native PASS at basebe9a, separate from this repair; no full-suite PASS claim"
+  },
+  "source_review": {
+    "cause": "Both authority fixtures used the initial process-global create() volatile registry. Canonical confirmed publication refuses volatile and unreplayed instances; a path alone is insufficient. Fixture now uses replay(path) then one-shot install_global, exactly like server bootstrap and existing trust/Goal fixtures.",
+    "scope_isolation": "One fresh process-private temporary registry directory for this executable; same process-lifetime as global installation. Existing per-case hooks/change observer/env restoration remain unchanged. Every global assertion selects its own verification_id; the fixed-actor/count test explicitly creates a separate local volatile registry and remains unaffected. Cleanup clears any ended Eio FS binding before removing only this private directory. Global installation has no reset API and is not replaced between cases.",
+    "stronger_persistence_assertion": "Both completion cases now independently replay the actual history and require identical complete run JSON plus Approved outcome. Existing5s limits and production publication policy remain unchanged.",
+    "correlation": "No-Keeper release still requires Todo, reason, authority, next-step and reclaim metadata. Evidence refs are now explicitly empty. Before retirement the actual typed rejection outbox must retain verification_id/reason/authority; after retirement the actual dated verdict event must retain task, verification, reason, rejected verdict and authority.",
+    "actual_module_probe": "No existing short module-linked persistence probe was reused. No canonical Registry or filesystem port was reimplemented. Full actual replay and the timeout cases are left to the immediate focused native run."
+  },
+  "changed_tests": [
+    {
+      "file": "test/test_completion_repair_delivery.ml",
+      "sha256": "03d80af432b056d930c8c3bd809e30265d09f14f2aca08b3a295041b96a9d998",
+      "parse_exit": 0,
+      "parse_output": ""
+    },
+    {
+      "file": "test/test_verification.ml",
+      "sha256": "dfed0a0d74211ab60e656cb6d810837843f7439c0a3538c325781c08bce2cd05",
+      "parse_exit": 0,
+      "parse_output": ""
+    }
+  ],
+  "direct_interfaces_reviewed": [
+    {
+      "file": "lib/verification_run_registry.mli",
+      "sha256": "0b251b5a8a525e920aa6866f96cb033684a23aa732767c10e475e445efd06cfe"
+    },
+    {
+      "file": "lib/verification_run_registry.ml",
+      "sha256": "9864c29f2d5b49c3bd26abb18acad4d50bf9fc66492c2e82da2760499d8bd281"
+    },
+    {
+      "file": "lib/run_registry_core/run_registry_core.mli",
+      "sha256": "c7f74a116ecd3881f5842c101bc0f10332218da3ba87706f3a3f70f63810a431"
+    },
+    {
+      "file": "lib/run_registry_core/run_registry_core.ml",
+      "sha256": "d575fb58c2e73006b4f0196afbd18b1c6dc77a9d23de25bec24475c4bb17280d"
+    },
+    {
+      "file": "lib/server/server_runtime_bootstrap.ml",
+      "sha256": "52e93c41abaf2ef2a6f5c82b3c3d3c149fc254b6edd384ce60d8e264800852ae"
+    },
+    {
+      "file": "test/test_completion_trust_harness.ml",
+      "sha256": "0ed10588a30c2b2eb8824c9ab95ddb858deec5a967bacbdd68c67b9105c08cf0"
+    },
+    {
+      "file": "test/test_goal_verification_agent.ml",
+      "sha256": "0d3699c9170db31805899fdb7a43a4f984b970b92dc69118012cf4876f185716"
+    },
+    {
+      "file": "lib/workspace/workspace_task_rejection_outbox.mli",
+      "sha256": "0427b6cfeba8b0959f680c442ff69014b350eb102c616dda8f0baf5305b867cb"
+    },
+    {
+      "file": "lib/workspace/workspace_task_transitions.ml",
+      "sha256": "4f66ec9447b4d5aacebe01281d5e6cf01a6d7962bd0b7988cedaacead210ddaa"
+    },
+    {
+      "file": "lib/workspace/workspace_task.ml",
+      "sha256": "704302e7f31064cc2260c25d7c00f6871bdf4fb66a80168b4b942e75ce107ae5"
+    },
+    {
+      "file": "lib/dated_jsonl/dated_jsonl.mli",
+      "sha256": "96c01c7f1bc0389abf155e897e1299ef70a1d025cd7fa8f16d13cfba0f431bfb"
+    }
+  ],
+  "diff_sha256": "ac1afa6b2b12977134ef7be1a0cd8b3e3f6e29578444d992140b6284cd5bd751",
+  "diff_check": {
+    "exit": 0,
+    "output": ""
+  },
+  "native_minimum_targets": [
+    "test/test_verification.exe",
+    "test/test_completion_repair_delivery.exe"
+  ],
+  "unrelated_failure": "Claude lifecycle49 belongs to a separate author; this commit does not edit it.",
+  "product_changes": false,
+  "head": "ba18da8fd3aa0b215dc8e905154906c012d23d87",
+  "working_tree_clean": true,
+  "module_visibility": "test/deps/dune explicitly re_exports dated_jsonl, so the existing test stanza needs no new library dependency."
+}

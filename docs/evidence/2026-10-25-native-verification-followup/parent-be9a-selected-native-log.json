@@ -1,0 +1,286 @@
+{
+  "source_log_sha256": "421e39925afa2c5498899a58edba05eed7ae9be821310059b32c36706bafcde0",
+  "selection": "Exact numbered original log excerpts; not a complete log. Includes first-retry fixture assertions, not just failures.",
+  "lines": [
+    {
+      "line": 1065,
+      "text": "2026-10-25T00:39:17.9605640Z [2026-10-25 00:39:17] [INFO] [Task] task task-001 done by system-test-worker"
+    },
+    {
+      "line": 1066,
+      "text": "2026-10-25T00:39:17.9607322Z [2026-10-25 00:39:17] [WARN] [Misc] MASC observation event was not published: event bus is not initialized"
+    },
+    {
+      "line": 1067,
+      "text": "2026-10-25T00:39:17.9669209Z [2026-10-25 00:39:17] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-dea03444fcea6b42d51f663f0d0e0190 authority=verifier_exact verdict=APPROVE"
+    },
+    {
+      "line": 1068,
+      "text": "2026-10-25T00:39:17.9690692Z [2026-10-25 00:39:17] [INFO] [Misc] completion approval delivered task_id=task-001 verification_id=vrf-dea03444fcea6b42d51f663f0d0e0190 producer=system-test-worker"
+    },
+    {
+      "line": 1069,
+      "text": "2026-10-25T00:39:17.9719092Z [2026-10-25 00:39:17] [WARN] [Misc] system LLM completion authority stopped: Commit_failed; producer or operator must act task_id=task-001 verification_id=vrf-dea03444fcea6b42d51f663f0d0e0190 authority=verifier_exact reason=A volatile verification registry cannot confirm durable publication"
+    },
+    {
+      "line": 1070,
+      "text": "2026-10-25T00:39:22.9422976Z   [FAIL]        completion_authority               22   boot recovery commits..."
+    },
+    {
+      "line": 1071,
+      "text": "2026-10-25T00:39:22.9423497Z ASSERT new workspace has no earlier verdicts"
+    },
+    {
+      "line": 1114,
+      "text": "2026-10-25T00:39:23.0420459Z [2026-10-25 00:39:23] [INFO] [Task] task task-001 done by snapshot-test-worker"
+    },
+    {
+      "line": 1115,
+      "text": "2026-10-25T00:39:23.0422101Z [2026-10-25 00:39:23] [WARN] [Misc] MASC observation event was not published: event bus is not initialized"
+    },
+    {
+      "line": 1116,
+      "text": "2026-10-25T00:39:23.0478642Z [2026-10-25 00:39:23] [INFO] [Misc] system LLM completion authority confirmed task_id=task-001 verification_id=vrf-c6382923735b08620285b0e619ccc14b authority=verifier_exact verdict=APPROVE"
+    },
+    {
+      "line": 1117,
+      "text": "2026-10-25T00:39:23.0501558Z [2026-10-25 00:39:23] [INFO] [Misc] completion approval delivered task_id=task-001 verification_id=vrf-c6382923735b08620285b0e619ccc14b producer=snapshot-test-worker"
+    },
+    {
+      "line": 1118,
+      "text": "2026-10-25T00:39:23.0530144Z [2026-10-25 00:39:23] [WARN] [Misc] system LLM completion authority stopped: Commit_failed; producer or operator must act task_id=task-001 verification_id=vrf-c6382923735b08620285b0e619ccc14b authority=verifier_exact reason=A volatile verification registry cannot confirm durable publication"
+    },
+    {
+      "line": 1119,
+      "text": "2026-10-25T00:39:28.0134013Z   [FAIL]        completion_authority               24   system LLM uses persi..."
+    },
+    {
+      "line": 1120,
+      "text": "2026-10-25T00:39:28.0134646Z ASSERT new workspace has no earlier verdicts"
+    },
+    {
+      "line": 1824,
+      "text": "2026-10-25T00:39:28.8064540Z ASSERT durable obligations"
+    },
+    {
+      "line": 1825,
+      "text": "2026-10-25T00:39:28.8078333Z [2026-10-25 00:39:28] [INFO] [Task] task task-001 release by repair-verifier-run"
+    },
+    {
+      "line": 1826,
+      "text": "2026-10-25T00:39:28.8079639Z [2026-10-25 00:39:28] [WARN] [Misc] MASC observation event was not published: event bus is not initialized"
+    },
+    {
+      "line": 1827,
+      "text": "2026-10-25T00:39:28.8105422Z [2026-10-25 00:39:28] [WARN] [Misc] completion rejection has no Keeper to deliver to; the task returned to the backlog task_id=task-001 verification_id=vrf-no-keeper-producer producer=repair-producer from=in_progress version=5"
+    },
+    {
+      "line": 1828,
+      "text": "2026-10-25T00:39:28.8106323Z ASSERT delivered"
+    },
+    {
+      "line": 1829,
+      "text": "2026-10-25T00:39:28.8106446Z ASSERT unroutable"
+    },
+    {
+      "line": 1830,
+      "text": "2026-10-25T00:39:28.8106571Z ASSERT retained"
+    },
+    {
+      "line": 1831,
+      "text": "2026-10-25T00:39:28.8106712Z ASSERT durable obligations"
+    },
+    {
+      "line": 1832,
+      "text": "2026-10-25T00:39:28.8106905Z ASSERT no queue is written under a name no Keeper reads"
+    },
+    {
+      "line": 1833,
+      "text": "2026-10-25T00:39:28.8107107Z ASSERT the verdict's reason stays on the Task"
+    },
+    {
+      "line": 1834,
+      "text": "2026-10-25T00:39:28.8107284Z ASSERT the verification id travels with it"
+    },
+    {
+      "line": 1835,
+      "text": "2026-10-25T00:39:28.8117789Z   [FAIL]        durable verdict delivery          2   a rejection with no Kee..."
+    },
+    {
+      "line": 1836,
+      "text": "2026-10-25T00:39:28.8119995Z [2026-10-25 00:39:28] [INFO] [Workspace] MASC base: /tmp/masc-completion-repair-3b1a38 (no git root found)"
+    },
+    {
+      "line": 3727,
+      "text": "2026-10-25T00:41:38.3530843Z [2026-10-25 00:41:38] [INFO] [Keeper/claude-pre-dispatch] Claude Code turn composition: mode=start prompt_bytes=18 system_prompt_bytes=781 tools=1 tool_surface_bytes=158"
+    },
+    {
+      "line": 3728,
+      "text": "2026-10-25T00:41:38.3531593Z [2026-10-25 00:41:38] [INFO] [runtime_agent] Claude Code turn starting (authentication=claude.ai)"
+    },
+    {
+      "line": 3729,
+      "text": "2026-10-25T00:41:38.3533784Z [2026-10-25 00:41:38] [WARN] [Keeper/claude-pre-dispatch] context submission measurement unavailable: no raw-trace attempt binding"
+    },
+    {
+      "line": 3730,
+      "text": "2026-10-25T00:41:38.3570443Z [2026-10-25 00:41:38] [WARN] [Keeper/claude-pre-dispatch] context submission measurement unavailable: no raw-trace attempt binding"
+    },
+    {
+      "line": 3731,
+      "text": "2026-10-25T00:41:38.3611510Z +[warn] [hooks] user hook for post_tool_use raised Failure(\"post-tool fixture terminal failure\")"
+    },
+    {
+      "line": 3732,
+      "text": "2026-10-25T00:41:38.3622433Z +[warn] [hooks] user hook for post_tool_use raised Failure(\"post-tool fixture terminal failure\")"
+    },
+    {
+      "line": 3733,
+      "text": "2026-10-25T00:41:38.3633251Z +[warn] [hooks] user hook for post_tool_use raised Failure(\"post-tool fixture terminal failure\")"
+    },
+    {
+      "line": 3734,
+      "text": "2026-10-25T00:41:40.3662641Z [2026-10-25 00:41:40] [WARN] [runtime_agent] Claude Code turn failed (kind=protocol_error): Claude Code protocol error during result message: no measured assistant model"
+    },
+    {
+      "line": 3735,
+      "text": "2026-10-25T00:41:40.3679238Z ASSERT terminal hook detail survives"
+    },
+    {
+      "line": 3736,
+      "text": "2026-10-25T00:41:40.3686229Z   [FAIL]        lifecycle             49   post-tool hook failure survives pr..."
+    },
+    {
+      "line": 3737,
+      "text": "2026-10-25T00:41:40.3686624Z ASSERT none carries the lookup alone"
+    },
+    {
+      "line": 1219,
+      "text": "2026-10-25T00:39:28.1158281Z [2026-10-25 00:39:28] [WARN] [Misc] MASC observation event was not published: event bus is not initialized"
+    },
+    {
+      "line": 1220,
+      "text": "2026-10-25T00:39:28.1162236Z ASSERT capture and notification share one immutable Task"
+    },
+    {
+      "line": 1221,
+      "text": "2026-10-25T00:39:28.1162603Z ASSERT committed Task includes that exact submission handoff"
+    },
+    {
+      "line": 1222,
+      "text": "2026-10-25T00:39:28.1163172Z ASSERT notification retains the submitting actor"
+    },
+    {
+      "line": 1223,
+      "text": "2026-10-25T00:39:28.1163518Z ASSERT capture and authority scheduling share one immutable Task"
+    },
+    {
+      "line": 1224,
+      "text": "2026-10-25T00:39:28.1163867Z ASSERT scheduled Task includes the committed handoff"
+    },
+    {
+      "line": 1225,
+      "text": "2026-10-25T00:39:28.1196267Z ASSERT rejection correlation does not become an evidence reference"
+    },
+    {
+      "line": 1226,
+      "text": "2026-10-25T00:39:28.1200241Z [2026-10-25 00:39:28] [WARN] [Task] [verification-submit] task=task-001 has no completion contract; submitted references=2 (persistence pending)"
+    },
+    {
+      "line": 1227,
+      "text": "2026-10-25T00:39:28.1245909Z [2026-10-25 00:39:28] [INFO] [Task] task task-001 submit_for_verification by snapshot-retry-worker"
+    },
+    {
+      "line": 1228,
+      "text": "2026-10-25T00:39:28.1246471Z [2026-10-25 00:39:28] [WARN] [Misc] MASC observation event was not published: event bus is not initialized"
+    },
+    {
+      "line": 1229,
+      "text": "2026-10-25T00:39:28.1249938Z ASSERT capture and notification share one immutable Task"
+    },
+    {
+      "line": 1230,
+      "text": "2026-10-25T00:39:28.1250327Z ASSERT committed Task includes that exact submission handoff"
+    },
+    {
+      "line": 1231,
+      "text": "2026-10-25T00:39:28.1250666Z ASSERT notification retains the submitting actor"
+    },
+    {
+      "line": 1232,
+      "text": "2026-10-25T00:39:28.1251016Z ASSERT capture and authority scheduling share one immutable Task"
+    },
+    {
+      "line": 1233,
+      "text": "2026-10-25T00:39:28.1251560Z ASSERT scheduled Task includes the committed handoff"
+    },
+    {
+      "line": 1234,
+      "text": "2026-10-25T00:39:28.1251851Z ASSERT the first retry has a fresh request"
+    },
+    {
+      "line": 1235,
+      "text": "2026-10-25T00:39:28.1252111Z ASSERT no duplicate retry was needed"
+    },
+    {
+      "line": 1236,
+      "text": "2026-10-25T00:39:28.1252367Z ASSERT each committed snapshot notifies once"
+    },
+    {
+      "line": 1237,
+      "text": "2026-10-25T00:39:28.1252689Z ASSERT authority scheduling observes both committed snapshots"
+    },
+    {
+      "line": 1238,
+      "text": "2026-10-25T00:39:28.1253019Z ASSERT first retry has no capture diagnostic"
+    },
+    {
+      "line": 1239,
+      "text": "2026-10-25T00:39:28.1253293Z ASSERT stored request retains its producer"
+    },
+    {
+      "line": 1240,
+      "text": "2026-10-25T00:39:28.1253605Z ASSERT current claim has only artifact and current narrative"
+    },
+    {
+      "line": 1241,
+      "text": "2026-10-25T00:39:28.1253918Z ASSERT first capture reads the new artifact"
+    },
+    {
+      "line": 1242,
+      "text": "2026-10-25T00:39:28.1254183Z ASSERT host-owned actor survives retry"
+    },
+    {
+      "line": 1243,
+      "text": "2026-10-25T00:39:28.1254437Z ASSERT exact retry Tool source survives"
+    },
+    {
+      "line": 1244,
+      "text": "2026-10-25T00:39:28.1254686Z ASSERT reported model survives"
+    },
+    {
+      "line": 1245,
+      "text": "2026-10-25T00:39:28.1254926Z ASSERT old rejected evidence remains immutable"
+    },
+    {
+      "line": 1246,
+      "text": "2026-10-25T00:39:28.1258253Z ASSERT stale verdict names the old request"
+    },
+    {
+      "line": 1247,
+      "text": "2026-10-25T00:39:28.1258682Z ASSERT stale verdict cannot approve the retry"
+    },
+    {
+      "line": 1248,
+      "text": "2026-10-25T00:39:28.1277354Z   [OK]          workspace_boundary                  2   rejected submission c..."
+    },
+    {
+      "line": 1249,
+      "text": "2026-10-25T00:39:28.1279443Z ASSERT new workspace has no earlier verdicts"
+    },
+    {
+      "line": 1250,
+      "text": "2026-10-25T00:39:28.1279907Z [2026-10-25 00:39:28] [INFO] [Workspace] MASC base: /tmp/masc_verify_testf1fbc3 (no git root found)"
+    }
+  ]
+}

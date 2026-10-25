@@ -1,0 +1,23 @@
+{
+  "commit": "43319b4298aca1f0e1fe81db12dbeeeec2d1d1ed",
+  "base": "be9a9d9da9d426c8babb691a9ebc4620ca4a517c",
+  "branch": "codex/native-hook-terminal-20261025",
+  "worktree": "/tmp/masc-native-lifecycle-repair-20261025",
+  "changed_file": "test/test_keeper_claude_code_runtime.ml",
+  "source_sha256": "f0e2ca817ecf6fe92afbd219dd3ca08dd818813447a9a4dc1c9016dada63d0c8",
+  "diff_sha256": "6e00cb70ec85aacff10408eba8202ce1b20f8a32b6153ab81308bf56f99d48f1",
+  "actual_executed": [
+    "actual extracted case49 fixture generator: ocamlfind ocamlc unix,yojson",
+    "actual generated shell/stdin/stdout: three MCP reads, root measured assistant, one terminal",
+    "ocamlc -stop-after parsing -impl test/test_keeper_claude_code_runtime.ml",
+    "git diff --check"
+  ],
+  "native_host_hook_execution": "not rerun locally",
+  "required_native_target": "test_keeper_claude_code_runtime lifecycle49; full Claude suite when combined by root",
+  "original_run": "/tmp/masc-native-integrity-be9a9d9d-result.json",
+  "fixture_receipt_sha256": "5c907eac436a5aa80a24193c21de74452d7bfe1206babb19f92bb7c425a364e5",
+  "production_changes": false,
+  "model_identity_policy_changed": false,
+  "hook_exception_policy_changed": false,
+  "existing_hook_detail_assertion_changed": false
+}

@@ -20,7 +20,7 @@
 
 승인 통지는 첫 요청에 있었지만 후속 Tool 요청에서 사라졌다. typed Goal/Completion Authority 관측을 현재 turn에 보존하도록 수리했다. Official Start에 같은 이벤트를 고정 System으로 넣은 첫 수리는 독립 리뷰에서 거절됐다. 후속 수리는 현재 이벤트를 Start/Resume User 운반층으로 투영한다. [실패·수리·native 범위](../evidence/2026-10-25-completion-authority-retention/README.md)는 구분돼 있다. 실제 vendor 세션 성공은 미검증이다.
 
-거절 후 첫 재제출에서는 이전 handoff의 bare verification ID가 새 증거에 다시 섞였다. 실제 Qwen의 동일 인수 두 제출이 다른 진단을 낸 사례를 출발점으로, 하나의 현재 Task snapshot을 캡처·commit·알림·review scheduling에 넘기도록 고쳤다. 상관 ID는 기존 typed verdict/outbox/event에 남는다. [후속 수리](../evidence/2026-10-25-submission-evidence-snapshot/README.md)는 실제-source 재현과 독립 source review를 갖지만, 이 수리를 실행한 전체 native 결과와 GLM328 실측은 별개다.
+거절 후 첫 재제출에서는 이전 handoff의 bare verification ID가 새 증거에 다시 섞였다. 실제 Qwen의 동일 인수 두 제출이 다른 진단을 낸 사례를 출발점으로, 하나의 현재 Task snapshot을 캡처·commit·알림·review scheduling에 넘기도록 고쳤다. 상관 ID는 기존 typed verdict/outbox/event에 남는다. [후속 수리](../evidence/2026-10-25-submission-evidence-snapshot/README.md)의 실제 첫 재제출 native 사례는 be9a 후보에서 통과했다. 같은 실행의 다른 실패 4건과 GLM328 실측은 별도로 남긴다.
 
 검사도 공격 대상이었다. 기존 Claude fixture는 오래된 unread 기대, Owner child 경계를 건너뛴 호출, provider terminal 부재와 제거된 반복 횟수 중단 가정을 품고 있었다. 잘린 auth probe 검사에는 timeout 에러도 성공으로 인정하는 가지가 있었다. 추가 scheduling 검사도 콜백 예외 격리에 assertion이 삼켜질 수 있어, 관측값을 밖에서 검사하도록 수정했다. [원본 실패와 fixture 수리](../evidence/2026-10-25-native-lifecycle-fixtures/README.md)를 보존한다.
 
@@ -30,6 +30,7 @@
 
 - 모델이 스스로 matching Goal Task를 만들고 alpha만 바꾸었다. Goal 없는 독립 Task도 별도 정상 사례로 유지된다.
 - 승인 뒤 실제 Read →1/3 측정 → beta/gamma Edit → Read →3/3 측정 → Task2 제출 → Goal 검증 요청 순서를 관측했다.
+- 다만 request29에서는 Read와 함께 다음 Task도 생성했다. 1/3 측정은 request30이다. 남은 artifact 수정 전 측정은 충족하지만, 모든 계획·상태 변경이 측정 뒤였다는 주장은 하지 않는다.
 - 측정 영수증은 reported_only/unchanged이고, 마지막 Goal은 Verifying/proof_pending, Task2는 AwaitingVerification이다. 최종 응답도 증명·사람 확인 대기를 구분했다.
 - 새 TaskSpace의 [실제 화면과 API/저장/DOM 대조](../evidence/2026-10-25-goal-continuation-glm/ui/README.md)가 같은 상태를 보인다.
 
@@ -51,7 +52,9 @@ Goal 상태 기계는 측정3/3만으로 Completed가 되지 않는다. 이번 �
 
 ## 남아 있는 경계
 
-메인8935의 /health와 MCP 읽기가 응답하지 않았다. experiment-owned acceptance 파일은11/11로 갱신했지만, 마지막 등록된 main Goal 측정은9/11이고 task-2620은 InProgress다. isolated canary의 Verifying을 main Goal 상태로 바꿔 적지 않았다. main Goal의 API 갱신·완료 증명·사람 확인은 남아 있다.
+메인8935가 응답하지 않던 기록 이후 서비스가 복구됐다. 2026-10-25 00:41:14 UTC에 main Goal 측정11/11이 reported_only로 등록됐고, 00:44:50에 task-2620은 AwaitingVerification으로 제출됐다. 00:45:12에 main Goal의 검증 요청이 수락돼 Verifying/proof_pending이 됐다. [원본 API 영수증과 01:01:45의 별도 저장소 재조회](../evidence/2026-10-25-goal-main-registration/README.md)를 보존한다. 이후 읽기에서 ConnectionRefused도 관측했으므로 서비스 가용성 회복을 지속 보장했다고 부르지 않는다. Goal 증명·사람 확인은 아직 없다.
+
+be9a 후보의 [최소 native 실행](../evidence/2026-10-25-native-verification-followup/README.md)은 5개 suite, 251건 중247 PASS/4 FAIL로 끝났으며 suite timeout은 없었다. 두 suite만 전체 통과했다. 남은 실패는 volatile Registry를 쓴 fixture 2건, bare verification ID를 증거로 기대한 fixture 1건, measured assistant 없는 Claude terminal fixture 1건이었다. 제품의 durable publication·model identity 검사는 유지하고 fixture를 수리했다. 변경한 세 suite의 후속 실행과 원본 실패를 구분한다.
 
 후속 소스는 기존16개 Native Stack을 다른 세션이 재배치하는 동안 별도 exact candidate로 보존한다. source review, 최소 native 검사, 실제328 runtime, UI, 현재 원격 PR head/base와 전체 스택 승인은 각각 따로 확인해야 한다. microVM grader·실제 Official vendor 세션·전체 회귀·운영 설치·배포·병합·최종 사람 Goal 확인은 이 감사의 성공 주장에 포함되지 않는다.
 

@@ -1,0 +1,56 @@
+{
+  "recorded_at": "2026-10-25T01:12:12.930526+00:00",
+  "scope": "This directory excluding this current manifest. Historical receipts remain original bytes.",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 3600,
+      "sha256": "d54a778b2cd49a16e04a7bc79f02291cdfa4ce1bd00b5484670e87b6cfc2038b"
+    },
+    {
+      "path": "claude-author-repair.json",
+      "bytes": 1266,
+      "sha256": "a2bbf29809144c40650bfedd8102488c71330589c4f1bd5cb403b723e7e717c0"
+    },
+    {
+      "path": "claude-fixture-protocol.json",
+      "bytes": 2941,
+      "sha256": "5c907eac436a5aa80a24193c21de74452d7bfe1206babb19f92bb7c425a364e5"
+    },
+    {
+      "path": "followup-17583b00-dispatch.json",
+      "bytes": 911,
+      "sha256": "ec4fc2e331ae33c2a8282c2123b26b78e903b1290e6c0efef1ec5dc6d28095ee"
+    },
+    {
+      "path": "local-parse-links.json",
+      "bytes": 928,
+      "sha256": "1f6c165e900d3adc1771a3a8346024ece80380e83d330393adfb8c575d687503"
+    },
+    {
+      "path": "parent-be9a-dispatch.json",
+      "bytes": 955,
+      "sha256": "f0e942a4ea1adfeae7f183ce27f41753582948e8d1afa13b7e9989588bfb1656"
+    },
+    {
+      "path": "parent-be9a-native-result.json",
+      "bytes": 3704,
+      "sha256": "85b861053f34f05fee83b49818ba245db2e7858a2bf38db8d323de564858741f"
+    },
+    {
+      "path": "parent-be9a-selected-native-log.json",
+      "bytes": 11573,
+      "sha256": "4304c7c951edc6faa46874f892d22ef8fd8ae112dd844e1f5ce72836ac1b52a7"
+    },
+    {
+      "path": "previous-glm-publication-manifest.json",
+      "bytes": 8765,
+      "sha256": "4925b6fdd9f7a9519fb29949419ed98a0b5a69e226dc4fd3ff1a5afc0c18e019"
+    },
+    {
+      "path": "registry-rejection-author-validation.json",
+      "bytes": 5301,
+      "sha256": "fd0518f7ad5c2f4c79532ea254adad941ff5f3dbf71143b072b37b51290a8f61"
+    }
+  ]
+}

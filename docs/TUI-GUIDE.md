@@ -66,6 +66,34 @@ Point it at the same root the server uses. A TUI reading one root while the
 server writes another shows stale keepers with no error, because both roots are
 valid on their own.
 
+## UI language (Experimental)
+
+Switch selected TUI navigation and System/Configuration labels between Korean
+and English while the TUI is running. From navigation, press `:` to open the
+command palette, type `language` (`:language`), select
+`language: English (영문)` or `language: 한국어 (Korean)`, and press Enter.
+Searching for `언어` also finds these choices.
+
+The System sub-navigation bar also offers a clickable `[언어:KO 전환]` /
+`[Lang:EN toggle]` control. The System `Themes` (`테마·언어`) pane has a
+clickable `UI 언어` / `UI Language` control too. Each click switches to the
+other language. Use the palette when the control is clipped or terminal mouse
+input is unavailable; changing the display language needs no server connection
+or operator credential. This feature requires a TUI build containing the
+language choices; an older executable will not offer them.
+
+This Experimental setting covers the top-level navigation, Configuration tabs,
+and selected System labels and detail headings. It is a partial UI translation:
+other text can remain Korean, English or bilingual after a switch. Keeper
+messages, original content, command names and configuration keys keep their
+original text. Korean navigation uses bilingual labels when space permits and
+shorter Korean labels on narrower terminals.
+
+To turn off English, select `language: 한국어 (Korean)` or click the language
+control again. The choice (`ui_language`) belongs to the current TUI session;
+it is not a saved `runtime.toml` preference. Every new TUI process starts in
+Korean, so restarting also restores the default.
+
 ## Browser
 
 Use `:`, then `go Browser Lane` (or `B` from Connectors). `l` / `a` select

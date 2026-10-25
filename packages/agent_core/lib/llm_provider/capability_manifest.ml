@@ -39,6 +39,7 @@ type entry =
         (none / minimal / low / medium / high / xhigh). *)
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
+  ; json_schema_dialect : Capability_vocab.json_schema_dialect option
   ; supports_multimodal_inputs : bool option
   ; supports_image_input : bool option
   ; supports_audio_input : bool option
@@ -334,6 +335,7 @@ let known_entry_keys =
   ; "accepted_reasoning_efforts"
   ; "supports_response_format_json"
   ; "supports_structured_output"
+  ; "json_schema_dialect"
   ; "supports_multimodal_inputs"
   ; "supports_image_input"
   ; "supports_audio_input"
@@ -491,6 +493,16 @@ let parse_entry json =
       ~allowed:Capability_vocab.tool_schema_conformance_values
       json
   in
+  let* json_schema_dialect =
+    let* raw = canonical_choice  "json_schema_dialect"
+      ~allowed:Capability_vocab.json_schema_dialect_values json in
+    match raw with
+    | None -> Ok None
+    | Some value ->
+      (match Capability_vocab.json_schema_dialect_of_string value with
+       | Some dialect -> Ok (Some dialect)
+       | None -> Error ("invalid json_schema_dialect: " ^ value))
+  in
   let* accepted_reasoning_efforts =
     canonical_string_list
       "accepted_reasoning_efforts"
@@ -547,6 +559,7 @@ let parse_entry json =
     ; accepted_reasoning_efforts
     ; supports_response_format_json
     ; supports_structured_output
+    ; json_schema_dialect
     ; supports_multimodal_inputs
     ; supports_image_input
     ; supports_audio_input

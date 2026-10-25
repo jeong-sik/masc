@@ -1988,7 +1988,7 @@ supports_native_streaming = true
 # Cohere Command Models
 [[models]]
 id_prefix = "command-r-plus"
-base = "openai_chat"
+base = "cohere"
 provider_name = "cohere"
 max_context_tokens = 256000
 max_output_tokens = 32000

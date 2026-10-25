@@ -732,3 +732,8 @@
  (modules test_agent_input_request)
  (libraries agent_core_base yojson alcotest)
  (flags (:standard -open Agent_core_base)))
+
+(test
+ (name test_cohere_schema_wire)
+ (modules test_cohere_schema_wire)
+ (libraries agent_core_test_deps alcotest))

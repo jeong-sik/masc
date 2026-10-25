@@ -117,6 +117,10 @@ type structured_output_support = Capability_vocab.structured_output_support =
   | Native_json_schema
 [@@deriving show, eq]
 
+type json_schema_dialect = Capability_vocab.json_schema_dialect =
+  | Openai_json_schema
+  | Json_object_schema
+
 type anthropic_thinking_control =
   | Anthropic_adaptive_default
   | Anthropic_adaptive_disabled_through_high
@@ -193,6 +197,7 @@ type capabilities =
   ; (* ── Output format ─────────────────────────────────── *)
     supports_response_format_json : bool (** JSON mode *)
   ; supports_structured_output : bool (** JSON schema 100% guarantee *)
+  ; json_schema_dialect : json_schema_dialect
   ; (* ── Input modalities ──────────────────────────────── *)
     supports_multimodal_inputs : bool (** Any non-text input *)
   ; supports_image_input : bool
@@ -266,6 +271,7 @@ let default_capabilities =
   ; reasoning_replay_override = Default_reasoning_replay
   ; supports_response_format_json = false
   ; supports_structured_output = false
+  ; json_schema_dialect = Openai_json_schema
   ; supports_multimodal_inputs = false
   ; supports_image_input = false
   ; supports_audio_input = false
@@ -856,7 +862,8 @@ let capabilities_for_provider_label label =
        Some openai_compat_chat_extended_capabilities
      | "openrouter" -> Some openrouter_capabilities
      | "xai" | "mistral" -> Some openai_compat_chat_extended_capabilities
-     | "cohere" -> Some openai_compat_chat_capabilities
+     | "cohere" ->
+       Some { openai_compat_chat_capabilities with json_schema_dialect = Json_object_schema }
      | "mimo" -> Some mimo_capabilities
      | "ollama_cloud" -> Some ollama_cloud_capabilities
      | "ollama_cloud_v1" -> Some ollama_cloud_v1_capabilities
@@ -1006,6 +1013,7 @@ type declarative_capability_overrides =
   ; accepted_reasoning_efforts : string list option
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
+  ; json_schema_dialect : json_schema_dialect option
   ; supports_multimodal_inputs : bool option
   ; supports_image_input : bool option
   ; supports_audio_input : bool option
@@ -1048,6 +1056,7 @@ let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
   ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
   ; supports_response_format_json = entry.supports_response_format_json
   ; supports_structured_output = entry.supports_structured_output
+  ; json_schema_dialect = entry.json_schema_dialect
   ; supports_multimodal_inputs = entry.supports_multimodal_inputs
   ; supports_image_input = entry.supports_image_input
   ; supports_audio_input = entry.supports_audio_input
@@ -1177,6 +1186,7 @@ let apply_declarative_capability_overrides overrides =
         overrides.supports_response_format_json
   ; supports_structured_output =
       override_bool base.supports_structured_output overrides.supports_structured_output
+  ; json_schema_dialect = Option.value overrides.json_schema_dialect ~default:base.json_schema_dialect
   ; supports_multimodal_inputs =
       override_bool base.supports_multimodal_inputs overrides.supports_multimodal_inputs
   ; supports_image_input =
@@ -1384,6 +1394,7 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
   ; supports_response_format_json = entry.supports_response_format_json
   ; supports_structured_output = entry.supports_structured_output
+  ; json_schema_dialect = entry.json_schema_dialect
   ; supports_multimodal_inputs = entry.supports_multimodal_inputs
   ; supports_image_input = entry.supports_image_input
   ; supports_audio_input = entry.supports_audio_input
@@ -1688,6 +1699,7 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
   ; accepted_reasoning_efforts = None
   ; supports_response_format_json = None
   ; supports_structured_output = None
+  ; json_schema_dialect = None
   ; supports_multimodal_inputs = None
   ; supports_image_input = None
   ; supports_audio_input = None

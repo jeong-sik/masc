@@ -1,0 +1,43 @@
+Source-only mismatch reproduction; no baseline execution claimed.
+Base 3cce9a517b25863c00b48cfb3dd79b994ebc1044
+File packages/agent_core/lib/llm_provider/backend_openai_request.ml
+Source SHA256 d667a1c2b314794596b42a5278bc7a30664e0757392054eb64f904f89c8bec15
+
+let structured_schema_of_config (config : Provider_config.t) =
+  match config.response_format with
+  | JsonSchema schema -> Some schema
+  | JsonMode | Off -> None
+;;
+
+let openai_json_schema_payload (schema : Yojson.Safe.t) : Yojson.Safe.t =
+  match schema with
+  | `Assoc fields when List.mem_assoc "name" fields && List.mem_assoc "schema" fields ->
+    schema
+  | _ ->
+    `Assoc
+      [ "name", `String (Provider_config.structured_output_name_of_schema schema)
+      ; "schema", schema
+      ; "strict", `Bool true
+      ]
+;;
+
+let response_format_to_openai_json = function
+  | Types.Off -> None
+  | Types.JsonMode -> Some (`Assoc [ "type", `String "json_object" ])
+  | Types.JsonSchema schema ->
+    Some
+      (`Assoc
+          [ "type", `String "json_schema"
+          ; "json_schema", openai_json_schema_payload schema
+          ])
+;;
+
+(** Build Openai Chat Completions request body from {!Provider_config.t}.
+    Returns a JSON string ready for HTTP POST. *)
+let response_format_of_config (config : Provider_config.t) =
+  match structured_schema_of_config config with
+  | Some schema -> response_format_to_openai_json (Types.JsonSchema schema)
+  | None when config.response_format = JsonMode ->
+    response_format_to_openai_json Types.JsonMode
+  | None -> None
+;;

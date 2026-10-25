@@ -108,6 +108,10 @@ type structured_output_support = Capability_vocab.structured_output_support =
   | Native_json_schema
 [@@deriving show, eq]
 
+type json_schema_dialect = Capability_vocab.json_schema_dialect =
+  | Openai_json_schema
+  | Json_object_schema
+
 type anthropic_thinking_control =
   | Anthropic_adaptive_default
   | Anthropic_adaptive_disabled_through_high
@@ -169,6 +173,9 @@ type capabilities =
   ; (* Output format *)
     supports_response_format_json : bool
   ; supports_structured_output : bool
+  ; json_schema_dialect : json_schema_dialect
+    (** Declared schema envelope for OpenAI-compatible Chat requests.
+        This selects serialization only and grants no schema capability. *)
   ; (* Input modalities *)
     supports_multimodal_inputs : bool
   ; supports_image_input : bool

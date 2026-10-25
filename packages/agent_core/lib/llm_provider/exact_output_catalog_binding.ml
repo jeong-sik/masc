@@ -246,6 +246,7 @@ let functional_capability_projection
   @ serving_constraint
   @ [ "max_output=" ^ option_int caps.max_output_tokens
     ; "json_mode=" ^ bool_string caps.supports_response_format_json
+    ; "json_schema_dialect=" ^ Capability_vocab.json_schema_dialect_to_string caps.json_schema_dialect
     ; "native_schema=" ^ bool_string caps.supports_structured_output
     ; "multimodal=" ^ bool_string caps.supports_multimodal_inputs
     ; "image=" ^ bool_string caps.supports_image_input
@@ -433,6 +434,7 @@ let capabilities_of_catalog_binding
       bool_or base.supports_response_format_json model.supports_response_format_json
   ; supports_structured_output =
       bool_or base.supports_structured_output model.supports_structured_output
+  ; json_schema_dialect = Option.value model.json_schema_dialect ~default:base.json_schema_dialect
   ; supports_multimodal_inputs =
       bool_or base.supports_multimodal_inputs model.supports_multimodal_inputs
   ; supports_image_input = bool_or base.supports_image_input model.supports_image_input

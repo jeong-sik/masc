@@ -520,6 +520,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       ; Binding.option_int model.max_output_tokens
       ; option_bool model.supports_response_format_json
       ; option_bool model.supports_structured_output
+      ; option_string (Option.map Capability_vocab.json_schema_dialect_to_string model.json_schema_dialect)
       ; option_bool model.supports_multimodal_inputs
       ; option_bool model.supports_image_input
       ; option_bool model.supports_audio_input

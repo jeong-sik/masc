@@ -77,6 +77,7 @@ type entry =
         (none / minimal / low / medium / high / xhigh). *)
   ; supports_response_format_json : bool option
   ; supports_structured_output : bool option
+  ; json_schema_dialect : Capability_vocab.json_schema_dialect option
   ; supports_multimodal_inputs : bool option
   ; supports_image_input : bool option
   ; supports_audio_input : bool option

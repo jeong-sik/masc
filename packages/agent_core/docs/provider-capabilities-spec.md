@@ -121,6 +121,9 @@ The two flags are related but not interchangeable:
 | Anthropic | `output_config.format` for JSON outputs; strict tool use is separate | Native schema guarantee for JSON outputs; strict tool use validates tool names and inputs, not assistant text shape | `backend_anthropic.ml` emits `output_config.format`; `lib/structured.ml` direct extraction uses native schema output | Strict tool use remains separate; do not describe Anthropic structured output as "tool-use only". |
 | Ollama | `/api/chat` `format` accepts `"json"` or a JSON schema | JSON mode or native schema guarantee, depending on `format` | `backend_ollama.ml` emits `/api/chat format` as `"json"` or a JSON schema | Native schema still depends on the target Ollama server honoring `format`. |
 | GLM | `response_format = {"type":"json_object"}` plus prompt/schema-in-text guidance | JSON mode only in the current official docs | agent_core keeps GLM on the OpenAI-style `json_object` path and rejects `response_format = JsonSchema _` up front | Keep caller-side validation; do not treat this as provider-native schema enforcement. |
+| Cohere compatibility Chat | `response_format = {"type":"json_object", "schema": ...}` | Native schema-constrained output using the sibling schema field | The typed `json_schema_dialect` declaration selects `json_object_schema`; raw schemas and named input envelopes send the domain schema | [Official compatibility guide](https://docs.cohere.com/docs/compatibility-api), checked 2026-10-25. This is separate from Cohere native v2 and does not establish schema-plus-tools combinations. |
+| Mistral Chat | Named `json_schema`; its OpenAPI defines `strict` default as false | Strict enforcement requires the request to say `strict: true` | Raw `JsonSchema` and exact `Provider_schema` requests explicitly include `strict: true`; a caller-supplied named envelope remains caller-owned | [Official OpenAPI](https://docs.mistral.ai/openapi.yaml), checked 2026-10-25. |
+| Kimi platform versus coding | Platform Chat documents named `json_schema` and MFJS; coding uses the Anthropic Messages wire | Platform support is model-specific; coding capability does not imply it | Explicit OpenAI-compatible wire and capability declarations select platform-style schema output. The packaged coding provider retains its schema-incapable profile; no platform provider is inferred from its model name | [Platform response format](https://platform.kimi.ai/docs/guide/response_format), checked 2026-10-25. This does not prove a live platform binding or MFJS acceptance. |
 | Generic OpenAI-compatible / llama.cpp | Varies by server, release, and host integration | Host-specific; do not assume schema support | agent_core rejects native schema by default for generic OpenAI-compatible hosts; verified provider/runtime catalog entries may declare endpoint support explicitly | OpenAI-compatible wire shape is not enough evidence for native schema support. |
 
 ## Thinking Taxonomy
@@ -239,7 +242,7 @@ reference from the March 2026 survey unless otherwise noted.
 - Meta Llama 4 (llama.com)
 - DeepSeek API docs (api-docs.deepseek.com)
 - Mistral docs (docs.mistral.ai)
-- Cohere docs (docs.cohere.com)
+- Cohere compatibility structured output: https://docs.cohere.com/docs/compatibility-api — checked 2026-10-25; Chat schema envelope only; provider execution remains separate.
 - xAI Grok docs (docs.x.ai)
 - MCP specification 2025-11-25
 - arxiv: SimpleTool (2603.00030), SelfBudgeter (2505.11274), Agent Skills (2602.12430)

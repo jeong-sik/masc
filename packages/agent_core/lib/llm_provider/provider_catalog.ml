@@ -640,6 +640,15 @@ let parse_capabilities provider_json =
     member_bool "supports_response_format_json" cap_json
   in
   let* supports_structured_output = member_bool "supports_structured_output" cap_json in
+  let* json_schema_dialect =
+    let* raw = member_string "json_schema_dialect" cap_json in
+    match raw with
+    | None -> Ok None
+    | Some value ->
+      (match Capability_vocab.json_schema_dialect_of_string value with
+       | Some dialect -> Ok (Some dialect)
+       | None -> Error ("invalid json_schema_dialect: " ^ value))
+  in
   let* supports_multimodal_inputs = member_bool "supports_multimodal_inputs" cap_json in
   let* supports_image_input = member_bool "supports_image_input" cap_json in
   let* supports_audio_input = member_bool "supports_audio_input" cap_json in
@@ -747,6 +756,11 @@ let parse_capabilities provider_json =
     |> fun caps ->
     override emits_usage_tokens caps (fun caps value ->
       { caps with Capabilities.emits_usage_tokens = value })
+  in
+  let caps =
+    match json_schema_dialect with
+    | None -> caps
+    | Some json_schema_dialect -> { caps with Capabilities.json_schema_dialect }
   in
   let caps =
     match thinking_control_format with

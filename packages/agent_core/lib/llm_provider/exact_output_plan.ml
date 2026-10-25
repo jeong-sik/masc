@@ -363,6 +363,7 @@ let plan_fingerprint
      ; Yojson.Safe.to_string (Types.response_format_to_json config.response_format)
      ; (if capabilities.supports_response_format_json then "1" else "0")
      ; (if capabilities.supports_structured_output then "1" else "0")
+     ; Capability_vocab.json_schema_dialect_to_string capabilities.json_schema_dialect
      ]
      @ admission_material
      @ [ option_float wire.connect_timeout_s

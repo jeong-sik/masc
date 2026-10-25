@@ -153,6 +153,7 @@ let[@warning "-32"] test_catalog_entry
   ; accepted_reasoning_efforts = None
   ; supports_response_format_json = None
   ; supports_structured_output = None
+  ; json_schema_dialect = None
   ; supports_multimodal_inputs = None
   ; supports_image_input = None
   ; supports_audio_input = None

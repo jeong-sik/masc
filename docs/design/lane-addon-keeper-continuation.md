@@ -2,12 +2,13 @@
 
 Implementation and design for the remaining continuation work in
 [#45736](https://github.com/jeong-sik/masc/issues/45736). The version-3 companion now has a private publication channel.
-The worker Service does not yet drain its outbox into that channel.
+The worker Service drains its durable outbox on a separate owned delivery thread.
 Original source capture and first-writer retention are source implementation
 in `Lane_addon_companion_origin`, before companion grant issuance. Canonical
 publication retention, a durable Keeper queue producer and source-checked
 observation intake are now implemented on the host. The original private broker can now call that producer through a
-host-injected callback; the worker Service does not call its Publisher yet. A preparing
+host-injected callback; the worker Service now sends its committed envelopes
+through its original Publisher. A preparing
 receipt or a private worker's completed fill does not prove the Keeper resumed.
 
 ## Ownership before dispatch (source implementation)
@@ -80,8 +81,8 @@ binding or executing anything. The private `acknowledge_publication` requires
 the exact original caller and complete, type-correct envelope. A duplicate ACK
 does not rewrite its record. Its `host_accepted` marker means durable host
 admission only; it does not claim queue consumption or Keeper resumption. Neither
-method is a public MCP tool, and the private transport is implemented but the Service-owned delivery pump is
-still unconnected. The private journal uses version 2 with strict closed decoding.
+method is a public MCP tool, and the Service-owned delivery pump invokes the private transport and commits
+ACKs with the original caller after confirmed host admission. The private journal uses version 2 with strict closed decoding.
 
 After an uncertain journal write the original engine fences admission, further
 writes and private sockets. It cannot overwrite a possibly committed publication
@@ -90,9 +91,24 @@ original IDs/host acceptance and records lost nonterminal ownership as a new
 unknown terminal notice without rebinding or replay. Private file tests cover
 failures before a fill-state write, after that write and after an ACK write.
 
-Remaining: deliver these intents on the private transport and reuse their IDs
-after an uncertain host acknowledgement. This retry concerns delivery only and
-never replays a request, credential fill or Browser command.
+The Service-owned delivery thread registers the original caller and Publisher
+before request admission. It reads committed envelopes without holding the
+engine lock during private network IO. After an exact host ACK it commits that
+envelope's admission marker with the original caller, even when the actor job
+was an operator check. State commits and existing status/host observation
+activity notify delivery; uncertain transport remains pending until such
+activity reconciles the same IDs. No new polling timer, replacement capability
+or request/fill replay is introduced.
+
+Storage uncertainty immediately interrupts this separate Publisher and stops a
+cached batch. Service retirement stops publication admission and IO; its worker
+joins delivery before closing the engine lease, including background failure.
+The private endpoint is never reconstructed from a retained journal. Explicitly
+unrouted descriptors continue to use their status flow without fabricated ACKs.
+Controlled Service, actual private files and Unix-socket fixtures cover normal
+attention/fill/terminal delivery, lost ACK reconciliation, cancel during a blocked
+ACK and an ACK write that committed before reporting failure. Their host is a
+controlled ACK endpoint; an actual OCaml host/Keeper turn remains unexecuted.
 
 The host implementation now retains each notice under the original invocation
 and publication ID in a private immutable file. It captures the export's closed

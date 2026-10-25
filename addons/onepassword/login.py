@@ -88,6 +88,12 @@ class Publication:
                         for key, value in expected["output"].items()))
 
 
+@dataclass(frozen=True)
+class PublicationSnapshot:
+    phase: Phase
+    pending: tuple[dict, ...]
+
+
 class _Lifecycle(StrEnum):
     OPEN = "open"
     CLOSING = "closing"
@@ -264,6 +270,7 @@ class Logins:
         self._lifecycle = _Lifecycle.OPEN
         self._cleanup_unconfirmed = False
         self._storage_failed = False
+        self._publication_notify, self._publication_fence = None, None
         self._live, self._lease = {}, None
         self._prepare = Path(__file__).with_name("prepare.js").read_text()
         self._program = Path(__file__).with_name("autofill.js").read_text()
@@ -295,6 +302,13 @@ class Logins:
     def _value(self):
         return {"version": 2, "operations": [_encode(record) for record in self._records.values()]}
 
+    def attach_publication_delivery(self, *, notify, fence):
+        """One original Service owns nonblocking notification and IO fencing."""
+        with self._lock:
+            if self._publication_notify is not None or self._lease is None or self._storage_failed:
+                raise LoginError("unavailable")
+            self._publication_notify, self._publication_fence = notify, fence
+
     @staticmethod
     def _changed(prior, record):
         publications = prior.publications if prior is not None else ()
@@ -315,6 +329,8 @@ class Logins:
                 self.journal.write(root, {"version": 2, "operations": [_encode(r) for r in records.values()]})
         except (ConnectionError, OSError, ValueError, TypeError):
             self._storage_failed = True
+            if self._publication_fence is not None:
+                self._publication_fence()
             with self._handles_lock:
                 for live in self._live.values():
                     live.cancelled.set()
@@ -324,6 +340,8 @@ class Logins:
                         self._cleanup_unconfirmed = True
             raise LoginError("outcome_unknown") from None
         self._records = records
+        if self._publication_notify is not None:
+            self._publication_notify(record.operation_id)
         return record
 
     def _save(self, record):
@@ -346,8 +364,17 @@ class Logins:
         Re-read the same immutable envelopes after an uncertain host ACK.
         This read never allocates a replacement host/Browser binding.
         """
+        return list(self.publication_snapshot(operation_id, caller).pending)
+
+    def publication_snapshot(self, operation_id, caller):
+        """Phase and pending envelopes from one committed immutable Record.
+
+        Separate reads could observe an empty older outbox and a newer terminal
+        phase, incorrectly retiring the owner before that final notice is sent.
+        """
         record = self._owned(operation_id, caller)
-        return [publication.public(operation_id) for publication in record.publications if not publication.host_accepted]
+        return PublicationSnapshot(record.phase, tuple(publication.public(operation_id)
+            for publication in record.publications if not publication.host_accepted))
 
     def acknowledge_publication(self, operation_id, caller, envelope):
         """Commit an exact original sender's ACK without replaying its effect.

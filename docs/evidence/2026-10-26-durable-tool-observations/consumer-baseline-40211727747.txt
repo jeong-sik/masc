@@ -1,0 +1,32 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40211727747
+Complete raw log SHA256: efa4f65d8281880ea105f86c20a09df466cbfa5549548bda77206f32520a1a46
+Complete raw log bytes: 203224
+Selected checkout, changed assertions, failures and summaries only; omitted assertions are not claimed by this excerpt.
+
+test suite	Checkout	2026-10-25T16:27:25.4823617Z HEAD is now at b481391f test(keeper): expose durable projection consumer association and ordering gaps
+test suite	Test	2026-10-25T16:28:53.9030011Z ASSERT same occurrence identities and sequence after observer failure
+test suite	Test	2026-10-25T16:28:54.0808217Z ASSERT called observation arrives before effect
+test suite	Test	2026-10-25T16:28:54.0808698Z ASSERT partial delivery retries only the unacknowledged occurrence
+test suite	Test	2026-10-25T16:28:54.0809144Z ASSERT one canonical called and completed identity
+test suite	Test	2026-10-25T16:28:54.0823482Z ASSERT bus occurrence uses canonical sequence
+test suite	Test	2026-10-25T16:28:54.0823925Z ASSERT bus occurrence uses canonical event id
+test suite	Test	2026-10-25T16:28:54.0824170Z ASSERT bus occurrence uses canonical run id
+test suite	Test	2026-10-25T16:28:54.0824409Z ASSERT bus occurrence uses canonical correlation id
+test suite	Test	2026-10-25T16:28:54.0824824Z ASSERT canonical parent event is preserved
+test suite	Test	2026-10-25T16:28:54.0825311Z ASSERT no synthetic lifecycle causation replaces source facts
+test suite	Test	2026-10-25T16:28:54.0827737Z ASSERT filtered empty pages still advance source cursor
+test suite	Test	2026-10-25T16:28:54.0828069Z ASSERT public cursor catch-up matches live canonical observations
+test suite	Test	2026-10-25T16:28:54.0837261Z ASSERT reopened cursor retries the identical undelivered event
+test suite	Test	2026-10-25T16:28:54.0837722Z ASSERT acknowledged catch-up has no repeat
+test suite	Test	2026-10-25T16:28:54.4065348Z Test Successful in 1.106s. 79 tests run.
+test suite	Test	2026-10-25T16:31:12.8489230Z ASSERT real Tool effect once
+test suite	Test	2026-10-25T16:31:12.8489559Z ASSERT producer association exists before bridge consume
+test suite	Test	2026-10-25T16:31:12.8489783Z ASSERT post-hook row commit precedes completion delivery
+test suite	Test	2026-10-25T16:31:12.8511129Z   [FAIL]        bridge_stamping          5   durable completion follows produ...
+test suite	Test	2026-10-25T16:31:12.8724250Z ASSERT real bridge resolves the completed canonical occurrence
+test suite	Test	2026-10-25T16:31:12.8736766Z   [FAIL]        bridge_stamping          6   durable completion retains produ...
+test suite	Test	2026-10-25T16:31:12.8777224Z │ [FAIL]        bridge_stamping          5   durable completion follows pr...  │
+test suite	Test	2026-10-25T16:31:12.8777803Z File "lib_eio/core/switch.ml", line 133, character 8:
+test suite	Test	2026-10-25T16:31:12.8778025Z FAIL post-hook row commit precedes completion delivery
+test suite	Test	2026-10-25T16:31:12.8785429Z │ [FAIL]        bridge_stamping          6   durable completion retains pr...  │
+test suite	Test	2026-10-25T16:31:12.8786138Z FAIL real bridge resolves the completed canonical occurrence

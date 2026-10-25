@@ -957,7 +957,9 @@ base = "openai_chat_extended"
     Alcotest.(check bool) "low-level policy retains its observed absence" true
       (Llm_provider.Provider_config.capabilities_for_config_model config = None);
     let actual = Provider_runtime_binding.capabilities_for_provider_config config in
-    let expected,_ = Llm_provider.Complete_common.resolve_capabilities_for_config config in
+    let expected = Option.value
+      (Llm_provider.Provider_config.capabilities_for_config_model config)
+      ~default:Llm_provider.Capabilities.openai_compat_chat_capabilities in
     Alcotest.(check bool) "runtime projection cannot revive a missing model policy" true
       (actual = expected))
 ;;
@@ -970,7 +972,9 @@ let test_frozen_absence_survives_provider_overlay () =
       |> Llm_provider.Provider_config.freeze_for_request in
     with_provider_catalog catalog_json (fun () ->
       let actual = Provider_runtime_binding.capabilities_for_provider_config config in
-      let expected,_ = Llm_provider.Complete_common.resolve_capabilities_for_config config in
+      let expected = Option.value
+      (Llm_provider.Provider_config.capabilities_for_config_model config)
+      ~default:Llm_provider.Capabilities.openai_compat_chat_capabilities in
       Alcotest.(check bool) "runtime projection cannot acquire a later provider overlay" true
         (actual = expected)))
 ;;
@@ -985,7 +989,9 @@ let test_selected_binding_carries_provider_capabilities () =
     let config = Llm_provider.Provider_config.freeze_for_request config in
     Llm_provider.Provider_catalog.clear_global ();
     let actual = Provider_runtime_binding.capabilities_for_provider_config config in
-    let expected,_ = Llm_provider.Complete_common.resolve_capabilities_for_config config in
+    let expected = Option.value
+      (Llm_provider.Provider_config.capabilities_for_config_model config)
+      ~default:Llm_provider.Capabilities.openai_compat_chat_capabilities in
     Alcotest.(check bool) "selected provider reasoning survives overlay removal" true
       actual.supports_reasoning;
     Alcotest.(check bool) "selected provider facts match request admission" true

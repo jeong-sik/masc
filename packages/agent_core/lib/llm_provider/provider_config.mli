@@ -383,6 +383,10 @@ val resolve_request_capabilities : t -> Capabilities.capabilities * capability_s
     or registry state. *)
 
 
+val with_request_policy : Capabilities.request_policy -> t -> t
+(** Install an already resolved policy, including absent facts, for this exact
+    kind/provider/model identity. Does not read global state or alter overrides. *)
+
 val freeze_for_request : t -> t
 (** Capture the catalog resolution for this request without changing explicit
     overrides. Idempotent while provider/model identity is unchanged. *)

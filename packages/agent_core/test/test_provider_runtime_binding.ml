@@ -997,8 +997,6 @@ let test_selected_binding_carries_provider_capabilities () =
     let binding = expect_binding "subscriber-alias" in
     let config = expect_ok (Provider_runtime_binding.to_provider_config
       ~model:"unlisted-local-model" binding) in
-    Alcotest.(check bool) "binding projects its declared capability into config" true
-      (Option.is_some config.model_capabilities_override);
     let config = Llm_provider.Provider_config.freeze_for_request config in
     Llm_provider.Provider_catalog.clear_global ();
     let actual = Provider_runtime_binding.capabilities_for_provider_config config in
@@ -1144,6 +1142,67 @@ let test_overlay_removes_seed_bare_authority () =
       (Provider_runtime_binding.capabilities_for_provider_config config).supports_reasoning)
 ;;
 
+let test_captured_anthropic_absence () =
+  let catalog control =
+    let toml = Printf.sprintf {|[[providers]]
+id = "captured-provider"
+kind = "anthropic"
+base_url = "https://captured.example.invalid"
+request_path = "/v1/messages"
+auth = "none"
+capabilities_base = "anthropic"
+default_model = "captured-model"
+[[models]]
+model_id = "captured-model"
+provider_name = "captured-provider"
+base = "anthropic"
+%s
+|} control in
+    match Llm_provider.Model_catalog.of_toml_string ~source:"thinking-capture-fixture" toml with
+    | Ok catalog -> catalog | Error error -> Alcotest.fail error in
+  let original = catalog "" in
+  let replacement = catalog "anthropic_thinking_control = \"adaptive_default\"" in
+  let binding = captured_binding original None in
+  Llm_provider.Model_catalog.set_global replacement;
+  Fun.protect ~finally:Llm_provider.Model_catalog.clear_global (fun () ->
+    let config = expect_ok (Provider_runtime_binding.to_provider_config binding) in
+    let frozen = Llm_provider.Provider_config.freeze_for_request config in
+    Alcotest.(check bool) "absent captured thinking control remains absent" true
+      (Llm_provider.Provider_config.anthropic_thinking_control frozen = None))
+;;
+
+let test_selected_wire_base () =
+  let toml = {|[[providers]]
+id = "captured-provider"
+kind = "openai_compat"
+identity_kinds = ["openai_compat"]
+base_url = "https://captured.example.invalid"
+request_path = "/chat/completions"
+auth = "none"
+capabilities_base = "openai_chat"
+capabilities_base_by_identity_kind = { openai_compat = "cohere" }
+default_model = "captured-model"
+[[models]]
+model_id = "captured-model"
+provider_name = "captured-provider"
+base = "openai_chat"
+|} in
+  let catalog = match Llm_provider.Model_catalog.of_toml_string ~source:"wire-capture-fixture" toml with
+    | Ok catalog -> catalog | Error error -> Alcotest.fail error in
+  let check model =
+    let binding = captured_binding catalog None in
+    let config = expect_ok (Provider_runtime_binding.to_provider_config ~model binding) in
+    let config = {config with response_format=Llm_provider.Types.JsonSchema
+      (`Assoc ["type",`String "object"])} in
+    let body = Llm_provider.Backend_openai.build_request ~config
+      ~messages:[Llm_provider.Types.user_msg "Return an object"] ()
+      |> Yojson.Safe.from_string in
+    Alcotest.(check string) "selected wire owns actual schema envelope"
+      "json_object" Yojson.Safe.Util.(body |> member "response_format" |> member "type" |> to_string) in
+  check "captured-model";
+  check "undeclared-model"
+;;
+
 let () =
   Alcotest.run
     "Provider_runtime_binding"
@@ -1153,7 +1212,10 @@ let () =
         ; Alcotest.test_case "model replacement after construction" `Quick
             (fun () -> test_selection_survives_model_replacement ~before_construction:false)
         ; Alcotest.test_case "overlay removes seed bare authority" `Quick
-            test_overlay_removes_seed_bare_authority ])
+            test_overlay_removes_seed_bare_authority
+        ; Alcotest.test_case "captured Anthropic absence" `Quick test_captured_anthropic_absence
+        ; Alcotest.test_case "selected wire base controls model and provider fallback" `Quick
+            test_selected_wire_base ])
     ; ( "policy authority",
         [ Alcotest.test_case "anonymous chat versus declared missing policy" `Quick
             test_anonymous_chat_defaults_do_not_restore_declared_missing_policy

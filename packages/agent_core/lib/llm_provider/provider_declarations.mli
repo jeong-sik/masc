@@ -51,4 +51,8 @@ val entries : t -> entry list
 (** Preserve the admitted declaration spellings; only identity lookup keys fold case. *)
 val find : t -> string -> entry option
 (** Lookup id or alias with ASCII case folding and trimmed query whitespace. *)
+val request_policy : t -> provider_id:string -> model_id:string -> Capabilities.request_policy option
+(** Resolve from this immutable selection's model catalog and admitted provider.
+    [None] means the provider id/alias is absent from this selection. *)
+
 val requires_api_key : authentication -> bool

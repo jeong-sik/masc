@@ -331,6 +331,14 @@ val resolve_request_policy
   -> model_id:string
   -> request_policy
 
+val resolve_bound_request_policy :
+  catalog:Model_catalog.t option -> provider:Model_catalog.provider_entry ->
+  capabilities:capabilities -> model_id:string -> request_policy
+(** Pure resolution from the selection-owned catalog and provider declaration.
+    The selected wire base precedes the model base; explicit model fields then
+    override that base, with selected provider defaults when no base is declared. No global
+    catalog or manifest is read; absent thinking controls remain absent. *)
+
 val request_policy_capabilities : request_policy -> capabilities option
 val request_policy_anthropic_thinking_control :
   request_policy -> anthropic_thinking_control option

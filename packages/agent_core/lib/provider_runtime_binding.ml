@@ -26,6 +26,7 @@ type t =
   ; capabilities : capabilities
   ; available : bool
   ; credential_scope : string option
+  ; declarations : PD.t
   }
 
 let normalize value = String.trim value |> String.lowercase_ascii
@@ -35,7 +36,7 @@ let trim_non_empty value =
   if trimmed = "" then None else Some trimmed
 ;;
 
-let binding_of_declaration (entry : PD.entry) =
+let binding_of_declaration declarations (entry : PD.entry) =
   let auth = match entry.authentication with
     | PD.No_auth -> No_auth
     | Caller_api_key | Api_key_env _ -> Api_key
@@ -46,16 +47,16 @@ let binding_of_declaration (entry : PD.entry) =
     default_model=entry.default_model;max_context=entry.max_context;
     capabilities=entry.capabilities;
     available=PR.authentication_available entry.authentication;
-    credential_scope=entry.credential_scope }
+    credential_scope=entry.credential_scope;declarations }
 ;;
 
 let all_from_declarations declarations =
-  PD.entries declarations |> List.map binding_of_declaration
+  PD.entries declarations |> List.map (binding_of_declaration declarations)
   |> List.sort (fun a b -> String.compare a.id b.id)
 ;;
 
 let find_in_declarations declarations label =
-  PD.find declarations label |> Option.map binding_of_declaration
+  PD.find declarations label |> Option.map (binding_of_declaration declarations)
 ;;
 
 let all () = all_from_declarations (PD.current ())
@@ -115,24 +116,18 @@ let to_provider_config ?model binding =
     (fun model_id ->
        let request_path = trim_non_empty binding.request_path in
        let max_context = binding.max_context in
-       let provider_capabilities_override =
-         match
-           Llm_provider.Capabilities.for_provider_model_id
-             ~wire:None
-             ~provider:(Llm_provider.Model_catalog.Declared_provider binding.id)
-             ~model_id
-         with
-         | Some _ -> None
-         | None -> Some binding.capabilities
-       in
+       let policy = match PD.request_policy binding.declarations
+           ~provider_id:binding.id ~model_id with
+         | Some policy -> policy
+         | None -> invalid_arg "runtime binding must belong to its admitted declarations" in
        PConfig.make
          ~kind:binding.kind
          ~provider_id:binding.id
          ~model_id
          ~base_url:binding.base_url
-         ?model_capabilities_override:provider_capabilities_override
          ?request_path
          ?max_context
-         ())
+         ()
+       |> PConfig.with_request_policy policy)
     (resolve_model binding ~requested_model:model)
 ;;

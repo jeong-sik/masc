@@ -191,6 +191,12 @@ val lookup_model_for_provider
     when {!serves_bare_row} permits it. No prefix or shorter-row fallback occurs. A scoped row shadows the entire bare row, including fields
     that it leaves undeclared. *)
 
+val lookup_model_for_provider_entry :
+  t -> provider:provider_entry -> model_id:Model_identifiers.Model_id.t -> model_entry option
+(** Resolve against the explicitly selected provider declaration. Its exact id,
+    aliases and bare-model permissions replace the catalog provider entry;
+    a replaced seed cannot grant authority to its replacement. *)
+
 val model_entries_for_provider
   :  t
   -> provider:provider_reference

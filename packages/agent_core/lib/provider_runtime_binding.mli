@@ -15,7 +15,7 @@ type auth =
   | Api_key
   | Setup_token
 
-type t =
+type t = private
   { id : string
   ; aliases : string list
   ; kind : provider_kind
@@ -28,6 +28,9 @@ type t =
   ; capabilities : capabilities
   ; available : bool
   ; credential_scope : string option
+  ; declarations : Llm_provider.Provider_declarations.t
+    (** Immutable catalog selection owning this binding; construction and record
+        updates are restricted to this module. *)
   }
 
 val all_from_declarations : Llm_provider.Provider_declarations.t -> t list
@@ -74,8 +77,8 @@ val capabilities_for_provider_config
     invents a provider-specific model or expands aliases. *)
 val resolve_model : t -> requested_model:string option -> (string, Error.t) result
 
-(** Convert a binding into the low-level provider config used by AGENT_CORE
-    transports. *)
+(** Convert a binding into a config with its selection-owned model policy
+    already frozen, before any later global catalog replacement. *)
 val to_provider_config
   :  ?model:string
   -> t

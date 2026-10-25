@@ -29,7 +29,12 @@ let error_to_string = function
       (String.concat ", " provider_ids)
 
 module Ids = Map.Make(String)
-type t = { declared : entry list; by_identity : entry Ids.t }
+type t =
+  { declared : entry list
+  ; by_identity : entry Ids.t
+  ; models : Model_catalog.t option
+  ; policy_providers : Model_catalog.provider_entry Ids.t
+  }
 let normalize s = String.trim s |> String.lowercase_ascii
 let ( let* ) = Result.bind
 
@@ -56,7 +61,7 @@ let of_provider_entry (entry : Provider_catalog.entry) =
       | None -> entry.capabilities.max_context_tokens);
     capabilities=entry.capabilities;credential_scope=entry.credential_scope }
 
-let admit declared =
+let admit ~models ~policy_providers declared =
   let rec identities entry index = function
     | [] -> Ok index
     | identity::rest ->
@@ -65,7 +70,7 @@ let admit declared =
            {identity;provider_ids=[other.id;entry.id]})
        | None -> identities entry (Ids.add identity entry index) rest) in
   let rec loop index = function
-    | [] -> Ok {declared;by_identity=index}
+    | [] -> Ok {declared;by_identity=index;models;policy_providers}
     | entry::rest ->
       let* index = identities entry index
           (List.map normalize (entry.id::entry.aliases)) in
@@ -78,8 +83,23 @@ let of_catalogs ~models ~providers =
   let replaced = List.fold_left (fun ids entry -> Ids.add (normalize entry.id) entry ids)
       Ids.empty overlay in
   let seeds = match models with None -> [] | Some catalog -> Model_catalog.provider_entries catalog in
+  let policy_providers = List.fold_left
+    (fun index (provider : Model_catalog.provider_entry) ->
+      if Ids.mem (normalize provider.id) replaced then index
+      else Ids.add (normalize provider.id) provider index)
+    Ids.empty seeds in
+  let policy_providers = List.fold_left (fun index (entry : entry) ->
+    let provider : Model_catalog.provider_entry =
+      { id=entry.id;aliases=entry.aliases;kind=entry.kind;identity_kinds=[entry.kind]
+      ; base_url=entry.base_url;request_path=entry.request_path
+      ; requires_api_key=(match entry.authentication with No_auth -> false
+          | Caller_api_key | Api_key_env _ | Setup_token_env _ -> true)
+      ; default_model=entry.default_model;capabilities_base=None
+      ; capabilities_base_by_identity_kind=[];supports_parallel_tool_suppression=false
+      ; serves_bare_models=[] } in
+    Ids.add (normalize entry.id) provider index) policy_providers overlay in
   let rec project acc = function
-    | [] -> admit (List.rev acc @ overlay)
+    | [] -> admit ~models ~policy_providers (List.rev acc @ overlay)
     | seed::rest ->
       (* An exact overlay replaces the whole seed before interpretation. *)
       if Ids.mem (normalize seed.Model_catalog.id) replaced then project acc rest
@@ -98,3 +118,9 @@ let entries t = t.declared
 let find t label = Ids.find_opt (normalize label) t.by_identity
 let requires_api_key = function No_auth -> false
   | Caller_api_key | Api_key_env _ | Setup_token_env _ -> true
+
+let request_policy t ~provider_id ~model_id =
+  Option.bind (find t provider_id) (fun entry ->
+    Option.map (fun provider -> Capabilities.resolve_bound_request_policy
+      ~catalog:t.models ~provider ~capabilities:entry.capabilities ~model_id)
+      (Ids.find_opt (normalize entry.id) t.policy_providers))

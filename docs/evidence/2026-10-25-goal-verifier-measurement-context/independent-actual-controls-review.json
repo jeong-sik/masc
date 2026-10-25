@@ -1,0 +1,35 @@
+{
+  "verdict": "PASS_BOUNDED_ACTUAL_CONTROLS",
+  "reviewer": "codex-repair-eval-metrics",
+  "candidate_source_sha": "32282146ed980d48baa661aa7db0ce99376d3c2a",
+  "public_report_sha256": "5b3a57ef3aff1dd9ed5e71caaa0a2ad01bef98aa103df605019a3305b09a321d",
+  "checks": [
+    "Full latest measurement JSON in retained Original and all actual User carriers.",
+    "System/User bytes exact for all6 inference requests; complete Original and body digests independently recomputed.",
+    "Raw responses report glm-5.3; aliases alone are not counted as provider-reported identity.",
+    "One actual web-fetch per control, source actual_value1 delivered before structured verdict.",
+    "Typed completed tool observations and reviewed/committed registry correlate exact request/criterion/run with primary proof/phase.",
+    "Positive primary rejection reason is null by type; model reason is retained exactly in evidence. Negative reason/evidence both match.",
+    "Initial P pre-model missing-root failure and same-request operational recovery preserved.",
+    "GET /models and repeated history/registry rows are not extra inference/fetches/reviews."
+  ],
+  "observed_results": {
+    "P": {
+      "verdict": "APPROVE",
+      "completion": "proof_proven",
+      "phase": "awaiting_confirmation"
+    },
+    "N": {
+      "verdict": "REJECT",
+      "completion": "proof_refuted",
+      "phase": "executing"
+    }
+  },
+  "limits": [
+    "Both are fresh Originals. Existing immutable originals and successor retries are not refreshed by this evidence.",
+    "One configured cohort and two controlled cases do not establish population/all-model reliability, main Goal success, final human confirmation, installation or whole-stack approval.",
+    "Source review, native checks, these actual model observations and Vite browser observations remain separate scopes."
+  ],
+  "privacy_method": "New allowlisted objects only; raw sources hashed, not copied. Assistant/thinking/auth fields are not selected or rendered. Reasons are hashes only.",
+  "mutations_by_reviewer": "Only new review/public report files; no source/runtime/API/provider/process/Goal/Task changes."
+}

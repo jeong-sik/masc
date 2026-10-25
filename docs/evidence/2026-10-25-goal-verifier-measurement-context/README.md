@@ -57,3 +57,5 @@ native 소비자는 Original 준비, 실제 Worker/AR reviewer 전달·조회·�
 브라우저: 실제 Vite 개발 대시보드를 같은 격리 backend에 연결해 P/N 측정값·근거·판정 화면을 캡처했다. packaged dashboard 자산은 초기 missing이었고 설치 증거로 쓰지 않는다. browser-observation.json과 두 PNG를 참조한다.
 
 후속09:56:19 UTC 재조회에서 main 실행 파일은3cce9a51/SHA8086953b…(09:12:53 UTC 시작)였다. 앞선c75 context 관측은 그 시점의 기록으로 유지한다. 32282146 후보는 main에 설치되지 않았고, main Goal은 Executing/idle 및 기존ff5d 측정 그대로다. final-main-runtime-identity.json을 참조한다.
+
+실제 carrier/lookup/verdict/registry/primary 결속과 독립 검토는 actual-verifier-controls.json 및 independent-actual-controls-review.json에 있다. 각 실험의 원문 조회는 1회이며 이후 요청 history나 reviewed/committed를 추가 실행으로 세지 않는다. 승인 verdict의 reason=null은 기존 타입 계약이고 실제 모델 사유는 evidence에 보존됐다.

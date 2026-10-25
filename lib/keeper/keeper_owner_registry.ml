@@ -730,12 +730,12 @@ let begin_input_checkpoint ~base_path ~keeper_name ~trace_id =
   with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.begin_input_checkpoint owner ~trace_id)
 let input_checkpoint ~base_path ~keeper_name ~trace_id =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner -> Keeper_owner.input_checkpoint owner ~trace_id)
-let advance_autonomous_input_checkpoint ~base_path ~keeper_name ~writer ~checkpoint =
+let advance_autonomous_input_checkpoint ~allow_turn_reset ~base_path ~keeper_name ~writer ~checkpoint =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
-    Keeper_owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint)
-let advance_direct_input_checkpoint ~base_path ~keeper_name ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
+    Keeper_owner.advance_autonomous_input_checkpoint ~allow_turn_reset owner ~writer ~checkpoint)
+let advance_direct_input_checkpoint ~allow_turn_reset ~base_path ~keeper_name ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
-    Keeper_owner.advance_direct_input_checkpoint owner ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint)
+    Keeper_owner.advance_direct_input_checkpoint ~allow_turn_reset owner ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint)
 let bind_retired_input_cut ~base_path ~keeper_name ~writer ~operation_id ~execution_digest ~observed ~call ~cut =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.bind_retired_input_cut owner ~writer ~operation_id ~execution_digest ~observed ~call ~cut)

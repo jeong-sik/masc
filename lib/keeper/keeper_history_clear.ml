@@ -3,15 +3,26 @@ let ( let* ) = Result.bind
 
 type authority = { trace_id : Keeper_id.Trace_id.t; observed : Keeper_checkpoint_ref.t option; session_dir : string }
 type canonical = Present of Store.exact_checkpoint_snapshot | Absent | Superseded | Undecodable
+type retained_input =
+  | Unobserved
+  | Owned_current of Agent_core.Checkpoint.t
+  | Owned_superseded
 (* Frozen bytes, rather than a checkpoint with a mutable Context, carry intent. *)
 type action = Payload of { source : Keeper_checkpoint_ref.t option; bytes : string;
-                          remove_undecodable : bool; cleared_message_count : int }
+                          remove_undecodable : bool; cleared_message_count : int;
+                          allow_turn_reset : bool }
             | No_payload of canonical
 type plan = { authority : authority; session_dir : string; action : action }
 type history =
   | Emptied of { cleared_message_count : int; checkpoint_found : bool }
   | Removed of { checkpoint_path : string; undecodable : Store.checkpoint_load_error }
-type receipt = { authority : authority; checkpoint : Keeper_checkpoint_ref.t option; history : history }
+type receipt =
+  { authority : authority
+  ; checkpoint : Keeper_checkpoint_ref.t option
+  ; marker : Keeper_checkpoint_ref.t option
+  ; allow_turn_reset : bool
+  ; history : history
+  }
 type error =
   | Invalid_clear of string
   | Canonical_unreadable of Store.checkpoint_ref_load_error
@@ -25,6 +36,7 @@ let trace_id (authority : authority) = authority.trace_id
 let predecessor (authority : authority) = authority.observed
 let belongs_to receipt authority = receipt.authority == authority
 let checkpoint receipt = receipt.checkpoint
+let allows_turn_reset receipt = receipt.allow_turn_reset
 let history receipt = receipt.history
 let error_to_string = function
   | Invalid_clear detail -> detail
@@ -109,27 +121,37 @@ let prepare ~(authority:authority) ~session_dir ~preserve_system =
   let session_id = Keeper_id.Trace_id.to_string authority.trace_id in
   let* canonical = canonical ~session_dir ~session_id in
   let* retained = match authority.observed with
-    | None -> Ok None
+    | None -> Ok Unobserved
     | Some reference ->
       if not (Keeper_id.Trace_id.equal reference.trace_id authority.trace_id)
       then Error (Invalid_clear "history clear predecessor belongs to another trace") else
-      let* snapshot = Store.load_retained_exact_snapshot ~session_dir ~reference
+      let* snapshot = Store.load_retained_snapshot ~session_dir ~reference
         |> Result.map_error (fun error -> Retained_unavailable error) in
-      let* checkpoint = snapshot_checkpoint snapshot in
-      let* () = nonwaiting checkpoint in
-      Ok (Some checkpoint) in
-  let* source,base,remove_undecodable = match canonical,retained with
-    | Present snapshot,(Some _ | None) ->
+      match snapshot with
+      | Store.Retained_current snapshot ->
+        let* checkpoint = snapshot_checkpoint snapshot in
+        let* () = nonwaiting checkpoint in
+        Ok (Owned_current checkpoint)
+      | Store.Retained_superseded { pending_input = Some _; _ } ->
+        Error (Invalid_clear "history clear cannot discard a pending input request; resolve it first")
+      | Store.Retained_superseded { pending_input = None; _ } ->
+        Ok Owned_superseded in
+  let* source,base,remove_undecodable,allow_turn_reset = match canonical,retained with
+    | Present snapshot,(Owned_current _ | Owned_superseded | Unobserved) ->
       let* current = snapshot_checkpoint snapshot in
       let* () = nonwaiting current in
-      let* base = match retained with
-        | Some input -> baseline ~input ~current
-        | None -> Ok current in
-      Ok (Some (Store.exact_snapshot_reference snapshot),Some base,false)
-    | (Absent | Undecodable),Some input -> Ok (None,Some input,canonical=Undecodable)
-    | Superseded,Some _ -> Error (Invalid_clear
+      let* base, allow_turn_reset = match retained with
+        | Owned_current input ->
+          let* base = baseline ~input ~current in
+          Ok (base, false)
+        | Owned_superseded -> Ok (current, true)
+        | Unobserved -> Ok (current, false) in
+      Ok (Some (Store.exact_snapshot_reference snapshot),Some base,false,allow_turn_reset)
+    | (Absent | Undecodable),Owned_current input -> Ok (None,Some input,canonical=Undecodable,false)
+    | Superseded,Owned_current _ -> Error (Invalid_clear
         "an owned input cannot be reconciled with a superseded canonical format by history clear")
-    | (Absent | Superseded | Undecodable),None -> Ok (None,None,false) in
+    | (Absent | Superseded | Undecodable),(Owned_superseded | Unobserved) ->
+      Ok (None,None,false,false) in
   match base with
   | None -> Ok {authority;session_dir;action=No_payload canonical}
   | Some original ->
@@ -142,7 +164,8 @@ let prepare ~(authority:authority) ~session_dir ~preserve_system =
       |> Result.map_error (fun error -> Canonical_unreadable error) in
     Ok {authority;session_dir;action=Payload {source;
       bytes=Store.exact_snapshot_canonical_bytes snapshot;remove_undecodable;
-      cleared_message_count=List.length original.messages - List.length messages}}
+      cleared_message_count=List.length original.messages - List.length messages;
+      allow_turn_reset}}
 
 let remove_undecodable ~session_dir ~session_id =
   match Store.remove_undecodable_canonical ~session_dir ~session_id with
@@ -158,7 +181,7 @@ let execute plan =
   let {authority;session_dir;action} = plan in
   let session_id = Keeper_id.Trace_id.to_string authority.trace_id in
   match action with
-  | Payload {source;bytes;remove_undecodable=remove;cleared_message_count} ->
+  | Payload {source;bytes;remove_undecodable=remove;cleared_message_count;allow_turn_reset} ->
     let* snapshot = Store.exact_snapshot_of_canonical_bytes ~expected_session_id:authority.trace_id bytes
       |> Result.map_error (fun error -> Canonical_unreadable error) in
     let* _retained = confirmed (Store.retain_exact_snapshot ~session_dir snapshot) in
@@ -169,23 +192,25 @@ let execute plan =
       | None -> Store.save_agent_core_if_absent ~session_dir candidate) in
     if not (Keeper_checkpoint_ref.equal checkpoint (Store.exact_snapshot_reference snapshot))
     then Error (Invalid_clear "installed history differs from its retained clear payload") else
-    Ok {authority;checkpoint=Some checkpoint;history=Emptied {cleared_message_count;checkpoint_found=true}}
+    Ok {authority;checkpoint=Some checkpoint;marker=Some checkpoint;allow_turn_reset;
+        history=Emptied {cleared_message_count;checkpoint_found=true}}
   | No_payload Undecodable ->
     let* removed = remove_undecodable ~session_dir ~session_id in
     let history = match removed with
       | Some undecodable -> Removed {checkpoint_path=Store.agent_core_checkpoint_path ~session_dir ~session_id;undecodable}
       | None -> Emptied {cleared_message_count=0;checkpoint_found=false} in
-    Ok {authority;checkpoint=None;history}
+    Ok {authority;checkpoint=authority.observed;marker=None;allow_turn_reset=false;history}
   | No_payload (Absent | Superseded) ->
     let* current = canonical ~session_dir ~session_id in
     (match current with
-     | Absent | Superseded -> Ok {authority;checkpoint=None;
-         history=Emptied {cleared_message_count=0;checkpoint_found=false}}
+     | Absent | Superseded ->
+       Ok {authority;checkpoint=authority.observed;marker=None;allow_turn_reset=false;
+           history=Emptied {cleared_message_count=0;checkpoint_found=false}}
      | Present _ | Undecodable -> Error (Invalid_clear "canonical history appeared before the no-payload clear"))
   | No_payload (Present _) -> Error (Invalid_clear "a decoded history requires a retained clear payload")
 
 let append_marker receipt ~keepers_dir ~keeper_name =
-  match receipt.checkpoint with
+  match receipt.marker with
   | None -> Ok ()
   | Some reference ->
     let record : Keeper_turn_boundaries.record =

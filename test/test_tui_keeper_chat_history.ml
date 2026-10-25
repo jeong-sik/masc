@@ -1890,10 +1890,83 @@ let test_composition_never_hides_a_different_execution () =
   check (list (option string)) "same provider call ID cannot hide another physical call"
     [Some "physical-other"] (List.map (fun (tool : Transcript.tool_activity) -> tool.execution_id) raw)
 
+let test_redundant_settled_failure_is_suppressed_after_terminal_request_failure () =
+  let op_key =
+    `Assoc
+      [ "kind", `String "operation"
+      ; "operation_id", `String "kmsg-superseded-1"
+      ]
+  in
+  let wire =
+    `List
+      [ `Assoc
+          [ "id", `String "msg-fail-terminal"
+          ; "role", `String "request_failure"
+          ; "content", `String "Keeper request failed: checkpoint version 13 is superseded by 15"
+          ; "ts", `Float 10.0
+          ; "delivery_key", op_key
+          ; "transcript_slot", `Assoc [ "kind", `String "terminal_result" ]
+          ]
+      ; `Assoc
+          [ "id", `String "msg-fail-settled"
+          ; "role", `String "request_failure"
+          ; "content", `String "Keeper request failed: The operation could not complete."
+          ; "ts", `Float 10.1
+          ; "delivery_key", op_key
+          ; "transcript_slot", `Assoc [ "kind", `String "settled_failure" ]
+          ]
+      ]
+  in
+  let decoded = decode wire in
+  check int "suppressed settled_failure is not counted as dropped" 0 decoded.History.dropped;
+  match decoded.History.rows with
+  | [ row ] ->
+      check string "specific terminal failure text is kept"
+        "Keeper request failed: checkpoint version 13 is superseded by 15"
+        row.History.text
+  | ([] | _ :: _ :: _) as rows ->
+      failf "expected 1 failure row, got %d" (List.length rows)
+
+let test_settled_failure_is_kept_when_no_terminal_request_failure_exists () =
+  let op_key =
+    `Assoc
+      [ "kind", `String "operation"
+      ; "operation_id", `String "kmsg-settled-only-1"
+      ]
+  in
+  let wire =
+    `List
+      [ `Assoc
+          [ "id", `String "msg-assistant-terminal"
+          ; "role", `String "assistant"
+          ; "content", `String "partial reply before settlement failed"
+          ; "ts", `Float 10.0
+          ; "delivery_key", op_key
+          ; "transcript_slot", `Assoc [ "kind", `String "terminal_result" ]
+          ]
+      ; `Assoc
+          [ "id", `String "msg-fail-settled"
+          ; "role", `String "request_failure"
+          ; "content", `String "Keeper request failed: The operation could not complete."
+          ; "ts", `Float 10.1
+          ; "delivery_key", op_key
+          ; "transcript_slot", `Assoc [ "kind", `String "settled_failure" ]
+          ]
+      ]
+  in
+  let decoded = decode wire in
+  check int "nothing dropped" 0 decoded.History.dropped;
+  check int "both assistant terminal row and settled failure row are kept" 2
+    (List.length decoded.History.rows)
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
       , [ test_case "composition delivery and execution remain independent" `Quick test_composition_execution_and_delivery_remain_separate
+        ; test_case "redundant settled failure is suppressed after terminal request failure" `Quick
+            test_redundant_settled_failure_is_suppressed_after_terminal_request_failure
+        ; test_case "settled failure is kept when no terminal request failure exists" `Quick
+            test_settled_failure_is_kept_when_no_terminal_request_failure_exists
         ; test_case "composition keeps other physical executions" `Quick test_composition_never_hides_a_different_execution
         ; test_case "operation and autonomous sources keep typed tool blocks" `Quick
             test_operation_and_autonomous_sources_keep_typed_tool_blocks

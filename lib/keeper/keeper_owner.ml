@@ -218,10 +218,14 @@ type input_checkpoint_writer =
   }
 
 type input_checkpoint_change =
-  | Autonomous_input of Keeper_checkpoint_ref.t
+  | Autonomous_input of
+      { checkpoint : Keeper_checkpoint_ref.t
+      ; allow_turn_reset : bool
+      }
   | Direct_input of
       { operation_id : Operation_id.t; execution_digest : string; call_id : string
-      ; observed : Keeper_checkpoint_ref.t; checkpoint : Keeper_checkpoint_ref.t }
+      ; observed : Keeper_checkpoint_ref.t; checkpoint : Keeper_checkpoint_ref.t
+      ; allow_turn_reset : bool }
 
 type retired_input_cut =
   { operation_id:Operation_id.t; execution_digest:string;
@@ -1943,7 +1947,9 @@ let start
                   && Keeper_id.Trace_id.equal meta.runtime.trace_id (Keeper_history_clear.trace_id authority)
                   && Keeper_history_clear.belongs_to receipt authority ->
               (match run_operation_command t ~label:"commit operator history input clear" (fun () ->
-                 Chat_operation_store.commit_history_clear_input_checkpoint t.operation_store
+                 Chat_operation_store.commit_history_clear_input_checkpoint
+                   ~allow_turn_reset:(Keeper_history_clear.allows_turn_reset receipt)
+                   t.operation_store
                    ~trace_id:meta.runtime.trace_id ~observed:(Keeper_history_clear.predecessor authority)
                    ~checkpoint:(Keeper_history_clear.checkpoint receipt)) with
                | Ok (Chat_operation_store.Input_checkpoint_updated,_) -> Ok ()
@@ -1982,7 +1988,7 @@ let start
           loop state shutdown_operation_id
         | Command (Advance_input_checkpoint (writer, change), resolve) ->
           let checkpoint, lane = match change with
-            | Autonomous_input checkpoint -> checkpoint, Autonomous
+            | Autonomous_input {checkpoint;_} -> checkpoint, Autonomous
             | Direct_input {checkpoint;_} -> checkpoint, Chat_operation in
           let response = match (Keeper_owner_reducer.projection state).meta,
               Atomic.get t.turn_in_flight, Atomic.get t.child_cancel with
@@ -1992,11 +1998,11 @@ let start
                   && Keeper_interrupt_token.equal flight.interrupt_token writer.input_child
                   && flight.lane = writer.input_lane && flight.lane = lane ->
               let persist () = match change with
-                | Autonomous_input checkpoint ->
-                  Chat_operation_store.update_input_checkpoint t.operation_store
+                | Autonomous_input {checkpoint;allow_turn_reset} ->
+                  Chat_operation_store.update_input_checkpoint ~allow_turn_reset t.operation_store
                     ~observed:writer.input_reference ~checkpoint
-                | Direct_input {operation_id;execution_digest;call_id;observed;checkpoint} ->
-                  Chat_operation_store.update_direct_input_checkpoint t.operation_store ~now:(t.now ())
+                | Direct_input {operation_id;execution_digest;call_id;observed;checkpoint;allow_turn_reset} ->
+                  Chat_operation_store.update_direct_input_checkpoint ~allow_turn_reset t.operation_store ~now:(t.now ())
                     ~operation_id ~execution_digest ~call_id ~observed
                     ~observed_input:writer.input_reference ~checkpoint in
               (match run_operation_command t ~label:"publish exact input checkpoint" persist with
@@ -2854,10 +2860,10 @@ let begin_input_checkpoint t ~trace_id =
       "input writer capture requires an inherited executing child"))
 let input_checkpoint_reference writer = writer.input_reference
 let input_checkpoint t ~trace_id = request t (Input_checkpoint trace_id)
-let advance_autonomous_input_checkpoint t ~writer ~checkpoint =
-  input_child_request t writer (Autonomous_input checkpoint)
-let advance_direct_input_checkpoint t ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
-  input_child_request t writer (Direct_input {operation_id;execution_digest;call_id;observed;checkpoint})
+let advance_autonomous_input_checkpoint ?(allow_turn_reset = false) t ~writer ~checkpoint =
+  input_child_request t writer (Autonomous_input {checkpoint; allow_turn_reset})
+let advance_direct_input_checkpoint ?(allow_turn_reset = false) t ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
+  input_child_request t writer (Direct_input {operation_id;execution_digest;call_id;observed;checkpoint;allow_turn_reset})
 let bind_retired_input_cut t ~writer ~operation_id ~execution_digest ~observed ~call ~cut =
   match Keeper_turn_preview_owner.current () with
   | Some caller when Keeper_interrupt_token.equal caller writer.input_child ->

@@ -647,6 +647,60 @@ let test_owned_clear_recovers_canonical ~corrupt () =
         | Error _ -> fail "cleared input payload unavailable"));
   check_next_prepare ~config ~meta ~session load
 
+let test_owned_superseded_input_checkpoint_clears_canonical () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
+  let session, original = input_source ~config ~meta load in
+  let accepted_dir = Filename.concat session.session_dir "accepted-checkpoints" in
+  Fs_compat.mkdir_p accepted_dir;
+  let v13_cp = { original with Agent_core.Checkpoint.turn_count = 15; pending_input = None } in
+  let v13_bytes =
+    match Agent_core.Checkpoint.to_json v13_cp with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (k, v) -> if String.equal k "version" then (k, `Int 13) else (k, v))
+           fields)
+      |> Yojson.Safe.to_string
+    | _ -> fail "expected checkpoint JSON object"
+  in
+  let v13_sha = Keeper_checkpoint_ref.sha256_of_canonical_bytes v13_bytes in
+  let v13_ref =
+    Keeper_checkpoint_ref.of_persisted
+      ~trace_id:meta.runtime.trace_id
+      ~turn_count:15
+      ~sha256:v13_sha
+    |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_create_error_to_string
+    |> require_ok
+  in
+  Fs_compat.save_file (Filename.concat accepted_dir (v13_sha ^ ".json")) v13_bytes;
+  run_owned ~config ~meta (fun () ->
+    let writer =
+      Keeper_owner_registry.begin_input_checkpoint
+        ~base_path:config.Workspace.base_path
+        ~keeper_name:meta.name
+        ~trace_id:meta.runtime.trace_id
+      |> Result.map_error Keeper_owner_registry.command_error_to_string
+      |> require_ok
+    in
+    ignore
+      (Keeper_owner_registry.advance_autonomous_input_checkpoint
+         ~allow_turn_reset:false
+         ~base_path:config.Workspace.base_path
+         ~keeper_name:meta.name
+         ~writer
+         ~checkpoint:v13_ref
+       |> Result.map_error Keeper_owner_registry.command_error_to_string
+       |> require_ok));
+  let result = clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check_empty load;
+  check_official_session_cleared official_session;
+  let after = observed_input ~config ~meta in
+  check bool "superseded input reference is replaced by cleared current checkpoint" false
+    (Keeper_checkpoint_ref.equal v13_ref after);
+  check_next_prepare ~config ~meta ~session load
+
 let test_clear_refuses_owned_pending_input () =
   with_keeper ~paused:false ~install_owner:true
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
@@ -898,6 +952,7 @@ let () =
                ; test_case "owned clear resumes before and after Owner restart" `Quick test_owned_clear_survives_owner_restart
                ; test_case "owned clear recovers missing canonical" `Quick (test_owned_clear_recovers_canonical ~corrupt:false)
                ; test_case "owned clear recovers corrupt canonical" `Quick (test_owned_clear_recovers_canonical ~corrupt:true)
+               ; test_case "owned superseded input checkpoint clears canonical" `Quick test_owned_superseded_input_checkpoint_clears_canonical
                ; test_case "owned pending input refuses before official-session effects" `Quick test_clear_refuses_owned_pending_input
                ; test_case "active turn, clear, next turn" `Quick test_clear_does_not_race_the_active_turn
                ; test_case "paused keeper remains paused" `Quick test_paused_keeper_can_clear_without_resuming

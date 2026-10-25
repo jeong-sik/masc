@@ -105,7 +105,11 @@ val annotate
     a second implementation of it would let the two stages disagree about
     where an atom begins. *)
 
-val atom_opening_digest : Agent_core.Types.message list -> int -> string option
+val atom_opening_digest
+  :  ?include_origin:bool
+  -> Agent_core.Types.message list
+  -> int
+  -> string option
 (** [atom_opening_digest history atom] is the SHA-256 hex of the message that
     opens atom [atom] of [history], as {!annotate} numbers the atoms: the
     first message labelled with that index. [None] when [history] has no

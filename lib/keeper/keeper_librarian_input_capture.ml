@@ -118,19 +118,47 @@ let role_json : A.role -> Yojson.Safe.t = function
 let role_of_json json = let* s=text json in match s with
   | "system" -> Ok A.System | "user" -> Ok A.User | "assistant" -> Ok A.Assistant | "tool" -> Ok A.Tool
   | _ -> Error "Unknown captured message role"
-let message_json (message:A.message) = `Assoc ["role",role_json message.role;
-  "origin",`String (A.message_origin_to_string message.origin);
-  "content",`List (List.map content_json message.content);"name",optional (fun s -> `String s) message.name;
-  "tool_call_id",optional (fun s -> `String s) message.tool_call_id;
-  "metadata",`List (List.map (fun (key,json) -> `Assoc ["key",`String key;"value",json]) message.metadata)]
-let message_of_json json = let* f=fields ["role";"origin";"content";"name";"tool_call_id";"metadata"] json in
-  let* origin_token=text (value "origin" f) in
-  let* origin=match A.message_origin_of_string origin_token with
-    | Some origin -> Ok origin | None -> Error "Unknown captured message origin" in
+let message_json_with_origin ~include_origin (message:A.message) =
+  let tail =
+    ["content",`List (List.map content_json message.content);"name",optional (fun s -> `String s) message.name;
+     "tool_call_id",optional (fun s -> `String s) message.tool_call_id;
+     "metadata",`List (List.map (fun (key,json) -> `Assoc ["key",`String key;"value",json]) message.metadata)] in
+  let fields =
+    if include_origin
+    then ("role",role_json message.role)::("origin",`String (A.message_origin_to_string message.origin))::tail
+    else ("role",role_json message.role)::tail in
+  `Assoc fields
+let message_json = message_json_with_origin ~include_origin:true
+let message_json_has_origin = function
+  | `Assoc entries -> List.mem_assoc "origin" entries
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> true
+let infer_legacy_origin metadata =
+  if List.mem_assoc "masc.librarian_working_state.v1" metadata
+     || List.mem_assoc "masc.librarian_unread_context.v1" metadata
+     || List.assoc_opt "masc.model_input_tail_window.v1" metadata = Some (`Bool true)
+  then A.Agent_instruction
+  else
+    match A.Extra_system_context_provenance.classify metadata with
+    | Present | Invalid | Duplicate -> A.System_context
+    | Historical -> A.Historical_system_context
+    | Absent -> A.Conversation
+let message_of_json json =
+  let* f, has_origin =
+    match fields ["role";"origin";"content";"name";"tool_call_id";"metadata"] json with
+    | Ok entries -> Ok (entries, true)
+    | Error _ ->
+      let+ entries = fields ["role";"content";"name";"tool_call_id";"metadata"] json in
+      entries, false in
   let* role=role_of_json (value "role" f) in let* content=list content_of_json (value "content" f) in
   let* name=option text (value "name" f) in let* tool_call_id=option text (value "tool_call_id" f) in
-  let+ metadata=list (fun json -> let* f=fields ["key";"value"] json in
+  let* metadata=list (fun json -> let* f=fields ["key";"value"] json in
     let+ key=text (value "key" f) in key,value "value" f) (value "metadata" f) in
+  let+ origin =
+    if has_origin then
+      let* origin_token=text (value "origin" f) in
+      match A.message_origin_of_string origin_token with
+      | Some origin -> Ok origin | None -> Error "Unknown captured message origin"
+    else Ok (infer_legacy_origin metadata) in
   ({ origin; A.role;content;name;tool_call_id;metadata}:A.message)
 
 let source_json (source:C.source) = `Assoc ["reference",`String source.reference;"content",source.content]
@@ -220,13 +248,15 @@ let counterpart_of_json json = let* f=fields ["origin";"channel";"workspace_id";
   let* user_id=option text (value "user_id" f) in let* user_name=option text (value "user_name" f) in
   let+ content=text (value "content" f) in ({P.origin;channel;workspace_id;user_id;user_name;authority;content}:P.t)
 
-let to_json (input:L.input) : Yojson.Safe.t = `Assoc [
+let to_json_with_origin ~include_origin (input:L.input) : Yojson.Safe.t = `Assoc [
   "keeper_id",`String (Keeper_identity.Keeper_id.to_string input.keeper_id);
   "keeper_instructions",`String input.keeper_instructions;"turn_ref",Ids.Turn_ref.to_yojson input.turn_ref;
   "goal_context",L.goal_context_to_json input.goal_context;"current",optional current_json input.current;
   "historical_task_contexts",H.to_json input.historical_task_contexts;"working_context",context_json input.working_context;
-  "messages",`List (List.map message_json input.messages);"tool_observations",`List (List.map tool_json input.tool_observations);
+  "messages",`List (List.map (message_json_with_origin ~include_origin) input.messages);
+  "tool_observations",`List (List.map tool_json input.tool_observations);
   "counterpart_observations",`List (List.map P.to_yojson input.counterpart_observations)]
+let to_json = to_json_with_origin ~include_origin:true
 let of_json json =
   let* f=fields ["keeper_id";"keeper_instructions";"turn_ref";"goal_context";"current";
     "historical_task_contexts";"working_context";"messages";"tool_observations";"counterpart_observations"] json in

@@ -644,6 +644,19 @@ val load_retained_exact_snapshot :
   session_dir:string -> reference:Keeper_checkpoint_ref.t ->
   (exact_checkpoint_snapshot, checkpoint_cas_error) result
 
+type retained_snapshot =
+  | Retained_current of exact_checkpoint_snapshot
+  | Retained_superseded of
+      { reference : Keeper_checkpoint_ref.t
+      ; expected_version : int
+      ; got_version : int
+      ; pending_input : Agent_core.Agent_input_request.pending option
+      }
+
+val load_retained_snapshot :
+  session_dir:string -> reference:Keeper_checkpoint_ref.t ->
+  (retained_snapshot, checkpoint_cas_error) result
+
 val find_exact_snapshot_for_retention : session_dir:string -> reference:Keeper_checkpoint_ref.t ->
   (exact_checkpoint_snapshot, checkpoint_cas_error) result
 (** Find the already identified bytes in retained storage, canonical state, or

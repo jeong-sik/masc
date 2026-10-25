@@ -163,6 +163,96 @@ let test_autonomous_input_owner_rejects_lost_response_lineage () =
     (observed.pending_input=None && observed.messages=(Option.get !accepted).messages);
   ignore (Keeper_owner.begin_stopping owner |> prepared)
 
+let test_superseded_retained_input_checkpoint_recovers_on_next_turn () =
+  let root = Filename.temp_dir "superseded-input-owner-" "" in
+  Fun.protect ~finally:(fun () -> Eio_main.run (fun env ->
+    Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root))) @@ fun () ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  ignore (Server_startup_state.mark_state_ready ());
+  let workspace = Workspace.default_config root in
+  ignore (Workspace.init workspace ~agent_name:(Some "superseded-input-test"));
+  let base_cp =
+    { (source_checkpoint (pending ~run_id:"run-a" ~request_id:"request-a")) with
+      pending_input = None
+    ; turn_count = 15
+    }
+  in
+  let keeper_name = base_cp.agent_name in
+  let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
+    "name",`String keeper_name;"trace_id",`String base_cp.session_id;
+    "activation_mode",`String "manual"]) |> prepared in
+  Keeper_meta_store.replace_snapshot workspace meta |> prepared;
+  Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
+    ~on_turn_slot_released:None workspace |> prepared |> ignore;
+  let owner = Keeper_owner_registry.get ~base_path:root ~keeper_name |> prepared in
+  let session_dir = Keeper_types_support.keeper_session_dir workspace base_cp.session_id in
+  let accepted_dir = Filename.concat session_dir "accepted-checkpoints" in
+  Fs_compat.mkdir_p accepted_dir;
+  let v13_bytes =
+    match Core.Checkpoint.to_json base_cp with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (k, v) -> if String.equal k "version" then (k, `Int 13) else (k, v))
+           fields)
+      |> Yojson.Safe.to_string
+    | _ -> fail "expected checkpoint JSON object"
+  in
+  let v13_sha = Keeper_checkpoint_ref.sha256_of_canonical_bytes v13_bytes in
+  let v13_ref =
+    Keeper_checkpoint_ref.of_persisted
+      ~trace_id:meta.runtime.trace_id
+      ~turn_count:15
+      ~sha256:v13_sha
+    |> prepared
+  in
+  Fs_compat.save_file_atomic (Filename.concat accepted_dir (v13_sha ^ ".json")) v13_bytes
+  |> prepared;
+  (match Store.load_retained_snapshot ~session_dir ~reference:v13_ref with
+   | Ok (Store.Retained_superseded { expected_version; got_version; pending_input = None; _ }) ->
+     check int "expected current checkpoint version" Core.Checkpoint.checkpoint_version expected_version;
+     check int "expected superseded got_version 13" 13 got_version
+   | Ok (Store.Retained_superseded { pending_input = Some _; _ })
+   | Ok (Store.Retained_current _)
+   | Error _ ->
+     fail "expected Retained_superseded with pending_input = None");
+  let fresh_turn_1 = { base_cp with turn_count = 1 } in
+  (match Keeper_owner.run_autonomous_if_idle owner (fun () ->
+     let writer =
+       Keeper_owner.begin_input_checkpoint owner ~trace_id:meta.runtime.trace_id
+       |> prepared
+     in
+     ignore
+       (Keeper_owner.advance_autonomous_input_checkpoint
+          owner
+          ~writer
+          ~checkpoint:v13_ref
+        |> prepared);
+     (match Keeper_input_wait_observation.read ~base_path:root ~keeper_name ~expected_trace:meta.runtime.trace_id with
+      | Ok (Keeper_input_wait_observation.Consumed r) ->
+        check bool "observation reads superseded consumed ref" true (Keeper_checkpoint_ref.equal r v13_ref)
+      | Ok (Keeper_input_wait_observation.Unobserved _ | Keeper_input_wait_observation.Pending _)
+      | Error _ -> fail "superseded retained checkpoint failed observation");
+     let producer =
+       Keeper_input_checkpoint_producer.prepare
+         ~base_path:root
+         ~keeper_name
+         ~session_dir
+         ~trace_id:meta.runtime.trace_id
+         ~source:None
+       |> prepared
+     in
+     ignore (Keeper_input_checkpoint_producer.publish_autonomous producer fresh_turn_1 |> prepared)) with
+   | Ok (`Ran ()) -> ()
+   | Ok (`Busy _ | `Interrupted) | Error _ -> fail "superseded recovery did not run");
+  let reference = Keeper_owner.input_checkpoint owner ~trace_id:meta.runtime.trace_id |> prepared
+    |> (function Keeper_chat_operation_store.Input_observed reference -> reference
+      | Input_unobserved | Prior_input_unavailable -> fail "input owner was not observed") in
+  check int "fresh turn count replaced superseded predecessor" 1 reference.turn_count;
+  ignore (Keeper_owner.begin_stopping owner |> prepared)
+
 let test_install_refuses_stale_nonhistory () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs env#fs;
@@ -425,8 +515,10 @@ let () =
       "physical response ownership",
       [test_case "same pending cannot discard retained context working-context tools MCP or turn" `Quick test_install_refuses_stale_nonhistory];
       "autonomous input ownership",
-      [test_case "consumed answer lineage survives settlement and rejects stale sources" `Quick
-         test_autonomous_input_owner_rejects_lost_response_lineage];
+      [ test_case "consumed answer lineage survives settlement and rejects stale sources" `Quick
+          test_autonomous_input_owner_rejects_lost_response_lineage
+      ; test_case "superseded retained input checkpoint recovers on next turn" `Quick
+          test_superseded_retained_input_checkpoint_recovers_on_next_turn ];
       "candidate preparation",
       [ test_case "canonical responses preserve full source metadata" `Quick
           test_canonical_response_preserves_complete_checkpoint

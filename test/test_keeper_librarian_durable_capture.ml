@@ -272,6 +272,92 @@ let test_source_changes_do_not_replace_the_original () = with_fixture Mixed @@ f
   check bool "original immutable observation does not advance the actual cursor" true
     (P.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name=atom_before
      && Keeper_librarian_official_progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name=official_before)
+let strip_origin_field = function
+  | `Assoc fields ->
+    `Assoc (List.filter (fun (k, _) -> not (String.equal k "origin")) fields)
+  | json -> json
+let test_legacy_v13_checkpoint_and_originless_messages_roundtrip () =
+  with_fixture Atoms @@ fun _ _ original ->
+  let cp =
+    match Capture.source original with
+    | Capture.Checkpoint_only value -> value
+    | Official_only _ | Mixed _ -> fail "expected checkpoint fixture"
+  in
+  let digest_map =
+    List.mapi
+      (fun index _ ->
+         match
+           ( Runtime_model_input_tail_window.atom_opening_digest
+               ~include_origin:true
+               cp.messages
+               index
+           , Runtime_model_input_tail_window.atom_opening_digest
+               ~include_origin:false
+               cp.messages
+               index )
+         with
+         | Some new_digest, Some old_digest -> Some (new_digest, old_digest)
+         | (Some _ | None), None | None, Some _ -> None)
+      cp.messages
+    |> List.filter_map Fun.id
+  in
+  let rec replace_digests = function
+    | `String s ->
+      (match List.assoc_opt s digest_map with
+       | Some old_digest -> `String old_digest
+       | None -> `String s)
+    | `List items -> `List (List.map replace_digests items)
+    | `Assoc fields -> `Assoc (List.map (fun (k, v) -> (k, replace_digests v)) fields)
+    | (`Bool _ | `Float _ | `Int _ | `Intlit _ | `Null) as other -> other
+  in
+  let v13_canonical_bytes =
+    match Yojson.Safe.from_string cp.canonical_bytes with
+    | `Assoc fields ->
+      `Assoc
+        (List.filter_map
+           (fun (k, v) ->
+              if String.equal k "pending_input" then None
+              else if String.equal k "version" then Some (k, `Int 13)
+              else if String.equal k "messages" then
+                match v with
+                | `List msgs -> Some (k, `List (List.map strip_origin_field msgs))
+                | _ -> Some (k, v)
+              else Some (k, v))
+           fields)
+      |> Yojson.Safe.to_string
+    | _ -> fail "expected canonical_bytes object"
+  in
+  let v13_sha256 = Keeper_checkpoint_ref.sha256_of_canonical_bytes v13_canonical_bytes in
+  let legacy_json =
+    Capture.to_json original
+    |> replace_digests
+    |> map_field "input_text"
+         (map_json_text
+            (map_field "messages" (function
+              | `List msgs -> `List (List.map strip_origin_field msgs)
+              | _ -> fail "expected messages array")))
+    |> map_field "source_text"
+         (map_json_text (function
+           | `List [`String "checkpoint"; checkpoint_json] ->
+             let updated =
+               checkpoint_json
+               |> replace_digests
+               |> map_field "canonical_bytes" (fun _ -> `String v13_canonical_bytes)
+               |> map_field "sha256" (fun _ -> `String v13_sha256)
+               |> map_field "messages" (function
+                 | `List msgs -> `List (List.map strip_origin_field msgs)
+                 | _ -> fail "expected messages array")
+             in
+             `List [`String "checkpoint"; updated]
+           | _ -> fail "expected checkpoint source"))
+  in
+  let restored =
+    Capture.of_json legacy_json
+    |> Result.map_error Capture.error_to_string
+    |> get
+  in
+  check bool "legacy v13 capture roundtrips to identical JSON" true
+    (Yojson.Safe.equal legacy_json (Capture.to_json restored))
 let () = Alcotest.run "durable source original capture" ["actual source retention",[
   test_case "checkpoint original survives strict disk roundtrip" `Quick (check_roundtrip Atoms);
   test_case "official Main and Internal originals survive strict disk roundtrip" `Quick (check_roundtrip Official);
@@ -281,4 +367,6 @@ let () = Alcotest.run "durable source original capture" ["actual source retentio
     test_matching_source_and_input_cannot_disagree_with_checkpoint_bytes;
   test_case "producer snapshot richer ToolResult JSON survives strict data restoration" `Quick
     test_richer_producer_snapshot_retains_complete_tool_json;
-  test_case "later source replacement and restart cannot substitute a retained original" `Quick test_source_changes_do_not_replace_the_original]]
+  test_case "later source replacement and restart cannot substitute a retained original" `Quick test_source_changes_do_not_replace_the_original;
+  test_case "legacy v13 checkpoint and originless messages survive strict roundtrip" `Quick
+    test_legacy_v13_checkpoint_and_originless_messages_roundtrip]]

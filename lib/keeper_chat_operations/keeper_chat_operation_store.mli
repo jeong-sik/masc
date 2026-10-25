@@ -87,7 +87,8 @@ val input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
     never Unobserved. Input_observed points to exact retained bytes, including
     consumed pending_input=None. None of these grants dispatch authority. *)
 
-val update_input_checkpoint : t -> observed:Keeper_checkpoint_ref.t option ->
+val update_input_checkpoint : ?allow_turn_reset:bool -> t ->
+  observed:Keeper_checkpoint_ref.t option ->
   checkpoint:Keeper_checkpoint_ref.t -> (input_checkpoint_update, error) result
 (** Owner-serialized predecessor CAS for the trace in checkpoint. The caller
     retains and validates the exact payload first. A stale predecessor returns
@@ -112,7 +113,8 @@ val history_clear_input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
     unacknowledged native call, including calls attached to terminal executions.
     None is a genuinely unobserved input, never a forgotten consumed request. *)
 
-val commit_history_clear_input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
+val commit_history_clear_input_checkpoint : ?allow_turn_reset:bool -> t ->
+  trace_id:Keeper_id.Trace_id.t ->
   observed:Keeper_checkpoint_ref.t option -> checkpoint:Keeper_checkpoint_ref.t option ->
   (input_checkpoint_update, error) result
 (** Recheck the same unsettled-state guard and exact input predecessor in one
@@ -315,7 +317,7 @@ val update_direct_native_call : t -> now:float -> operation_id:Operation.Operati
   execution_digest:string -> Keeper_native_call.change -> (unit, error) result
 (** Owner-serialized native-call identity and checkpoint CAS. Every change
     verifies the current direct-operation execution digest. *)
-val update_direct_input_checkpoint : t -> now:float ->
+val update_direct_input_checkpoint : ?allow_turn_reset:bool -> t -> now:float ->
   operation_id:Operation.Operation_id.t -> execution_digest:string ->
   call_id:string -> observed:Keeper_checkpoint_ref.t ->
   observed_input:Keeper_checkpoint_ref.t option -> checkpoint:Keeper_checkpoint_ref.t ->

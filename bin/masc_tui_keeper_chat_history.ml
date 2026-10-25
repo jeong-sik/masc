@@ -1355,7 +1355,41 @@ let rows_of_trace ~source_id ~turn_sequence ~turn_id ~operation_id ~execution_so
    Annotated rather than inferred: an inferred parameter widens to an open
    variant and accepts tags Yojson does not have, which leaves the match below
    exhaustive over nothing. yojson 3 has no `Tuple or `Variant. *)
-let parse_row (entry : Yojson.Safe.t) : parsed list option =
+module StringSet = Set.Make (String)
+
+let operation_delivery_id_of_fields fields =
+  match assoc_opt "delivery_key" fields with
+  | Some (`Assoc key_fields) -> (
+      match string_field key_fields "kind" with
+      | Some "operation" -> string_field key_fields "operation_id"
+      | Some _ | None -> None)
+  | Some _ | None -> None
+
+let transcript_slot_kind_of_fields fields =
+  match assoc_opt "transcript_slot" fields with
+  | Some (`Assoc slot_fields) -> string_field slot_fields "kind"
+  | Some _ | None -> None
+
+let terminal_failure_operation_ids (entries : Yojson.Safe.t list) =
+  List.fold_left
+    (fun acc (entry : Yojson.Safe.t) ->
+       match entry with
+       | `Assoc fields ->
+           let is_terminal_failure =
+             string_field fields "role" = Some "request_failure"
+             && transcript_slot_kind_of_fields fields = Some "terminal_result"
+           in
+           (match operation_delivery_id_of_fields fields with
+            | Some op_id when is_terminal_failure -> StringSet.add op_id acc
+            | Some _ | None -> acc)
+       | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+           acc)
+    StringSet.empty
+    entries
+
+let parse_row ?(terminal_failure_ops = StringSet.empty) (entry : Yojson.Safe.t)
+  : parsed list option
+  =
   match entry with
   | `Assoc fields -> (
       let at = Option.value ~default:0.0 (float_field fields "ts") in
@@ -1407,41 +1441,44 @@ let parse_row (entry : Yojson.Safe.t) : parsed list option =
              the row under. Only an operation key names a turn this client
              dispatched; the other producers get [None] rather than a
              borrowed id. *)
-          let origin_request_id =
-            match assoc_opt "delivery_key" fields with
-            | Some (`Assoc key_fields) -> (
-                match string_field key_fields "kind" with
-                | Some "operation" -> string_field key_fields "operation_id"
-                | Some _ | None -> None)
-            | Some _ | None -> None
+          let origin_request_id = operation_delivery_id_of_fields fields in
+          let redundant_settled_failure =
+            transcript_slot_kind_of_fields fields = Some "settled_failure"
+            &&
+            match origin_request_id with
+            | Some op_id -> StringSet.mem op_id terminal_failure_ops
+            | None -> false
           in
-          Some
-            [ Utterance
-              { at
-              ; structural_id = structural_id_of_fields fields "failure"
-              ; turn_sequence
-              ; turn_id =
-                  (match turn_id with
-                   | Some _ -> turn_id
-                   | None -> origin_request_id)
-              ; (* The failure is the operation's: the key it was stored
-                   under names it even when the row carries no transcript
-                   slot for the provenance reader. *)
-                operation_id =
-                  (match operation_id with
-                   | Some _ -> operation_id
-                   | None -> origin_request_id)
-              ; execution_source =
-                  (match execution_source with
-                   | Some _ -> execution_source
-                   | None -> Option.map (fun id -> Masc_tui_keeper_chat_log.Operation id) origin_request_id)
-              ; kind = Delivery_failed { origin_request_id; recovered_at = None }
-              ; text = content
-              ; media = (match assoc_opt "blocks" fields with
-                  | Some blocks -> Masc_tui_chat_media.of_json blocks | None -> [])
-              ; attachments = attachment_notes_of fields
-              }
-          ]
+          if redundant_settled_failure then
+            Some []
+          else
+            Some
+              [ Utterance
+                { at
+                ; structural_id = structural_id_of_fields fields "failure"
+                ; turn_sequence
+                ; turn_id =
+                    (match turn_id with
+                     | Some _ -> turn_id
+                     | None -> origin_request_id)
+                ; (* The failure is the operation's: the key it was stored
+                     under names it even when the row carries no transcript
+                     slot for the provenance reader. *)
+                  operation_id =
+                    (match operation_id with
+                     | Some _ -> operation_id
+                     | None -> origin_request_id)
+                ; execution_source =
+                    (match execution_source with
+                     | Some _ -> execution_source
+                     | None -> Option.map (fun id -> Masc_tui_keeper_chat_log.Operation id) origin_request_id)
+                ; kind = Delivery_failed { origin_request_id; recovered_at = None }
+                ; text = content
+                ; media = (match assoc_opt "blocks" fields with
+                    | Some blocks -> Masc_tui_chat_media.of_json blocks | None -> [])
+                ; attachments = attachment_notes_of fields
+                }
+            ]
       | Some "assistant" -> (
           (* An autonomous turn persists what it did as a trace block and
              often says nothing in [content]: on one live keeper 32 of
@@ -1755,7 +1792,8 @@ let annotate_recovered_interruptions rows =
 let rows_of_json (payload : Yojson.Safe.t) =
   match payload with
   | `List entries ->
-      let parsed = List.map parse_row entries in
+      let terminal_failure_ops = terminal_failure_operation_ids entries in
+      let parsed = List.map (parse_row ~terminal_failure_ops) entries in
       (* What the operator is told could not be read. An entry that was read
          and draws nothing -- a wake that produced neither speech nor work --
          is not one of them. *)

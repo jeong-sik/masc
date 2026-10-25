@@ -22,10 +22,14 @@ let read ~base_path ~keeper_name ~expected_trace =
   | Input_unobserved -> Ok (Unobserved owner.trace_id)
   | Input_observed reference ->
     let session_dir=Filename.concat owner.session_root (Keeper_id.Trace_id.to_string owner.trace_id) in
-    let* snapshot=Store.load_retained_exact_snapshot ~session_dir ~reference
+    let* snapshot=Store.load_retained_snapshot ~session_dir ~reference
       |> Result.map_error (fun error -> Retained_unavailable error) in
-    let checkpoint=Store.exact_snapshot_reference snapshot in
-    match (Store.exact_snapshot_checkpoint snapshot).pending_input with
+    let checkpoint, pending_input = match snapshot with
+      | Store.Retained_current snapshot ->
+        Store.exact_snapshot_reference snapshot, (Store.exact_snapshot_checkpoint snapshot).pending_input
+      | Store.Retained_superseded {reference;pending_input;_} ->
+        reference, pending_input in
+    match pending_input with
     | None -> Ok (Consumed checkpoint)
     | Some pending -> Ok (Pending {checkpoint;pending})
 

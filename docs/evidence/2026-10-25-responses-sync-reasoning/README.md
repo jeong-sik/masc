@@ -42,8 +42,14 @@ request-local projection consume the same final transport rule. Other protocols
 keep their defaults, including Ollama and the embedding runtime's Anthropic
 history rule. Dashboard declaration serialization covers the new member.
 No shipped catalog row opts in, and no MiniMax activation is claimed.
+Source review also found plaintext admission could permit endpoint rotation of
+opaque artifacts in the same envelope. Responses now retains exact source
+rotation for both carriers, with a changed-endpoint encrypted-item control.
+The earlier6ac run40192348454 likewise failed at the same unused helper before
+suites; its diagnostic remains separate. Run40192421091 targets6d4e before the
+endpoint-binding correction; do not treat it as the final source execution.
 
-Fifteen current cases use an explicitly synthetic plaintext replay declaration
+Sixteen current cases use an explicitly synthetic plaintext replay declaration
 for plaintext round-trips, plus actual default OpenAI opaque-policy control.
 Additional public cases verify producer/request contract identity, the manifest
 vocabulary, other-protocol defaults and nonactivation from a Chat override.

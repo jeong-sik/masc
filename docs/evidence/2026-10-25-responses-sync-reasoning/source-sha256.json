@@ -37,7 +37,11 @@
   },
   {
     "path": "packages/agent_core/lib/llm_provider/reasoning_dialect.ml",
-    "sha256": "276e7074dc5dfe7aab32a954e53ac72b525c4628858558e52b8393dd22794324"
+    "sha256": "1e4ba5a2f83228773ff54df55d562f1bc448d7a401b81c8472a15eb46a566f4c"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/reasoning_dialect.mli",
+    "sha256": "ecb9e431a2bd9905d7dc43a1a42402efc1d785c8915ccaf1008fcc1d2eda787a"
   },
   {
     "path": "packages/agent_core/lib/llm_provider/responses_reasoning.ml",
@@ -49,6 +53,6 @@
   },
   {
     "path": "packages/agent_core/test/test_responses_reasoning_content.ml",
-    "sha256": "490875343a749978d32c9ee928bac8d99c95bd13d7618d22400c654d2b8b1b81"
+    "sha256": "74c9a4f54b78eccccad22302b84dc72c6e1236d3aeb015b82f09cae6c3c4cb6e"
   }
 ]

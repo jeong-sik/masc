@@ -120,7 +120,7 @@ let native_default_control model family =
   List.iter (fun stream ->
     let body = request stream config in
     Alcotest.(check bool) "omitted depth stays omitted" true
-      (body |> member "reasoning" |> member "effort" = `Null);
+      (member "reasoning" body = `Null);
     match family with
     | Toggle_only ->
       Alcotest.(check bool) "M3 enable requires a non-none effort" true
@@ -133,7 +133,7 @@ let native_default_control model family =
     | Effort_depth ->
       let body = request stream {config with enable_thinking=Some true} in
       Alcotest.(check bool) "default-on enable does not invent a depth" true
-        (body |> member "reasoning" |> member "effort" = `Null);
+        (member "reasoning" body = `Null);
       Alcotest.(check bool) "no competing thinking object" true
         (member "thinking" body = `Null);
       List.iter (fun effort ->

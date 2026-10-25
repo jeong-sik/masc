@@ -151,7 +151,10 @@ let existing_leaf (error : Fs_compat.capability_write_error) =
       && (match failure.cause with
           | Fs_compat.Operation_failed failure ->
               (match failure.exception_ with
-               | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _),_) -> true
+               | Eio.Io (Eio.Fs.E error,_) ->
+                   (match error with
+                    | Eio.Fs.Already_exists _ -> true
+                    | Not_found _ | Permission_denied _ | File_too_large | Not_native _ -> false)
                | _ -> false)
           | Invalid_leaf _ | Invalid_recovery_target _ | Mutation_contended
           | Posix_descriptor_unavailable | Unexpected_resource_kind _

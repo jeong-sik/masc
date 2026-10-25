@@ -36,10 +36,13 @@ val issue : t -> publish:(Yojson.Safe.t -> (unit, error) result) option ->
     and declarations. Binding itself must send no Browser input. The first
     authenticated connection consumes the grant before any yielding work. *)
 val descriptor : grant -> Yojson.Safe.t
-val accept : grant -> unit
+val accept : grant -> (unit,error) result
 (** Mark a successfully validated exported invocation as accepted. An original
     unclaimed grant can bind after its public reply, until this provider ends.
-    This never restores a cancelled, consumed or revoked grant. *)
+    This never restores a cancelled, consumed or revoked grant. A rejected
+    invocation returns [Not_started]; an ended provider returns [Unavailable],
+    including after a prior acceptance. Callers must refuse a late successful
+    worker reply when this original admission cannot be confirmed. *)
 val end_invocation : grant -> unit
 (** Reject an invocation that has not been accepted, including a Browser it
     already claimed. An accepted invocation keeps its original Browser and

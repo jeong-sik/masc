@@ -48,6 +48,7 @@ val current : unit -> t
     declarations never become an empty or partially loaded registry. *)
 
 val entries : t -> entry list
+(** Preserve the admitted declaration spellings; only identity lookup keys fold case. *)
 val find : t -> string -> entry option
 (** Lookup id or alias with ASCII case folding and trimmed query whitespace. *)
 val requires_api_key : authentication -> bool

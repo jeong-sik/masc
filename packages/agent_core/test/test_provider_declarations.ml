@@ -41,6 +41,23 @@ let test_exact_replacement () =
   Alcotest.(check bool) "environment auth is explicit data" true
     (selected.authentication=D.Api_key_env "MASC_TEST_PROVIDER_SNAPSHOT_KEY")
 
+let test_declared_spelling_and_lookup_identity () =
+  let declarations = snapshot
+    ~providers:(overlay ~id:"Snapshot-Provider" ~alias:"New-Alias" ()) () in
+  Alcotest.(check int) "case-equivalent exact replacement" 1
+    (List.length (D.entries declarations));
+  Alcotest.(check string) "declared spelling is retained" "Snapshot-Provider"
+    (entry declarations "snapshot-provider").id;
+  let registry = Provider_registry.of_declarations declarations in
+  Alcotest.(check bool) "registry retains its exact declared key" true
+    (Option.is_some (Provider_registry.find registry "Snapshot-Provider"));
+  Alcotest.(check bool) "registry invents no lowercase alias" true
+    (Option.is_none (Provider_registry.find registry "snapshot-provider"));
+  let binding = match B.find_in_declarations declarations " NEW-ALIAS " with
+    | Some binding -> binding | None -> Alcotest.fail "missing folded runtime alias" in
+  Alcotest.(check string) "runtime canonical identity remains normalized"
+    "snapshot-provider" binding.id
+
 let test_cross_source_collision alias =
   match D.of_catalogs ~models:(Some seed)
       ~providers:(Some (overlay ~id:"other-provider" ~alias ())) with
@@ -121,6 +138,7 @@ let test_current_rejects_invalid_combination () =
 let () = Alcotest.run "provider declarations"
   ["admission",[
     "exact overlay replacement",`Quick,test_exact_replacement;
+    "declared spelling and lookup identity",`Quick,test_declared_spelling_and_lookup_identity;
     "alias versus canonical id",`Quick,(fun () -> test_cross_source_collision "snapshot-provider");
     "alias versus alias",`Quick,(fun () -> test_cross_source_collision "old-alias");
     "missing capability base",`Quick,test_missing_preset_fails_closed;

@@ -40,7 +40,7 @@ let binding_of_declaration (entry : PD.entry) =
     | PD.No_auth -> No_auth
     | Caller_api_key | Api_key_env _ -> Api_key
     | Setup_token_env _ -> Setup_token in
-  { id=entry.id;aliases=entry.aliases;kind=entry.kind;base_url=entry.base_url;
+  { id=normalize entry.id;aliases=List.map normalize entry.aliases;kind=entry.kind;base_url=entry.base_url;
     request_path=entry.request_path;
     requires_api_key=PD.requires_api_key entry.authentication;auth;
     default_model=entry.default_model;max_context=entry.max_context;

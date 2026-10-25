@@ -38,7 +38,7 @@ let of_model_entry (entry : Model_catalog.provider_entry) =
   match Capabilities.capabilities_for_provider_label label with
   | None -> Error (Unknown_capability_base {provider_id=entry.id;label})
   | Some capabilities -> Ok
-    { id=normalize entry.id;aliases=List.map normalize entry.aliases;
+    { id=entry.id;aliases=entry.aliases;
       kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
       authentication=(if entry.requires_api_key then Caller_api_key else No_auth);
       default_model=entry.default_model;max_context=capabilities.max_context_tokens;
@@ -49,7 +49,7 @@ let of_provider_entry (entry : Provider_catalog.entry) =
     | Provider_catalog.No_auth -> No_auth
     | Provider_catalog.Api_key_env env -> Api_key_env env
     | Provider_catalog.Setup_token_env env -> Setup_token_env env in
-  { id=normalize entry.id;aliases=List.map normalize entry.aliases;
+  { id=entry.id;aliases=entry.aliases;
     kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
     authentication;default_model=entry.default_model;
     max_context=(match entry.max_context with Some _ as n -> n
@@ -67,14 +67,15 @@ let admit declared =
   let rec loop index = function
     | [] -> Ok {declared;by_identity=index}
     | entry::rest ->
-      let* index = identities entry index (entry.id::entry.aliases) in
+      let* index = identities entry index
+          (List.map normalize (entry.id::entry.aliases)) in
       loop index rest in
   loop Ids.empty declared
 
 let of_catalogs ~models ~providers =
   let overlay = match providers with None -> []
     | Some catalog -> List.map of_provider_entry (Provider_catalog.entries catalog) in
-  let replaced = List.fold_left (fun ids entry -> Ids.add entry.id entry ids)
+  let replaced = List.fold_left (fun ids entry -> Ids.add (normalize entry.id) entry ids)
       Ids.empty overlay in
   let seeds = match models with None -> [] | Some catalog -> Model_catalog.provider_entries catalog in
   let rec project acc = function

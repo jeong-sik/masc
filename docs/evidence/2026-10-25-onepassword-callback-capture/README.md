@@ -37,7 +37,7 @@ while a return is queued, and unmount with a late reply.
 
 Source-before checks on `f89d8442` fail the actual script's premature URL clear
 and the actual component's missing original-return retry. The candidate has
-23 Dashboard checks,21 operator checks and29 existing OAuth checks passing.
+26 Dashboard checks,21 operator checks and29 existing OAuth checks passing.
 Six changed TypeScript roots were checked semantically and the OCaml route
 was parsed; these are not whole-project type/build or Native/HTTP/MCP results.
 
@@ -47,3 +47,19 @@ layer into provider65, with its later duplicate absorbed. There is no compatibil
 wrapper. This packet's owned file-store receipt results do not execute that native
 backend. Original authority loss, keyless/account-pinned recovery and pathname
 allocation P2 remain outside the demonstrated result.
+
+An independent source review found two further counterexamples in frozen `8dd942`:
+captured storage could still block later window actions while waiting for a lost
+page-cleared message, and exact cancel could auto-dispatch a stale queued return.
+The original actual component fails both new selected checks. The response
+preserves confirmed storage even when postMessage to a closed page fails, releases
+captured dispatch ownership for later actions, and rechecks pending identity after
+every mutation. Separate closed-page and lost-cleared cases permit the next
+operator window without claiming that the old page cleared or closing it; the
+cancel case preserves the original return without an automatic third RPC.
+
+The private whole-stack composition regenerates the checked-in receipt packet
+through the actual protected-store read-back/reference edge using explicit
+process-local `MemoryRecords`. Its source hashes bind the composed Python
+producer. This exercises no native OS credential backend; the original SDK
+file-store source results above remain a separate historical scope.

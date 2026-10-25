@@ -83,6 +83,13 @@ it clear query/fragment from history, confirm clearing to that opener and close.
 Absent, malformed or another connection's receipt cannot clear it. The panel
 and original page retain an unconfirmed return for explicit same-request retry;
 they never automatically retry a mutation or retarget it to a new attempt.
+Confirmation of backend capture releases dispatch ownership even if the old
+page has closed or its cleared notification is lost. Later operator windows do
+not require that notification; this does not claim the old page cleared its URL
+and does not close a navigated page on its behalf. A cancel or another mutation
+that removes/replaces the original pending identity leaves a queued return
+unconfirmed for explicit original-request retry, rather than automatically
+dispatching it after that mutation completes.
 The manual secret callback form follows the same ownership/receipt rule and
 retains its input on failure, without inventing a popup acknowledgement.
 

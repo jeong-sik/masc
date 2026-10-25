@@ -3,10 +3,12 @@ open Llm_provider
 open Types
 open Yojson.Safe.Util
 
+type family = Always_on | Toggle_only | Effort_depth
 let models =
-  [ "MiniMax-M2"; "MiniMax-M2.1"; "MiniMax-M2.1-highspeed"
-  ; "MiniMax-M2.5"; "MiniMax-M2.5-highspeed"; "MiniMax-M2.7"
-  ; "MiniMax-M2.7-highspeed"; "MiniMax-M3"; "MiniMax-M3.1-Flash" ]
+  [ "MiniMax-M2",Always_on; "MiniMax-M2.1",Always_on; "MiniMax-M2.1-highspeed",Always_on
+  ; "MiniMax-M2.5",Always_on; "MiniMax-M2.5-highspeed",Always_on; "MiniMax-M2.7",Always_on
+  ; "MiniMax-M2.7-highspeed",Always_on; "MiniMax-M3",Toggle_only; "MiniMax-M3.1-Flash",Effort_depth ]
+
 let part kind text = `Assoc ["type",`String kind;"text",`String text]
 let thought = `Assoc ["type",`String "reasoning";"id",`String "r1";
   "summary",`List [part "summary_text" "short"];"content",`List [part "reasoning_text" "full thought"]]
@@ -51,7 +53,7 @@ let stream model =
   | Ok response -> response | Error _ -> Alcotest.fail "native Responses stream failed"
 let request config messages = Backend_openai_responses.build_request ~config ~messages ~tools ()
   |> Yojson.Safe.from_string
-let native_replay model =
+let native_replay model family =
   let config = config model in
   let caps = match Provider_config.capabilities_for_config_model config with
     | Some caps -> caps | None -> Alcotest.fail "exact native Responses model is absent" in
@@ -89,16 +91,23 @@ let native_replay model =
   Alcotest.(check bool) "tool-free request emits no undocumented none value" true
     (member "tools" without_tools=`Null && member "tool_choice" without_tools=`Null);
   List.iter (fun effort ->
-    let request = request {config with reasoning_effort=Some effort} [] in
-    Alcotest.(check string) "documented effort stays in Responses reasoning object"
-      (Reasoning_effort.to_string effort) (request |> member "reasoning" |> member "effort" |> to_string))
+    let config = {config with reasoning_effort=Some effort} in
+    match family with
+    | Always_on -> Alcotest.(check bool) "M2 has no invented effort control" true
+        (Result.is_error (Provider_config.validate_reasoning_effort_request_typed config))
+    | Toggle_only | Effort_depth ->
+      let request = request config [] in
+      Alcotest.(check string) "documented effort stays in Responses reasoning object"
+        (Reasoning_effort.to_string effort) (request |> member "reasoning" |> member "effort" |> to_string))
     [Reasoning_effort.Low;Medium;High;XHigh;Max];
-  let flash = String.equal model "MiniMax-M3.1-Flash" in
-  List.iter (fun effort -> Alcotest.(check bool) "model-specific effort boundary" (not flash)
-    (Result.is_ok (Provider_config.validate_reasoning_effort_request_typed
-      {config with reasoning_effort=Some effort}))) [Reasoning_effort.None_;Minimal];
-  Alcotest.(check bool) "explicit disable follows the declared model ladder" (not flash)
-    (Result.is_ok (Provider_config.validate_reasoning_effort_request_typed {config with enable_thinking=Some false}))
+  List.iter (fun effort ->
+    let accepted = match family with Toggle_only -> true | Always_on | Effort_depth -> false in
+    Alcotest.(check bool) "model-specific effort boundary" accepted
+      (Result.is_ok (Provider_config.validate_reasoning_effort_request_typed
+        {config with reasoning_effort=Some effort}))) [Reasoning_effort.None_;Minimal];
+  let can_disable = match family with Toggle_only -> true | Always_on | Effort_depth -> false in
+  Alcotest.(check bool) "explicit disable follows the declared control semantics" can_disable
+    (Complete_common.thinking_control_request_rejection ~caps {config with enable_thinking=Some false}=None)
 
 let () = Alcotest.run "minimax_responses_binding"
-  ["native models",List.map (fun model -> model,`Quick,(fun () -> native_replay model)) models]
+  ["native models",List.map (fun (model,family) -> model,`Quick,(fun () -> native_replay model family)) models]

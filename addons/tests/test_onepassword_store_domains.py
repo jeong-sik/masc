@@ -25,7 +25,7 @@ class StoreDomainTests(unittest.TestCase):
         self.connection = oauth.PrivateStore(self.directory, provision=True)
         self.journal = Journal(self.directory)
         self.connection_value = {"phase": "disconnected", "configuration_id": "a" * 64}
-        self.journal_value = {"version": 1, "operations": []}
+        self.journal_value = {"version": 2, "operations": []}
 
     def write(self, store, value):
         with store.locked() as root:

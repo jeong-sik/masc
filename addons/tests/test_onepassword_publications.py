@@ -12,16 +12,21 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "onepassword"))
 from login import Extension, Journal, LoginError, Logins
+import oauth
+from onepassword_store_fixture import MemoryRecords, active_raw, replace_active_raw
 from oauth import ConnectionError
 from test_onepassword_login import APP_LINK, BROWSER, CALLER, REFERENCE, Bridge, Connector
 
 
 class PublicationTests(unittest.TestCase):
     def setUp(self):
+        backend = mock.patch.object(oauth, "ProtectedRecords", MemoryRecords)
+        backend.start()
+        self.addCleanup(backend.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name) / "journal"
-        self.path = self.directory / "operations.json"
+        self.path = self.directory / "operations.reference.json"
         self.journal = Journal(self.directory, provision=True)
         self.connector, self.bridges = Connector(), []
         self.extension = Extension(Path(self.temp.name) / "extension", "a" * 32)
@@ -32,7 +37,7 @@ class PublicationTests(unittest.TestCase):
     def make_engine(self):
         def create(_descriptor):
             bridge = Bridge()
-            bridge.journal_path = self.path
+            bridge.journal_store = self.journal
             self.bridges.append(bridge)
             return bridge
         engine = Logins(self.connector, self.journal, self.extension,
@@ -67,7 +72,7 @@ class PublicationTests(unittest.TestCase):
         return self.engine.pending_publications(operation, CALLER)
 
     def record(self):
-        return json.loads(self.path.read_text())["operations"][0]
+        return json.loads(active_raw(self.journal))["operations"][0]
 
     def test_attention_and_state_commit_together_without_poll_wakes_or_private_data(self):
         operation = self.start()
@@ -227,7 +232,7 @@ class PublicationTests(unittest.TestCase):
     def test_corrupt_or_duplicate_publication_evidence_is_rejected_without_repair(self):
         self.start()
         self.engine.close()
-        original = json.loads(self.path.read_text())
+        original = json.loads(active_raw(self.journal))
         variants = []
         for key, value in [("kind", "unknown"), ("phase", "requesting"), ("host_accepted", 1),
                            ("publication_id", "not-an-id"), ("extra", True)]:
@@ -241,7 +246,7 @@ class PublicationTests(unittest.TestCase):
         changed["operations"][0]["publications"] = []
         variants.append(changed)
         for value in variants:
-            self.path.write_text(json.dumps(value))
+            replace_active_raw(self.journal, json.dumps(value))
             before = self.path.read_bytes()
             with self.journal.locked() as root:
                 with self.assertRaises(ConnectionError):
@@ -252,9 +257,9 @@ class PublicationTests(unittest.TestCase):
         self.start()
         self.start(tab_id=8)
         self.engine.close()
-        value = json.loads(self.path.read_text())
+        value = json.loads(active_raw(self.journal))
         value["operations"][1]["publications"][0]["publication_id"] = value["operations"][0]["publications"][0]["publication_id"]
-        self.path.write_text(json.dumps(value))
+        replace_active_raw(self.journal, json.dumps(value))
         with self.journal.locked() as root:
             with self.assertRaisesRegex(ConnectionError, "^duplicate_login_publication$"):
                 self.journal.read(root)

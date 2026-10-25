@@ -82,8 +82,14 @@ An optional private `callback_receipt` has a closed `kind` (`captured` or
 original key reached validated protected storage with confirmed publication;
 it does not prove that the code exchange or account connection succeeded.
 Busy, unavailable or unconfirmed storage produces no capture receipt. A
-`declined` receipt comes only from the direct successful cancellation of that
-exact pending attempt; observing a disconnected record cannot reconstruct it.
+`declined` receipt comes from the protected record that commits cancellation
+and that original callback's state/connection together. Only a validated
+`access_denied` redelivery with the same state and connection can confirm the
+stored reference's durability and replay it, without rewriting the record or
+calling the provider. Generic inspection, ordinary cancellation and malformed
+or mismatched returns do not produce a declined receipt. A new connection
+attempt replaces the original receipt; losing the original popup/component
+authority remains a separate recovery boundary.
 
 The original page accepts pending identity and receipt messages only from its
 original opener and origin, matching state and connection ID. Only then does

@@ -62,10 +62,34 @@ Browser command authority and progress delivery have different lifetimes. A
 released or withdrawn Browser grant permits no more Browser input. A separate
 publication binding may still deliver the final committed result of that same
 invocation, then end explicitly. It cannot bind another Browser or adopt another
-provider connection. Provider retirement closes and joins publication admission. A separate durable
-host owner-loss notice remains to be implemented; no successor may claim the
-original private authority.
+provider connection. Provider retirement closes and joins publication admission.
+After that join, the allocation's existing settlement owner emits a host-only
+`owner_lost` notice for an invocation whose successful acceptance was confirmed.
+Its fixed output is `{"outcome":"unknown"}`; the worker decoder refuses that
+kind. The retained record preserves the original closed worker schema as
+provenance without fabricating a worker operation phase or credential result.
+No successor may claim the original private authority.
 No elapsed-time expiry or replacement operation is introduced.
+
+This settlement uses the captured raw host sink and original origin. It cannot
+reenter provider authorization, allocation cleanup or Browser work. Live
+invocation acceptance and eligibility are recorded without yielding. A rejected
+or unaccepted invocation completes its notification without an owner-loss event.
+A worker Terminal that reached confirmed durable admission completes the same
+notification before the following fresh authorization read can yield, preventing
+a false loss notice if the provider ends during that read. Browser Release and
+withdrawal never complete this separate publication notification.
+
+This is source implementation for detected provider retirement while the host
+owner is alive. A cancelled root switch or failed storage remains unconfirmed
+under the allocation's existing cleanup contract. It does not promise recovery
+from whole-host power loss. Source fixtures enter the actual Runtime Attach and
+exported invocation paths with an external worker replaced by an exit barrier.
+They release that barrier without Detach, require canonical owner-loss admission
+and IPC settlement, and check that explicit Detach still owns worker resource
+release. Known-terminal and rejected-invocation variants require no false loss
+notice. Those new fixtures have only been parsed; native execution and an actual
+process-kill scenario remain unverified.
 
 ## Commit, deliver and acknowledge
 
@@ -188,9 +212,15 @@ and all selected suites, but failed overall on two other fixture scenarios.
 
 The host publication fixtures use private files, the durable queue and actual
 canonical observation reads, including retry after simulated source consumption.
-Five passed in that same native run. The later three original-source batching
-scenarios belong to a newer candidate. Simulated completion receipts in fixtures
-do not prove that a model ran or continued a real website task.
+Five passed in that same native run. At source
+`60303e6d5c3334df8a4827448e2a2fc6b84c5071`,
+[run 40149926239](https://github.com/jeong-sik/masc/actions/runs/40149926239)
+passed all eight publication scenarios, including the three original-source
+batching cases, and all seven selected suites (108 tests). The run failed later
+on an artifact-copy permission error; its real Chromium probe was skipped.
+Simulated completion receipts in fixtures do not prove that a model ran or
+continued a real website task. The newer acceptance and owner-loss changes have
+not been executed in that run.
 
 ## Observed isolated failure continuation
 
@@ -217,9 +247,22 @@ recording the result. The initial observer assumed surface-post chat rows carrie
 `turn_ref`; the actual producer omits it. A separate verification joined the
 successful post's payload to its persisted assistant row instead.
 
-The probe's original Task was explicitly null. These results establish private
-worker delivery, durable source consumption and a subsequent real Keeper turn
-for this controlled failure. They do not establish non-null Task restoration,
-successful fill, website authentication or production installation. Local
+That probe's original Task was explicitly null. A subsequent isolated probe of
+the same source used the actual `keeper_task_claim` tool to claim and auto-start
+`task-001` before requesting login. The real login call in
+`trace-1792893853333-00000#2` captured that Task, tool-use ID and original
+Dashboard channel. Its canonical terminal event and actual queue
+`turn_completed` receipt preserved those coordinates. The next real model turn
+in `#3` retained `task-001`, called `keeper_surface_post` and persisted message
+`msg-1792893883329673-7`. Both tool-call contexts and the resumed decision record
+identify that Task; the authoritative backlog and Keeper metadata still bind it
+in progress after the probe. Thirteen tracked package files matched the frozen
+source. Original source-file hashes and retained captures preserve the join.
+
+These results establish private worker delivery, durable source consumption,
+original non-null Task preservation and a subsequent real Keeper turn for a
+controlled failure. They do not establish successful fill, website
+authentication, actual process-kill recovery or production installation. Local
 receipts are retained under `reports/onepassword-addon-20261024/` in the
-development worktree.
+development worktree. Earlier failed observer runs remain separate evidence;
+they are not relabelled as successful execution.

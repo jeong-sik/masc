@@ -1,5 +1,7 @@
 (** Real private publication files, durable recipient queue and canonical
-    observation reads. No private worker transport, Browser or Keeper turn runs. *)
+    observation reads. Runtime retirement cases replace only the external worker
+    with explicit barriers and use the real companion broker. No Browser or
+    model turn runs. *)
 open Alcotest
 open Masc
 module O=Lane_addon_companion_origin
@@ -79,6 +81,45 @@ let canonical_retention _env fs config origin =
   check string "conflict never rewrites original" bytes (read (path origin));
   check bool "original publication strictly reloads" true
     (P.find ~config ~origin_id:origin.id ~publication_id=Ok first)
+let host_owner_loss _env fs config origin =
+  let event=P.owner_lost ~publication_id |> pub_ok in
+  check bool "host notice uses a fixed generic unknown output" true
+    (event.kind=P.Owner_lost && event.output=`Assoc ["outcome",`String "unknown"]);
+  check bool "worker capability cannot forge host owner loss" true
+    (P.event ~output_schema (P.event_json event)=Error P.Invalid_event);
+  check bool "host notice requires a canonical publication identity" true
+    (P.owner_lost ~publication_id:"../replacement"=Error P.Invalid_event);
+  let retained=retain fs config origin event |> pub_ok in
+  check bool "original closed worker schema remains provenance" true
+    (retained.output_schema=(Lane_addon_action.canonical output_schema |> string_ok));
+  check bool "host notice strictly reloads without worker-schema coercion" true
+    (P.find ~config ~origin_id:origin.id ~publication_id=Ok retained);
+  deliver fs config origin event |> delivery_ok;
+  let change=only config |> payload in
+  check (option string) "owner loss retains the original Task" (Some "task-original") change.ao_source.task_id;
+  check bool "owner loss retains its original conversation" true
+    (Keeper_continuation_channel.same_route origin.source.channel change.ao_channel);
+  let observed=Keeper_world_observation.pending_board_event_of_addon_operation_change
+    ~base_path:config.base_path ~keeper_name:keeper ~arrived_at:0. change |> pub_ok in
+  let fields=Keeper_unified_prompt.For_testing.board_event_fields {observed with preview=""} in
+  check bool "resumed input carries the complete host event" true
+    (Yojson.Safe.from_string (List.assoc "publication" fields)=P.event_json event);
+  let file=path origin in
+  let bytes=read file in
+  let json=Yojson.Safe.from_string bytes in
+  let changed=match json with
+    | `Assoc fields -> `Assoc (List.map (fun (name,value) ->
+        if name="event" then name,`Assoc ["publication_id",`String publication_id;
+          "kind",`String "owner_lost";"output",`Assoc ["outcome",`String "known"]]
+        else name,value) fields)
+    | _ -> fail "retained host publication missing" in
+  let damaged=Yojson.Safe.to_string changed ^ "\n" in
+  write file damaged;
+  check bool "changed host outcome is not authoritative" true
+    (P.find ~config ~origin_id:origin.id ~publication_id=Error P.Corrupt);
+  check bool "damaged host record cannot be silently repaired" true
+    (retain fs config origin event=Error P.Corrupt);
+  check string "failed reconciliation preserves damaged evidence" damaged (read file)
 let schema_refusal _env _fs _config origin =
   let raw=P.event_json (notice ()) in
   let fields=match raw with `Assoc fields -> fields | _ -> fail "event object missing" in
@@ -309,7 +350,162 @@ let unreadable_source_does_not_anchor_batch env fs config origin = with_intake e
   ack_fixture_batch config admitted;
   check int "completion cannot consume unreadable original source" 1 (List.length (pending config));
   check string "failed source is not silently repaired" "{" (read (path origin)))
+type runtime_exit_case = Missing_terminal | Known_terminal | Rejected_invocation
+let runtime_worker_exit mode env fs config original =
+  let module Runtime=Lane_addon_runtime in
+  let module L=Lane_addon_lifecycle in
+  let clock=Eio.Stdenv.clock env in
+  Eio.Time.with_timeout_exn clock 10. (fun () -> Eio.Switch.run (fun sw ->
+  Eio_context.with_test_env ~sw ~clock ~net:(Eio.Stdenv.net env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+  Runtime.For_testing.reset ();
+  Fun.protect ~finally:Runtime.For_testing.reset (fun () ->
+    let ended,end_worker=Eio.Promise.create () in
+    let delivered,deliver_notice=Eio.Promise.create () in
+    let acknowledged,acknowledge=Eio.Promise.create () in
+    let socket=ref None and events=ref [] and stops=ref 0 in
+    let empty=`Assoc ["type",`String "object";"properties",`Assoc [];"additionalProperties",`Bool false] in
+    let tool=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "owner_loss_probe";
+      "inputSchema",empty;"outputSchema",output_schema]) |> string_ok in
+    let backend : Runtime.For_testing.backend = {
+      start=(fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id ~package:_ ~binding:_
+          ~on_authority ~is_live_instance:_ ~on_created ->
+        let connection : Runtime.For_testing.connection = {
+          resource=L.Native_resource {pid=Unix.getpid ();started=None};resolved_image=None;
+          browser=None;host=None;action_schema=(fun () -> None);operator_schema=(fun () -> None);
+          exported_tools=(fun () -> [tool]);companion_tools=(fun () -> [tool.name]);
+          observe=(fun ~binding:_ ~sources:_ -> Ok Lane_addon_types.{rows=[];coverage=[]});
+          act=(fun ~arguments:_ -> Error "fixture has no actions");
+          call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);
+          await_exit=(fun () -> Eio.Promise.await ended;"fixture worker ended");
+          stop=(fun () -> incr stops;ignore (Eio.Promise.try_resolve end_worker ());
+            Ok (L.Native_released {installation_id;instance_id}));
+          call_exported_tool=(fun ~companion ~on_result ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->
+            let admitted=match companion with Some value -> value | None -> fail "companion missing" in
+            check bool "fake external worker receives original host admission" true (admitted.admit ());
+            let path=admitted.context.socket_path in
+            socket:=Some (path,Unix.lstat (Filename.dirname path),Unix.lstat path);
+            (match mode with
+             | Missing_terminal | Rejected_invocation -> ()
+             | Known_terminal ->
+                 let capability=match admitted.context.publication_id with
+                   | Some id -> id | None -> fail "original publisher missing" in
+                 Eio.Fiber.fork ~sw (fun () ->
+                   Eio.Fiber.yield ();
+                   let flow=Eio.Net.connect ~sw (Eio.Stdenv.net env) (`Unix admitted.context.socket_path) in
+                   let event=notice ~kind:"terminal" ~phase:"outcome_unknown" () in
+                   Eio.Flow.copy_string (Yojson.Safe.to_string (`Assoc ["publication_id",`String capability;
+                     "event",P.event_json event]) ^ "\n") flow;
+                   let reader=Eio.Buf_read.of_flow flow ~max_size:65537 in
+                   check bool "real private broker confirms durable terminal admission" true
+                     (Yojson.Safe.from_string (Eio.Buf_read.line reader)=`Assoc ["accepted",`Bool true]);
+                   Eio.Flow.close flow;Eio.Promise.resolve acknowledge ()));
+            let reply={(Mcp_protocol.Mcp_types.tool_result_of_text "fixture response") with
+              structured_content=Some (output "approval_ready" false);
+              is_error=Some (match mode with Rejected_invocation -> true | Missing_terminal | Known_terminal -> false)} in
+            on_result reply;Ok reply)} in
+        match on_authority (L.Native_admission {installation_id}) with
+        | Error detail -> Error (L.Persistence_failed detail)
+        | Ok () -> on_created connection;Ok connection);
+      acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_
+        ~read_browser_document:_ ~binding:_ -> Ok (`List []));
+      package_ready=(fun ~package:_ -> Ok ());condition_met=(fun ~runtime:_ _ -> false);
+      sweep=(fun ~runtime:_ ~is_live_instance:_ -> Ok []);
+      recover_stop=(fun ~state_owner:_ ~instance_id:_ ~authority:_ ~resource:_ ->
+        Error (L.Cleanup_unconfirmed "unexpected fixture recovery"))} in
+    Runtime.For_testing.with_backend backend (fun () ->
+      let manifest=Filename.concat config.Workspace.base_path "owner-loss.toml" in
+      write manifest {|id = "owner-loss-fixture"
+revision = "1"
+title = "Controlled companion worker"
+runtime = "host_process"
+command = ["fixture-worker"]
+contributions = ["observe"]
+[world.tools]
+export = ["owner_loss_probe"]
+invocation = "host_context"
+hooks = ["validate_input", "validate_output"]
+[resources]
+max_reply_bytes = 65536
+|};
+      let dispatch operation fields=Runtime.dispatch ~caller:"fixture-operator"
+        ~access:Lane_addon_sources.Operator_configuration ~config ~operation (`Assoc fields)
+        |> Result.map_error Runtime.error_to_string |> string_ok in
+      let attached=dispatch Runtime.Attach ["manifest_path",`String manifest;"run_id",`String "owner-loss";
+        "binding",`Assoc ["sources",`List []]] in
+      let id=Yojson.Safe.Util.member "instance_id" attached |> Yojson.Safe.Util.to_string in
+      let inspect ()=dispatch Runtime.Inspect ["instance_id",`String id]
+        |> Yojson.Safe.Util.member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+      let rec await predicate=if predicate () then () else (Eio.Time.sleep clock 0.001;await predicate) in
+      await (fun () -> (inspect () |> Yojson.Safe.Util.member "observation_seq" |> Yojson.Safe.Util.to_int)>0);
+      let access=Lane_addon_sources.Keeper keeper in
+      let reading=Runtime.tool_export_reading ~config ~access ~reserved:[] |> string_ok in
+      let export=match reading.exports with [one] -> one | [] | _::_ -> fail "fixture export unavailable" in
+      let turn=original.O.source.turn_ref in
+      let trace=Ids.Turn_ref.trace_id turn in
+      let context=Keeper_tool_call_log_context.{empty_turn_context with agent_name=Some keeper;
+        trace_id=Some trace;keeper_turn_id=Some (Ids.Turn_ref.absolute_turn turn);task_id=original.source.task_id} in
+      let source=O.source ~keeper_name:keeper ~turn_ref:(Some turn) ~tool_use_id:(Some "runtime-owner-loss")
+        ~trace_id:(Some trace) ~source_context:(Some context) ~channel:(Some original.source.channel) |> origin_ok in
+      let publish ~origin ~output_schema ~event=
+        match D.deliver ~fs ~config ~origin ~output_schema ~event with
+        | Error _ -> Error ()
+        | Ok () -> events:=event.P.kind::!events;
+            ignore (Eio.Promise.try_resolve deliver_notice ());Ok () in
+      let reply=Runtime.call_exported_tool_with_authority ~companion_publish:(Some publish)
+        ~continuation:(Some (Ok source)) ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())
+        ~authorize:None ~principal:(Some (Lane_addon_call_context.Keeper keeper))
+        ~config ~access ~reserved:[] ~export ~arguments:(`Assoc []) in
+      check bool "original invocation returned its controlled worker reply" true (Result.is_ok reply);
+      (match mode with Known_terminal -> Eio.Promise.await acknowledged | Missing_terminal | Rejected_invocation -> ());
+      Eio.Promise.resolve end_worker ();
+      (match mode with Missing_terminal -> Eio.Promise.await delivered | Known_terminal | Rejected_invocation -> ());
+      await (fun () ->
+        match inspect () |> Yojson.Safe.Util.member "lifecycle" |> L.state_of_json |> string_ok with
+        | L.Failed _ -> true
+        | L.Attached | L.Observing -> false
+        | L.Detaching _ | L.Detached _ -> fail "original worker retired before operator Detach");
+      let captured,directory_identity,socket_identity=match !socket with
+        | Some original -> original | None -> fail "original socket not captured" in
+      (* Listener refusal is observable before Detach; it does not claim that
+         every Browser settlement has joined. Detach below joins the owner. *)
+      await (fun () ->
+        let connection=Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+        Fun.protect ~finally:(fun () -> Unix.close connection) (fun () ->
+          Unix.set_nonblock connection;
+          match Unix.connect connection (Unix.ADDR_UNIX captured) with
+          | () -> false
+          | exception Unix.Unix_error (Unix.ECONNREFUSED,_,_) -> true
+          | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINPROGRESS),_,_) -> false));
+      let check_retained () =
+        let same expected path =
+          let current=Unix.lstat path in
+          current.st_dev=expected.Unix.st_dev && current.st_ino=expected.st_ino
+          && current.st_kind=expected.st_kind in
+        check bool "original stopped IPC pathnames stay retained" true
+          (same directory_identity (Filename.dirname captured) && same socket_identity captured) in
+      check_retained ();
+      check int "detected exit closes IPC admission without stopping worker resource" 0 !stops;
+      let expected=match mode with Missing_terminal -> [P.Owner_lost] | Known_terminal -> [P.Terminal]
+        | Rejected_invocation -> [] in
+      check bool "one original outcome and no false owner-loss notice" true (!events=expected);
+      (match mode with
+       | Rejected_invocation -> check int "rejected invocation creates no async queue source" 0 (List.length (pending config))
+       | Missing_terminal | Known_terminal ->
+           let change=only config |> payload in
+           check (option string) "runtime notice preserves original Task" original.source.task_id change.ao_source.task_id;
+           check bool "runtime notice preserves original conversation" true
+             (Keeper_continuation_channel.same_route original.source.channel change.ao_channel));
+      ignore (dispatch Runtime.Detach ["instance_id",`String id]);
+      Runtime.For_testing.await_run_stopped ~config ~instance_id:id;
+      check int "explicit Detach still owns worker resource release" 1 !stops;
+      check_retained ();
+      check bool "Detach reuses the same settlement without another notice" true (!events=expected))))))
 let ()=run "Original companion publication" ["publication",[
+  test_case "manual worker exit publishes owner loss without Detach" `Quick (with_origin (runtime_worker_exit Missing_terminal));
+  test_case "known terminal suppresses owner loss at worker exit" `Quick (with_origin (runtime_worker_exit Known_terminal));
+  test_case "rejected invocation emits no owner loss at worker exit" `Quick (with_origin (runtime_worker_exit Rejected_invocation));
+  test_case "host-only owner loss retains original source and fixed outcome" `Quick (with_origin host_owner_loss);
   test_case "one original invocation and conversation per intake" `Quick (with_origin invocation_batches);
   test_case "ordinary sources defer companion routing intact" `Quick (with_origin general_source_precedes_addon);
   test_case "retired tool result hint cannot anchor companion admission" `Quick (with_origin retired_tool_result_does_not_anchor_batch);

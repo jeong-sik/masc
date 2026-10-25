@@ -51,8 +51,16 @@ and five publication fixtures passed, along with the allocation and protocol
 suites. The extension and broker fixtures still had two failures repaired by
 the later candidate. Build success did not make that run successful.
 
-The retained server and 1Password package from that same source were run in a
-separate temporary workspace. The executable's embedded commit and effective
+[Run 40149926239](https://github.com/jeong-sik/masc/actions/runs/40149926239)
+subsequently built source `60303e6d5c3334df8a4827448e2a2fc6b84c5071` and
+passed all seven selected suites, 108 tests. A later artifact-copy step failed
+when overwriting an already retained read-only executable, so the real Chromium
+probe was skipped and the overall run failed. These results do not cover the
+new invocation-acceptance and detected-owner-loss changes above that source.
+
+The retained server and 1Password package from source
+`6e6491e9cec86347b6664d26821cba95eda080f7` were run in a separate temporary
+workspace. The executable's embedded commit and effective
 runtime roots were checked. The declaration API attached its native worker,
 and an initialized MCP client discovered all seven exports. An actual Keeper
 model turn invoked `onepassword_status` once and returned `not_configured`,
@@ -76,6 +84,15 @@ the assistant row was persisted. The original Task was null, and no actual
 1Password account, extension fill or website authentication was exercised.
 The [continuation contract](lane-addon-keeper-continuation.md#observed-isolated-failure-continuation)
 records the evidence scope.
+
+A further isolated run of that same source established a non-null Task path.
+An actual Keeper claimed and auto-started `task-001`, invoked `onepassword_login`
+in `trace-1792893853333-00000#2`, then received the canonical failure in `#3`.
+The original record, queue receipt, both tool contexts and resumed turn retained
+`task-001`. Its actual `keeper_surface_post` persisted message
+`msg-1792893883329673-7` in the original Dashboard conversation, and the Task
+remained in progress. This is controlled failure continuation; it does not
+establish successful sign-in or work on an authenticated website.
 
 ## Earlier status installation
 
@@ -111,8 +128,10 @@ published account-authentication evidence.
    session/tab and principal pins. Exercise the read/screenshot exclusion and
    original-owner cancellation fences while a real extension call is in flight.
    A lost fill cannot authorize replay or adoption of another Browser.
-4. Add a host-owned unknown notice for detected original-provider loss. An
-   origin record alone is pre-dispatch intent and cannot prove execution.
+4. Exercise the implemented host-owned unknown notice after detected original
+   provider loss. It requires confirmed invocation acceptance; an origin record
+   alone remains pre-dispatch intent and cannot prove execution. Whole-host crash
+   recovery is outside that source implementation's guarantee.
 5. Verify worker publication, durable intake and the original Keeper's resumed
    turn through the connected path. Generic Lane Ask stores question text and
    does not itself resume a Keeper; it must not carry opaque approval links.

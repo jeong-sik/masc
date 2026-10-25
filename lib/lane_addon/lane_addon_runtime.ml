@@ -1350,14 +1350,17 @@ let run ~sw ~read_browser_document backend m e =
               | Some _ -> stop_entry ~sw ~backend m e)
             else failed m e failure
         | Ok c ->
-            e.connection <- Some {export_owner;worker=c;companion=None;companion_active=None}; e.started <- true;
+            let owner={export_owner;worker=c;companion=None;companion_active=None} in
+            e.connection <- Some owner; e.started <- true;
             notify_exports m e;
             (* Every stop this runtime asks for marks the entry stopping before
                the worker is told. A process that ends without that request
                cannot serve again, so the entry turns failed and stopping. Its
                owner retires it as it retires a failed start: a declaration on
                the next configuration pass, which then starts a new instance,
-               and an instance attached without one on the operator's Detach. *)
+               and an instance attached without one on the operator's Detach.
+               The original private companion settles at detected exit without
+               waiting for that resource-retention decision. *)
             fork_isolated ~sw:worker_sw (fun () ->
               let ended = c.await_exit () in
               if not e.stopping then (
@@ -1368,7 +1371,20 @@ let run ~sw ~read_browser_document backend m e =
                 e.state <- fail_state e cause;
                 notify_exports m e;
                 (match persist m e with Ok () -> wake_dependents m e | Error detail ->
-                  Log.Misc.error "Lane Add-on instance %s exit state persistence: %s" e.instance_id detail)));
+                  Log.Misc.error "Lane Add-on instance %s exit state persistence: %s" e.instance_id detail);
+                Option.iter (fun allocation ->
+                  fork_isolated ~sw (fun () ->
+                    let result=match Eio.Lazy.force allocation with
+                      | Error Lane_addon_companion_allocation.Unavailable -> Ok ()
+                      | Error Cleanup_unconfirmed -> Error "private companion startup cleanup unconfirmed"
+                      | Ok owned ->
+                          (match Lane_addon_companion_allocation.cleanup owned with
+                           | Ok (Paths_retained _) -> Ok ()
+                           | Error detail -> Error detail) in
+                    match result with
+                    | Ok () -> ()
+                    | Error _ -> Log.Misc.warn "Original companion settlement remains unconfirmed after provider exit"))
+                  owner.companion));
             Option.iter (fun port -> Option.iter
               (run_host_watch ~sw:worker_sw ~cleanup_sw:sw ~backend m e port) port.await_change) c.host;
             (match c.host, e.configuration with
@@ -2324,6 +2340,7 @@ let private_companion_binding ~sw m ~access ~principal provider original provide
     | Some pair -> Ok pair | None -> Error C.Not_started in
   let* client=Option.to_result ~none:C.Not_started browser_owner.worker.browser in
   let browser_configuration=browser.configuration in
+  let browser_authority=browser.authority in
   let original_browser ()=match Hashtbl.find_opt m.entries browser.instance_id,browser.connection with
     | Some current,Some connection when current==browser
         && Lane_addon_tool_export.equal_owner connection.export_owner browser_owner.export_owner ->
@@ -2363,6 +2380,15 @@ let private_companion_binding ~sw m ~access ~principal provider original provide
        Invoke refusal cannot discard a previously prepared binding. *)
     if previously_unbound && result=Error P.Not_started then operation:=None;
     result in
+  let join_original_browser () =
+    (* A revoked client or stopping entry does not prove Browser settlement.
+       Join only the captured worker; its stop receipt must match the original
+       execution authority and resource, even after the entry is replaced. *)
+    Browser_addon_client.revoke client;
+    let* release=browser_owner.worker.stop () in
+    check_release ~instance_id:browser.instance_id ~authority:browser_authority
+      ~resource:(Some browser_owner.worker.resource) release
+    |> Result.map (fun _ -> ()) in
   let* finish=Lane_addon_companion_allocation.on_finish allocation (function
     | C.Released -> Ok ()
     | Abandoned ->
@@ -2374,15 +2400,19 @@ let private_companion_binding ~sw m ~access ~principal provider original provide
            (match execute (P.Release operation_id) with
             | Ok (`Assoc [("released",`Bool true)]) -> Ok ()
             | Ok _|Error (P.Not_started|Outcome_unknown) -> Error "private browser settlement unconfirmed")
-       | Some _ -> Error "private browser settlement unconfirmed")) |> Result.map_error (fun _ -> C.Not_started) in
+       | Some _ -> join_original_browser ()
+           |> Result.map_error (fun _ -> "private browser settlement unconfirmed")))
+    |> Result.map_error (fun _ -> C.Not_started) in
   Ok {C.execute;finish}
 
 type companion_publication = origin:Lane_addon_companion_origin.record ->
   output_schema:Yojson.Safe.t -> event:Lane_addon_companion_publication.event ->
   (unit,unit) result
+type companion_invocation_admission = Invocation_not_accepted | Invocation_accepted
 
 let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish ~continuation ~(export:tool_export) ~arguments e original invoke =
   let module C=Lane_addon_companion_broker in
+  let module P=Lane_addon_companion_publication in
   let unavailable ()=Error (Lane_addon_call_context.Host_refusal (Unavailable "private companion is unavailable")) in
   let configuration=e.configuration in
   match e.package.execution,e.package.worker_service with
@@ -2418,18 +2448,10 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
           authority; retained origin is evidence, never a replacement grant. *)
        let* ()=confirm_companion_owner m ~access ~principal e original configuration
          |> Result.map_error (fun () -> Lane_addon_call_context.Host_refusal (Unavailable "private companion is unavailable")) in
-       let* publish=match origin,companion_publish,export.tool.output_schema with
+       let* publication=match origin,companion_publish,export.tool.output_schema with
          | None,None,_ -> Ok None
          | Some origin,Some deliver,Some output_schema ->
-             Ok (Some (fun value ->
-               let* ()=confirm_companion_owner m ~access ~principal e original configuration
-                 |> Result.map_error (fun () -> C.Not_started) in
-               let* event=Lane_addon_companion_publication.event ~output_schema value
-                 |> Result.map_error (fun _ -> C.Not_started) in
-               let* ()=deliver ~origin ~output_schema ~event
-                 |> Result.map_error (fun () -> C.Outcome_unknown) in
-               confirm_companion_owner m ~access ~principal e original configuration
-                 |> Result.map_error (fun () -> C.Outcome_unknown)))
+             Ok (Some (origin,deliver,output_schema))
          | (Some _|None),(Some _|None),(Some _|None) -> unavailable () in
        let allocation=match original.companion with
          | Some allocation -> allocation
@@ -2445,6 +2467,43 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
        match Eio.Lazy.force allocation with
        | Error _ -> unavailable ()
        | Ok allocation ->
+         let admission=ref Invocation_not_accepted in
+         let* finish=match publication with
+           | None -> Ok None
+           | Some (origin,deliver,output_schema) ->
+               let* event=P.owner_lost ~publication_id:(Random_id.uuid_v7 ())
+                 |> Result.map_error (fun _ -> Lane_addon_call_context.Host_refusal
+                     (Unavailable "private companion publication is unavailable")) in
+               (* This host sink retains the original source after its provider
+                  ends. It must not call the provider-authenticated publisher or
+                  reenter the allocation's own cleanup. *)
+               Lane_addon_companion_allocation.on_finish allocation (function
+                 | C.Released -> Ok ()
+                 | Abandoned ->
+                     (match !admission with
+                      | Invocation_not_accepted -> Ok ()
+                      | Invocation_accepted ->
+                          deliver ~origin ~output_schema ~event
+                          |> Result.map_error (fun () -> "original companion owner-loss notice unconfirmed")))
+               |> Result.map Option.some
+               |> Result.map_error (fun _ -> Lane_addon_call_context.Host_refusal
+                   (Unavailable "private companion publication is unavailable")) in
+         let finish_unaccepted ()=match !admission with
+           | Invocation_accepted -> ()
+           | Invocation_not_accepted -> Option.iter (fun notify -> notify C.Released) finish in
+         Fun.protect ~finally:finish_unaccepted (fun () ->
+         let publish=Option.map (fun (origin,deliver,output_schema) value ->
+           let* ()=confirm_companion_owner m ~access ~principal e original configuration
+             |> Result.map_error (fun () -> C.Not_started) in
+           let* event=P.event ~output_schema value |> Result.map_error (fun _ -> C.Not_started) in
+           let* ()=deliver ~origin ~output_schema ~event |> Result.map_error (fun () -> C.Outcome_unknown) in
+           (* Durable Terminal admission suppresses owner loss before the next
+              fresh authorization read can yield or observe provider retirement. *)
+           (match event.P.kind with
+            | P.Terminal -> Option.iter (fun notify -> notify C.Released) finish
+            | Attention_required | Effect_submitted | Owner_lost -> ());
+           confirm_companion_owner m ~access ~principal e original configuration
+             |> Result.map_error (fun () -> C.Outcome_unknown)) publication in
          let bind=private_companion_binding ~sw m ~access ~principal e original configuration allocation in
          match C.issue (Lane_addon_companion_allocation.broker allocation) ~publish ~bind with
          | Error _ -> unavailable ()
@@ -2458,17 +2517,17 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
                try let result=invoke companion in
                  (match result with
                   | Ok reply when reply.Mcp_protocol.Mcp_types.is_error<>Some true ->
-                      let admission=
+                      let accepted=
                         let* ()=confirm_companion_owner m ~access ~principal e original configuration in
                         C.accept grant |> Result.map_error (fun _ -> ()) in
-                      (match admission with
-                       | Ok () -> result
+                      (match accepted with
+                       | Ok () -> admission:=Invocation_accepted;result
                        | Error () -> C.cancel_invocation grant;
                            Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown"))
                   | Ok _|Error _ -> C.cancel_invocation grant;result)
                with
                | Eio.Cancel.Cancelled _ as exn -> C.cancel_invocation grant;raise exn
-               | _ -> C.cancel_invocation grant;Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown")))
+               | _ -> C.cancel_invocation grant;Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown"))))
 
 let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
     Fun.protect ~finally:on_complete (fun () ->

@@ -79,7 +79,8 @@ For a remote-SSH shim compatibility failure, `linux-x64-probe.yml` also accepts
 the explicit manual targets `exec-shim-linux-arm64` and `exec-shim-linux-amd64`.
 Pass a full `candidate_sha` and dispatch from a ref containing those targets.
 Only the chosen architecture builds, using the release's static-musl builder
-on a matching native Linux runner. The probe driver comes from the workflow ref;
+on a matching native Linux runner. Only the probe driver file is checked out
+from the workflow ref, so its nested checkout adds no second Dune package;
 the shim and compiler recipe come from the candidate checkout. The artifact
 includes binary checksums, both source identities, and an actual framed payload
 that loads `env_file`, alongside the version probe. This establishes candidate

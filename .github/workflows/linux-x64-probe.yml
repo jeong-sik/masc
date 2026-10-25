@@ -61,6 +61,10 @@ jobs:
         with:
           path: probe-driver
           persist-credentials: false
+          # A full nested repository gives Dune two definitions of masc.
+          # Only this workflow-owned driver is an input to the candidate build.
+          sparse-checkout: /scripts/remote-ssh/probe-shim-artifact.py
+          sparse-checkout-cone-mode: false
       - uses: ./.github/actions/prepare-shim-builder
         with:
           arch: ${{ env.SHIM_ARCH }}

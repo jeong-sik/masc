@@ -217,7 +217,7 @@ let test_task_source_failure_boundaries () = with_fixture (fun config ->
   let primary = Workspace_backlog.backlog_path config in
   let recovery = Workspace_backlog.backlog_recovery_path config in
   check bool "valid recovery exists before damage" true (Sys.file_exists recovery);
-  Fs_compat.save_file_atomic primary "{broken";
+  Fs_compat.save_file_atomic primary "{broken" |> require "damage primary for recovery control";
   (match Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[reference] with
    | Error (Evidence.Storage_failed _) -> () | _ -> fail "recovery was presented as primary Task evidence");
   (match Workspace.read_backlog_observation_r config with

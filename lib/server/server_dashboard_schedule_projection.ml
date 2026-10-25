@@ -205,24 +205,13 @@ let schedule_evidence_snapshot ~config wakes =
     wakes;
   let queue_by_keeper = Hashtbl.create (Hashtbl.length requested_stimulus_ids) in
   let reaction_by_keeper = Hashtbl.create (Hashtbl.length requested_stimulus_ids) in
-  (* Capture queue authority before ledger projection. These are per-owner
-     coherent observations, not one globally atomic cross-store snapshot. *)
-  Hashtbl.iter
-    (fun keeper_name _ ->
-       Hashtbl.add queue_by_keeper keeper_name
-         (Keeper_event_queue_persistence.observe_state_result
-            ~base_path:config.Workspace_utils.base_path ~keeper_name))
-    requested_stimulus_ids;
-  let used_initial = Hashtbl.create (Hashtbl.length queue_by_keeper) in
+  (* Resolve queue authority before ledger projection. Every callback reads
+     fresh bytes, so an owner enters the resolver cache at the same instant as
+     its observation. Pre-capturing a target outside that cache could conceal
+     a transfer-followed stale absence from the resolver's refresh rule. *)
   let read_state ~base_path keeper_name =
-    let observed =
-      match Hashtbl.find_opt queue_by_keeper keeper_name with
-      | Some initial when not (Hashtbl.mem used_initial keeper_name) ->
-        Hashtbl.add used_initial keeper_name ();
-        initial
-      | Some _ | None ->
-        Keeper_event_queue_persistence.observe_state_result ~base_path ~keeper_name
-    in
+    let observed = Keeper_event_queue_persistence.observe_state_result ~base_path ~keeper_name in
+    Hashtbl.replace queue_by_keeper keeper_name observed;
     Result.map_error
       (fun errors -> String.concat "; "
           (List.map (fun (error : Keeper_event_queue_persistence.snapshot_read_error) ->
@@ -239,6 +228,12 @@ let schedule_evidence_snapshot ~config wakes =
     ~read_state ~base_path:config.Workspace_utils.base_path occurrences
   |> List.iter (fun (keeper_name, stimulus_id, result) ->
       Hashtbl.add disposition_by_occurrence (keeper_name, stimulus_id) result);
+  (* Legacy receipts without an identity still get explicit queue read
+     errors, but cannot be resolved to an occurrence. *)
+  Hashtbl.iter (fun keeper_name _ ->
+      if not (Hashtbl.mem queue_by_keeper keeper_name) then
+        ignore (read_state ~base_path:config.Workspace_utils.base_path keeper_name))
+    requested_stimulus_ids;
   Hashtbl.iter
     (fun keeper_name stimulus_ids ->
        Hashtbl.add reaction_by_keeper keeper_name
@@ -469,30 +464,35 @@ let schedule_keeper_queue_evidence_dashboard_json
                 ~stimulus_label:stimulus
                 (Keeper_event_queue.enqueue Keeper_event_queue.empty source)
             in
+            let verify ~post_id:source_post_id ~urgency ~arrived_at ~source_ref =
+              if not (String.equal payload_digest (Schedule_domain.payload_digest request.payload))
+              then Error "current schedule payload cannot verify the durable occurrence"
+              else
+                match Server_schedule_consumers.keeper_wake_stimulus_for_occurrence
+                    ~request ~occurrence_id:post_id ~due_at ~arrived_at with
+                | Error detail -> Error detail
+                | Ok (_, expected) ->
+                  if String.equal source_post_id expected.post_id
+                     && urgency = expected.urgency
+                     && String.equal source_ref
+                          (Keeper_event_queue_state.source_snapshot_ref expected)
+                  then (match full_matches expected with
+                      | Some source -> Ok source
+                      | None -> Error "durable source does not match this schedule occurrence")
+                  else Error "durable source provenance conflicts with this occurrence"
+            in
             match source with
             | Keeper_event_queue_state.Full_source source ->
               (match full_matches source with
-               | Some source -> Ok source
-               | None -> Error "durable source does not match this schedule occurrence")
+               | None -> Error "durable source does not match this schedule occurrence"
+               | Some source -> verify ~post_id:source.post_id ~urgency:source.urgency
+                   ~arrived_at:source.arrived_at
+                   ~source_ref:(Keeper_event_queue_state.source_snapshot_ref source))
             | Keeper_event_queue_state.Compact_source compact ->
-              (* Recover every source byte from the same decoder as dispatch,
-                 using the receipt's arrival time. The hash commits title,
-                 message, delivery, urgency and the exact occurrence identity. *)
-              if not (String.equal payload_digest (Schedule_domain.payload_digest request.payload))
-              then Error "current schedule payload cannot verify the retired occurrence"
-              else
-                (match Server_schedule_consumers.keeper_wake_stimulus_for_occurrence
-                    ~request ~occurrence_id:post_id ~due_at ~arrived_at:compact.arrived_at with
-                 | Error detail -> Error detail
-                 | Ok (_, source) ->
-                   if String.equal compact.post_id source.post_id
-                      && compact.urgency = source.urgency
-                      && String.equal compact.source_ref
-                           (Keeper_event_queue_state.source_snapshot_ref source)
-                   then (match full_matches source with
-                       | Some source -> Ok source
-                       | None -> Error "compact source does not match this schedule occurrence")
-                   else Error "compact durable source provenance conflicts with this occurrence")
+              (* Recover every source byte through the same decoder as dispatch.
+                 The hash binds title, message, delivery and exact identity. *)
+              verify ~post_id:compact.post_id ~urgency:compact.urgency
+                ~arrived_at:compact.arrived_at ~source_ref:compact.source_ref
           in
           let disposition = match stimulus_id with
             | None -> Error "dispatch receipt has no exact stimulus identity"
@@ -526,9 +526,12 @@ let schedule_keeper_queue_evidence_dashboard_json
             terminal owner source evidence "failed" (Some reason)
           | Some _, [], Ok (Server_schedule_consumers.Terminal_cancelled_at (owner, source, reason, evidence)) ->
             terminal owner source evidence "cancelled" (Some reason)
-          | Some _, [], Ok (Server_schedule_consumers.Transfer_projecting_at (owner, target)) ->
-            encode "transfer_projection_pending"
-              [ "resolved_owner", `String owner; "transfer_target", `String target ]
+          | Some _, [], Ok (Server_schedule_consumers.Transfer_projecting_at (owner, target, source)) ->
+            (match source_matches source with
+             | Error detail -> invalid detail
+             | Ok source -> encode "transfer_projection_pending"
+                 ([ "resolved_owner", `String owner; "transfer_target", `String target ]
+                  @ schedule_queue_match_fields ~now "transfer" source))
           | Some _, [], Ok (Server_schedule_consumers.Pending_at (owner, source)) ->
             (match source_matches source with
              | Error detail -> invalid detail

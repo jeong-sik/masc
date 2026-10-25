@@ -116,7 +116,7 @@ val accept_keeper_wake_occurrence :
 
 type resolved_occurrence_disposition =
   | Pending_at of string * Keeper_event_queue_state.schedule_occurrence_source
-  | Transfer_projecting_at of string * string
+  | Transfer_projecting_at of string * string * Keeper_event_queue_state.schedule_occurrence_source
   | Terminal_completed_at of
       string
       * Keeper_event_queue_state.schedule_occurrence_source

@@ -1459,6 +1459,7 @@ let test_dashboard_drain_committed_before_projection transition () =
   with_workspace @@ fun config ->
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
   let request = create_keeper_wake_schedule config in
   let occurrence_id = tick_ok config ~now:201.0 |> single_occurrence_id in
   let selection = pending_selection_exn ~base_path ~keeper_name in
@@ -1545,9 +1546,78 @@ let test_dashboard_drain_committed_before_projection transition () =
       | Ok () -> () | Error detail -> fail detail));
   let projected = page_row () in
   assert_page ~stage:"projected" ~status:projected_status projected;
+  if transition = Completed then (
+    (* Retire this completed schedule's hot witness with a real later terminal.
+       Resolution must then use its exact-id compact receipt, not a ledger scan. *)
+    let later : Keeper_event_queue.stimulus =
+      { post_id = "later-bootstrap"; urgency = Normal; arrived_at = 203.0; payload = Bootstrap }
+    in
+    (match Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+        ~base_path ~keeper_name later with Ok _ -> () | Error detail -> fail detail);
+    let later_selection = pending_selection_exn ~base_path ~keeper_name in
+    let later_receipt =
+      Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
+        ~base_path ~keeper_name ~applied_at:204.0 ~selection:later_selection () |> require_terminal
+    in
+    (match Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+        ~base_path ~keeper_name ~expected_transition_id:later_receipt.transition_id with
+     | Ok () -> () | Error detail -> fail detail);
+    assert_page ~stage:"retired" ~status:projected_status (page_row ());
+    let path = Keeper_reaction_ledger.For_testing.schedule_occurrence_receipt_path
+        ~base_path ~keeper_name ~occurrence_id in
+    let bytes = In_channel.with_open_bin path In_channel.input_all in
+    Fun.protect ~finally:(fun () -> write_file path bytes) (fun () ->
+        write_file path "{";
+        assert_page ~stage:"unreadable_receipt" ~status:"read_error" (page_row ())));
   if transition = Transferred then
     check string "projection follows the actual target owner" "drain-target"
       (projected |> member "keeper_queue_evidence" |> member "resolved_owner" |> to_string)
+;;
+
+let test_dashboard_resolver_refreshes_target_observed_before_transfer () =
+  with_workspace @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_name = "schedule-keeper" in
+  let target_name = "drain-target" in
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let target_meta = persist_keeper_meta config target_name in
+  ignore (create_keeper_wake_schedule config : Schedule_domain.schedule_request);
+  let occurrence_id = tick_ok config ~now:201.0 |> single_occurrence_id in
+  let selection = pending_selection_exn ~base_path ~keeper_name in
+  let target_reads = ref 0 in
+  let moved = ref false in
+  let read_state ~base_path owner =
+    if String.equal owner target_name then incr target_reads;
+    if String.equal owner keeper_name && not !moved then (
+      let transfer : Keeper_event_queue_persistence.accepted_transfer =
+        { source = selection.source; source_incarnation = selection.admitted_revision
+        ; operator_operation_id = "transfer-between-owner-observations"
+        ; from_keeper = keeper_name; to_keeper = target_name
+        ; target_trace_id = target_meta.runtime.trace_id }
+      in
+      (match Keeper_event_queue_persistence.transfer_pending_accepted_result
+          ~base_path ~keeper_name ~applied_at:202.0 ~transfer () with
+       | Ok (Keeper_event_queue_persistence.Transition_applied _) -> ()
+       | Ok _ -> fail "fresh transfer did not commit"
+       | Error detail -> fail detail);
+      (match Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name with
+       | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+       | Ok _ -> fail "interleaved transfer did not converge"
+       | Error error -> fail (Keeper_event_queue_recovery.projection_error_to_string error));
+      moved := true);
+    Keeper_event_queue_persistence.observe_state_result ~base_path ~keeper_name:owner
+    |> Result.map_error (fun errors -> Printf.sprintf "owner observation failed: %d" (List.length errors))
+  in
+  let observed = Server_schedule_consumers.resolve_keeper_wake_occurrences_with
+      ~read_state ~base_path [target_name, occurrence_id; keeper_name, occurrence_id] in
+  (match observed with
+   | [ (_, _, Ok (Server_schedule_consumers.Absent_at initially_absent));
+       (_, _, Ok (Server_schedule_consumers.Pending_at (owner, Full_source source))) ] ->
+     check string "target really was observed empty before transfer" target_name initially_absent;
+     check string "source follows committed transfer to fresh target" target_name owner;
+     check bool "transfer preserves complete exact source" true (source = selection.source)
+   | _ -> fail "stale target absence escaped transfer refresh");
+  check int "cached target absence triggers a second fresh observation" 2 !target_reads
 ;;
 
 (* The cancel may run inside the turn the schedule woke: a Keeper cancelling
@@ -4396,6 +4466,8 @@ let () =
             `Quick (test_interval_wake_retries_acceptance_commit ~complete_before_retry:true)
         ; test_case "due wake bypasses proactive policy" `Quick
             test_due_schedule_wakes_live_keeper_with_proactive_disabled
+        ; test_case "dashboard resolver refreshes target observed before transfer" `Quick
+            test_dashboard_resolver_refreshes_target_observed_before_transfer
         ; test_case "dashboard observes committed completion before projection" `Quick
             (test_dashboard_drain_committed_before_projection Completed)
         ; test_case "dashboard observes committed failure before projection" `Quick

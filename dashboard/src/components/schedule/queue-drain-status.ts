@@ -101,9 +101,9 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
     title: '큐 스냅샷 또는 reaction ledger 읽기 실패 — 드레인 상태 확인 불가',
   },
   evidence_invalid: {
-    label: '증거 격리',
+    label: '증거 확인 불가',
     tone: 'warn',
-    title: '해당 occurrence의 reaction ledger 행이 격리되어 정확한 드레인 판정 불가',
+    title: '해당 occurrence의 durable 증거 또는 reaction ledger를 정확히 검증할 수 없음',
   },
   indeterminate: {
     label: '확인 불가',
@@ -117,6 +117,7 @@ export function queueDrainStateOfEvidence(
   reaction: string | null | undefined,
 ): QueueDrainState | null {
   if (queue == null) return null
+  if (queue !== 'read_error' && reaction === 'conflicting_terminal_evidence') return 'evidence_invalid'
   switch (queue) {
     case 'terminal_projection_pending':
     case 'transfer_projection_pending':

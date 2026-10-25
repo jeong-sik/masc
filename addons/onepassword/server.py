@@ -83,6 +83,7 @@ class Worker:
         if (not isinstance(action, str) or action not in expected or set(arguments) != expected[action]
                 or not all(isinstance(value, str) and value for value in arguments.values())):
             raise InvalidInput("invalid private operator action")
+        connector = None
         try:
             connector = load_connector(self.configuration, provision=action in {"view", "connect"})
             if action == "connect":
@@ -128,6 +129,8 @@ class Worker:
                         raise ConnectionError("invalid_callback")
                     connector.cancel_authorization(expected_state=query["state"][0],
                                                    expected_connection_id=arguments["connection_id"])
+                    return {**self.operator_view(connector), "callback_receipt": {
+                        "kind": "declined", "connection_id": arguments["connection_id"]}}
                 else:
                     connector.complete(state=query["state"][0], code=query["code"][0],
                                        integration_key=fragment["integration_key"][0])
@@ -135,8 +138,20 @@ class Worker:
         except (ConnectionError, OSError, InvalidInput, ValueError, TypeError, KeyError, UnicodeError):
             # The operator learns only a fixed outcome. The durable backend
             # phase, not an exception's wording, decides whether reconnect is safe.
-            return {"title": "1Password", "message": "Connection unavailable. Inspect the account connection before another attempt.",
-                    "actions": [{"id": "view", "label": "Inspect connection", "arguments": {}, "fields": []}]}
+            return self.with_callback_receipt(connector, {
+                "title": "1Password", "message": "Connection unavailable. Inspect the account connection before another attempt.",
+                "actions": [{"id": "view", "label": "Inspect connection", "arguments": {}, "fields": []}]})
+
+    @staticmethod
+    def with_callback_receipt(connector, view):
+        if connector is not None:
+            try:
+                receipt = connector.callback_receipt()
+            except (ConnectionError, OSError, ValueError, TypeError, KeyError, UnicodeError):
+                receipt = None
+            if receipt is not None:
+                return {**view, "callback_receipt": receipt}
+        return view
 
     def operator_view(self, connector):
         status = connector.status()
@@ -159,7 +174,7 @@ class Worker:
         result = {"title": "1Password", "message": messages[phase], "actions": actions}
         if callback is not None:
             result["callback"] = callback
-        return result
+        return self.with_callback_receipt(connector, result)
 
     def status(self):
         # Only this first boundary constructs public data. No provider or OS

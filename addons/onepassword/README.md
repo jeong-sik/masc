@@ -13,9 +13,11 @@ Browser Add-on session, through verified website sign-in and continuation.
 separate operator-owned private store. Its only model-safe projection is
 `Connector.status()`. `begin()` is an operator-only control: its authorization
 URL must never enter a public tool result, Ask text, observation, log or model context.
-The HTTPS callback must authenticate the operator, capture `integration_key`
-from the fragment, clear that fragment, and call `complete()` with the matching
-state. Tokens use the fixed production API origin and redirects are refused.
+The HTTPS callback authenticates the operator and sends the original
+`integration_key` fragment to `complete()` with the matching state and connection.
+It preserves the URL/window or manual input until the backend confirms durable
+capture of that original key; only then may the page clear its URL and close.
+Tokens use the fixed production API origin and redirects are refused.
 
 `credentials(use, expected_connection_id=...)` is a backend callback, not a public
 tool. A browser operation pins `connection_identity()` at creation and retains
@@ -54,8 +56,15 @@ The package now advertises the non-exportable `lane_operator` port for `view`,
 panel provides its connection form through the [private operator control
 contract](../../docs/design/lane-addon-operator-controls.md). Register the exact
 HTTPS URL `<your MASC origin>/addons/oauth/callback` with 1Password. The callback
-fragment is cleared in the return page and sent through authenticated private
-POST; no tokens or PKCE verifier are returned to that page.
+return is sent through authenticated private POST before the fragment is cleared.
+The private `callback_receipt` names the original connection and distinguishes
+key capture from a directly confirmed decline. Capture does not claim connection
+success: an exchange failure can leave a captured key with reconciliation still
+required. A lost response permits explicit redelivery of that same original
+return; the one-use code exchange is not reexecuted after its durable marker.
+Unconfirmed/busy storage produces no capture acknowledgement. No tokens or PKCE
+verifier are returned to the page. Keyless, account-pinned recovery and confirmed
+remote revocation remain unfinished; another connection's key is never reused.
 
 These changes are source implementation, not an installed-host or real-account
 connection result. The previously installed development package still provides

@@ -250,8 +250,10 @@ class PrivateStore:
         return info.st_dev, info.st_ino
 
     @contextmanager
-    def locked(self):
-        with self.thread_lock:
+    def locked(self, *, blocking=True):
+        if not self.thread_lock.acquire(blocking=blocking):
+            raise ConnectionError("secret_store_busy")
+        try:
             if self._directory_identity() != self.identity:
                 raise ConnectionError("secret_store_replaced")
             root = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -263,7 +265,7 @@ class PrivateStore:
                 lock = os.open("connection.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
                                | os.O_NONBLOCK, 0o600, dir_fd=root)
                 self._owned(os.fstat(lock))
-                fcntl.flock(lock, fcntl.LOCK_EX)
+                fcntl.flock(lock, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
                 yield root
                 if self._directory_identity() != self.identity:
                     raise ConnectionError("secret_store_replaced")
@@ -271,6 +273,8 @@ class PrivateStore:
                 if lock is not None:
                     os.close(lock)
                 os.close(root)
+        finally:
+            self.thread_lock.release()
 
     def _reference(self, root: int) -> int | None:
         try:
@@ -422,6 +426,22 @@ class Connector:
                           "code_challenge_method": "S256"}
             return {"authorization_url": WEB_ORIGIN + "/oauth/authorize?" + parse.urlencode(parameters),
                     "connection_id": connection_id}
+
+    def callback_receipt(self) -> dict | None:
+        """Private observation of a durably captured key, never a use grant.
+
+        Only post-capture records carry a key. A busy/unavailable store must
+        not be replaced with an acknowledgement derived from UI state.
+        """
+        with self.store.locked(blocking=False) as root:
+            record = self._read(root)
+            if Phase(record["phase"]) in {Phase.EXCHANGING, Phase.CONNECTED, Phase.REFRESHING, Phase.REVOKING}:
+                # write() verifies the protected payload before publishing its
+                # reference. Confirm that reference even if the original
+                # directory fsync failed and its response became uncertain.
+                os.fsync(root)
+                return {"kind": "captured", "connection_id": record["connection_id"]}
+            return None
 
     def authorization_identity(self) -> dict:
         """Private operator continuation; never includes PKCE verifier/tokens."""

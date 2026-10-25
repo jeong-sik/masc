@@ -357,10 +357,10 @@ let subscription_model_efforts =
   ; None, "gpt-6.1-sol", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
-  ; None, "gemini-4-argon-high", [ "low"; "medium"; "high" ]
-  ; None, "gemini-3.8-flash-high", [ "low"; "medium"; "high" ]
-  ; None, "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
-  ; None, "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
+  ; None, "gemini-4-argon", [ "low"; "medium"; "high" ]
+  ; None, "gemini-3.8-flash", [ "low"; "medium"; "high" ]
+  ; None, "gemini-3.7-flash", [ "low"; "medium"; "high" ]
+  ; None, "gemini-3.6-flash", [ "minimal"; "low"; "medium"; "high" ]
   ]
 ;;
 

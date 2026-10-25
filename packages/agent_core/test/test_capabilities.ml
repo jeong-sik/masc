@@ -629,9 +629,8 @@ let test_lookup_local_ollama_gemma4_e2b_qat_catalog () =
    with
    | Some c -> check_gemma4_e2b "ollama Gemma4 E2B QAT via bare fallback" c
    | None -> fail "Ollama lookup with bare fallback should match local Gemma4 E2B QAT");
-  match Capabilities.for_model_id model_id with
-  | Some c -> check_gemma4_e2b "bare local Gemma4 E2B QAT" c
-  | None -> fail "bare lookup should match local Gemma4 E2B QAT"
+  check bool "scoped local Gemma4 does not grant a bare row" true
+    (Option.is_none (Capabilities.for_model_id model_id))
 ;;
 
 let test_lookup_deepseek_v4_flash () =
@@ -1595,7 +1594,7 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , Delta_stream "thinking_delta" )
     ; ( "Qwen3.6 RunPod/self-hosted"
       , Direct_model
-      , "qwen/qwen3.6-35b-a3b"
+      , "qwen/qwen3.6"
       , Extended_thinking
       , Response_format_json_schema
       , Replay_latest_user_tool_turn_only
@@ -3143,7 +3142,8 @@ let test_exact_rows_do_not_inherit_variant_capabilities () =
     ; "glm-5-code", (fun c -> c.max_context_tokens = Some 128_000)
     ; "glm-4.6v", (fun c -> c.supports_image_input && c.max_output_tokens = Some 32_768)
     ; "glm-4.5v", (fun c -> c.supports_image_input && c.max_output_tokens = Some 16_384)
-    ; "glm-4.5", (fun c -> c.supports_reasoning && c.max_output_tokens = Some 96_000) ] in
+    ; "glm-4.5", (fun c -> c.supports_reasoning && c.max_output_tokens = Some 96_000)
+    ; "glm-4.5-x", (fun c -> c.supports_reasoning && c.max_output_tokens = Some 128_000) ] in
   List.iter (fun (model_id, valid) ->
     (match frontier_capabilities Direct_model model_id with
      | None -> fail ("declared exact model missing: " ^ model_id)
@@ -3151,7 +3151,7 @@ let test_exact_rows_do_not_inherit_variant_capabilities () =
     List.iter (fun suffix ->
       check bool "an undeclared variant has no inherited policy" true
         (Option.is_none (frontier_capabilities Direct_model (model_id ^ suffix))))
-      ["-x"; ":unlisted"; "-latest"]) cases
+      ["-undeclared"; ":unlisted"; "-latest"]) cases
 ;;
 
 (* ── Anthropic thinking wire without a declared policy ─────────── *)

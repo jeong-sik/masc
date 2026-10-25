@@ -41,9 +41,22 @@ issue contract, although the historical test called it a prefix-ordering pass.
 
 Changed OCaml sources/interfaces parse and whitespace checks pass. Python TOML
 comparison confirms235 unchanged row payloads apart from the identity key and
-35 exact preserved suggestions. Focused executable verification is requested
-separately; no local Dune build, successful candidate execution, MASC binary,
-provider HTTP, deployment or complete #27898 closure is claimed here.
+35 exact preserved suggestions.
+
+Actual initial run40149391321 at23e6d4d262038e12c2e113ec8e709817a6053e99
+finished FAILURE: six suites passed262 cases; catalog26/27 and capabilities114/124.
+The new identifier/permission cases passed, as did provider config, catalog
+coverage, exact resolver, MASC auth and thinking consumers. The11 failures
+exposed positive fixtures still expecting undeclared variants, scoped Gemma
+leaking into bare lookup, and an invalid negative assumption about the explicitly
+declared glm-4.5-x. Corrections use existing exact rows, scoped-only denial and
+a genuinely undeclared suffix; glm-4.5-x keeps its own128K output assertion.
+Native Kimi sampling policy assertions are preserved on its declared row.
+Selected actual logs are retained alongside this file. Corrected execution is
+requested separately; no aggregate success is claimed.
+
+No local Dune build, full MASC executable build, provider HTTP, deployment or
+complete #27898 closure is claimed here.
 
 The issue remains open for provider/catalog/manifest consolidation, remaining
 reverse provider discovery/high-level binding/API cleanup, and integration.

@@ -1,0 +1,19 @@
+{
+  "requested_at": "2026-10-25T00:36:12.887423+00:00",
+  "run_id": 40147287888,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/40147287888",
+  "candidate_sha": "be9a9d9da9d426c8babb691a9ebc4620ca4a517c",
+  "frozen_validation_branch": "codex/goal-integrity-validation-be9a9d9d",
+  "workflow_file": ".github/workflows/test.yml",
+  "workflow_sha256": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191",
+  "minimal": true,
+  "suites": [
+    "test_verification",
+    "test_completion_repair_delivery",
+    "test_workspace_handoff_boundary",
+    "test_workspace_task_verification_phase_e",
+    "test_keeper_claude_code_runtime"
+  ],
+  "suite_selection_sha256": "916c3142109555061b03eca9ba0c32f98f3654a393034cc6d424e68577b24c34",
+  "scope": "Explicit focused native consumer verification only. Dispatch receipt is not completion/pass. No CI watch/wait/repeat loop or full regression. Lower Native Stack branch movement is separate."
+}

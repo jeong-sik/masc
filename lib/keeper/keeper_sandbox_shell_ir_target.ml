@@ -292,13 +292,7 @@ let guest_target
     Ok { target; runtime; sandbox_profile; observe_route }
 ;;
 
-let ssh_target ~base_path ~meta ~timeout_sec ?ssh_bin ?on_receipt () =
-  match Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name:meta.name with
-  | Error message ->
-    Error
-      (target_error ~class_:Tool_result.Policy_rejection
-         ~fields:[ "requested_sandbox", `String "remote_ssh" ] message)
-  | Ok endpoint ->
+let ssh_target ~endpoint ~base_path ~meta ~timeout_sec ?ssh_bin ?on_receipt () =
     (match
        Keeper_sandbox_ssh.create ?ssh_bin ~base_path ~keeper_name:meta.name
          ~endpoint ()

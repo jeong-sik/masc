@@ -1584,6 +1584,7 @@ interface KeeperSupervisorDiagnostics {
 export type KeeperSystemPromptPreview =
   | { state: 'available'; effective: string; assembled: string }
   | { state: 'unavailable'; reason: 'constitution_unreadable'; path: string; detail: string }
+  | { state: 'unavailable'; reason: 'workspace_unavailable'; detail: string }
   | { state: 'unavailable'; reason: 'prompt_unrenderable'; detail: string }
   | { state: 'decode_failed'; detail: string }
 

@@ -219,11 +219,11 @@ let deferred_names_absent_from ~declared_names ~actual_names =
 ;;
 
 let prepare_agent_setup
-      ~workspace_root
       ?preview
       ?observation_token
       ?(answer_source_ids = [])
       ~(config : Workspace.config)
+      ~workspace_root
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(publication_recovery :

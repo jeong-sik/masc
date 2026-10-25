@@ -9,6 +9,13 @@ open Masc
 
 let ( let* ) = Result.bind
 
+(* Interactive SSH children are waited on synchronously inside Eio's signal
+   runtime. Resume only the interrupted syscall, never spawn or stream again. *)
+let rec resume_syscall operation =
+  try operation () with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> resume_syscall operation
+;;
+
 let read_all ic =
   let buffer = Buffer.create 4096 in
   let chunk = Bytes.create 4096 in
@@ -53,7 +60,7 @@ let run_inherited argv =
       Unix.create_process program (Array.of_list argv)
         Unix.stdin Unix.stdout Unix.stderr
     in
-    status_error argv (snd (Unix.waitpid [] pid))
+    status_error argv (snd (resume_syscall (fun () -> Unix.waitpid [] pid)))
 ;;
 
 let run_capture_stdout argv =
@@ -74,7 +81,7 @@ let run_capture_stdout argv =
     Unix.close write_fd;
     let ic = Unix.in_channel_of_descr read_fd in
     let output = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () -> read_all ic) in
-    let* () = status_error argv (snd (Unix.waitpid [] pid)) in
+    let* () = status_error argv (snd (resume_syscall (fun () -> Unix.waitpid [] pid))) in
     Ok output
 ;;
 
@@ -83,7 +90,7 @@ let copy_channel source output =
   let rec write_all offset remaining =
     if remaining > 0
     then
-      let written = Unix.write output bytes offset remaining in
+      let written = resume_syscall (fun () -> Unix.write output bytes offset remaining) in
       if written = 0 then raise End_of_file;
       write_all (offset + written) (remaining - written)
   in
@@ -128,7 +135,7 @@ let run_with_file_stdin argv path =
              (Unix.error_message error))
     in
     Unix.close write_fd;
-    let status = snd (Unix.waitpid [] pid) in
+    let status = snd (resume_syscall (fun () -> Unix.waitpid [] pid)) in
     let* () = status_error argv status in
     match write_error with
     | None -> Ok ()

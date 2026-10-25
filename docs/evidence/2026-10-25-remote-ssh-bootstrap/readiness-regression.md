@@ -50,3 +50,13 @@ cases: nine passed; the config-refusal assertion failed because Cmdliner wrapped
 The assertion now normalizes diagnostic whitespace before checking that cause;
 it still requires nonzero exit, no success text, no false root-missing claim,
 and no Keeper workspace creation.
+
+The packaged macOS helper from run 40198143147 was then executed locally after
+its artifact checksums and the main executable's source identity were verified.
+The same ten CLI cases exposed a native runtime failure: seven failed with
+`waitpid(): Interrupted system call`, including normal preparation and symlink
+refusal. This is separate from the Linux line-wrapping assertion. Synchronous
+interactive subprocess waits inside the new Eio runtime now resume `EINTR` on
+the same owned PID; streaming writes likewise resume only the interrupted write
+at its current offset. Commands and complete uploads are never replayed as a
+retry. Actual post-repair native execution is still required.

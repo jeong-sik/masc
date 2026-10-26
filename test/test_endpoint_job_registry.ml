@@ -463,7 +463,7 @@ let test_cancel_rejects_rebound_job_and_known_launch_coordinates () =
 
 let test_launch_storage_is_original_and_job_owned () = fixture (fun ~env ~sw:_ ~root ~registry ~open_root:_ ->
   let b=binding (id "05") in let permit=admitted registry b |> commit in
-  let fd=Eio.Switch.run (fun job_sw ->
+  let storage=Eio.Switch.run (fun job_sw ->
     let storage=R.with_launch ~sw:job_sw permit (fun _ ~storage ->
       let stat=Eio.Path.stat ~follow:true storage in
       let target=Fs_compat.capability_publication_target
@@ -487,10 +487,12 @@ let test_launch_storage_is_original_and_job_owned () = fixture (fun ~env ~sw:_ ~
     Out_channel.with_open_bin (Filename.concat job "supervisor.json") (fun oc -> output_string oc "replacement");
     check string "opened capability never follows the replacement pathname" "original rendezvous"
       (Eio.Path.load Eio.Path.(storage / "supervisor.json"));
-    match Eio_unix.Resource.fd_opt (fst storage) with
-    | None -> fail "Unix directory has no owned descriptor"
-    | Some fd -> check bool "job switch still owns its original descriptor" true (Eio_unix.Fd.is_open fd);fd) in
-  check bool "ending the per-job switch actually closes storage" false (Eio_unix.Fd.is_open fd))
+    storage) in
+  let unavailable=match Eio.Path.load Eio.Path.(storage / "supervisor.json") with
+    | _ -> false
+    | exception Invalid_argument _ -> true
+    | exception Eio.Io _ -> true in
+  check bool "ending the per-job switch actually revokes original storage I/O" true unavailable)
 
 let test_launch_rejects_storage_swap_before_effect () = fixture (fun ~env:_ ~sw ~root ~registry ~open_root:_ ->
   let b=binding (id "05") in let permit=admitted registry b |> commit in

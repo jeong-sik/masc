@@ -48,7 +48,7 @@ let refresh_cache () =
       Llm_provider.Provider_registry.active_llama_endpoints ()
     in
     let results =
-      Llm_provider.Discovery.discover ~sw:switch ~net ~endpoints
+      Llm_provider.Discovery.discover ~headers:[] ~sw:switch ~net ~endpoints
     in
     let next =
       {
@@ -89,7 +89,8 @@ let first_ollama_model_id_for_url ?(headers=[]) url =
   let cached =
     if fresh then
       List.find_map (fun (status : endpoint_info) ->
-        if status.url = url then model_of_status status else None) cache.endpoints
+        if status.url = url && status.protocol = Llm_provider.Discovery.Ollama_native
+        then model_of_status status else None) cache.endpoints
     else None
   in
   match cached with

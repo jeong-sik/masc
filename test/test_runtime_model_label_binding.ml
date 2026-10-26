@@ -361,6 +361,36 @@ let ollama_auto_renews_stale_selected_endpoint () =
             (requests_before_expiry + 1) !tag_requests
         | None -> Alcotest.fail "expired Ollama discovery was refused")))
 
+let ollama_auto_does_not_reuse_openai_compatible_cache () =
+  let native_requests = ref 0 in
+  let handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/health" -> Cohttp_eio.Server.respond_string ~status:`OK ~body:"ok" ()
+    | "/v1/models" -> Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"data":[{"id":"openai-model","owned_by":"local"}]}|} ()
+    | "/api/tags" ->
+      incr native_requests;
+      Cohttp_eio.Server.respond_string ~status:`OK
+        ~body:{|{"models":[{"name":"native-model"}]}|} ()
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server handler (fun ~sw ~net ~endpoint ->
+    Discovery_cache.set_env ~sw ~net;
+    let declared = Llm_provider.Discovery.endpoint
+      ~protocol:Llm_provider.Discovery.Openai_compatible
+      ~capabilities:Llm_provider.Capabilities.openai_compat_chat_capabilities endpoint in
+    ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared]);
+    ignore (Discovery_cache.get_cached_or_refresh ());
+    with_catalog ~endpoint (fun () ->
+      match Runtime_model_string.parse_model_string "ollama:auto" with
+      | Some config ->
+        Alcotest.(check string) "OpenAI inventory cannot satisfy Ollama auto"
+          "native-model" config.Provider_config.model_id;
+        Alcotest.(check int) "wrong-protocol cache falls through to native discovery"
+          1 !native_requests
+      | None -> Alcotest.fail "same-URL native Ollama discovery was refused"))
+
 let ollama_auto_does_not_refresh_other_endpoints () =
   let other_hits = ref 0 in
   let other_handler _conn req body =
@@ -433,4 +463,5 @@ let () = Alcotest.run "runtime model label binding"
      "declared default skips discovery",`Quick,declared_default_skips_discovery;
      "authenticated discovery",`Quick,ollama_auto_sends_resolved_credential;
      "stale selected endpoint",`Quick,ollama_auto_renews_stale_selected_endpoint;
+     "wrong protocol cache",`Quick,ollama_auto_does_not_reuse_openai_compatible_cache;
      "cold cache endpoint isolation",`Quick,ollama_auto_does_not_refresh_other_endpoints]]

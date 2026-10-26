@@ -266,16 +266,16 @@ def run(script,answer):
             'viewport':{'documentId':'d1','width':800,'height':600,'scrollX':0,'scrollY':0}})})
     elif step=='page.target_input':
         (root/'clicked').write_text(json.dumps([args['target'],args['cursor']]))
-        answer({'urlBefore':'https://fixture.test/','receipt':{},'error':None,
+        answer({'urlBefore':'https://fixture.test/','receipt':{},'error':None,'pointerReleased':True,
             'tab':{'url':'https://fixture.test/','title':'Fixture'}})
     elif step=='page.native_workflow':
         time.sleep(0.03)
-        answer({'completed':[],'effectStarted':False,'completedEffect':False,'failure':None,
+        answer({'completed':[],'effectStarted':False,'completedEffect':False,'inputReleased':True,'failure':None,
             'urlBefore':'https://fixture.test/','url':'https://fixture.test/','title':'Fixture','snapshot':'root','truncated':False,'chars':4})
     elif step=='page.pointer':
         page={'answer':json.dumps({'url':'https://fixture.test/','title':'Fixture','scrollX':0,'scrollY':0})}
         (root/'clicked').write_text(json.dumps([args['x'],args['y'],args['button'],args['cursor']]))
-        answer({'guard':page,'receipt':page,'error':None})
+        answer({'guard':page,'receipt':page,'error':None,'pointerReleased':True})
     elif step=='page.downloads':
         # What the page's download wait saved: <downloads>/<id>, in folders
         # no one else may write, as ego's saveAs makes them.
@@ -337,8 +337,12 @@ let scenario mode =
         let issue ?(timeout_sec=B.default_timeout_sec) verb = dispatch (W.Issue {route=B.Live_route (Some client.client_id);verb;
           actor=Some "keeper/live-fixture";timeout_sec;only_if_idle=false}) in
         let tab_list = answered (issue B.Tabs_list) in
-        check string "the tab list" {|{"ok":true,"data":[{"id":1,"index":0,"url":"https://fixture.test/","title":"Fixture","active":true}]}|}
-          (Yojson.Safe.to_string tab_list);
+        let tab=match Yojson.Safe.Util.(tab_list |> member "data" |> to_list) with
+          | [tab] -> tab | _ -> fail "expected one observed tab" in
+        check int "observed tab" 1 Yojson.Safe.Util.(tab |> member "id" |> to_int);
+        check bool "native Page context reaches the owned live client" true
+          (Yojson.Safe.Util.member "egoPage" tab = `Assoc ["label",`String "p1";
+            "targetId",`String "T1";"openedBy",`String "agent"]);
         let finished () = List.mem "space.finish" (lines (Filename.concat root "steps")) in
         let clock = Eio.Stdenv.clock env in
         if mode = "late" then (

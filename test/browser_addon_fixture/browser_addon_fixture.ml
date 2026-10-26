@@ -22,6 +22,9 @@ def control(conn):
         req=json.loads(conn.makefile("rb").readline())
         if req["incarnation"]!=a.incarnation: raise RuntimeError("wrong incarnation")
         op=req["operation"]
+        if op=="retire":
+            conn.sendall((json.dumps({"reply":"receipt"})+"\n").encode())
+            return
         if op in ("download_claim","download_commit","download_release"):
             with open(os.path.join(a.root,"downloads.json")) as src: downloads=json.load(src)
             if req["id"] not in downloads: raise RuntimeError("unknown download grant")
@@ -33,7 +36,7 @@ def control(conn):
             with open(os.path.join(a.root,"polls"),"a") as out: out.write(req["client"]["clientId"]+"\n")
             conn.sendall((json.dumps({"reply":"poll","command":None,"state_id":"fixture"})+"\n").encode())
             return
-        if op!="snapshot": raise RuntimeError("fixture exposes snapshot, poll and download grants only")
+        if op!="snapshot": raise RuntimeError("fixture exposes snapshot, poll, retirement and download grants only")
         with open(os.path.join(a.root,"clients.json")) as src: clients=json.load(src)
         with open(os.path.join(a.root,"owned.json")) as src: owned=json.load(src)
         result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"owned_backends":{"automation":{"activity":"enabled","registered":owned["automation"],"session":"closed","locate":False},"stagehand":{"activity":"enabled","registered":owned["stagehand"],"session":"unknown","locate":False}}}}
@@ -157,7 +160,10 @@ let start ~sw ~env ~config ~root ~name ~backend ~exports ~owned:(automation,stag
     "name",`String tool.name;"inputSchema",tool.input_schema;
     "outputSchema",Option.get tool.output_schema]));
   let script=Filename.concat root "browser.py" in write script server;
-  let manifest=Filename.concat root "lane.toml" in
+  write (Filename.concat root "clients.json")
+    (Yojson.Safe.to_string (`List (List.map (fun client -> match W.client_to_json client with
+       | `Assoc fields -> `Assoc (("interactions",`List [])::("lastActivities",`List [])::fields)
+       | value -> value) clients)));
   write manifest (Printf.sprintf {|id = "scripted-browser-%s"
 revision = "fixture-1"
 title = "Scripted browser adapter"

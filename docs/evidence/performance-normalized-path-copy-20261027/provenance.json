@@ -1,0 +1,36 @@
+{
+  "schema": "masc.normalized-path-helper-provenance.v1",
+  "baseline_ref": "9edd5752ec3b81c3618f9e3953afb5072f0e0525",
+  "candidate_source_commit": "9f7533779cbeef09213f677ab8fefb9055387ead",
+  "candidate_source_files": {
+    "lib/config/env_config_core.ml": "29bb930ac2f8ca26c8764c02f6676c150b5e991067d7dd3367891c2432ff1587",
+    "lib/config/env_config_core.mli": "b69ee9ba2f618b2d8347044563b4ede40d2eb32223c1f967c919856a5e863912",
+    "test/test_config_dir_resolver.ml": "b1fae4f1d96cb49b5463f7ccc62608ce7824311e5b0541d7b0a3024a5d2cf618"
+  },
+  "baseline_normalizer_matches_qualified_native_source": "55a0c7482fedece3f114fa8accb64a5084b1a796",
+  "interpreter": "5.5.1",
+  "plan_sha256": "ac80d26bffae24f1088cad5e6d30fb2f86f3741ba37c1ac4ac58a3595a010659",
+  "original_summary_sha256": "c31e5f678378d34a3ec4c91f3c3722b06d26953eb35d25c5b5a616dab581baf5",
+  "profile_motivation": {
+    "local_packet": "artifacts/runs/extreme-perf-20261026/dispatch-profile-55a0c748-300-v3",
+    "local_independent_report": "artifacts/runs/extreme-perf-20261026/dispatch-profile-native-evidence-review-v3/README.md",
+    "report_sha256": "eb7ffb7f2964db7eacca225eec04b11ed937ec48d198b03785276f61f0627957",
+    "first_frame_source": "lib/config/env_config_core.ml:248 at55a0c748",
+    "visible_released_allocated_rows": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "distinct_site_keys": 4,
+    "allocated_samples": 2071,
+    "estimated_bytes": 1656799968,
+    "scope": "Cumulative sampled top30 rows only, not exclusive CPU/function total or a production cause; raw profiler packet remains local."
+  },
+  "reproduction_dependencies": {
+    "raw_value_opt": "Only HOME is accepted; returns current explicit home_fixture, no actual HOME mutation",
+    "Common.masc_dirname": ".masc"
+  },
+  "original_source_snapshots": "Baseline/candidate complete source files remain under local normalized-path-copy-helper-v1; selected generated helper program is retained as probe.ocaml.txt.",
+  "runtime_evidence": "No native binary from this candidate, installation, UI or whole-program performance result is part of this helper bundle."
+}

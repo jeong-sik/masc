@@ -538,7 +538,7 @@ let ollama_auto_probe_uses_declared_deadline () =
     Discovery_cache.set_env ~sw ~net;
     with_catalog ~endpoint (fun () ->
       (match Eio.Time.with_timeout clock 5. (fun () ->
-        Runtime_model_string.parse_model_string "ollama:auto") with
+        Ok (Runtime_model_string.parse_model_string "ollama:auto")) with
        | Ok None -> ()
        | Ok (Some _) -> Alcotest.fail "an unanswered probe invented a model"
        | Error `Timeout -> Alcotest.fail "the Ollama probe escaped its declared deadline");

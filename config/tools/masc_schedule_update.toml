@@ -7,7 +7,8 @@ latest stored due time, recurrence and expiry; a content edit does not
 reschedule the wake. Those three are the only fields kept from the stored
 definition; every other field is replaced by this call's arguments. An explicit
 recurrence_kind follows masc_schedule_create's first-due rules. Omitting
-recurrence_kind keeps the stored recurrence.
+recurrence_kind keeps the latest stored recurrence under the mutation lock,
+including when this call supplies a due input.
 A changed due time before the current second is refused with error_kind
 due_already_past; resending the stored
 due time is accepted. You may update a schedule you made or one that wakes you;

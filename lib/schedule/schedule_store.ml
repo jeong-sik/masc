@@ -861,7 +861,7 @@ let changed_due_not_past ~now ~(current : schedule_request) (request : schedule_
          })
 ;;
 
-type timing_update = Replace_timing | Keep_timing
+type timing_update = Replace_timing | Keep_timing | Keep_recurrence
 
 (* Only the locked row establishes who scheduled this id. For replacement
    ownership, the target comes from the proposed payload but the scheduler
@@ -897,6 +897,7 @@ let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Rep
           requested_by = current.requested_by; scheduled_by = current.scheduled_by } in
         let request = match timing_update with
           | Replace_timing -> request
+          | Keep_recurrence -> { request with recurrence = current.recurrence }
           | Keep_timing ->
             (* The expiry is part of the timing a content edit keeps: a
                replacement that carries none must not turn an expiring

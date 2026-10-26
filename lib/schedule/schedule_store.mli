@@ -181,11 +181,14 @@ val insert_request :
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 
-type timing_update = Replace_timing | Keep_timing
+type timing_update = Replace_timing | Keep_timing | Keep_recurrence
 (** [Keep_timing] reads the current due time, recurrence and expiry under the
     mutation lock. A content editor cannot restore a stale timing snapshot.
     An expiry on the replacement request replaces the stored one; an absent
-    expiry keeps it. Only [Replace_timing] can remove an expiry. *)
+    expiry keeps it. [Keep_recurrence] replaces the due time and expiry while
+    retaining the latest recurrence under the mutation lock: the caller
+    supplied a due input but omitted the recurrence kind. Both
+    [Replace_timing] and [Keep_recurrence] can remove an expiry. *)
 
 val update_request :
   Workspace_utils.config ->
@@ -204,7 +207,8 @@ val update_request :
     [Changed_due_already_past]; the stored due time sent back unchanged is
     accepted whatever the clock says. [timing_update] defaults to
     [Replace_timing]; [Keep_timing] retains the latest stored time, recurrence
-    and expiry. The current row and its replacement must both belong to
+    and expiry. [Keep_recurrence] retains only the latest recurrence, while
+    replacing due time and expiry. The current row and its replacement must both belong to
     [authority] before any write. Replacement ownership uses the current
     row's scheduler, and the stored requester and scheduler are preserved. *)
 

@@ -848,6 +848,12 @@ let handle_write ~action ~tool_name ~start_time ctx args =
         (* The observed time validates the replacement definition; the
            mutation re-reads its current value under the ledger lock. *)
         Ok (request.due_at, Schedule_store.Keep_timing)
+      | Update_schedule, Some _, None, _ :: _ ->
+        (* An explicit instant/delay does not use the observed recurrence or
+           its timezone to compute due_at. Multiple inputs are refused by
+           the resolver; only the recurrence is re-read at commit. *)
+        let* due_at = resolve_due_at ~dispatched_at recurrence args in
+        Ok (due_at, Schedule_store.Keep_recurrence)
       | (Create_schedule | Update_schedule), _, _, _ ->
         let* due_at = resolve_due_at ~dispatched_at recurrence args in
         Ok (due_at, Schedule_store.Replace_timing)

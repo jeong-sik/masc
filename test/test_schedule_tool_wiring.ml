@@ -526,7 +526,7 @@ let test_content_edit_preserves_due_and_recurrence () =
 (* The expiry is part of the timing a content edit keeps. A content edit that
    dropped it would turn an expiring schedule into one that never reaches
    [Expired]. An expiry sent on the call wins, and an update that also sends a
-   due input is a full replacement, so omitting the expiry there still clears
+   due input replaces expiry, so omitting the expiry there still clears
    it, as the tool description says. *)
 let test_content_edit_keeps_expiry () =
   with_config @@ fun config ->
@@ -594,6 +594,84 @@ let test_content_edit_preserves_concurrently_changed_due () =
   check string "new content is committed" "after"
     Yojson.Safe.Util.(Schedule_domain.payload_to_yojson stored.payload
       |> member "body" |> member "message" |> to_string)
+;;
+
+(* Both edits use the public tool. U1 has already observed the old recurrence
+   when its intake callback completes U2's explicit cadence change. U1 must
+   replace the due time it actually supplied, not restore the old cadence.
+   Explicit due inputs resolve independently of recurrence/calendar timezone. *)
+let check_due_edit_keeps_concurrent_recurrence
+    ~schedule_id ~initial_fields ~latest_fields ~latest_recurrence
+    ~due_input ~expected_due_at =
+  with_config @@ fun config ->
+  let created = dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc ([ "schedule_id", `String schedule_id
+               ; "keeper_name", `String "schedule-keeper"
+               ; "message", `String "original cadence"
+               ; "due_at_unix", `Float future_due_at
+               ; "expires_at_unix", `Float (future_due_at +. 3600.) ] @ initial_fields)) in
+  check bool "original cadence created" true (Tool_result.is_success created);
+  let concurrent_instance = ref None in
+  let context = { (schedule_ctx config) with
+    admit_keeper_wake_creation = (fun _config ~keeper_name:_ write ->
+      let changed = dispatch_exn config Tool_schemas_schedule.Update_request
+          (`Assoc ([ "schedule_id", `String schedule_id
+                   ; "keeper_name", `String "schedule-keeper"
+                   ; "message", `String "concurrent cadence change"
+                   ; "due_at_unix", `Float (future_due_at +. 600.)
+                   ; "expires_at_unix", `Float (future_due_at +. 7200.) ] @ latest_fields)) in
+      check bool "explicit concurrent recurrence update commits" true
+        (Tool_result.is_success changed);
+      let committed = match Schedule_store.get_schedule config ~schedule_id with
+        | Some row -> row | None -> fail "concurrent update lost schedule" in
+      check bool "latest recurrence established before U1 resumes" true
+        (committed.recurrence = latest_recurrence);
+      concurrent_instance := Some committed.schedule_instance_id;
+      write ()) } in
+  let updated = match Tool_schedule.dispatch context
+      ~name:(schedule_tool_name Tool_schemas_schedule.Update_request)
+      ~args:(`Assoc [ "schedule_id", `String schedule_id
+                   ; "keeper_name", `String "schedule-keeper"
+                   ; "message", `String "due-only replacement"
+                   ; due_input ]) with
+    | Some result -> result | None -> fail "update tool missing" in
+  check bool "due-only replacement succeeds" true (Tool_result.is_success updated);
+  let stored = match Schedule_store.get_schedule config ~schedule_id with
+    | Some row -> row | None -> fail "due-only replacement lost schedule" in
+  check (float 0.) "caller's explicit due time wins" expected_due_at stored.due_at;
+  check bool "latest recurrence survives omitted kind" true
+    (stored.recurrence = latest_recurrence);
+  check (option (float 0.)) "due-only omission still removes expiry" None stored.expires_at;
+  check string "caller's replacement content is saved" "due-only replacement"
+    Yojson.Safe.Util.(Schedule_domain.payload_to_yojson stored.payload
+      |> member "body" |> member "message" |> to_string);
+  (match !concurrent_instance with
+   | Some instance -> check bool "replacement receives its own instance" false
+       (String.equal instance stored.schedule_instance_id)
+   | None -> fail "concurrent update was never applied")
+;;
+
+let test_due_edit_keeps_concurrent_daily_to_interval () =
+  check_due_edit_keeps_concurrent_recurrence
+    ~schedule_id:"due-edit-daily-to-interval"
+    ~initial_fields:[ "recurrence_kind", `String "daily"
+                    ; "recurrence_hour", `Int 9
+                    ; "recurrence_minute", `Int 0
+                    ; "recurrence_timezone", `String "Asia/Seoul" ]
+    ~latest_fields:[ "recurrence_kind", `String "interval"; "recurrence_interval_sec", `Int 60 ]
+    ~latest_recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+    ~due_input:("due_at_iso", `String "2100-01-01T09:20:00+09:00")
+    ~expected_due_at:(future_due_at +. 1200.)
+;;
+
+let test_due_edit_keeps_concurrent_interval_to_one_shot () =
+  check_due_edit_keeps_concurrent_recurrence
+    ~schedule_id:"due-edit-interval-to-one-shot"
+    ~initial_fields:[ "recurrence_kind", `String "interval"; "recurrence_interval_sec", `Int 60 ]
+    ~latest_fields:[ "recurrence_kind", `String "one_shot" ]
+    ~latest_recurrence:Schedule_domain.One_shot
+    ~due_input:("due_at_unix", `Float (future_due_at +. 1200.))
+    ~expected_due_at:(future_due_at +. 1200.)
 ;;
 
 (* The checkpoint encoder rejects an object that binds the same key twice,
@@ -2399,6 +2477,10 @@ let () =
             test_content_edit_keeps_expiry
         ; test_case "content edit keeps a concurrent retime" `Quick
             test_content_edit_preserves_concurrently_changed_due
+        ; test_case "due edit keeps a concurrent daily-to-interval change" `Quick
+            test_due_edit_keeps_concurrent_daily_to_interval
+        ; test_case "due edit keeps a concurrent interval-to-one-shot change" `Quick
+            test_due_edit_keeps_concurrent_interval_to_one_shot
         ; test_case "results survive the checkpoint encoder" `Quick
             test_results_survive_the_checkpoint_encoder
         ; test_case "creation boundary owns result delivery destination" `Quick

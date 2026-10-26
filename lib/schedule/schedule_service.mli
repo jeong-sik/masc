@@ -62,6 +62,8 @@ val update :
     ({!Schedule_store.Changed_due_already_past}), and accepts the stored due
     time sent back unchanged. [Keep_timing] preserves the latest stored due
     time and recurrence under the mutation lock, independently of the supplied snapshot.
+    [Keep_recurrence] preserves only the latest recurrence under the lock;
+    due time and expiry come from this replacement.
     [authority] comes from the trusted caller; the store checks ownership of
     the current row and the replacement under that same lock. *)
 

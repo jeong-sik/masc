@@ -96,6 +96,9 @@ val space_id : t -> int
     peer for its lifetime. The name is an attachment-time observation, not a
     current ownership, visibility or login claim. *)
 val space : t -> Browser_lane.ego_space
+val space_observation : t -> Browser_ego_space_observation.t option
+(** Last SDK metadata read, dated at receipt. Control-changing commands and
+    failed refreshes invalidate it; reading this cache never calls the SDK. *)
 val input_status : t -> Browser_ego_input.status
 val input_busy : t -> bool
 val assert_input_reset : t -> generation:string -> (unit, string) result

@@ -71,10 +71,12 @@ type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) re
 
 type t = { run : runner; run_native : string -> (string, run_failure) result; now : unit -> float; space : Browser_lane.ego_space; version : string; capture_directory : string;
   downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t; uploads : Browser_lane.Upload_lease.owner;
-  input : Input.t; mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
+  input : Input.t; mutable space_observation : Browser_ego_space_observation.t option;
+  mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
 let space_id t = t.space.id
 let space t = t.space
+let space_observation t = t.space_observation
 let input_status t = Input.status t.input
 let input_busy t = Input.busy t.input
 let assert_input_reset t ~generation = Input.assert_reset t.input ~generation ~now:(t.now ())
@@ -207,8 +209,8 @@ let with_download_root t = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as args -> args
 let run_step t ~window_s ~step ~args body =
   asked t.run ~window_s ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body
-let run_native_step t ~step ~args body =
-  match t.run_native (script ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body) with
+let run_native_step ?(holder=Agent_holds) t ~step ~args body =
+  match t.run_native (script ~step ~space:(`Int t.space.id) ~holder ~args:(with_download_root t args) body) with
   | Error failure -> Error (Unanswered failure)
   | Ok output -> answer output
 (* A read has no effect, so however it failed, nothing happened. *)
@@ -233,13 +235,14 @@ let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloa
   let* ()=match space with
     | Browser_configuration.Existing_space id when id<>bound_space.id -> Error "ego answered a different Space ID; no replacement or fallback is permitted"
     | Existing_space _|Named_space _ -> Ok () in
+  let* observation=Browser_ego_space_observation.of_sdk ~expected_id:bound_space.id ~observed_at:(now ()) opened in
   match List.assoc_opt "ownership" fields with
   | Some (`String ownership) ->
     (match space_owner_of_wire ownership with
      | Some (Agent_owner | Handed_to_operator) ->
        Ok {run; run_native; now; space=bound_space; version; capture_directory; downloads; published = Hashtbl.create 16;
          uploads = Browser_lane.Upload_lease.create_owner ();
-         input=Input.create (); pages=[]; next_tab=0; captures=0}
+         input=Input.create (); space_observation=Some observation; pages=[]; next_tab=0; captures=0}
      | Some Operator_owner | None ->
        Error (Printf.sprintf "ego task space %s belongs to %s, not to an agent" (Yojson.Safe.to_string reference) ownership))
   | _ -> Error "ego answered the task space without its owner"
@@ -1350,6 +1353,7 @@ let interact ?actor t args =
    failed may still have happened; do not probe or replay it without the
    operator's explicit confirmation. *)
 let hand_off t =
+  t.space_observation <- None;
   let unknown = Printf.sprintf
     "control of ego Space #%d is unconfirmed; ask the operator and wait for explicit confirmation before any further command"
     t.space.id in
@@ -1371,6 +1375,7 @@ let hand_off t =
    nor masc checks. ego names the tab that was active then; a tab the
    operator opened has no label, so it is listed later and not adopted. *)
 let take_over t =
+  t.space_observation <- None;
   let unknown = "list this connection's tabs before another step" in
   match asked t.run ~window_s:(window_s (Browser_lane.Page_act (Browser_lane.Action.Control Browser_lane.Action.Take_over)))
           ~step:"space.take_over" ~space:(`Int t.space.id) ~holder:Operator_holds ~args:`Null (String.concat "\n" [
@@ -1388,6 +1393,7 @@ let take_over t =
 (* SDK-owned polling of this agent-owned Space only. It does not change the
    owner or settle an earlier uncertain input, including after a dialog. *)
 let wait_for_control t options =
+  t.space_observation <- None;
   let args=obj ["controlOptions",Browser_lane.Action.control_wait_to_json options] in
   match run_native_step t ~step:"space.wait_for_control" ~args (String.concat "\n" [
     "    await task.waitForControl(args.controlOptions);";
@@ -1399,6 +1405,21 @@ let wait_for_control t options =
        Ok (obj ["action",str "wait_for_control";"spaceId",`Int id;"spaceName",str name;"controlAvailable",`Bool true])
      | (None|Some _),(None|Some _),(None|Some _) -> Error (Live.Before_effect "invalid native control wait observation"))
   | Ok _ -> Error (Live.Before_effect "invalid native control wait observation")
+
+let space_status t =
+  (* A failed refresh must not leave an earlier owner looking current. The
+     numeric helper never creates a replacement, and no Page is addressed. *)
+  t.space_observation <- None;
+  let* value=run_native_step ~holder:Either_holds t ~step:"space.status" ~args:`Null
+    "    emit({ok: true, value: {spaceId: task.spaceId, name: task.name, ownership: task.ownership}});"
+    |> Result.map_error (fun failure -> Live.Before_effect (step_failure_message failure)) in
+  let* observation=Browser_ego_space_observation.of_sdk ~expected_id:t.space.id ~observed_at:(t.now ()) value
+    |> Result.map_error (fun detail -> Live.Before_effect detail) in
+  t.space_observation <- Some observation;
+  match Browser_ego_space_observation.to_json observation with
+  | `Assoc fields -> Ok (obj (("action",str "space_status")::fields))
+  | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ ->
+    Error (Live.Before_effect "invalid encoded Space observation")
 
 let page_management_script = {js|async (task, args) => {
   const tabs = await task.tabs();
@@ -1460,6 +1481,7 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.Control Browser_lane.Action.Hand_off) -> hand_off t
   | Ok (Browser_lane.Action.Control Browser_lane.Action.Take_over) -> take_over t
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Wait_for_control options)) -> wait_for_control t options
+  | Ok (Browser_lane.Action.Control Browser_lane.Action.Space_status) -> space_status t
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Adopt_tab {tab_id;label})) -> manage_tab t ~tab_id (Adopt label)
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Release_tab tab_id)) -> manage_tab t ~tab_id Release
   | Ok (Browser_lane.Action.Open_window _) ->
@@ -1483,7 +1505,7 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
-    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off, take_over, wait_for_control, adopt_tab and release_tab only")
+    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off, take_over, space_status, wait_for_control, adopt_tab and release_tab only")
 
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

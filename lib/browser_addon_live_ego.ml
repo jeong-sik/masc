@@ -325,7 +325,8 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
       let* first = poll 0. in
       let* () = if Option.is_none first then Ok () else Error "the ego connection received input before attachment" in
       Browser_addon_owner.attach_live ~ego_input:{Browser_ego_operator.status=(fun () -> Peer.input_status peer);
-        busy=(fun () -> Peer.input_busy peer);assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation)}
+        busy=(fun () -> Peer.input_busy peer);assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation);
+        space_observation=(fun () -> Peer.space_observation peer)}
         owner ~client_id ~cleanup:(fun () ->
         ignore (Eio.Promise.try_resolve stop ());
         Eio.Promise.await stopped) in

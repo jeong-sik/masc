@@ -45,10 +45,12 @@ type interaction =
 type control_wait = { interval_ms : float option; timeout_ms : float option }
 (** Positive finite SDK milliseconds. Missing values keep SDK defaults. *)
 val control_wait_to_json : control_wait -> Yojson.Safe.t
-type control = Hand_off | Take_over | Wait_for_control of control_wait
+type control = Hand_off | Take_over | Space_status | Wait_for_control of control_wait
   | Adopt_tab of { tab_id : int; label : string option }
   | Release_tab of int
-(** [Wait_for_control] calls the native SDK within the current agent-owned
+(** [Space_status] reads metadata on the exact bound numeric Space, even when
+    delegated, without Page calls or changing control. It is not admission.
+    [Wait_for_control] calls the native SDK within the current agent-owned
     Space. It does not claim or take over a user-held Space, clear uncertain
     input state, or authorize later commands.
     [Adopt_tab] explicitly brings an observed unmanaged tab in this exact

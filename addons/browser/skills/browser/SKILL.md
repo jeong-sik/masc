@@ -103,6 +103,14 @@ not change caller, upload, artifact, document, viewport or cleanup authority.
 Source support and advertised capabilities do not prove that the current page
 accepted an action. Confirm its result on the original connection.
 
+To inspect who owns the already bound Ego Space, send `page.act` with
+`{"action":"space_status"}` on that exact live client. It reads native Space
+metadata only, even when delegated to the operator, without Page calls, claim,
+takeover or input reset. The receipt carries current SDK name/ownership and
+`observedAt`; these observations do not establish permission or login success.
+The private operator form displays the last cached SDK observation and its date.
+Control-changing calls and failed refreshes invalidate that cache.
+
 If an Ego result says input release is unconfirmed, keep the original connection
 and do not replay its command. Answer any JavaScript dialog separately. Ask the
 operator to check/reset key and button state in that Space and use this Browser

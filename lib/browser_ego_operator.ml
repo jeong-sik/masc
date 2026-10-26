@@ -1,5 +1,6 @@
 module Input = Browser_ego_input
-type recovery = {status:unit -> Input.status;busy:unit -> bool;assert_reset:generation:string -> (unit,string) result}
+type recovery = {status:unit -> Input.status;busy:unit -> bool;assert_reset:generation:string -> (unit,string) result;
+  space_observation:unit -> Browser_ego_space_observation.t option}
 type connection = {client_id:string;space:Browser_lane.ego_space;recovery:recovery}
 let schema = `Assoc ["type",`String "object";"properties",`Assoc [
   "action",`Assoc ["type",`String "string";"enum",`List [`String "view";`String "assert_input_reset"]];
@@ -26,6 +27,15 @@ let view ?(outcome=Observed) connection =
             "arguments",obj ["clientId",text connection.client_id;"spaceId",text (string_of_int connection.space.id);
               "generation",text pending.generation;"confirmation",text "checked_and_reset"];
             "fields",`List []]] in
+  let message=match connection with
+    | None -> message
+    | Some connection ->
+      let observation=match connection.recovery.space_observation () with
+        | None -> "SDK Space 상태 관측이 없습니다. 같은 연결에서 space_status로 조회할 수 있습니다."
+        | Some observed when observed.space.id=connection.space.id -> Printf.sprintf "마지막 SDK 관측: Space #%d (%s), ownership=%s, observedAt=%.3f (Unix)."
+            observed.space.id observed.space.name observed.ownership observed.observed_at
+        | Some _ -> "현재 연결과 SDK Space 관측이 일치하지 않습니다." in
+      message ^ "\n" ^ observation in
   let message=match outcome with Observed|Asserted -> message
     | Not_applied -> "확인을 적용하지 않았습니다. 현재 요청을 다시 확인하세요.\n" ^ message in
   obj ["title",text "Ego 입력 상태 확인";"message",text message;

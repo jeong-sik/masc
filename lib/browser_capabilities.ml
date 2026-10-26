@@ -9,7 +9,7 @@ type operation =
   | Click | Double_click | Right_click | Middle_click | Pointer_down | Pointer_up | Hover | Pointer_drag | Html5_drop
   | Scroll_page | Scroll_at | Fill | Type_text | Press_key | Key_chord | Select_option
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
-  | Hand_off | Take_over | Wait_for_control | Adopt_tab | Release_tab
+  | Hand_off | Take_over | Space_status | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
   | Read_clipboard | Write_clipboard | Read_network | Intercept_network
   | Read_console | Read_storage | Write_storage | Emulate_environment | Sentence_action
@@ -323,9 +323,15 @@ let support backend operation = match backend with
     | Hand_off -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"hand_off" Act
           ["Requires the exact observed clientId. Hands the whole ego task space, tabs the operator opened there included, to the operator for a step only a person can take, such as a sign-in or a captcha; tell them what to do.";
-           "While the operator holds the space, every step on it is refused before any effect, until take_over."]
+           "While the operator holds the space, Page work is refused before any effect until take_over; space_status remains a metadata-only query."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
           Unsupported "Only an ego connection hands its task space to the operator.")
+    | Space_status -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"space_status" Act
+          ["Requires the exact observed clientId. Reads only the already bound numeric Space's native name/ownership, including delegated control, without Page calls or control changes.";
+           "The dated ownership value is metadata, not input admission, a reset assertion, visible UI or login proof."]
+      | Connected (Browser_lane.Web_extension|Browser_lane.Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable ->
+          Unsupported "Only an ego connection has native Space metadata.")
     | Wait_for_control -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"wait_for_control" Act
           ["Requires the exact observed clientId and an agent-owned Space. Native SDK wait only; never claims or takes over user control.";
@@ -417,7 +423,7 @@ let operation_name = function
   | Scroll_at -> "scroll_at" | Fill -> "fill" | Type_text -> "type_text" | Press_key -> "press_key"
   | Key_chord -> "key_chord" | Select_option -> "select_option" | Read_frames -> "read_frames"
   | Frame_interaction -> "frame_interaction" | Read_dialog -> "read_dialog"
-  | Accept_dialog -> "accept_dialog" | Dismiss_dialog -> "dismiss_dialog" | Hand_off -> "hand_off" | Take_over -> "take_over" | Wait_for_control -> "wait_for_control"
+  | Accept_dialog -> "accept_dialog" | Dismiss_dialog -> "dismiss_dialog" | Hand_off -> "hand_off" | Take_over -> "take_over" | Space_status -> "space_status" | Wait_for_control -> "wait_for_control"
   | Adopt_tab -> "adopt_tab" | Release_tab -> "release_tab"
   | Upload_file -> "upload_file"
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"

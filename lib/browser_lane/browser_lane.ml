@@ -136,7 +136,7 @@ let reply_policy = function
   | Page_native_workflow _ -> Executor_owned
   | Page_act action ->
     (match action with
-     | Action.Control (Action.Wait_for_control _|Action.Adopt_tab _|Action.Release_tab _) -> Executor_owned
+     | Action.Control (Action.Space_status|Action.Wait_for_control _|Action.Adopt_tab _|Action.Release_tab _) -> Executor_owned
      | Action.Open_tab _ | Action.Open_window _ | Action.Control (Action.Hand_off|Action.Take_over) -> Reply_window
      | Action.On_tab {interaction;_} ->
        (match interaction with
@@ -572,7 +572,7 @@ let live_capability = function
   | Page_snapshot _ -> Some Accessibility_snapshot
   | Page_interact { action; _ } -> Some (live_capability_of_interaction action)
   | Page_act (Action.Open_tab _ | Action.Open_window _) -> Some Tab_creation
-  | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Wait_for_control _)) -> Some Operator_handoff
+  | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Space_status | Action.Wait_for_control _)) -> Some Operator_handoff
   | Page_act (Action.Control (Action.Adopt_tab _|Action.Release_tab _)) -> Some Page_management
   | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Some Tab_history
   | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Some Tab_closing
@@ -602,7 +602,7 @@ let handoff_refused = "Space control actions apply only to an ego connection on 
 let automation_refusal = function
   | Page_native_workflow _ -> Some "native workflows require an ego connection"
   | Page_interact {action; _} when acts_on_snapshot_target action -> Some snapshot_target_refused
-  | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Wait_for_control _ | Action.Adopt_tab _ | Action.Release_tab _)) -> Some handoff_refused
+  | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Space_status | Action.Wait_for_control _ | Action.Adopt_tab _ | Action.Release_tab _)) -> Some handoff_refused
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _
   | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _
   | Page_act (Action.Open_tab _ | Action.Open_window _ | Action.On_tab _)
@@ -625,7 +625,7 @@ let verb_allowed_on_stagehand = function
   | Page_read _ | Page_elements _ | Page_scene _ | Page_interact _ | Page_instruct _ | Page_locate _
   | Page_extract _ -> true
   | Page_act (Action.Open_tab _) -> true
-  | Page_act (Action.Open_window _ | Action.Control (Action.Hand_off | Action.Take_over | Action.Wait_for_control _ | Action.Adopt_tab _ | Action.Release_tab _)) -> false
+  | Page_act (Action.Open_window _ | Action.Control (Action.Hand_off | Action.Take_over | Action.Space_status | Action.Wait_for_control _ | Action.Adopt_tab _ | Action.Release_tab _)) -> false
   | Page_act (Action.On_tab {frame_path;interaction;_}) ->
     (match interaction with
      | Action.Back | Forward | Reload | Close_tab -> frame_path = []
@@ -832,8 +832,9 @@ let activity_scope = function
   | Page_act (Action.On_tab {tab_id;_}) -> Some tab_id
   | Page_read {tab_id;_} | Page_elements {tab_id;_} | Page_goto {tab_id;_} -> tab_id
   | Tabs_list | Session_open _ | Session_close | Session_status
-  | Page_act (Action.Open_tab _|Open_window _|Control (Hand_off|Take_over|Wait_for_control _)) -> None
+  | Page_act (Action.Open_tab _|Open_window _|Control (Hand_off|Take_over|Space_status|Wait_for_control _)) -> None
 let activity_name = function
+  | Page_act (Action.Control Action.Space_status) -> "space_status"
   | Page_act (Action.Control (Action.Wait_for_control _)) -> "wait_for_control"
   | Page_act (Action.Control (Action.Adopt_tab _)) -> "adopt_tab"
   | Page_act (Action.Control (Action.Release_tab _)) -> "release_tab"

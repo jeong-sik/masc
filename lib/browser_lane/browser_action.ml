@@ -22,7 +22,7 @@ type interaction =
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
 type control_wait = { interval_ms : float option; timeout_ms : float option }
-type control = Hand_off | Take_over | Wait_for_control of control_wait
+type control = Hand_off | Take_over | Space_status | Wait_for_control of control_wait
   | Adopt_tab of { tab_id : int; label : string option }
   | Release_tab of int
 type t = Open_tab of string | Open_window of string | Control of control
@@ -188,6 +188,7 @@ let parse = function
      | "open_window" -> let* () = exact ["url"] in let* url = string "url" in Ok (Open_window url)
      | "hand_off" -> let* () = exact [] in Ok (Control Hand_off)
      | "take_over" -> let* () = exact [] in Ok (Control Take_over)
+     | "space_status" -> let* () = exact [] in Ok (Control Space_status)
      | "wait_for_control" ->
        let* ()=exact ["controlOptions"] in
        let* options=control_wait_of_json (match List.assoc_opt "controlOptions" fields with
@@ -242,6 +243,7 @@ let to_json = function
   | Open_window url -> `Assoc ["action",`String "open_window";"url",`String url]
   | Control Hand_off -> `Assoc ["action",`String "hand_off"]
   | Control Take_over -> `Assoc ["action",`String "take_over"]
+  | Control Space_status -> `Assoc ["action",`String "space_status"]
   | Control (Wait_for_control options) -> `Assoc ["action",`String "wait_for_control";
       "controlOptions",control_wait_to_json options]
   | Control (Adopt_tab {tab_id;label}) -> `Assoc (["action",`String "adopt_tab";"tabId",`Int tab_id]

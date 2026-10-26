@@ -133,11 +133,17 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     acting is [Before_effect], a load that failed
     after it started is a [Partial_failure] with where the tab is now, and a
     run that was stopped or failed where the script cannot say is
-    [Outcome_unknown]. [page.downloads] lists the downloads an agent page
-    started while this ego process watched it: each step that acts on such
+    [Outcome_unknown]. [page.downloads] lists the downloads and native Fetch
+    saves an agent page started in this SDK process: each step that acts on such
     a page starts watching it, and a row says pending, completed or
     interrupted as {!Browser_downloads} does, a completed file once
-    published. Selector and snapshot input use ego's native locator and Page methods,
+    published. Rows distinguish [native_download] events from [fetch] save
+    receipts. A workflow Fetch [saveAs] is an artifact filename; the SDK writes
+    a fresh worker-owned path and the receipt carries its download ID instead
+    of that path. For Fetch rows [suggestedFilename] is the requested filename,
+    not a name suggested by the server. Completed saves remain readable after
+    a later step stops, while this SDK process survives. Worker/session loss
+    does not provide durable registry reconciliation. Selector and snapshot input use ego's native locator and Page methods,
     including automatic scrolling and iframe/shadow traversal. Selector strings
     follow ego's documented syntax. Scene references, document scrolling and
     direct link following retain the shared page adapter because ego has no

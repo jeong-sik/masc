@@ -1,5 +1,6 @@
-(** Download evidence comes only from the browser's own download events,
-    BiDi's or ego lite's, never directory polling. *)
+(** Download evidence comes from native browser download events or an Ego
+    Page.fetch save receipt, never directory polling. The Ego adapter keeps
+    these sources distinct in its public rows. *)
 type completion = File of string | Path_unavailable
 type status = Pending | Completed of completion | Canceled | Interrupted of string
 type download = {

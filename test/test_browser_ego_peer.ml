@@ -1810,7 +1810,7 @@ let test_downloads_are_listed_and_published_once () =
   let downloads = {Peer.root; publish = (fun path ->
     published := path :: !published;
     if !busy then Error "the broker is busy" else Ok (obj ["downloadSnapshot",str "snapshot-1"]))} in
-  let row ?(path=`Null) ?(reason=`Null) ~id ~state name = obj ["id",str id;"label",str "p1";
+  let row ?(path=`Null) ?(reason=`Null) ~id ~state name = obj ["id",str id;"label",str "p1";"source",str "native_download";
     "url",str ("https://example.test/" ^ name);"suggestedFilename",str name;"state",str state;"path",path;"reason",reason] in
   let rows = ref [] and asked = ref [] in
   let peer = opened ~downloads (fun sent -> match sent.step with
@@ -2309,6 +2309,147 @@ const taskSpace = async () => ({ownership:'agent',
     check string "header bytes are preserved" "keep-me" (text (field "value" receipt));
     check bool "data never changes the headers prototype" true (field "plain" receipt = `Bool true)
 
+let test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker () =
+  let module Broker=Masc.Browser_addon_downloads in
+  let ok=function Ok value->value|Error detail->fail detail in
+  let root=Unix.realpath (Filename.temp_dir ~perms:0o700 "masc-fetch-peer-" "") in
+  let rec remove path = match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR -> Array.iter (fun name->remove (Filename.concat path name)) (Sys.readdir path);Unix.rmdir path
+    | Unix.S_REG|S_LNK|S_CHR|S_BLK|S_FIFO|S_SOCK -> Unix.unlink path in
+  Fun.protect ~finally:(fun ()->remove root) (fun ()->
+    let broker=ok (Broker.create ~directory:root) in
+    let preserved=ref [] and original=ref None in
+    let has_original_pin path =
+      let expected=Unix.stat path in
+      Array.exists (fun name->
+        match Unix.stat (Filename.concat "/dev/fd" name) with
+        | actual->actual.Unix.st_dev=expected.st_dev && actual.st_ino=expected.st_ino
+        | exception Unix.Unix_error ((Unix.ENOENT|EBADF),_,_)->false) (Sys.readdir "/dev/fd") in
+    Fun.protect ~finally:(fun ()->
+      check (result unit string) "abandon preserves files without confirmed backend teardown"
+        (Error "download cleanup requires confirmed backend teardown") (Broker.abandon broker);
+      Option.iter (fun path->check bool "abandon closes the broker's original source pin" false (has_original_pin path)) !original;
+      List.iter (fun (path,bytes)->check string "abandon preserves fixture-owned binary files" bytes
+        (In_channel.with_open_bin path In_channel.input_all)) !preserved) (fun ()->
+      let downloads_directory=Broker.downloads_directory ~directory:root in
+      Unix.mkdir downloads_directory 0o700;
+      let download_root=Filename.concat downloads_directory "ego" in Unix.mkdir download_root 0o700;
+      let capture=Filename.concat root "capture" in Unix.mkdir capture 0o700;
+      let program=Filename.concat root "sdk-stand-in.cjs" in
+      Out_channel.with_open_bin program (fun channel->output_string channel {js|
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+globalThis.crypto=crypto;
+const ownedRoot=process.argv[2],bytes=Buffer.from([0,255,128,13,10,0,65]);
+let fetchCalls=0,snapshots=0;
+const page={
+ url:async()=> 'https://fixture.test/start',title:async()=> 'Binary fixture',info:async()=>({dialog:null}),
+ waitForEvent:()=>new Promise(()=>{}),
+ snapshot:async()=>{snapshots++;if(snapshots===1)throw Error('final snapshot response lost');return 'later snapshot';},
+ fetch:async(url,options)=>{
+  fetchCalls++;
+  if(url!=='/binary'||options.credentials!=='include'||options.timeout!==37)throw Error('native fetch options lost');
+  if(path.dirname(options.saveAs)!==ownedRoot||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(path.basename(options.saveAs)))
+   throw Error('SDK write escaped fixture-owned UUID path');
+  fs.writeFileSync(options.saveAs,bytes,{mode:0o600});
+  return {ok:false,status:404,statusText:'Not Found',url:'https://fixture.test/binary',headers:{'content-type':'application/octet-stream'},savedPath:options.saveAs};
+ }
+};
+globalThis.taskSpace=async reference=>{
+ if(reference!==51&&reference!=='masc')throw Error('unexpected Space');
+ return {spaceId:51,name:'SDK Space',ownership:'agent',
+  tabs:async()=>[{label:'p1',targetId:'T1',openedBy:'agent',title:'Binary fixture',url:'https://fixture.test/start',active:true}],
+  page:label=>{if(label!=='p1')throw Error('wrong Page');return page;}};
+};
+const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
+(async()=>{
+ for await(const line of require('node:readline').createInterface({input:process.stdin})){
+  const request=JSON.parse(line);
+  if(request.stats){process.stdout.write(JSON.stringify({fetchCalls,snapshots,sha256:crypto.createHash('sha256').update(bytes).digest('hex')})+'\n');continue;}
+  const lines=[];
+  try {await new AsyncFunction('console',request.script)({log:(...args)=>lines.push(args.join(' '))});
+   process.stdout.write(JSON.stringify({output:lines.join('\n')+'\n'})+'\n');}
+  catch(error){process.stdout.write(JSON.stringify({error:String(error)})+'\n');}
+ }
+})().catch(error=>{process.stderr.write(String(error));process.exitCode=1;});
+|js});
+      let channels=Unix.open_process_full
+        ("node " ^ Filename.quote program ^ " " ^ Filename.quote download_root) (Unix.environment ()) in
+      let incoming,outgoing,_errors=channels in
+      Fun.protect ~finally:(fun ()->
+        match Unix.close_process_full channels with
+        | Unix.WEXITED 0 -> ()
+        | WEXITED _|WSIGNALED _|WSTOPPED _ -> fail "persistent Node SDK stand-in did not close cleanly") (fun ()->
+        let exchange value = output_string outgoing (Yojson.Safe.to_string value ^ "\n");flush outgoing;
+          Yojson.Safe.from_string (input_line incoming) in
+        let scripts=ref [] in
+        let run ~window_s script =
+          scripts:=(sent_of ~window_s script).step::!scripts;
+          let reply=exchange (obj ["script",str script]) in
+          match field "output" reply with
+          | `String output -> Ok output
+          | `Null|`Bool _|`Int _|`Intlit _|`Float _|`Assoc _|`List _ -> Error (Peer.Unobserved (Yojson.Safe.to_string reply)) in
+        let published=ref [] in
+        let downloads={Peer.root=download_root;publish=(fun path->published:=path::!published;Broker.publish broker path)} in
+        let peer=ok (Peer.open_space ~downloads ~run ~run_native:(run ~window_s:0.) ~now
+          ~space:(Browser_configuration.Named_space "masc") ~version:"fixture" ~capture_directory:capture) in
+        let served name=function Ok value->value
+          | Error (Live.Before_effect detail|Outcome_unknown detail|Partial_failure {message=detail;_})->failf "%s: %s" name detail in
+        ignore (served "actual tabs listing" (dispatch peer Live.Tabs_list (obj [])));
+        let arguments=obj ["tabId",`Int 1;"expectedUrl",str "https://fixture.test/start";"maxChars",`Int 100;
+          "steps",`List [obj ["method",str "fetch";"url",str "/binary";
+            "options",obj ["saveAs",str "binary report.bin";"credentials",str "include";"timeout",`Int 37]]]] in
+        let partial=match Peer.dispatch ~command_id:"save-once-before-snapshot-failure" ~actor:"keeper/fetch-reader"
+            peer ~verb:Live.Page_native_workflow arguments with
+          | Error (Live.Partial_failure {tab_id=1;receipt;_})->receipt
+          | other->failf "saved fetch with failed final snapshot was %s" (failure_kind other) in
+        let completed=match field "completed" partial with
+          | `List [row]->field "receipt" row | _->fail "completed save metadata was lost" in
+        let download_id=text (field "downloadId" completed) in
+        check string "completed workflow keeps fetch provenance" "fetch" (text (field "source" completed));
+        check bool "workflow save receipt does not expose a source path" true (field "savedPath" completed=`Null);
+        check int "HTTP error remains saved response data" 404 (Yojson.Safe.Util.to_int (field "status" completed));
+        let listing=served "recover saved fetch" (dispatch peer Live.Page_downloads (obj ["tabId",`Int 1])) in
+        let second=served "repeat download read" (dispatch peer Live.Page_downloads (obj ["tabId",`Int 1])) in
+        check bool "repeated listing reuses the same private snapshot marker" true (listing=second);
+        let row=match field "downloads" listing with `List [row]->row|_->fail "one saved fetch expected" in
+        check string "the same completed fetch is recovered" download_id (text (field "downloadId" row));
+        check string "download source is preserved" "fetch" (text (field "source" row));
+        check string "requested filename remains artifact metadata" "binary report.bin" (text (field "suggestedFilename" row));
+        check string "download is complete" "completed" (text (field "status" row));
+        let saved=Filename.concat download_root download_id in
+        check (list string) "the original file was published exactly once" [saved] !published;
+        let bytes="\000\255\128\r\n\000A" in
+        check string "SDK save kept binary bytes" bytes (In_channel.with_open_bin saved In_channel.input_all);
+        original:=Some saved;preserved:=[saved,bytes];
+        check bool "broker holds the original source until retirement" true (has_original_pin saved);
+        let client=ok (Lane.client_id_of_string "00000000-0000-4000-8000-000000000001") in
+        let other=ok (Lane.client_id_of_string "00000000-0000-4000-8000-000000000002") in
+        let route=Lane.Live_route (Some client) and actor="keeper/fetch-reader" and verb=Lane.Page_downloads {tab_id=1} in
+        let bound=ok (Broker.bind broker ~actor ~route ~verb listing) in
+        let grant=match field "downloads" bound with
+          | `List [row]->text (field "downloadGrant" (field "artifact" row))
+          | _->fail "the actual broker did not bind the listing marker" in
+        check bool "a different actor cannot claim the saved bytes" true
+          (Result.is_error (Broker.claim broker ~id:grant ~actor:"keeper/foreign" ~route ~verb));
+        check bool "another client cannot claim the saved bytes" true
+          (Result.is_error (Broker.claim broker ~id:grant ~actor ~route:(Lane.Live_route (Some other)) ~verb));
+        check bool "another tab read cannot claim the saved bytes" true
+          (Result.is_error (Broker.claim broker ~id:grant ~actor ~route ~verb:(Lane.Page_downloads {tab_id=2})));
+        let descriptor=match ok (Broker.claim broker ~id:grant ~actor ~route ~verb) with
+          | Broker.Snapshot descriptor->descriptor | Published _->fail "first claim must hold a snapshot" in
+        Fun.protect ~finally:(fun ()->ok (Broker.release broker ~id:grant ~actor ~route ~verb)) (fun ()->
+          let snapshot_path=ok (Broker.snapshot_path ~directory:root ~snapshot_id:descriptor.snapshot_id) in
+          preserved:=(snapshot_path,bytes)::!preserved;
+          ok (Broker.snapshot_matches ~label:"saved fetch snapshot" ~path:snapshot_path descriptor (Unix.lstat snapshot_path));
+          check int "descriptor counts binary bytes" (String.length bytes) descriptor.bytes;
+          check string "broker snapshot preserves binary content" bytes (In_channel.with_open_bin snapshot_path In_channel.input_all);
+          let stats=exchange (obj ["stats",`Bool true]) in
+          check string "snapshot digest matches the saved binary" (text (field "sha256" stats)) descriptor.sha256;
+          check int "listing never retries native fetch" 1 (Yojson.Safe.Util.to_int (field "fetchCalls" stats));
+          check int "download recovery needs no new snapshot" 1 (Yojson.Safe.Util.to_int (field "snapshots" stats)));
+        check (list string) "one persistent SDK session executes production wrappers without replay"
+          ["space.open";"tabs.list";"page.native_workflow";"page.downloads";"page.downloads"] (List.rev !scripts))))
+
 let test_native_workflow_pointer_ownership () =
   List.iter (fun (method_,fields) -> List.iter (fun mode ->
     let issued=ref 0 in
@@ -2551,6 +2692,7 @@ let () =
     "ego", [
       test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
+      test_case "saved fetch survives snapshot failure and reaches the download broker" `Quick test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker;
       test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
       test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;

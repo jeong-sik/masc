@@ -118,7 +118,7 @@ let options_of_json action raw =
     | Keyboard_type _|Keyboard_press _ -> Some ["delay"]
     | Wait_for_load_state _ -> Some ["timeout";"idleMs"]
     | Wait_for_function _ -> Some ["timeout";"polling"]
-    | Fetch _ -> Some ["timeout";"method";"headers";"body";"cache";"credentials";"integrity";
+    | Fetch _ -> Some ["timeout";"saveAs";"method";"headers";"body";"cache";"credentials";"integrity";
         "keepalive";"mode";"redirect";"referrer";"referrerPolicy"]
     | Snapshot -> Some ["scope";"root";"includeActionMarks";"includeStableLocator"]
     | Keyboard_insert_text _|Keyboard_paste _|Evaluate _|Url|Title|Info|Events|Wait_for_timeout _ -> None in
@@ -129,6 +129,8 @@ let options_of_json action raw =
     | Error _ -> false | Ok fields -> List.length fields=2
         && Result.is_ok (number "x" fields) && Result.is_ok (number "y" fields) in
   let valid name value=match name,value with
+    | "saveAs",`String value -> String.trim value<>"" && value<>"." && value<>".."
+        && not (String.exists (fun c -> c='/' || c='\\' || Char.code c<32 || Char.code c=127) value)
     | ("label"|"referer"|"method"|"body"|"integrity"|"referrer"),`String _ -> true
     | ("force"|"clearFirst"|"keepalive"|"includeActionMarks"|"includeStableLocator"),`Bool _ -> true
     | "scope",`String ("full_page"|"only_within_viewport"|"subtree") -> true
@@ -161,6 +163,14 @@ let options_of_json action raw =
     |Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
     |Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
     |Evaluate _|Wait_for_function _|Fetch _|Url|Title|Info|Events|Wait_for_timeout _),_,_ -> Ok raw
+let fetch_save_name step = match step.action,step.options with
+  | Fetch _,Some (`Assoc fields) ->
+      (match List.assoc_opt "saveAs" fields with Some (`String value) -> Some value | None|Some _ -> None)
+  | (Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
+    |Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
+    |Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
+    |Evaluate _|Wait_for_function _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _),_
+  | Fetch _,(None|Some (`Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _)) -> None
 let step_of_json value =
   let* fields = object_fields ["method";"selector";"destination";"x";"y";"text";"html";"key";"url";
     "selectionJson";"state";"source";"argumentJson";"milliseconds";"options"] value in

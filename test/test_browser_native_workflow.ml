@@ -167,6 +167,49 @@ let observations () =
     check bool "native observation receipt shape is checked" true
       (Result.is_error (R.decode expected (obj (snapshot @ result ~started:consumes_events ~completed_effect:consumes_events
         ~completed:[row] ~failure:`Null))))) methods
+let fetch_save_inputs () =
+  List.iter (fun name ->
+    let parsed=request [step "fetch" ["url",str "/binary";"options",obj ["saveAs",str name]]] in
+    check bool "safe requested filenames roundtrip as artifact metadata" true
+      (ok (W.of_json (W.to_json parsed))=parsed);
+    match parsed.steps with
+    | [step] -> check (option string) "fetch save name belongs to the requested step" (Some name) (W.fetch_save_name step)
+    | []|_::_::_ -> fail "expected one fetch")
+    ["report.bin";"한글 😀.pdf";"notes..txt";".hidden";"a b.dat"];
+  List.iter (fun name ->
+    check bool "unsafe save names never reach the native SDK" true
+      (Result.is_error (W.of_json (obj (base [step "fetch" ["url",str "/binary";
+        "options",obj ["saveAs",str name]]])))))
+    ["";" ";".";"..";"a/b";"a\\b";"\000";"a\nb";"a\rb";"a\tb";"a\127b"]
+let fetch_save_receipts () =
+  let name="binary report.bin" in
+  let expected=request [step "fetch" ["url",str "/binary";"options",obj ["saveAs",str name]]] in
+  let id="00000000-0000-4000-8000-000000000001" in
+  let fields=["ok",`Bool true;"status",`Int 200;"statusText",str "OK";
+    "url",str "https://example.test/binary";"headers",obj ["content-type",str "application/octet-stream"];
+    "downloadId",str id;"suggestedFilename",str name;"source",str "fetch"] in
+  let replace key value fields=(key,value)::List.remove_assoc key fields in
+  let decode fields = R.decode expected (obj (snapshot @ result ~started:true ~completed_effect:true
+    ~completed:[obj ["index",`Int 0;"method",str "fetch";"receipt",obj fields]] ~failure:`Null)) in
+  List.iter (fun fields ->
+    match ok (decode fields) with R.Completed _ -> () | R.Stopped _ -> fail "a native saved response was stopped")
+    [fields;fields |> replace "ok" (`Bool false) |> replace "status" (`Int 404) |> replace "statusText" (str "Not Found");
+     fields |> replace "ok" (`Bool false) |> replace "status" (`Int 0) |> replace "statusText" (str "") |> replace "url" (str "")];
+  List.iter (fun forged -> check bool "saved receipt binds exact metadata, UUID, filename and provenance" true
+    (Result.is_error (decode forged)))
+    [replace "suggestedFilename" (str "other.bin") fields;
+     replace "downloadId" (str "not-a-uuid") fields;
+     replace "downloadId" (str "00000000-0000-4000-8000-00000000000A") fields;
+     replace "source" (str "native_download") fields;
+     replace "ok" (str "true") fields;
+     replace "status" (str "200") fields;
+     replace "statusText" `Null fields;
+     replace "url" `Null fields;
+     replace "headers" (obj ["x-test",`Int 3]) fields;
+     ("savedPath",str "/private/file")::fields;
+     ("downloadId",str id)::fields;
+     List.remove_assoc "source" fields;
+     List.remove_assoc "headers" fields]
 let malformed_receipts () =
   let expected=request [click;wait] in
   List.iter (fun value -> check bool "incomplete/mismatched execution is not success" true (Result.is_error (R.decode expected value)))
@@ -213,5 +256,7 @@ let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.arg
   test_case "snapshot completes the exact requested sequence" `Quick complete;
   test_case "failed waits and uncertain effects retain progress" `Quick progress_and_uncertainty;
   test_case "native observations retain values and event-drain effects" `Quick observations;
+  test_case "fetch save names are safe artifact metadata" `Quick fetch_save_inputs;
+  test_case "saved fetch receipts bind exact artifact provenance" `Quick fetch_save_receipts;
   test_case "drag release is separate from effect completion" `Quick pointer_release;
   test_case "malformed execution never proves success" `Quick malformed_receipts]]

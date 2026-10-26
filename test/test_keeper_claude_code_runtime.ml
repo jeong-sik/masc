@@ -6357,27 +6357,35 @@ let test_original_outbox_result_is_delivered_on_start_and_resume () =
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     let system_path = Filename.concat base_path "outbox-start.txt"
     and prompt_path = Filename.concat base_path "outbox-resume.json" in
-    retain "original-1" "ORIGINAL_RESULT_FOR_CLAUDE_START";
-    with_fixture ~system_marker:system_path
+    let transmissions = ref [] in
+    let on_request_attribution ~runtime_id:_ ~tools:_ ~transmitted =
+      transmissions := transmitted :: !transmissions in
+    with_fixture_sequence ~first_system_marker:system_path ~second_prompt_marker:prompt_path
       [Emit (assistant ~turn_id:"outbox-start" "read original result");
        Emit (result ~turn_id:"outbox-start" "read original result")]
-      (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"Use the original result" () with
-       | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
-    check bool "Claude Start receives original cross-runtime result" true
-      (String_util.contains_substring (In_channel.with_open_bin system_path In_channel.input_all)
-         "ORIGINAL_RESULT_FOR_CLAUDE_START");
-    check int "completed Start acknowledges the original result" 0 (count ());
-    retain "original-2" "ORIGINAL_RESULT_FOR_CLAUDE_RESUME";
-    with_fixture ~prompt_marker:prompt_path
       [Emit (assistant ~turn_id:"outbox-resume" "read newer original result");
        Emit (result ~turn_id:"outbox-resume" "read newer original result")]
-      (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"Use the newer original result" () with
-       | Ok result -> check (option bool) "same consumer session resumes" (Some true) result.session_resumed
-       | Error error -> fail (Agent_core.Error.to_string error));
-    check bool "Claude Resume receives exact newer original result" true
-      (String_util.contains_substring (In_channel.with_open_bin prompt_path In_channel.input_all)
-         "ORIGINAL_RESULT_FOR_CLAUDE_RESUME");
-    check int "completed Resume acknowledges only its loaded result" 0 (count ()))
+      (fun cli_path ->
+        let run goal = match run_keeper_turn ~base_path ~cli_path ~goal ~on_request_attribution () with
+          | Ok result -> result | Error error -> fail (Agent_core.Error.to_string error) in
+        retain "original-1" "ORIGINAL_RESULT_FOR_CLAUDE_START";
+        let first = run "Use the original result" in
+        check bool "Claude Start receives original cross-runtime result" true
+          (String_util.contains_substring (In_channel.with_open_bin system_path In_channel.input_all)
+             "ORIGINAL_RESULT_FOR_CLAUDE_START");
+        check int "completed Start acknowledges the original result" 0 (count ());
+        retain "original-2" "ORIGINAL_RESULT_FOR_CLAUDE_RESUME";
+        let second = run "Use the newer original result" in
+        check bool "the same vendor session consumes the newer result" true
+          (first.session_id = second.session_id);
+        (match List.rev !transmissions with
+         | [Keeper_official_client_host.Whole_input_transmitted _;
+            Keeper_official_client_host.Held_by_client_session] -> ()
+         | _ -> fail "original result must pass through an actual Start and held Resume");
+        check bool "Claude Resume receives exact newer original result" true
+          (String_util.contains_substring (In_channel.with_open_bin prompt_path In_channel.input_all)
+             "ORIGINAL_RESULT_FOR_CLAUDE_RESUME");
+        check int "completed Resume acknowledges only its loaded result" 0 (count ())))
 ;;
 
 let () =

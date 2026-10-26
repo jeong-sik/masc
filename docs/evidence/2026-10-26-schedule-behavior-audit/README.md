@@ -32,8 +32,8 @@ in the log are command provenance, not retained executables.
 The producer rows are historical inputs from the prior
 [schedule-drain projection evidence](../2026-10-25-schedule-drain-projection/README.md).
 This execution checks the new decoder against those rows, not a fresh backend run.
-The component log includes expected warning/error fixture output from domain tests;
-these are not production incidents.
+The component log includes findlib duplicate-interface warnings for digestif.cmi
+from installed packages; these are compiler environment warnings, not production incidents.
 
 Not proven: whole-program typecheck, current backend suite, actual TUI execution,
 provider/model execution, destination delivery, installed binary or deployment.

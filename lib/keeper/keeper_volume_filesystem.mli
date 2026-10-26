@@ -70,6 +70,7 @@ type inspect_failure =
   | Entries of { count : int }  (** The array does not hold exactly one entry. *)
   | Entry_without_configuration
   | Configuration_without_fields  (** No string [name], [format] and [source]. *)
+  | Duplicate_inspect_fields
   | Empty_source of { volume : string }
   | Not_ext4_format of
       { volume : string
@@ -90,6 +91,17 @@ val superblock_size : int
 val of_superblock : string -> (state, read_failure) result
 (** Decode one superblock: the first [superblock_size] bytes of the
     argument, read at [superblock_offset]. A shorter string is [Truncated]. *)
+
+type discard_default = Discard_default_set | Discard_default_absent
+
+val discard_default_of_superblock : string -> (discard_default, read_failure) result
+(** The ext4 [s_default_mount_opts] little-endian word at 0x100 carries
+    [EXT4_DEFM_DISCARD] (0x0400). Require the same complete superblock and
+    ext4 magic as {!of_superblock}. *)
+
+val read_discard_default_image : path:string -> (discard_default, read_failure) result
+(** Read through the same regular-file superblock reader as {!read_image}.
+    This only observes bytes; it never changes an image. *)
 
 val read_image : path:string -> (state, read_failure) result
 (** Read and decode the superblock of the image at [path]. Anything but a

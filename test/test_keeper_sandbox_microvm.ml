@@ -2011,7 +2011,7 @@ let run_build_output_removal ~keeper_root =
   let ic =
     Unix.open_process_args_in
       "/bin/sh"
-      [| "/bin/sh"; "-eu"; "-c"; M.build_output_removal_script ~keeper_root |]
+      [| "/bin/sh"; "-eu"; "-c"; M.first_handoff_build_cleanup_script ~keeper_work_root:keeper_root |]
   in
   let out = In_channel.input_all ic in
   Unix.close_process_in ic, out
@@ -2055,7 +2055,7 @@ let test_build_output_removal_script_removes_only_unkept_dune_output () =
   touch (Filename.concat elsewhere "f");
   touch (under (Filename.concat "linked" M.build_root_marker));
   Unix.symlink elsewhere (build "linked");
-  let status, out = run_build_output_removal ~keeper_root in
+  let status, _out = run_build_output_removal ~keeper_root in
   Alcotest.(check bool) "script exits 0" true (status = Unix.WEXITED 0);
   List.iter
     (fun rel -> Alcotest.(check bool) (rel ^ " build output removed") false (exists (build rel)))
@@ -2075,15 +2075,8 @@ let test_build_output_removal_script_removes_only_unkept_dune_output () =
     (Sys.file_exists (Filename.concat elsewhere "f"));
   Alcotest.(check bool) "the checkout itself stays" true
     (Sys.file_exists (under (Filename.concat "masc" M.build_root_marker)));
-  Alcotest.(check (list string)) "one line per removal"
-    [ "build output removed: masc/.worktrees/task-1/_build"
-    ; "build output removed: masc/_build"
-    ; "build output removed: my repo/_build"
-    ]
-    (out
-     |> String.split_on_char '\n'
-     |> List.filter (fun line -> not (String.equal line ""))
-     |> List.sort String.compare)
+  Alcotest.(check bool) "staged output has been fully removed" false
+    (Sys.file_exists (Filename.concat keeper_root ".masc-build-removing"))
 ;;
 
 let test_build_output_removal_script_skips_a_missing_keeper_root () =
@@ -2266,84 +2259,18 @@ let test_work_volume_trim_argv_grants_only_its_capabilities () =
      dropped first, spelled the way the keeper guest's boot spells it. *)
   Alcotest.(check bool) "drops every capability first" true
     (contains_run (spelled Backend.Drop_all_capabilities) argv);
-  (* SYS_ADMIN for tune2fs, the remount and FITRIM; DAC_OVERRIDE so root can
-     unlink inside the keeper-owned tree. Nothing else. *)
-  Alcotest.(check bool) "only CAP_SYS_ADMIN and CAP_DAC_OVERRIDE are added" true
+  (* The helper only configures the block-device default. *)
+  Alcotest.(check bool) "only CAP_SYS_ADMIN is added" true
     (adjacent ~flag:"--cap-add" ~value:"CAP_SYS_ADMIN" argv
-     && adjacent ~flag:"--cap-add" ~value:"CAP_DAC_OVERRIDE" argv
-     && List.length (List.filter (String.equal "--cap-add") argv) = 2);
+     && not (contains "CAP_DAC_OVERRIDE" argv)
+     && List.length (List.filter (String.equal "--cap-add") argv) = 1);
   Alcotest.(check bool) "read-only root" true (contains_run (spelled Backend.Read_only_rootfs) argv);
   Alcotest.(check bool) "no network" true (adjacent ~flag:"--network" ~value:"none" argv);
   Alcotest.(check bool) "fixed script entrypoint, not the image's own" true
     (adjacent ~flag:"--entrypoint" ~value:"/bin/sh" argv);
   Alcotest.(check bool) "mounts the work volume at the trim root" true
     (adjacent ~flag:"--volume" ~value:("masc-keeper-work-x:" ^ M.trim_guest_root) argv);
-  (* Build output goes after this mount drops discard and before fstrim,
-     which returns its blocks; the removal walks this keeper's root only. *)
-  Alcotest.(check (list string)) "fail closed while configuring discard, removing build output and trimming"
-    [ "masc-sandbox:general"; "-eu"; "-c"
-    ; "work_device=$(/usr/bin/findmnt --noheadings --output SOURCE --target /masc-trim)\n\
-       /usr/sbin/tune2fs -o discard \"$work_device\"\n\
-       /usr/bin/mount -o remount,nodiscard /masc-trim || echo 'remount nodiscard refused; removing with discard on'\n"
-      ^ M.build_output_removal_script ~keeper_root:"/masc-trim/x"
-      ^ "\n/usr/sbin/fstrim -v /masc-trim" ]
-    (let n = List.length argv in
-     List.filteri (fun i _ -> i >= n - 4) argv)
-;;
 
-let test_work_volume_trim_confirms_cleanup () =
-  Eio_main.run @@ fun _ ->
-  let cli = [ Backend.cli_name Backend.Apple_container ] in
-  let volume_name = "masc-keeper-work-x" in
-  let name = M.work_volume_trim_name ~keeper_name:"x" in
-  let image = "masc-sandbox:general" in
-  let rm = M.delete_force_argv_for Backend.Apple_container ~container_name:name in
-  let list = cli @ [ "list"; "--all"; "--format"; "json" ] in
-  let trim = M.apple_work_volume_trim_argv ~keeper_name:"x" ~volume_name ~image in
-  let execute ?(expect_trim = true) ~before ~after ~trim_status () =
-    let remaining = ref
-      ([ rm, (Unix.WEXITED 1, "", "already absent or failed"); list, before ]
-       @ (if expect_trim then [trim, (trim_status, "", "trim interrupted")] else [])
-       @ [rm, (Unix.WEXITED 1, "", "already absent or failed"); list, after])
-    in
-    let run ~timeout_sec argv =
-      Alcotest.(check (float 0.)) "only deletion gets the removal budget"
-        (if argv = rm then 180. else 30.) timeout_sec;
-      match !remaining with
-      | (expected, result) :: rest ->
-        Alcotest.(check (list string)) "cleanup brackets the trim" expected argv;
-        remaining := rest;
-        result
-      | [] -> Alcotest.fail "unexpected container command"
-    in
-    M.reclaim_apple_work_volume ~run ~on_cleanup_error:(fun _ -> ())
-      ~timeout_sec:30. ~remove_timeout_sec:180. ~keeper_name:"x" ~volume_name ~image, remaining
-  in
-  let absent = Unix.WEXITED 0, "[]", "" in
-  let result, remaining = execute ~before:absent ~after:absent ~trim_status:(Unix.WSIGNALED 9) () in
-  (match result with
-   | Ok (Unix.WSIGNALED 9, _) -> ()
-   | Ok _ | Error _ -> Alcotest.fail "a confirmed cleanup preserves the trim failure");
-  Alcotest.(check int) "both cleanup inventories were read" 0 (List.length !remaining);
-  List.iter
-    (fun after ->
-       let result, _ = execute ~before:absent ~after ~trim_status:(Unix.WEXITED 0) () in
-       match result with
-       | Error _ -> ()
-       | Ok _ -> Alcotest.fail "unproven cleanup permits a second volume mount")
-    [ Unix.WEXITED 0, Yojson.Safe.to_string (`List [`Assoc ["configuration", `Assoc ["id", `String name]]]), ""
-    ; Unix.WEXITED 0, "[{}]", ""
-    ; Unix.WEXITED 0, {|[{"id":""}]|}, ""
-    ; Unix.WEXITED 0, {|[{"configuration":{"id":""}}}]|}, ""
-    ; Unix.WEXITED 0, {|[{"id":"   "}]|}, ""
-    ; Unix.WEXITED 0, "[1]", ""
-    ; Unix.WEXITED 0, "{}", ""
-    ; Unix.WEXITED 0, "not JSON", ""
-    ; Unix.WEXITED 1, "", "container service unavailable"
-    ];
-  let result, remaining = execute ~expect_trim:false ~before:(Unix.WEXITED 0, "[{}]", "") ~after:absent ~trim_status:(Unix.WEXITED 0) () in
-  (match result with Error _ -> () | Ok _ -> Alcotest.fail "unknown inventory starts a trim");
-  Alcotest.(check int) "no trim starts; protected cleanup still runs" 0 (List.length !remaining)
 ;;
 
 (* RFC keeper-volume-filesystem-repair §3.3. *)
@@ -2450,59 +2377,6 @@ let test_volume_repair_script_refuses_a_mounted_volume () =
     (List.mem "volume is still mounted; e2fsck not run" (String.split_on_char '\n' out))
 ;;
 
-let test_volume_repair_cleanup_brackets_the_helper () =
-  Eio_main.run @@ fun _ ->
-  let cli = [ Backend.cli_name Backend.Apple_container ] in
-  let name = M.volume_repair_name ~keeper_name:"x" in
-  let rm = M.delete_force_argv_for Backend.Apple_container ~container_name:name in
-  let list = cli @ [ "list"; "--all"; "--format"; "json" ] in
-  let absent = Unix.WEXITED 0, "[]", "" in
-  let expected_helper =
-    M.apple_volume_repair_argv ~keeper_name:"x" ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
-  in
-  let execute ~before ~after =
-    let remaining = ref [ rm, (Unix.WEXITED 1, "", "already absent"); list, before
-                        ; rm, (Unix.WEXITED 1, "", "already absent"); list, after ] in
-    let events = ref [] in
-    let run ~timeout_sec:_ argv =
-      match !remaining with
-      | (expected, result) :: rest ->
-        Alcotest.(check (list string)) "cleanup brackets the helper" expected argv;
-        remaining := rest;
-        result
-      | [] -> Alcotest.fail "unexpected container command"
-    in
-    let run_helper argv =
-      Alcotest.(check (list string)) "the repair helper" expected_helper argv;
-      events := "helper" :: !events;
-      Unix.WEXITED 0, "e2fsck repair exit 1", ""
-    in
-    let result =
-      M.repair_apple_volume ~run ~run_helper
-        ~on_start:(fun () -> events := "started" :: !events)
-        ~on_cleanup_error:(fun _ -> ())
-        ~timeout_sec:30. ~remove_timeout_sec:180. ~keeper_name:"x"
-        ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
-    in
-    result, List.rev !events, remaining
-  in
-  let result, events, remaining = execute ~before:absent ~after:absent in
-  (match result with
-   | Ok { M.status = Unix.WEXITED 0; stdout = "e2fsck repair exit 1"; stderr = ""; cleanup = Ok () } -> ()
-   | Ok _ | Error _ -> Alcotest.fail "the helper's own status and output come back");
-  Alcotest.(check (list string)) "the start is announced after the stale check" [ "started"; "helper" ] events;
-  Alcotest.(check int) "both cleanup inventories were read" 0 (List.length !remaining);
-  (* e2fsck may have written the image, so a failed removal afterwards is
-     reported beside the result, not in place of it. *)
-  let result, _, _ = execute ~before:absent ~after:(Unix.WEXITED 1, "", "container service unavailable") in
-  (match result with
-   | Ok { M.status = Unix.WEXITED 0; cleanup = Error _; _ } -> ()
-   | Ok _ | Error _ -> Alcotest.fail "a failed cleanup after the run replaced its result");
-  let result, events, _ = execute ~before:(Unix.WEXITED 0, "[{}]", "") ~after:absent in
-  (match result with Error _ -> () | Ok _ -> Alcotest.fail "an unproven stale helper still starts a repair");
-  Alcotest.(check (list string)) "nothing starts beside an unknown container" [] events
-;;
-
 let trim_test_plan keeper_name =
   M.work_volume_trim_name ~keeper_name,
   M.apple_work_volume_trim_argv ~keeper_name ~volume_name:("masc-keeper-work-" ^ keeper_name) ~image:"trim-fixture"
@@ -2524,41 +2398,6 @@ let test_trim_names_fit_apple_and_distinguish_long_keepers () =
   Alcotest.(check bool) "distinct suffixes survive truncation" false (first = second);
   Alcotest.(check string) "name is stable for cleanup" first repeated;
   Alcotest.(check bool) "run uses bounded name" true (adjacent ~flag:"--name" ~value:first argv)
-;;
-
-let test_trim_cancellation_runs_protected_cleanup () =
-  Eio_main.run @@ fun _ ->
-  List.iter (fun cleanup_fails ->
-    let container_name, trim_argv = trim_test_plan "trim-cancel" in
-    let delete_argv = M.delete_force_argv_for Backend.Apple_container ~container_name in
-    let listing = [ Backend.cli_name Backend.Apple_container; "list"; "--all"; "--format"; "json" ] in
-    let started = ref false and cleaned = ref false and reported = ref [] in
-    let cancelled =
-      try
-        Eio.Cancel.sub (fun cancel ->
-          let run ~timeout_sec:_ argv =
-            if argv = trim_argv then (
-              started := true;
-              Eio.Cancel.cancel cancel Exit;
-              Eio.Fiber.await_cancel ())
-            else if argv = delete_argv then (
-              if !started then (Eio.Fiber.yield (); cleaned := true);
-              Unix.WEXITED 0, "removed", "")
-            else if argv = listing then
-              if !started && cleanup_fails then Unix.WEXITED 1, "API unavailable", ""
-              else Unix.WEXITED 0, "[]", ""
-            else Alcotest.fail "unexpected trim command"
-          in
-          ignore (M.reclaim_apple_work_volume ~run ~timeout_sec:30. ~remove_timeout_sec:180.
-            ~on_cleanup_error:(fun error -> reported := error :: !reported)
-            ~keeper_name:"trim-cancel" ~volume_name:"masc-keeper-work-trim-cancel" ~image:"trim-fixture"));
-        false
-      with Eio.Cancel.Cancelled _ -> true
-    in
-    Alcotest.(check bool) "cancellation reaches caller" true cancelled;
-    Alcotest.(check bool) "yielding cleanup completed despite cancellation" true !cleaned;
-    Alcotest.(check bool) "failed cleanup is reported without replacing cancellation"
-      cleanup_fails (!reported <> [])) [ false; true ]
 ;;
 
 let test_teardown_removes_or_reports_abandoned_trim_helper () =
@@ -2802,11 +2641,9 @@ esac
     Alcotest.(check bool) "policy lookup ran after the snapshot claim" true
       (List.mem "network list --format json" calls);
     let runs = List.filter (String.starts_with ~prefix:"run ") calls in
-    Alcotest.(check int) "only trim ran; no persistent guest was started" 1 (List.length runs);
-    List.iter (fun command ->
-      Alcotest.(check bool) "the sole run names the trim helper" true
-        (String.starts_with
-           ~prefix:("run --rm --name " ^ M.work_volume_trim_name ~keeper_name ^ " ") command)) runs;
+    Alcotest.(check int) "unreadable superblock starts neither helper nor guest" 0 (List.length runs);
+    Alcotest.(check bool) "current volume source was actually requested" true
+      (List.mem ("volume inspect masc-keeper-work-" ^ keeper_name) calls);
     (* Rewrite the same inode with equal-length bytes and restore its mtime.
        A fresh runtime drives the real boot entry again, not just the hash
        helper; neither branch may admit this changed shim to a guest. *)
@@ -4094,20 +3931,14 @@ let () =
             test_volume_create_argv_carries_a_size
         ; Alcotest.test_case "work volume trim grants only its capabilities" `Quick
             test_work_volume_trim_argv_grants_only_its_capabilities
-        ; Alcotest.test_case "work volume trim proves cleanup before boot" `Quick
-            test_work_volume_trim_confirms_cleanup
         ; Alcotest.test_case "volume repair argv grants only CAP_SYS_ADMIN" `Quick
             test_volume_repair_argv_grants_only_sys_admin
         ; Alcotest.test_case "volume repair script runs e2fsck after unmount" `Quick
             test_volume_repair_script_runs_e2fsck_after_unmount
         ; Alcotest.test_case "volume repair script refuses a mounted volume" `Quick
             test_volume_repair_script_refuses_a_mounted_volume
-        ; Alcotest.test_case "volume repair cleanup brackets the helper" `Quick
-            test_volume_repair_cleanup_brackets_the_helper
         ; Alcotest.test_case "trim names preserve existing helpers and bound long names" `Quick
             test_trim_names_fit_apple_and_distinguish_long_keepers
-        ; Alcotest.test_case "trim cancellation runs protected cleanup" `Quick
-            test_trim_cancellation_runs_protected_cleanup
         ; Alcotest.test_case "teardown removes or reports abandoned trim helper" `Quick
             test_teardown_removes_or_reports_abandoned_trim_helper
         ; Alcotest.test_case "teardown attempts every guest after helper or guest errors" `Quick

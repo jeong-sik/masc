@@ -361,14 +361,15 @@ val work_volume_trim_name : keeper_name:string -> string
 val apple_work_volume_trim_argv :
   keeper_name:string -> volume_name:string -> image:string -> string list
 (** [container run --rm] of [image] as root with every capability dropped
-    and [CAP_SYS_ADMIN] and [CAP_DAC_OVERRIDE] added back (the latter so the
-    removal can unlink inside the keeper-owned tree), no network, a
-    read-only root, and
-    a fixed shell script as entrypoint, setting persistent ext4 discard,
-    removing the keeper's real build output ({!build_output_removal_script})
-    and trimming the work volume so the host gets back the blocks a guest freed.
+    and only [CAP_SYS_ADMIN] added back, no network, a read-only root and
+    a fixed findmnt/tune2fs script setting persistent ext4 discard.
     Subsequent mounts automatically discard freed blocks. Run only while no guest has the volume
     attached: a second ext4 mount of the same volume corrupts it. *)
+
+val discard_configuration_script_with : findmnt:string -> tune2fs:string -> guest_root:string -> string
+(** The same fixed helper payload with explicit tool/mount paths, allowing
+    actual process fixtures without touching a mounted volume. Resolve its
+    mounted device and run tune2fs only; a failed discovery stops before tuning. *)
 
 val remove_apple_work_volume_trim :
   run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
@@ -377,8 +378,43 @@ val remove_apple_work_volume_trim :
   -> keeper_name:string
   -> (unit, string) result
 (** Delete the stable helper using the removal budget, then prove its absence
-    using a complete structured inventory under the I/O budget. Shared by
-    boot cleanup and keeper teardown. *)
+    using actual complete canonical CLI capture and the shared strict all-row
+    inventory decoder under the I/O budget. [run] supplies only the delete
+    effect, never absence authority. Shared by boot cleanup and keeper teardown. *)
+
+type discard_read_failure =
+  | Discard_backend_unsupported of Keeper_microvm_backend.t
+  | Discard_volume_name_invalid of string
+  | Discard_inspect_unavailable of Keeper_microvm_cli_output.error
+  | Discard_inspect_failed of Unix.process_status
+  | Discard_inspect_invalid_json
+  | Discard_inspect_invalid of Keeper_volume_filesystem.inspect_failure
+  | Discard_volume_mismatch of { expected : string; actual : string }
+  | Discard_image_unreadable of Keeper_volume_filesystem.read_failure
+
+type work_volume_discard_default =
+  | Discard_default_set
+  | Discard_default_absent
+  | Superblock_unreadable of discard_read_failure
+
+val read_work_volume_discard_default :
+  backend:Keeper_microvm_backend.t -> keeper_name:string -> timeout_sec:float ->
+  work_volume_discard_default
+(** Inspect the current backend's actual keeper-owned work volume, require its
+    exact expected name and ext4 source, then read the host superblock. Apple
+    uses complete canonical CLI capture. Other backends explicitly refuse.
+    No cached source, caller-provided image or preview authorizes this read. *)
+
+val discard_read_failure_message : discard_read_failure -> string
+
+type discard_configuration =
+  | Discard_already_set
+  | Discard_unreadable of discard_read_failure
+  | Discard_helper_finished of
+      { status : Unix.process_status
+      ; output : string
+      ; after : work_volume_discard_default
+      }
 
 val reclaim_apple_work_volume :
   run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
@@ -388,14 +424,13 @@ val reclaim_apple_work_volume :
   -> keeper_name:string
   -> volume_name:string
   -> image:string
-  -> (Unix.process_status * string, string) result
-(** Removes a previous named trim container and proves its absence before
-    starting a trim. Protected switch release removes it and confirms absence
-    after success, failure or cancellation. Cleanup failures are reported to
-    [on_cleanup_error]; an original cancellation still propagates. [Error]
-    refuses the subsequent guest mount when inventory cannot prove cleanup.
-    The returned status describes discard configuration and trim; failure is harmless
-    only after cleanup has been confirmed. *)
+  -> (discard_configuration, string) result
+(** Read the actual work volume before any helper operation. Set/unreadable
+    results start no helper and issue no helper cleanup. Only an absent flag
+    permits one tune2fs helper, bracketed by strict absence checks, including
+    protected cleanup on cancellation. A helper's status is retained and its
+    subsequent superblock reading is separate; exit0 never guesses a set bit.
+    [Error] refuses a guest mount when helper absence cannot be proved. *)
 
 val volume_repair_guest_root : string
 (** [/masc-repair]: where {!apple_volume_repair_argv} mounts the volume. *)
@@ -591,8 +626,8 @@ val plan_build_link : target:string -> build_link_state -> build_link_plan
     runs inside a live guest, where a build may be using a real [_build], so
     the plan never deletes one; the caller reports
     {!Link_refused_real_directory} and the checkout keeps building on the
-    unified work volume until the next boot's helper removes it
-    ({!build_output_removal_script}). Retargeting a stale symlink is
+    unified work volume until the next owned first handoff removes it
+    ({!first_handoff_build_cleanup_script}). Retargeting a stale symlink is
     different: removing a symlink loses no data. *)
 
 val apple_volume_delete_argv : volume_name:string -> string list
@@ -672,16 +707,16 @@ val build_keep_marker : string
 (** [.masc-keep-build]: a checkout holding this file keeps its real
     [_build] through a guest boot. *)
 
-val build_output_removal_script : keeper_root:string -> string
-(** The shell step {!apple_work_volume_trim_argv} runs before [fstrim]:
-    removes the real [_build] of every checkout under [keeper_root] that the
-    in-guest scan ({!build_scan_argv_for}) would refuse to link -- the same
-    depth and [dune-project] marker, the keeper root itself and [.git]
-    skipped. A symlinked [_build] is neither followed nor removed, and a
-    checkout holding {!build_keep_marker} keeps its output. Prints one line
-    per removal; a failed removal is printed and does not stop the script.
-    Runs only while no guest holds the volume, so no build can be using the
-    output. *)
+val first_handoff_build_cleanup_script : keeper_work_root:string -> string
+(** Pure payload for the owned guest's first turn handoff, under its uid/gid
+    through the exec-shim runner. The same scan depth/markers skip the root,
+    [.git], symlinked output and [.masc-keep-build]. Each real [_build] first
+    moves into a private mktemp child of [.masc-build-removing]; only after
+    all renames does deletion clear that reserved pending directory, including
+    interrupted prior cleanup. Paths are [-exec] arguments, never lines.
+    Root/pending symlinks refuse. Failure is reported by the script status;
+    the caller logs it and may continue boot. Never run on attached reads or
+    a guest this process has already handed to a turn. *)
 
 val build_scan_argv_for
   :  Keeper_microvm_backend.t

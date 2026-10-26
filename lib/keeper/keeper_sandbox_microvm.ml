@@ -1160,116 +1160,71 @@ let build_output_dir_name = "_build"
 let build_keep_marker = ".masc-keep-build"
 
 let trim_guest_root = "/masc-trim"
-let trim_capabilities = [ "CAP_SYS_ADMIN"; "CAP_DAC_OVERRIDE" ]
+let trim_capabilities = [ "CAP_SYS_ADMIN" ]
 let work_volume_trim_name ~keeper_name =
   Keeper_sandbox_container_name.make
     (Keeper_sandbox_container_name.Micro_vm_work_volume_trim { keeper_name })
   |> Keeper_sandbox_container_name.to_string
 ;;
 
-(* util-linux's path on the Debian and Ubuntu bases of the catalog images
-   (measured in [masc-sandbox:general] and [masc-keeper-sandbox:local]). *)
-let fstrim_guest_path = "/usr/sbin/fstrim"
-let mount_guest_path = "/usr/bin/mount"
-
-(** Removes the real [_build] of every checkout under [keeper_root] that the
-    in-guest scan would otherwise leave on the work volume as
-    {!Link_refused_real_directory}: the same depth, the same [dune-project]
-    marker, the keeper root itself and [.git] skipped. A checkout made and
-    built while its guest runs has a real [_build] before any scan can link
-    it, so without this its output stays on the work volume for good. The
-    helper runs it before the guest boots, so no process can hold the
-    output. [find] without [-L] never follows a symlinked [_build], and
-    [-type d] does not match one. Paths reach the removal as [-exec]
-    arguments, never as lines, so a directory name holding a newline cannot
-    split into the path of another checkout. A checkout holding
-    {!build_keep_marker} keeps its output. A failed [cd], [find] or removal
-    is printed and does not stop the trim that follows. *)
-let build_output_removal_script ~keeper_root =
-  let root = Filename.quote keeper_root in
+(* This payload runs under the Keeper uid/gid at its first owned turn
+   handoff. All renames precede deletion, so a subsequent build cannot write
+   into an old tree while it is being removed. The pending name is reserved. *)
+let first_handoff_build_cleanup_script ~keeper_work_root =
+  let root = Filename.quote keeper_work_root in
   Printf.sprintf
-    {sh|if [ -d %s ] && cd %s; then
-  find . -maxdepth %d \( -name .git -prune \) -o \( -name %s -type d -prune -exec sh -c '
+    {sh|[ ! -L %s ] || exit 1
+if [ ! -e %s ]; then exit 0; fi
+[ -d %s ] || exit 1
+cd %s || exit 1
+pending=./.masc-build-removing
+[ ! -L "$pending" ] || exit 1
+if [ -e "$pending" ] && [ ! -d "$pending" ]; then exit 1; fi
+failed=0
+find . -maxdepth %d \( -name .git -o -path ./.masc-build-removing \) -prune -o \( -name %s -type d -prune -exec sh -c '
+pending=$1
+shift
+failed=0
 for b do
   c=${b%%/%s}
   [ "$c" != . ] || continue
   [ -e "$c/%s" ] || continue
   [ ! -e "$c/%s" ] || continue
-  if rm -rf -- "$b"; then
-    printf "build output removed: %%s\n" "${b#./}"
+  [ -d "$b" ] && [ ! -L "$b" ] || continue
+  [ ! -L "$pending" ] || exit 1
+  if ! (umask 077; mkdir -p -- "$pending"); then failed=1; continue; fi
+  staging=$(mktemp -d "$pending/removing.XXXXXXXX") || { failed=1; continue; }
+  if mv -- "$b" "$staging/%s"; then
+    printf "build output staged: %%s\n" "${b#./}"
   else
-    printf "build output not removed: %%s\n" "${b#./}"
+    rmdir -- "$staging" || :
+    failed=1
   fi
-done' sh {} + \) || echo 'build output scan failed'
-fi|sh}
-    root
-    root
-    (build_root_scan_depth + 1)
+done
+exit "$failed"' sh "$pending" {} + \) || failed=1
+[ ! -L "$pending" ] || exit 1
+if [ -d "$pending" ]; then
+  find "$pending" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || failed=1
+  rmdir -- "$pending" || failed=1
+fi
+exit "$failed"|sh}
+    root root root root (build_root_scan_depth + 1)
+    build_output_dir_name build_output_dir_name build_root_marker build_keep_marker
     build_output_dir_name
-    build_output_dir_name
-    build_root_marker
-    build_keep_marker
 ;;
 
-(* The ext4 default survives the helper's unmount and makes later keeper
-   deletes discard their blocks without granting the keeper capabilities.
-   Resolve the mounted device instead of assuming a virtio disk number.
-
-   The helper's own mount drops discard before the build output goes, so the
-   removal rewrites only metadata and the host-side cost lands in [fstrim],
-   which changes nothing on the filesystem. Measured 2026-10-06 on container
-   1.3.1 with [masc-sandbox:general], 20 GB of build output (250 x 80 MB plus
-   20,000 small files): removal took 7.7 s with discard on and 0.07 s with it
-   off, the [fstrim] after it 7.4 s, and the host image went from 20 GB to
-   15 MB either way. If the helper's budget runs out, it runs out inside
-   [fstrim], and the next boot's [fstrim] returns the rest. A refused remount
-   only moves that cost back into the removal, so it is reported, not fatal. *)
-let work_volume_reclaim_script ~keeper_name =
-  let keeper_root =
-    Filename.concat trim_guest_root (Playground_paths.sanitize_keeper_name keeper_name)
-  in
-  Printf.sprintf
-    "work_device=$(/usr/bin/findmnt --noheadings --output SOURCE --target %s)\n\
-     /usr/sbin/tune2fs -o discard \"$work_device\"\n\
-     %s -o remount,nodiscard %s || echo 'remount nodiscard refused; removing with discard on'\n\
-     %s\n\
-     %s -v %s"
-    trim_guest_root
-    mount_guest_path
-    trim_guest_root
-    (build_output_removal_script ~keeper_root)
-    fstrim_guest_path
-    trim_guest_root
+(* The only one-shot work-volume operation left: configure the ext4 default.
+   No build deletion, remount or whole-filesystem trim occurs in this helper. *)
+let discard_configuration_script_with ~findmnt ~tune2fs ~guest_root =
+  Printf.sprintf "work_device=$(%s --noheadings --output SOURCE --target %s)\n%s -o discard \"$work_device\""
+    (Filename.quote findmnt) (Filename.quote guest_root) (Filename.quote tune2fs)
 ;;
 
-(** Apple's work volume is a sparse ext4 image, and a guest delete leaves its
-    blocks allocated on the host until something discards them. The virtio
-    disk does accept discard ([discard_max_bytes] 274877906944 on
-    [/dev/vdc], measured 2026-09-26); a keeper guest cannot issue it, since
-    its capability set is empty and [FITRIM] needs [CAP_SYS_ADMIN]. So a
-    one-shot container does it while no guest has the volume attached.
-    Measured on [masc-keeper-work-pr-updater]: 39 GB used inside, host image
-    116 GB -> 39 GB, 213.3 GiB trimmed.
+let work_volume_reclaim_script =
+  discard_configuration_script_with ~findmnt:"/usr/bin/findmnt"
+    ~tune2fs:"/usr/sbin/tune2fs" ~guest_root:trim_guest_root
+;;
 
-    [--cap-add] alone adds to the runtime's default set: measured 2026-09-27
-    on container 1.3.1, [--user 0 --cap-add CAP_SYS_ADMIN] gives [CapEff]
-    00000000a82425fb (the default set plus SYS_ADMIN), and with [--cap-drop
-    ALL] first it is 0000000000200000, SYS_ADMIN only. The root is read-only
-    and the network is off. A fixed shell script enables ext4 discard,
-    removes the keeper's real build output ({!build_output_removal_script})
-    and runs [fstrim] by absolute path, so the image's
-    own entrypoint ([opam] on the ocaml image) never runs with the
-    capabilities.
-
-    [CAP_DAC_OVERRIDE] is what lets the removal unlink inside the keeper's
-    tree: the tree belongs to the server's uid with mode 0755, and uid 0
-    without the capability gets only the "other" bits. Measured 2026-10-06
-    on container 1.3.1 with a [_build] made as 502:20 under umask 022: with
-    SYS_ADMIN alone [rm] answered "Permission denied" and nothing was freed;
-    with DAC_OVERRIDE added ([CapEff] 0000000000200002) it was removed and the
-    host image went from 103 MB to 2.6 MB. The capability reaches nothing
-    new: the root is read-only, the network is off, and the one writable
-    mount is this keeper's own work volume. *)
 let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
   command_argv_for Backend.Apple_container
   @ [ "run"; "--rm"; "--name"; work_volume_trim_name ~keeper_name
@@ -1278,7 +1233,7 @@ let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
   @ [ "--network"; "none"; "--read-only"
     ; "--entrypoint"; "/bin/sh"
     ; "--volume"; volume_name ^ ":" ^ trim_guest_root
-    ; image; "-eu"; "-c"; work_volume_reclaim_script ~keeper_name ]
+    ; image; "-eu"; "-c"; work_volume_reclaim_script ]
 ;;
 
 (* The trim cleanup, the abandoned-guest sweep, Keeper status and the guest
@@ -1305,33 +1260,28 @@ let apple_listing_row_id fields =
 (* Remove a one-shot volume helper by its stable name and prove it is gone.
    [helper] names it in the messages ("trim", "repair"). *)
 let remove_apple_volume_helper ~run ~timeout_sec ~remove_timeout_sec ~name ~helper =
-  (* Removal's exit code alone cannot prove absence: --rm may already have
-     removed the container, or a timed-out CLI may have left it running. *)
-  let removal_status, removal_out, removal_err =
-    run ~timeout_sec:remove_timeout_sec (delete_force_argv_for Backend.Apple_container ~container_name:name)
+  (* Only the actual complete inventory authorizes absence. The legacy runner
+     remains the deletion effect edge; its bounded output cannot prove it. *)
+  let removal_status, _stdout, _stderr =
+    run ~timeout_sec:remove_timeout_sec
+      (delete_force_argv_for Backend.Apple_container ~container_name:name)
   in
-  match run ~timeout_sec (apple_container_list_argv ()) with
-  | Unix.WEXITED 0, listing, _ ->
-    let rec absent = function
-      | [] -> Ok ()
-      | `Assoc fields :: rest ->
-        (match apple_listing_row_id fields with
-         | Some id when String.equal id name ->
-           Error (Printf.sprintf "%s container %s remains after removal (%s): %s"
-             helper name (Keeper_sandbox_exec_failure.status_label removal_status)
-             (output_for_log ~stdout:removal_out ~stderr:removal_err))
-         | Some _ -> absent rest
-         | None -> Error (helper ^ " cleanup inventory contains a container without an id"))
-      | _ :: _ -> Error (helper ^ " cleanup inventory contains a non-object container")
-    in
-    (match Yojson.Safe.from_string listing with
-     | `List entries -> absent entries
-     | _ -> Error (helper ^ " cleanup inventory is not a JSON array")
-     | exception Yojson.Json_error detail ->
-       Error (helper ^ " cleanup inventory is invalid JSON: " ^ detail))
-  | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
-    Error (Printf.sprintf "cannot verify %s container %s was removed (%s): %s"
-      helper name (Keeper_sandbox_exec_failure.status_label status) (output_for_log ~stdout ~stderr))
+  let unconfirmed detail = Error (helper ^ " helper absence unconfirmed: " ^ detail) in
+  match Keeper_microvm_cli_output.read ~timeout_sec ~argv:(apple_container_list_argv ()) with
+  | Error error -> unconfirmed (Keeper_microvm_cli_output.error_message error)
+  | Ok (Unix.WEXITED 0, stdout) ->
+    let module Inventory = Keeper_microvm_inventory_json in
+    (match Inventory.of_apple_json stdout with
+     | Error error -> unconfirmed (Inventory.invalid_inventory_message error)
+     | Ok inventory ->
+       match Inventory.presence ~guest_name:name inventory with
+       | Error Inventory.Invalid_guest_name -> unconfirmed "invalid helper name"
+       | Ok Inventory.Absent -> Ok ()
+       | Ok Inventory.Present ->
+         Error (Printf.sprintf "%s container %s remains after removal (%s)"
+           helper name (Keeper_sandbox_exec_failure.status_label removal_status)))
+  | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _stdout) ->
+    unconfirmed (Keeper_sandbox_exec_failure.status_label status)
 ;;
 
 let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =
@@ -1339,26 +1289,97 @@ let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_
     ~name:(work_volume_trim_name ~keeper_name) ~helper:"trim"
 ;;
 
+type discard_read_failure =
+  | Discard_backend_unsupported of Backend.t
+  | Discard_volume_name_invalid of string
+  | Discard_inspect_unavailable of Keeper_microvm_cli_output.error
+  | Discard_inspect_failed of Unix.process_status
+  | Discard_inspect_invalid_json
+  | Discard_inspect_invalid of Keeper_volume_filesystem.inspect_failure
+  | Discard_volume_mismatch of { expected : string; actual : string }
+  | Discard_image_unreadable of Keeper_volume_filesystem.read_failure
+
+type work_volume_discard_default =
+  | Discard_default_set
+  | Discard_default_absent
+  | Superblock_unreadable of discard_read_failure
+
+let apple_volume_inspect_argv ~volume_name =
+  command_argv_for Backend.Apple_container @ [ "volume"; "inspect"; volume_name ]
+;;
+
+let read_work_volume_discard_default ~backend ~keeper_name ~timeout_sec =
+  let unreadable failure = Superblock_unreadable failure in
+  match (backend : Backend.t) with
+  | Backend.Microsandbox | Backend.Nerdctl_kata -> unreadable (Discard_backend_unsupported backend)
+  | Backend.Apple_container ->
+    match work_volume_name ~keeper_name with
+    | Error detail -> unreadable (Discard_volume_name_invalid detail)
+    | Ok expected ->
+      match Keeper_microvm_cli_output.read ~timeout_sec ~argv:(apple_volume_inspect_argv ~volume_name:expected) with
+      | Error error -> unreadable (Discard_inspect_unavailable error)
+      | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status, _) when status <> Unix.WEXITED 0 ->
+        unreadable (Discard_inspect_failed status)
+      | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), stdout) ->
+        match Yojson.Safe.from_string stdout with
+        | exception Yojson.Json_error _ -> unreadable Discard_inspect_invalid_json
+        | json ->
+          match Keeper_volume_filesystem.image_of_inspect json with
+          | Error failure -> unreadable (Discard_inspect_invalid failure)
+          | Ok image when image.volume <> expected ->
+            unreadable (Discard_volume_mismatch {expected; actual=image.volume})
+          | Ok image ->
+            Eio_guard.run_in_systhread ~label:"microvm-discard-default" (fun () ->
+              match Keeper_volume_filesystem.read_discard_default_image ~path:image.source with
+              | Ok Keeper_volume_filesystem.Discard_default_set -> Discard_default_set
+              | Ok Keeper_volume_filesystem.Discard_default_absent -> Discard_default_absent
+              | Error failure -> unreadable (Discard_image_unreadable failure))
+;;
+
+let discard_read_failure_message = function
+  | Discard_backend_unsupported backend -> "discard observation unsupported for " ^ Backend.to_string backend
+  | Discard_volume_name_invalid detail -> detail
+  | Discard_inspect_unavailable error -> Keeper_microvm_cli_output.error_message error
+  | Discard_inspect_failed status -> "volume inspect " ^ Keeper_sandbox_exec_failure.status_label status
+  | Discard_inspect_invalid_json -> "volume inspect returned invalid JSON"
+  | Discard_inspect_invalid failure -> Keeper_volume_filesystem.inspect_failure_to_string failure
+  | Discard_volume_mismatch {expected; actual} -> Printf.sprintf "volume inspect named %S, expected %S" actual expected
+  | Discard_image_unreadable failure -> Keeper_volume_filesystem.read_failure_to_string failure
+;;
+
+type discard_configuration =
+  | Discard_already_set
+  | Discard_unreadable of discard_read_failure
+  | Discard_helper_finished of
+      { status : Unix.process_status; output : string; after : work_volume_discard_default }
+
 let reclaim_apple_work_volume ~run ~on_cleanup_error ~timeout_sec ~remove_timeout_sec
     ~keeper_name ~volume_name ~image =
-  let cleanup () =
-    remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name
-  in
-  let released = ref (Ok ()) in
-  let result = Eio.Switch.run (fun sw ->
-    (* Register before the first external operation. Switch release handlers
-       run protected from cancellation, including while deletion/listing yield. *)
-    Eio.Switch.on_release sw (fun () ->
-      released := cleanup ();
-      match !released with Ok () -> () | Error detail -> on_cleanup_error detail);
-    let ( let* ) = Result.bind in
-    let* () = cleanup () in
-    let status, stdout, stderr =
-      run ~timeout_sec (apple_work_volume_trim_argv ~keeper_name ~volume_name ~image)
-    in
-    Ok (status, output_for_log ~stdout ~stderr))
-  in
-  match !released with Ok () -> result | Error _ as error -> error
+  let initial = match work_volume_name ~keeper_name with
+    | Error detail -> Superblock_unreadable (Discard_volume_name_invalid detail)
+    | Ok expected when expected <> volume_name ->
+      Superblock_unreadable (Discard_volume_mismatch {expected; actual=volume_name})
+    | Ok _ -> read_work_volume_discard_default ~backend:Backend.Apple_container ~keeper_name ~timeout_sec in
+  match initial with
+  | Discard_default_set -> Ok Discard_already_set
+  | Superblock_unreadable failure -> Ok (Discard_unreadable failure)
+  | Discard_default_absent ->
+    let cleanup () = remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name in
+    let released = ref (Ok ()) in
+    let result = Eio.Switch.run (fun sw ->
+      Eio.Switch.on_release sw (fun () ->
+        released := cleanup ();
+        match !released with Ok () -> () | Error detail -> on_cleanup_error detail);
+      let ( let* ) = Result.bind in
+      let* () = cleanup () in
+      let status, stdout, stderr = run ~timeout_sec
+          (apple_work_volume_trim_argv ~keeper_name ~volume_name ~image) in
+      Ok (status, output_for_log ~stdout ~stderr)) in
+    match !released, result with
+    | Error detail, _ | Ok (), Error detail -> Error detail
+    | Ok (), Ok (status, output) ->
+      let after = read_work_volume_discard_default ~backend:Backend.Apple_container ~keeper_name ~timeout_sec in
+      Ok (Discard_helper_finished {status; output; after})
 ;;
 
 (* RFC keeper-volume-filesystem-repair §3.3. *)
@@ -1587,9 +1608,6 @@ let apple_volume_list_argv () =
   command_argv_for Backend.Apple_container @ [ "volume"; "list"; "--format"; "json" ]
 ;;
 
-let apple_volume_inspect_argv ~volume_name =
-  command_argv_for Backend.Apple_container @ [ "volume"; "inspect"; volume_name ]
-;;
 
 type volume_probe_outcome =
   | Volume_present
@@ -1869,8 +1887,8 @@ let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
    (2026-09-24) to keep its allocated size after the guest deletes
    everything inside it -- `fstrim` inside the guest, run as root, answers
    "Operation not permitted", because the guest's capability set is empty
-   (the disk itself accepts discard, measured 2026-09-26). The boot helper
-   now sets the work volume's ext4 discard default, so a delete there returns
+   (the disk itself accepts discard, measured 2026-09-26). The host reads the
+   work volume's ext4 discard default and configures it only when absent, so a delete there returns
    its blocks; the build volume gets no such default, and what linked
    checkouts built on it is returned by deleting the volume and making a new
    one at every boot. *)
@@ -1986,7 +2004,7 @@ let recreate_apple_build_volume ~volume_name ~size ~timeout_sec =
    So the walk, the [_build] state read, and the symlink itself all run
    inside the guest over [container exec]; only the *decision*
    ({!plan_build_link}) stays host-side and pure. The checkouts it walks are
-   the ones {!build_output_removal_script} walks at boot. *)
+   the ones {!first_handoff_build_cleanup_script} walks at boot. *)
 
 (** One [find] and one read loop, run with the keeper's work root as the
     exec's [container_cwd] so every path [find] prints is already relative

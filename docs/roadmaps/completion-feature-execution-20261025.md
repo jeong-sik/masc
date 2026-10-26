@@ -11,6 +11,11 @@ original-read diagnostics outside the first worker checks. Their actual-daemon
 [failure and repair receipts](../evidence/goal-daemon-progress-20261025.md) are
 tracked by #45975 and task-2672 in three additional layers of the same stack.
 
+The [delivery audit](../evidence/completion-feature-delivery-20261026.md) records
+the requirement-by-requirement readback, current follow-up ownership, and the
+subsequent whole-stack integration of a reviewed retained-recovery amendment.
+Historical execution receipts keep their original source identities.
+
 The requested outcome is a product that finishes the user's original work,
 including correction after rejection and recovery after interruption. The operator
 selected a first feature stack that repairs one demonstrated failure through

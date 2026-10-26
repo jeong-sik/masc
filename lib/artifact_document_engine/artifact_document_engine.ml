@@ -48,10 +48,17 @@ let default_runner ?(executable = "masc-artifact-document") input =
        stdout is a complete private file, never the process runner's preview. *)
     let env = [|"PATH=" ^ Option.value ~default:"" (Sys.getenv_opt "PATH")|] in
     match Process_eio.run_argv_with_redirects ~env
+      ~timeout_sec:30.0
       ~stdin:(Process_eio.From_string input)
       ~stdout:(Process_eio.Written_to { path = output_path; append = false })
       ~stderr:Process_eio.Captured [executable] with
     | Error message -> Error message
+    | Ok (status, _, _) when Process_eio.exit_reason_of_status status = Process_eio.Timed_out ->
+      (* The shared classifier recognises Process_eio's synthesized timeout
+         status (timeout(1) style). An over-long transformer is not a broken
+         document: invoke maps this raw runner error to Unavailable so the
+         client can retry. *)
+      Error "masc-artifact-document timed out"
     | Ok (status, _, _) ->
       let output = Eio_unix.run_in_systhread (fun () ->
         In_channel.with_open_bin output_path In_channel.input_all) in

@@ -51,6 +51,18 @@ let integration_tests executable =
     "failed executable is unavailable", `Quick, (fun () -> with_runtime (fun () ->
       let runner = Engine.default_runner ~executable:(executable ^ ".missing") in
       require_error Engine.Unavailable (Engine.seed ~runner "source")));
+    "hanging transformer is bounded and refused as unavailable", `Slow, (fun () -> with_runtime (fun () ->
+      let dir = Filename.get_temp_dir_name () in
+      let path = Filename.concat dir "masc-stub-hangs" in
+      let oc = open_out_bin path in
+      Printf.fprintf oc "#!/bin/sh\nsleep 600\n";
+      close_out oc;
+      Unix.chmod path 0o755;
+      let started = Unix.gettimeofday () in
+      require_error Engine.Unavailable (Engine.seed ~runner:(Engine.default_runner ~executable:path) "source");
+      let took = Unix.gettimeofday () -. started in
+      Alcotest.(check bool) "bounded well under the 600s hang"
+        (took < 600.0) true));
   ]
 let () =
   let integration, argv = if Array.length Sys.argv = 3 && Sys.argv.(1) = "--transformer"

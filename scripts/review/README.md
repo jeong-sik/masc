@@ -41,16 +41,28 @@ non-native branch chain, land the parent first and inspect the changed diff
 before landing the child. See the [Native GitHub Stacks guide](../../docs/guides/NATIVE-GITHUB-STACKS.md).
 
 Approval publication records the reviewing account's independent conclusion.
-Other accounts' open `CHANGES_REQUESTED` reviews, including their structured
-verdicts, do not prevent it; they remain blockers for merge admission and source
-receipts. The guard names those pending requests as `APPROVAL ONLY` on stderr
-and never dismisses them. To replace your own latest open change request after
-rereview, pass `--replace-own-cr REVIEW_ID` alongside the reviewed base, diff and
-PASS body. Only that exact owned request is replaced by the new approval.
-Separate issue-comment and `COMMENTED` review verdicts still apply, as do all
-head, diff, identity and Release CI checks. Reviewers can therefore rereview in
-any order without withdrawing each other's findings or posting a PASS comment
-to unblock approval.
+Existing change requests and structured decisions do not prevent a new,
+independently reviewed PASS from being recorded. They still apply when a merge
+or source receipt consumes review evidence. API-read failures, author exclusion,
+reviewed head/base/diff checks and Release CI requirements remain enforced.
+Ordinary source publication does not wait for a `leader-selected-ci` pin; merge
+admission still checks that pin.
+
+To replace your own open change request after rereview, pass
+`--replace-own-cr REVIEW_ID` alongside the reviewed base, diff and PASS body.
+The ID may name any of your open CRs on that PR; repeat the option to name
+several. Every ID is checked against the authenticated account and actual CR
+state. A new approval supersedes that account's previous formal decision without
+dismissing another review. Replacement flags cannot authorize merge or receipts.
+
+`review-decisions.py` reduces structured review/comment decisions independently
+for each authenticated GitHub login. A later trusted PASS can supersede only
+that account's older decisions. A PR-author or unrelated account's PASS comment
+cannot clear another account's FAIL/HOLD. Keeper `by:` names are diagnostic;
+Keepers sharing a GitHub login do not supply independent formal opinions.
+Unidentified decisions cannot grant PASS, and unpublished PENDING reviews do
+not participate. Positive comment edits cannot move an old PASS past a later
+refusal; negative edits and contradictory same-timestamp decisions still block.
 
 `merge-guard.sh --check --repo O/R --pr N --head SHA` checks each included
 PR's current head, independent trusted head-bound approval and latest blocking
@@ -76,7 +88,9 @@ missing or skipped required job is not evidence of full verification.
 
 `queue-ledger.sh --repo O/R --format tsv` reports source-review readiness and
 native stack scope admission or non-native parent waits. It reads full CI
-evidence only for release heads.
+evidence only for release heads. Structured blockers name their authenticated
+account, record ID and decision timestamp. Other admission failures retain their
+concrete guard diagnostic instead of being collapsed to `review`.
 
 ## Reading a refusal
 
@@ -89,8 +103,10 @@ footer prefix, `reviewed base`/`diff sha256` tail, a stale diff hash, or the
 makes the admission decision and the reasons come from the same code, so the
 guard and the explanation cannot disagree.
 
-Offline checks: `python3 -I scripts/review/test_review_refusal.py`,
-`python3 -I scripts/review/test_approve_guard_refusal.py` and
+Offline checks: `python3 -I scripts/review/test_review_decisions.py`,
+`python3 -I scripts/review/test_review_refusal.py`,
+`python3 -I scripts/review/test_approve_guard_refusal.py`,
+`python3 -I scripts/review/test_queue_ledger.py` and
 `python3 -I scripts/review/test_stack_scope.py`.
 
 ## Preparing an approved candidate

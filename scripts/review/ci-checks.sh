@@ -55,10 +55,10 @@ read_current_pr() {
 # operator judgment (MASC_MERGE_COMPILE_ENFORCE=1 opts a single invocation
 # into fail-close).
 check_leader_selected_ci() {
-  local rows status context target_url
+  local rows status target_url description
   rows=$(ci_gh_last_row "repos/$repo/commits/$head/status" '[.statuses[] | select(.context == "leader-selected-ci") | [.state, .target_url, .description] | @tsv] | last // empty') || return 1
   [ -n "$rows" ] || return 0
-  IFS=$'\t' read -r status context target_url <<<"$rows"
+  IFS=$'\t' read -r status target_url description <<<"$rows"
   case "$status" in
     pending)
       echo "MERGE ON HOLD #$pr: leader-selected CI is in progress ($target_url) — wait for it to finish before merging" >&2

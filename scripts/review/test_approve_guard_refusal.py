@@ -61,7 +61,7 @@ class GuardHarness(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.scripts = self.tmp / "scripts"
         self.scripts.mkdir()
-        for name in ("approve-guard.sh", "ci-checks.sh", "review-verdict.sh",
+        for name in ("approve-guard.sh", "ci-checks.sh", "review-verdict.sh", "review-decisions.py",
                      "review-scope.py", "review-refusal.py", "_gh_merge_base.py",
                      "prepare-approved-batch.py"):
             shutil.copy(HERE / name, self.scripts / name)
@@ -392,6 +392,20 @@ class SourceReceiptCase(GuardHarness):
 
 
 class CheckOnlyCase(GuardHarness):
+    def test_source_publication_does_not_wait_for_selected_ci(self):
+        body = self.tmp / "body.md"
+        body.write_text(f"verdict: PASS head: {HEAD} by: reviewer-keeper\nsource review notes\n")
+        for state in ("pending", "failure", "error"):
+            with self.subTest(state=state):
+                (self.data / "status.json").write_text(json.dumps({"statuses": [{
+                    "context": "leader-selected-ci", "state": state,
+                    "target_url": "https://ci.example/run/1", "description": "selected check"}]}))
+                r = self.run_guard("--check", "--review-base", BASE,
+                                   "--review-diff", DIFF, "--body", str(body))
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("WOULD APPROVE", r.stdout)
+        self.assertNotIn("/status", (self.data / "calls.log").read_text())
+
     def test_check_refuses_self_approval(self):
         (self.data / "user.json").write_text(json.dumps({"login": "author-keeper"}))
         r = self.run_guard("--check")
@@ -472,15 +486,14 @@ class VerdictWithdrawalCase(GuardHarness):
         self.assertEqual(r.returncode, 2)
         self.assertIn("open CHANGES_REQUESTED", r.stderr)
 
-    def test_foreign_or_superseded_replacement_id_is_refused(self):
+    def test_foreign_or_missing_replacement_id_is_refused(self):
         for request in (self.negative_review(login="another-reviewer"),
                         self.negative_review(rid=89)):
             with self.subTest(request=request):
                 self.reviews(request)
                 r = self.replacement_check()
                 self.assertEqual(r.returncode, 2)
-                self.assertIn("open CHANGES_REQUESTED" if request["user"]["login"] == "reviewer-account"
-                              else "does not name this account", r.stderr)
+                self.assertIn("does not name this account", r.stderr)
                 self.assertEqual(r.stdout, "")
 
     def test_other_change_requests_do_not_block_recording_an_independent_review(self):
@@ -496,8 +509,7 @@ class VerdictWithdrawalCase(GuardHarness):
                 self.assertIn("remain merge blockers: another-reviewer:88", r.stderr)
                 self.assertEqual(json.loads((self.data / "reviews.json").read_text()), [request])
 
-    def test_two_reviewers_can_replace_their_crs_without_dismissing_each_other(self):
-        self.reviews(self.negative_review(), self.negative_review(rid=89, login="another-reviewer"))
+    def install_publication_fake(self):
         # Exercise the real publication and readback path. The fake records
         # APPROVE as a new review; no dismissal operation is implemented.
         post = self.tmp / "post.py"
@@ -507,10 +519,10 @@ args = sys.argv[1:]
 assert args[:3] == ["-X", "POST", "repos/o/r/pulls/41487/reviews"], args
 assert "event=APPROVE" in args and "body=@-" in args, args
 reviews = json.loads((p / "reviews.json").read_text())
-rid = max(r["id"] for r in reviews) + 1
+rid = max((r["id"] for r in reviews), default=0) + 1
 review = {"id": rid, "state": "APPROVED", "author_association": "COLLABORATOR",
           "body": sys.stdin.read(), "commit_id": next(a.split("=", 1)[1] for a in args if a.startswith("commit_id=")),
-          "user": json.loads((p / "user.json").read_text()), "submitted_at": f"2026-10-09T03:45:{rid % 60:02d}Z"}
+          "user": json.loads((p / "user.json").read_text()), "submitted_at": f"2026-10-10T03:45:{rid % 60:02d}Z"}
 reviews.append(review)
 (p / "reviews.json").write_text(json.dumps(reviews))
 (p / f"review-{rid}.json").write_text(json.dumps(review))
@@ -525,11 +537,20 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
             '[ "$1" != --paginate ] || shift').replace(
             'repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review.json";;',
             'repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review-${path##*/}.json";;'))
+
+    def publish(self, *replace_ids):
         body = self.tmp / "replacement.md"
         body.write_text(f"verdict: PASS head: {HEAD} by: reviewer-keeper\nindependent source review\n")
+        args = ["--review-base", BASE, "--review-diff", DIFF, "--body", str(body)]
+        for rid in replace_ids:
+            args += ["--replace-own-cr", str(rid)]
+        return self.run_guard(*args)
+
+    def test_two_reviewers_can_replace_their_crs_without_dismissing_each_other(self):
+        self.reviews(self.negative_review(), self.negative_review(rid=89, login="another-reviewer"))
+        self.install_publication_fake()
         def approve(rid):
-            return self.run_guard("--replace-own-cr", str(rid), "--review-base", BASE,
-                                  "--review-diff", DIFF, "--body", str(body))
+            return self.publish(rid)
 
         first = approve(88)
         self.assertEqual(first.returncode, 0, first.stderr)
@@ -553,16 +574,22 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
         self.assertEqual(calls.count("POST repos/o/r/pulls/41487/reviews"), 2)
         self.assertNotIn("dismiss", calls)
 
-    def test_replacement_does_not_hide_a_separate_newer_fail_review(self):
+    def test_recording_a_new_review_does_not_clear_a_different_reviewers_findings(self):
         for login in ("reviewer-account", "another-reviewer"):
             with self.subTest(login=login):
                 self.reviews(self.negative_review(), self.negative_review(
                     rid=89, state="COMMENTED", login=login, submitted="2026-10-09T03:45:54Z"))
+                self.install_publication_fake()
                 r = self.replacement_check()
-                self.assertEqual(r.returncode, 2)
-                self.assertIn("latest structured verdict is FAIL", r.stderr)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                published = self.publish(88)
+                self.assertEqual(published.returncode, 0, published.stderr)
+                merged = self.run_guard("--merge-check")
+                self.assertEqual(merged.returncode, 0 if login == "reviewer-account" else 2, merged.stderr)
+                if login != "reviewer-account":
+                    self.assertIn("structured verdict is FAIL", merged.stderr)
 
-    def test_edited_fail_comment_with_the_same_id_still_blocks_replacement(self):
+    def test_edited_fail_comment_can_be_superseded_by_its_authors_new_publication(self):
         self.review(footer_line())
         approval = json.loads((self.data / "review.json").read_text())
         self.reviews(approval, self.negative_review())
@@ -572,8 +599,93 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
             "user": {"login": "reviewer-account"}, "author_association": "COLLABORATOR",
             "created_at": "2026-10-06T03:45:54Z", "updated_at": "2026-10-09T03:45:54Z"}]))
         r = self.replacement_check()
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("latest structured verdict is FAIL", r.stderr)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_multiple_own_crs_can_be_replaced_by_a_new_bound_approval(self):
+        self.install_publication_fake()
+        for ids in ((88,), (89,), (88, 89)):
+            with self.subTest(ids=ids):
+                self.reviews(self.negative_review(), self.negative_review(
+                    rid=89, submitted="2026-10-09T03:45:54Z"))
+                published = self.publish(*ids)
+                self.assertEqual(published.returncode, 0, published.stderr)
+                for mode in ("--merge-check", "--source-receipt"):
+                    result = self.run_guard(mode)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_each_replacement_id_must_belong_to_the_authenticated_reviewer(self):
+        self.reviews(self.negative_review(), self.negative_review(rid=89, login="someone-else"))
+        self.install_publication_fake()
+        result = self.publish(88, 89)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("--replace-own-cr 89 does not name this account", result.stderr)
+        self.assertNotIn("POST", (self.data / "calls.log").read_text())
+
+    def test_new_review_can_supersede_own_fail_comment_without_cr(self):
+        self.install_publication_fake()
+        (self.data / "comments.json").write_text(json.dumps([{
+            "id": 88, "body": f"verdict: FAIL head: {HEAD} by: reviewer-keeper",
+            "user": {"login": "reviewer-account"}, "author_association": "COLLABORATOR",
+            "created_at": "2026-10-08T03:45:54Z", "updated_at": "2026-10-08T03:45:54Z"}]))
+        published = self.publish()
+        self.assertEqual(published.returncode, 0, published.stderr)
+        self.assertEqual(self.run_guard("--merge-check").returncode, 0)
+
+    def test_prior_own_approval_does_not_skip_a_new_verdict_after_own_fail(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        approval["user"]["login"] = "reviewer-account"
+        self.reviews(approval)
+        (self.data / "review-77.json").write_text(json.dumps(approval))
+        (self.data / "comments.json").write_text(json.dumps([{
+            "id": 88, "body": f"verdict: FAIL head: {HEAD} by: reviewer-keeper",
+            "user": {"login": "reviewer-account"}, "author_association": "COLLABORATOR",
+            "created_at": "2026-10-08T03:45:54Z", "updated_at": "2026-10-08T03:45:54Z"}]))
+        self.install_publication_fake()
+        self.assertEqual(self.run_guard("--merge-check").returncode, 2)
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("APPROVED #41487", result.stdout)
+        self.assertEqual(self.run_guard("--merge-check").returncode, 0)
+        # Once the new account-owned PASS is effective, identical publication
+        # remains idempotent and does not create another formal review.
+        repeated = self.publish()
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        self.assertIn("SKIP #41487", repeated.stdout)
+        self.assertEqual((self.data / "calls.log").read_text().count("POST "), 1)
+
+    def test_replacement_requires_one_numeric_id_per_option(self):
+        for invalid in ("88 89", "88\n89", "0", "88x"):
+            with self.subTest(invalid=invalid):
+                result = self.replacement_check(replace_id=invalid)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertFalse((self.data / "calls.log").exists())
+
+    def test_unrelated_and_author_pass_cannot_clear_another_reviewers_hold(self):
+        self.review(footer_line())
+        hold = {"id": 88, "body": f"verdict: HOLD head: {HEAD} by: held-keeper",
+                "user": {"login": "held-account"}, "author_association": "COLLABORATOR",
+                "created_at": "2026-10-08T03:45:54Z", "updated_at": "2026-10-08T03:45:54Z"}
+        for actor in ("author-keeper", "reviewer-keeper", "someone-else"):
+            with self.subTest(actor=actor):
+                passed = {"id": 89, "body": f"verdict: PASS head: {HEAD} by: held-keeper",
+                          "user": {"login": actor}, "author_association": "COLLABORATOR",
+                          "created_at": "2026-10-09T03:45:54Z", "updated_at": "2026-10-09T03:45:54Z"}
+                (self.data / "comments.json").write_text(json.dumps([hold, passed]))
+                for mode in ("--merge-check", "--source-receipt"):
+                    result = self.run_guard(mode)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("structured verdict is HOLD", result.stderr)
+                    self.assertIn("held-account", result.stderr)
+
+    def test_merge_pin_refusal_preserves_the_actual_run_link(self):
+        self.review(footer_line())
+        (self.data / "status.json").write_text(json.dumps({"statuses": [{
+            "context": "leader-selected-ci", "state": "pending",
+            "target_url": "https://ci.example/run/1", "description": "selected check"}]}))
+        result = self.run_guard("--merge-check")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("https://ci.example/run/1", result.stderr)
 
     def test_dismissing_a_review_does_not_withdraw_its_matching_issue_comment(self):
         self.review(footer_line())

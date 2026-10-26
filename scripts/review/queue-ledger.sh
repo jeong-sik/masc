@@ -44,22 +44,24 @@ while IFS=$'\t' read -r pr author base head branch draft; do
   [ -n "$pr" ] || continue
   review_identity=""; run=""; verdict="-"; evidence="source review"; waits="review"
   if [ "$draft" = true ]; then waits=draft
-  elif value=$(verdict_for "$pr" "$head"); then
-    read -r state cited by <<<"$value"
+  elif value=$(verdict_for "$pr" "$head" "" "" json); then
+    state=$(printf '%s' "$value" | jq -r '.state // empty')
+    cited=$(printf '%s' "$value" | jq -r '.run // "-"')
+    by=$(printf '%s' "$value" | jq -r '.by // "-"')
     verdict="${state:--}${by:+ by $by}"
+    if [ -n "$state" ] && [ "$state" != PASS ]; then
+      waits=$(printf '%s' "$value" | jq -r '[.blockers[] | "\(.state) by \(.actor // "unidentified") at \(.kind):\(.id // "unknown") since \(.decision_at)"] | join("; ")')
+    fi
     if [ "$state" = PASS ]; then
       if check_current_ci; then
         [ "$review_policy" != release ] || evidence="release run $release_run"
         if { [ "$review_policy" = source ] && [ "$cited" != - ]; } ||
            { [ "$review_policy" = release ] && [ "$cited" != "$release_run" ]; }; then waits=review
-        elif GUARD_GH="$GH" bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" --head "$head" >/dev/null; then
+        elif guard_note=$(GUARD_GH="$GH" bash "$here/approve-guard.sh" --merge-check --repo "$repo" --pr "$pr" --head "$head" 2>&1); then
           waits=merge
           if [ "${pr_stack:-null}" != null ]; then
             if accepted_scope=$(GUARD_GH="$GH" bash "$here/merge-guard.sh" --check --scope-json --repo "$repo" --pr "$pr" --head "$head"); then
               target=$(printf '%s' "$accepted_scope" | jq -r 'if .stack != null then .stack.base.ref else .scope[0].identity.base.ref end')
-              if [ "$fmt" = md ]; then
-                target=$(printf '%s' "$target" | python3 -c 'import sys; print(sys.stdin.read().replace("\\", "\\\\").replace("|", "\\|"), end="")')
-              fi
               if [ "$(printf '%s' "$accepted_scope" | jq -r '.stack != null')" = true ]; then
                 waits="merge native stack through #$pr into $target"
               else waits="merge into $target"; fi
@@ -68,10 +70,15 @@ while IFS=$'\t' read -r pr author base head branch draft; do
             parent=$(printf '%s\n' "$rows" | awk -F '\t' -v base="$base" '$5==base {print $1; exit}')
             waits="parent ${parent:+#}${parent:-$base}"
           fi
-        else waits=review; fi
+        else
+          waits=$(printf '%s\n' "$guard_note" | awk 'NF {print; exit}')
+          [ -n "$waits" ] || waits="unknown:review admission failed without a diagnostic"
+        fi
       else waits="release CI or changed PR"; fi
     fi
   else waits="unknown:review"; fi
-  if [ "$fmt" = md ]; then printf '| #%s | %s | %s | %s | %s |\n' "$pr" "$author" "$waits" "$evidence" "$verdict"
+  if [ "$fmt" = md ]; then
+    waits=$(printf '%s' "$waits" | python3 -c 'import sys; print(sys.stdin.read().replace("\\", "\\\\").replace("|", "\\|").replace("\n", " "), end="")')
+    printf '| #%s | %s | %s | %s | %s |\n' "$pr" "$author" "$waits" "$evidence" "$verdict"
   else printf '%s\t%s\t%s\t%s\t%s\n' "$pr" "$author" "$waits" "$evidence" "$verdict"; fi
 done <<<"$rows"

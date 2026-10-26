@@ -574,40 +574,42 @@ let test_export_cancellation_after_lock_admission_is_not_success () =
     let directory=Filename.concat base "cancel-export" in
     let registry_root=Filename.concat base "local-masc" in
     List.iter (fun path -> Unix.mkdir path 0o700) [directory;registry_root];
-    let lock_path=Filename.concat registry_root "tui-evidence-export.lock" in
     let file=download_fixture ~base_path:base (String.make (4 * 1024 * 1024) 'x') in
     let progress=Atomic.make File.Not_started in
-    Eio.Switch.run @@ fun sw ->
-    let outcome,resolve_outcome=Eio.Promise.create () in
-    let context,resolve_context=Eio.Promise.create () in
-    Eio.Fiber.fork ~sw (fun () ->
-      Eio.Cancel.sub (fun cancellation ->
-        Eio.Promise.resolve resolve_context cancellation;
-        match File.export ~fs:env#fs ~registry_root ~directory ~progress
-          ~admitted:(fun () -> Ok ()) ~open_file:None file with
-        | result -> Eio.Promise.resolve resolve_outcome (`Returned result)
-        | exception Eio.Cancel.Cancelled Exit ->
-          Eio.Promise.resolve resolve_outcome `Cancelled
-        | exception exn -> Eio.Promise.resolve resolve_outcome (`Unexpected exn)));
-    let rec await_lock () =
-      if File_lock_eio.For_testing.holders_and_waiters ~lock_path >= 1 then ()
-      else match Eio.Promise.peek outcome with
-        | Some _ -> Alcotest.fail "export completed before lock-admitted cancellation"
-        | None -> Eio.Fiber.yield (); await_lock ()
-    in
-    await_lock ();
-    Eio.Cancel.cancel (Eio.Promise.await context) Exit;
-    match Eio.Promise.await outcome with
-    | `Cancelled ->
-      (match Atomic.get progress with
-       | File.Saved path ->
-         Alcotest.(check int) "cancelled export retains the complete saved bytes"
-           (4 * 1024 * 1024) (String.length (Eio.Path.load Eio.Path.(env#fs / path)))
-       | File.Not_started | File.Writing _ ->
-         Alcotest.fail "cancelled export lost its confirmed save")
-    | `Returned (Ok path) -> Alcotest.failf "lock-admitted cancellation returned success: %s" path
-    | `Returned (Error detail) -> Alcotest.failf "lock-admitted cancellation returned an error: %s" detail
-    | `Unexpected exn -> Alcotest.fail (Printexc.to_string exn))
+    let lock_acquired,resolve_lock_acquired=Eio.Promise.create () in
+    let previous=Atomic.get File_lock_eio.on_lock_attempt_fn in
+    Fun.protect ~finally:(fun () -> Atomic.set File_lock_eio.on_lock_attempt_fn previous) (fun () ->
+      Atomic.set File_lock_eio.on_lock_attempt_fn (fun ~caller:_ ~retries:_ ~elapsed_s:_ ~outcome ->
+        if outcome="acquired" then Eio.Promise.resolve resolve_lock_acquired ());
+      Eio.Switch.run @@ fun sw ->
+      let outcome,resolve_outcome=Eio.Promise.create () in
+      let context,resolve_context=Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Cancel.sub (fun cancellation ->
+          Eio.Promise.resolve resolve_context cancellation;
+          match File.export ~fs:env#fs ~registry_root ~directory ~progress
+            ~admitted:(fun () -> Ok ()) ~open_file:None file with
+          | result -> Eio.Promise.resolve resolve_outcome (`Returned result)
+          | exception Eio.Cancel.Cancelled Exit ->
+            Eio.Promise.resolve resolve_outcome `Cancelled
+          | exception exn -> Eio.Promise.resolve resolve_outcome (`Unexpected exn)));
+      Eio.Promise.await lock_acquired;
+      Eio.Fiber.yield ();
+      (match Eio.Promise.peek outcome with
+       | Some _ -> Alcotest.fail "export completed before lock-admitted cancellation"
+       | None -> ());
+      Eio.Cancel.cancel (Eio.Promise.await context) Exit;
+      match Eio.Promise.await outcome with
+      | `Cancelled ->
+        (match Atomic.get progress with
+         | File.Saved path ->
+           Alcotest.(check int) "cancelled export retains the complete saved bytes"
+             (4 * 1024 * 1024) (String.length (Eio.Path.load Eio.Path.(env#fs / path)))
+         | File.Not_started | File.Writing _ ->
+           Alcotest.fail "cancelled export lost its confirmed save")
+      | `Returned (Ok path) -> Alcotest.failf "lock-admitted cancellation returned success: %s" path
+      | `Returned (Error detail) -> Alcotest.failf "lock-admitted cancellation returned an error: %s" detail
+      | `Unexpected exn -> Alcotest.fail (Printexc.to_string exn)))
 
 let http_get_evidence ~router ?token target =
   let output=Buffer.create 1024 in

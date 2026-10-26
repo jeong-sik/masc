@@ -62,6 +62,14 @@ val await_settled : t -> (settled,error) result
     stdin-close failure becomes observable without waiting for a child that
     may now be blocked on that failed stream. An error is not termination;
     the owner can still durably cancel and observe physical quiescence. *)
+type observation = private { settled : settled; status : P.response }
+val await_observation : t -> (observation,error) result
+(** Join this actual supervisor and refresh its original record before projecting
+    Termination_observed with the raw physical status and both actual seals.
+    The raw gate and input-delivery facts remain in [settled]. The result stays
+    Result_pending: no immutable terminal receipt, exec proof, host ACK or
+    Release is fabricated. Original authority or capture failure remains an
+    error even when the physical child has exited. Never infer replay permission. *)
 val read_output : t -> stream:P.stream -> offset:int64 -> max_bytes:int -> (O.chunk,error) result
 val cancel : t -> (R.record,error) result
 val await_quiescent : t -> (G.exit_observation,error) result

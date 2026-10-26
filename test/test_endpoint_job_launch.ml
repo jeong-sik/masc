@@ -473,6 +473,15 @@ let supervisor_owns_original_input_and_both_outputs = fixture (fun ~env ~sw:_ ~s
       ((S.original owner).binding=binding && (S.original owner).admission_id=id "04");
     let settled=S.await_settled owner |> supervise in
     exit 7 settled.physical_exit;
+    let observed=S.await_observation owner |> supervise in
+    check "physical observation retains the same actual gate and input evidence" (observed.settled=settled);
+    (match observed.status with
+     | P.Status {original;phase=P.Termination_observed (P.Exited 7);result=P.Result_pending;
+         stdout=P.Sealed {sha256;_};stderr=P.Sealed _;_} ->
+       check "original physical result does not fabricate exec proof or terminal publication"
+         (original=S.original owner && sha256=settled.stdout.sha256)
+     | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ ->
+       Alcotest.fail "physical settlement became payload success or a ready result");
     (match settled.stdin with
      | S.Written n -> Alcotest.(check int64) "only the committed binary stdin was supplied" (Int64.of_int (String.length data)) n
      | S.Write_failed _ -> Alcotest.fail "cat lost its committed input");
@@ -511,6 +520,9 @@ let supervisor_reports_capture_failure_before_blocked_child_exit = fixture (fun 
     ignore (S.cancel owner |> supervise);
     let stopped=S.await_quiescent owner |> supervise in
     check "original was still alive until its own durable cancel" (stopped.status=G.Signaled 9);
+    (match S.await_observation owner with
+     | Error (S.Output_error {stream=P.Stdout;cause=O.Publication_failed _}) -> ()
+     | Error _ | Ok _ -> Alcotest.fail "physical termination hid missing complete original output");
     let current=R.load store ~binding |> registry in
     check "output failure never substitutes another cancellation owner" (R.cancellation_state current=R.Cancellation_requested)))
 

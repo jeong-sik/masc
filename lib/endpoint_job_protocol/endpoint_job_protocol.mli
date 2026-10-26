@@ -130,9 +130,19 @@ type non_start = Cancelled_before_activation | Launch_rejected
     request, controller EOF, activation request, missing record or bootstrap
     exit code alone is insufficient. Uncertain original authority stays Held. *)
 
-type phase = Queued | Starting | Running | Finished of exit_status | Not_started of non_start
+type phase =
+  | Queued | Starting | Running
+  | Finished of exit_status
+  | Not_started of non_start
+  | Termination_observed of exit_status
 (** Not_started is terminal without inventing a payload exit status. Bootstrap
     exits are not classified as Finished just from their physical exit code.
+    Termination_observed records the exact original main reaped and recursive
+    tree empty, while leaving payload execution and effects uncertain. Gate
+    activation/control EOF cannot establish exec. This is neither success nor
+    failure/retry permission, and may retain nonempty original output.
+    Its protected terminal receipt must preserve raw gate boundary, original
+    admission/launch and cancellation intent before result readiness.
     Not_started carries no payload output; its streams may still await durable
     empty sealing and result-manifest publication. Cancelled_before_activation
     requires the corresponding cancellation intent to remain visible. *)
@@ -163,7 +173,8 @@ type hold =
 
 type result_availability = Result_pending | Result_ready of Sha256.t
 (** Ready names the protected complete terminal result manifest required by
-    Release. It requires a Finished or proven Not_started terminal and both durably sealed streams;
+    Release. It requires a Finished, proven Not_started or Termination_observed
+    terminal receipt and both durably sealed streams;
     even that combination may remain pending until manifest publication. *)
 
 type response =

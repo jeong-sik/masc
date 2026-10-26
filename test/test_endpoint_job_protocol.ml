@@ -313,6 +313,41 @@ let test_original_admission_handshake () =
   check bool "delayed registration cannot roll back confirmed progress" true
     (P.check_response ~minimum_revision:2L ~request:(P.Reconcile_admission binding) admitted=Error P.Response_revision_stale)
 
+let test_termination_observation_preserves_execution_uncertainty () =
+  let spec=spec () |> require in let binding=binding spec in
+  let original=pinned binding in
+  let empty=P.Sealed {byte_length=0L;sha256=digest ""} in
+  let status phase stdout result : P.response=P.Status {original;revision=3L;phase;
+    cancel_requested=true;result;stdout;stderr=empty} in
+  let request=P.Inspect original in
+  List.iter (fun physical ->
+    let phase=P.Termination_observed physical in
+    let response=status phase (P.Sealed {byte_length=4L;sha256=digest "data"}) P.Result_pending in
+    let wire=P.response_to_json response |> get in
+    check bool "physical termination keeps uncertain execution distinct from payload Finished or Not_started" true
+      (P.response_of_json wire=Ok response);
+    check bool "observed terminal remains bound to its original request" true
+      (P.check_response ~minimum_revision:3L ~request response=Ok ());
+    let ready=status phase empty (P.Result_ready (digest "protected physical observation receipt")) in
+    check bool "sealed complete observation and original manifest can be consumed without asserting execution success" true
+      (P.check_response ~minimum_revision:3L ~request ready=Ok ());
+    let growing=status phase (P.Growing 4L) (P.Result_ready (digest "unsealed observation")) in
+    check bool "physical termination cannot bypass missing complete output" true (Result.is_error (P.response_to_json growing)))
+    [P.Exited 0;P.Exited 125;P.Exited 127;P.Signaled 9];
+  let wire=P.response_to_json (status (P.Termination_observed (P.Exited 127)) empty P.Result_pending) |> get in
+  let with_physical value=match wire with
+    | `Assoc fields -> `Assoc (List.map (fun (key,current) -> key,
+        if key="phase" then `Assoc ["state",`String "termination_observed";"physical_status",value] else current) fields)
+    | _ -> fail "status object missing" in
+  List.iter (fun value -> check bool "raw terminal status rejects ambiguous, missing and foreign fields" true
+      (Result.is_error (P.response_of_json (with_physical value))))
+    [`Assoc ["kind",`String "exited";"code",`String "127";"payload_ran",`Bool true];
+     `Assoc ["kind",`String "signaled";"signal",`String "0"];
+     `Assoc ["kind",`String "exited";"code",`String "-1"];
+     `Assoc ["kind",`String "exited";"code",`String "01"];
+     `Assoc ["kind",`String "exited";"code",`String "0";"code",`String "127"];
+     `Assoc ["kind",`String "guessed_success"]]
+
 let () = run "endpoint job protocol"
   ["protected control boundary",[
     test_case "original binary bytes, domains, routes and exact integer offsets" `Quick test_exact_bytes_and_routes;
@@ -323,4 +358,5 @@ let () = run "endpoint job protocol"
     test_case "stale response, operation kind and result release remain distinct" `Quick test_revisions_response_kind_and_release;
     test_case "invalid exec, version and lifecycle claims refuse explicitly" `Quick test_structural_refusals;
     test_case "non-start settles without fabricated exit, output or result" `Quick test_non_start_terminal;
-    test_case "registration and later controls pin the exact original admission" `Quick test_original_admission_handshake]]
+    test_case "registration and later controls pin the exact original admission" `Quick test_original_admission_handshake;
+    test_case "physical termination preserves uncertain execution and complete result requirements" `Quick test_termination_observation_preserves_execution_uncertainty]]

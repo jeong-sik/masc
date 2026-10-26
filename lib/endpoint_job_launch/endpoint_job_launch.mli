@@ -38,6 +38,10 @@ val error_to_string : error -> string
 type activation = Requested | Held of error
 val activation : t -> activation
 val original : t -> P.original
+val observe_original : t -> (R.record, error) result
+(** Refresh the opaque original source captured by this launch. Matching caller
+    coordinates cannot substitute another registry or known launch. This read
+    grants no new effect or recovered kernel-handle authority. *)
 val specification : t -> P.spec
 val storage : t -> Eio.Fs.dir_ty Eio.Path.t
 (** The same original capability owned by the job Switch, for the trusted

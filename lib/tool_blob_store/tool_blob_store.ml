@@ -425,13 +425,6 @@ let store_addressed ~rewrite ~atomic_replace ~operation addressed =
    | Rewrite_every_put -> write ());
   addressed.addressed_ref
 
-let put_with_atomic_replace ~rewrite ~atomic_replace ~operation t ~bytes ~mime =
-  store_addressed
-    ~rewrite
-    ~atomic_replace
-    ~operation
-    (address_with ~operation t ~bytes ~mime)
-
 let address t ~bytes ~mime = address_with ~operation:"address" t ~bytes ~mime
 let addressed_bytes addressed = addressed.addressed_bytes
 
@@ -450,11 +443,44 @@ let put_addressed addressed =
    leaves the bytes at their address. *)
 let put t ~bytes ~mime = put_addressed (address_with ~operation:"put" t ~bytes ~mime)
 
-let put_durable =
-  put_with_atomic_replace
-    ~rewrite:Rewrite_every_put
-    ~atomic_replace:Fs_compat.save_file_atomic_strict
-    ~operation:"put_durable"
+let prepare_owned_durable_parent t path =
+  let parent = Filename.dirname path in
+  let check () =
+    match Fs_compat.read_owned_directory_if_present ~owner_uid:(Unix.geteuid ())
+      ~ownership_root:t.ownership_root parent with
+    | Ok entries -> entries
+    | Error error ->
+      raise (Sys_error (Fs_compat.owned_regular_file_read_error_to_string error)) in
+  ignore (check ());
+  let descendants = match Fs_compat.owned_directory_paths
+    ~ownership_root:t.ownership_root parent with
+    | Ok paths -> paths
+    | Error error ->
+      raise (Sys_error (Fs_compat.owned_directory_chain_rejection_to_string error)) in
+  ensure_parent_dir path;
+  let require_directory () = match check () with
+    | Some _ -> ()
+    | None -> raise (Sys_error "tool_blob_store.put_durable: directory creation not observed") in
+  require_directory ();
+  (* Sync all ancestors, including existing directories: a previous failed
+     preparation may have created a name without durably linking it. *)
+  List.iter (fun directory ->
+    let fd = Unix.openfile directory [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd))
+    (List.rev (t.ownership_root :: descendants));
+  require_directory ()
+
+let put_durable t ~bytes ~mime =
+  let addressed = address_with ~operation:"put_durable" t ~bytes ~mime in
+  Eio_guard.run_in_systhread ~label:"tool-blob-put-durable" (fun () ->
+    (try prepare_owned_durable_parent t addressed.addressed_path with
+     | Unix.Unix_error (code, fn, arg) ->
+       raise (Sys_error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))));
+    store_addressed
+      ~rewrite:Rewrite_every_put
+      ~atomic_replace:Fs_compat.save_file_atomic_strict
+      ~operation:"put_durable"
+      addressed)
 ;;
 
 (* A content address proves identity, not durability of a replacement file.

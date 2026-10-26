@@ -84,3 +84,17 @@ npm test
 실제 npm 설치/잠금 재설치, React와 Vite 설정·플러그인·별칭·pre/post build·동적 chunk, 파일 그래프의 전체 바이트/SHA와 HTTP 경로, 검증용 DOM/ESM에서의 실제 앱 동작, 잠금 변조·최종 기록 실패·출력 수집 중 변경 등을 검사합니다. DOM 실행은 SourceTextModule+HappyDOM이며 실제 브라우저/CSP/layout/프로젝트 UI·Keeper 배정은 별도입니다.
 
 [근거] [npm run](https://docs.npmjs.com/cli/v11/commands/npm-run/), [npm ci](https://docs.npmjs.com/cli/v11/commands/npm-ci/), [Vite production build](https://vite.dev/guide/build.html), [esbuild API](https://esbuild.github.io/api/) 및 고정 설치본. 2026-10-26 KST · High. 실제 검사 범위를 전체 브라우저나 제품 통합 증거로 넓히지 않습니다.
+
+## 프로젝트 원본 보관
+
+네이티브 서버 쪽 `Artifact_project_source.request_of_json`은 실행기와 같은 요청 형식을 받습니다.
+`Artifact_project_source_store.save`는 원본 파일을 기존 blob 저장소에 넣은 뒤, 선택한 workspace의
+`.masc/artifact_project_sources/`에 파일 목록과 빌드 방식을 기록합니다. 저장할 때마다 새 ID를
+만들며 이전 원본을 덮어쓰지 않습니다. 파일 목록의 normalized blob reference가 저장소 정리 때도
+원본 파일을 보존합니다.
+
+`Artifact_project_source_store.read`는 목록 파일의 소유권·권한과 각 원본의 길이·해시를 검사한 뒤
+실행기 요청을 복원합니다. 의존성을 설치하거나 프로젝트 코드를 실행하지 않습니다.
+`.npmrc`나 `.env` 같은 비밀 정보도 원본에 포함될 수 있으므로, 이를 호출하는 쪽에서 인증과
+원본 접근 권한을 확인해야 합니다. HTTP 업로드·조회 API, 원본 편집, 빌드 결과·사이트 저장,
+Keeper 실행 연결은 후속 작업이며 가져오기 화면은 아직 없습니다.

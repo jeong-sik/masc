@@ -378,6 +378,8 @@ let durable_consumer_basenames =
   ; "keeper_msg_requests"
   (* Published reports own all revisions independently of chat/log retention. *)
   ; "published_artifacts"
+  (* Imported project sources may outlive their originating tool or chat row. *)
+  ; "artifact_project_sources"
   ]
 ;;
 

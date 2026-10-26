@@ -1486,7 +1486,7 @@
  (name masc_tui_keeper_list_model)
  (wrapped false)
  (modules masc_tui_keeper_list_model)
- (libraries masc masc_tui_keeper_control))
+ (libraries masc masc.masc_goal masc_tui_keeper_control))
 
 (library
  (name masc_tui_keeper_selection)

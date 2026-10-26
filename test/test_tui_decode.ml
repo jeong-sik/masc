@@ -8638,6 +8638,7 @@ let keeper_turns_waiting_json =
                       ] )
               ] )
       ] )
+  ] )
 
 let test_decode_keeper_turns_projection_reads_waiting () =
   match Tui_decode.decode_keeper_turns_projection keeper_turns_waiting_json with

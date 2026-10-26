@@ -10704,9 +10704,10 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
           state.keeper_tool_approvals
       in
       let task =
-        Option.bind keeper.k_activity (fun activity -> activity.Tui_decode.k_current_task_id)
-        |> Option.bind (fun task_id ->
-          List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id task_id) state.tasks)
+        match keeper.k_activity with
+        | Some { Tui_decode.k_current_task_id = Some task_id; _ } ->
+            List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id task_id) state.tasks
+        | Some { Tui_decode.k_current_task_id = None; _ } | None -> None
       in
       let async_requests =
         match state.tools_async_observation with

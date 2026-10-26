@@ -4600,15 +4600,16 @@ let decode_named_vocabulary ~kind table raw =
   | None -> Error (Printf.sprintf "unknown %s %S" kind raw)
 
 let keeper_waiting_state_of_string raw =
-  decode_named_vocabulary ~kind:"keeper waiting state" raw
+  decode_named_vocabulary ~kind:"keeper waiting state"
     [ "idle", Keeper_waiting_idle
     ; "busy", Keeper_waiting_busy
     ; "waiting", Keeper_waiting_blocked
     ; "deferred", Keeper_waiting_deferred
     ]
+    raw
 
 let waiting_source_of_string raw =
-  decode_named_vocabulary ~kind:"keeper waiting source" raw
+  decode_named_vocabulary ~kind:"keeper waiting source"
     [ "event_queue_pending", Waiting_source_event_queue_pending
     ; "chat_operation_queued", Waiting_source_chat_operation_queued
     ; "chat_operation_running", Waiting_source_chat_operation_running
@@ -4619,9 +4620,10 @@ let waiting_source_of_string raw =
     ; "operator_pending_confirm", Waiting_source_operator_pending_confirm
     ; "read_error", Waiting_source_read_error
     ]
+    raw
 
 let wake_producer_of_string raw =
-  decode_named_vocabulary ~kind:"keeper wake producer" raw
+  decode_named_vocabulary ~kind:"keeper wake producer"
     [ "board_dispatch", Wake_board_dispatch
     ; "board_attention_judge", Wake_board_attention_judge
     ; "keeper_owner_actor", Wake_keeper_owner_actor
@@ -4642,6 +4644,7 @@ let wake_producer_of_string raw =
     ; "keeper_addon", Wake_keeper_addon
     ; "read_model_reader", Wake_read_model_reader
     ]
+    raw
 
 let decode_waiting_item json =
   let* source_raw = required_string_field json "source" in

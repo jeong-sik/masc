@@ -108,10 +108,10 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
       outcome.pruned outcome.days (retention_source_label outcome.source)
 
 
-(** Collect abandoned guests without making unrelated Keeper readiness wait
-    for VM shutdown. The runtime serializes the entire inventory/removal pass
-    with boot and teardown, since a stable name can be reused after restart.
-    Live owners remain outside the collection set. *)
+(** Inventory maintenance excludes guest start/adoption through deletion.
+    Apple preserves names derived from current readable declarations regardless
+    of the previous server PID; unresolved inventories/declarations preserve.
+    Other backend ownership rules remain runtime-specific. *)
 let startup_sweep_microvm_guests (state : Mcp_server.server_state) =
   let timeout_sec = Env_config_sandbox.Runtime.microvm_remove_timeout_sec () in
   let config = Mcp_server.workspace_config state in
@@ -137,14 +137,14 @@ let startup_sweep_microvm_guests (state : Mcp_server.server_state) =
           | [] -> ()
           | removed ->
             Log.Misc.info
-              "startup sweep: removed %d %s guest(s) whose server is gone: %s"
+              "startup sweep: removed %d abandoned %s guest(s): %s"
               (List.length removed)
               (Keeper_microvm_backend.to_string backend)
               (String.concat ", " removed));
          List.iter
            (fun (container_id, detail) ->
               Log.Misc.warn
-                "startup sweep: %s guest %s survived removal: %s"
+                "startup sweep: %s maintenance target %s could not settle: %s"
                 (Keeper_microvm_backend.to_string backend)
                 container_id
                 detail)

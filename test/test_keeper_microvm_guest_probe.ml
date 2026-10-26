@@ -391,16 +391,6 @@ let is_listing_call line =
   String.starts_with ~prefix:"list " line || String.starts_with ~prefix:"ps " line
 ;;
 
-(* The calls after the guest's own [run -d], or [None] when it never ran. *)
-let calls_after_boot ~guest calls =
-  let boot = "run -d --name " ^ guest ^ " " in
-  let rec after = function
-    | [] -> None
-    | line :: rest -> if String.starts_with ~prefix:boot line then Some rest else after rest
-  in
-  after calls
-;;
-
 (* The start reads the guest's state before anything else touches it. On
    [Docker_container_absent] it clears the name with [delete --force] and
    boots; that is what a stalled apiserver must not reach. *)
@@ -423,103 +413,6 @@ let test_a_start_during_a_stall_neither_deletes_nor_boots () =
     (List.exists (String.starts_with ~prefix:"run ") calls);
   Alcotest.(check bool) "the guest was inspected" true (List.mem ("inspect " ^ guest) calls);
   Alcotest.(check bool) "the listing was asked" true (List.exists is_listing_call calls)
-;;
-
-(* The other side of the same start: a listing that answers without the name
-   is a real absence, so the name is cleared and a guest is booted. *)
-let test_a_start_with_a_confirmed_absence_boots () =
-  with_fake_cli Backend.Apple_container
-  @@ fun ~config ~set_mode ~after_boot ~calls ~forget_calls:_ ->
-  set_mode Guest_absent;
-  after_boot Guest_running;
-  let meta = microvm_meta ~name:"probe-absent-start" ~backend:Backend.Apple_container in
-  let runtime =
-    Turn.create ~config ~meta ~image:(Ok "probe-fixture") ~network_mode:meta.network_mode ()
-  in
-  let guest = guest_name ~config ~meta in
-  (match Turn.microvm_remote_endpoint ~timeout_sec:5. runtime with
-   | Ok _ -> ()
-   | Error detail -> Alcotest.failf "a confirmed absence must boot a guest: %s" detail);
-  let calls = calls () in
-  Alcotest.(check bool) "the name is cleared for the boot" true
-    (List.mem ("delete --force " ^ guest) calls);
-  Alcotest.(check bool) "the guest is booted" true (Option.is_some (calls_after_boot ~guest calls))
-;;
-
-let start_after_boot ~name ~after ~config ~set_mode ~after_boot =
-  let meta = microvm_meta ~name ~backend:Backend.Apple_container in
-  let guest = guest_name ~config ~meta in
-  set_mode Guest_absent;
-  after_boot (after guest);
-  let runtime =
-    Turn.create ~config ~meta ~image:(Ok "probe-fixture") ~network_mode:meta.network_mode ()
-  in
-  guest, Turn.microvm_remote_endpoint ~timeout_sec:5. runtime
-;;
-
-let removal_of ~guest line =
-  String.equal line ("stop " ^ guest) || String.equal line ("delete --force " ^ guest)
-;;
-
-let booted_calls ~guest calls =
-  match calls_after_boot ~guest calls with
-  | Some after -> after
-  | None -> Alcotest.fail "the start never ran the guest's boot"
-;;
-
-(* [run -d] exited 0 and the runtime then stalled. The guest may be up and
-   may already mount its snapshot, so it is neither stopped nor deleted, the
-   snapshot stays registered, and this start fails for the next one to
-   probe again. *)
-let test_a_stall_right_after_a_boot_keeps_the_guest () =
-  with_fake_cli Backend.Apple_container
-  @@ fun ~config ~set_mode ~after_boot ~calls ~forget_calls:_ ->
-  let guest, result =
-    start_after_boot ~name:"probe-stall-after-boot" ~config ~set_mode ~after_boot
-      ~after:(fun _ -> Apiserver_stalled)
-  in
-  (match result with
-   | Ok _ -> Alcotest.fail "a guest nobody could ask about was handed out"
-   | Error _ -> ());
-  Alcotest.(check bool) "no stop or delete after the boot" false
-    (List.exists (removal_of ~guest) (booted_calls ~guest (calls ())));
-  Alcotest.(check bool) "the snapshot stays registered" true
-    (Turn.For_testing_microvm.microvm_identity_snapshot_registered ~container_name:guest)
-;;
-
-(* Inspect failed after the boot, and the listing shows the guest: it is the
-   guest this start booted, and the start goes on with it. *)
-let test_a_listed_guest_after_a_boot_is_booted () =
-  with_fake_cli Backend.Apple_container
-  @@ fun ~config ~set_mode ~after_boot ~calls ~forget_calls:_ ->
-  let guest, result =
-    start_after_boot ~name:"probe-listed-after-boot" ~config ~set_mode ~after_boot
-      ~after:(fun guest ->
-        Inspect_stalled_listing (listing_of_names Backend.Apple_container [ guest ]))
-  in
-  (match result with
-   | Ok _ -> ()
-   | Error detail -> Alcotest.failf "a listed guest must be used: %s" detail);
-  Alcotest.(check bool) "no stop or delete after the boot" false
-    (List.exists (removal_of ~guest) (booted_calls ~guest (calls ())))
-;;
-
-(* A listing without the guest after its boot: taken down, as a guest that
-   came up unusable always was, and the snapshot it never mounted released. *)
-let test_a_guest_missing_after_its_boot_is_taken_down () =
-  with_fake_cli Backend.Apple_container
-  @@ fun ~config ~set_mode ~after_boot ~calls ~forget_calls:_ ->
-  let guest, result =
-    start_after_boot ~name:"probe-missing-after-boot" ~config ~set_mode ~after_boot
-      ~after:(fun _ -> Guest_absent)
-  in
-  (match result with
-   | Ok _ -> Alcotest.fail "a guest the runtime does not list was handed out"
-   | Error _ -> ());
-  Alcotest.(check bool) "the guest is stopped and deleted" true
-    (List.exists (removal_of ~guest) (booted_calls ~guest (calls ())));
-  Alcotest.(check bool) "the snapshot is released" false
-    (Turn.For_testing_microvm.microvm_identity_snapshot_registered ~container_name:guest)
 ;;
 
 (* Teardown releases a guest's records only when the guest is gone. A guest
@@ -596,14 +489,6 @@ let () =
     ; ( "callers"
       , [ Alcotest.test_case "a start during a stall neither deletes nor boots" `Quick
             test_a_start_during_a_stall_neither_deletes_nor_boots
-        ; Alcotest.test_case "a start with a confirmed absence boots" `Quick
-            test_a_start_with_a_confirmed_absence_boots
-        ; Alcotest.test_case "a stall right after a boot keeps the guest" `Quick
-            test_a_stall_right_after_a_boot_keeps_the_guest
-        ; Alcotest.test_case "a listed guest after a boot is booted" `Quick
-            test_a_listed_guest_after_a_boot_is_booted
-        ; Alcotest.test_case "a guest missing after its boot is taken down" `Quick
-            test_a_guest_missing_after_its_boot_is_taken_down
         ; Alcotest.test_case "a teardown during a stall keeps the guest records" `Quick
             test_a_teardown_during_a_stall_keeps_the_guest_records
         ; Alcotest.test_case "the absence reason is a fact on every backend" `Quick

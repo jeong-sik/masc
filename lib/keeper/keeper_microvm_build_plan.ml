@@ -40,7 +40,8 @@ type build_link_plan =
     The scan runs inside a live guest, where a keeper's build may be using a
     real [_build], so the plan never deletes one: the caller reports it and
     the checkout keeps building on the unified work volume until the next
-    boot's helper removes it ([Keeper_sandbox_microvm.build_output_removal_script]), unless the
+    owned first handoff removes it
+    ([Keeper_sandbox_microvm.first_handoff_build_cleanup_script]), unless the
     checkout holds [Keeper_sandbox_microvm.build_keep_marker]. Retargeting a stale link is
     different -- removing a symlink removes no data. *)
 let plan_build_link ~target = function

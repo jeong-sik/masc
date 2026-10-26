@@ -74,16 +74,34 @@ let test_requested_security_changes_digest () =
 
 let test_label_separates_change_from_runtime_disagreement () =
   check bool "complete runtime facts match" true
-    (Plan.assess ~plan ~policy_environment:[] (reading (inspect ())) = Plan.Matches_plan);
+    (Plan.assess ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] (reading (inspect ())) = Plan.Matches_plan);
   let changed = reading (inspect ~memory:(`Int 4_294_967_296) ()) in
-  List.iter (fun _ -> match Plan.assess ~plan ~policy_environment:[] changed with
+  List.iter (fun _ -> match Plan.assess ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] changed with
     | Plan.Refuse (Plan.Runtime_reports_other_than_asked [Plan.Resources]) -> ()
     | _ -> fail "same plan with different runtime memory must preserve/refuse, repeatedly") [(); ()];
   let facts = facts () in
-  match Plan.assess ~plan ~policy_environment:[]
+  match Plan.assess ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[]
     (Plan.Facts {facts with plan_label = None; memory_bytes = 4_294_967_296L}) with
   | Plan.Replace [Plan.Plan_label; Plan.Resources] -> ()
   | _ -> fail "an unknown requested plan permits replacement and reports observed differences"
+
+let test_identity_refusal_priority () =
+  let assess = Plan.assess ~plan ~policy_environment:[] ~identity_reading:Plan.Identity_unreadable in
+  (match assess (Plan.Unreadable "missing runtime facts") with
+   | Plan.Refuse (Plan.Guest_facts_unreadable _) -> ()
+   | _ -> fail "unreadable facts cannot authorize replacement");
+  (match assess (Plan.Facts { (facts ()) with plan_label=None }) with
+   | Plan.Replace (Plan.Plan_label :: _) -> ()
+   | _ -> fail "changed plan precedes identity replacement");
+  (match assess (reading (inspect ~memory:(`Int 4_294_967_296) ())) with
+   | Plan.Replace [Plan.Identity_snapshot] -> ()
+   | _ -> fail "unreadable snapshot precedes same-label disagreement refusal");
+  let policy = {plan with network=Plan.Network_policy {name="fixture-policy"}} in
+  (match Plan.assess ~plan:policy ~policy_environment:[]
+      ~identity_reading:Plan.Identity_unreadable
+      (Plan.Facts {(facts ()) with plan_label=Some (Plan.digest policy)}) with
+   | Plan.Replace [Plan.Policy_route] -> ()
+   | _ -> fail "stale policy route precedes identity replacement")
 
 let test_unreadable_is_not_replacement () =
   let malformed =
@@ -92,7 +110,7 @@ let test_unreadable_is_not_replacement () =
     ; inspect ~memory:(`Float 2_147_483_648.) ()
     ; "[]"; "{}"; "not-json" ] in
   List.iter (fun raw ->
-    match Plan.assess ~plan ~policy_environment:[] (reading raw) with
+    match Plan.assess ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] (reading raw) with
     | Plan.Refuse (Plan.Guest_facts_unreadable _) -> ()
     | _ -> fail "unreadable facts cannot authorize replacement") malformed;
   match Sandbox.apple_guest_facts ~container_name:"another-guest" (inspect ()) with
@@ -152,13 +170,13 @@ let test_ephemeral_routes_do_not_change_plan_identity () =
     (first <> second && List.mem label first && List.mem label second);
   let facts = { (facts ()) with plan_label = Some (Plan.digest policy_plan);
     networks = ["fixture-policy"] } in
-  (match Plan.assess ~plan:policy_plan ~policy_environment:["HTTPS_PROXY", "http://192.0.2.1:32102"]
+  (match Plan.assess ~identity_reading:Plan.Identity_readable ~plan:policy_plan ~policy_environment:["HTTPS_PROXY", "http://192.0.2.1:32102"]
     (Plan.Facts facts) with
   | Plan.Replace [Plan.Policy_route] -> ()
   | _ -> fail "stable policy plan still replaces a stale execution route");
   (* Approved RFC 4.1 step 3 precedes step 5: stale policy replacement is
      intentional even when another runtime fact also disagrees. *)
-  match Plan.assess ~plan:policy_plan ~policy_environment:["HTTPS_PROXY", "http://192.0.2.1:32102"]
+  match Plan.assess ~identity_reading:Plan.Identity_readable ~plan:policy_plan ~policy_environment:["HTTPS_PROXY", "http://192.0.2.1:32102"]
     (Plan.Facts {facts with read_only = false}) with
   | Plan.Replace [Plan.Policy_route] -> ()
   | _ -> fail "the documented stale-route decision must keep its priority"
@@ -182,7 +200,7 @@ let test_renderer_rejects_order_sensitive_duplicates () =
     let order values = if reverse then List.rev values else values in
     List.iter (fun (expected, invalid) ->
       require_invalid_boot expected invalid ~lifecycle_labels:[] ~policy_proxy:None;
-      match Plan.assess ~plan:invalid ~policy_environment:[] (Plan.Facts (facts ())) with
+      match Plan.assess ~identity_reading:Plan.Identity_readable ~plan:invalid ~policy_environment:[] (Plan.Facts (facts ())) with
       | Plan.Refuse (Plan.Invalid_requested_plan errors) ->
         check bool "invalid request is no comparison authority" true (List.mem expected errors)
       | _ -> fail "invalid requested plan must not authorize adoption or replacement")
@@ -222,6 +240,7 @@ let test_valid_plan_keeps_command_order_semantic () =
 let () = run "Keeper Apple boot plan"
   [ "authority", [test_case "requested security changes identity" `Quick test_requested_security_changes_digest
                  ; test_case "same plan disagrees with runtime" `Quick test_label_separates_change_from_runtime_disagreement
+                 ; test_case "identity and runtime refusal order" `Quick test_identity_refusal_priority
                  ; test_case "unreadable facts preserve guest" `Quick test_unreadable_is_not_replacement
                  ; test_case "every security disagreement is retained" `Quick test_all_runtime_security_disagreements_are_named]
   ; "boot", [test_case "actual Apple argv projects its labelled plan" `Quick test_boot_projects_the_labelled_plan

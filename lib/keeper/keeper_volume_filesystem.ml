@@ -47,6 +47,7 @@ type inspect_failure =
   | Entries of { count : int }
   | Entry_without_configuration
   | Configuration_without_fields
+  | Duplicate_inspect_fields
   | Empty_source of { volume : string }
   | Not_ext4_format of
       { volume : string
@@ -67,6 +68,8 @@ let state_offset = 0x3A
 let error_count_offset = 0x194
 let ext4_magic = 0xEF53
 let errors_detected_bit = 0x0002
+let default_mount_opts_offset = 0x100
+let discard_default_bit = 0x0400
 let error_func_bytes = 32
 let u32_mask = 0xFFFF_FFFF
 
@@ -182,7 +185,7 @@ let site superblock layout =
       }
 ;;
 
-let of_superblock superblock =
+let validate_superblock superblock =
   let bytes = String.length superblock in
   if bytes < superblock_size
   then Error (Truncated { bytes })
@@ -190,7 +193,12 @@ let of_superblock superblock =
     let magic = String.get_uint16_le superblock magic_offset in
     if magic <> ext4_magic
     then Error (Not_ext4 { magic })
-    else if String.get_uint16_le superblock state_offset land errors_detected_bit = 0
+    else Ok ())
+;;
+
+let of_superblock superblock =
+  Result.bind (validate_superblock superblock) (fun () ->
+    if String.get_uint16_le superblock state_offset land errors_detected_bit = 0
     then Ok Clean
     else
       Ok
@@ -199,6 +207,15 @@ let of_superblock superblock =
            ; first = site superblock first_site
            ; last = site superblock last_site
            }))
+;;
+
+type discard_default = Discard_default_set | Discard_default_absent
+
+let discard_default_of_superblock superblock =
+  Result.map (fun () ->
+    if u32 superblock default_mount_opts_offset land discard_default_bit <> 0
+    then Discard_default_set else Discard_default_absent)
+    (validate_superblock superblock)
 ;;
 
 let rec read_into fd buffer ~filled =
@@ -210,7 +227,7 @@ let rec read_into fd buffer ~filled =
     | count -> read_into fd buffer ~filled:(filled + count))
 ;;
 
-let read_superblock fd =
+let read_superblock ~decode fd =
   let stats = Unix.fstat fd in
   match stats.st_kind with
   | Unix.S_REG ->
@@ -221,7 +238,7 @@ let read_superblock fd =
       let (_ : int) = Unix.lseek fd superblock_offset Unix.SEEK_SET in
       let buffer = Bytes.create superblock_size in
       match read_into fd buffer ~filled:0 with
-      | filled when filled = superblock_size -> of_superblock (Bytes.to_string buffer)
+      | filled when filled = superblock_size -> decode (Bytes.to_string buffer)
       | filled -> Error (Truncated { bytes = filled }))
   | (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK) as kind ->
     Error (Not_regular_file { kind })
@@ -230,12 +247,12 @@ let read_superblock fd =
 (* O_NONBLOCK so that opening a FIFO returns at once; the kind check then
    refuses it. The kind is read from the open descriptor, so the file that
    is checked is the file that is read. *)
-let read_image ~path =
+let read_image_with ~decode ~path =
   match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
   | exception Unix.Unix_error (error, _, _) -> Error (Unreadable (Unix.error_message error))
   | fd ->
     let result =
-      match read_superblock fd with
+      match read_superblock ~decode fd with
       | result -> result
       | exception Unix.Unix_error (error, _, _) -> Error (Unreadable (Unix.error_message error))
     in
@@ -245,9 +262,19 @@ let read_image ~path =
     result
 ;;
 
+let read_image ~path = read_image_with ~decode:of_superblock ~path
+let read_discard_default_image ~path = read_image_with ~decode:discard_default_of_superblock ~path
+
+let unique_fields fields =
+  let keys = List.map fst fields in
+  List.length keys = List.length (List.sort_uniq String.compare keys)
+;;
+
 let image_of_inspect = function
+  | `List [ `Assoc fields ] when not (unique_fields fields) -> Error Duplicate_inspect_fields
   | `List [ `Assoc fields ] ->
     (match List.assoc_opt "configuration" fields with
+     | Some (`Assoc configuration) when not (unique_fields configuration) -> Error Duplicate_inspect_fields
      | Some (`Assoc configuration) ->
        (match
           ( List.assoc_opt "name" configuration
@@ -315,6 +342,7 @@ let inspect_failure_to_string = function
   | Entry_without_configuration -> "volume inspect entry has no configuration object"
   | Configuration_without_fields ->
     "volume inspect configuration lacks a string name, format and source"
+  | Duplicate_inspect_fields -> "volume inspect has duplicate object fields"
   | Empty_source { volume } -> Printf.sprintf "volume %s has an empty image source" volume
   | Not_ext4_format { volume; format } -> Printf.sprintf "volume %s is %s, not ext4" volume format
 ;;

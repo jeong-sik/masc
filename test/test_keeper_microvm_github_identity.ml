@@ -72,6 +72,9 @@ let load f scope = Store.load ~fs:f.fs ~coordinator:f.coordinator ~scope
 let publish f scope captured = Store.publish_if_guest_absent ~fs:f.fs
     ~coordinator:f.coordinator ~scope ~base_path:f.base_path ~keeper_name ~backend ~network_mode
     ~timeout_sec:5. captured
+let remove f scope = Store.remove_if_guest_absent ~fs:f.fs
+    ~coordinator:f.coordinator ~scope ~base_path:f.base_path ~keeper_name ~backend ~network_mode
+    ~timeout_sec:5.
 let unconfigured () = captured_value (Github.captured_tool_identity_of_files [])
 
 let configured f =
@@ -238,6 +241,107 @@ let test_scope () = with_fixture @@ fun f ->
     | Ok _ -> fail "other coordinator accepted");
   check string "refused scopes perform no inventory calls" "" (read f.calls)
 
+let removed = function
+  | Ok Store.Removed -> ()
+  | Ok Store.Already_absent -> fail "existing snapshot reported as already absent"
+  | Error error -> fail (Store.error_message error)
+
+let test_remove_empty_and_repeat () = with_fixture @@ fun f ->
+  (match owner f (fun scope -> remove f scope) with
+   | Ok Store.Already_absent -> ()
+   | Ok Store.Removed -> fail "missing snapshot reported as removed"
+   | Error error -> fail (Store.error_message error));
+  ignore (owner f (fun scope -> value (publish f scope (unconfigured ()))));
+  let parent = Filename.dirname (path f) in
+  let parent_before = Unix.lstat parent in
+  removed (owner f (fun scope -> remove f scope));
+  check bool "empty sealed target removed" false (Sys.file_exists (path f));
+  (match owner f (fun scope -> remove f scope) with
+   | Ok Store.Already_absent -> ()
+   | Ok Store.Removed -> fail "repeat removal invented an existing target"
+   | Error error -> fail (Store.error_message error));
+  let parent_after = Unix.lstat parent in
+  check int "parent identity retained" parent_before.st_ino parent_after.st_ino;
+  check int "parent permissions retained" parent_before.st_perm parent_after.st_perm;
+  check string "every remove reads a new complete inventory"
+    (String.concat "" (List.init 4 (fun _ -> "list --all --format json\n"))) (read f.calls)
+
+let test_remove_configured_and_unknown_entries () = with_fixture @@ fun f ->
+  let captured, central, hosts = configured f in
+  ignore (owner f (fun scope -> value (publish f scope captured)));
+  let outside = Filename.concat f.base_path "external-credential-target" in
+  write outside "external bytes must survive";
+  Unix.chmod (path f) 0o700;
+  let orphan = Filename.concat (path f) "unknown-orphan" in
+  write orphan "old private fixture bytes";
+  Unix.chmod orphan 0o400;
+  Unix.symlink outside (Filename.concat (path f) "unknown-link");
+  Unix.chmod (path f) 0o500;
+  removed (owner f (fun scope -> remove f scope));
+  check bool "configured immutable snapshot removed" false (Sys.file_exists (path f));
+  check string "unknown link was not followed" "external bytes must survive" (read outside);
+  check string "central credentials preserved" hosts (read (Filename.concat central "hosts.yml"))
+
+let test_remove_present_or_failed_inventory () = with_fixture @@ fun f ->
+  let captured, _, hosts = configured f in
+  ignore (owner f (fun scope -> value (publish f scope captured)));
+  let original = Unix.lstat (path f) in
+  let guest = Names.make (Names.Micro_vm_persistent
+    {base_path=f.base_path; keeper_name; network_mode}) |> Names.to_string in
+  write f.listing (Yojson.Safe.to_string (`List [`Assoc ["id", `String guest]]));
+  (match owner f (fun scope -> remove f scope) with
+   | Error Store.Guest_present -> ()
+   | Error error -> fail (Store.error_message error)
+   | Ok _ -> fail "present guest authorized removal");
+  check int "present guest keeps sealed mode" 0o500 (Unix.lstat (path f)).st_perm;
+  write f.listing "[]";
+  write f.status "1";
+  (match owner f (fun scope -> remove f scope) with
+   | Error (Store.Inventory_unavailable _) -> ()
+   | Error error -> fail (Store.error_message error)
+   | Ok _ -> fail "failed inventory authorized removal");
+  check int "failed inventory keeps target identity" original.st_ino (Unix.lstat (path f)).st_ino;
+  check int "failed inventory keeps sealed mode" 0o500 (Unix.lstat (path f)).st_perm;
+  check string "refused removal preserves credential bytes" hosts (read (Filename.concat (path f) "hosts.yml"))
+
+let test_remove_rejects_parent_link () = with_fixture @@ fun f ->
+  let outside = Filename.concat f.base_path "external-tree" in
+  Unix.mkdir outside 0o700;
+  write (Filename.concat outside "preserved") "outside owned identity chain";
+  let shared = Filename.concat (Config_dir_resolver.masc_root ~base_path:f.base_path) "microvm" in
+  Unix.symlink outside shared;
+  check_refused (owner f (fun scope -> remove f scope));
+  check bool "parent link not removed" true ((Unix.lstat shared).st_kind = Unix.S_LNK);
+  check string "external parent target not traversed" "outside owned identity chain"
+    (read (Filename.concat outside "preserved"));
+  check int "external mode unchanged" 0o700 (Unix.lstat outside).st_perm
+
+let test_remove_rejects_target_link () = with_fixture @@ fun f ->
+  ignore (owner f (fun scope -> value (publish f scope (unconfigured ()))));
+  let outside = Filename.concat f.base_path "moved-snapshot" in
+  Unix.rename (path f) outside;
+  Unix.symlink outside (path f);
+  check_refused (owner f (fun scope -> remove f scope));
+  check bool "target link retained" true ((Unix.lstat (path f)).st_kind = Unix.S_LNK);
+  check int "external target stays sealed" 0o500 (Unix.lstat outside).st_perm;
+  check (list string) "external target untouched" [] (Sys.readdir outside |> Array.to_list)
+
+let test_remove_resumes_partial_writable_target () = with_fixture @@ fun f ->
+  let captured, central, hosts = configured f in
+  ignore (owner f (fun scope -> value (publish f scope captured)));
+  (* An interrupted earlier removal may have prepared the owned directory and
+     removed some entries. This is a fixture state, never a load-time repair. *)
+  Unix.chmod (path f) 0o700;
+  Unix.unlink (Filename.concat (path f) "config.yml");
+  check_refused (owner f (fun scope -> load f scope));
+  check_refused (owner f (fun scope -> publish f scope captured));
+  check int "ordinary operations did not reseal partial target" 0o700 (Unix.lstat (path f)).st_perm;
+  removed (owner f (fun scope -> remove f scope));
+  check bool "new absence allows exact partial target removal" false (Sys.file_exists (path f));
+  check string "partial cleanup preserved central credentials" hosts (read (Filename.concat central "hosts.yml"));
+  check string "partial retry obtains another actual inventory"
+    (String.concat "" (List.init 3 (fun _ -> "list --all --format json\n"))) (read f.calls)
+
 let () = run "microvm guest credential store"
   ["actual immutable publication and reload", [
     test_case "configured bytes survive central mutation and fresh owner" `Quick test_publish_reload;
@@ -250,4 +354,10 @@ let () = run "microvm guest credential store"
     test_case "parent symlink refuses" `Quick test_parent_link;
     test_case "workspace state root symlink refuses" `Quick test_root_link;
     test_case "hardlinked or noncanonical credential files refuse" `Quick test_hardlink_and_changed_bytes;
-    test_case "expired and foreign scope cannot mutate" `Quick test_scope]]
+    test_case "expired and foreign scope cannot mutate" `Quick test_scope;
+    test_case "remove sealed empty target and distinguish missing repeats" `Quick test_remove_empty_and_repeat;
+    test_case "remove configured target without following unknown links" `Quick test_remove_configured_and_unknown_entries;
+    test_case "removal preserves sealed bytes on present or failed inventory" `Quick test_remove_present_or_failed_inventory;
+    test_case "removal refuses parent symlinks" `Quick test_remove_rejects_parent_link;
+    test_case "removal refuses target symlinks" `Quick test_remove_rejects_target_link;
+    test_case "new absence resumes partial0700 target without Ready promotion" `Quick test_remove_resumes_partial_writable_target]]

@@ -25,6 +25,7 @@ type error =
   | Lane_release_failed of { primary : error option; failure : Recovery.lane_release_failure }
   | Invalid_publication_target of Fs_compat.capability_publication_target_error
   | Publication_failed of Fs_compat.capability_write_error
+  | Removal_failed of string
   | Filesystem_operation_failed of exn * Printexc.raw_backtrace
 
 let rec error_message = function
@@ -43,6 +44,7 @@ let rec error_message = function
     (match primary with None -> detail | Some error -> error_message error ^ "; " ^ detail)
   | Invalid_publication_target error -> Fs_compat.capability_publication_target_error_to_string error
   | Publication_failed error -> Fs_compat.capability_write_error_to_string error
+  | Removal_failed detail -> "guest identity removal unconfirmed: " ^ detail
   | Filesystem_operation_failed _ -> "guest identity filesystem operation failed"
 
 let ( let* ) = Result.bind
@@ -340,3 +342,94 @@ let publish_if_guest_absent ~fs ~coordinator ~scope ~base_path ~keeper_name ~bac
                     ~permissions:(creation_permissions permissions) ~after_publish:(fun () -> Ok ()) empty in
               publish_parents next rest in
           publish_parents [] (components ~base_path ~keeper_name ~backend ~network_mode)))
+
+type removal = Removed | Already_absent
+
+let frozen_directory held (stat : Unix.stats) : Fs_compat.cleanup_directory =
+  { path = Fs_compat.owned_inventory_root_path held
+  ; device = stat.st_dev
+  ; inode = stat.st_ino
+  ; owner_uid = stat.st_uid
+  ; permissions = stat.st_perm
+  }
+
+(* The preparation scopes still require the target to exist while they settle.
+   Only after all of them succeed does the canonical remover reopen the frozen
+   chain. It verifies every retained identity/mode before each unlink and fsyncs
+   the retained parent before reporting absence. *)
+let removal_chain ~root ~base_path ~keeper_name ~backend ~network_mode =
+  Fs_compat.with_owned_inventory_root root.spelling (fun held ->
+    let observed = Fs_compat.owned_inventory_root_stat held in
+    let original = Unix.lstat root.spelling in
+    if original.st_kind <> Unix.S_DIR || not (same_identity root.stat observed)
+       || not (same_identity original observed)
+    then Ok (Error (Invalid_snapshot "workspace state root changed"))
+    else (
+      check_directory ~permissions:root.stat.st_perm observed;
+      let prepare_target parent parent_permissions chain leaf =
+        let parent_stat = Fs_compat.owned_inventory_root_stat parent in
+        let target_stat = ref None in
+        let sync_directory fd =
+          let current = Unix.fstat fd in
+          if same_identity current parent_stat then (
+            check_directory ~permissions:parent_permissions current;
+            Unix.fsync fd)
+          else
+            match !target_stat with
+            | Some target when same_identity current target ->
+              check_directory ~permissions:target.st_perm current;
+              (* Absence has already been read in this owned workflow. Use
+                 the held exact-inode descriptor, never a pathname chmod. *)
+              if current.st_perm = 0o500 then Unix.fchmod fd 0o700;
+              let writable = Unix.fstat fd in
+              if not (same_identity target writable) then raise Invalid_directory_permissions;
+              check_directory ~permissions:0o700 writable;
+              Unix.fsync fd
+            | Some _ | None -> raise Invalid_directory_permissions in
+        let directory = Filename.concat (Fs_compat.owned_inventory_root_path parent) leaf in
+        let* found = Fs_compat.with_owned_directory_inventory_if_present
+            ~owner_uid:(Unix.getuid ()) ~inventory_root:parent ~sync_directory directory
+            (fun target _names ->
+              let stat = Fs_compat.owned_inventory_root_stat target in
+              (match stat.st_perm with
+               | 0o500 | 0o700 -> check_directory ~permissions:stat.st_perm stat
+               | _ -> raise Invalid_directory_permissions);
+              target_stat := Some stat;
+              (* This value escapes only after the held-fd transition and
+                 every bound descriptor/path settlement have succeeded. *)
+              let frozen = frozen_directory target stat in
+              chain @ [{frozen with permissions = 0o700}])
+          |> filesystem_result in
+        Ok found in
+      let rec descend parent parent_permissions chain = function
+        | [] -> Error (Invalid_snapshot "snapshot path is empty")
+        | [(leaf, _permissions)] -> prepare_target parent parent_permissions chain leaf
+        | (leaf, permissions) :: rest ->
+          with_child ~parent ~parent_permissions ~leaf ~permissions
+            (fun child observed_permissions _ ->
+              let stat = Fs_compat.owned_inventory_root_stat child in
+              descend child observed_permissions (chain @ [frozen_directory child stat]) rest) in
+      Ok (descend held observed.st_perm [frozen_directory held observed]
+        (components ~base_path ~keeper_name ~backend ~network_mode))))
+  |> filesystem_result |> Result.join
+
+let remove_if_guest_absent ~fs ~coordinator ~scope ~base_path ~keeper_name ~backend
+    ~network_mode ~timeout_sec =
+  borrow ~coordinator ~scope ~keeper_name (fun () ->
+    let* presence = Keeper_microvm_guest_inventory.read ~backend
+        ~guest_name:(guest_name ~base_path ~keeper_name ~network_mode) ~timeout_sec
+      |> Result.map_error (fun error -> Inventory_unavailable error) in
+    match presence with
+    | Keeper_microvm_guest_inventory.Present -> Error Guest_present
+    | Keeper_microvm_guest_inventory.Absent ->
+      let* root = inspect_root ~base_path in
+      let owner = recovery_owner ~base_path ~keeper_name ~backend ~network_mode in
+      with_recovery ~fs ~root ~owner (fun _ ->
+        Eio_guard.run_in_systhread ~label:"guest-identity-remove" (fun () ->
+          let* chain = removal_chain ~root ~base_path ~keeper_name ~backend ~network_mode in
+          match chain with
+          | None -> Ok Already_absent
+          | Some chain ->
+            Fs_compat.remove_owned_tree chain
+            |> Result.map (fun () -> Removed)
+            |> Result.map_error (fun detail -> Removal_failed detail))))

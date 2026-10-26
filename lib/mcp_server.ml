@@ -1038,6 +1038,15 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
         Board_dispatch.init_jsonl ())
       base_path
   in
+  (* Settle the shared mounted shim configuration before this state can be
+     returned to a transport and admit an attached endpoint. Verification
+     reads this actual result; the asynchronous startup sweep cannot race it. *)
+  (match Keeper_microvm_shim_readiness.initialize ~base_path:config.base_path
+      ~payload_path:(Env_config_sandbox.Runtime.microvm_payload_path ()) with
+   | Ok () -> ()
+   | Error error ->
+     Log.Keeper.warn "microvm shim initialization unavailable: %s"
+       (Keeper_microvm_shim_readiness.error_message error));
   let registry = Session.create () in
   Session.start_loop registry ~sw;
   Subscriptions.set_session_push_fn (fun event ->

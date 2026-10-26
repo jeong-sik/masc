@@ -168,7 +168,13 @@ val live_status_json :
 
     A failed container inventory leaves [effective_mode] null and preserves
     the failure in [container_error]. Only a successful inventory can establish
-    that a microVM is running or absent. *)
+    that a microVM is running or absent.
+
+    Apple microVM [resource_config.work_volume_discard_default] freshly reads
+    the actual volume source and ext4 superblock under [timeout_sec] on every
+    status request. It is [{state:"set"|"absent",error:null}] or
+    [{state:"unreadable",error:string}]; other backends expose null. This
+    read-only observation is never cached and never starts a helper. *)
 
 type sandbox_log_backend =
   | Docker_logs

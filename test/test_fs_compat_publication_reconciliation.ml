@@ -535,16 +535,19 @@ let test_current_prepared_record_fields_stay_decodable () =
       ; "state", `String "prepared"
       ; "owner", `String owner_name
       ; "operation_id", `String record_name
+      ; "publication", `String "replace"
       ; "allowed_root_path", `String allowed_root_path
       ; "allowed_root", identity
       ; "parent_components", `List []
       ; "parent", identity
       ; "target_leaf", `String "target.json"
-      ; "publication", `String "replace"
       ; "initial_target", `Assoc [ "presence", `String "absent" ]
       ; "permissions", `Int 0o600
       ]
   in
+  check string "independent fixture retains exact canonical bytes"
+    (Fs_compat.load_file record_path)
+    (Yojson.Safe.to_string independent_record ^ "\n");
   Fs_compat.save_file record_path (Yojson.Safe.to_string independent_record ^ "\n");
   let owner = inventory_owner registry owner_name in
   let report = reconcile ~fs registry owner in

@@ -38,7 +38,12 @@ type held =
 type pending_settlement
 (** Immutable, process-local intent for a started attempt's returned rejection.
     Keeps the exact attempt, original recurrence clock and first successful
-    finish-clock observation. Cancellation/process death are outside retention. *)
+    finish-clock observation. An unavailable authority or failed publication
+    keeps the intent and excludes that same definition from fresh admission
+    for as long as the error persists. There is no expiry or automatic discard;
+    progress requires successful original settlement or positive supersession
+    evidence from the authoritative store. Unrelated definitions remain eligible.
+    Cancellation/process death are outside retention. *)
 
 type settlement_failure =
   | Finish_clock_raised of string

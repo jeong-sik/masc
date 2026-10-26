@@ -66,6 +66,22 @@ default. Explicit output arguments still select another destination. Feedback
 loop measurements go under `artifacts/feedback-loop/` in the script's repository,
 including when the script is invoked from another working directory.
 
+## Clean local folders
+
+Inspect tracked files, current script/configuration references and active use
+before removing a folder. An ignored path can still contain runtime state or
+unsubmitted work. In particular, repository `logs/` holds supervisor recovery
+records, and `.tmp/` can hold RFC caller context consumed by the checker.
+
+Remove known disposable caches and genuinely empty folders. Tools may recreate
+their caches. Preserve run records, source edits and old dashboard copies under
+`artifacts/<cleanup-run>/` when clearing their old locations; record each original
+and new path. Keep the active `assets/dashboard/` bundle in place.
+
+For a finished worktree, confirm its PR merged and inspect both tracked and
+untracked changes. Preserve needed ignored output before `git worktree remove`.
+Do not force removal of an unfinished checkout or clean another active worktree.
+
 ## Runtime boundary
 
 Resolve the runtime root from the server's effective base path. With base path

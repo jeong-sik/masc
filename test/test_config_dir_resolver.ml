@@ -223,6 +223,40 @@ let test_normalize_masc_base_path_input_canonicalizes_explicit_path () =
   in
   check string "canonical explicit base path" "/tmp/synthetic-masc-base" actual
 
+let test_normalize_path_lexically_normal_paths () =
+  List.iter
+    (fun path ->
+      check string path path (Env_config_core.normalize_path_lexically path))
+    [ "/"; "alpha"; "alpha/beta"; "/alpha/beta";
+      "/.config/.../..suffix/part.."; "/설정/keepér/파일.md";
+      "~someone/docs"; "alpha\\beta" ]
+
+let test_normalize_path_lexically_special_components () =
+  List.iter
+    (fun (path, expected) ->
+      check string (Printf.sprintf "%S" path) expected
+        (Env_config_core.normalize_path_lexically path))
+    [ "", ""; " \t\r\n", ""; " /// ", "/";
+      "/alpha//beta/", "/alpha/beta";
+      "/alpha/./beta", "/alpha/beta";
+      "/alpha/beta/../gamma", "/alpha/gamma";
+      "/../../alpha", "/alpha";
+      "alpha/../../beta", "../beta";
+      "../..", "."; "../../..", "..";
+      "./", "."; "alpha/.", "alpha"; "alpha/..", ".";
+      " alpha beta / gamma ", "alpha beta / gamma" ]
+
+let test_normalize_masc_base_path_input_strips_one_masc_component () =
+  List.iter
+    (fun (path, expected) ->
+      check string path expected
+        (Env_config_core.normalize_masc_base_path_input path))
+    [ ".masc", "."; "/.masc", "/";
+      "project/.masc", "project";
+      "project/.masc/.masc", "project/.masc";
+      "project/.masc/child", "project/.masc/child";
+      "project/.masc-suffix", "project/.masc-suffix" ]
+
 let test_env_override_valid () =
   with_temp_dir "config-dir-env" @@ fun root ->
   let config = make_config_root root in
@@ -595,6 +629,12 @@ let () =
             test_inputs_from_env_survives_deleted_cwd;
           test_case "canonicalizes explicit base path" `Quick
             test_normalize_masc_base_path_input_canonicalizes_explicit_path;
+          test_case "preserves normal lexical paths" `Quick
+            test_normalize_path_lexically_normal_paths;
+          test_case "reduces special lexical components" `Quick
+            test_normalize_path_lexically_special_components;
+          test_case "strips one terminal .masc component" `Quick
+            test_normalize_masc_base_path_input_strips_one_masc_component;
         ] );
       ( "rfc_0121_accessors",
         [

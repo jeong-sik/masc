@@ -449,8 +449,8 @@ let output_owner_teardown_finishes_entered_metadata = fixture (fun ~env ~sw ~sto
       (read (leaf fixture binding "stdout.bin"))))
 
 let supervise value = value |> Result.map_error S.error_to_string |> require
-let supervised ?(after_spawn=fun _ -> ()) ~sw ~env fixture permit =
-  match S.For_testing.launch_effect_workspace ~after_spawn ~sw ~fs:env#fs
+let supervised ?(after_spawn=fun _ -> ()) ?(before_result_publish=fun () -> ()) ~sw ~env fixture permit =
+  match S.For_testing.launch_effect_workspace ~after_spawn ~before_result_publish ~sw ~fs:env#fs
       ~cgroup_parent_path:"/sys/fs/cgroup" ~execution:fixture.execution permit with
   | S.Not_performed {error;_} -> Alcotest.fail (S.error_to_string error)
   | S.Performed {value;registry_release_error=None;pipe_cleanup_errors=[]} -> supervise value
@@ -487,7 +487,24 @@ let supervisor_owns_original_input_and_both_outputs = fixture (fun ~env ~sw:_ ~s
      | S.Write_failed _ -> Alcotest.fail "cat lost its committed input");
     check "stdout digest covers all original input bytes" (settled.stdout.sha256=digest data);
     Alcotest.(check string) "owned stdin/stdout pair preserves binary bytes" data (supervised_output owner P.Stdout settled.stdout);
-    Alcotest.(check string) "stderr belongs to the same original process" "error" (supervised_output owner P.Stderr settled.stderr)))
+    Alcotest.(check string) "stderr belongs to the same original process" "error" (supervised_output owner P.Stderr settled.stderr);
+    let receipt=S.await_result owner |> supervise in
+    check "ready result digest covers the exact immutable receipt bytes" (receipt.sha256=digest receipt.content);
+    Alcotest.(check string) "complete original result is actually retained on disk" receipt.content
+      (read (leaf fixture binding S.result_leaf));
+    let stat=Unix.lstat (leaf fixture binding S.result_leaf) in
+    check "result is a single-link private immutable controller record" (stat.st_kind=Unix.S_REG && stat.st_nlink=1 && stat.st_perm land 0o7777=0o400);
+    (match receipt.status with
+     | P.Status {original;phase=P.Termination_observed (P.Exited 7);result=P.Result_ready sha256;_} ->
+       check "ready means durable physical observation rather than payload success" (original=S.original owner && sha256=receipt.sha256)
+     | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "receipt did not remain bound to its original observation");
+    let json=Yojson.Safe.from_string receipt.content in
+    let wire=Yojson.Safe.Util.member "status" json in
+    let status=P.response_of_json wire |> Result.map_error P.error_to_string |> require in
+    (match status with
+     | P.Status {original;result=P.Result_pending;_} -> check "frozen receipt has no self-referential digest" (original=S.original owner)
+     | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "stored receipt promoted itself before publication");
+    check "duplicate result observers share the same original receipt" (S.await_result owner=Ok receipt)))
 
 let supervisor_early_exit_does_not_wait_on_stdin = fixture (fun ~env ~sw:_ ~store fixture ->
   Eio.Switch.run (fun sw ->
@@ -513,6 +530,9 @@ let supervisor_reports_capture_failure_before_blocked_child_exit = fixture (fun 
     (match S.await_settled owner with
      | Error (S.Output_error {stream=P.Stdout;cause=O.Publication_failed _}) -> ()
      | Error _ | Ok _ -> Alcotest.fail "unavailable stdout waited on or completed a FIFO-blocked child");
+    (match S.await_result owner with
+     | Error (S.Output_error {stream=P.Stdout;cause=O.Publication_failed _}) -> ()
+     | Error _ | Ok _ -> Alcotest.fail "result observer waited for a child blocked on failed output");
     let _,next=prepare store fixture "07" "exit 8" in
     let other=Eio.Switch.run (fun next_sw ->
       supervised ~sw:next_sw ~env fixture next |> S.await_settled |> supervise) in
@@ -535,6 +555,72 @@ let supervisor_teardown_settles_external_observers = fixture (fun ~env ~sw:_ ~st
   match S.await_settled owner with
   | Error S.Interrupted | Error (S.Output_error {cause=O.Interrupted;_}) -> ()
   | Error _ | Ok _ -> Alcotest.fail "supervisor teardown left an observer waiting or invented a complete result")
+
+let result_publication_failure_preserves_raw_settlement = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let binding,permit=prepare store fixture "05" "printf original; exit 7" in
+    let path=leaf fixture binding S.result_leaf in
+    let original=supervised ~sw ~env fixture permit ~after_spawn:(fun _ ->
+      Out_channel.with_open_bin path (fun oc -> output_string oc "preserved conflicting result");Unix.chmod path 0o400) in
+    let settled=S.await_settled original |> supervise in exit 7 settled.physical_exit;
+    (match S.await_result original with
+     | Error (S.Publication_failed _) -> ()
+     | Error _ | Ok _ -> Alcotest.fail "conflicting result became durable readiness or hid actual settlement");
+    Alcotest.(check string) "failed exclusive result publication preserves original conflicting evidence"
+      "preserved conflicting result" (read path);
+    Alcotest.(check string) "complete output remains available even with unavailable terminal receipt"
+      "original" (supervised_output original P.Stdout settled.stdout);
+    let _,next=prepare store fixture "07" "printf independent; exit 8" in
+    let result=Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise) in
+    (match result.status with
+     | P.Status {phase=P.Termination_observed (P.Exited 8);result=P.Result_ready _;_} -> ()
+     | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "another original result could not publish")))
+
+let result_observer_cancel_and_source_progress_preserve_publication = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+    let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+    Fun.protect ~finally:unblock (fun () ->
+      let binding,permit=prepare store fixture "05" "printf original; exit 7" in
+      let original=supervised ~sw ~env fixture permit ~before_result_publish:(fun () ->
+        Eio.Promise.resolve signal ();Eio.Promise.await resume) in
+      Eio.Promise.await entered;
+      check "actual settled result remains unpublished at the controlled boundary" (not (Sys.file_exists (leaf fixture binding S.result_leaf)));
+      let waiting,notice=Eio.Promise.create () in
+      let cancelled=ref false in
+      Eio.Fiber.first
+        (fun () -> try Eio.Promise.resolve notice ();ignore (S.await_result original |> supervise);
+          Alcotest.fail "unpublished result was prematurely acknowledged"
+          with Eio.Cancel.Cancelled _ as ex -> cancelled:=true;raise ex)
+        (fun () -> Eio.Promise.await waiting);
+      check "result observer cancellation propagates without owning the publisher" !cancelled;
+      let record=R.load store ~binding |> registry in
+      let current=R.request_cancel record ~confirmed_admission_id:(id "04") |> registry in
+      let _,next=prepare store fixture "07" "printf independent; exit 8" in
+      ignore (Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise));
+      check "another original can publish before this result boundary resumes" (not (Sys.file_exists (leaf fixture binding S.result_leaf)));
+      unblock ();
+      let receipt=S.await_result original |> supervise in
+      (match receipt.status with
+       | P.Status {revision;cancel_requested=true;result=P.Result_ready hash;_} ->
+         check "returned readiness retains latest same-launch cancellation progress" (revision=R.revision current && hash=receipt.sha256)
+       | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "publication rolled back cancellation progress");
+      let json=Yojson.Safe.from_string receipt.content in
+      let status=P.response_of_json Yojson.Safe.Util.(member "status" json) |> Result.map_error P.error_to_string |> require in
+      (match status with
+       | P.Status {revision=2L;cancel_requested=false;result=P.Result_pending;_} -> ()
+       | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "later cancellation rewrote the frozen original receipt");
+      check "frozen result bytes retain the same digest across duplicate observers" (receipt.sha256=digest receipt.content && S.await_result original=Ok receipt))))
+
+let result_owner_teardown_settles_external_observers = fixture (fun ~env ~sw:_ ~store fixture ->
+  let fifo=Filename.concat fixture.work "control" in
+  Unix.mkfifo fifo 0o600;Unix.chown fifo fixture.uid fixture.execution.payload_gid;
+  let original=Eio.Switch.run (fun sw ->
+    let _,permit=prepare store fixture "05" "exec /bin/cat control" in
+    supervised ~sw ~env fixture permit) in
+  match S.await_result original with
+  | Error S.Interrupted | Error (S.Output_error {cause=O.Interrupted;_}) -> ()
+  | Error _ | Ok _ -> Alcotest.fail "owner teardown left a result observer waiting or invented readiness")
 
 let completed_output ~env ~store fixture script = Eio.Switch.run (fun sw ->
   let binding,permit=prepare store fixture "05" script in
@@ -724,6 +810,9 @@ let () =
       "seal atomic open rejects post-stat FIFO without a writer",sealed_output_atomic_open_rejects_raced_special_leaf `Seal `Fifo;
       "seal atomic open rejects post-stat symlink",sealed_output_atomic_open_rejects_raced_special_leaf `Seal `Symlink;
       "spool atomic open rejects post-stat FIFO without a writer",sealed_output_atomic_open_rejects_raced_special_leaf `Spool `Fifo;
-      "spool atomic open rejects post-stat symlink",sealed_output_atomic_open_rejects_raced_special_leaf `Spool `Symlink] in
+      "spool atomic open rejects post-stat symlink",sealed_output_atomic_open_rejects_raced_special_leaf `Spool `Symlink;
+      "failed result publication preserves raw settlement and other progress",result_publication_failure_preserves_raw_settlement;
+      "result observer cancellation preserves frozen receipt and source progress",result_observer_cancel_and_source_progress_preserve_publication;
+      "owner teardown settles external terminal result observers",result_owner_teardown_settles_external_observers] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

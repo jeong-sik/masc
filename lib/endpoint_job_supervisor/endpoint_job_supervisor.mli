@@ -19,6 +19,10 @@ type error =
   | Registry_cleanup_failed of File_lock_eio.durable_lock_error
   | Interrupted
   | Supervisor_failed
+  | Codec_error of P.codec_error
+  | Publication_failed of Fs_compat.capability_write_error
+  | Recovery_failed of string
+  | Receipt_storage_unavailable
 val error_to_string : error -> string
 type input_delivery =
   | Written of int64
@@ -70,6 +74,23 @@ val await_observation : t -> (observation,error) result
     Result_pending: no immutable terminal receipt, exec proof, host ACK or
     Release is fabricated. Original authority or capture failure remains an
     error even when the physical child has exited. Never infer replay permission. *)
+type result_receipt = private { sha256 : P.Sha256.t; status : P.response; content : string }
+val result_leaf : string
+val await_result : t -> (result_receipt,error) result
+(** The job-owned supervisor automatically publishes once after original
+    physical/tree settlement, input delivery and both seals. It freezes the
+    original admission/known launch, source revision/cancellation and raw gate
+    observations in a private immutable receipt using canonical durable
+    exclusive publication. Only confirmed publication produces Result_ready
+    with the digest of these exact receipt bytes. The result remains an
+    uncertain-execution observation, never payload or Task/Goal success.
+
+    Observer cancellation leaves publication and the original job alive.
+    Publication/capture failure or owner teardown settles this observer with an
+    error; it never grants a new launch or overwrites an existing receipt.
+    Repeated observers share the same original immutable receipt. Restart
+    readback/reconciliation and durable host consumption/Release remain separate
+    obligations; this API grants neither cleanup nor recovered kernel authority. *)
 val read_output : t -> stream:P.stream -> offset:int64 -> max_bytes:int -> (O.chunk,error) result
 val cancel : t -> (R.record,error) result
 val await_quiescent : t -> (G.exit_observation,error) result
@@ -77,9 +98,11 @@ val await_quiescent : t -> (G.exit_observation,error) result
     available even when output initialization or capture is unavailable. *)
 module For_testing : sig
   val launch_effect_workspace :
-    after_spawn:(L.t -> unit) ->
+    after_spawn:(L.t -> unit) -> before_result_publish:(unit -> unit) ->
     sw:Eio.Switch.t -> fs:Eio.Fs.dir_ty Eio.Path.t ->
     cgroup_parent_path:string -> execution:L.execution -> R.launch_intent -> launch_outcome
-  (** Original owner exists and parent child-ends are closed; input/capture
-      workers have not started. No alternate spawn or storage path. *)
+  (** [after_spawn]: original owner exists and parent child-ends are closed;
+      input/capture workers have not started. [before_result_publish]: actual
+      physical/tree/input/output settlement exists, before result publication
+      and outside the owner metadata lock. No alternate spawn/storage/evidence. *)
 end

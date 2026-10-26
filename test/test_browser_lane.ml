@@ -474,6 +474,24 @@ let test_read_activity () =
   | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ -> fail "activity is not an object");
  ignore (activity_ok (Lane.disconnect_client ~client_id:info.client_id))
 
+let test_space_identity_cannot_take_queued_work () = with_clients (fun sw _ ->
+  let space : Lane.ego_space = {id=51;name="SDK Space"} in
+  let original={ (info Lane.Ego_lite) with transport=Lane.Ego_task_space;space=Some space} in
+  ignore (Lane.take_command ~client_info:original ~window_sec:0.);
+  Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:original.client_id));
+  let changed={original with space=Some {space with id=52}} in
+  let renamed={original with space=Some {space with name="Renamed Space"}} in
+  let result=Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
+    ~target:(target original.client_id) ~verb:(Lane.Page_read {tab_id=Some 1;max_chars=None}) ~timeout_sec:1.) in
+  Eio.Fiber.yield ();
+  check bool "another Space cannot register under an existing client UUID" true
+    (match Lane.register changed with Error Lane.Client_identity_changed -> true | Ok _|Error _ -> false);
+  check bool "another Space cannot consume the original queued read" true
+    (Lane.take_command ~client_info:changed ~window_sec:0. = Error Lane.Client_identity_changed);
+  let command=take renamed in
+  ignore (Lane.deliver_result ~client_id:original.client_id ~id:command.id ~payload:(payload "original Space"));
+  answered result "original Space")
+
 let test_space_connection_context () =
   let space : Lane.ego_space = {id=51;name="SDK Space"} in
   let json=Lane.ego_space_to_json space in
@@ -513,5 +531,6 @@ let () = run "browser client routing" ["ownership", [
   test_case "expired queued actions do not execute" `Quick test_timed_out_queue_is_not_executed;
   test_case "disconnect releases pending caller" `Quick test_disconnect_releases_waiter;
   test_case "source and live command policy" `Quick test_sources_and_live_policy;
+  test_case "a replacement Space cannot take queued work" `Quick test_space_identity_cannot_take_queued_work;
   test_case "Space context follows its authoritative connection" `Quick test_space_connection_context;
   test_case "answers state their connection" `Quick test_answers_state_their_connection]]

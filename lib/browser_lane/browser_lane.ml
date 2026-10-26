@@ -887,6 +887,7 @@ let refresh_unlocked client = match client.liveness with
   | Worker_held -> ()
 let same_info left right = left.browser = right.browser
   && left.transport = right.transport
+  && same_space_id left.space right.space
   && String.equal left.version right.version && String.equal left.engine_version right.engine_version
 let retire_unlocked key client =
   Hashtbl.remove clients key;

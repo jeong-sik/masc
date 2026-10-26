@@ -6,7 +6,7 @@
 (test
  (name test_browser_addon_observation)
  (modules test_browser_addon_observation)
- (libraries masc alcotest yojson))
+ (libraries masc masc.browser_lane alcotest eio_main yojson))
 
 (test
  (name test_browser_addon_tool)

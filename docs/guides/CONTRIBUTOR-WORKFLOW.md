@@ -195,6 +195,8 @@ can follow the relationship. Treat a Board plan as a plan until it has evidence.
 
 ## 4. Validate and request CI
 
+For existing shell and dashboard fixture checks, see [focused manual checks](FOCUSED-MANUAL-CHECKS.md). Choose the check for the changed boundary and preserve its stated evidence limits.
+
 Choose evidence from the changed behavior and its concrete risks. For documentation,
 read the source behind changed claims and check file links, anchors and commands.
 `git diff --check` identifies whitespace errors; it does not establish behavior.

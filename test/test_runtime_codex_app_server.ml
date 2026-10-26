@@ -706,6 +706,41 @@ let test_dynamic_tool_callback ?(worker_pool = false) ?(content = "MASC_TOOL_RES
           | _ -> fail "Codex live stream events were not projected in wire order"))
 ;;
 
+let test_buffered_response_observer_interrupt_keeps_typed_cause () =
+  let effects = ref 0 and response_writes = ref 0 and worker_settled = ref false in
+  let undelivered = ref [] in
+  let tool = dispatch_tool
+      ~execution_mode:(fun _ -> Agent_core.Tool_contract.Serial)
+      ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
+      (fun ~call_id:_ _ ->
+        incr effects;
+        { (tool_response "ORIGINAL_WRITTEN_RESULT") with
+          on_response_sent = Some (fun () ->
+            incr response_writes;
+            check bool "interrupt observer follows buffered worker settlement" true !worker_settled;
+            raise Keeper_registry_types.Operator_interrupt) }) in
+  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+    tool_call_request; item_completed; turn_completed] (fun path ->
+    let outcome =
+      try `Returned (run_fixture ~dynamic_tools:[tool]
+        ~on_stream_event:(function
+          | Runtime_codex_app_server.Dynamic_tool_finished _ ->
+            check int "buffered worker has not physically written its response" 0 !response_writes;
+            worker_settled := true
+          | _ -> ())
+        ~on_undelivered_tool_result:(fun receipt -> undelivered := receipt :: !undelivered; Ok ()) path)
+      with exn -> `Raised exn in
+    (match outcome with
+     | `Raised exn -> check bool "operator interrupt remains typed through physical response settlement"
+         true (Keeper_registry_types.is_operator_interrupt exn)
+     | `Returned (Error error) -> failf "post-write interrupt became a transport failure: %s"
+         (Runtime_codex_app_server.error_to_string error)
+     | `Returned (Ok _) -> fail "response observer operator interrupt disappeared");
+    check int "the original effect executes once" 1 !effects;
+    check int "one complete physical write invokes the interrupting observer" 1 !response_writes;
+    check int "the already written original is never retained as undelivered" 0 (List.length !undelivered))
+;;
+
 let test_response_observer_requires_original_projection () =
   let image = Agent_core.Types.Image
     {media_type = "image/tiff"; data = "AAAA"; source_type = Base64} in
@@ -9838,6 +9873,8 @@ let () =
             test_response_observer_requires_original_projection
         ; test_case "observer failure does not undo a written response" `Quick
             (fun () -> test_dynamic_tool_callback ~observer_raises:true ())
+        ; test_case "buffered response observer preserves operator interrupt" `Quick
+            test_buffered_response_observer_interrupt_keeps_typed_cause
         ; test_case "host stop follows response write" `Quick
             test_dynamic_tool_abort_stops_the_provider_loop
         ; test_case "vendor completion preserves unwritten original" `Quick

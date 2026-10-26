@@ -1835,6 +1835,7 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
            if !vendor_closed then retain ()
            else
              (try io.send ?on_response_sent frame json; Ok () with
+              | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
               | Idle_timeout seconds ->
                 close_delivery ();
                 stopped := Some (Timeout {seconds; turn_accepted = true});

@@ -5870,7 +5870,7 @@ let test_scheduled_source_handoff case () =
   let record text = order := !order @ [text] in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     let owner = Eio.Promise.await owner_p in
-    let operation = Option.get (owner_ok (claim ())) in
+    let operation : Chat_operation.t = Option.get (owner_ok (claim ())) in
     if Chat_operation.Operation_id.equal operation.operation_id first then (
       incr attempts;
       if !attempts = 1 then (

@@ -603,6 +603,45 @@ let test_storage_contention_and_known_launch_revalidation () = fixture (fun ~env
     check bool "refresh never adopts another known launch with matching admission" true (R.refresh known=Error R.Stale_record);
     check bool "storage open never adopts another known launch" true (R.open_storage ~sw known=Error R.Stale_record)))
 
+let test_original_readers_overlap_without_admitting_writers () = fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root:_ ->
+  let b=binding (id "05") in let original=admitted registry b in
+  let entered,signal=Eio.Promise.create () and done_,finish=Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let interrupted=match Eio.Switch.run (fun reader_sw ->
+      ignore (R.For_testing.refresh original ~after_lock:(fun () ->
+        Eio.Promise.resolve signal reader_sw;Eio.Fiber.await_cancel ()) |> get)) with
+      | () -> false
+      | exception Interrupted -> true in
+    Eio.Promise.resolve finish interrupted);
+  let first_scope=Eio.Promise.await entered in
+  let second=R.For_testing.refresh original ~after_lock:(fun () ->
+    let loaded=R.load registry ~binding:b |> get in
+    let refreshed=R.refresh original |> get in
+    let storage=R.open_storage ~sw original |> get in
+    check bool "overlapping original readers preserve the same exact source" true
+      (R.admission_id loaded=R.admission_id original && R.revision refreshed=R.revision original
+        && R.specification (R.storage_record storage)=R.specification original);
+    check bool "both shared readers remain admitted together" true (Eio.Promise.peek done_=None);
+    check bool "launch intent refuses active original readers without waiting" true
+      (R.commit_launch original ~confirmed_admission_id:(id "04") ~launch_id:(id "06")=Error R.Busy);
+    check bool "cancellation refuses active original readers without waiting" true
+      (R.request_cancel original ~confirmed_admission_id:(id "04")=Error R.Busy);
+    let independent=admitted registry (binding (id "07")) in
+    let permit=commit independent in
+    ignore (R.with_launch ~sw permit (fun _ ~storage:_ -> ()) |> completed);
+    check bool "independent job commits and enters its original launch while readers remain" true
+      (Eio.Promise.peek done_=None);
+    Eio.Switch.fail first_scope Interrupted;
+    check bool "reader cancellation preserves its original exception and closes its lease" true
+      (Eio.Promise.await done_);
+    check bool "closing one reader never releases the other reader's shared lease" true
+      (R.request_cancel original ~confirmed_admission_id:(id "04")=Error R.Busy)) |> get in
+  check bool "the remaining reader still returns the original unchanged record" true
+    (R.revision second=R.revision original && R.cancellation_state second=R.No_cancellation);
+  let cancelled=R.request_cancel original ~confirmed_admission_id:(id "04") |> get in
+  check bool "exclusive original mutation succeeds after every shared reader releases" true
+    (R.cancellation_state cancelled=R.Cancellation_requested && R.revision cancelled=2L))
+
 let ()=run "endpoint job registry" ["original durable admission",[
   test_case "original admission is idempotent and survives reopen" `Quick test_original_admission_survives_reopen;
   test_case "base Inspect outer v1 is rejected before original decoding" `Quick
@@ -629,4 +668,5 @@ let ()=run "endpoint job registry" ["original durable admission",[
   test_case "cancelled supervisor scope cannot enter launch" `Quick test_cancelled_job_scope_never_enters_launch;
   test_case "old boot can read original storage without restoring a launch" `Quick test_original_storage_read_survives_boot_without_launch;
   test_case "storage pins its actual registry and rejects a rebound job" `Quick test_open_storage_pins_actual_registry_and_rejects_rebound_job;
-  test_case "storage contention preserves progress and known launch authority" `Quick test_storage_contention_and_known_launch_revalidation]]
+  test_case "storage contention preserves progress and known launch authority" `Quick test_storage_contention_and_known_launch_revalidation;
+  test_case "original readers overlap while exclusive writers remain nonwaiting" `Quick test_original_readers_overlap_without_admitting_writers]]

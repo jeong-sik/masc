@@ -132,6 +132,15 @@ val try_with_liveness_lock_observed :
     A successful short callback observes an inactive owner, not execution or
     replay authority. *)
 
+val try_with_shared_liveness_lock_observed :
+  lock_path:string -> (unit -> 'a) -> 'a durable_lock_attempt
+(** Read-only inspection under a shared nonwaiting flock on the same stable
+    private inode. Independent readers may overlap; an exclusive owner or
+    writer still refuses admission without waiting. This uses the same
+    no-follow identity checks, cancellable callback and protected descriptor
+    release as {!try_with_liveness_lock_observed}. The callback must not mutate
+    the protected operation or derive effect permission from a shared lease. *)
+
 val with_durable_lock :
   lock_path:string -> (unit -> 'a) -> ('a, durable_lock_error) result
 (** Compatibility projection of {!with_durable_lock_observed}. A release

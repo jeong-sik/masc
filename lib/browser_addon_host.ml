@@ -97,7 +97,7 @@ let dispatch ?upload_id ~required_actions t ~preference verb ~start_time =
   let* ()=match preference,verb with
     | Browser_selection.Exact (Browser_lane.Live_route None),Browser_lane.Page_act (Browser_lane.Action.Open_tab _|Open_window _|Control _)
     | Automatic,Browser_lane.Page_act (Browser_lane.Action.Control _) ->
-        refuse "live open_tab, open_window, hand_off, take_over and wait_for_control require an explicit observed clientId"
+        refuse "live creation, control and Page management actions require an explicit observed clientId"
     | Exact (Browser_lane.Automation_route|Stagehand_route),Browser_lane.Page_act (Browser_lane.Action.Control _) ->
         refuse Browser_lane.handoff_refused
     | Exact (Browser_lane.Live_route (Some _)),Browser_lane.Page_act (Browser_lane.Action.Control _) -> Ok ()

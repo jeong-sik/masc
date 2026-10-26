@@ -202,6 +202,7 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Dialog_answer -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Dismiss_dialog})
   | Frame_read -> Page_context {tab_id=2;frame_path=["#frame"];mode=`Frames}
   | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
+    | Page_management -> Page_act (Action.Control (Action.Adopt_tab {tab_id=2;label=None}))
   | Download_listing -> Page_downloads {tab_id=2}
   | File_upload -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=["/tmp/note.txt"]}}))
 
@@ -212,9 +213,9 @@ let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the extension has no pointer the browser trusts"
-    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_answer; Frame_read; Operator_handoff; Download_listing; File_upload] (unserved Lane.Web_extension);
+    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_answer; Frame_read; Operator_handoff; Page_management; Download_listing; File_upload] (unserved Lane.Web_extension);
   check (list capability) "the BiDi peer has no ego snapshot, browser zoom, hand-off, download list or upload"
-    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Browser_zoom; Operator_handoff; Download_listing; File_upload] (unserved Lane.Webdriver_bidi);
+    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Browser_zoom; Operator_handoff; Page_management; Download_listing; File_upload] (unserved Lane.Webdriver_bidi);
   check (list capability) "the ego connection has no document source, touch, zoom, resize, activation or frame reads"
     Lane.[Document_source; Touch_input; Browser_zoom; Viewport_resize; Tab_activation; Frame_read]
     (unserved Lane.Ego_task_space);
@@ -539,7 +540,31 @@ let test_native_control_wait_contract () =
       ["controlOptions",`Assoc ["claim",`Bool true]];
       ["controlOptions",`Assoc [];"controlOptions",`Assoc []] ]
 
+let test_native_page_management_contract () =
+  let parse action fields=Lane.Action.parse (`Assoc (("action",`String action)::fields)) in
+  List.iter (fun action ->
+    let encoded=Lane.Action.to_json action in
+    check bool "Page management retains its exact tab and label" true (Lane.Action.parse encoded=Ok action);
+    let verb=Lane.Page_act action in
+    check (option int) "activity belongs to the observed tab" (Some 2) (Lane.activity_scope verb);
+    check bool "native SDK owns management execution" true (Lane.ego_reply_policy verb=Lane.Executor_owned);
+    check bool "only Ego serves Page management" true
+      (Lane.live_capability verb=Some Lane.Page_management
+        && Lane.live_transport_serves Ego_task_space Page_management
+        && not (Lane.live_transport_serves Webdriver_bidi Page_management)
+        && not (Lane.live_transport_serves Web_extension Page_management)
+        && not (Lane.verb_allowed_on_automation verb) && not (Lane.verb_allowed_on_stagehand verb)))
+    [Lane.Action.Control (Adopt_tab {tab_id=2;label=None});Control (Adopt_tab {tab_id=2;label=Some "login"});Control (Release_tab 2)];
+  List.iter (fun (action,fields) -> check bool "invalid lifecycle input is refused" true
+    (Result.is_error (parse action fields)))
+    ["adopt_tab",[];"adopt_tab",["tabId",`Int (-1)];
+     "adopt_tab",["tabId",`Int 2;"pageLabel",`String " "];
+     "adopt_tab",["tabId",`Int 2;"framePath",`List []];
+     "adopt_tab",["tabId",`Int 2;"tabId",`Int 3];
+     "release_tab",["tabId",`Int 2;"pageLabel",`String "login"]]
+
 let () = run "browser client routing" ["ownership", [
+  test_case "native Page management retains exact tab binding" `Quick test_native_page_management_contract;
   test_case "native Space wait keeps SDK ownership and options" `Quick test_native_control_wait_contract;
   test_case "reads retain caller, scope and settled results" `Quick test_read_activity;
   test_case "agent activity follows queue ownership and cleanup" `Quick test_agent_activity;

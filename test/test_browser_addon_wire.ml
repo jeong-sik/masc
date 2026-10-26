@@ -21,6 +21,9 @@ let roundtrips () =
     Page_elements {tab_id=None;filter={within=Some "nav[aria-label=\"Channels\"] > ul";selector=Some "[role=row]"}};
     Page_context {tab_id=7;frame_path=["#frame"];mode=`Elements {within=Some "#sidebar";selector=None}};
     Page_act (B.Action.On_tab {tab_id=7;frame_path=["#frame"];interaction=B.Action.Upload {target=B.Action.File_input "#edit";paths=["/staged/a.txt"]}});
+    Page_act (B.Action.Control (B.Action.Wait_for_control {interval_ms=Some 0.5;timeout_ms=Some 100000.}));
+    Page_act (B.Action.Control (B.Action.Adopt_tab {tab_id=7;label=Some "login"}));
+    Page_act (B.Action.Control (B.Action.Release_tab 7));
     Page_context {tab_id=7;frame_path=["#frame"];mode=`Text 1000};
     Page_instruct {tab_id=7;instruction="Open the menu"};Page_locate {tab_id=7;instruction=None};
     Page_extract {tab_id=7;instruction="Read totals";schema=Some (`Assoc ["type",`String "object"])}] in
@@ -47,6 +50,11 @@ let a_native_host_cannot_poll_as_ego () =
   check bool "a BiDi host still polls" true (Result.is_ok (poll B.Webdriver_bidi))
 
 let rejections () =
+  check bool "unknown lifecycle fields stay closed" true
+    (Result.is_error (decode "page.act" ["action",`String "adopt_tab";"tabId",`Int 7;"force",`Bool true]));
+  check bool "duplicate lifecycle options stay closed" true
+    (Result.is_error (decode "page.act" ["action",`String "wait_for_control";
+      "controlOptions",`Assoc ["timeout",`Int 1;"timeout",`Int 2]]));
   check bool "nested action route cannot override selected browser" true
     (Result.is_error (decode "page.act" ["action",`String "open_tab";"url",`String "https://example.org";"lane",`String "automation"]));
   check bool "nested action client cannot conflict" true

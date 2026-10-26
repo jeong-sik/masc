@@ -153,6 +153,21 @@ These tools are composed by the Keeper; handoff does not automatically create
 an Ask, show a window, or verify credentials. The identity receipt and guidance
 are source changes; a real Keeper login handoff remains unverified.
 
+Before handing off an agent-controlled Space, `BrowserInteract activate_tab`
+can explicitly activate its observed agent-created Page, with exact `clientId`,
+`tabId` and `expectedUrl`. It uses Ego's native `TaskSpace.cdp` to look up that
+target's window, restores it only if minimized, and activates the target.
+The command rechecks Page identity, URL and window before effects and observes
+them afterward. These CDP calls are not atomic: a concurrent change or a lost
+response after activation remains uncertain and must not trigger a replay.
+The receipt reports `active` and `window` (`windowId`, `stateBefore`,
+`stateAfter`, `restored`). These are native observations, not proof that the
+operator can see the rendered page or that the app has OS focus. Fullscreen
+and maximized windows are not resized. No claim, takeover, navigation, login
+or new Space is part of activation. Never use it while the Space is delegated.
+Real SDK activation/window restoration and installed Keeper execution remain
+unverified; a successful source fixture is below visible login handoff proof.
+
 For an observed unmanaged tab in an **agent-controlled** Space, explicit
 `BrowserAct action=adopt_tab` takes that tab's `tabId` and exact `clientId`.
 Optional `pageLabel` is forwarded as the SDK's `as` option; omission lets Ego

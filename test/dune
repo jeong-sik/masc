@@ -5175,6 +5175,11 @@
  (modules test_browser_capture_options)
  (libraries alcotest masc.browser_lane))
 
+(test
+ (name test_browser_ego_activation)
+ (modules test_browser_ego_activation)
+ (libraries alcotest masc unix yojson))
+
 (include stanzas/test_browser_activity.inc)
 
 ; Mock clock as the lane's clock: a command taken, and an answer delivered,

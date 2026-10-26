@@ -615,7 +615,7 @@ let test_input_acts_through_the_shared_page_scripts () =
     check bool (Lane.interaction_verb action ^ " is not served") true
       (String_util.contains_substring (before_effect "an input ego does not serve" (interact action)) "not served by an ego connection"))
     [Lane.Tap_at {point;viewport}; Lane.Swipe {from=point;to_=elsewhere;viewport;via=[];duration_ms=0};
-     Lane.Set_zoom {factor=1.5}; Lane.Set_viewport Lane.Browser_default; Lane.Activate_tab];
+     Lane.Set_zoom {factor=1.5}; Lane.Set_viewport Lane.Browser_default];
   check int "none of those ran a script" before (runs ())
 
 (* Selector requests must reach ego unchanged, without a MASC target/DOM run.
@@ -875,6 +875,9 @@ let test_the_peer_serves_what_the_lane_table_says () =
         "snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])
     | "page.target_input" -> answered (obj ["urlBefore",str "https://app.slack.com/";"receipt",obj [];"error",`Null;
         "tab",obj ["url",str "https://app.slack.com/";"title",str "Slack"]])
+    | "page.activate" -> answered (obj ["spaceId",`Int 51;"label",str "p1";"targetId",str "T1";
+        "urlBefore",str "https://app.slack.com/";"url",str "https://app.slack.com/";"title",str "Slack";
+        "active",`Bool true;"window",obj ["windowId",`Int 7;"stateBefore",str "normal";"stateAfter",str "normal";"restored",`Bool false]])
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/new";"title",str "New";"active",`Bool true]])
     | "page.goto" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
@@ -989,6 +992,47 @@ let in_node script =
   match Unix.waitpid [] pid with
   | _, Unix.WEXITED 0 -> In_channel.with_open_bin out In_channel.input_all
   | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> fail "node did not run the step"
+
+let test_native_activation_keeps_space_authority () =
+  let owner=ref "agent" and runner_failure=ref false and native_calls=ref 0 and output=ref "" in
+  let run ~window_s script = match (sent_of ~window_s script).step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+    | "tabs.list" -> answered tabs
+    | other -> failf "activation must use native execution, got %s" other in
+  let run_native script =
+    incr native_calls;
+    check string "one native activation" "page.activate" (sent_of ~window_s:0. script).step;
+    if !runner_failure then Error (Peer.Unobserved "activation receipt lost") else
+    let shim=Printf.sprintf {js|
+const calls=[];let active=false;
+process.on('exit',()=>console.log('native-calls '+JSON.stringify(calls)));
+const taskSpace=async()=>({spaceId:51,ownership:%s,
+ tabs:async()=>[{label:'p1',targetId:'T1',openedBy:'agent',url:'https://app.slack.com/',title:'Slack',active}],
+ cdp:async(method,params)=>{
+  calls.push(method);
+  if(params.targetId!=='T1')throw Error('foreign target');
+  if(method==='Browser.getWindowForTarget')return {windowId:7,bounds:{windowState:'normal'}};
+  if(method==='Target.activateTarget'){active=true;return {};}
+  throw Error('unexpected native command');
+ }});
+|js} (Yojson.Safe.to_string (str !owner)) in
+    output:=in_node (shim^script);Ok !output in
+  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
+      ~space:(Browser_configuration.Named_space "masc") ~version:"fixture" ~capture_directory:(capture_directory ()) with
+    | Ok peer -> peer | Error detail -> fail detail in
+  ignore(dispatch peer Live.Tabs_list (obj []));
+  let activate ()=dispatch peer Live.Page_interact (interact_args Lane.Activate_tab) in
+  (match activate () with
+   | Ok value -> check bool "native activation names the original tab" true
+       (field "tabId" value=`Int 1 && field "active" value=`Bool true && field "spaceId" value=`Int 51)
+   | Error _ -> fail "native activation failed");
+  owner:="agentDelegatedToUser";
+  check string "a delegated Space refuses before activation" "before effect" (failure_kind (activate ()));
+  check bool "delegated owner performs no native target/window calls" true
+    (List.mem "native-calls []" (String.split_on_char '\n' !output));
+  owner:="agent";runner_failure:=true;
+  check string "lost activation stays uncertain" "unknown" (failure_kind (activate ()));
+  check int "one native execution per caller command" 3 !native_calls
 
 (* Execute the generated capture script against a Page stand-in, including its
    actual screenshot call and file write. This proves the adapter boundary,
@@ -2450,6 +2494,7 @@ let () =
       test_case "an answer past the limit is refused" `Quick test_an_answer_past_the_limit_is_refused;
       test_case "a capture reads and removes its file" `Quick test_capture_reads_and_removes_the_file;
       test_case "native captures preserve options and consume owned files" `Quick test_native_capture_options_and_owned_file;
+      test_case "native activation retains original Space authority" `Quick test_native_activation_keeps_space_authority;
       test_case "effects answer what happened" `Quick test_effects_answer_what_happened;
       test_case "history moves one entry and waits for it" `Quick test_history_moves_one_entry;
       test_case "a snapshot reads ego's own tree" `Quick test_a_snapshot_reads_egos_own_tree;

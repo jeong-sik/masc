@@ -68,6 +68,11 @@ Ego Space는 같은 브라우저 안의 작업 공간이다. 작업할 때마다
 1. 현재 관측의 lane/clientId/tabId와 페이지 주소를 보관한다. BrowserAct
    `hand_off`를 같은 live clientId로 한 번 호출해 공간 전체를 운영자에게 넘긴다.
    성공 결과의 `spaceId`와 `spaceName`은 그 공간의 SDK 정보다.
+   인계 전에 agent가 제어 중인 공간의 agent-created Page를 활성화하려면
+   같은 clientId/tabId와 expectedUrl로 BrowserInteract `activate_tab`을 사용한다.
+   Ego의 네이티브 탭 활성화와 최소화된 창 복원을 요청하며, 반환된 active와
+   window 상태는 실제 화면 노출이나 OS 포커스의 증명이 아니다. 실패·불확실
+   응답을 자동 재실행하지 않는다. 이미 인계한 공간에는 호출하지 않는다.
 2. `masc_ask`로 해야 할 일과 그 Space 이름·번호를 알리고, 끝나면 알려 달라고
    요청한다. 현재 알고 있는 Task/Goal ID를 함께 보낸다. 예를 들어 질문은
    “Ego의 Space <이름> (#<번호>)에서 Slack 로그인을 마친 뒤 완료를 선택해 주세요.

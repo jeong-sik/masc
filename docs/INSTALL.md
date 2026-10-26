@@ -704,6 +704,13 @@ Keeper's system prompt.
 controlling, and verifying a browser. It does not install a browser, an
 extension, or authentication. An existing skill package is not overwritten,
 so on upgrade compare your changes with the new guidance and merge them in.
+Before a first browser task, read the browser-lanes skill and confirm a
+connection that supports the requested work. Keep the lane returned in
+browserSelection, and the live connection's clientId and tabId, on subsequent
+calls. When a refusal such as browser_binding_required occurs, inspect that
+response and the original connection receipt, then follow the skill's
+matching recovery procedure. Do not repeat the same call without confirming
+the cause.
 The Gecko scene features need the native host together with browser
 extension 0.5.0 or later. Update an existing browser extension separately.
 

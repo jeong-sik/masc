@@ -780,13 +780,19 @@ let interaction_activity_of_json = function
        Ok {request_id;actor;action;tab_id;phase}
      | _ -> Error "invalid browser interaction activity")
   | _ -> Error "invalid browser interaction activity"
+(* How the lane learns a client is gone. A native host that stops polling
+   says nothing, so it is gone once its window without a poll passes. A
+   connection this worker runs itself (owned Firefox, ego) is disconnected by
+   the worker when it ends; elapsed time, which on macOS includes system
+   sleep, says nothing about it. *)
+type liveness = Polled of Monotonic_deadline.t | Worker_held
 type client = { info : client_info; commands : issued Eio.Stream.t;
   mutex : Eio.Mutex.t;
   waiters : (string, Yojson.Safe.t Eio.Promise.u) Hashtbl.t;
   interactions : (string, interaction_activity) Hashtbl.t;
   executor_work : (string, interaction_phase) Hashtbl.t;
   mutable last_delivered_result : (string * Yojson.Safe.t) option;
-  mutable connected_until : Monotonic_deadline.t; mutable closed : bool }
+  mutable liveness : liveness; mutable closed : bool }
 type target = Automation | Live_client of client | Stagehand
 let clients : (string, client) Hashtbl.t = Hashtbl.create 4
 let clients_mutex = Eio.Mutex.create ()
@@ -799,10 +805,17 @@ let lane_connected_window_sec = 120.
    explicit disconnect always wins, and settlement releases this ownership. *)
 let connected client = Eio.Mutex.use_ro client.mutex (fun () ->
   not client.closed &&
-  (not (Monotonic_deadline.passed client.connected_until)
-   || Hashtbl.fold (fun _ phase running -> match phase with
-        | Interaction_running -> true | Interaction_queued -> running)
-        client.executor_work false))
+  (match client.liveness with
+   | Worker_held -> true
+   | Polled until ->
+     not (Monotonic_deadline.passed until)
+     || Hashtbl.fold (fun _ phase running -> match phase with
+          | Interaction_running -> true | Interaction_queued -> running)
+          client.executor_work false))
+(* A poll or a delivered result shows a polled client is still there. *)
+let refresh_unlocked client = match client.liveness with
+  | Polled _ -> client.liveness <- Polled (Monotonic_deadline.after ~seconds:lane_connected_window_sec)
+  | Worker_held -> ()
 let same_info left right = left.browser = right.browser
   && left.transport = right.transport
   && String.equal left.version right.version && String.equal left.engine_version right.engine_version
@@ -992,7 +1005,7 @@ let resolve_target ~verb route =
                   String.compare (client_id_to_string left) (client_id_to_string right)))))
 (* Why the lane turns a poll's client away. [Client_retired]: the lane ended
    this connection, after [lane_connected_window_sec] without a poll or running
-   executor-owned work, or on the
+   executor-owned work for a polled client, or on the
    client's own disconnect, and its ID is never served again; a client that
    is still there registers under a new one. [Client_identity_changed]: the
    ID is connected as another browser or transport, and asking again gets
@@ -1014,14 +1027,13 @@ let register info =
     | Some client when client.closed -> Error Client_retired
     | Some client when not (same_info client.info info) -> Error Client_identity_changed
     | Some client ->
-      Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
-        client.connected_until <- Monotonic_deadline.after ~seconds:lane_connected_window_sec);
+      Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> refresh_unlocked client);
       Ok client
     | None ->
       let client = {info; commands=Eio.Stream.create 16; mutex=Eio.Mutex.create ();
         waiters=Hashtbl.create 8; interactions=Hashtbl.create 8; executor_work=Hashtbl.create 8;
         last_delivered_result=None; closed=false;
-        connected_until=Monotonic_deadline.after ~seconds:lane_connected_window_sec} in
+        liveness=Polled (Monotonic_deadline.after ~seconds:lane_connected_window_sec)} in
       Hashtbl.add clients key client; Ok client)
 let take_registered_command ~client ~window_sec =
     let rec take () =
@@ -1058,7 +1070,7 @@ let deliver_result ~client_id ~id ~payload =
         Hashtbl.remove client.waiters id;
         Hashtbl.remove client.interactions id;
         Hashtbl.remove client.executor_work id;
-        client.connected_until <- Monotonic_deadline.after ~seconds:lane_connected_window_sec;
+        refresh_unlocked client;
         client.last_delivered_result <- Some (id, payload);
         Eio.Promise.resolve resolver payload;
         Ok ()
@@ -1074,6 +1086,16 @@ let disconnect_client ~client_id =
     | None when Hashtbl.mem retired_clients key -> Ok ()
     | None -> Error "unknown_client"
     | Some client -> retire_unlocked key client; Ok ())
+(* The worker that runs this connection disconnects it itself when it ends,
+   so the lane stops timing it. A retired or unknown client is not held. *)
+let hold_client ~client_id =
+  Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
+    match Hashtbl.find_opt clients (client_id_to_string client_id) with
+    | None -> Error "unknown_client"
+    | Some client ->
+      Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+        if client.closed then Error "client_not_connected"
+        else (client.liveness <- Worker_held; Ok ())))
 (* A browser whose lease ended after its target was resolved is the same
    selection failure as naming it when it had already gone, so the caller
    answers both from one place. Work this connection's transport does not

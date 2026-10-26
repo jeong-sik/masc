@@ -156,7 +156,7 @@ let test_ego_input_outlives_poll_lease () = with_lane @@ fun ~sw ~clock ->
   let issued=Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target ~verb:native_click ~timeout_sec:window_s) in
   let command=take_owned info in
-  client.connected_until <- Monotonic_deadline.after ~seconds:0.;
+  client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
   Eio_mock.Clock.set_time clock (Eio.Time.now clock +. Lane.lane_connected_window_sec +. window_s);
   check bool "running native work keeps its original connection" true
     (List.exists (fun (c:Lane.client_info) -> c.client_id=info.client_id) (Lane.active_clients ()));
@@ -165,7 +165,7 @@ let test_ego_input_outlives_poll_lease () = with_lane @@ fun ~sw ~clock ->
   expect_answer issued;
   check int "settlement releases execution ownership" 0 (Hashtbl.length client.executor_work);
   check bool "delivery renews idle connection" true (Lane.connected client);
-  client.connected_until <- Monotonic_deadline.after ~seconds:0.;
+  client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
   Eio_mock.Clock.set_time clock (Eio.Time.now clock +. Lane.lane_connected_window_sec +. window_s);
   ignore (Lane.active_clients ());
   check bool "idle expired connection still retires" true client.closed
@@ -178,7 +178,7 @@ let test_queued_native_work_is_not_liveness () = with_lane @@ fun ~sw ~clock ->
     Lane.issue_for_actor ~actor:None ~target ~verb:native_click ~timeout_sec:window_s) in
   (* Consume the queue without an authenticated client poll: no execution owner. *)
   ignore (Eio.Stream.take client.commands);
-  client.connected_until <- Monotonic_deadline.after ~seconds:0.;
+  client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
   Eio_mock.Clock.set_time clock (Eio.Time.now clock +. Lane.lane_connected_window_sec +. window_s);
   ignore (Lane.active_clients ());
   check bool "queued work cannot hold a dead client alive" true client.closed;
@@ -209,7 +209,7 @@ let test_running_native_disconnect_is_final () = with_lane @@ fun ~sw ~clock ->
   let issued=Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target ~verb:native_click ~timeout_sec:window_s) in
   let command=take_owned info in
-  client.connected_until <- Monotonic_deadline.after ~seconds:0.;
+  client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
   ignore (Lane.disconnect_client ~client_id:info.client_id);
   (match Eio.Promise.await_exn issued with
    | Ok (Lane.Answered (`Assoc fields)) ->

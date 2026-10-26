@@ -76,13 +76,34 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
      = Error (Lane.Selected_client_disconnected old.client_id));
   check bool "retired native identity cannot re-register" true
     (Lane.take_command ~client_info:old ~window_sec:0.001 = Error Lane.Client_retired))
+(* A connection the worker runs itself is ended by that worker, not by the
+   no-poll window. After the window passed, as it does when the laptop sleeps
+   (Mtime counts sleep on macOS), the next poll retires a polled client and
+   still serves the held one. *)
+let test_worker_held_client_outlives_the_poll_window () = with_clients (fun _ connect ->
+  let polled = connect Lane.Firefox and held = connect Lane.Zen in
+  let live (info : Lane.client_info) = match target info.client_id with
+    | Lane.Live_client client -> client
+    | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
+  let polled_client = live polled and held_client = live held in
+  polled_client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
+  held_client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
+  check bool "the worker holds its own connection" true (Lane.hold_client ~client_id:held.client_id = Ok ());
+  check bool "a polled client whose window passed is retired on its next poll" true
+    (Lane.take_command ~client_info:polled ~window_sec:0.001 = Error Lane.Client_retired);
+  check bool "the held client's next poll still serves it" true
+    (Lane.take_command ~client_info:held ~window_sec:0.001 = Ok None);
+  check bool "only the held client stays connected" true
+    (List.map (fun (client : Lane.client_info) -> client.client_id) (Lane.connected_clients ()) = [held.client_id]);
+  check bool "a retired client cannot be held" true
+    (Result.is_error (Lane.hold_client ~client_id:polled.client_id)))
 let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connect ->
   let info = connect Lane.Firefox in
   let pinned = target info.client_id in
   let client = match pinned with Lane.Live_client client -> client | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
   (* Expire the captured target between resolution and issue, without sleeps
      or a clock-dependent scheduling race. No command has been dispatched. *)
-  client.connected_until <- Monotonic_deadline.after ~seconds:0.;
+  client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
   let answer = Lane.issue_for_actor ~actor:None ~target:pinned
     ~verb:(Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Scroll {x=0;y=120}}) ~timeout_sec:1. in
@@ -340,7 +361,7 @@ let test_inventory_does_not_prune () = with_clients (fun sw connect ->
   let pending = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   ignore (take info);
-  client.connected_until <- Monotonic_deadline.after ~seconds:0.;
+  client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
   check bool "expired client is not counted" true
     (Lane.inventory_observation Lane.Lane_name.Live = {Lane.activity=Enabled;backend=Lane.Live_clients 0});
   check bool "inventory did not retire client" false client.closed;
@@ -403,6 +424,7 @@ let () = run "browser client routing" ["ownership", [
   test_case "a late result reaches no other waiter" `Quick test_late_result_reaches_no_other_waiter;
   test_case "single selection and stale identity" `Quick test_single_and_stale_selection;
   test_case "resolved target expires before dispatch" `Quick test_expired_resolved_target_is_pre_dispatch;
+  test_case "a worker-held client outlives the poll window" `Quick test_worker_held_client_outlives_the_poll_window;
   test_case "expired queued actions do not execute" `Quick test_timed_out_queue_is_not_executed;
   test_case "disconnect releases pending caller" `Quick test_disconnect_releases_waiter;
   test_case "source and live command policy" `Quick test_sources_and_live_policy;

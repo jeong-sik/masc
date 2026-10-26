@@ -319,7 +319,11 @@ let test_remove_rejects_parent_link () = with_fixture @@ fun f ->
 let test_remove_rejects_target_link () = with_fixture @@ fun f ->
   ignore (owner f (fun scope -> value (publish f scope (unconfigured ()))));
   let outside = Filename.concat f.base_path "moved-snapshot" in
+  (* Construct the hostile state with owner authority. Linux requires write
+     access to a moved directory when rename updates its parent entry. *)
+  Unix.chmod (path f) 0o700;
   Unix.rename (path f) outside;
+  Unix.chmod outside 0o500;
   Unix.symlink outside (path f);
   check_refused (owner f (fun scope -> remove f scope));
   check bool "target link retained" true ((Unix.lstat (path f)).st_kind = Unix.S_LNK);

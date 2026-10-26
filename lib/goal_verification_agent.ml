@@ -338,7 +338,11 @@ let retained_recovery_work config work =
       | Error error ->
         Log.Misc.error "goal verifier original unavailable goal_id=%s: %s"
           goal_id (worker_detail error);
-        work
+        (* The read failed but the Goal still owns its recovery: keep it in
+           the work list so process_pending_work defers it with a retryable
+           per-Goal Proof_lookup_unavailable outcome instead of dropping it. *)
+        if not (List.exists (fun item -> item.goal_id=goal_id) work)
+        then work @ [{goal_id}] else work
       | Ok rows ->
         List.fold_left (fun work retained ->
           let needed = match Host.needs_recovery ~registry:(Registry.global ()) retained with

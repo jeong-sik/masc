@@ -556,7 +556,7 @@ let ollama_auto_probe_uses_declared_deadline () =
     match Uri.path (Cohttp.Request.uri req) with
     | "/api/tags" ->
       incr tag_requests;
-      Eio_mock.Clock.set_time clock 1006.;
+      Eio_mock.Clock.advance clock;
       let pending, _ = Eio.Promise.create () in
       Eio.Promise.await pending
     | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()

@@ -10,15 +10,17 @@
 
     The HTTP probe runs outside atomic publication, so callers never wait
     behind a lock held during multi-second network I/O. A stale caller still
-    performs its own synchronous probe. The environment, endpoint list, and
-    refresh timestamp form one immutable state snapshot, so readers cannot
-    observe fields from different generations. A result is published only
-    when the state observed before probing is still current.
+    performs its own synchronous probe. The environment, endpoint list,
+    scoped model observations and refresh timestamp form one immutable state
+    snapshot, so readers cannot observe fields from different generations.
+    A result is published only when the state observed before probing is still
+    current. Global refresh replaces the identities it actually probed and
+    retains other fresh observations instead of discarding them merely because
+    they are absent from the global registry.
 
-    The cache cells themselves are private. They were exposed for a
-    [test_tool_local_runtime_verify] suite that seeds and restores them, and
-    that suite does not exist -- no file, no module, no caller anywhere. The
-    only way in is {!get_cached_or_refresh}. *)
+    The cache cells are private. Global endpoint snapshots are read through
+    {!get_cached_or_refresh}; selected Ollama models are read through
+    {!first_ollama_model_id_for_url}. *)
 
 (** {1 Type aliases} *)
 

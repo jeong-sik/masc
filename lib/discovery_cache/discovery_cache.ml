@@ -115,7 +115,13 @@ let refresh_cache () =
     let now = Time_compat.now () in
     let retained =
       List.filter (fun observation ->
-        observation.key.scope <> Public && fresh_observation now observation)
+        fresh_observation now observation
+        && (match observation.key.scope with
+          | Header_fingerprint _ -> true
+          | Public ->
+            not (List.exists (fun (status : endpoint_info) ->
+              String.equal status.url observation.key.url
+              && status.protocol = observation.key.protocol) results)))
         observed.cache.models
     in
     let cache = {

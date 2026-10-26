@@ -181,7 +181,7 @@ let existing_leaf (error : Fs_compat.capability_write_error) =
           | Fs_compat.Operation_failed operation_failure ->
               failure.stage=Fs_compat.Publish_exclusive
               && (match operation_failure.exception_ with
-               | Unix.Unix_error (Unix.EEXIST,_,_) -> true
+               | Unix.Unix_error (code,_,_) -> code=Unix.EEXIST
                | _ -> false)
           | Invalid_recovery_target _ | Mutation_contended
           | Posix_descriptor_unavailable | Unexpected_resource_kind _

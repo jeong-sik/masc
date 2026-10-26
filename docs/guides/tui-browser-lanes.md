@@ -140,6 +140,10 @@ content; explicit `framePath` and touch input are not supported. Keeper workflow
 can focus an editor, type or insert text, paste text/HTML through Ego's native
 clipboard restoration, and wait for the result before returning a final snapshot
 ([what it serves](../design/browser-lane.md#what-each-live-connection-serves)).
+Native workflows also expose app-state waits, Page expressions with a JSON
+argument, and browser-context fetch. Page source runs only in the observed Ego
+Page, and these calls count as possible effects. Fetch file output and other
+remaining SDK/Space gaps are listed in the [SDK inventory](ego-sdk-coverage.md).
 
 | The host | First row |
 |---|---|

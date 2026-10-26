@@ -1,0 +1,44 @@
+{
+  "recorded_at_unix": 1793049001.123213,
+  "status": "prepared; AST only; controller/server/preflight not executed",
+  "parent_sha256": "48c4c9a600589818f60cc65ef1dcfaea6c3a877c274e60e398aea2039fd3b988",
+  "controller_sha256": "1a513560e8d48580cdeb02c20f8a5c0a2403cb6730894ad7d0994cf9e5776577",
+  "source": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "source_bindings": {
+    "lib/schedule/schedule_runner.ml": "75b8c9de27318178182520a72f3e4b97506ec6e2281f0f238e7fbe96635c8425",
+    "lib/schedule/schedule_store.ml": "82d0fdc88f0e88b63a881f4d5badb27fe4ac424e6ac103feaa55b02db1687ef2",
+    "lib/schedule/schedule_runner_status.ml": "ae52f4417555f4031cc76cb7442ba6465bbd2eddb4b8ffdc01565e598f68cbeb",
+    "lib/server/server_bootstrap_maintenance.ml": "6c32469ed124bdb07e970b11a29e0c14b7555e251ad7fc691d73af776d7b8183",
+    "lib/server/server_schedule_consumers.ml": "1049380c7da869797970a497166857e76f991a75731c0f98a69afd9b2a86eb3e",
+    "lib/server/server_routes_http_routes_activity.ml": "0e25318d0ddf991eaade70a93a549301cca0dc0de4693506f0b0f4b81e757e73",
+    "lib/keeper_schedule_creation_admission.ml": "31625a02de1a277ad6f7ed8c0e3c73d2a406739802ded966410b4fd9761fe025",
+    "lib/keeper/keeper_registry_event_queue.ml": "b6419e9bfce1ddad9ee8110b852b5f21e9210c7aca452fac7fbe654a59768efb",
+    "lib/keeper_runtime/keeper_event_queue_persistence.ml": "2e5a3653e41f6b2963d5358e4dc646288ecaeb4daf2207d9cfa7669da140d3a9",
+    "lib/keeper_runtime/keeper_event_queue_schema.ml": "ba652ae46cd7ba27d3b23fd573b08a908276222abea0f794740f19d1218a31a4",
+    "lib/keeper_runtime/keeper_event_queue_state_wire.ml": "53d7c4d57b17a376c8428320a1cf3f89025efbd5a0cedcb570bb03878c2df17b",
+    "lib/keeper_runtime/keeper_event_queue_owner_lock.ml": "0f447ed7e2a9b22e7b10725a22aa2d78f5fa4251d0b8a856c2c06aba6b315ae5",
+    "lib/fs_compat/fs_compat.ml": "990a2417e1272142d07b2db309c3971d41692e77d623e015e3db6e469d3be3ba",
+    "lib/fs_compat/atomic_replace.ml": "88a63172b265c2c5907e0d83885b405388c2b9bc4b04fa3f27f93ae23dc05d9b",
+    "lib/fs_compat/atomic_temp_name.ml": "6504705133d494dbeedd412ad17ffcc4205db1ee3838f8c9cbcd3075ac3a8d1b",
+    "lib/backend/backend.ml": "d09bed16a3a59c79687b1fdcdff5c52fdf3841cd2295ddaccf0171a95a3ec374",
+    "lib/workspace/workspace_utils_ops.ml": "b00257c7ce608b6cb0993ea4702b5cb9e5c0a1a4e1df8123277f751b8c9fd6bd",
+    "lib/tool_schedule.ml": "0c9eb68dc0436870c85f663f918d55f07b807f5503f7abe73114a372b1aeb5f0",
+    "lib/schedule/schedule_occurrence_id.ml": "06b70943cb98d5e7e4d6855ded11713a80475ed468bd2cb4f7bba9663e61cf10",
+    "lib/server_keeper_waiting_inventory.ml": "d1feaf480a8c4e7d7bbaec09bce7934439df1c2dbb063c6b61c90b716c466381",
+    "lib/keeper_runtime/keeper_event_queue.ml": "1173e06eca9e45cb95cf4af6411e0c47412a3bf4e64c293636758ecd809105af",
+    "lib/keeper_runtime/keeper_event_queue_state_core.ml": "bd20f22f1d89f1ecdd936d2b76176289c29e1b66935b8bc6cd1434de9e82d163",
+    "lib/keeper_runtime/keeper_event_queue_snapshot_codec.ml": "0d0c774bdd8e235c66201aaab550be1f00e0d281f8cab6275d5bd90afb3151ba",
+    "lib/core/safe_ops.ml": "5b10632defd19dbde4b2d033a3cd9aa4e7481ab858391c5e8ef2acf445e6a9a8",
+    "lib/keeper_schedule_cancel_withdrawal.ml": "6a2fc10c46e22e23be1abbc35c4f83aef6efa37a44f439f29814afc2b1acdbb7"
+  },
+  "changes": [
+    "Bind actual withdrawal callback source identity",
+    "Verify public response cancellation actor/kind/reason in both top-level and scheduled cancellation record",
+    "Compare queue receipt reason to canonical withdrawal formatter rather than unwrapped request string"
+  ],
+  "limits": [
+    "v4 reason mismatch found before execution; all originals preserved",
+    "Runtime F5 proof still absent until a new correctly prepared trial",
+    "Original failure-cause review and finished_at range-only limits unchanged"
+  ]
+}

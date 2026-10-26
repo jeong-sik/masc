@@ -59,7 +59,7 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 33 | due가 되면 wake를 한 번 접수한다 | R-tick0/7–8, C3/28 | 신호 중복·생산 enqueue·offline 반복 tick single acceptance 실행. 모델 완료와 별개. |
 | 34 | 접수 후 receipt 저장 실패에도 중복 효과를 피한다 | C23–27/30–31/41/54, L5 | acceptance/receipt 장애 뒤 같은 occurrence 재사용 실행. F5 settlement write 실패와 다름. |
 | 35 | 한 예약 실패가 다른 due 예약을 막지 않는다 | R-tick17, C42 | fixture retry 격리와 실제 corrupt ledger의 다른 Keeper dispatch 격리 실행. |
-| 36 | Keeper가 작업 중일 때 도착한 예약을 보존한다 | real-busy-deepseek-1; repair-validation 실제 두 모델; [D9 실제 after-effect](../evidence/2026-10-27-schedule-after-effect-models/README.md) | 과거 F6 반례 유지. product94b2에서 DeepSeek/GLM의 checkpoint 보존·두 note·exact ACK 확인. DeepSeek observer의 overlap FAIL은 유지하며 원장으로 별도 대조. b5c976의 Owner103/3 실패는 보존하고 fixture 수리 ccb000의 Owner106 PASS와 구분. standalone rebased6dedd 실행은 미검증. 조합본D9 DeepSeek는 A1→checkpoint·원 incarnation 보존→B ACK→동일 A 재입장→A2→ACK를 실제 확인했지만, 모델이 잘못된 정정 노트까지 추가해 총4회 썼다. 같은 D9 GLM은 A1 없이 다른 ID를 조회하고 원 요청을 완료·ACK해 B 생성 전 실패했다. 모델 행동 전체 PASS가 아니다. |
+| 36 | Keeper가 작업 중일 때 도착한 예약을 보존한다 | real-busy-deepseek-1; repair-validation 실제 두 모델; [D9 실제 after-effect](../evidence/2026-10-27-schedule-after-effect-models/README.md) | 과거 F6 반례 유지. product94b2에서 DeepSeek/GLM의 checkpoint 보존·두 note·exact ACK 확인. DeepSeek observer의 overlap FAIL은 유지하며 원장으로 별도 대조. b5c976의 Owner103/3 실패는 보존하고 fixture 수리 ccb000의 Owner106 PASS와 구분. standalone rebased6dedd 실행은 미검증. 조합본D9 DeepSeek는 A1→checkpoint·원 incarnation 보존→B ACK→동일 A 재입장→A2→ACK를 실제 확인했지만, 모델이 잘못된 정정 노트까지 추가해 총4회 썼다. 같은 D9 GLM은 A1 없이 다른 ID를 조회하고 원 요청을 완료·ACK해 B 생성 전 실패했다. 모델 행동 전체 PASS가 아니다. 수리 #46272를 포함한 [C2 실제 두 모델](../evidence/2026-10-27-schedule-durable-runtime/README.md)에서 post-tool durable 본문 유지 확인. GLM은 A3에서 canonical B 결과를 읽고 A2를 썼다. 원 observer의 notes_list 전용 FAIL은 보존하고 별도 raw 검증으로 구분한다. DeepSeek는 세 note만 썼지만 B가 A2를 수행한 뒤 A3는 실행 없이 완료했다. B의 A 작업 금지 조건 위반이며 요청별 행동 격리는 FAIL이다([후속 #46281](https://github.com/jeong-sik/masc/issues/46281)). |
 | 37 | paused Keeper에 도착해도 유실하지 않는다 | C11; retarget-cancel-4/restart-expiry-3 | 실제 pause·pending 보존 실행. Resume 후 모델 소비는 미검증. |
 | 38 | owner가 꺼져 있어도 demand를 유지한다 | C28–29 | 등록됐으나 미시작 owner의 deferred/not_running·single acceptance 실행. Boot 후 모델 소비 미검증. |
 | 39 | notice에서 busy/paused/offline 원인과 다음 행동을 안다 | C3/28/32는 backend reason만 | notice의 원인별 Resume/Boot 안내와 실제 사용자 조치는 여전히 공백. |
@@ -73,7 +73,7 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 47 | 이전 owner ACK와 새 owner pending을 구분한다 | C21/33/37; 기존 decoder/재생 | 실제 transfer outbox/projection/cached target 실행. 실제 model-to-model 인계 미검증. |
 | 48 | 재시작 전 Running을 Due로 복원한다 | S-due7–8 | 실제 filesystem Running→Due recovery 함수/idempotence 실행. [c52 native 새 process](../evidence/2026-10-27-schedule-native-startup-recovery/README.md)에서 genuine Running 사망 후 old attempt가 process_interrupted로 정리되고 새 attempt/paused enqueue까지 관측. 중간 Due 화면을 직접 캡처한 것은 아님. |
 | 49 | 첫 startup recovery 실패 후 같은 process에서 회복한다 | Test40358821346 Consumer의 keeper_wake46–47, 117 PASS; Test40365052184에 같은 source 포함 | genuine Running·실제 publication 실패→첫 recovery 실패→저장 복원→같은 maintenance state의 다음 cadence 성공, 성공 뒤 normal crash가 startup으로 돌아가지 않음 실행. [c52 native 실제 bootstrap](../evidence/2026-10-27-schedule-native-startup-recovery/README.md): SIGSTOP·lease 자연만료·의도SIGKILL로 보존된 Running에 첫 실제 staging-write 실패→동일 B runtime 다음tick 복구·원본/control 합계 dispatch2. old Running/control 원장 불변 확인. scheduler ok이나 overall health는 degraded, 모델/운영 설치 증명 아님. |
-| 50 | dispatch 실패 정산 write 실패 뒤 같은 process에서 회복한다 | Test40365052184의 exact attempt/primary fault 회귀; 후속 PR46248 | Store의 실제 primary 실패·같은 capability 재정산은 실행. 보류 intent를 다음 production cadence에 보존/재시도하는 PR46248은 작성·독립 소스 검토 완료, Test40369739062는 head22014660의 직접 Eio 의존 참조로 suite 전 컴파일 실패. head2861571의 Test40371389026도 warning4로 suite 전 실패. 닫힌 오류 분기와 문서 수리 headc52f799의 [Test40374192059](../evidence/2026-10-27-schedule-settlement-verification/test40374192059/result.json)는 success: Runner30·Consumer60·Tool wiring64·Lane act7, 161 PASS/FAIL0/SKIP0. production maintenance composition에서 intent 보존·같은 process cadence 재정산·health와 오류 경계 검증. 실제 서버 binary fault→수렴은 미검증. |
+| 50 | dispatch 실패 정산 write 실패 뒤 같은 process에서 회복한다 | Test40365052184의 exact attempt/primary fault 회귀; 후속 PR46248 | Store의 실제 primary 실패·같은 capability 재정산은 실행. 보류 intent를 다음 production cadence에 보존/재시도하는 PR46248은 작성·독립 소스 검토 완료, Test40369739062는 head22014660의 직접 Eio 의존 참조로 suite 전 컴파일 실패. head2861571의 Test40371389026도 warning4로 suite 전 실패. 닫힌 오류 분기와 문서 수리 headc52f799의 [Test40374192059](../evidence/2026-10-27-schedule-settlement-verification/test40374192059/result.json)는 success: Runner30·Consumer60·Tool wiring64·Lane act7, 161 PASS/FAIL0/SKIP0. production maintenance composition에서 intent 보존·같은 process cadence 재정산·health와 오류 경계 검증. [C2 native 실제 F5](../evidence/2026-10-27-schedule-durable-runtime/settlement/README.md)는 실제 queue Permission denied + primary ledger Is-a-directory를 확인했다. 동일 PID에서 pending1→queue-only 복구 후 재발행0→원장 복구로 원 Retry 정산→다음 주기 단일 새 attempt/queue 전달을 관측했다. 독립 원형 검산·정상 종료0·재시작0. 첫 준비 실험 INCOMPLETE는 보존한다. 모델 실행·프로세스 사망 뒤 in-memory intent 보존 증거는 아니다. |
 | 51 | 손상·stale receipt·결과 불확실을 성공으로 덮지 않는다 | S-corruption2–3/6–9, C23–27/34/38/41/43/47/49 | 손상·write failure·retired/stale/noncanonical receipt 거절 실행. 전체 runtime 장애 복구는 아님. |
 | 52 | 도착한 단발이 dispatch Succeeded여도 계속 보인다 | 기존 chat_schedule_entries 추출 결정 | 새 195개에 해당 TUI suite 없음. 실제 채팅 표시 미검증. |
 | 53 | 선택한 Keeper의 예약만 보인다 | 기존 selection; W35는 backend owner만 | TUI Keeper 전환·generation·shared-read UI 실행 미검증. |
@@ -111,3 +111,19 @@ ref `fix/schedule-pending-settlement-20261027`, conclusion **success**의 161 PA
 각 실행 head에 한정한다. [동일 candidate 실제 실행](../evidence/2026-10-27-schedule-candidate-runtime/README.md)은
 20행의 제한된 A→B 취소와 2·13·59행의 빈 export/권한 사례를 보강한다.
 [통제된 실제 bootstrap 복구](../evidence/2026-10-27-schedule-native-startup-recovery/README.md)는 c52에 한정해 48–49행을 보강했다. [D9 실제 모델 두 사례](../evidence/2026-10-27-schedule-after-effect-models/README.md)는 36행의 기계적 보존·재개와 의미상 정확성을 구분한다. F5 process-local intent 사망 후 보존·임의 모델의 작업 정확성·모델 전환·TUI·운영 설치는 별도 경계다.
+
+
+2026-10-27 C2 후속: [durable 요청·실제 정산·두 모델 근거](../evidence/2026-10-27-schedule-durable-runtime/README.md)는
+원 수리 #46272 head `2d8fa7543519c5c58be056f3460a2a06e76c2730`의
+Test40394461863 두 suite 44+66=110 PASS와, 원 source slices를 그대로 조합한
+별도 Draft #46274 head `a3950a189b9cc5a7ce82cb725699455d79923f42`의 native producer
+40396800146 및 격리 실제 실행을 구분한다. C2는 중복 소스 검증용이며 병합 대상이 아니다.
+원 #46272의 정식 source 승인과 focused CI는 실제 모델 성공 판정과 다르다.
+
+GLM 원 관측기 FAIL은 실제 canonical 결과 재조회 경로를 놓친 관측 한계다.
+별도 원형 검증은 B 결과 blob→A3 실제 읽기→A2와 저장된 checkpoint 선택 자료의 연속성을 확인했다.
+원 관측기의 정상 종료 PASS로 다시 쓰지 않는다. DeepSeek 원 FAIL은 실제 B 턴의 A2 실행이다.
+세 효과의 수가 맞아도 B의 명시적 요청 범위 제한을 지켰다는 뜻은 아니다.
+두 실험의 요청별 행동을 합쳐 전체 PASS로 부르지 않으며, old D9 반례도 그대로 남긴다.
+50행의 실제 동일 PID 정산 복구는 이번에 보강됐지만 52–57행의 보이는 TUI·F9·알림 동작,
+강제 HTTP race·장기 calendar·모델/계정 전환·외부 파일/채널 효과와 설치는 여전히 별도 미검증 범위다.

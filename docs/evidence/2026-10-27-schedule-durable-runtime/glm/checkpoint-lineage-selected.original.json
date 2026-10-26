@@ -1,0 +1,937 @@
+[
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048034197.json",
+    "sha256": "96729380a6ecb3573db968238fb251aa87db754f641f225cbff73281ccd50336",
+    "bytes": 108195,
+    "observed_at_unix": 1793048034.23227,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 2,
+    "created_at": 1793048034.197941,
+    "selected_note_tool_results": [],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048034227.json",
+    "sha256": "5aaeab894f681765e0f9f7823e0d8156647f9cdbfb27a7bb081df59559629335",
+    "bytes": 108526,
+    "observed_at_unix": 1793048034.232748,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 2,
+    "created_at": 1793048034.227289,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048034221.json",
+    "sha256": "12017ca4c7e3fe6b0c660919bf8ffb8aecc33e233aa85a92e1ff62cb4f775ae7",
+    "bytes": 108522,
+    "observed_at_unix": 1793048034.233336,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 2,
+    "created_at": 1793048034.221623,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048036124.json",
+    "sha256": "202769568123f3a18560bea9aa99ccbf07307ab5d9b441d3501fce87b0d486f8",
+    "bytes": 108905,
+    "observed_at_unix": 1793048036.315433,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 3,
+    "created_at": 1793048036.124186,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048036114.json",
+    "sha256": "b111f514a142f0946d149a7cff4fc8af6f2451bd3c873118994d49a8bf5c21bb",
+    "bytes": 108757,
+    "observed_at_unix": 1793048036.316184,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 3,
+    "created_at": 1793048036.114813,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/trace-1793048013383-00000.json",
+    "sha256": "fc06113b93e2b436d269d4932f5c7ff355a1428afb433efad0a4676762a7145c",
+    "bytes": 108906,
+    "observed_at_unix": 1793048036.316851,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 3,
+    "created_at": 1793048036.12782,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/trace-1793048013383-00000.json",
+    "sha256": "20601caf8d5aaaadfc6b8f0ed719815e734f74377476ed109b25f49665c851ed",
+    "bytes": 115399,
+    "observed_at_unix": 1793048048.969097,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 4,
+    "created_at": 1793048048.860263,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048048857.json",
+    "sha256": "9653aab79b09f139e30e3040f0c517029c7c7c2030aed9fdc4cd2da0342b1a4b",
+    "bytes": 115401,
+    "observed_at_unix": 1793048048.970229,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 4,
+    "created_at": 1793048048.857034,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048048840.json",
+    "sha256": "8757c6aca46490d8202a8c2d01c4d8f5ae6eee3840bf0e6a491980efd90eaff2",
+    "bytes": 114935,
+    "observed_at_unix": 1793048048.971194,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 4,
+    "created_at": 1793048048.84074,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048053110.json",
+    "sha256": "3c067b897d1dced0486ae0ad4563dae6d33e392b0592e9b0089e4b40ed1b8c6b",
+    "bytes": 116175,
+    "observed_at_unix": 1793048053.235465,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 5,
+    "created_at": 1793048053.110034,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048053107.json",
+    "sha256": "7fec092279dc9a86b92f364491c85bf83ad15a44ccc739564e0217cd7683317f",
+    "bytes": 116173,
+    "observed_at_unix": 1793048053.236672,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 5,
+    "created_at": 1793048053.107015,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048053098.json",
+    "sha256": "2d0ef8e4c668dd83b23642c8d54abcbe5cc098cf60ffde03937379d2c1133be7",
+    "bytes": 115632,
+    "observed_at_unix": 1793048053.238176,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 5,
+    "created_at": 1793048053.098331,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048059434.json",
+    "sha256": "4b2089d7d8df1394f4fc768da0a81e59e9eedc4d87a1e4fcb143144bc0d0e407",
+    "bytes": 116175,
+    "observed_at_unix": 1793048059.639068,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 6,
+    "created_at": 1793048059.434298,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048067701.json",
+    "sha256": "9313199d52d7d8ba05cd113a4bb8c8bd12882171cd29bec523ef907f9d1c1313",
+    "bytes": 121328,
+    "observed_at_unix": 1793048067.7302232,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 7,
+    "created_at": 1793048067.701244,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048067698.json",
+    "sha256": "13e4fc9df982d7f33ba722137ac0816099e3810282d709f6c00efbb8e563bf6a",
+    "bytes": 121332,
+    "observed_at_unix": 1793048067.7310941,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 7,
+    "created_at": 1793048067.698534,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048067671.json",
+    "sha256": "fc1e4b085d0b215a19b2d27d5536bc048c975476ecbf735c8f75082605f485e0",
+    "bytes": 120523,
+    "observed_at_unix": 1793048067.732903,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 7,
+    "created_at": 1793048067.67155,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048072513.json",
+    "sha256": "d2add6108ffcd4928b82cf3c0d775ba77e9414544c9bcb239437f9cccb5cf1ad",
+    "bytes": 122941,
+    "observed_at_unix": 1793048072.6582332,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 8,
+    "created_at": 1793048072.513673,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      },
+      {
+        "tool_use_id": "call_7575f0bd4fad48d296939782",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba"
+        },
+        "note": {
+          "note_id": "12",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048072.48934,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048072482.json",
+    "sha256": "0e6296895e90574d9061d3d22d5c10d9e504ef78a2e2726048c9f86724458ede",
+    "bytes": 122483,
+    "observed_at_unix": 1793048072.663729,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 8,
+    "created_at": 1793048072.482042,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/trace-1793048013383-00000.json",
+    "sha256": "79503c7372ddab200f775173351db0b6259694c4118e00fae7bb6b96e369540d",
+    "bytes": 122943,
+    "observed_at_unix": 1793048072.664375,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 8,
+    "created_at": 1793048072.516552,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      },
+      {
+        "tool_use_id": "call_7575f0bd4fad48d296939782",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba"
+        },
+        "note": {
+          "note_id": "12",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048072.48934,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048077644.json",
+    "sha256": "342a4d355109e00b7ed7d8f511b90913163c7b4c89c0cc8532df02e02d60422a",
+    "bytes": 123949,
+    "observed_at_unix": 1793048077.87456,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 9,
+    "created_at": 1793048077.64494,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      },
+      {
+        "tool_use_id": "call_7575f0bd4fad48d296939782",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba"
+        },
+        "note": {
+          "note_id": "12",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048072.48934,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048077641.json",
+    "sha256": "700e7849621e6e4415a2f929979c82454bcb535e2b7967b3b021c2265979be57",
+    "bytes": 123947,
+    "observed_at_unix": 1793048077.8761861,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 9,
+    "created_at": 1793048077.64183,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      },
+      {
+        "tool_use_id": "call_7575f0bd4fad48d296939782",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba"
+        },
+        "note": {
+          "note_id": "12",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048072.48934,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/agent-core-snapshot-1793048077630.json",
+    "sha256": "c2c97b0a80c9a4ba687f24e75a7e6aa94f676673cead45820a34f969e67d0a82",
+    "bytes": 123166,
+    "observed_at_unix": 1793048077.881367,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 9,
+    "created_at": 1793048077.63025,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      },
+      {
+        "tool_use_id": "call_7575f0bd4fad48d296939782",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba"
+        },
+        "note": {
+          "note_id": "12",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048072.48934,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  },
+  {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace/.masc/traces/trace-1793048013383-00000/trace-1793048013383-00000.json",
+    "sha256": "4749794ea5b378644d7a443b635e3e9d224771b8057d9a17f5bf20a48faa545c",
+    "bytes": 123951,
+    "observed_at_unix": 1793048084.0482209,
+    "session_id": "trace-1793048013383-00000",
+    "turn_count": 10,
+    "created_at": 1793048083.97482,
+    "selected_note_tool_results": [
+      {
+        "tool_use_id": "call_89848c39810a43d680f7e1d5",
+        "input": {
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        },
+        "note": {
+          "note_id": "6",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048034.209748,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9"
+        }
+      },
+      {
+        "tool_use_id": "call_097903ee2ddc4720a61412d2",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second"
+        },
+        "note": {
+          "note_id": "11",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048048.849434,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND"
+        }
+      },
+      {
+        "tool_use_id": "call_7575f0bd4fad48d296939782",
+        "input": {
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba"
+        },
+        "note": {
+          "note_id": "12",
+          "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+          "author_id": "audit-live-glm",
+          "author_kind": "automated_actor",
+          "created_at": 1793048072.48934,
+          "body": "SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B"
+        }
+      }
+    ],
+    "scope": "Selected persisted lineage facts only; full messages/reasoning are not copied."
+  }
+]

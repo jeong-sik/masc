@@ -1,0 +1,15 @@
+{
+  "scope": "Source-only intermediate controller identities, not additional model executions",
+  "controllers": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v3.py",
+      "sha256": "945566b248ccb38f86e3ee911b9420e444aa8fea655bebfacaf91e3b9426cd90",
+      "bytes": 64282
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v4.py",
+      "sha256": "f20e2f10ccbcf1cbc4b5fe4b98c5168ca36db450cc72d71da4b8cfca192f7123",
+      "bytes": 66633
+    }
+  ]
+}

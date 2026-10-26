@@ -1,0 +1,13 @@
+{
+  "attempt_id": "01a17a0f-0588-7000-8736-0fd8f0e2fd87",
+  "settlement_kind": "retryable_failure",
+  "schedule_instance_id": "01a17a0e-909b-7000-b2db-ed614d9e5466",
+  "schedule_id": "audit-settle-original",
+  "started_at": 1793049167.238468,
+  "finished_at": 1793049167.253119,
+  "due_at": 1793049152.307249,
+  "payload_digest": "4121101ca935c244b42b03da0b1a26cccbc221b388a70d2b4b0ab8ef99d568d2",
+  "status": "failed",
+  "detail": null,
+  "error": "retryable schedule dispatch failure: scheduled keeper wake durable enqueue failed: failed to persist keeper=audit-settle-a path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/keepers/audit-settle-a/event-queue-v19.json: save_file_atomic /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/keepers/audit-settle-a/event-queue-v19.json: Sys_error(\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-settlement-actual-9ih0hvae/.masc/keepers/audit-settle-a/.atomic_a19800.tmp: Permission denied\")"
+}

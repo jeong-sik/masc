@@ -1,0 +1,53 @@
+{
+  "is_derivative": true,
+  "turns": [
+    {
+      "keeper": "audit-live-deepseek",
+      "trace_id": "trace-1793049660076-00000",
+      "absolute_turn": 1,
+      "turn_ref": "trace-1793049660076-00000#1",
+      "turn_kind": "autonomous",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "request_runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "execution_ids": [
+        "execution-node-944cf8d7e83b2ed9441c1781359d6371",
+        "execution-node-25ad4730843904db3d0af24772d02cf4",
+        "execution-node-e0bd8926388e3319a42e545c06fc4b7c",
+        "execution-node-e9cb41831ac238d89aa140dd6e844686"
+      ],
+      "finish_reason": "yielded_to_durable_stimulus:4",
+      "ts": 1793049671.338017
+    },
+    {
+      "keeper": "audit-live-deepseek",
+      "trace_id": "trace-1793049660076-00000",
+      "absolute_turn": 2,
+      "turn_ref": "trace-1793049660076-00000#2",
+      "turn_kind": "autonomous",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "request_runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "execution_ids": [
+        "execution-node-1dc49c160845ec3f7dc5f754ba77299d",
+        "execution-node-a7a8d09355f4386c51c51f5ded78cf6c",
+        "execution-node-9ca54b23d1f9dc3506248a6e269a8ba6",
+        "execution-node-91c384ef91bbf616fbf2a5719815dfb5",
+        "execution-node-bdc1587f7fc8893bca66837f18da65b5"
+      ],
+      "finish_reason": "completed",
+      "ts": 1793049686.988057
+    },
+    {
+      "keeper": "audit-live-deepseek",
+      "trace_id": "trace-1793049660076-00000",
+      "absolute_turn": 3,
+      "turn_ref": "trace-1793049660076-00000#3",
+      "turn_kind": "autonomous",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "request_runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "execution_ids": [],
+      "finish_reason": "completed",
+      "ts": 1793049689.264471
+    }
+  ],
+  "scope": "Exact turn/source execution memberships and finish reasons; no response text, reasoning or input blocks retained."
+}

@@ -1,0 +1,22 @@
+{
+  "artifacts/schedule-durable-candidate-20261027/native-producer-dispatch.json": "fdb1aa27bf170756dddc9bdc92ad257ec1cc11f471d185dd0f2e7e630a3e5a72",
+  "artifacts/schedule-durable-candidate-20261027/native-producer-initial-observation.json": "61eac914fd8e49d16b4ecfbfbeac5edd227a1ba58fa53980ea3b1e29de3196ad",
+  "artifacts/schedule-durable-candidate-20261027/c2-native-preflight-result.json": "3d33adba6a2e6b62cfee5b26cd89c9f52b2f4ef1a6ca1185bf40314319b0284a",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/c2-native-binding.json": "89599a1c52c93d774eff7675f216b65d0b208a913c428506dbee2ebf097f3c17",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/identity-verification.json": "770efa19e25e10e3c52516e624b637ed107b51d23e4409836e95377348abfdce",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact-metadata.json": "10de879979e53e78d0bc551ccdbf6a3cbc6762f6a55f578ce507f4efd3b0cb1f",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/verification-attempt-1.json": "6072eac2a8c81cc9cf3b55c727b69a74e1c3fad791f0c5732da1323d70ccaaf6",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/receipt.json": "db9d24e84c3364d6c87120381121ab70254400db1e036bff3c98dafd2c8b42b1",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/build.log": "fbb0bf14aad0755727e41b8e791ef27d53a626deee0b5cd732d500d200c453bc",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/build-targets.txt": "e9c17e853ab1e61988813c4ab35f5910fbbdcd08a5f7291fca161f27bc35bc31",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/executed-tests.txt": "c8fc96c506a5424674834367e68d8a2a011111680d0e54c30d9826488dc46b63",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/test-results.tsv": "1779c1dc177c1f1ce32b2d4935386c09f221f510e9cba78e77f8e585edb8bd9a",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/test_tui_lane_addons.log": "d4087c636039fbe929898b4b262a47f3342393168bbd65825e4cda29f9dfd11b",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/test_lane_addon_application.log": "0a6891f0ca2c8b61ea2063b33253fdac0059e98548d68399b7a68308d59704d7",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/server-native-dependencies.txt": "14e4f3d5234c5f82eb57a242b558487690df46fb41a8cc16ff03ae90e517200a",
+  "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/native-dependencies.txt": "30a19842189afd3ee7547d831a72a7143e46ba79226d064b7b3d0a947d1473a9",
+  "docs/evidence/2026-10-27-schedule-durable-candidate/selection.json": "16d1b5726cffc4539b053f41015780624e1ce517334ff7a56568a0f68b5caee6",
+  "docs/evidence/2026-10-27-schedule-durable-candidate/assembly-result.json": "ca9334433e945f1a5d06f2ff539cc7bc4ba5ed901eca3e970c131f8154b354d5",
+  "docs/evidence/2026-10-27-schedule-durable-candidate/leader-selection-excerpt.json": "ce9ab66d6dc6fa9c603ab0565907a166a314d76d142e02947bbe8c9c32658a40",
+  "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/build-A.json": "18046319434247118fdb026d219e32814ddf0a3f79a6f5e251f90a7bbb1c0022"
+}

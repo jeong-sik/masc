@@ -1,0 +1,15 @@
+{
+  "is_derivative": true,
+  "recorded_at_unix": 1793048639.057003,
+  "pid": 65904,
+  "verified_command": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc start --base-path /Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-glm-c2-1/workspace --host 127.0.0.1 --port 57302",
+  "reason": "Exact A/B completed, target idle, queue empty; root ended completed owned trial after preserving canonical-result-read and final observations.",
+  "signal": "SIGTERM",
+  "forced_kill": false,
+  "process_no_longer_listed": true,
+  "observed_state": "",
+  "exit_status": null,
+  "exit_status_limit": "Original observer exited first; root is not this server parent and did not observe wait status.",
+  "original_observer_result": "FAIL due notes_list-only oracle, retained unchanged; independent canonical-read review is separate",
+  "no_replay_or_restart": true
+}

@@ -1,0 +1,1060 @@
+{
+  "schema": "masc.selected-runtime-submanifest.v1",
+  "scope": "deepseek",
+  "source_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+  "inputs": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/result.json",
+      "sha256": "7ba8b7a665a1a1f7c57a87467f5641d5fa3c0a91690e10398e9023917f988e6b",
+      "bytes": 322
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/checks.json",
+      "sha256": "6c9252df30f4dcfa12d32f57ec3a48fde9f3a348ed0c608e931a77287cc7f5a0",
+      "bytes": 5962
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/observation-ended-process.json",
+      "sha256": "3a7b4f6b52d926a0ace74ce81466998d744feb1761bc2087409d2403b0c4ad65",
+      "bytes": 362
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/root-final-readonly-observation.json",
+      "sha256": "c7dd2a530d696c82c1a2804e6db77c0c16a18e1e0c098775d442fc443327948d",
+      "bytes": 5929
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/root-owned-server-stop.json",
+      "sha256": "54415a27291db5e1945c091790ff7cfc87df5f9f795481742af5bede1245fff1",
+      "bytes": 485
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/checkpoint-lineage-selected.json",
+      "sha256": "ba7aea967b1749a7035d3d96dae0b880ac2defa408772b21a0de3d4d3d7cf502",
+      "bytes": 44655
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/provenance.json",
+      "sha256": "e7d0d4d1f384842f754970dace8584dae56e8851fa56b89f4a46772d4f810631",
+      "bytes": 6076
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v5.py",
+      "sha256": "af564ff36a2886f988d96ed5eb2d433aff1dc85eb4ba0d125e8f10a96eceb995",
+      "bytes": 67009
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/created.json",
+      "sha256": "0f88ac0f4b67f93cf32cb006e029a1f838bd4eff597eea8eced4a90acaa82a64",
+      "bytes": 4850
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/schedules.json",
+      "sha256": "d9f34b2e6473555ba349edab8fd4ee71e3b49278a4090b72df82a8ff365fc8e8",
+      "bytes": 5805
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+      "sha256": "95b4a1ee703cd0b5562065b188669ab32641c20cd67a61cf01fa28e4cf2a79a1",
+      "bytes": 43934
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/exact-note-executions.json",
+      "sha256": "1c84ccdef36a0fcd7ce3d73051e8fdf049dd80387ca09eaf96a3a9625e7fdd9e",
+      "bytes": 18785
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+      "sha256": "e33e15edd9c7e404e005d6bc228b473a3eb2257686b20cb824323c09a62cb630",
+      "bytes": 10061
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/turn-records/2026-10/26.jsonl",
+      "sha256": "95d4bd222d63fcb8fb7dddc8bffa8f3fbd0e9c95cb0c82ea703bc260729aa7e1",
+      "bytes": 13982
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/c0/c00ac68c08ecd5d4ef4aae2f5a467cd81a3b79600cc48e91bbd92f4d71171a39",
+      "sha256": "c00ac68c08ecd5d4ef4aae2f5a467cd81a3b79600cc48e91bbd92f4d71171a39",
+      "bytes": 25189
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/66/66928b2597fd564354de984347bccb6c77a421a54e6ef5d2d1b0cdb8d65c35b1",
+      "sha256": "66928b2597fd564354de984347bccb6c77a421a54e6ef5d2d1b0cdb8d65c35b1",
+      "bytes": 2940
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/eb/eba691d341374357b749ed3e5210dbe72d3cbf1ee057302cf1829f0bad2519b8",
+      "sha256": "eba691d341374357b749ed3e5210dbe72d3cbf1ee057302cf1829f0bad2519b8",
+      "bytes": 1016
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/96/9629cae3f7000fc4716ccf5a1e88a2d49330b3405bdf8b47a394b917cfcf5a66",
+      "sha256": "9629cae3f7000fc4716ccf5a1e88a2d49330b3405bdf8b47a394b917cfcf5a66",
+      "bytes": 487
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/5f/5f2a1da509cd110baedf8197d05e94d0c6d33f7c9c737610348b1640c83b5e24",
+      "sha256": "5f2a1da509cd110baedf8197d05e94d0c6d33f7c9c737610348b1640c83b5e24",
+      "bytes": 762
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/64/64633053715345be2dc6b0861ee5d20414f0357ce9c75d962213d35856c73a03",
+      "sha256": "64633053715345be2dc6b0861ee5d20414f0357ce9c75d962213d35856c73a03",
+      "bytes": 476
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/b4/b47403a4019536fa1347cc203e2757bb89fdc7e943c582e2850a99f0fe904a0e",
+      "sha256": "b47403a4019536fa1347cc203e2757bb89fdc7e943c582e2850a99f0fe904a0e",
+      "bytes": 698
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/2c/2c5cfe8924299b1b02bfbf5127b4b4ad496b44f8e76f45c637728201cee4ba9c",
+      "sha256": "2c5cfe8924299b1b02bfbf5127b4b4ad496b44f8e76f45c637728201cee4ba9c",
+      "bytes": 294
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/bd/bd5ac44448113fcb15456f7dce5c9c8b30a4b7bc519de84a73bfb92c08c1f955",
+      "sha256": "bd5ac44448113fcb15456f7dce5c9c8b30a4b7bc519de84a73bfb92c08c1f955",
+      "bytes": 2379
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/33/3308bcf0f1f4129aee78a25a3e72d4a2792d766255239b3763e933b2120d4945",
+      "sha256": "3308bcf0f1f4129aee78a25a3e72d4a2792d766255239b3763e933b2120d4945",
+      "bytes": 909
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/a9/a9078e529141198a80672ee2d3e072a739bde43366e790b0eb0054196b3f5685",
+      "sha256": "a9078e529141198a80672ee2d3e072a739bde43366e790b0eb0054196b3f5685",
+      "bytes": 1993
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/fc/fc08f18a3cfd1726806f9f82945dbebfda95c2df7c38ae9130102f6ea42c5844",
+      "sha256": "fc08f18a3cfd1726806f9f82945dbebfda95c2df7c38ae9130102f6ea42c5844",
+      "bytes": 1527
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/a9/a962e2e80564a2c254663729b8a2c65e4cb988848ec4d7b8f58e5edd963907b5",
+      "sha256": "a962e2e80564a2c254663729b8a2c65e4cb988848ec4d7b8f58e5edd963907b5",
+      "bytes": 731
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/cc/ccca6bc817061c3532981aff5ab5b57aa2031f035411b656a872cbe48e34616d",
+      "sha256": "ccca6bc817061c3532981aff5ab5b57aa2031f035411b656a872cbe48e34616d",
+      "bytes": 1388
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/8b/8ba3790d140132d996f5bf96c01e42fd5bbd31fba15acbd7d39dd291c30ef7a8",
+      "sha256": "8ba3790d140132d996f5bf96c01e42fd5bbd31fba15acbd7d39dd291c30ef7a8",
+      "bytes": 1170
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/b9/b9dc17e51d872c18b94d3456d6583302233ccd90cc3eb7ef68bcbd1ee6ac81cc",
+      "sha256": "b9dc17e51d872c18b94d3456d6583302233ccd90cc3eb7ef68bcbd1ee6ac81cc",
+      "bytes": 2741
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/c8/c88517f440d5eeec0f0332c90bec1eac9621aa559f6fa3687f37759fb7850632",
+      "sha256": "c88517f440d5eeec0f0332c90bec1eac9621aa559f6fa3687f37759fb7850632",
+      "bytes": 2871
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/a4/a4247051b379a492d2a2a88cf2172e87bcdf9f3f54262c8f6ff56bd95778aadd",
+      "sha256": "a4247051b379a492d2a2a88cf2172e87bcdf9f3f54262c8f6ff56bd95778aadd",
+      "bytes": 1115
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/5f/5f6d8db2b01b2dbf537e9046abd071870f1861039f22d287b8c0c21c42e722aa",
+      "sha256": "5f6d8db2b01b2dbf537e9046abd071870f1861039f22d287b8c0c21c42e722aa",
+      "bytes": 980
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/44/44ce67343f60de8b8ed7336c16926c991159fbda848c62a713e6be0a9889e745",
+      "sha256": "44ce67343f60de8b8ed7336c16926c991159fbda848c62a713e6be0a9889e745",
+      "bytes": 751
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/bb/bb0a8399eef2ce0683b1befbbd405172020dfd6a12507f2f99f800c142e6585e",
+      "sha256": "bb0a8399eef2ce0683b1befbbd405172020dfd6a12507f2f99f800c142e6585e",
+      "bytes": 420
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/42/42e354a718778ef70702d35d568a4fae9eccdb3966a8871d856f2140deacf187",
+      "sha256": "42e354a718778ef70702d35d568a4fae9eccdb3966a8871d856f2140deacf187",
+      "bytes": 1699
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/e2/e26148e74f7737cc3291a8d733a440fb4652a5b5a31ae82e8d53103e5086dfb7",
+      "sha256": "e26148e74f7737cc3291a8d733a440fb4652a5b5a31ae82e8d53103e5086dfb7",
+      "bytes": 633
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/0f/0feb34110e8b4a8d8016e352ff1b6fde02591a6b1a05c3fe36995f7a7ac8cd84",
+      "sha256": "0feb34110e8b4a8d8016e352ff1b6fde02591a6b1a05c3fe36995f7a7ac8cd84",
+      "bytes": 1326
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/20/20f97b997e83a46083af1a9c191e596ec516bc2a16da0e09a80405f054e4bfcf",
+      "sha256": "20f97b997e83a46083af1a9c191e596ec516bc2a16da0e09a80405f054e4bfcf",
+      "bytes": 2755
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/fb/fba3af6b77c4568a2c7f38d730775883b29a1d12ab481b9c5b41a316ad3d2114",
+      "sha256": "fba3af6b77c4568a2c7f38d730775883b29a1d12ab481b9c5b41a316ad3d2114",
+      "bytes": 3185
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/4e/4eb09b3ba1a6eccbe13bc68b1ec866b50afd0488bde18aac77741d58e96555ae",
+      "sha256": "4eb09b3ba1a6eccbe13bc68b1ec866b50afd0488bde18aac77741d58e96555ae",
+      "bytes": 909
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/f8/f8579a34149e3ccfa5209c4a3032f52c87ba48f4f6df1071be57c6503df878d7",
+      "sha256": "f8579a34149e3ccfa5209c4a3032f52c87ba48f4f6df1071be57c6503df878d7",
+      "bytes": 1425
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/15/15ebf216c7827ec7640527f85d0aba7074d4825fa8761b8af3fff21e8f3597f2",
+      "sha256": "15ebf216c7827ec7640527f85d0aba7074d4825fa8761b8af3fff21e8f3597f2",
+      "bytes": 2267
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/3b/3b4305fe6a862a9162956a6d1bf7cedf14217f0d2542294b99b6fec6d0f5c3f7",
+      "sha256": "3b4305fe6a862a9162956a6d1bf7cedf14217f0d2542294b99b6fec6d0f5c3f7",
+      "bytes": 1197
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/e1/e1b8a4f679a9ce8f4c79209803dbf3f7a1bf7db59af623545dd5520694634965",
+      "sha256": "e1b8a4f679a9ce8f4c79209803dbf3f7a1bf7db59af623545dd5520694634965",
+      "bytes": 342
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/68/685c91bebafe8f7396a078d234b9a3b7309e518fa9f6a5a526b152a5b4ee6446",
+      "sha256": "685c91bebafe8f7396a078d234b9a3b7309e518fa9f6a5a526b152a5b4ee6446",
+      "bytes": 260
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/4d/4d48862e3ff40c69130f24160b1f72d34e9acf6b682b0f860c60da0375f296de",
+      "sha256": "4d48862e3ff40c69130f24160b1f72d34e9acf6b682b0f860c60da0375f296de",
+      "bytes": 687
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/01/01a13bbadc393b90c0935c792b8a41b3e6d54e251fed769850a4ff3f404e95e3",
+      "sha256": "01a13bbadc393b90c0935c792b8a41b3e6d54e251fed769850a4ff3f404e95e3",
+      "bytes": 567
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/fa/fa841bc4fd54c09ef1abb638c8cbc72fd0041c80632e3f54a440aa7f8033c67d",
+      "sha256": "fa841bc4fd54c09ef1abb638c8cbc72fd0041c80632e3f54a440aa7f8033c67d",
+      "bytes": 1014
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/43/43b314d01985b6dc1bf95d78905d13296e4071594c760b398e87045f4e452435",
+      "sha256": "43b314d01985b6dc1bf95d78905d13296e4071594c760b398e87045f4e452435",
+      "bytes": 2914
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/27/27cefc5d3f965ed8f3a7a73f5c600000021e17996493e740e6282bd1b2c8b927",
+      "sha256": "27cefc5d3f965ed8f3a7a73f5c600000021e17996493e740e6282bd1b2c8b927",
+      "bytes": 1709
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/dd/ddc9a83a57f2379d3c7f3fdd0dcc10cf879ec74835334681c9bdaa448678ff70",
+      "sha256": "ddc9a83a57f2379d3c7f3fdd0dcc10cf879ec74835334681c9bdaa448678ff70",
+      "bytes": 1547
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/2d/2d19a32783bad82300afb48b1f0d5ad0907a7bbae45bab91d398998d9304ae84",
+      "sha256": "2d19a32783bad82300afb48b1f0d5ad0907a7bbae45bab91d398998d9304ae84",
+      "bytes": 1133
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/b9/b92433d993335aea83653b6a9dc80d97e9b09b37ea797d0cd4c53580fae3efd1",
+      "sha256": "b92433d993335aea83653b6a9dc80d97e9b09b37ea797d0cd4c53580fae3efd1",
+      "bytes": 818
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/ab/abd5182d339c95176d185846187dbfd33e7cb06c8a10fe2d5501274efccc2b91",
+      "sha256": "abd5182d339c95176d185846187dbfd33e7cb06c8a10fe2d5501274efccc2b91",
+      "bytes": 3009
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/d5/d517882ea37861536361cb9c4635c7946ee62a3f5d2161f8fc5aa15e40f8a877",
+      "sha256": "d517882ea37861536361cb9c4635c7946ee62a3f5d2161f8fc5aa15e40f8a877",
+      "bytes": 338
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/d3/d38195c05e0682c0f2d076dd462db0ca0440995c9ef16f0d8b232da73dcf7d9d",
+      "sha256": "d38195c05e0682c0f2d076dd462db0ca0440995c9ef16f0d8b232da73dcf7d9d",
+      "bytes": 1120
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/ed/ed226a378fde80a6831b4435bc0fa2e7c5bde3a1c0b6317c7fad463aa4395ae3",
+      "sha256": "ed226a378fde80a6831b4435bc0fa2e7c5bde3a1c0b6317c7fad463aa4395ae3",
+      "bytes": 762
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/85/85e80457717e00edff64b1f5aeb58a711063dc1b3eccaac2fb0c0c0fbf229b61",
+      "sha256": "85e80457717e00edff64b1f5aeb58a711063dc1b3eccaac2fb0c0c0fbf229b61",
+      "bytes": 638
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/f9/f90e82d59889ef91563d985432125f750151b0f31f2411172d621aab484015f5",
+      "sha256": "f90e82d59889ef91563d985432125f750151b0f31f2411172d621aab484015f5",
+      "bytes": 684
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/92/9280ccdfca43ddf1d7faec68b8ca3e9b40f987e0016f76e936e125921812c5a6",
+      "sha256": "9280ccdfca43ddf1d7faec68b8ca3e9b40f987e0016f76e936e125921812c5a6",
+      "bytes": 635
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/78/786fa94217af92da7db738158643df345df669d857a4e22890483f6be040bd07",
+      "sha256": "786fa94217af92da7db738158643df345df669d857a4e22890483f6be040bd07",
+      "bytes": 635
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/d1/d1848be30d94b38341d8a9f0152da4cd0ef8ebd7e1b121b69d4f3a9ebce0bd52",
+      "sha256": "d1848be30d94b38341d8a9f0152da4cd0ef8ebd7e1b121b69d4f3a9ebce0bd52",
+      "bytes": 294
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/5b/5bfe5e66563412f3ea82c8ae576e38dd30d16ea27875c8e9778d660c109009b5",
+      "sha256": "5bfe5e66563412f3ea82c8ae576e38dd30d16ea27875c8e9778d660c109009b5",
+      "bytes": 2222
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/fb/fb6ca556028b73a58b1a13d437ee3a8f02b9c5d9f34d984b753a60e1d79583d4",
+      "sha256": "fb6ca556028b73a58b1a13d437ee3a8f02b9c5d9f34d984b753a60e1d79583d4",
+      "bytes": 2225
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/20/2045bfa8aa6b2534ce100eb71887c0010c5cb26def71dfcb8eff13d05a222a09",
+      "sha256": "2045bfa8aa6b2534ce100eb71887c0010c5cb26def71dfcb8eff13d05a222a09",
+      "bytes": 491
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/84/84c18d77a6e47b12ec5aa5e474d993387fa8a93a2ab47f92840790602e051101",
+      "sha256": "84c18d77a6e47b12ec5aa5e474d993387fa8a93a2ab47f92840790602e051101",
+      "bytes": 221
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/29/2941598722a2526b1d9e5212044158ae2d183fd73b2a777672e624b8051fb20b",
+      "sha256": "2941598722a2526b1d9e5212044158ae2d183fd73b2a777672e624b8051fb20b",
+      "bytes": 567
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/f7/f7e4a72cbbfb614dcb931e940031a246e4ff8123db3df31fa59265f1511e4c62",
+      "sha256": "f7e4a72cbbfb614dcb931e940031a246e4ff8123db3df31fa59265f1511e4c62",
+      "bytes": 2699
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/a1/a196032a96bf03e31b752920730316fab72814436ea2d3b81d7f2422f82f4915",
+      "sha256": "a196032a96bf03e31b752920730316fab72814436ea2d3b81d7f2422f82f4915",
+      "bytes": 3868
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/3e/3eaaba0473c4b72cc256f9ea6a13b69641bc22341ddd43d25f6bf6dce4473dc8",
+      "sha256": "3eaaba0473c4b72cc256f9ea6a13b69641bc22341ddd43d25f6bf6dce4473dc8",
+      "bytes": 1225
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/93/930949f9512051f8ab2218ab3f6281be03d3e52dc0112b68f15b2698a63a7b68",
+      "sha256": "930949f9512051f8ab2218ab3f6281be03d3e52dc0112b68f15b2698a63a7b68",
+      "bytes": 485
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/e4/e443931e44dc688a6ae653b21e9af3f814ed843b032dd0cafcaa64e8c8c81d78",
+      "sha256": "e443931e44dc688a6ae653b21e9af3f814ed843b032dd0cafcaa64e8c8c81d78",
+      "bytes": 214
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/1c/1cc28ac6016cf827b07e5d078ebe3cb115143461145b9af8debc4a8facd2d201",
+      "sha256": "1cc28ac6016cf827b07e5d078ebe3cb115143461145b9af8debc4a8facd2d201",
+      "bytes": 813
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/50/50ba6c4fff9ac5491538362a223b65b3f3ce973fc009ba773bebc223f9a297ca",
+      "sha256": "50ba6c4fff9ac5491538362a223b65b3f3ce973fc009ba773bebc223f9a297ca",
+      "bytes": 698
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/fd/fd63d09356e5140bf1c0ba420230d88f9ad77f286c60aa4b255c42a0d89db2e1",
+      "sha256": "fd63d09356e5140bf1c0ba420230d88f9ad77f286c60aa4b255c42a0d89db2e1",
+      "bytes": 557
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/c5/c514b1bfdceb3a3758114403786bfd7fc787032c919c6979ffbec4bc80a1b2d0",
+      "sha256": "c514b1bfdceb3a3758114403786bfd7fc787032c919c6979ffbec4bc80a1b2d0",
+      "bytes": 621
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/5b/5b5221985200427149dacdb98a39bd1157e1956f345f427098dbf648409fbae1",
+      "sha256": "5b5221985200427149dacdb98a39bd1157e1956f345f427098dbf648409fbae1",
+      "bytes": 549
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/81/81ee36e3bc72cf09b7879ec752ae97886cdf800373acaa4a31e6556728864513",
+      "sha256": "81ee36e3bc72cf09b7879ec752ae97886cdf800373acaa4a31e6556728864513",
+      "bytes": 692
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/54/5435547d33f1233844ed0cf20d350d06ac28676d5f4f7157dd0e83389fb30ee5",
+      "sha256": "5435547d33f1233844ed0cf20d350d06ac28676d5f4f7157dd0e83389fb30ee5",
+      "bytes": 563
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/f8/f8d49231469f1481f546910f815d1661288d74a2c86003d02ca199380ce0591d",
+      "sha256": "f8d49231469f1481f546910f815d1661288d74a2c86003d02ca199380ce0591d",
+      "bytes": 5276
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/provider-inputs/2026-10/26.jsonl",
+      "sha256": "af1863679715b067dd218b393bc6fb4781d31018103250fe15fad09b02c8dbe7",
+      "bytes": 40171
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/provider-input-selected.json",
+      "sha256": "f379cfd7237276008d00690abfb70233b7f39b74ae6155ce91d23b37054369cd",
+      "bytes": 109265
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/deepseek-c2-request-scope-independent-review.json",
+      "sha256": "bc3285fca892d9a9e8b6bd7bfde44ba25f03cfa5288071ebee7d1682cd81a94e",
+      "bytes": 28432
+    }
+  ],
+  "outputs": [
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/observer-result.original.json",
+        "sha256": "7ba8b7a665a1a1f7c57a87467f5641d5fa3c0a91690e10398e9023917f988e6b",
+        "bytes": 322
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/result.json",
+          "sha256": "7ba8b7a665a1a1f7c57a87467f5641d5fa3c0a91690e10398e9023917f988e6b",
+          "bytes": 322
+        }
+      ],
+      "transformation": "byte-identical copy; source may itself be a selected derivative as described by its schema/README"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/observer-checks.original.json",
+        "sha256": "6c9252df30f4dcfa12d32f57ec3a48fde9f3a348ed0c608e931a77287cc7f5a0",
+        "bytes": 5962
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/checks.json",
+          "sha256": "6c9252df30f4dcfa12d32f57ec3a48fde9f3a348ed0c608e931a77287cc7f5a0",
+          "bytes": 5962
+        }
+      ],
+      "transformation": "byte-identical copy; source may itself be a selected derivative as described by its schema/README"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/observer-ended-process.original.json",
+        "sha256": "3a7b4f6b52d926a0ace74ce81466998d744feb1761bc2087409d2403b0c4ad65",
+        "bytes": 362
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/observation-ended-process.json",
+          "sha256": "3a7b4f6b52d926a0ace74ce81466998d744feb1761bc2087409d2403b0c4ad65",
+          "bytes": 362
+        }
+      ],
+      "transformation": "byte-identical copy; source may itself be a selected derivative as described by its schema/README"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/root-final-observation.original.json",
+        "sha256": "c7dd2a530d696c82c1a2804e6db77c0c16a18e1e0c098775d442fc443327948d",
+        "bytes": 5929
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/root-final-readonly-observation.json",
+          "sha256": "c7dd2a530d696c82c1a2804e6db77c0c16a18e1e0c098775d442fc443327948d",
+          "bytes": 5929
+        }
+      ],
+      "transformation": "byte-identical copy; source may itself be a selected derivative as described by its schema/README"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/root-owned-stop.original.json",
+        "sha256": "54415a27291db5e1945c091790ff7cfc87df5f9f795481742af5bede1245fff1",
+        "bytes": 485
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/root-owned-server-stop.json",
+          "sha256": "54415a27291db5e1945c091790ff7cfc87df5f9f795481742af5bede1245fff1",
+          "bytes": 485
+        }
+      ],
+      "transformation": "byte-identical copy; source may itself be a selected derivative as described by its schema/README"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/checkpoint-lineage-selected.original.json",
+        "sha256": "ba7aea967b1749a7035d3d96dae0b880ac2defa408772b21a0de3d4d3d7cf502",
+        "bytes": 44655
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/checkpoint-lineage-selected.json",
+          "sha256": "ba7aea967b1749a7035d3d96dae0b880ac2defa408772b21a0de3d4d3d7cf502",
+          "bytes": 44655
+        }
+      ],
+      "transformation": "byte-identical copy; source may itself be a selected derivative as described by its schema/README"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/identity-selected.json",
+        "sha256": "f0149970e976cc0782e13cc15323d262c2db6b0cf6fa0e6e529104f2013d1357",
+        "bytes": 1827
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/provenance.json",
+          "sha256": "e7d0d4d1f384842f754970dace8584dae56e8851fa56b89f4a46772d4f810631",
+          "bytes": 6076
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v5.py",
+          "sha256": "af564ff36a2886f988d96ed5eb2d433aff1dc85eb4ba0d125e8f10a96eceb995",
+          "bytes": 67009
+        }
+      ],
+      "transformation": "selected non-secret producer and synthetic scenario identity fields"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/requests-selected.json",
+        "sha256": "10c1fd41e3b137a65e409d6fdfe3fcd6f42720bd12d6901d3ea576feca07ed8f",
+        "bytes": 3295
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/created.json",
+          "sha256": "0f88ac0f4b67f93cf32cb006e029a1f838bd4eff597eea8eced4a90acaa82a64",
+          "bytes": 4850
+        }
+      ],
+      "transformation": "exact synthetic request bodies and ownership/instance/due/digest fields; changing status projections omitted"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/all-synthetic-notes.json",
+        "sha256": "b4237031a23b327f8d48965ac92f940000207c73b5f37a4e6c6251d3e48cbeca",
+        "bytes": 1371
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/schedules.json",
+          "sha256": "d9f34b2e6473555ba349edab8fd4ee71e3b49278a4090b72df82a8ff365fc8e8",
+          "bytes": 5805
+        }
+      ],
+      "transformation": "all exact notes for the two synthetic schedule IDs selected; all other primary fields omitted"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/all-owned-tool-calls-selected.json",
+        "sha256": "4f3b3df05fd7e1194e593becd5573f4f2783f3ec5c1f4df0d6d96fce7debe68f",
+        "bytes": 16549
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+          "sha256": "95b4a1ee703cd0b5562065b188669ab32641c20cd67a61cf01fa28e4cf2a79a1",
+          "bytes": 43934
+        }
+      ],
+      "transformation": "field projection; no call rows removed; only tool-search schema output replaced by its original UTF-8 SHA/bytes"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/exact-note-executions-selected.json",
+        "sha256": "cebaf1434e48eb5ce2d2e1984d8c52d222180e6c89a0be86ae14449eb08cb6f5",
+        "bytes": 6414
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/exact-note-executions.json",
+          "sha256": "1c84ccdef36a0fcd7ce3d73051e8fdf049dd80387ca09eaf96a3a9625e7fdd9e",
+          "bytes": 18785
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+          "sha256": "95b4a1ee703cd0b5562065b188669ab32641c20cd67a61cf01fa28e4cf2a79a1",
+          "bytes": 43934
+        }
+      ],
+      "transformation": "select exact note execution fields and compare parsed outputs against raw durable calls; preserve capture output strings as captured"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/reaction-ledger-0.original.jsonl",
+        "sha256": "e33e15edd9c7e404e005d6bc228b473a3eb2257686b20cb824323c09a62cb630",
+        "bytes": 10061
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+          "sha256": "e33e15edd9c7e404e005d6bc228b473a3eb2257686b20cb824323c09a62cb630",
+          "bytes": 10061
+        }
+      ],
+      "transformation": "byte-identical copy; source may itself be a selected derivative as described by its schema/README"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/turn-records-selected.json",
+        "sha256": "f1dc4d538fecddb00edca830bb395532c7458c34c2bbaa62d6a4e4cd07d74ffe",
+        "bytes": 2104
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/turn-records/2026-10/26.jsonl",
+          "sha256": "95d4bd222d63fcb8fb7dddc8bffa8f3fbd0e9c95cb0c82ea703bc260729aa7e1",
+          "bytes": 13982
+        }
+      ],
+      "transformation": "project turn identity/execution membership only"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/provider-input-parts-verified.json",
+        "sha256": "56f24b123906e67f4234a5a980277883464c83af1e769130775d5ec38294ee79",
+        "bytes": 86725
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/provider-input-selected.json",
+          "sha256": "f379cfd7237276008d00690abfb70233b7f39b74ae6155ce91d23b37054369cd",
+          "bytes": 109265
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/created.json",
+          "sha256": "0f88ac0f4b67f93cf32cb006e029a1f838bd4eff597eea8eced4a90acaa82a64",
+          "bytes": 4850
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/provider-inputs/2026-10/26.jsonl",
+          "sha256": "af1863679715b067dd218b393bc6fb4781d31018103250fe15fad09b02c8dbe7",
+          "bytes": 40171
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/c0/c00ac68c08ecd5d4ef4aae2f5a467cd81a3b79600cc48e91bbd92f4d71171a39",
+          "sha256": "c00ac68c08ecd5d4ef4aae2f5a467cd81a3b79600cc48e91bbd92f4d71171a39",
+          "bytes": 25189
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/66/66928b2597fd564354de984347bccb6c77a421a54e6ef5d2d1b0cdb8d65c35b1",
+          "sha256": "66928b2597fd564354de984347bccb6c77a421a54e6ef5d2d1b0cdb8d65c35b1",
+          "bytes": 2940
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/eb/eba691d341374357b749ed3e5210dbe72d3cbf1ee057302cf1829f0bad2519b8",
+          "sha256": "eba691d341374357b749ed3e5210dbe72d3cbf1ee057302cf1829f0bad2519b8",
+          "bytes": 1016
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/96/9629cae3f7000fc4716ccf5a1e88a2d49330b3405bdf8b47a394b917cfcf5a66",
+          "sha256": "9629cae3f7000fc4716ccf5a1e88a2d49330b3405bdf8b47a394b917cfcf5a66",
+          "bytes": 487
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/5f/5f2a1da509cd110baedf8197d05e94d0c6d33f7c9c737610348b1640c83b5e24",
+          "sha256": "5f2a1da509cd110baedf8197d05e94d0c6d33f7c9c737610348b1640c83b5e24",
+          "bytes": 762
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/64/64633053715345be2dc6b0861ee5d20414f0357ce9c75d962213d35856c73a03",
+          "sha256": "64633053715345be2dc6b0861ee5d20414f0357ce9c75d962213d35856c73a03",
+          "bytes": 476
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/b4/b47403a4019536fa1347cc203e2757bb89fdc7e943c582e2850a99f0fe904a0e",
+          "sha256": "b47403a4019536fa1347cc203e2757bb89fdc7e943c582e2850a99f0fe904a0e",
+          "bytes": 698
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/2c/2c5cfe8924299b1b02bfbf5127b4b4ad496b44f8e76f45c637728201cee4ba9c",
+          "sha256": "2c5cfe8924299b1b02bfbf5127b4b4ad496b44f8e76f45c637728201cee4ba9c",
+          "bytes": 294
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/bd/bd5ac44448113fcb15456f7dce5c9c8b30a4b7bc519de84a73bfb92c08c1f955",
+          "sha256": "bd5ac44448113fcb15456f7dce5c9c8b30a4b7bc519de84a73bfb92c08c1f955",
+          "bytes": 2379
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/33/3308bcf0f1f4129aee78a25a3e72d4a2792d766255239b3763e933b2120d4945",
+          "sha256": "3308bcf0f1f4129aee78a25a3e72d4a2792d766255239b3763e933b2120d4945",
+          "bytes": 909
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/a9/a9078e529141198a80672ee2d3e072a739bde43366e790b0eb0054196b3f5685",
+          "sha256": "a9078e529141198a80672ee2d3e072a739bde43366e790b0eb0054196b3f5685",
+          "bytes": 1993
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/fc/fc08f18a3cfd1726806f9f82945dbebfda95c2df7c38ae9130102f6ea42c5844",
+          "sha256": "fc08f18a3cfd1726806f9f82945dbebfda95c2df7c38ae9130102f6ea42c5844",
+          "bytes": 1527
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/a9/a962e2e80564a2c254663729b8a2c65e4cb988848ec4d7b8f58e5edd963907b5",
+          "sha256": "a962e2e80564a2c254663729b8a2c65e4cb988848ec4d7b8f58e5edd963907b5",
+          "bytes": 731
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/cc/ccca6bc817061c3532981aff5ab5b57aa2031f035411b656a872cbe48e34616d",
+          "sha256": "ccca6bc817061c3532981aff5ab5b57aa2031f035411b656a872cbe48e34616d",
+          "bytes": 1388
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/8b/8ba3790d140132d996f5bf96c01e42fd5bbd31fba15acbd7d39dd291c30ef7a8",
+          "sha256": "8ba3790d140132d996f5bf96c01e42fd5bbd31fba15acbd7d39dd291c30ef7a8",
+          "bytes": 1170
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/b9/b9dc17e51d872c18b94d3456d6583302233ccd90cc3eb7ef68bcbd1ee6ac81cc",
+          "sha256": "b9dc17e51d872c18b94d3456d6583302233ccd90cc3eb7ef68bcbd1ee6ac81cc",
+          "bytes": 2741
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/c8/c88517f440d5eeec0f0332c90bec1eac9621aa559f6fa3687f37759fb7850632",
+          "sha256": "c88517f440d5eeec0f0332c90bec1eac9621aa559f6fa3687f37759fb7850632",
+          "bytes": 2871
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/a4/a4247051b379a492d2a2a88cf2172e87bcdf9f3f54262c8f6ff56bd95778aadd",
+          "sha256": "a4247051b379a492d2a2a88cf2172e87bcdf9f3f54262c8f6ff56bd95778aadd",
+          "bytes": 1115
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/5f/5f6d8db2b01b2dbf537e9046abd071870f1861039f22d287b8c0c21c42e722aa",
+          "sha256": "5f6d8db2b01b2dbf537e9046abd071870f1861039f22d287b8c0c21c42e722aa",
+          "bytes": 980
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/44/44ce67343f60de8b8ed7336c16926c991159fbda848c62a713e6be0a9889e745",
+          "sha256": "44ce67343f60de8b8ed7336c16926c991159fbda848c62a713e6be0a9889e745",
+          "bytes": 751
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/bb/bb0a8399eef2ce0683b1befbbd405172020dfd6a12507f2f99f800c142e6585e",
+          "sha256": "bb0a8399eef2ce0683b1befbbd405172020dfd6a12507f2f99f800c142e6585e",
+          "bytes": 420
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/42/42e354a718778ef70702d35d568a4fae9eccdb3966a8871d856f2140deacf187",
+          "sha256": "42e354a718778ef70702d35d568a4fae9eccdb3966a8871d856f2140deacf187",
+          "bytes": 1699
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/e2/e26148e74f7737cc3291a8d733a440fb4652a5b5a31ae82e8d53103e5086dfb7",
+          "sha256": "e26148e74f7737cc3291a8d733a440fb4652a5b5a31ae82e8d53103e5086dfb7",
+          "bytes": 633
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/0f/0feb34110e8b4a8d8016e352ff1b6fde02591a6b1a05c3fe36995f7a7ac8cd84",
+          "sha256": "0feb34110e8b4a8d8016e352ff1b6fde02591a6b1a05c3fe36995f7a7ac8cd84",
+          "bytes": 1326
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/20/20f97b997e83a46083af1a9c191e596ec516bc2a16da0e09a80405f054e4bfcf",
+          "sha256": "20f97b997e83a46083af1a9c191e596ec516bc2a16da0e09a80405f054e4bfcf",
+          "bytes": 2755
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/fb/fba3af6b77c4568a2c7f38d730775883b29a1d12ab481b9c5b41a316ad3d2114",
+          "sha256": "fba3af6b77c4568a2c7f38d730775883b29a1d12ab481b9c5b41a316ad3d2114",
+          "bytes": 3185
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/4e/4eb09b3ba1a6eccbe13bc68b1ec866b50afd0488bde18aac77741d58e96555ae",
+          "sha256": "4eb09b3ba1a6eccbe13bc68b1ec866b50afd0488bde18aac77741d58e96555ae",
+          "bytes": 909
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/f8/f8579a34149e3ccfa5209c4a3032f52c87ba48f4f6df1071be57c6503df878d7",
+          "sha256": "f8579a34149e3ccfa5209c4a3032f52c87ba48f4f6df1071be57c6503df878d7",
+          "bytes": 1425
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/15/15ebf216c7827ec7640527f85d0aba7074d4825fa8761b8af3fff21e8f3597f2",
+          "sha256": "15ebf216c7827ec7640527f85d0aba7074d4825fa8761b8af3fff21e8f3597f2",
+          "bytes": 2267
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/3b/3b4305fe6a862a9162956a6d1bf7cedf14217f0d2542294b99b6fec6d0f5c3f7",
+          "sha256": "3b4305fe6a862a9162956a6d1bf7cedf14217f0d2542294b99b6fec6d0f5c3f7",
+          "bytes": 1197
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/e1/e1b8a4f679a9ce8f4c79209803dbf3f7a1bf7db59af623545dd5520694634965",
+          "sha256": "e1b8a4f679a9ce8f4c79209803dbf3f7a1bf7db59af623545dd5520694634965",
+          "bytes": 342
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/68/685c91bebafe8f7396a078d234b9a3b7309e518fa9f6a5a526b152a5b4ee6446",
+          "sha256": "685c91bebafe8f7396a078d234b9a3b7309e518fa9f6a5a526b152a5b4ee6446",
+          "bytes": 260
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/4d/4d48862e3ff40c69130f24160b1f72d34e9acf6b682b0f860c60da0375f296de",
+          "sha256": "4d48862e3ff40c69130f24160b1f72d34e9acf6b682b0f860c60da0375f296de",
+          "bytes": 687
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/01/01a13bbadc393b90c0935c792b8a41b3e6d54e251fed769850a4ff3f404e95e3",
+          "sha256": "01a13bbadc393b90c0935c792b8a41b3e6d54e251fed769850a4ff3f404e95e3",
+          "bytes": 567
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/fa/fa841bc4fd54c09ef1abb638c8cbc72fd0041c80632e3f54a440aa7f8033c67d",
+          "sha256": "fa841bc4fd54c09ef1abb638c8cbc72fd0041c80632e3f54a440aa7f8033c67d",
+          "bytes": 1014
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/43/43b314d01985b6dc1bf95d78905d13296e4071594c760b398e87045f4e452435",
+          "sha256": "43b314d01985b6dc1bf95d78905d13296e4071594c760b398e87045f4e452435",
+          "bytes": 2914
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/27/27cefc5d3f965ed8f3a7a73f5c600000021e17996493e740e6282bd1b2c8b927",
+          "sha256": "27cefc5d3f965ed8f3a7a73f5c600000021e17996493e740e6282bd1b2c8b927",
+          "bytes": 1709
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/dd/ddc9a83a57f2379d3c7f3fdd0dcc10cf879ec74835334681c9bdaa448678ff70",
+          "sha256": "ddc9a83a57f2379d3c7f3fdd0dcc10cf879ec74835334681c9bdaa448678ff70",
+          "bytes": 1547
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/2d/2d19a32783bad82300afb48b1f0d5ad0907a7bbae45bab91d398998d9304ae84",
+          "sha256": "2d19a32783bad82300afb48b1f0d5ad0907a7bbae45bab91d398998d9304ae84",
+          "bytes": 1133
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/b9/b92433d993335aea83653b6a9dc80d97e9b09b37ea797d0cd4c53580fae3efd1",
+          "sha256": "b92433d993335aea83653b6a9dc80d97e9b09b37ea797d0cd4c53580fae3efd1",
+          "bytes": 818
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/ab/abd5182d339c95176d185846187dbfd33e7cb06c8a10fe2d5501274efccc2b91",
+          "sha256": "abd5182d339c95176d185846187dbfd33e7cb06c8a10fe2d5501274efccc2b91",
+          "bytes": 3009
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/d5/d517882ea37861536361cb9c4635c7946ee62a3f5d2161f8fc5aa15e40f8a877",
+          "sha256": "d517882ea37861536361cb9c4635c7946ee62a3f5d2161f8fc5aa15e40f8a877",
+          "bytes": 338
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/d3/d38195c05e0682c0f2d076dd462db0ca0440995c9ef16f0d8b232da73dcf7d9d",
+          "sha256": "d38195c05e0682c0f2d076dd462db0ca0440995c9ef16f0d8b232da73dcf7d9d",
+          "bytes": 1120
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/ed/ed226a378fde80a6831b4435bc0fa2e7c5bde3a1c0b6317c7fad463aa4395ae3",
+          "sha256": "ed226a378fde80a6831b4435bc0fa2e7c5bde3a1c0b6317c7fad463aa4395ae3",
+          "bytes": 762
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/85/85e80457717e00edff64b1f5aeb58a711063dc1b3eccaac2fb0c0c0fbf229b61",
+          "sha256": "85e80457717e00edff64b1f5aeb58a711063dc1b3eccaac2fb0c0c0fbf229b61",
+          "bytes": 638
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/f9/f90e82d59889ef91563d985432125f750151b0f31f2411172d621aab484015f5",
+          "sha256": "f90e82d59889ef91563d985432125f750151b0f31f2411172d621aab484015f5",
+          "bytes": 684
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/92/9280ccdfca43ddf1d7faec68b8ca3e9b40f987e0016f76e936e125921812c5a6",
+          "sha256": "9280ccdfca43ddf1d7faec68b8ca3e9b40f987e0016f76e936e125921812c5a6",
+          "bytes": 635
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/78/786fa94217af92da7db738158643df345df669d857a4e22890483f6be040bd07",
+          "sha256": "786fa94217af92da7db738158643df345df669d857a4e22890483f6be040bd07",
+          "bytes": 635
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/d1/d1848be30d94b38341d8a9f0152da4cd0ef8ebd7e1b121b69d4f3a9ebce0bd52",
+          "sha256": "d1848be30d94b38341d8a9f0152da4cd0ef8ebd7e1b121b69d4f3a9ebce0bd52",
+          "bytes": 294
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/5b/5bfe5e66563412f3ea82c8ae576e38dd30d16ea27875c8e9778d660c109009b5",
+          "sha256": "5bfe5e66563412f3ea82c8ae576e38dd30d16ea27875c8e9778d660c109009b5",
+          "bytes": 2222
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/fb/fb6ca556028b73a58b1a13d437ee3a8f02b9c5d9f34d984b753a60e1d79583d4",
+          "sha256": "fb6ca556028b73a58b1a13d437ee3a8f02b9c5d9f34d984b753a60e1d79583d4",
+          "bytes": 2225
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/20/2045bfa8aa6b2534ce100eb71887c0010c5cb26def71dfcb8eff13d05a222a09",
+          "sha256": "2045bfa8aa6b2534ce100eb71887c0010c5cb26def71dfcb8eff13d05a222a09",
+          "bytes": 491
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/84/84c18d77a6e47b12ec5aa5e474d993387fa8a93a2ab47f92840790602e051101",
+          "sha256": "84c18d77a6e47b12ec5aa5e474d993387fa8a93a2ab47f92840790602e051101",
+          "bytes": 221
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/29/2941598722a2526b1d9e5212044158ae2d183fd73b2a777672e624b8051fb20b",
+          "sha256": "2941598722a2526b1d9e5212044158ae2d183fd73b2a777672e624b8051fb20b",
+          "bytes": 567
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/f7/f7e4a72cbbfb614dcb931e940031a246e4ff8123db3df31fa59265f1511e4c62",
+          "sha256": "f7e4a72cbbfb614dcb931e940031a246e4ff8123db3df31fa59265f1511e4c62",
+          "bytes": 2699
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/a1/a196032a96bf03e31b752920730316fab72814436ea2d3b81d7f2422f82f4915",
+          "sha256": "a196032a96bf03e31b752920730316fab72814436ea2d3b81d7f2422f82f4915",
+          "bytes": 3868
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/3e/3eaaba0473c4b72cc256f9ea6a13b69641bc22341ddd43d25f6bf6dce4473dc8",
+          "sha256": "3eaaba0473c4b72cc256f9ea6a13b69641bc22341ddd43d25f6bf6dce4473dc8",
+          "bytes": 1225
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/93/930949f9512051f8ab2218ab3f6281be03d3e52dc0112b68f15b2698a63a7b68",
+          "sha256": "930949f9512051f8ab2218ab3f6281be03d3e52dc0112b68f15b2698a63a7b68",
+          "bytes": 485
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/e4/e443931e44dc688a6ae653b21e9af3f814ed843b032dd0cafcaa64e8c8c81d78",
+          "sha256": "e443931e44dc688a6ae653b21e9af3f814ed843b032dd0cafcaa64e8c8c81d78",
+          "bytes": 214
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/1c/1cc28ac6016cf827b07e5d078ebe3cb115143461145b9af8debc4a8facd2d201",
+          "sha256": "1cc28ac6016cf827b07e5d078ebe3cb115143461145b9af8debc4a8facd2d201",
+          "bytes": 813
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/50/50ba6c4fff9ac5491538362a223b65b3f3ce973fc009ba773bebc223f9a297ca",
+          "sha256": "50ba6c4fff9ac5491538362a223b65b3f3ce973fc009ba773bebc223f9a297ca",
+          "bytes": 698
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/fd/fd63d09356e5140bf1c0ba420230d88f9ad77f286c60aa4b255c42a0d89db2e1",
+          "sha256": "fd63d09356e5140bf1c0ba420230d88f9ad77f286c60aa4b255c42a0d89db2e1",
+          "bytes": 557
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/c5/c514b1bfdceb3a3758114403786bfd7fc787032c919c6979ffbec4bc80a1b2d0",
+          "sha256": "c514b1bfdceb3a3758114403786bfd7fc787032c919c6979ffbec4bc80a1b2d0",
+          "bytes": 621
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/5b/5b5221985200427149dacdb98a39bd1157e1956f345f427098dbf648409fbae1",
+          "sha256": "5b5221985200427149dacdb98a39bd1157e1956f345f427098dbf648409fbae1",
+          "bytes": 549
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/81/81ee36e3bc72cf09b7879ec752ae97886cdf800373acaa4a31e6556728864513",
+          "sha256": "81ee36e3bc72cf09b7879ec752ae97886cdf800373acaa4a31e6556728864513",
+          "bytes": 692
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/54/5435547d33f1233844ed0cf20d350d06ac28676d5f4f7157dd0e83389fb30ee5",
+          "sha256": "5435547d33f1233844ed0cf20d350d06ac28676d5f4f7157dd0e83389fb30ee5",
+          "bytes": 563
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_blobs/f8/f8d49231469f1481f546910f815d1661288d74a2c86003d02ca199380ce0591d",
+          "sha256": "f8d49231469f1481f546910f815d1661288d74a2c86003d02ca199380ce0591d",
+          "bytes": 5276
+        }
+      ],
+      "transformation": "independent current blob rehash and exact synthetic request presence counts; retain metadata only, omit all private message/system/tool-schema bodies"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/source-effect-timeline-selected.json",
+        "sha256": "30ca6ca8276eadf9ef7970048bb87fb41ce4d71e4e37f5de7c75aca48e2ab537",
+        "bytes": 2048
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/provenance.json",
+          "sha256": "e7d0d4d1f384842f754970dace8584dae56e8851fa56b89f4a46772d4f810631",
+          "bytes": 6076
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/root-final-readonly-observation.json",
+          "sha256": "c7dd2a530d696c82c1a2804e6db77c0c16a18e1e0c098775d442fc443327948d",
+          "bytes": 5929
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+          "sha256": "95b4a1ee703cd0b5562065b188669ab32641c20cd67a61cf01fa28e4cf2a79a1",
+          "bytes": 43934
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+          "sha256": "e33e15edd9c7e404e005d6bc228b473a3eb2257686b20cb824323c09a62cb630",
+          "bytes": 10061
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/keepers/audit-live-deepseek/turn-records/2026-10/26.jsonl",
+          "sha256": "95d4bd222d63fcb8fb7dddc8bffa8f3fbd0e9c95cb0c82ea703bc260729aa7e1",
+          "bytes": 13982
+        }
+      ],
+      "transformation": "join exact effect call IDs/times with original source ACK/readmission and turn execution membership; no model self-narrative"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/README.md",
+        "sha256": "cd6c6d938009e1094a00e52e0c265dc05ed33c4dc97d68c2e7a6a567f23576ca",
+        "bytes": 2527
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/deepseek-c2-request-scope-independent-review.json",
+          "sha256": "bc3285fca892d9a9e8b6bd7bfde44ba25f03cfa5288071ebee7d1682cd81a94e",
+          "bytes": 28432
+        }
+      ],
+      "transformation": "new bounded narrative, updated from pending to the actually received independent P2 report; original runtime FAIL retained"
+    },
+    {
+      "retained": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-settlement-evidence/docs/evidence/2026-10-27-schedule-durable-runtime/deepseek/request-scope-independent-review.original.json",
+        "sha256": "bc3285fca892d9a9e8b6bd7bfde44ba25f03cfa5288071ebee7d1682cd81a94e",
+        "bytes": 28432
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/deepseek-c2-request-scope-independent-review.json",
+          "sha256": "bc3285fca892d9a9e8b6bd7bfde44ba25f03cfa5288071ebee7d1682cd81a94e",
+          "bytes": 28432
+        }
+      ],
+      "transformation": "byte-identical copy of bounded independent derivative report; its 18 raw bindings and 5 source file hash/bytes rechecked during retention"
+    }
+  ],
+  "limits": "Input paths locate current original files. Retained copies and new derivatives have separate hashes. Historical nested checkpoint/HTTP digests are observations, not claims those full original bytes remain available."
+}

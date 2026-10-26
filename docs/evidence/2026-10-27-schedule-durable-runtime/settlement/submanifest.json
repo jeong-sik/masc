@@ -1,0 +1,1381 @@
+{
+  "schema": "masc.schedule-durable-runtime.submanifest.v1",
+  "created_at_utc": "2026-10-26T21:27:13.036678+00:00",
+  "bundle": "settlement",
+  "scope": "Separate setup-INCOMPLETE trial1 and bounded real same-process F5 trial2.",
+  "paths_relative_to": "delivery repository root; original inputs also carry their actual original checkout",
+  "files": [
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/controllers/trial1-v3.py.txt",
+        "bytes": 44880,
+        "sha256": "0aca7602ed37123a4b124fc17048e7a4e695cfe8253b7c2a5840732f23e6fb1e"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_pending_settlement_actual_c2_v3.py",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/probe_pending_settlement_actual_c2_v3.py",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 44880,
+          "sha256": "0aca7602ed37123a4b124fc17048e7a4e695cfe8253b7c2a5840732f23e6fb1e"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/controllers/trial1-v3-preparation.json",
+        "bytes": 3889,
+        "sha256": "a518c00d66451ca343b8fb38337738f37954d9976f55949597e01992bd5cac03"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-v3-preparation.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-v3-preparation.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 3889,
+          "sha256": "a518c00d66451ca343b8fb38337738f37954d9976f55949597e01992bd5cac03"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/invocation.json",
+        "bytes": 1361,
+        "sha256": "65dd570e3b50fe2ef98b2d0f5e69531090d299cd377449540aab6524ae751dff"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-1-invocation.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-1-invocation.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 1361,
+          "sha256": "65dd570e3b50fe2ef98b2d0f5e69531090d299cd377449540aab6524ae751dff"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/controllers/trial2-v5.py.txt",
+        "bytes": 49028,
+        "sha256": "1a513560e8d48580cdeb02c20f8a5c0a2403cb6730894ad7d0994cf9e5776577"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_pending_settlement_actual_c2_v5.py",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/probe_pending_settlement_actual_c2_v5.py",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 49028,
+          "sha256": "1a513560e8d48580cdeb02c20f8a5c0a2403cb6730894ad7d0994cf9e5776577"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/controllers/trial2-v5-preparation.json",
+        "bytes": 3783,
+        "sha256": "f02642126dea64c900cd074a388d09ffd1e3a08a6a79df34c8331ba6bb12123e"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-v5-preparation.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-v5-preparation.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 3783,
+          "sha256": "f02642126dea64c900cd074a388d09ffd1e3a08a6a79df34c8331ba6bb12123e"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/invocation.json",
+        "bytes": 1410,
+        "sha256": "ddbf7e6c5405937257719894bd6a6dc6a0bf4f0bebc04e13cb0b8a22e3bcbe55"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-2-invocation.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/pending-settlement-c2-2-invocation.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 1410,
+          "sha256": "ddbf7e6c5405937257719894bd6a6dc6a0bf4f0bebc04e13cb0b8a22e3bcbe55"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/summary.json",
+        "bytes": 2719,
+        "sha256": "466ef9253fb8dd85cb8543e71e54e56ccc01c54f9697c773353adfb07290a10f"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/summary.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/summary.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 2719,
+          "sha256": "466ef9253fb8dd85cb8543e71e54e56ccc01c54f9697c773353adfb07290a10f"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/incomplete.json",
+        "bytes": 135,
+        "sha256": "c8606f25896964d3fa0df5fafc7ba6ed6449b185b1983864382aa4db47dce27c"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/incomplete.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/incomplete.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 135,
+          "sha256": "c8606f25896964d3fa0df5fafc7ba6ed6449b185b1983864382aa4db47dce27c"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/provenance.json",
+        "bytes": 4399,
+        "sha256": "da411113065945a038fd0cd5344131b9b0ed6c38ee1710f8f4547466ddd9d1db"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/provenance.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/provenance.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 4399,
+          "sha256": "da411113065945a038fd0cd5344131b9b0ed6c38ee1710f8f4547466ddd9d1db"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/process-A.json",
+        "bytes": 143,
+        "sha256": "a4cac64f0401f8e3bdf77ae902019e2ed015705a193ad1bc25467a8cbc228088"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/process-A.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/http/process-A.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 143,
+          "sha256": "a4cac64f0401f8e3bdf77ae902019e2ed015705a193ad1bc25467a8cbc228088"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial1/after-owned-shutdown-ledger.json",
+        "bytes": 1928,
+        "sha256": "d11ac63794072b51dbe578b170cc25b4a3f2d723fb5b1bb90d7ba3e52b03ced7"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/after-owned-shutdown-ledger.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-1/after-owned-shutdown-ledger.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 1928,
+          "sha256": "d11ac63794072b51dbe578b170cc25b4a3f2d723fb5b1bb90d7ba3e52b03ced7"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-accepted-ledger.json",
+        "bytes": 1767,
+        "sha256": "b06a8c40b9acd2b20e07b33d8c1f4b64e6e06551f46fba5c69bdcda960cd4061"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-accepted-ledger.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-accepted-ledger.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 1767,
+          "sha256": "b06a8c40b9acd2b20e07b33d8c1f4b64e6e06551f46fba5c69bdcda960cd4061"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-accepted-queue.json",
+        "bytes": 841,
+        "sha256": "368159f049435883e2f79c745447c939cf734a8715872f7c75132e30c72c81d4"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-accepted-queue.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-accepted-queue.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 841,
+          "sha256": "368159f049435883e2f79c745447c939cf734a8715872f7c75132e30c72c81d4"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-cancelled-queue.json",
+        "bytes": 1402,
+        "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-cancelled-queue.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-cancelled-queue.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 1402,
+          "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/before-stop-ledger.json",
+        "bytes": 2920,
+        "sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/before-stop-ledger.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/before-stop-ledger.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 2920,
+          "sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/frozen-ledger.json",
+        "bytes": 2920,
+        "sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-ledger.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-ledger.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 2920,
+          "sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/frozen-queue.json",
+        "bytes": 1402,
+        "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-queue.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-queue.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 1402,
+          "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/frozen-wal.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-wal.jsonl",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/frozen-wal.jsonl",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-after-cancel-wal.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-after-cancel-wal.jsonl",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/setup-after-cancel-wal.jsonl",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/after-owned-shutdown-ledger.json",
+        "bytes": 4598,
+        "sha256": "95781e945de46c0f34d587f91ba8caad113c29267ed5b3a8e04ede14988baa1c"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/after-owned-shutdown-ledger.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/after-owned-shutdown-ledger.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 4598,
+          "sha256": "95781e945de46c0f34d587f91ba8caad113c29267ed5b3a8e04ede14988baa1c"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/final-source-address-queue.json",
+        "bytes": 2066,
+        "sha256": "e2a592352ff745e953c28a65f83c252687faf32834bb10db7930ce7ddd16cc70"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/final-source-address-queue.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/final-source-address-queue.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 2066,
+          "sha256": "e2a592352ff745e953c28a65f83c252687faf32834bb10db7930ce7ddd16cc70"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/summary.json",
+        "bytes": 26981,
+        "sha256": "fa9899443c01585678c156797cd757e902088bdadc0865e8a7251620b4396e5b"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/summary.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/summary.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 26981,
+          "sha256": "fa9899443c01585678c156797cd757e902088bdadc0865e8a7251620b4396e5b"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/provenance.json",
+        "bytes": 4515,
+        "sha256": "1f52b974ea1a7d72e1f74cb4742b1825850e31b0fbdd24e9d888fc3e0cc549a1"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/provenance.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/provenance.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 4515,
+          "sha256": "1f52b974ea1a7d72e1f74cb4742b1825850e31b0fbdd24e9d888fc3e0cc549a1"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/process-A.json",
+        "bytes": 143,
+        "sha256": "996d9bd4f56e1eb81009522192e51130d4777b6ff5e57792f77f14779833e635"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/process-A.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/process-A.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 143,
+          "sha256": "996d9bd4f56e1eb81009522192e51130d4777b6ff5e57792f77f14779833e635"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/posix-lock-preflight.json",
+        "bytes": 109,
+        "sha256": "698c90d7dccfe80fe142626df5110b1b4c04cbe1aa51a34d2c4164169b544b8a"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/posix-lock-preflight.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/posix-lock-preflight.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 109,
+          "sha256": "698c90d7dccfe80fe142626df5110b1b4c04cbe1aa51a34d2c4164169b544b8a"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/wal-barrier.json",
+        "bytes": 138,
+        "sha256": "833d35ad200d1a888e57067ae229dc0c7e6e1ddbf87498764ef47a9d9191dcca"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/wal-barrier.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/wal-barrier.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 138,
+          "sha256": "833d35ad200d1a888e57067ae229dc0c7e6e1ddbf87498764ef47a9d9191dcca"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/stopped-process.json",
+        "bytes": 71,
+        "sha256": "5eff394bb36d59d1703a39d190ce0f3b395ffc166af8efecb61cdf8959065f3f"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/stopped-process.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/stopped-process.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 71,
+          "sha256": "5eff394bb36d59d1703a39d190ce0f3b395ffc166af8efecb61cdf8959065f3f"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/resumed-process.json",
+        "bytes": 46,
+        "sha256": "efd9b0dfe436daf618a36620e225b67f533784bef45284af2eb0cd39695393d3"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/resumed-process.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/resumed-process.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 46,
+          "sha256": "efd9b0dfe436daf618a36620e225b67f533784bef45284af2eb0cd39695393d3"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/faults-installed.json",
+        "bytes": 262,
+        "sha256": "5a4b03263b91551e9f68951c4e49408faae65b7d329d5bfcaba72a4ff672327d"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/faults-installed.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/faults-installed.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 262,
+          "sha256": "5a4b03263b91551e9f68951c4e49408faae65b7d329d5bfcaba72a4ff672327d"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/queue-effective-write-refusal.json",
+        "bytes": 99,
+        "sha256": "5f22fcc732c4d3d0b352127fca598a6256979140d0efa71891028d9067c8d0cd"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-effective-write-refusal.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-effective-write-refusal.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 99,
+          "sha256": "5f22fcc732c4d3d0b352127fca598a6256979140d0efa71891028d9067c8d0cd"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/queue-repaired.json",
+        "bytes": 74,
+        "sha256": "d6244f93bcc45939013aa9e2033e16f52ce208a6dfca93257b9b8149ff7a0fe7"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-repaired.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-repaired.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 74,
+          "sha256": "d6244f93bcc45939013aa9e2033e16f52ce208a6dfca93257b9b8149ff7a0fe7"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/ledger-repaired.json",
+        "bytes": 46,
+        "sha256": "f0cfaf58ad72d3228ceaeca1f02aabba1139565d97d30303b1428d8e5a81f6f2"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/ledger-repaired.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/ledger-repaired.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 46,
+          "sha256": "f0cfaf58ad72d3228ceaeca1f02aabba1139565d97d30303b1428d8e5a81f6f2"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/original-retry-settled.json",
+        "bytes": 1049,
+        "sha256": "a6ee240a508673a672d290b9f64585d12e767d549aeae247c6a876cae0ec3354"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/original-retry-settled.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/original-retry-settled.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 1049,
+          "sha256": "a6ee240a508673a672d290b9f64585d12e767d549aeae247c6a876cae0ec3354"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/final-source-address-proof.json",
+        "bytes": 508,
+        "sha256": "d11453ae3cedba45764959b2b7303e467df15686248f477ec818c529a0009f75"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/final-source-address-proof.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/final-source-address-proof.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 508,
+          "sha256": "d11453ae3cedba45764959b2b7303e467df15686248f477ec818c529a0009f75"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-before-cancel-wal-metadata.json",
+        "bytes": 49,
+        "sha256": "8ce6e99cda05efdf225fcee0898a87f3652a5b633c3e8153e6b5fa19ebcb9238"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-before-cancel-wal-metadata.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-before-cancel-wal-metadata.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 49,
+          "sha256": "8ce6e99cda05efdf225fcee0898a87f3652a5b633c3e8153e6b5fa19ebcb9238"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-after-cancel-wal-metadata.json",
+        "bytes": 145,
+        "sha256": "ed977121c2c196463c5159ca737b0717d1ef015b00a6062b884a27f69b5d2c54"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-after-cancel-wal-metadata.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-after-cancel-wal-metadata.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 145,
+          "sha256": "ed977121c2c196463c5159ca737b0717d1ef015b00a6062b884a27f69b5d2c54"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-cancellation-receipt-link.json",
+        "bytes": 2020,
+        "sha256": "7dc556119c45081c4f8af4ddbe097564b36291a63e52386988ee03d93d1b734b"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-cancellation-receipt-link.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-cancellation-receipt-link.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 2020,
+          "sha256": "7dc556119c45081c4f8af4ddbe097564b36291a63e52386988ee03d93d1b734b"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-cancelled-inventory.json",
+        "bytes": 1011,
+        "sha256": "caef71324fc656dbb5a108d07353f98688cb0888fc07cfb235ca0b584a73d2f0"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-cancelled-inventory.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/setup-cancelled-inventory.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 1011,
+          "sha256": "caef71324fc656dbb5a108d07353f98688cb0888fc07cfb235ca0b584a73d2f0"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/first-failure.schedule-runner.json",
+        "bytes": 1975,
+        "sha256": "8e5b9c13f7e993c19c02bbc677543e740f5240c527644372cd26f8ff8305fd37"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00064-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00064-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 33150,
+          "sha256": "ba688ad56e0fdb6292bf432a26a236e839870948f8429751577bc9968bb386f6"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/first-failure-health.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/first-failure-health.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 42924,
+          "sha256": "ca06967b3e9dd54621dc8f9360c10733b4c7ed94931f7eec3e33cd04abc05194"
+        }
+      ],
+      "transformation": {
+        "kind": "selection",
+        "is_derivative": true,
+        "method": "Select the complete schedule_runner JSON object only. JSON UTF-8 indent2 rendering; full health excluded. Numeric semantics preserved; retained bytes do not equal full original response bytes."
+      },
+      "limits": [
+        "Full health and unrelated private configuration are omitted."
+      ]
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/first-failure.ledger.json",
+        "bytes": 2920,
+        "sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00065-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00065-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 2920,
+          "sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/first-failure.queue.json",
+        "bytes": 1402,
+        "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00066-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00066-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 1402,
+          "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/queue-repaired-ledger-fault.schedule-runner.json",
+        "bytes": 1977,
+        "sha256": "8e98263de8399dd5aaebb227fb0c430575fef1153428aa17db9d40a48128ca29"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00274-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00274-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 33157,
+          "sha256": "bcf442a9d024bf1c7539e69bf52901c29335cb23aa8f0d8cf2e7e5753fe5ab87"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-repaired-completed-cadence-health.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-repaired-completed-cadence-health.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 42931,
+          "sha256": "de14d4322915b4e6f031835eb709cd44a91cebbe38092495e5b0fa054d9524a5"
+        }
+      ],
+      "transformation": {
+        "kind": "selection",
+        "is_derivative": true,
+        "method": "Select the complete schedule_runner JSON object only. JSON UTF-8 indent2 rendering; full health excluded. Numeric semantics preserved; retained bytes do not equal full original response bytes."
+      },
+      "limits": [
+        "Full health and unrelated private configuration are omitted."
+      ]
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/queue-repaired-ledger-fault.ledger.json",
+        "bytes": 2920,
+        "sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00275-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00275-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 2920,
+          "sha256": "c67010cea61b9e1285fe3256ab582543f022ed855f6a433747db594346143f56"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/queue-repaired-ledger-fault.queue.json",
+        "bytes": 1402,
+        "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00276-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00276-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 1402,
+          "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/retry-settled-only.schedule-runner.json",
+        "bytes": 1431,
+        "sha256": "e9721b4b729db98ebf29a9060ab382e7a9e8df5575fc787891595b607fce7946"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00481-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00481-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 32605,
+          "sha256": "bae23ea13c288b690c3835f3c0f1cfde593f3b5739a0f911867b16e814279b2b"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/retry-settled-only-health.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/retry-settled-only-health.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 42367,
+          "sha256": "96f49965e6c823b0e327188a6f0ec2b4dcc7d7e4281c49775362d0de6b190857"
+        }
+      ],
+      "transformation": {
+        "kind": "selection",
+        "is_derivative": true,
+        "method": "Select the complete schedule_runner JSON object only. JSON UTF-8 indent2 rendering; full health excluded. Numeric semantics preserved; retained bytes do not equal full original response bytes."
+      },
+      "limits": [
+        "Full health and unrelated private configuration are omitted."
+      ]
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/retry-settled-only.ledger.json",
+        "bytes": 3561,
+        "sha256": "8aeb0b6a019c052565a8ab88d1efb2f76f3b0350eb2415d1dceff432fabf8bed"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00482-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00482-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 3561,
+          "sha256": "8aeb0b6a019c052565a8ab88d1efb2f76f3b0350eb2415d1dceff432fabf8bed"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/retry-settled-only.queue.json",
+        "bytes": 1402,
+        "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00483-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00483-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 1402,
+          "sha256": "197a6dda95b78e10cdc331547f2865be4d0488ca11475b70502000868a94f6d6"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/fresh-admission.schedule-runner.json",
+        "bytes": 1430,
+        "sha256": "17d2bd2ec0708ea4abfacd4584e3ebe54143ec84098a271231deb21df9b0cf0c"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00694-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00694-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 34458,
+          "sha256": "e3dd10e8db29949048df4b52bd59ad172b6b9b57cdcf3dbdf79901c5eef07c3f"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/fresh-admission-health.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/fresh-admission-health.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 44927,
+          "sha256": "5ba7c02e48f93359131f3214b90d8ced2785168d18a8d0cdee7844fd61df9ae9"
+        }
+      ],
+      "transformation": {
+        "kind": "selection",
+        "is_derivative": true,
+        "method": "Select the complete schedule_runner JSON object only. JSON UTF-8 indent2 rendering; full health excluded. Numeric semantics preserved; retained bytes do not equal full original response bytes."
+      },
+      "limits": [
+        "Full health and unrelated private configuration are omitted."
+      ]
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/fresh-admission.ledger.json",
+        "bytes": 4598,
+        "sha256": "95781e945de46c0f34d587f91ba8caad113c29267ed5b3a8e04ede14988baa1c"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00695-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00695-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 4598,
+          "sha256": "95781e945de46c0f34d587f91ba8caad113c29267ed5b3a8e04ede14988baa1c"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phases/fresh-admission.queue.json",
+        "bytes": 2066,
+        "sha256": "e2a592352ff745e953c28a65f83c252687faf32834bb10db7930ce7ddd16cc70"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00696-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00696-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 2066,
+          "sha256": "e2a592352ff745e953c28a65f83c252687faf32834bb10db7930ce7ddd16cc70"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/setup-accepted-inventory.raw.json",
+        "bytes": 3552,
+        "sha256": "f5209615ab0a7d617044921c4b847641dec6d38f5511296f42716c97a94d2847"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00021-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00021-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 3552,
+          "sha256": "f5209615ab0a7d617044921c4b847641dec6d38f5511296f42716c97a94d2847"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/final-exact-inventory.raw.json",
+        "bytes": 2194,
+        "sha256": "cd6b319d07207f1b33f82ce9704031f63708bb20ac2d9d9d3d5c490898aa8274"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00697-response.bin",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/00697-response.bin",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 2194,
+          "sha256": "cd6b319d07207f1b33f82ce9704031f63708bb20ac2d9d9d3d5c490898aa8274"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/selected-capture-bindings.json",
+        "bytes": 5418,
+        "sha256": "79d95383d004a77cfc24e10f4c2f69cf2600baaf6564d555653ae5eaae93a195"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/events.jsonl",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/events.jsonl",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 204981,
+          "sha256": "b1949d000c1e7a510134bdf834b8d7914faf7afc0e4b5233cbc3f1e16101daad"
+        }
+      ],
+      "transformation": {
+        "kind": "selection",
+        "is_derivative": true,
+        "method": "Select original JSONL metadata rows; JSON rendered as one selected metadata object."
+      },
+      "limits": [
+        "Only selected ledger/queue/inventory bodies are retained exactly; health bodies are replaced by explicitly marked field selections."
+      ]
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/phase-build-identities.json",
+        "bytes": 1435,
+        "sha256": "99c63c9ab44ade6dd8b9c1b823361e634d6cedc9536d9e7354df8fcf79e540dd"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/first-failure-health.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/first-failure-health.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 42924,
+          "sha256": "ca06967b3e9dd54621dc8f9360c10733b4c7ed94931f7eec3e33cd04abc05194"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-repaired-completed-cadence-health.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/queue-repaired-completed-cadence-health.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 42931,
+          "sha256": "de14d4322915b4e6f031835eb709cd44a91cebbe38092495e5b0fa054d9524a5"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/retry-settled-only-health.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/retry-settled-only-health.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 42367,
+          "sha256": "96f49965e6c823b0e327188a6f0ec2b4dcc7d7e4281c49775362d0de6b190857"
+        },
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/fresh-admission-health.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/fresh-admission-health.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 44927,
+          "sha256": "5ba7c02e48f93359131f3214b90d8ced2785168d18a8d0cdee7844fd61df9ae9"
+        }
+      ],
+      "transformation": {
+        "kind": "selection",
+        "is_derivative": true,
+        "method": "Select build identity fields from four phase health responses; no full health."
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/initial-owner-audit-settle-a.selected.json",
+        "bytes": 206,
+        "sha256": "22afd0eeaaab1e02a71bc3ab28983990a73b28a189a333dc1e0367b5ebf7d4c8"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/initial-owner-audit-settle-a.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/initial-owner-audit-settle-a.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 17146,
+          "sha256": "2e5a9ab019e5c56e88b724b927da18709b486bbf887c17a6c745937d5b291f00"
+        }
+      ],
+      "transformation": {
+        "kind": "selection",
+        "is_derivative": true,
+        "method": "Select manual/paused/zero-turn/no-runtime-attempt facts only; omit instructions and unrelated Keeper metadata."
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/initial-owner-audit-settle-b.selected.json",
+        "bytes": 206,
+        "sha256": "e8c0ed00ad694e775aaed53f010af41f1774af81fbbe7faaac96fd24de366bde"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/initial-owner-audit-settle-b.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/initial-owner-audit-settle-b.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 17146,
+          "sha256": "163ff24167ba09527ce4f69f8f6f2ddb41a72a3bcc2a2094db0e45343ecb4d30"
+        }
+      ],
+      "transformation": {
+        "kind": "selection",
+        "is_derivative": true,
+        "method": "Select manual/paused/zero-turn/no-runtime-attempt facts only; omit instructions and unrelated Keeper metadata."
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/final-owner-audit-settle-a.selected.json",
+        "bytes": 206,
+        "sha256": "22afd0eeaaab1e02a71bc3ab28983990a73b28a189a333dc1e0367b5ebf7d4c8"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/final-owner-audit-settle-a.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/final-owner-audit-settle-a.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 17541,
+          "sha256": "147e43d16bb7df28387732de7940c2358ad43bca332798c23bc4a51bfc482c33"
+        }
+      ],
+      "transformation": {
+        "kind": "selection",
+        "is_derivative": true,
+        "method": "Select manual/paused/zero-turn/no-runtime-attempt facts only; omit instructions and unrelated Keeper metadata."
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/final-owner-audit-settle-b.selected.json",
+        "bytes": 206,
+        "sha256": "e8c0ed00ad694e775aaed53f010af41f1774af81fbbe7faaac96fd24de366bde"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/final-owner-audit-settle-b.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/final-owner-audit-settle-b.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 17541,
+          "sha256": "41ee7cf6c71edbd2243f9e9c6ebc9be4ce6756e217e5abe78cce42609bec80a6"
+        }
+      ],
+      "transformation": {
+        "kind": "selection",
+        "is_derivative": true,
+        "method": "Select manual/paused/zero-turn/no-runtime-attempt facts only; omit instructions and unrelated Keeper metadata."
+      },
+      "limits": []
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/server-causes-and-terminal-lines.txt",
+        "bytes": 4010,
+        "sha256": "f05d85f7b402837ebf0b9a238a0ad4c5b6170f65b319c28e99d7dbefcca34ff7"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/server-A.log",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/server-A.log",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 30865,
+          "sha256": "0bab884b51a9df492eb3149afb295328064a7b543b5f8d342f8b45fb90f1700b"
+        }
+      ],
+      "transformation": {
+        "kind": "line_selection",
+        "is_derivative": true,
+        "method": "Concatenate exact original line bytes, retaining existing newlines; no text edits.",
+        "source_lines_1based": [
+          183,
+          184,
+          185,
+          193,
+          194,
+          197,
+          198,
+          199,
+          234,
+          235
+        ]
+      },
+      "limits": [
+        "Complete server log is not included; source SHA/bytes bind selected lines. These include actual queue publication and primary settlement causes plus later fresh dispatch and clean shutdown."
+      ]
+    },
+    {
+      "retained": {
+        "path": "docs/evidence/2026-10-27-schedule-durable-runtime/settlement/trial2/independent-review.json",
+        "bytes": 32821,
+        "sha256": "dfbcc7529f8a3ef5bd175882f957273a3e02912c21dd36d91688eba891693d9e"
+      },
+      "inputs": [
+        {
+          "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/f5-c2-trial2-independent-review.json",
+          "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/f5-c2-trial2-independent-review.json",
+          "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+          "bytes": 32821,
+          "sha256": "dfbcc7529f8a3ef5bd175882f957273a3e02912c21dd36d91688eba891693d9e"
+        }
+      ],
+      "transformation": {
+        "kind": "exact_original_byte_copy",
+        "is_derivative": false
+      },
+      "limits": []
+    }
+  ],
+  "omitted_originals": [
+    {
+      "input": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/events.jsonl",
+        "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/http/events.jsonl",
+        "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+        "bytes": 204981,
+        "sha256": "b1949d000c1e7a510134bdf834b8d7914faf7afc0e4b5233cbc3f1e16101daad"
+      },
+      "reason": "All701 raw body hashes verified independently, but complete HTTP event stream/private full health omitted. Selected metadata and safe full bodies retained."
+    },
+    {
+      "input": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/server-A.log",
+        "capture_path_relative_to_original_checkout": "artifacts/schedule-durable-candidate-20261027/runs/pending-settlement-c2-2/server-A.log",
+        "original_checkout": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+        "bytes": 30865,
+        "sha256": "0bab884b51a9df492eb3149afb295328064a7b543b5f8d342f8b45fb90f1700b"
+      },
+      "reason": "Complete startup/runtime log omitted; exact cause and terminal lines selected."
+    }
+  ],
+  "limits": [
+    "Full private health/owner instructions/auth data omitted.",
+    "Source input and retained hashes are separate.",
+    "No process-restart or model/whole-feature PASS."
+  ],
+  "metadata_note": "README.md, submanifest.json, capture-path-digests.json and current-locations.json are newly authored retention metadata. Captured path/digest records are copied unchanged. Original-input hashes and retained hashes are separate; a derivative never inherits the original byte identity."
+}

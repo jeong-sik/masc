@@ -1,0 +1,23 @@
+{
+  "release_version": "0.64.0",
+  "binary_version": "0.64.0",
+  "repo_version": "0.64.0",
+  "commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "commit_source": "embedded",
+  "binary_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "binary_commit_source": "embedded",
+  "provenance_source": "self_observed",
+  "executable_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+  "binary_commit_unix_ts": 1793046677.0,
+  "binary_commit_age_seconds": 2445,
+  "repo_head_commit": "a3950a189b9",
+  "repo_head_commit_source": "runtime_repo_head",
+  "repo_head_commit_unix_ts": 1793046677.0,
+  "repo_head_commit_age_seconds": 2445,
+  "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+  "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact",
+  "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+  "runtime_instance_id": "01a17a0e-5201-7000-8197-de7dc881f6bc",
+  "started_at": "2026-10-26T21:12:01Z",
+  "uptime_seconds": 0
+}

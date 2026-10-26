@@ -33,7 +33,10 @@ let () =
   assert (not (Q.matches combined ~goal_task_ids:(Some [fixture.id]) {fixture with task_status=Masc_domain.Todo}));
   List.iter (fun field -> assert (Result.is_error (Q.of_args (`Assoc [field]))))
     ["task_ids", `List []; "task_ids", `List [`Int 1]; "query", `String " "; "assignee", `Int 1];
-  let filter : C.filter = {status=None; include_done=false; projection="compact"; selection=query} in
+  let filter : C.filter =
+    { lifecycle = Q.Active_tasks
+    ; projection = "compact"
+    ; selection = query } in
   let cursor : C.t = {after={priority=seed.priority;created_at=seed.created_at;id=seed.id};filter} in
   let wire = C.to_string cursor in
   assert (Result.is_ok (C.of_string ~call:filter wire));

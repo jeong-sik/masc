@@ -574,7 +574,7 @@ let test_content_edit_preserves_concurrently_changed_due () =
       {hour=10; minute=0; second=0; timezone="UTC"} in
   let context = { (schedule_ctx config) with
     admit_keeper_wake_creation = (fun _config ~keeper_name:_ write ->
-      match Schedule_service.update config ~now:100. ~runner_tick_sec ~schedule_id
+      match Schedule_service.update config ~authority:Schedule_store.Operator_authority ~now:100. ~runner_tick_sec ~schedule_id
           ~requested_by:original.requested_by ~scheduled_by:original.scheduled_by
           ~due_at:latest_due ~payload:(Schedule_domain.payload_to_yojson original.payload)
           ~source:original.source ~recurrence:latest_recurrence () with
@@ -1792,6 +1792,130 @@ let test_an_update_keeps_the_rows_actors_and_its_target_rule () =
    ignored: the HTTP boundary already replaced it (#37149), and the MCP path
    does not stamp, so the tool itself must refuse -- otherwise an MCP caller
    names any actor it likes on create, cancel and note_add. *)
+(* The real update path reads its authorization snapshot before entering
+   Keeper intake. Interleave another public update at that boundary: the old
+   recipient must not edit the definition after it stops waking that caller. *)
+let test_recipient_edit_rechecks_the_current_target () =
+  with_config @@ fun config ->
+  let schedule_id = "recipient-edit-retargeted" in
+  let creator = Tool_schedule.Named_caller "scheduler-agent" in
+  register_wake_target config "replacement-keeper";
+  let created = dispatch_exn ~caller:creator config Tool_schemas_schedule.Create_request
+      (create_args ~schedule_id ()) in
+  check bool "creator schedules A" true (Tool_result.is_success created);
+  let committed = ref None in
+  let ctx = { (schedule_ctx ~caller:(Tool_schedule.Named_caller "schedule-keeper") config) with
+    admit_keeper_wake_creation = (fun _config ~keeper_name:_ write ->
+      let retarget = dispatch_exn ~caller:creator config Tool_schemas_schedule.Update_request
+          (`Assoc [ "schedule_id", `String schedule_id
+                  ; "keeper_name", `String "replacement-keeper"
+                  ; "message", `String "creator's replacement" ]) in
+      check bool "creator retargets B before recipient commits" true
+        (Tool_result.is_success retarget);
+      committed := Some (Schedule_store.read_state config);
+      write ()) } in
+  let result = match Tool_schedule.dispatch ctx
+      ~name:(schedule_tool_name Tool_schemas_schedule.Update_request)
+      ~args:(`Assoc [ "schedule_id", `String schedule_id
+                   ; "keeper_name", `String "schedule-keeper"
+                   ; "message", `String "stale recipient edit" ]) with
+    | Some result -> result
+    | None -> fail "update tool missing" in
+  check_refusal "former recipient cannot overwrite B"
+    Schedule_contract_values.Refusal_not_schedule_owner result;
+  let open Yojson.Safe.Util in
+  let facts = Tool_result.data result in
+  check string "refusal identifies current target" "replacement-keeper"
+    (facts |> member "wake_target" |> to_string);
+  check string "refusal identifies caller" "schedule-keeper"
+    (facts |> member "caller" |> to_string);
+  check string "refusal identifies scheduler" "scheduler-agent"
+    (facts |> member "scheduled_by_id" |> to_string);
+  let before = match !committed with
+    | Some state -> state | None -> fail "retarget did not commit" in
+  check int "refused edit leaves the ledger version unchanged" before.version
+    (Schedule_store.read_state config).version;
+  let stored = stored_schedule config schedule_id in
+  check string "creator's content survives" "creator's replacement"
+    (Schedule_domain.payload_to_yojson stored.payload |> member "body" |> member "message" |> to_string);
+  check bool "creator can still edit the retargeted row" true
+    (Tool_result.is_success
+       (dispatch_exn ~caller:creator config Tool_schemas_schedule.Update_request
+          (`Assoc [ "schedule_id", `String schedule_id
+                  ; "keeper_name", `String "schedule-keeper"
+                  ; "message", `String "creator's next edit" ])))
+;;
+
+let test_locked_cancel_refuses_a_former_recipient_before_withdrawal () =
+  with_config @@ fun config ->
+  let schedule_id = "cancel-retargeted-owner" in
+  let creator = Tool_schedule.Named_caller "scheduler-agent" in
+  register_wake_target config "replacement-keeper";
+  ignore (dispatch_exn ~caller:creator config Tool_schemas_schedule.Create_request
+    (create_args ~schedule_id ()) : Tool_result.result);
+  let observed = stored_schedule config schedule_id in
+  check (option string) "original recipient" (Some "schedule-keeper")
+    (Schedule_payload_projection.wake_keeper_name observed);
+  let changed = dispatch_exn ~caller:creator config Tool_schemas_schedule.Update_request
+      (`Assoc [ "schedule_id", `String schedule_id
+              ; "keeper_name", `String "replacement-keeper"
+              ; "message", `String "retargeted" ]) in
+  check bool "retarget commits" true (Tool_result.is_success changed);
+  let before = Schedule_store.read_state config in
+  let withdrawals = ref 0 in
+  let withdraw request _cancellation =
+    incr withdrawals;
+    check (option string) "withdrawal sees the current target" (Some "replacement-keeper")
+      (Schedule_payload_projection.wake_keeper_name request);
+    Ok () in
+  let cancel name = Schedule_service.cancel config
+      ~authority:(Schedule_store.Named_authority
+        { name; wake_keeper_name = Schedule_payload_projection.wake_keeper_name })
+      ~schedule_id ~cancelled_by:(automated name) ~reason:"no longer needed"
+      ~withdraw_queued_wakes:withdraw in
+  (match cancel "schedule-keeper" with
+   | Error (Schedule_service.Store_error (Schedule_store.Not_schedule_owner
+       { caller; scheduled_by_id; wake_target; schedule_id = refused_id })) ->
+     check string "refused schedule" schedule_id refused_id;
+     check string "former recipient" "schedule-keeper" caller;
+     check string "current scheduler" "scheduler-agent" scheduled_by_id;
+     check (option string) "current target" (Some "replacement-keeper") wake_target
+   | Error err -> fail (Schedule_service.service_error_to_string err)
+   | Ok _ -> fail "former recipient cancelled the retargeted row");
+  check int "unauthorized cancel never calls withdrawal" 0 !withdrawals;
+  check int "unauthorized cancel never writes the ledger" before.version
+    (Schedule_store.read_state config).version;
+  (match cancel "scheduler-agent" with
+   | Ok request -> check bool "creator cancels" true (request.status = Schedule_domain.Cancelled)
+   | Error err -> fail (Schedule_service.service_error_to_string err));
+  check int "authorized creator withdraws once" 1 !withdrawals
+;;
+
+let test_locked_replacement_uses_the_current_scheduler () =
+  with_config @@ fun config ->
+  let schedule_id = "replacement-owner-current-row" in
+  let original = create_service_exn config ~schedule_id ~due_at:future_due_at
+      ~payload:(keeper_wake_payload "original") () in
+  let before = Schedule_store.read_state config in
+  let payload = `Assoc [ "kind", `String Schedule_supported_kinds.keeper_wake
+    ; "body", `Assoc [ "keeper_name", `String "other-keeper"; "message", `String "moved" ] ] in
+  let result = Schedule_service.update config
+      ~authority:(Schedule_store.Named_authority
+        { name = "schedule-keeper"; wake_keeper_name = Schedule_payload_projection.wake_keeper_name })
+      ~now:100. ~runner_tick_sec ~schedule_id
+      ~requested_by:(automated "schedule-keeper") ~scheduled_by:(automated "schedule-keeper")
+      ~due_at:original.due_at ~payload ~source:original.source () in
+  (match result with
+   | Error (Schedule_service.Store_error (Schedule_store.Not_schedule_owner
+       { scheduled_by_id; wake_target; schedule_id = _; caller = _ })) ->
+     check string "current scheduler decides replacement ownership" "scheduler-agent" scheduled_by_id;
+     check (option string) "replacement target is refused" (Some "other-keeper") wake_target
+   | Error err -> fail (Schedule_service.service_error_to_string err)
+   | Ok _ -> fail "replacement supplied its own scheduling authority");
+  check int "invalid replacement leaves the ledger unchanged" before.version
+    (Schedule_store.read_state config).version
+;;
+
 let test_a_named_caller_is_the_actor_not_the_argument () =
   with_config
   @@ fun config ->
@@ -2105,6 +2229,7 @@ let test_status_active_lists_every_status_that_is_not_terminal () =
   (match
      Schedule_service.cancel
        config
+       ~authority:Schedule_store.Operator_authority
        ~schedule_id:"sched-gone"
        ~cancelled_by:(human "operator")
        ~reason:"list fixture"
@@ -2334,6 +2459,12 @@ let () =
             test_a_keeper_cannot_cancel_another_keepers_schedule
         ; test_case "an update keeps the row's actors and its target rule" `Quick
             test_an_update_keeps_the_rows_actors_and_its_target_rule
+        ; test_case "recipient edit rechecks the current target" `Quick
+            test_recipient_edit_rechecks_the_current_target
+        ; test_case "locked cancel refuses a former recipient before withdrawal" `Quick
+            test_locked_cancel_refuses_a_former_recipient_before_withdrawal
+        ; test_case "locked replacement uses the current scheduler" `Quick
+            test_locked_replacement_uses_the_current_scheduler
         ; test_case "a named caller is the actor, not the argument" `Quick
             test_a_named_caller_is_the_actor_not_the_argument
         ; test_case "a call gives exactly one due input" `Quick

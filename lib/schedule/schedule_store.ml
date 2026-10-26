@@ -13,9 +13,22 @@ type attempted_transition =
   | Cancel_schedule
   | Cancel_for_consumer_retirement
 
+type mutation_authority =
+  | Operator_authority
+  | Named_authority of
+      { name : string
+      ; wake_keeper_name : Schedule_domain.schedule_request -> string option
+      }
+
 type store_error =
   | Schedule_already_exists
   | Schedule_not_found
+  | Not_schedule_owner of
+      { schedule_id : string
+      ; caller : string
+      ; scheduled_by_id : string
+      ; wake_target : string option
+      }
   | Invalid_initial_status of string
   | Transition_refused of
       { schedule_id : string
@@ -126,6 +139,11 @@ let attempted_transition_to_string = function
 let store_error_to_string = function
   | Schedule_already_exists -> "schedule already exists"
   | Schedule_not_found -> "schedule not found"
+  | Not_schedule_owner { schedule_id; caller; scheduled_by_id; wake_target = _ } ->
+    Printf.sprintf
+      "schedule %s was scheduled by %s and would not wake %s; a caller \
+       changes only the schedules it made or the ones that wake it"
+      schedule_id scheduled_by_id caller
   | Invalid_initial_status reason -> "invalid initial schedule status: " ^ reason
   | Transition_refused { schedule_id; current; attempted; last_wake = _ } ->
     let current = Schedule_domain.schedule_status_to_string current in
@@ -845,15 +863,38 @@ let changed_due_not_past ~now ~(current : schedule_request) (request : schedule_
 
 type timing_update = Replace_timing | Keep_timing
 
-let update_request config ~now ~runner_tick_sec ?(timing_update = Replace_timing)
+(* Only the locked row establishes who scheduled this id. For replacement
+   ownership, the target comes from the proposed payload but the scheduler
+   still comes from [current], never a stale request supplied by the caller. *)
+let authorize_mutation authority ~(current : schedule_request) ~target =
+  match authority with
+  | Operator_authority -> Ok ()
+  | Named_authority { name; wake_keeper_name } ->
+    let wake_target = wake_keeper_name target in
+    if String.equal current.scheduled_by.id name
+       || Option.fold ~none:false ~some:(String.equal name) wake_target
+    then Ok ()
+    else Error (Not_schedule_owner
+      { schedule_id = current.schedule_id
+      ; caller = name
+      ; scheduled_by_id = current.scheduled_by.id
+      ; wake_target
+      })
+;;
+
+let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Replace_timing)
     (request : Schedule_domain.schedule_request) =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state request.schedule_id with
     | None -> Error Schedule_not_found
     | Some current ->
+      let* () = authorize_mutation authority ~current ~target:current in
+      let* () = authorize_mutation authority ~current ~target:request in
       if Schedule_domain.modify_allowed current.status
       then (
+        let request = { request with
+          requested_by = current.requested_by; scheduled_by = current.scheduled_by } in
         let request = match timing_update with
           | Replace_timing -> request
           | Keep_timing ->
@@ -890,12 +931,13 @@ let update_request config ~now ~runner_tick_sec ?(timing_update = Replace_timing
    cancel again. A ledger write that fails after the withdrawal also leaves the
    row active; the withdrawn occurrence stays cancelled in the queue, with the
    queue's own cancellation receipt, and the next occurrence fires as due. *)
-let cancel_request config ~schedule_id ~cancellation ~withdraw_queued_wakes =
+let cancel_request config ~authority ~schedule_id ~cancellation ~withdraw_queued_wakes =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
+      let* () = authorize_mutation authority ~current:request ~target:request in
       (match request.status with
        | Running | Succeeded | Failed | Cancelled | Expired ->
          Error (transition_refused state request ~attempted:Cancel_schedule)

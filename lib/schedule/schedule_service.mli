@@ -40,6 +40,7 @@ val create :
 
 val update :
   Workspace_utils.config ->
+  authority:Schedule_store.mutation_authority ->
   now:float ->
   runner_tick_sec:float ->
   ?timing_update:Schedule_store.timing_update ->
@@ -60,10 +61,13 @@ val update :
     a due time that changes and lands before the current whole second
     ({!Schedule_store.Changed_due_already_past}), and accepts the stored due
     time sent back unchanged. [Keep_timing] preserves the latest stored due
-    time and recurrence under the mutation lock, independently of the supplied snapshot. *)
+    time and recurrence under the mutation lock, independently of the supplied snapshot.
+    [authority] comes from the trusted caller; the store checks ownership of
+    the current row and the replacement under that same lock. *)
 
 val cancel :
   Workspace_utils.config ->
+  authority:Schedule_store.mutation_authority ->
   schedule_id:string ->
   cancelled_by:Schedule_domain.actor ->
   reason:string ->
@@ -76,7 +80,8 @@ val cancel :
     ({!Schedule_domain.make_cancellation}; a blank actor id or reason is
     [Invalid_request]). [withdraw_queued_wakes] removes the wakes of that
     schedule already queued for its consumer, under the ledger lock
-    ({!Schedule_store.cancel_request}). *)
+    ({!Schedule_store.cancel_request}). [authority] is checked against the
+    current row before any queued wake is withdrawn. *)
 
 val prune :
   Workspace_utils.config ->

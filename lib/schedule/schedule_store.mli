@@ -22,9 +22,28 @@ type attempted_transition =
 
 val attempted_transition_to_string : attempted_transition -> string
 
+type mutation_authority =
+  | Operator_authority
+  | Named_authority of
+      { name : string
+      ; wake_keeper_name : Schedule_domain.schedule_request -> string option
+      }
+(** Constructed from the trusted dispatch caller, never call arguments.
+    A named caller changes rows it scheduled or rows that wake it. The
+    consumer supplies its canonical, read-only wake-target projection because
+    this library treats payloads as opaque. [None] means no Keeper target.
+    Both current-row and replacement ownership are checked under the ledger
+    mutation lock; an earlier observation grants no authority. *)
+
 type store_error =
   | Schedule_already_exists
   | Schedule_not_found
+  | Not_schedule_owner of
+      { schedule_id : string
+      ; caller : string
+      ; scheduled_by_id : string
+      ; wake_target : string option
+      }
   | Invalid_initial_status of string
   | Transition_refused of
       { schedule_id : string
@@ -170,6 +189,7 @@ type timing_update = Replace_timing | Keep_timing
 
 val update_request :
   Workspace_utils.config ->
+  authority:mutation_authority ->
   now:float ->
   runner_tick_sec:float ->
   ?timing_update:timing_update ->
@@ -184,10 +204,13 @@ val update_request :
     [Changed_due_already_past]; the stored due time sent back unchanged is
     accepted whatever the clock says. [timing_update] defaults to
     [Replace_timing]; [Keep_timing] retains the latest stored time, recurrence
-    and expiry. *)
+    and expiry. The current row and its replacement must both belong to
+    [authority] before any write. Replacement ownership uses the current
+    row's scheduler, and the stored requester and scheduler are preserved. *)
 
 val cancel_request :
   Workspace_utils.config ->
+  authority:mutation_authority ->
   schedule_id:string ->
   cancellation:Schedule_domain.cancellation ->
   withdraw_queued_wakes:
@@ -201,7 +224,8 @@ val cancel_request :
     the caller removes the wakes already queued for it; this library has no
     view of those queues. A withdrawal [Error] is [Persistence_failed] and
     nothing is written. [Running] and terminal requests are
-    [Transition_refused]. *)
+    [Transition_refused]. Current-row ownership is checked before the
+    withdrawal callback or any write; an unauthorized request has no effects. *)
 
 val refresh_due :
   Workspace_utils.config ->

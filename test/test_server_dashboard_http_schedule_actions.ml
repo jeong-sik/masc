@@ -74,6 +74,7 @@ let test_prune_removes_terminal_schedule () =
   (match
      Schedule_service.cancel
        config
+       ~authority:Schedule_store.Operator_authority
        ~schedule_id:request.schedule_id
        ~cancelled_by:(actor "canceller")
        ~reason:"prune fixture"

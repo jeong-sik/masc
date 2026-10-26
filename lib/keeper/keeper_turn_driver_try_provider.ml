@@ -497,6 +497,7 @@ type try_provider_ctx =
   ; cooperative_yield_probe : Runtime_agent.cooperative_yield_probe option
   ; agent_core_checkpoint : Agent_core.Checkpoint.t option
   ; on_request_evidence : (Request_observation.evidence -> unit) option
+  ; on_request_execution_ready : (runtime_id:string -> execution:Types_core.verifier_execution_reference -> (unit, string) result) option
   ; native_binding : Keeper_direct_native_continuation.binding option
   ; native_retired_history_cut : Keeper_direct_native_continuation.retired_history_cut option
   ; (* Eio concurrency *)
@@ -2437,10 +2438,15 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 | Some blocks -> blocks
                 | None -> [Agent_core.Types.Text ctx.goal] in
               Native.New_input { blocks; metadata = ctx.goal_metadata }, ctx.agent_core_checkpoint in
-          let prepared, request_execution = match ctx.native_binding, ctx.on_request_evidence with
-            | None, None -> Ok (config, checkpoint, input), None
-            | None, Some _ ->
-              (match Keeper_request_execution.prepare ~base_path:ctx.base_path
+          let journal_required = Option.is_some ctx.on_request_evidence
+            || Option.is_some ctx.on_request_execution_ready in
+          let prepared, request_execution = match ctx.native_binding, journal_required with
+            | None, false -> Ok (config, checkpoint, input), None
+            | None, true ->
+              (match Keeper_request_execution.prepare
+                  ?on_scope_ready:(Option.map (fun ready ~call_id ->
+                    ready ~runtime_id:ctx.runtime_id ~execution:(Types_core.Native_execution {call_id})) ctx.on_request_execution_ready)
+                  ~base_path:ctx.base_path
                   ~keeper_name:ctx.keeper_name ~config () with
                | Ok (execution, config) -> Ok (config, checkpoint, input), Some (Ok execution)
                | Error detail -> Error (Agent_core.Error.Internal detail), Some (Error detail))

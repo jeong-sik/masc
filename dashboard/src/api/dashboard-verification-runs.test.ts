@@ -51,6 +51,14 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 describe('parseVerificationRunsResponse', () => {
+  it.each(['execution_pending', 'execution_repair_required'])('preserves %s without rejecting the response', status => {
+    const parsed = parseVerificationRunsResponse({
+      generated_at: '2026-10-26T10:00:00Z', count: 1,
+      runs: [row({status, detail: 'original execution observation'})],
+    })
+    expect(onlyRun(parsed)).toMatchObject({status, cause: 'original execution observation'})
+  })
+
   it('maps a completed review onto the record shape', () => {
     const parsed = parseVerificationRunsResponse({
       generated_at: '2026-08-05T00:00:00Z',

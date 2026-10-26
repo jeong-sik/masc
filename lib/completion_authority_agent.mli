@@ -119,6 +119,7 @@ module For_testing : sig
       answers with a [retry_admission]. *)
   type retry_request =
     | Retry_requested
+    | Observe_original_requested
     | No_retry_requested
 
   (** The scheduler's answer to one request. [Armed_timer]: this request
@@ -158,6 +159,8 @@ module For_testing : sig
         ; retryable_runtimes : string list
         ; model_absent_runtimes : string list
         }
+    | Execution_pending of { detail : string }
+    | Execution_repair_required of { detail : string }
     | Raised of { detail : string }
 
   (** How one review attempt ended. [Superseded_by] records the observed

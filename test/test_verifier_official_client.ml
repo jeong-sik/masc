@@ -84,7 +84,7 @@ let records path = In_channel.with_open_bin path In_channel.input_lines
   |> List.map Yojson.Safe.from_string
 let member = Yojson.Safe.Util.member
 
-let test_review ?(shadow_lane=false) mode =
+let test_review ?(shadow_lane=false) ?(owned=false) mode =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Eio_context.set_env env;
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
@@ -158,7 +158,28 @@ candidates = ["forbidden.verifier", "official.verifier"]
   Eio.Switch.on_release sw (fun () ->
     Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn previous_slots);
   let calls = ref [] in
-  let review () = AR.run ~sw:(Some sw)
+  let owner_confirmed=ref false in
+  let review () = if owned then (
+    let system_prompt=Prompt_registry.render_prompt_template Prompt_names.verification_system [] |> Result.get_ok in
+    let execution_owner : AR.execution_owner = {keeper_name="owned-official-review";
+      session_root=Filename.concat root "original-review-session";
+      on_execution_ready=(fun ~runtime_id ~execution ->
+        check string "exact admitted CLI runtime owns its session" "official.verifier" runtime_id;
+        check bool "owner is confirmed before the client starts" false (Sys.file_exists capture);
+        (match execution with Types_core.Official_session -> ()
+         | Native_execution _ -> fail "official client was assigned a native locator");
+        owner_confirmed:=true;Ok ())} in
+    let bytes=Base64.decode_exn png in
+    AR.review_rendered ~generator_runtime:None ~system_prompt ~execution_owner ~sw:(Some sw)
+      ~prompt:"Verify the supplied image and read proof.txt before reporting."
+      ~lookup ~provider_rest:Verification_retry.provider_rest ~base_path:root
+      ~on_tool_result:(fun ~input:_ result -> calls:=result::!calls)
+      {AR.task_title="Owned CLI review";task_description="Read the proof";
+        completion_notes="fixture";agent_name="producer";task_id="task-cli";evidence_refs=[];
+        evidence_images=[{AR.image_reference="artifact:proof.png";
+          image_sha256=Lane_addon_store.digest bytes;image_bytes=String.length bytes;
+          image_media_type="image/png";image_body_base64=png}]})
+    else AR.run ~sw:(Some sw)
     ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
     ~render_prompt:(fun () -> Ok "Verify the supplied image and read proof.txt before reporting.")
     ~goal_blocks:[Agent_core.Types.Image
@@ -166,6 +187,7 @@ candidates = ["forbidden.verifier", "official.verifier"]
     ~lookup ~provider_rest:Verification_retry.provider_rest ~base_path:root
     ~on_tool_result:(fun ~input:_ result -> calls := result :: !calls) () in
   let result = review () in
+  if owned then check bool "valid CLI verifier remains supported with an original owner" true !owner_confirmed;
   (match mode, result.AR.verdict, result.gate with
    | ("valid" | "large-read"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
    | "missing", None, AR.Invalid_verdict -> ()
@@ -190,7 +212,8 @@ candidates = ["forbidden.verifier", "official.verifier"]
     (String.starts_with ~prefix:managed (member "system_prompt" invocation |> Yojson.Safe.Util.to_string));
   let client_root = member "cwd" invocation |> Yojson.Safe.Util.to_string in
   check bool "client does not run in workspace" false (String.equal root client_root);
-  check bool "private session root reclaimed after terminal result" false (Sys.file_exists client_root);
+  if not owned then
+    check bool "private session root reclaimed after terminal result" false (Sys.file_exists client_root);
   (* #36066 refuses a keeper with no keepers/<name>.toml. The reviewer is
      program-defined: its posture reaches the host as a value and the host
      reads no declaration, so the review root holds no TOML at launch. *)
@@ -356,6 +379,8 @@ let () =
       ["valid"; "missing"; "duplicate"; "large-read"];
      "shadow lane", [test_case "verifier uses direct binding while Keeper routing retains its lane" `Quick
        (fun () -> test_review ~shadow_lane:true "valid")];
+     "original ownership", [test_case "owned CLI remains supported and binds before dispatch" `Quick
+       (fun () -> test_review ~owned:true "valid")];
      "admission", [test_case "unsafe direct clients and lanes never spawn" `Quick
        test_unsafe_slots_refused_before_spawn];
      "failure evidence", [test_case "a failed review leaves no failed-attempt mark" `Quick

@@ -151,7 +151,29 @@ let test_empty_lookup_schemas_rejected () =
   | Ok _ -> failwith "empty lookup_schemas must be rejected"
   | Error _ -> ()
 
+let test_namespace_round_trip_and_strict_decode () =
+  let original = match V.prepare ~generator_runtime:None
+    ~verification_id:"vrf-namespace" ~attempt:0 ~question:sample_question
+    ~lookup_root:(AR.Producer_namespace {root="/owned/root"})
+    ~lookup_binding:(String.make 64 'a') ~lookup_schemas:sample_schemas sample_request with
+    | Ok value -> value | Error detail -> failwith detail in
+  let json = V.to_json original in
+  (match V.of_json json with
+   | Ok value -> assert (V.lookup_root value = AR.Producer_namespace {root="/owned/root"})
+   | Error detail -> failwith detail);
+  List.iter (fun invalid ->
+    let bad = match json with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+          key, if key="lookup_root" then invalid else value) fields)
+      | _ -> assert false in
+    match V.of_json bad with
+    | Error _ -> () | Ok _ -> failwith "invalid namespace decoded")
+    [`Assoc ["producer_namespace", `String ""];
+     `Assoc ["producer_namespace", `String "/owned/root";"producer_tree", `List []];
+     `Assoc ["producer_namespace", `String "/owned/root";"producer_namespace", `String "/other"]]
+
 let () =
+  test_namespace_round_trip_and_strict_decode ();
   test_round_trip_preserves_lookup_and_image ();
   test_round_trip_with_blank_notes ();
   test_other_verification_original_is_rejected ();

@@ -529,6 +529,8 @@ let terminal_of_verification_outcome = function
   | Verification_run_registry.Infrastructure_unavailable _
   | Verification_run_registry.Commit_failed _
   | Verification_run_registry.Raised _
+  | Verification_run_registry.Execution_pending _
+  | Verification_run_registry.Execution_repair_required _
   | Verification_run_registry.Not_reviewed _ -> Failed
   | Verification_run_registry.Approved _
   | Verification_run_registry.Rejected _ -> Succeeded

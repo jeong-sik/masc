@@ -15,6 +15,8 @@ module Link = Masc_tui_link
 let review_label = function
   | Review_unobserved -> "실행 미관측"
   | Review_running _ -> "검증 중"
+  | Review_waiting_original _ -> "원 실행 확인 대기"
+  | Review_stopped {cause=Review_original_repair;_} -> "원 실행 확인 필요"
   | Review_stopped _ -> "검증 중단"
   | Review_approved _ -> "승인 판정 기록"
   | Review_rejected _ -> "반려 판정 기록"
@@ -23,11 +25,14 @@ let review_label = function
 let review_detail = function
   | Review_unobserved -> "자동 검증의 실행 기록이 아직 관측되지 않았습니다."
   | Review_running actor -> "자동 검증자가 증거를 확인하고 있습니다: " ^ actor
+  | Review_waiting_original {detail;actor} ->
+    "기존 검증 실행의 기록을 확인하고 있습니다. 모델 재호출은 예약하지 않습니다. " ^ actor ^ " · " ^ detail
   | Review_stopped {cause; detail; actor} ->
     let reason = match cause with
       | Review_environment -> "검증 환경에 접근하지 못했습니다."
       | Review_no_judgment -> "검증자가 판정을 내리지 못했습니다."
       | Review_commit_failure -> "검증 결과를 Task에 반영하지 못했습니다."
+      | Review_original_repair -> "원 실행의 결과를 확정할 수 없어 운영자 확인이 필요합니다."
       | Review_failure -> "검증 실행이 중단되었습니다."
       | Review_cancelled -> "검증 실행이 취소되었습니다." in
     reason ^ " " ^ actor ^ " · " ^ detail
@@ -317,6 +322,7 @@ let verification_detail_lines ~width
   wrap Ansi.bold request.vr_task_title
   @ wrap (match request.vr_review with
       | Review_stopped _ -> Theme.warn ()
+      | Review_waiting_original _ -> Theme.warn ()
       | Review_unobserved | Review_running _ | Review_approved _ | Review_rejected _
       | Review_superseded _ -> Ansi.reset)
       (review_detail request.vr_review)

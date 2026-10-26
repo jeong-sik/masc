@@ -31,8 +31,10 @@ val create_task_review :
   evidence_access:Workspace_verification_store.submitted_evidence_access ->
   (task_review, string) result
 (** Validate the submitted header and freeze the actual descriptors, evidence
-    snapshot, workspace, producer and root together. No caller dispatch closure
-    can be substituted for this surface. *)
+    snapshot, workspace, producer and root together. The root is a declared
+    namespace, not a discovery result: inventory failure cannot veto a review
+    of the submitted evidence. Lookup availability is observed by each tool.
+    No caller dispatch closure can be substituted for this surface. *)
 
 val task_review_binding : task_review -> string
 (** Canonical SHA-256 of the complete authority projection, including full tool

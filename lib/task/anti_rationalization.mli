@@ -45,6 +45,10 @@ type lookup_surface =
     Each case renders its own [verification.lookup.*] slot, so the prose
     about a root describes that root's case and no other. *)
 type lookup_root =
+  | Producer_namespace of { root : string }
+      (** Declared namespace of the captured read authority. This makes no
+          claim about existence, readability or inventory completeness.
+          Task admission does not require a recursive workspace scan. *)
   | Producer_tree of string list
       (** Paths the lookup tools actually resolve against, listed from disk at
           review time and relative to the root they are rooted at. The
@@ -73,6 +77,16 @@ type reviewer_reply =
   ; verdict : verdict option
   ; evaluator_execution : Runtime_response_identity.t option
   }
+
+type execution_owner =
+  { keeper_name : string
+  ; session_root : string
+  ; on_execution_ready : runtime_id:string -> execution:Types_core.verifier_execution_reference -> (unit, string) result
+  }
+(** Stable original owner of review calls. Native references confirm ownership
+    after locator publication; official references bind the existing session
+    namespace before dispatch. The callback must confirm durable ownership
+    before provider effects. Neither reference grants replay authority. *)
 (** The runtime that actually answered, not a lane alias requested by the
     caller. A successful dispatch without a verdict still names its owner. *)
 
@@ -263,6 +277,7 @@ val build_prompt
 
 val review_rendered :
   generator_runtime:string option -> system_prompt:string ->
+  ?execution_owner:execution_owner ->
   ?on_execution:(execution_observation -> unit) ->
   ?on_verdict:(review_result -> unit) ->
   ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
@@ -327,6 +342,7 @@ val outcome_observer_fn : (outcome:string -> runtime:string -> unit) Atomic.t
 val run_llm_reviewer_fn
   :  (base_path:string
       -> ?sw:Eio.Switch.t
+      -> ?execution_owner:execution_owner
       -> evaluator_runtime:string
       -> candidate_kind:Types_core.verifier_slot_kind
       -> prompt:string

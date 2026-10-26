@@ -36,7 +36,7 @@ let reviewer_response = ref (Reviewer_verdict (AR.Approve ""))
 let reviewer_calls = ref []
 let submitted_verifications = ref []
 
-let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
+let reviewer ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_ ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
   reviewer_calls := !reviewer_response :: !reviewer_calls;
   match !reviewer_response with
   | Reviewer_verdict verdict -> Ok {AR.selected_runtime_id=evaluator_runtime; evaluator_execution = None;verdict=Some verdict}
@@ -452,7 +452,7 @@ let test_rendered_image_reaches_verifier_http_request () =
       Eio.Fiber.fork_daemon ~sw (fun () ->
         Cohttp_eio.Server.run socket server ~on_error:raise);
       let previous = Atomic.get AR.run_llm_reviewer_fn in
-      let http_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
+      let http_reviewer ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
           ?system_prompt:_ ?goal_blocks ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
           ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
         match goal_blocks with
@@ -756,7 +756,7 @@ let test_late_verdict_respects_actual_terminal_authority () =
             | Some ({task_status=Masc_domain.AwaitingVerification {verification_id;_}; _} as task) -> task,verification_id
             | Some _ | None -> fail "race fixture never reached AwaitingVerification" in
           let previous = Atomic.get AR.run_llm_reviewer_fn in
-          let racing_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
+          let racing_reviewer ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
               ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
               ~attempt_continuation:_ ~on_runtime_attempt_error:_ () =
             let commit verdict = Workspace.commit_verdict_r config

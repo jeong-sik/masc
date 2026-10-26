@@ -29,7 +29,7 @@ let reopen ~base_path ~keeper_name ~call_id =
 let locator_path t = Filename.concat t.directory "locator.json"
 let journal_dir t = Eio.Path.(t.fs / t.directory / "journal")
 
-let prepare ~base_path ~keeper_name ~(config : Runtime_agent.config) () =
+let prepare ?on_scope_ready:owner_scope_ready ~base_path ~keeper_name ~(config : Runtime_agent.config) () =
   let* () = match config.execution_store with
     | None -> Ok ()
     | Some _ -> Error "native request journal cannot replace an execution store" in
@@ -43,24 +43,28 @@ let prepare ~base_path ~keeper_name ~(config : Runtime_agent.config) () =
       Ok ()
     with Eio.Io _ as exn -> Error (Format.asprintf "%a" Eio.Exn.pp exn) in
   let on_scope_ready locator =
-    Agent.execution_locator_to_yojson locator
+    let* () = Agent.execution_locator_to_yojson locator
     |> Keeper_fs.save_json_durable_atomic ~ownership_root:base_path ~pretty:false (locator_path t)
     |> Result.map_error Keeper_fs.durable_write_error_to_string in
+    match owner_scope_ready with None -> Ok () | Some ready -> ready ~call_id:t.call_id in
   let execution_store = Agent.execution_store ~runtime:t.runtime
       ~dir:(journal_dir t) ~on_scope_ready () in
   Ok (t, { config with execution_store=Some execution_store })
 
-let request_evidence t =
-  let read () =
+let projection t =
     let* bytes =
       try Ok (Eio.Path.load Eio.Path.(t.fs / locator_path t)) with
       | Eio.Io _ as exn -> Error (Format.asprintf "%a" Eio.Exn.pp exn) in
     let* json = try Ok (Yojson.Safe.from_string bytes)
       with Yojson.Json_error detail -> Error detail in
     let* locator = Agent.execution_locator_of_yojson json in
-    let* projection = Agent.open_execution_projection ~runtime:t.runtime
+    Agent.open_execution_projection ~runtime:t.runtime
         ~dir:(journal_dir t) locator
-      |> Result.map_error Agent.Execution_projection.error_to_string in
+      |> Result.map_error Agent.Execution_projection.error_to_string
+
+let request_evidence t =
+  let read () =
+    let* projection = projection t in
     let* requests = Agent.Execution_projection.provider_requests projection ()
       |> Result.map_error Agent.Execution_projection.error_to_string in
     let requests = List.map (fun (request : Agent.Execution_projection.provider_request) ->

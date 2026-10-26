@@ -723,12 +723,11 @@ let tick ?consumer ?clock config ~pending_settlements ~now ~retention_days =
             Ok { due_changed; emitted; rescheduled; dispatches = []; held; held_at;
               pending_settlements; settlement_errors }))
   in
-  try
-    progress := replay_settlements config ~clock pending_settlements;
-    match run_fresh () with Ok result -> Ok result | Error error -> failed error
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> failed (Tick_raised (Printexc.to_string exn))
+  Cancel_safe.protect
+    ~on_exn:(fun exn -> failed (Tick_raised (Printexc.to_string exn)))
+    (fun () ->
+      progress := replay_settlements config ~clock pending_settlements;
+      match run_fresh () with Ok result -> Ok result | Error error -> failed error)
 ;;
 
 let hold_reason_to_json = function

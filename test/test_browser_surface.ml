@@ -334,19 +334,19 @@ let test_a_snapshot_read_is_checked_before_any_browser () =
     [ "a viewport snapshot goes on to find the browser Add-on", snapshot []
     ; "and a subtree under a ref", snapshot ["snapshotScope",`String "subtree";"root",`String "ref=12"] ]
 
-(* BrowserRead keeps a screenshot under its Keeper's workspace, so a caller
-   with no owning Keeper is refused as input before the tool looks for a
-   browser Add-on. *)
-let test_screenshot_requires_an_owning_keeper () =
+(* A Keeper keeps a screenshot under its workspace; another caller gets the
+   image in the result. Either way the input is valid and the tool goes on
+   to find the browser Add-on. *)
+let test_screenshot_reaches_the_addon_with_or_without_a_keeper () =
   let read keeper_name = addon_tool ?keeper_name Masc.Browser_capabilities.Read
       ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73] in
-  let unowned = read None in
-  check bool "a screenshot without an owner is refused as input" true (refused_as_input unowned);
-  check bool "an owned screenshot goes on to find the browser Add-on" true
+  check bool "a screenshot without a Keeper goes on to find the browser Add-on" true
+    (reaches_the_addon_lookup (read None));
+  check bool "a Keeper's screenshot goes on to find the browser Add-on" true
     (reaches_the_addon_lookup (read (Some "browser-screenshot-keeper")))
 
 let () = run "browser surface" ["behavior",[
-  test_case "a screenshot needs an owning Keeper" `Quick test_screenshot_requires_an_owning_keeper;
+  test_case "a screenshot reaches the Add-on with or without a Keeper" `Quick test_screenshot_reaches_the_addon_with_or_without_a_keeper;
   test_case "malformed tool arguments reach no browser" `Quick test_malformed_arguments_reach_no_browser;
   test_case "a snapshot read is checked before any browser" `Quick test_a_snapshot_read_is_checked_before_any_browser;
   test_case "a snapshot target is checked before any browser" `Quick test_a_snapshot_target_is_checked_before_any_browser;

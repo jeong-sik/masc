@@ -15,8 +15,8 @@ without opening or navigating one. Keep `browserSelection.lane` and
 for all work on its tabs/documents. An unavailable selection must not be
 replaced silently.
 
-For initial discovery, give `BrowserTabs` or `BrowserSession` the
-`requiredActions` the work needs, such as `["hover","pointer_drag"]`. The host
+For initial discovery, give `BrowserTabs`, or `BrowserSession` with
+`action = "open"`, the `requiredActions` the work needs, such as `["hover","pointer_drag"]`. The host
 chooses a compatible available connection or refuses before dispatch; it checks
 explicit connections too. This capability declaration does not prove that a
 page accepted an interaction. An explicitly named live connection must include

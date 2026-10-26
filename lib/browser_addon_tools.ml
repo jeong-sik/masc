@@ -224,12 +224,16 @@ let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
       match keeper_name,capture with
       | Some keeper_name,_ -> data (Browser_screenshot.persist ~base_path ~keeper_name capture)
       (* A caller with no Keeper workspace gets the checked PNG back as an image
-         block of this result, and the observation fields without its bytes. *)
+         block of this result, and the observation fields without its bytes.
+         The content repeats the observation as text before the image, so a
+         client that reads only content keeps the viewport and selection. *)
       | None,`Assoc fields ->
           (match List.assoc_opt "data" fields with
            | Some (`String image) ->
-               Ok (`Assoc (List.filter (fun (key,_) -> key<>"data") fields),
-                 Some [Llm_provider.Types.Image {media_type="image/png";data=image;source_type=Llm_provider.Types.Base64}])
+               let observed=`Assoc (List.filter (fun (key,_) -> key<>"data") fields) in
+               Ok (observed,
+                 Some [Llm_provider.Types.Text (Yojson.Safe.to_string observed);
+                   Llm_provider.Types.Image {media_type="image/png";data=image;source_type=Llm_provider.Types.Base64}])
            | Some _|None -> Error "screenshot lacks its image")
       | None,_ -> Error "screenshot must be an object"
 let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool ~tool_name ~start_time json =

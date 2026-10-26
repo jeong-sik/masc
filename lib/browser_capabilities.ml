@@ -167,7 +167,7 @@ let support backend operation = match backend with
           Unsupported "Only an ego connection returns its own accessibility snapshot; read scene or elements instead."
       | Safari_unavailable -> missing)
     | Screenshot -> read backend (invoke ~mode:"screenshot" Read)
-        [observed;"Requires an owning Keeper and explicit tabId; captures the viewport, not the whole document."]
+        [observed;"Requires explicit tabId; captures the viewport, not the whole document. A Keeper gets a workspace artifact; another caller gets the PNG as an image block."]
     | Click -> (match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"click" Interact
           [observed;target;"Uses DOM click; trusted pointerdown/mousedown is not provided."]

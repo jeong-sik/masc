@@ -256,5 +256,9 @@ F6 [#46202](https://github.com/jeong-sik/masc/pull/46202)의 후속
 `b5c9762b27845918eba2acb804434a0da435cc78`은 native source와 lib/bin tree가 같지만,
 Test40341860767, ref `fix/schedule-work-continuation-20261026`, conclusion **failure**다.
 수정된 Connector32 cases는 통과했고 Owner106 cases 중 scheduled handoff 3건이
-`operation did not become terminal`로 실패했다. 원인과 수리를 계속 확인한다.
-이 실제 모델 결과를 현재 head의 Owner 검사 성공·운영 설치·전체 피쳐 PASS로 이월하지 않는다.
+`operation did not become terminal`로 실패했다. fixture가 실제 production의 exact
+checkpoint resume를 생략한 원인을 고쳤으며, 별도 Test40348100243의
+`ccb0007e95ead82676a58d0dcc17d740dfe94f30`, 같은 ref, conclusion **success**에서
+Owner106 cases가 모두 통과했다(skip/fail0). main 위로 rebase된 새
+`6dedd652df1273c9476a04643b445601e30181ad`의 결과로 이월하지 않는다.
+실제 모델 결과 역시 현재 head CI·운영 설치·전체 피쳐 PASS로 이월하지 않는다.

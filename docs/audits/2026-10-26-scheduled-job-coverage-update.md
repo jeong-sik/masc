@@ -59,7 +59,7 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 33 | due가 되면 wake를 한 번 접수한다 | R-tick0/7–8, C3/28 | 신호 중복·생산 enqueue·offline 반복 tick single acceptance 실행. 모델 완료와 별개. |
 | 34 | 접수 후 receipt 저장 실패에도 중복 효과를 피한다 | C23–27/30–31/41/54, L5 | acceptance/receipt 장애 뒤 같은 occurrence 재사용 실행. F5 settlement write 실패와 다름. |
 | 35 | 한 예약 실패가 다른 due 예약을 막지 않는다 | R-tick17, C42 | fixture retry 격리와 실제 corrupt ledger의 다른 Keeper dispatch 격리 실행. |
-| 36 | Keeper가 작업 중일 때 도착한 예약을 보존한다 | real-busy-deepseek-1; repair-validation 실제 두 모델 | 과거 F6 반례 유지. product94b2에서 DeepSeek/GLM의 checkpoint 보존·두 note·exact ACK 확인. DeepSeek observer의 overlap FAIL은 유지하며 원장으로 별도 대조. 새 b5c976 Owner CI의 handoff 3 failures는 미해결. |
+| 36 | Keeper가 작업 중일 때 도착한 예약을 보존한다 | real-busy-deepseek-1; repair-validation 실제 두 모델 | 과거 F6 반례 유지. product94b2에서 DeepSeek/GLM의 checkpoint 보존·두 note·exact ACK 확인. DeepSeek observer의 overlap FAIL은 유지하며 원장으로 별도 대조. b5c976의 Owner103/3 실패는 보존하고 fixture 수리 ccb000의 Owner106 PASS와 구분. rebased6dedd 실행은 미검증. |
 | 37 | paused Keeper에 도착해도 유실하지 않는다 | C11; retarget-cancel-4/restart-expiry-3 | 실제 pause·pending 보존 실행. Resume 후 모델 소비는 미검증. |
 | 38 | owner가 꺼져 있어도 demand를 유지한다 | C28–29 | 등록됐으나 미시작 owner의 deferred/not_running·single acceptance 실행. Boot 후 모델 소비 미검증. |
 | 39 | notice에서 busy/paused/offline 원인과 다음 행동을 안다 | C3/28/32는 backend reason만 | notice의 원인별 Resume/Boot 안내와 실제 사용자 조치는 여전히 공백. |
@@ -94,4 +94,6 @@ conclusion **success**를 확인했다. 실제 artifact는 55/58/9/2=124 cases�
 F4와 F1의 완료 검사, 별도 product94b2의 native build 및 실제 모델 재검증은
 [수리 증거 묶음](../evidence/2026-10-26-schedule-repair-validation/README.md)에 있다.
 F6 Test40341860767은 b5c976 head에서 Connector32 PASS, Owner103 PASS/3 FAIL로 전체 실패다.
+이후 Test40348100243의 ccb000 head에서 Owner106 PASS/skip0/fail0를 확인했다.
+main 위로 rebase한 6dedd head의 결과로 이월하지 않는다.
 소스 작성·리뷰·CI·격리 binary 실행·운영 설치를 구분하며, 전체 기능 PASS는 아니다.

@@ -32,7 +32,7 @@ the legal minimum. Original observers, decisions and raw hashes remain unchanged
 Only owned synthetic workspaces were used; credential values, authorization
 headers, live turn-control tokens and model thinking are omitted.
 
-There is also an unresolved focused CI failure: **Test
+The historical focused CI failure is retained: **Test
 [40341860767](https://github.com/jeong-sik/masc/actions/runs/40341860767)**,
 head `b5c9762b27845918eba2acb804434a0da435cc78`, ref
 `fix/schedule-work-continuation-20261026`, conclusion **failure**. The corrected
@@ -40,7 +40,17 @@ connector suite passes all 32 cases. Owner executes 106 cases, with 103 passing
 and three scheduled-handoff failures (`operation did not become terminal`).
 The [selected failure receipt](f6-ci-failure/selection.json) preserves exact source
 log lines and original hashes; the raw archive remains under the ignored local
-capture directory. Diagnosis is ongoing. The earlier native product source and these real-provider runs are not
-a current-head Owner-suite success. After-effect checkpoint/restart,
+capture directory. The fixtures omitted the production runner's exact checkpoint
+resume step and attempted success while semantic execution was suspended.
+
+The corrected fixture then passed **Test
+[40348100243](https://github.com/jeong-sik/masc/actions/runs/40348100243)** at head
+`ccb0007e95ead82676a58d0dcc17d740dfe94f30`, ref
+`fix/schedule-work-continuation-20261026`, conclusion **success**:
+[106 Owner cases PASS, FAIL/SKIP 0](f6-owner-ci/README.md), including all three
+previously failing cases. That source precedes the subsequent rebase onto main
+and is not an execution result for `6dedd652df1273c9476a04643b445601e30181ad`.
+The native product source and these real-provider runs are also not current-head
+CI or installed-runtime evidence. After-effect checkpoint/restart,
 cancel/replacement during continuation, F2/F5 recovery, external delivery, real
 Lane workers and TUI behavior remain outside these results.

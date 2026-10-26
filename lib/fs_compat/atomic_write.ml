@@ -268,7 +268,7 @@ exception Capability_write_failed of
 
 exception Capability_write_cancelled of exn * capability_write_cancellation
 
-exception Parent_sync_cleanup_failed_on_cancellation of
+exception Write_cleanup_failed_on_cancellation of
   exn * capability_write_failure list
 
 let capability_write_operation_to_string = function
@@ -717,7 +717,7 @@ let sync_parent_capability ~before_stage ~stage ~sw parent =
     else
       Printexc.raise_with_backtrace
         (Eio.Cancel.Cancelled
-           (Parent_sync_cleanup_failed_on_cancellation
+           (Write_cleanup_failed_on_cancellation
               (reason, close_failures)))
         backtrace
   | Capability_write_failed (failure, additional) ->
@@ -910,6 +910,32 @@ let write_cleanup_failures failures =
   List.map (fun failure -> Write_cleanup_failure failure) failures
 ;;
 
+let capability_write_cancellation_context = function
+  | Capability_recovery_operation_cancelled (reason, interruption) ->
+    reason, Some interruption, []
+  | Write_cleanup_failed_on_cancellation (reason, failures) ->
+    reason, None, write_cleanup_failures failures
+  | reason -> reason, None, []
+;;
+
+let cleanup_cancelled_write ~interrupted_recovery ~additional cleanup =
+  try interrupted_recovery, additional @ cleanup () with
+  | Eio.Cancel.Cancelled cleanup_reason ->
+    (* The caller re-raises its original cancellation and backtrace. A second
+       cancellation must retain cleanup facts without replacing that authority. *)
+    let _, cleanup_interruption, carried_failures =
+      capability_write_cancellation_context cleanup_reason
+    in
+    let interrupted_recovery, additional =
+      match interrupted_recovery, cleanup_interruption with
+      | None, interruption -> interruption, additional
+      | Some original, None -> Some original, additional
+      | Some original, Some interruption ->
+        Some original, additional @ [ Recovery_cleanup_failure interruption ]
+    in
+    interrupted_recovery, additional @ carried_failures
+;;
+
 let reraise_capability_write_cancellation
       ~backtrace
       ~operation
@@ -919,12 +945,7 @@ let reraise_capability_write_cancellation
       reason
   =
   let reason, interrupted_recovery, carried_cleanup_failures =
-    match reason with
-    | Capability_recovery_operation_cancelled (reason, interruption) ->
-      reason, Some interruption, []
-    | Parent_sync_cleanup_failed_on_cancellation (reason, failures) ->
-      reason, None, write_cleanup_failures failures
-    | reason -> reason, None, []
+    capability_write_cancellation_context reason
   in
   Printexc.raise_with_backtrace
     (Eio.Cancel.Cancelled
@@ -989,110 +1010,129 @@ let cleanup_owned_staging_directory
       ~parent_dirty
   =
   Eio.Cancel.protect (fun () ->
-    let failures = ref (cleanup_open_file ~before_stage payload_file) in
+    let failures = ref [] in
     let add additional = failures := !failures @ additional in
-    let payload_absent =
-      if (not !payload_created) || !payload_published
-      then true
-      else (
-        let identity_failures =
-          capture_cleanup ~before_stage Cleanup_verify_identity (fun () ->
-            match !payload_entry, !payload_identity with
-            | Some entry, Some expected ->
-              let actual = Eio.Path.stat ~follow:false entry in
-              if
-                actual.kind <> `Regular_file
-                || not (same_resource_identity expected actual)
-              then raise_failure Cleanup_verify_identity Resource_identity_changed
-            | None, _ | _, None ->
-              raise_failure
-                Cleanup_verify_identity
-                Resource_identity_unavailable)
-        in
-        add identity_failures;
-        if identity_failures <> []
-        then false
+    try
+      add (cleanup_open_file ~before_stage payload_file);
+      let payload_absent =
+        if (not !payload_created) || !payload_published
+        then true
         else (
-          let unlink_failures =
-            capture_cleanup ~before_stage Cleanup_unlink (fun () ->
-              match !payload_entry with
-              | None ->
-                raise_failure Cleanup_unlink Resource_identity_unavailable
-              | Some entry -> Eio.Path.unlink entry)
+          let identity_failures =
+            capture_cleanup ~before_stage Cleanup_verify_identity (fun () ->
+              match !payload_entry, !payload_identity with
+              | Some entry, Some expected ->
+                let actual = Eio.Path.stat ~follow:false entry in
+                if
+                  actual.kind <> `Regular_file
+                  || not (same_resource_identity expected actual)
+                then raise_failure Cleanup_verify_identity Resource_identity_changed
+              | None, _ | _, None ->
+                raise_failure
+                  Cleanup_verify_identity
+                  Resource_identity_unavailable)
           in
-          add unlink_failures;
-          if unlink_failures = [] then payload_created := false;
-          unlink_failures = []))
-    in
-    let staging_sync_failures =
-      if (not !staging_directory_created) || !staging_directory_removed
-      then []
-      else
-        capture_cleanup ~before_stage Cleanup_sync_staging_directory (fun () ->
-          match !staging_directory_file with
-          | None ->
-            raise_failure
-              Cleanup_sync_staging_directory
-              Resource_identity_unavailable
-          | Some directory_file ->
-            sync_open_directory_file
-              ~before_stage:(fun _ -> ())
-              ~stage:Cleanup_sync_staging_directory
-              directory_file)
-    in
-    add staging_sync_failures;
-    add
-      (cleanup_open_resource
-         ~before_stage
-         ~stage:Cleanup_close_staging_directory
-         staging_directory_file);
-    let staging_identity_failures =
-      if (not !staging_directory_created) || !staging_directory_removed
-      then []
-      else
-        capture_cleanup
-          ~before_stage
-          Cleanup_verify_staging_directory_identity
-          (fun () ->
-             match !staging_path, !staging_directory_identity with
-             | Some path, Some expected ->
-               let actual = Eio.Path.stat ~follow:false path in
-               if
-                 actual.kind <> `Directory
-                 || not (same_resource_identity expected actual)
-               then
+          add identity_failures;
+          if identity_failures <> []
+          then false
+          else (
+            let unlink_failures =
+              capture_cleanup ~before_stage Cleanup_unlink (fun () ->
+                match !payload_entry with
+                | None ->
+                  raise_failure Cleanup_unlink Resource_identity_unavailable
+                | Some entry -> Eio.Path.unlink entry)
+            in
+            add unlink_failures;
+            if unlink_failures = [] then payload_created := false;
+            unlink_failures = []))
+      in
+      let staging_sync_failures =
+        if (not !staging_directory_created) || !staging_directory_removed
+        then []
+        else
+          capture_cleanup ~before_stage Cleanup_sync_staging_directory (fun () ->
+            match !staging_directory_file with
+            | None ->
+              raise_failure
+                Cleanup_sync_staging_directory
+                Resource_identity_unavailable
+            | Some directory_file ->
+              sync_open_directory_file
+                ~before_stage:(fun _ -> ())
+                ~stage:Cleanup_sync_staging_directory
+                directory_file)
+      in
+      add staging_sync_failures;
+      add
+        (cleanup_open_resource
+           ~before_stage
+           ~stage:Cleanup_close_staging_directory
+           staging_directory_file);
+      let staging_identity_failures =
+        if (not !staging_directory_created) || !staging_directory_removed
+        then []
+        else
+          capture_cleanup
+            ~before_stage
+            Cleanup_verify_staging_directory_identity
+            (fun () ->
+               match !staging_path, !staging_directory_identity with
+               | Some path, Some expected ->
+                 let actual = Eio.Path.stat ~follow:false path in
+                 if
+                   actual.kind <> `Directory
+                   || not (same_resource_identity expected actual)
+                 then
+                   raise_failure
+                     Cleanup_verify_staging_directory_identity
+                     Resource_identity_changed
+               | None, _ | _, None ->
                  raise_failure
                    Cleanup_verify_staging_directory_identity
-                   Resource_identity_changed
-             | None, _ | _, None ->
-               raise_failure
-                 Cleanup_verify_staging_directory_identity
-                 Resource_identity_unavailable)
-    in
-    add staging_identity_failures;
-    if
-      !staging_directory_created
-      && not !staging_directory_removed
-      && payload_absent
-      && staging_sync_failures = []
-      && staging_identity_failures = []
-    then (
-      let removal_failures =
-        capture_cleanup ~before_stage Cleanup_remove_staging_directory (fun () ->
-          match !staging_path with
-          | None ->
-            raise_failure
-              Cleanup_remove_staging_directory
-              Resource_identity_unavailable
-          | Some path -> Eio.Path.rmdir path)
+                   Resource_identity_unavailable)
       in
-      add removal_failures;
-      if removal_failures = []
+      add staging_identity_failures;
+      if
+        !staging_directory_created
+        && not !staging_directory_removed
+        && payload_absent
+        && staging_sync_failures = []
+        && staging_identity_failures = []
       then (
-        staging_directory_removed := true;
-        parent_dirty := true));
-    add (cleanup_parent_if_dirty ~before_stage ~sw ~parent parent_dirty);
-    !failures)
+        let removal_failures =
+          capture_cleanup ~before_stage Cleanup_remove_staging_directory (fun () ->
+            match !staging_path with
+            | None ->
+              raise_failure
+                Cleanup_remove_staging_directory
+                Resource_identity_unavailable
+            | Some path -> Eio.Path.rmdir path)
+        in
+        add removal_failures;
+        if removal_failures = []
+        then (
+          staging_directory_removed := true;
+          parent_dirty := true));
+      add (cleanup_parent_if_dirty ~before_stage ~sw ~parent parent_dirty);
+      !failures
+    with
+    | Eio.Cancel.Cancelled reason as cancellation ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      if !failures = []
+      then Printexc.raise_with_backtrace cancellation backtrace
+      else (
+        let reason, carried_failures =
+          match reason with
+          | Write_cleanup_failed_on_cancellation (reason, failures) ->
+            reason, failures
+          | reason -> reason, []
+        in
+        Printexc.raise_with_backtrace
+          (Eio.Cancel.Cancelled
+             (Write_cleanup_failed_on_cancellation
+                (reason, !failures @ carried_failures)))
+          backtrace))
 ;;
 
 let replace_capability_file_with
@@ -1534,14 +1574,11 @@ let replace_capability_file_with
      | Eio.Cancel.Cancelled reason as cancellation ->
        let backtrace = Printexc.get_raw_backtrace () in
        let reason, interrupted_recovery, additional =
-         match reason with
-         | Capability_recovery_operation_cancelled (reason, interruption) ->
-           reason, Some interruption, []
-         | Parent_sync_cleanup_failed_on_cancellation (reason, failures) ->
-           reason, None, write_cleanup_failures failures
-         | reason -> reason, None, []
+         capability_write_cancellation_context reason
        in
-       let cleanup_failures = additional @ cleanup () in
+       let interrupted_recovery, cleanup_failures =
+         cleanup_cancelled_write ~interrupted_recovery ~additional cleanup
+       in
        if
          !target_effect = Target_unchanged
          && Option.is_none interrupted_recovery
@@ -1744,14 +1781,15 @@ let create_capability_file_exclusive_with
      with
      | Eio.Cancel.Cancelled reason as cancellation ->
        let backtrace = Printexc.get_raw_backtrace () in
-       let reason, additional =
-         match reason with
-         | Parent_sync_cleanup_failed_on_cancellation (reason, failures) ->
-           reason, write_cleanup_failures failures
-         | reason -> reason, []
+       let reason, interrupted_recovery, additional =
+         capability_write_cancellation_context reason
        in
-       let cleanup_failures = additional @ cleanup () in
-       if !target_effect = Target_unchanged && cleanup_failures = []
+       let interrupted_recovery, cleanup_failures =
+         cleanup_cancelled_write ~interrupted_recovery ~additional cleanup
+       in
+       if !target_effect = Target_unchanged
+          && Option.is_none interrupted_recovery
+          && cleanup_failures = []
        then Printexc.raise_with_backtrace cancellation backtrace
        else
          Printexc.raise_with_backtrace
@@ -1761,7 +1799,7 @@ let create_capability_file_exclusive_with
                  , { operation
                    ; target_effect = !target_effect
                    ; interrupted_primary_failure = None
-                   ; interrupted_recovery = None
+                   ; interrupted_recovery
                    ; cleanup_failures
                    } )))
            backtrace

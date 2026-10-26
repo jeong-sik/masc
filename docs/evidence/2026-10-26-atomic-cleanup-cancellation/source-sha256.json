@@ -1,0 +1,5 @@
+{
+  "lib/fs_compat/atomic_write.ml": "2ac648ce0a9785c01a5500ce6ca539b2e5c22464bb90a8f075c357f7b6ee8836",
+  "test/test_fs_compat_capability_write.ml": "5a7cba1537e72b2da47f5fa3a24b15265de32aba338d99aaa42f0987a3432de5",
+  "test/stanzas/test_fs_compat_capability_write.inc": "f919118e6d40b22a66c12b5b9f8974937b143bfa58686fc1e4e1bfe7ceba4c80"
+}

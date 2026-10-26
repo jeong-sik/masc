@@ -52,8 +52,19 @@ Whitespace and the code PR's changelog checks passed. No local Dune build ran.
 The explicit [Test run 40318190019](https://github.com/jeong-sik/masc/actions/runs/40318190019)
 uses the code head above, ref `fix/tui-memory-execution-contract-20261026`,
 `minimal=true`, and only `test_server_dashboard_http_keeper_memory_health`
-and `test_tui_decode`. At this record's initial capture it was in progress,
-with no completed conclusion. See [receipt.json](receipt.json) for that state.
+and `test_tui_decode`. It completed successfully at 2026-10-26T11:58:59Z
+(attempt 1, job `121556012059`): 24 Memory-health cases and 378 TUI-decoder
+cases, **402 passed, 0 failed**. The actual job log contains:
+
+```text
+2026-10-26T11:58:54.9300546Z Test Successful in 0.126s. 24 tests run.
+2026-10-26T11:58:55.1820753Z Test Successful in 0.033s. 378 tests run.
+```
+
+[receipt.json](receipt.json) retains the initial in-progress observation,
+completed result and nine selected-source SHA-256 values. Evidence-layer
+changes are confined to documentation and changelog; no executable input was
+changed after the checked code head.
 
 The existing HTTP-producer-to-TUI-decoder scenario checks retained unread
 evidence and unchanged stored files. It now also refuses missing, duplicate,
@@ -62,4 +73,4 @@ valid v8 fixture roots and the stale-schema fixture use the real producer's
 disabled diagnostic, preserving their original test purposes.
 
 Installed-TUI recovery, visible UI verification and full regression remain
-unverified by this source review or the test dispatch.
+unverified by these two selected suites and source review.

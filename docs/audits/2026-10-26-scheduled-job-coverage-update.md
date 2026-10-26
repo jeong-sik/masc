@@ -75,11 +75,11 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 49 | 첫 startup recovery 실패 후 같은 process에서 회복한다 | Test40358821346 Consumer의 keeper_wake46–47, 117 PASS; Test40365052184에 같은 source 포함 | genuine Running·실제 publication 실패→첫 recovery 실패→저장 복원→같은 maintenance state의 다음 cadence 성공, 성공 뒤 normal crash가 startup으로 돌아가지 않음 실행. [c52 native 실제 bootstrap](../evidence/2026-10-27-schedule-native-startup-recovery/README.md): SIGSTOP·lease 자연만료·의도SIGKILL로 보존된 Running에 첫 실제 staging-write 실패→동일 B runtime 다음tick 복구·원본/control 합계 dispatch2. old Running/control 원장 불변 확인. scheduler ok이나 overall health는 degraded, 모델/운영 설치 증명 아님. |
 | 50 | dispatch 실패 정산 write 실패 뒤 같은 process에서 회복한다 | Test40365052184의 exact attempt/primary fault 회귀; 후속 PR46248 | Store의 실제 primary 실패·같은 capability 재정산은 실행. 보류 intent를 다음 production cadence에 보존/재시도하는 PR46248은 작성·독립 소스 검토 완료, Test40369739062는 head22014660의 직접 Eio 의존 참조로 suite 전 컴파일 실패. head2861571의 Test40371389026도 warning4로 suite 전 실패. 닫힌 오류 분기와 문서 수리 headc52f799의 [Test40374192059](../evidence/2026-10-27-schedule-settlement-verification/test40374192059/result.json)는 success: Runner30·Consumer60·Tool wiring64·Lane act7, 161 PASS/FAIL0/SKIP0. production maintenance composition에서 intent 보존·같은 process cadence 재정산·health와 오류 경계 검증. [C2 native 실제 F5](../evidence/2026-10-27-schedule-durable-runtime/settlement/README.md)는 실제 queue Permission denied + primary ledger Is-a-directory를 확인했다. 동일 PID에서 pending1→queue-only 복구 후 재발행0→원장 복구로 원 Retry 정산→다음 주기 단일 새 attempt/queue 전달을 관측했다. 독립 원형 검산·정상 종료0·재시작0. 첫 준비 실험 INCOMPLETE는 보존한다. 모델 실행·프로세스 사망 뒤 in-memory intent 보존 증거는 아니다. |
 | 51 | 손상·stale receipt·결과 불확실을 성공으로 덮지 않는다 | S-corruption2–3/6–9, C23–27/34/38/41/43/47/49 | 손상·write failure·retired/stale/noncanonical receipt 거절 실행. 전체 runtime 장애 복구는 아님. |
-| 52 | 도착한 단발이 dispatch Succeeded여도 계속 보인다 | 기존 chat_schedule_entries 추출 결정 | 새 195개에 해당 TUI suite 없음. 실제 채팅 표시 미검증. |
-| 53 | 선택한 Keeper의 예약만 보인다 | 기존 selection; W35는 backend owner만; C2 Test40409087814 | 기존 TUI state suite의 schedule-target/generation 1 case에서 late A·오래된 generation·다른 roster 선택의 chat target 분리 결정을 실행했다. 나머지 7 case는 일반 wait 결정이다. 실제 전환 요청·화면은 별도이며 전체 UI PASS는 아니다. |
+| 52 | 도착한 단발이 dispatch Succeeded여도 계속 보인다 | 기존 chat_schedule_entries 추출 결정; C2 실제 TUI trial4 | 실제 TUI의 A 대상 응답에 원 instance의 dispatch succeeded·accepted·matched_pending·incarnation0이 함께 도착했다. backend 수락을 소비 완료와 구분한다. 지속 표시·notice paint는 미검증이다. |
+| 53 | 선택한 Keeper의 예약만 보인다 | 기존 selection; W35; C2 Test40409087814; 실제 TUI trial4 | 기존 state suite의 schedule-target/generation 1 case에서 late A·오래된 generation·roster/chat target 분리 결정을 실행했다. 실제 native TUI A→B→A의 대상별 응답도 해당 owner의 예약만 포함했다. 실제 late-response 교차와 화면은 별도이며 전체 UI PASS는 아니다. |
 | 54 | 앞 회차 시각·다음 예정·hold가 구분된다 | C44–45 | 생산 hold JSON→TUI hold decoder의 exact occurrence/due 실행. 전체 clock/render 미검증. |
-| 55 | F9로 펼치고 입력 공간·좁은 화면을 보존한다 | 직접 실행 없음 | F9·좁은 화면·입력 공간의 실제 상호작용 미검증. |
-| 56 | 오래된 조회를 현재 사실로 오인하지 않는다 | C45–46; C2 Test40409087814 | Hold_current→Hold_as_of·cache invalidation 및 기존 TUI state suite의 failed refresh 때 last read 보존·target별 error/generation 결정을 실행했다. 실제 transport interleaving·paint는 미검증. |
+| 55 | F9로 펼치고 입력 공간·좁은 화면을 보존한다 | C2 실제 TUI trial4 | 정상 typing/paste·F9 의도 byte2회·120→20→120 resize·좁은 typing/paste 후 실제 수락된 원 queued edit는 정상 suffix만 보존했다. B 작업은 불변이다. F9 인식/펼침 상태·UI resize 처리 ack·좁은 guard 인과·입력 공간 paint는 미검증이다. |
+| 56 | 오래된 조회를 현재 사실로 오인하지 않는다 | C45–46; C2 Test40409087814; 실제 TUI trial4 | Hold_current→Hold_as_of·cache invalidation 및 failed refresh 때 last read 보존·target별 error/generation 결정을 실행했다. 실제 refresh 입력 후 새 canonical row도 TUI 응답에서 관측했으나 공유 polling의 영향과 분리하지 않는다. 실제 failure/interleaving·paint는 미검증. |
 | 57 | overdue 때 사용자에게 알려 준다 | 직접 새 실행 없음 | persistent notice 구현/기존 선택 결정과 별개로 실제 overdue 알림 UX 미검증. OS push/sound 보장 없음. |
 | 58 | 채널/파일에 요청한 실제 결과가 도착한다 | real-deepseek-1/real-glm-1; C4는 route만; C2 file trial2 | 실제 내부 note 목적지 효과/readback 및 C2 DeepSeek의 단일 MicroVM Write→정확한 71 UTF-8 bytes 전체 Read→원 Job marker 1개를 실행했다. 첫 shim 누락 FAIL은 보존한다. host export·독립 guest FS 추출·posting/외부 채널·두 Job 범위 정확성은 미검증이다. |
 | 59 | worker 실행·idempotence·effect unknown을 처리한다 | L0–6 | 생산 queue/receipt와 대체 worker lifecycle/redelivery 실행. candidate c52f799 실제 package/Docker worker export와 원 receipt 안정성·빈 blob/volume readback 일치 확인. 실제 worker redelivery·unknown·외부 effect exactly-once는 미검증. |
@@ -141,3 +141,10 @@ selector를 고친 다음 관측은 실제 TUI의 HTTP400과 별도 진단의 �
 관측 relay의 Host가 서버 identity로 설정되지 않아 `request_authority_untrusted`로 거절된 것을 확인했다.
 이 관측도 INCOMPLETE이며 키보드 시나리오에는 도달하지 않았다.
 이 관측을 화면·F9·좁은 입력·알림의 성공이나 예약 기능의 새 실패로 바꾸어 해석하지 않는다.
+
+[후속 실제 TUI 요청·상태 bundle](../evidence/2026-10-27-schedule-tui-request-state/README.md)은
+동일 C2 native에서 trial4의 한 요청·저장 상태 시나리오 PASS를 보존한다.
+실제 TUI 요청147건과 root 사전 확인1건을 분리하고, A/B 대상·새 목록·원 queued edit·B 불변·두 owner zero-turn과 정상 child exit0을 검산했다.
+기존 routine 관측을 TUI child에만 활성화하여 같은 PID/capture의 적용·decoder 준비를 첫 입력 전에 확인했다.
+이전 trial3 INCOMPLETE와 roster 시점 원인 미확정의 별도 정정은 유지한다.
+43개 반복 assertion은 한 시나리오이며 visible UI·전체 52–57행·DeepSeek 두 Job 범위 오류의 해결을 뜻하지 않는다.

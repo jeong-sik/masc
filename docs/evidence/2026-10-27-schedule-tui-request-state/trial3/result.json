@@ -1,0 +1,6 @@
+{
+  "verdict": "INCOMPLETE",
+  "error_type": "KeyboardInterrupt",
+  "detail": "",
+  "scope": "Observation ended; no automatic retry/resume or producer-terminal inference"
+}

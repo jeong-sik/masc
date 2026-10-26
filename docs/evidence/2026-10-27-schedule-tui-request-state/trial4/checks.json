@@ -1,0 +1,228 @@
+[
+  {
+    "name": "exact owned server identity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "durable Queue_only admission accepted audit-tui-a",
+    "passed": true,
+    "detail": {
+      "operation_id": "tui-draft-337edd98cd1a43e993eb11b4b46cdd6b",
+      "state": "Queued",
+      "queued_count": 1
+    }
+  },
+  {
+    "name": "exact operation is queued and has not started audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "durable Queue_only admission accepted audit-tui-b",
+    "passed": true,
+    "detail": {
+      "operation_id": "tui-draft-29afd24f86d1463699bf29da7d19c54f",
+      "state": "Queued",
+      "queued_count": 1
+    }
+  },
+  {
+    "name": "exact operation is queued and has not started audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "TUI target response contains only selected owner schedules audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "TUI received accepted one-shot whose exact occurrence remains pending",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "TUI target response contains only selected owner schedules audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "TUI target response contains only selected owner schedules audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "TUI target response contains only selected owner schedules audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "TUI target response contains only selected owner schedules audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "TUI target response contains only selected owner schedules audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "TUI target response contains only selected owner schedules audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "TUI target response contains only selected owner schedules audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "actual TUI queued edit accepted",
+    "passed": true,
+    "detail": {
+      "status": 200,
+      "agent": "masc-tui"
+    }
+  },
+  {
+    "name": "actual TUI edit targets the exact selected A operation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "actual TUI edit request preserves original typed input and exact draft",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "exact operation is queued and has not started audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "F9/narrow input preserved exact queued draft bytes",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "original A operation identity retained operation_id",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "original A operation identity retained source",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "original A operation identity retained sequence",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "original A operation identity retained admission_digest",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "exact operation is queued and has not started audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "other owner operation unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "only original queued operation remains audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "only original queued operation remains audit-tui-b",
+    "passed": true,
+    "detail": null
+  }
+]

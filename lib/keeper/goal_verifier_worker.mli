@@ -48,6 +48,27 @@ val inventory :
     original rejects the inventory; partial results are not a complete list.
     Neither function creates an original, authorizes dispatch or picks a retry. *)
 
+val inventory_for_goal :
+  store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
+  goal_id:string -> (retained list, error) result
+(** Strictly discover the existing scope's metadata and canonical subject
+    keys, then restore all requests and attempts belonging to this Goal.
+    Foreign original bodies are not read. Unclassifiable metadata still
+    rejects discovery; any selected original's body, identity or destination
+    failure rejects the Goal result. The owner revalidates before effects. *)
+
+val inventory_by_goal :
+  store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
+  ((string * (retained list, error) result) list, error) result
+(** A complete metadata observation grouped by Goal for host recovery.
+    Unclassifiable metadata is an outer error. Each Goal observed at the
+    requested destination retains its own full-body success or failure;
+    failures are never silently removed or reported as complete originals.
+    Other destinations' bodies are not read unless their subject shares a
+    Goal selected here, in which case the destination conflict is refused.
+    Goal and record order follow their first metadata occurrence. This is
+    discovery, not a cross-Goal transaction or permission to dispatch. *)
+
 val frontier :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
   goal_id:string -> request_id:string -> new_run:(unit -> run_identity) ->

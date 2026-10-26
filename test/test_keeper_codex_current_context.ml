@@ -1302,10 +1302,6 @@ let test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool 
       check int "replacement never re-executes the original or independent effect" 1 !calls)
 
 let () = run "Keeper current Codex context" ["native requests",[
-  test_case "host checkpoint preserves result through fresh-session intake" `Quick
-    (test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool:false);
-  test_case "repeated-tool checkpoint preserves result through fresh-session intake" `Quick
-    (test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool:true);
   test_case "completed arguments cross Start and held Resume" `Quick
     (test_completed_arguments_cross_start_resume_and_reseed ~overflow_resume:false);
   test_case "fresh overflow retry materializes its own Start" `Quick
@@ -1341,4 +1337,9 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;
   test_case "a resume carries per-turn context in front of the goal" `Quick (test_resume_carries_per_turn_context_in_front_of_the_goal ~worker_pool:false);
   test_case "pooled context projection preserves fresh and resumed requests" `Quick (test_resume_carries_per_turn_context_in_front_of_the_goal ~worker_pool:true);
-  test_case "context injection must be acknowledged before model turn" `Quick test_rejected_context_never_submits_turn]]
+  test_case "context injection must be acknowledged before model turn" `Quick test_rejected_context_never_submits_turn];
+  "async receipt continuation",[
+    test_case "host checkpoint preserves result through fresh-session intake" `Quick
+      (test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool:false);
+    test_case "repeated-tool checkpoint preserves result through fresh-session intake" `Quick
+      (test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool:true)]]

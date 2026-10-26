@@ -209,6 +209,13 @@
  (modules test_keeper_codex_current_context)
  (libraries masc_test_deps))
 
+; Explicit minimal check for the real adapter's asynchronous receipt lifecycle.
+; The ordinary suite continues to include the complete native context group.
+(rule
+ (alias runtest-test_keeper_async_receipt_checkpoint)
+ (action
+  (run %{exe:test_keeper_codex_current_context.exe} test "async receipt continuation")))
+
 (test
  (name test_keeper_vision_official_client)
  (modules test_keeper_vision_official_client)

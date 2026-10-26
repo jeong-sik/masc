@@ -1220,6 +1220,8 @@ let test_checkpoint_preserves_receipt_across_session_replacement ~repeated_tool 
   with_fixture ~checkpoint_tool:true @@ fun ~run ~capture ~reports:_ ->
   let base_path = Filename.dirname capture and keeper_name = "context-fixture" in
   let config = Workspace.default_config base_path in
+  Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_image:"base"
+    ~sandbox_profile:(Some Keeper_types_profile.Docker) keeper_name;
   let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String keeper_name])
     |> require |> Keeper_meta_contract.effective_meta_result ~base_path |> require in
   ignore (Keeper_meta_store.replace_snapshot config meta |> require);

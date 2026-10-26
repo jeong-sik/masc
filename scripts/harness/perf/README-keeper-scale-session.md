@@ -65,17 +65,22 @@ boundary without launching MASC, or independently audit a completed v3 packet:
 ```sh
 python3 scripts/harness/perf/keeper_scale_fault_probe.py \
   --output /tmp/keeper-evidence-faults.json
+mkdir -p artifacts/keeper-scale-probes
+python3 scripts/harness/perf/keeper_scale_inventory_tail_fault_probe.py \
+  --output artifacts/keeper-scale-probes/inventory-tail-new
 python3 scripts/harness/perf/keeper_scale_packet_audit.py /tmp/keeper-session-new \
   --output /tmp/keeper-session-new-audit
-python3 scripts/harness/perf/keeper_scale_inventory_tail_fault_probe.py \
-  --output /tmp/keeper-inventory-tail-probe
 ```
 
-The tail-inventory probe's optional `--packet` selects a 650-record regression
-capture and reads only its four JSON files. `--baseline-reader` selects a
-Python reader implementation to compare against the current reader's partial
-coverage and volume accounting. `--output` is required and must be a new
-directory outside the original packet. The probe does not run a full SQL audit.
+The inventory-tail probe requires a new `--output` directory whose parent
+already exists. It runs synthetic inventory and mocked output-ownership cases
+without opening SQLite. `--packet PATH` optionally checks the four source JSON
+files of the 650-record regression capture; it does not run a full packet audit.
+`--baseline-reader PATH` optionally compares the candidate reader with a frozen
+earlier reader and demonstrates its incomplete-tail rejection. `--reader PATH`
+selects the candidate reader; without it, the sibling
+`keeper_scale_packet_audit.py` is used. Results and any supplied-packet coverage
+derivative are written only under the new output directory.
 
 Before provider release, a single SQLite read transaction per Keeper records
 all operation columns and batch membership together. Original source/input

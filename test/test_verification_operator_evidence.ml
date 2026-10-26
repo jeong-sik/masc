@@ -494,6 +494,80 @@ let test_export_uses_local_registry_not_shared_temp () =
                 Recovery.owner_to_string owner="tui-evidence-export"
               | Recovery.Invalid_owner_name _ -> false) owners))))
 
+let test_export_serializes_owner_reconciliation_and_publication () =
+  with_base_path_env (fun env base ->
+    let module File=Masc_tui_evidence_file in
+    let module Recovery=Fs_compat.Publication_recovery in
+    let module Writer=Fs_compat_test_support.Capability_write_for_testing in
+    let first_export=Filename.concat base "first-export" in
+    let second_export=Filename.concat base "second-export" in
+    let registry_root=Filename.concat base "local-masc" in
+    List.iter (fun directory -> Unix.mkdir directory 0o700)
+      [first_export;second_export;registry_root];
+    let lock_path=Filename.concat registry_root "tui-evidence-export.lock" in
+    let first_prepared,resolve_first_prepared=Eio.Promise.create () in
+    let release_first,resolve_release_first=Eio.Promise.create () in
+    let before_stage = function
+      | Fs_compat.Create_staging_directory ->
+        Eio.Promise.resolve resolve_first_prepared ();
+        Eio.Promise.await release_first
+      | _ -> () in
+    let first_write () =
+      let ( let* ) = Result.bind in
+      Eio.Path.with_open_dir Eio.Path.(env#fs / first_export) (fun parent ->
+        let root=Eio.Path.stat ~follow:true parent in
+        let* target=Fs_compat.capability_publication_target
+          ~allowed_root_path:first_export ~allowed_root_device:root.dev ~allowed_root_inode:root.ino
+          ~parent_components:[] ~target_leaf:"first.txt" ~permissions:0o600
+          |> Result.map_error Fs_compat.capability_publication_target_error_to_string in
+        Eio.Switch.run @@ fun sw ->
+        let* registry=Recovery.open_registry ~sw ~fs:env#fs
+          ~registry_root:Eio.Path.(env#fs / registry_root)
+          |> Result.map_error Recovery.registry_error_to_string in
+        match Recovery.with_lane ~registry ~owner:"tui-evidence-export" (fun recovery ->
+          Writer.create_capability_file_exclusive ~before_stage ~recovery ~parent ~target "first bytes"
+          |> Result.map_error Fs_compat.capability_write_error_to_string) with
+        | Error error -> Error (Recovery.lane_open_error_to_string error)
+        | Ok (Recovery.Lane_released result) -> result
+        | Ok (Recovery.Lane_release_failed {value;release_failure}) ->
+          let detail=Recovery.lane_release_failure_to_string release_failure in
+          Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail)) in
+    let first_writer () =
+      match File_lock_eio.with_durable_lock_observed ~lock_path first_write with
+      | File_lock_eio.Lock_not_acquired error ->
+        Error (File_lock_eio.durable_lock_error_to_string error)
+      | File_lock_eio.Body_completed {value;release_error=None} -> value
+      | File_lock_eio.Body_completed {value;release_error=Some error} ->
+        let detail=File_lock_eio.durable_lock_error_to_string error in
+        Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail) in
+    Eio.Switch.run @@ fun sw ->
+    let first_result,resolve_first_result=Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve_first_result (first_writer ()));
+    Eio.Promise.await first_prepared;
+    let second_result,resolve_second_result=Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      let file=download_fixture ~base_path:base "second bytes" in
+      let result=File.export ~fs:env#fs ~registry_root ~directory:second_export
+        ~progress:(Atomic.make File.Not_started) ~admitted:(fun () -> Ok ()) ~open_file:None file in
+      Eio.Promise.resolve resolve_second_result result);
+    let rec observe_second () =
+      match Eio.Promise.peek second_result with
+      | Some _ -> `Completed
+      | None ->
+        if File_lock_eio.For_testing.holders_and_waiters ~lock_path >= 2 then `Blocked
+        else (Eio.Fiber.yield (); observe_second ()) in
+    let second_state=observe_second () in
+    Eio.Promise.resolve resolve_release_first ();
+    let first=Eio.Promise.await first_result in
+    let second=Eio.Promise.await second_result in
+    Alcotest.(check bool) "the second export cannot reconcile the active first writer" true
+      (second_state=`Blocked);
+    (match first with Ok () -> () | Error detail -> Alcotest.fail detail);
+    match second with
+    | Error detail -> Alcotest.fail detail
+    | Ok path -> Alcotest.(check string) "both exports retain their exact payload"
+      "second bytes" (Eio.Path.load Eio.Path.(env#fs / path)))
+
 let http_get_evidence ~router ?token target =
   let output=Buffer.create 1024 in
   let connection=Httpun.Server_connection.create (fun reqd ->
@@ -588,6 +662,7 @@ let () =
         Alcotest.test_case "viewer and write failures retain their destinations" `Quick test_export_preserves_destination_and_saved_effects;
         Alcotest.test_case "authority withdrawal and cancellation preserve actual effects" `Quick test_export_rechecks_authority_and_propagates_cancellation;
         Alcotest.test_case "local recovery registry ignores shared temp collisions" `Quick test_export_uses_local_registry_not_shared_temp;
+        Alcotest.test_case "concurrent exports serialize owner recovery" `Quick test_export_serializes_owner_reconciliation_and_publication;
         Alcotest.test_case "saving creates a private local copy with original bytes" `Quick test_download_saves_a_private_local_copy;
         Alcotest.test_case "long original filenames remain usable" `Quick test_export_preserves_long_original_filename;
         Alcotest.test_case "original text and non-image binary bytes round trip" `Quick test_download_preserves_original_bytes;

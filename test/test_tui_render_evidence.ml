@@ -39,7 +39,7 @@ let prepared_pngs sizes =
       }
   in
   match
-    Picture.prepare ~display:kitty
+    Picture.prepare ~layout:Picture.Together ~display:kitty
       ~convert:(fun _ -> Alcotest.fail "a PNG must not reach a converter")
       (Decode.Evidence_items (List.mapi item sizes))
   with

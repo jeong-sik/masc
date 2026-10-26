@@ -155,7 +155,8 @@ let drawable ~convert ~slot ~media data =
                       ; key = Digestif.SHA256.(digest_string png |> to_hex)
                       ; pixel_width; pixel_height; slot })))
 
-(* Pictures take slots in the order the evidence lists them. A picture that
+(* Simultaneous pictures take slots in evidence order; individual selections
+   can reuse one slot. A picture that
    does not become drawable leaves its slot for the next one. A terminal that
    draws no pixels gives no slot and runs no converter: the picture is its
    caption. *)
@@ -201,7 +202,9 @@ let board_body content =
      | _ -> None)
   | exception Yojson.Json_error _ -> None
 
-let prepare ~display ~convert = function
+type layout = Together | One_at_a_time
+
+let prepare ~layout ~display ~convert = function
   | Decode.Evidence_access_unavailable reason -> Access_unavailable reason
   | Decode.Evidence_items items ->
       let draws_pixels = draws_pixels display in
@@ -212,6 +215,9 @@ let prepare ~display ~convert = function
             | Decode.Ev_binary
                 { ev_b_reference; ev_b_bytes; ev_b_sha256; ev_b_format; ev_b_preview } ->
                 let picture, free_slots =
+                  let free_slots = match layout with
+                    | Together -> free_slots
+                    | One_at_a_time -> Masc_tui_graphics.evidence_images in
                   prepare_preview ~draws_pixels ~convert ~free_slots ev_b_preview
                 in
                 ( free_slots

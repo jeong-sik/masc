@@ -4097,6 +4097,7 @@ let launch_verification_evidence_load state ~mailbox key =
           |> Result.map (fun evidence ->
             Eio_guard.run_in_systhread ~label:"tui-evidence-pictures" (fun () ->
               Masc_tui_evidence_picture.prepare
+                ~layout:Masc_tui_evidence_picture.One_at_a_time
                 ~display:(Masc_tui_portrait_view.current_display ())
                 ~convert:convert_evidence_image evidence)))) in
       launch_workspace_result ~key:request.ver_job ~observation:true state ~mailbox

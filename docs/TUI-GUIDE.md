@@ -2068,6 +2068,8 @@ to another item does not require scrolling past every other evidence body.
 `j` / `k` scroll the current detail, and `[` / `]` move between submissions.
 Completion conditions and required evidence remain available below the body.
 Notes, text files, collaboration snapshots and images are identified separately.
+Individual image selections reuse one graphics slot, including later images in
+the same submission; preview availability still follows the server's response.
 Board snapshots show the saved title, author, body and comments as readable
 text; exporting preserves the original JSON snapshot.
 

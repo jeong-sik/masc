@@ -74,7 +74,7 @@ let read config expected key response = bound expected (fun () ->
               fail "original filed image changed kind")
           | [] | _ :: _ -> fail "original filed image membership changed")
        | Evidence_access_unavailable _ -> fail "original filed image lost");
-      Picture.prepare ~display:Masc_tui_portrait_view.No_picture
+      Picture.prepare ~layout:Picture.Together ~display:Masc_tui_portrait_view.No_picture
         ~convert:(fun _ -> fail "no-picture evidence cannot launch a converter") decoded))
 let start state key = begin_verification_evidence_read state key
   |> function Some request -> request | None -> fail "explicit original read did not start"
@@ -124,7 +124,7 @@ let test_board_snapshot_projects_real_comments_without_losing_source () = with_r
     let rec search offset = offset + String.length original <= String.length projected
       && (String.sub projected offset (String.length original) = original || search (offset + 1)) in
     search 0 in
-  match Picture.prepare ~display:Masc_tui_portrait_view.No_picture
+  match Picture.prepare ~layout:Picture.Together ~display:Masc_tui_portrait_view.No_picture
       ~convert:(fun _ -> fail "Board evidence cannot launch an image converter") decoded with
   | Picture.Items [Source_item {source=Ev_collaboration {ev_reference;ev_content;ev_sha256};body}] ->
       check bool "projection retains the post payload" true (contains post.body body);

@@ -56,8 +56,13 @@ over the observed scroll container within this same workflow invocation.
 `dragAndDrop` takes `selector` and `destination`, both observed locators.
 If a pointer click or drag fails, one release of its exact button is attempted.
 A lost key press/type response keeps release unconfirmed without guessing a
-key-up sequence. An unconfirmed release prevents further input on that
-connection. The result reports `inputReleased` independently of completed
+key-up sequence. `press` is included because its key sequence may be held if
+its reply is lost. Before `press`, a read-only SDK attached-selector wait can
+refuse the step without sending keys. It does not authorize a later press or
+classify an exception from that actual press as pre-effect. A dialog can be
+reported before release: answering it alone does not prove that every original
+key or pointer button was released. An unconfirmed release prevents further
+input on that connection. The result reports `inputReleased` independently of completed
 effects; neither a cleanup nor a guard makes the failed action successful. Manual held-button and held-key workflows
 are not exposed.
 
@@ -65,6 +70,9 @@ are not exposed.
 `argumentJson`. The source never executes in the host Node process. Page code,
 including a wait predicate, can have effects before failing. `fetch` accepts
 HTTP(S) absolute or page-relative URLs and returns its native response receipt.
+A scheme-relative URL such as `//api.example/path` is also accepted: the
+browser inherits the page's HTTP(S) scheme and uses the specified host, with
+its normal credentials policy and CORS checks.
 `saveAs` requires a brokered download path and is not exposed here.
 
 These options are integrated in source with standalone codec and forwarding

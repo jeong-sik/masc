@@ -1949,6 +1949,9 @@ let test_native_workflow_pointer_ownership () =
         incr issued;
         if !issued=1 then match mode with
           | `Lost -> Error (Peer.Unobserved "lost native workflow result")
+          | `Before -> answered (obj ["completed",`List [];"effectStarted",`Bool false;
+              "completedEffect",`Bool false;"inputReleased",`Bool true;
+              "failure",obj ["index",`Int 0;"method",str "inputPreflight";"message",str "selector absent"]])
           | `Unreleased|`Released -> answered (obj ["completed",`List [];"effectStarted",`Bool true;
               "completedEffect",`Bool false;"inputReleased",`Bool (mode=`Released);
               "failure",obj ["index",`Int 0;"method",str method_;"message",str "SDK failed"]])
@@ -1960,15 +1963,20 @@ let test_native_workflow_pointer_ownership () =
     let call steps=dispatch peer Live.Page_native_workflow (obj ["tabId",`Int 1;
       "expectedUrl",str "https://app.slack.com/";"maxChars",`Int 1000;"steps",`List steps]) in
     let first=call [obj (("method",str method_)::fields)] in
-    (match first with Error (Live.Outcome_unknown _) -> ()
-     | Ok _|Error (Live.Before_effect _|Live.Partial_failure _) -> fail "lost input result changed its effect classification");
+    (match mode,first with
+     | `Before,Error (Live.Before_effect _)
+     | (`Lost|`Unreleased|`Released),Error (Live.Outcome_unknown _) -> ()
+     | (`Before|`Lost|`Unreleased|`Released),
+       (Ok _|Error (Live.Before_effect _|Live.Partial_failure _|Live.Outcome_unknown _)) ->
+       fail "workflow input result changed its effect classification");
     (match mode,call [] with
-     | `Released,Ok _ -> check int "confirmed release permits the next original request" 2 !issued
+     | (`Released|`Before),Ok _ -> check int "confirmed release permits the next original request" 2 !issued
      | (`Lost|`Unreleased),Error (Live.Before_effect _) ->
        check int "unknown release never dispatches another workflow" 1 !issued
-     | (`Lost|`Unreleased),Ok _|`Released,Error _|(`Lost|`Unreleased),Error (Live.Partial_failure _|Live.Outcome_unknown _) ->
+     | (`Lost|`Unreleased),Ok _|(`Released|`Before),Error _|(`Lost|`Unreleased),Error (Live.Partial_failure _|Live.Outcome_unknown _) ->
        fail "native input ownership did not survive the workflow boundary");
-    ignore (dispatch peer Live.Tabs_list (obj []))) [`Lost;`Unreleased;`Released])
+    ignore (dispatch peer Live.Tabs_list (obj [])))
+      ([`Lost;`Unreleased;`Released] @ if method_="press" then [`Before] else []))
     ["dragAndDrop",["selector",str "#source";"destination",str "#target"];
      "click",["selector",str "#source"];
      "dblclick",["selector",str "#source"];

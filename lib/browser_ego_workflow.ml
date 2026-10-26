@@ -221,7 +221,8 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
            | Mouse_move _ | Mouse_wheel _ | Fill _ | Focus _ | Reload
            | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
            | Select_option _ | Goto _ | Wait_for_url _ | Wait_for_selector _
-           | Wait_for_load_state _ | Evaluate _ | Wait_for_function _ | Fetch _ ->
+           | Wait_for_load_state _ | Evaluate _ | Wait_for_function _ | Fetch _
+           | Url | Title | Info | Snapshot | Events | Wait_for_timeout _ ->
              Error "workflow input preflight does not match a pending press")
       | "observation" when index=count && count>0 -> Ok has_effect
       | "snapshot" when index=count && remaining=[] -> Ok has_effect

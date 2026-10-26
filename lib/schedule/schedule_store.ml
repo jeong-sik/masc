@@ -528,7 +528,9 @@ let write_state config state =
   let* commit = written |> Result.map_error (fun msg -> Persistence_failed msg) in
   (* Memory's backend is authoritative. Its local mirror can fail after that
      commit; reporting failure then would tell the runner to retry a settlement
-     whose schedule and wake have already changed. *)
+     whose schedule and wake have already changed. Memory is volatile: this
+     success reports in-process authority, not persistence across restart.
+     FileSystem publication failures remain errors. *)
   (match commit.Workspace_utils.mirror_error with
    | None -> ()
    | Some msg ->
@@ -1348,6 +1350,8 @@ let terminal_evidence_valid (wake : wake_record) =
       | Some (Schedule_rejected | Occurrence_rejected | Retryable_failure
              | Process_interrupted | Unsupported_payload) ->
         wake.status = Wake_failed && wake.error <> None && wake.detail = None
+      (* Cancellation/orphan writers preserve any prior receipt detail for
+         queue evidence projection; dispatch-failure writers clear it. *)
       | Some (Cancelled_schedule | Orphaned_attempt) ->
         wake.status = Wake_failed && wake.error <> None)
 ;;

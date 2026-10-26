@@ -41,6 +41,8 @@ type last_success =
 
 type snapshot =
   { tick_in_flight : bool
+  ; pending_settlement_count : int
+  ; settlement_errors : Schedule_runner.settlement_error list
   ; tick_count : int
   ; success_count : int
   ; failure_count : int
@@ -101,6 +103,8 @@ let add_counts (left : tick_counts) (right : tick_counts) : tick_counts =
 
 let empty =
   { tick_in_flight = false
+  ; pending_settlement_count = 0
+  ; settlement_errors = []
   ; tick_count = 0
   ; success_count = 0
   ; failure_count = 0
@@ -168,6 +172,14 @@ let tick_counts_of_result
 
 let duration ~started_at ~finished_at = max 0.0 (finished_at -. started_at)
 
+let record_settlement_progress ~pending_settlements ~settlement_errors =
+  Atomic_util.update state (fun current ->
+    { current with
+      pending_settlement_count = List.length pending_settlements
+    ; settlement_errors
+    })
+;;
+
 let record_tick_ok
       ?(wake_enqueue_counts = empty_wake_enqueue_counts)
       ~started_at
@@ -178,6 +190,8 @@ let record_tick_ok
   Atomic_util.update state (fun current ->
     { current with
       tick_in_flight = false
+    ; pending_settlement_count = List.length result.pending_settlements
+    ; settlement_errors = result.settlement_errors
     ; tick_count = current.tick_count + 1
     ; success_count = current.success_count + 1
     ; last_tick_started_at = Some started_at
@@ -304,6 +318,7 @@ let status ?now ?stale_after_sec snapshot : Schedule_contract_values.runner_stat
   else if latest_error_is_newer snapshot
           || latest_tick_has_dispatch_failure snapshot
           || latest_tick_has_wake_failure snapshot
+          || snapshot.pending_settlement_count > 0
   then Schedule_contract_values.Runner_degraded
   else Schedule_contract_values.Runner_ok
 ;;
@@ -336,6 +351,12 @@ let snapshot_to_yojson ?now ?stale_after_sec snapshot =
     ; "last_duration_sec", Json_util.float_opt_to_json snapshot.last_duration_sec
     ; "last_counts", option_int_counts_json snapshot.last_counts
     ; "totals", counts_json snapshot.totals
+    ; ( "pending_settlement_count"
+      , `Int snapshot.pending_settlement_count )
+    ; ( "settlement_errors"
+      , `List (List.map (fun error ->
+          `String (Schedule_runner.settlement_error_to_string error))
+          snapshot.settlement_errors) )
     ; ( "held"
       , `List
           (match snapshot.last_success with

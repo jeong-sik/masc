@@ -478,11 +478,11 @@ let create_invalid_keeper_wake_schedule config =
 
 let tick_ok ?clock config ~now =
   match
-    Schedule_runner.tick ~consumer:Server_schedule_consumers.consumer ?clock config ~now
+    Schedule_runner.tick ~pending_settlements:[] ~consumer:Server_schedule_consumers.consumer ?clock config ~now
       ~retention_days:Schedule_store.terminal_schedule_retention_days
   with
   | Ok result -> result
-  | Error err -> fail (Schedule_runner.runner_error_to_string err)
+  | Error err -> fail (Schedule_runner.tick_failure_to_string err)
 ;;
 
 let find_wake
@@ -2540,11 +2540,11 @@ let test_shutdown_join_waits_for_inflight_schedule_intake () =
   ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
   let request = create_keeper_wake_schedule config in
   let signal =
-    match Schedule_runner.tick config ~now:201.0
+    match Schedule_runner.tick ~pending_settlements:[] config ~now:201.0
       ~retention_days:Schedule_store.terminal_schedule_retention_days with
     | Ok { emitted = [ signal ]; _ } -> signal
     | Ok _ -> fail "expected one durable schedule signal"
-    | Error error -> fail (Schedule_runner.runner_error_to_string error)
+    | Error error -> fail (Schedule_runner.tick_failure_to_string error)
   in
   let running =
     match
@@ -2793,11 +2793,11 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
     (fun () ->
       let request = create_keeper_wake_schedule config in
       let signal =
-        match Schedule_runner.tick config ~now:201.0
+        match Schedule_runner.tick ~pending_settlements:[] config ~now:201.0
           ~retention_days:Schedule_store.terminal_schedule_retention_days with
         | Ok { emitted = [ signal ]; _ } -> signal
         | Ok _ -> fail "expected one durable schedule signal"
-        | Error err -> fail (Schedule_runner.runner_error_to_string err)
+        | Error err -> fail (Schedule_runner.tick_failure_to_string err)
       in
       let running =
         match
@@ -3409,9 +3409,9 @@ let test_interval_wake_retries_acceptance_commit ~complete_before_retry () =
          consumer.dispatch config ~now signal request
            ~commit_acceptance:(fun _ ->
              Error (Schedule_runner.Retryable_dispatch_failure "acceptance commit fixture"))) } in
-  let first = match Schedule_runner.tick ~consumer:first_consumer config ~now:201.0
+  let first = match Schedule_runner.tick ~pending_settlements:[] ~consumer:first_consumer config ~now:201.0
       ~retention_days:Schedule_store.terminal_schedule_retention_days with
-    | Ok result -> result | Error error -> fail (Schedule_runner.runner_error_to_string error) in
+    | Ok result -> result | Error error -> fail (Schedule_runner.tick_failure_to_string error) in
   let occurrence_id = single_occurrence_id first in
   check bool "acceptance failure is retryable" true
     ((List.hd first.dispatches).status = Schedule_runner.Dispatch_failed);
@@ -3965,10 +3965,10 @@ let seed_unsettled_running config ~keeper_name ~now (request : Schedule_domain.s
           ~base_path:config.Workspace.base_path ~keeper_name)));
     concrete.dispatch config ~now signal running ~commit_acceptance
   in
-  let result = match Schedule_runner.tick ~consumer:{ concrete with dispatch }
+  let result = match Schedule_runner.tick ~pending_settlements:[] ~consumer:{ concrete with dispatch }
       ~clock:(fun () -> now) config ~now ~retention_days:7 with
     | Ok result -> result
-    | Error error -> fail (Schedule_runner.runner_error_to_string error) in
+    | Error error -> fail (Schedule_runner.tick_failure_to_string error) in
   check bool "production dispatch reached the fault boundary" true !entered;
   let failed = List.find (fun (dispatch : Schedule_runner.dispatch_result) ->
       String.equal dispatch.schedule_id request.schedule_id) result.dispatches in
@@ -4088,6 +4088,126 @@ let test_recovery_success_survives_a_normal_tick_crash () =
       ~clock:(fun () -> now +. 1.) config ~state);
   check bool "normal crash does not return the runner to global startup recovery" true
     ((recovery_request config later).status = Schedule_domain.Running)
+;;
+
+let check_maintenance_retains_failed_settlement ~clock_failure =
+  with_workspace @@ fun config ->
+  let now = Unix.gettimeofday () in
+  let keeper_name = "schedule-keeper" in
+  pause_recovery_keeper config keeper_name;
+  let request = create_keeper_wake_schedule config in
+  let staging = Filename.concat (Workspace.masc_dir config) "schedules.json.tmp-atomic" in
+  let wakes () = Schedule_store.wakes_for_schedule_instance
+      (Schedule_store.read_state config)
+      ~schedule_instance_id:request.schedule_instance_id ~schedule_id:request.schedule_id in
+  let latest_wake () = match wakes () with
+    | wake :: _ -> wake
+    | [] -> fail "maintenance did not persist an actual wake"
+  in
+  let queue_state () =
+    match Keeper_event_queue_persistence.load_state_result
+        ~base_path:config.Workspace.base_path ~keeper_name with
+    | Ok state -> state
+    | Error detail -> fail detail
+  in
+  let pending_count () =
+    Keeper_event_queue.length (Keeper_event_queue_state.pending (queue_state ())) in
+  let observed_attempt = ref None in
+  (* The runner calls this clock after the concrete consumer durably enqueues
+     its stimulus, immediately before acceptance settlement. Observe actual
+     persisted authority, not the number or timing of clock calls. *)
+  let clock () =
+    (* In the compound-failure case every read after fault installation raises:
+       both the returned Retry's finish clock and maintenance's post-tick
+       observation fail. This is deliberately not a post-tick-only injection. *)
+    if clock_failure && Option.is_some !observed_attempt then raise Exit;
+    if Option.is_none !observed_attempt
+       && (recovery_request config request).status = Schedule_domain.Running then (
+      let wake = latest_wake () in
+      match wake.attempt_identity, wake.status with
+      | Schedule_domain.Identified id, Schedule_contract_values.Wake_running ->
+        observed_attempt := Some (Schedule_domain.wake_attempt_id_to_string id);
+        Unix.mkdir staging 0o755
+      | (Schedule_domain.Unidentified | Schedule_domain.Identified _),
+        (Schedule_contract_values.Wake_running | Schedule_contract_values.Wake_succeeded
+        | Schedule_contract_values.Wake_failed) ->
+        fail "fault boundary did not observe an identified Running attempt");
+    now
+  in
+  Schedule_runner_status.reset_for_test ();
+  Fun.protect ~finally:(fun () ->
+    if Sys.file_exists staging && Sys.is_directory staging then Unix.rmdir staging;
+    Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+    Schedule_runner_status.reset_for_test ()) @@ fun () ->
+  let state = Server_bootstrap_maintenance.run_schedule_runner_tick ~clock config
+      ~state:Server_bootstrap_maintenance.initial_schedule_runner_state in
+  check bool "fault was installed after a genuine identified start" true
+    (Option.is_some !observed_attempt);
+  check bool "the primary staging path actually rejects file publication" true
+    (Sys.is_directory staging);
+  check bool "both failed settlements leave the attempt Running" true
+    ((recovery_request config request).status = Schedule_domain.Running);
+  check int "failed acceptance created only one actual attempt" 1 (List.length (wakes ()));
+  check int "post-tick clock failure is recorded without losing returned progress"
+    (if clock_failure then 1 else 0) (Schedule_runner_status.snapshot ()).crash_count;
+  let failed_progress = Schedule_runner_status.snapshot () in
+  check int "returned pending count remains visible even if post-tick observation crashes"
+    1 failed_progress.pending_settlement_count;
+  check int "returned settlement error survives post-tick observation failure"
+    1 (List.length failed_progress.settlement_errors);
+  check int "canonical consumer retains its durable stimulus after acceptance error" 1
+    (pending_count ());
+  let pending_before = Yojson.Safe.to_string (Keeper_event_queue_state.to_yojson (queue_state ())) in
+  check bool "unsettled dispatch is visible as degraded" true
+    (recovery_cached_status config = Schedule_contract_values.Runner_degraded);
+  Unix.rmdir staging;
+  (* A delayed cadence repairs only the returned Retry verdict. It must neither
+     run startup recovery nor redispatch this occurrence in the same cadence. *)
+  let state = Server_bootstrap_maintenance.run_schedule_runner_tick
+      ~clock:(fun () -> now +. 3600.) config ~state in
+  check bool "stored pending verdict returns the original occurrence to Due" true
+    ((recovery_request config request).status = Schedule_domain.Due);
+  check int "settlement-only replay creates no second dispatch attempt" 1 (List.length (wakes ()));
+  let repaired = latest_wake () in
+  check bool "replay records the returned retry, not acceptance or startup recovery" true
+    (repaired.status = Schedule_contract_values.Wake_failed
+     && repaired.settlement_kind = Some Schedule_domain.Retryable_failure);
+  check (option (float 0.001))
+    (if clock_failure then "replay obtains the first successful finish observation after clock repair"
+     else "replay preserves the original finish observation")
+    (Some (if clock_failure then now +. 3600. else now)) repaired.finished_at;
+  (match repaired.attempt_identity with
+   | Schedule_domain.Unidentified -> fail "replay discarded the attempt identity"
+   | Schedule_domain.Identified id ->
+     check (option string) "replay settles the exact original attempt" !observed_attempt
+       (Some (Schedule_domain.wake_attempt_id_to_string id)));
+  check string "store-only replay does not mutate the consumer queue" pending_before
+    (Yojson.Safe.to_string (Keeper_event_queue_state.to_yojson (queue_state ())));
+  check bool "successful settlement refreshes the degraded cached status" true
+    (recovery_cached_status config = Schedule_contract_values.Runner_ok);
+  let repaired_progress = Schedule_runner_status.snapshot () in
+  check int "repaired cadence clears pending progress" 0 repaired_progress.pending_settlement_count;
+  check int "repaired cadence clears settlement errors" 0 (List.length repaired_progress.settlement_errors);
+  ignore (Server_bootstrap_maintenance.run_schedule_runner_tick
+    ~clock:(fun () -> now +. 3601.) config ~state);
+  check bool "a later ordinary cadence reconciles durable consumer acceptance" true
+    ((recovery_request config request).status = Schedule_domain.Succeeded);
+  check int "ordinary retry adds exactly one new attempt" 2 (List.length (wakes ()));
+  let accepted = latest_wake () in
+  check bool "fresh attempt has a completed acceptance receipt" true
+    (accepted.status = Schedule_contract_values.Wake_succeeded
+     && accepted.settlement_kind = Some Schedule_domain.Accepted);
+  check bool "fresh dispatch has a different attempt identity" false
+    (accepted.attempt_identity = repaired.attempt_identity);
+  check int "consumer reconciliation does not duplicate the pending stimulus" 1 (pending_count ())
+;;
+
+let test_maintenance_retains_failed_settlement_until_storage_recovers () =
+  check_maintenance_retains_failed_settlement ~clock_failure:false
+;;
+
+let test_maintenance_retains_pending_across_finish_and_post_tick_clock_failures () =
+  check_maintenance_retains_failed_settlement ~clock_failure:true
 ;;
 
 let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
@@ -4680,6 +4800,10 @@ let () =
             test_startup_recovery_retries_before_admitting_dispatch
         ; test_case "successful recovery survives a normal tick crash" `Quick
             test_recovery_success_survives_a_normal_tick_crash
+        ; test_case "maintenance retains failed settlement until storage recovers" `Quick
+            test_maintenance_retains_failed_settlement_until_storage_recovers
+        ; test_case "maintenance retains pending through finish and post-tick clock failures" `Quick
+            test_maintenance_retains_pending_across_finish_and_post_tick_clock_failures
         ; test_case "a runner tick refreshes the cached schedule list" `Quick
             test_a_runner_tick_refreshes_the_cached_schedule_list
         ; test_case "dashboard projects quarantined and unreadable reaction evidence"

@@ -2415,7 +2415,7 @@ let test_browser_screenshot_reaches_vision_reader () =
               ~tool:Masc.Browser_capabilities.Read ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
               (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) with
            | Tool_result.Completed {content_blocks=Some [Agent_core.Types.Text text;
-               Agent_core.Types.Image {media_type="image/png";data=image;_}];data=observed;_} ->
+               Agent_core.Types.Image {media_type="image/png";data=image;source_type=Base64}];data=observed;_} ->
                assert (image=encoded);
                assert (Yojson.Safe.from_string text=observed);
                assert (Yojson.Safe.Util.member "data" observed=`Null);

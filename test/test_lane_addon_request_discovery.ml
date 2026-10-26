@@ -357,9 +357,14 @@ let test_all_scopes_survive_restart_without_metadata () = with_store (fun root s
   retain store "original-a";
   retain ~scope:"history-physical-owner" store "original-b";
   let records=owned (Owner.discover_all ~store:(Store.create ~root)) in
+  let folded=owned (Owner.fold_all ~store:(Store.create ~root) ~init:[]
+    ~f:(fun acc (record:Owner.retained) -> (record.scope,record.request_id)::acc)) in
   Alcotest.(check (list string)) "every actual scope is discovered without a Keeper/profile index"
     ["original-a";"original-b"]
     (List.map (fun (record:Owner.retained) -> record.request_id) records |> List.sort String.compare);
+  Alcotest.(check (list (pair string string))) "fold_all visits the exact validated originals across all scopes"
+    [scope,"original-a";"history-physical-owner","original-b"]
+    (List.sort Stdlib.compare folded);
   List.iter (fun (record:Owner.retained) ->
     Alcotest.check json "original evidence and destination survive the sweep" request record.request;
     Alcotest.(check bool) "the original scope remains its own binding" true
@@ -377,11 +382,13 @@ let test_all_scope_refusals_never_become_partial_success () =
     let wrong=Filename.concat other (Store.digest "another-id" ^ ".json") in
     Unix.rename original wrong;
     fail_inventory (Owner.discover_all ~store);
+    fail_inventory (Owner.fold_all ~store ~init:[] ~f:(fun acc r -> r::acc));
     Unix.rename wrong original;
     let moved=Filename.concat (Filename.dirname root) "original-scope-moved" in
     Unix.rename other moved;
     Unix.symlink moved other;
-    fail_inventory (Owner.discover_all ~store))
+    fail_inventory (Owner.discover_all ~store);
+    fail_inventory (Owner.fold_all ~store ~init:[] ~f:(fun acc r -> r::acc)))
 
 let () = Alcotest.run "Original Add-on request discovery" ["inventory",[
   Alcotest.test_case "all original scopes survive restart without a metadata index" `Quick

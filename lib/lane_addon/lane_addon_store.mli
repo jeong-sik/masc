@@ -171,6 +171,15 @@ val tool_request_owner_inventory : t -> scope:string -> ((string * Yojson.Safe.t
     original-scope serializer as publication and known-ID reads. This is not an
     atomic multi-record transaction; callers retain their process lease and
     serialization and revalidate the original record before effects. *)
+val fold_tool_request_owner_inventory_all :
+  t ->
+  init:'a ->
+  f:('a -> directory_name:string -> file_name:string -> Yojson.Safe.t -> ('a, string) result) ->
+  ('a, string) result
+(** Read-only observational fold across all published scopes, passing one
+    scope-directory name, filename and parsed record JSON at a time to [f]
+    under the same descriptor/no-follow/durability checks and per-scope
+    publication serializer as {!tool_request_owner_inventory_all}. *)
 val tool_request_owner_inventory_all : t -> ((string * string * Yojson.Safe.t) list, string) result
 (** Read-only observational sweep of all published scopes. Each row retains its
     actual scope-directory name and filename for the Owner's strict key check.

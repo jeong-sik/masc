@@ -63,6 +63,15 @@ val discover_all : store:Lane_addon_store.t -> (retained list, error) result
 (** Validate the directory and record identity of each published scope, then
     strictly load each original body. This observation is not an atomic
     cross-scope snapshot or permission for effects. *)
+val fold_all :
+  store:Lane_addon_store.t ->
+  init:'a ->
+  f:('a -> retained -> 'a) ->
+  ('a, error) result
+(** Same strict all-scope validation and body restoration as {!discover_all},
+    passing one restored original at a time to [f] so callers do not retain
+    every original request body in memory simultaneously. Any scope, record or
+    body error rejects the whole fold without returning partial results. *)
 val load_scope : store:Lane_addon_store.t -> scope:string -> (retained list, error) result
 (** Discover record identities, then strictly load each unchanged original.
     Missing or changed observations reject the whole result. Unlike

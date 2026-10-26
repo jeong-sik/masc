@@ -2074,16 +2074,18 @@ text; exporting preserves the original JSON snapshot.
 `o` downloads the selected retained item and asks a local application to open
 it; `s` saves a private local copy without opening it. The resulting local path
 stays with that evidence item in the detail, including if the viewer cannot
-open. Copies use uniquely named files in the local temporary directory and
-never replace existing files. A file reference such as `artifact:reports/a.pdf`
+open. Copies keep their original basename inside a unique private directory in
+the local temporary directory and never replace existing files. A file reference such as `artifact:reports/a.pdf`
 names a producer-workspace source, not a file on the operator's machine. The
 submission metadata names the server's retained verification record; the
-local-copy path appears only after a confirmed download and write.
+local-copy path distinguishes confirmed saves from interrupted or failed write
+destinations whose completion is unknown.
 
 The export endpoint is the same admin-authenticated evidence GET with a
 zero-based `item_index`, bound to exact `task_id` and `verification_id`. Both
 ends verify downloaded size and SHA-256; binary export uses retained original
-bytes, including PDF/audio/video files without inline image previews. A missing
+bytes, including PDF/audio/video files without inline image previews. The model
+inline attachment limit does not restrict operator downloads. A missing
 body, incomplete text snapshot or invalid reference yields a reason rather
 than a purported full file. A successful download or opener request is not
 independent verification of the Task's completion claim.

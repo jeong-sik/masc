@@ -8,7 +8,8 @@
   목록을 접고 현재 항목부터 보이며 `i`로 목록을 펼친다. Board 본문은 worker에서 읽기
   좋은 텍스트로 준비하되 원본 snapshot과 digest는 별도로 보존한다. `o/s`는 원래
   workspace·Task·verification·item index에 결속된 저장 사본만 내려받는다. 로컬 쓰기가
-  완료된 경로는 viewer 실패·취소와 별도로 원래 요청의 영수증에 남기고 workspace 철회 때
+  시작 전 목적지를 기록하고 완료된 사본과 완료 미확인 목적지를 구분한다. 원래 파일명은
+  고유한 private 디렉터리에 보존한다. 경로는 viewer 실패·취소와 별도로 원래 요청의 영수증에 남기고 workspace 철회 때
   이전 경로를 새 workspace에 표시하지 않는다. 승인·반려는 증거 선택/저장과 독립이다.
 
 - Board의 저장 File/Score는 원래 post·digest·byte length·이름에 묶인 reader로 연다.

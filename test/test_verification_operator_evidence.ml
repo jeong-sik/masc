@@ -7,7 +7,7 @@ module Operator = Workspace_verification_operator_evidence
 let ceiling = Store.verification_evidence_max_bytes
 let budget = Tool_shard_limits.verification_operator_preview_budget_bytes
 
-let with_base_path f =
+let with_base_path_env f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = Filename.temp_dir "operator_evidence_test" "" in
@@ -15,7 +15,9 @@ let with_base_path f =
     ~finally:(fun () ->
       Fs_compat.clear_fs ();
       Masc_test_deps.cleanup_test_workspace dir)
-    (fun () -> f dir)
+    (fun () -> f env dir)
+
+let with_base_path f = with_base_path_env (fun _env base -> f base)
 
 let png_signature = "\x89PNG\r\n\x1a\n"
 
@@ -340,12 +342,33 @@ let test_download_saves_a_private_local_copy () =
       let result=match result with Ok value -> value | Error detail -> Alcotest.fail detail in
       let file=match Masc_tui_evidence_file.decode ~task_id:"task-download" ~verification_id:"vr-download" ~index:0
         (`Assoc ["ok",`Bool true;"result",result]) with Ok file -> file | Error detail -> Alcotest.fail detail in
-      match Masc_tui_evidence_file.save ~fs:env#fs ~directory file with
+      match Masc_tui_evidence_file.export ~fs:env#fs ~directory ~progress:(Atomic.make Masc_tui_evidence_file.Not_started)
+        ~admitted:(fun () -> Ok ()) ~open_file:None file with
       | Error detail -> Alcotest.fail detail
       | Ok path ->
         Alcotest.(check bool) "absolute path" false (Filename.is_relative path);
         Alcotest.(check string) "saved bytes" content (Eio.Path.load Eio.Path.(env#fs / path));
+        Alcotest.(check int) "private directory" 0o700 (Unix.stat (Filename.dirname path)).Unix.st_perm;
         Alcotest.(check int) "private file" 0o600 (Unix.stat path).Unix.st_perm))
+
+let test_export_preserves_long_original_filename () =
+  with_base_path_env (fun env base_path ->
+    let name=String.make 240 'x' ^ ".txt" in
+    let content="retained long-named artifact" in
+    let item=Store.Evidence_artifact {reference="artifact:reports/" ^ name;
+      content;bytes=String.length content;truncated=false} in
+    let wire=match Operator.file_to_yojson ~base_path ~index:0 (access [item]) with
+      | Ok result -> `Assoc ["ok",`Bool true;"result",result]
+      | Error detail -> Alcotest.fail detail in
+    let file=match Masc_tui_evidence_file.decode ~task_id:"task-download" ~verification_id:"vr-download" ~index:0 wire with
+      | Ok file -> file | Error detail -> Alcotest.fail detail in
+    match Masc_tui_evidence_file.export ~fs:env#fs ~directory:base_path
+      ~progress:(Atomic.make Masc_tui_evidence_file.Not_started)
+      ~admitted:(fun () -> Ok ()) ~open_file:None file with
+    | Error detail -> Alcotest.fail detail
+    | Ok path ->
+      Alcotest.(check string) "original basename fits unchanged" name (Filename.basename path);
+      Alcotest.(check string) "long-named file contains original bytes" content (Eio.Path.load Eio.Path.(env#fs / path)))
 
 let test_download_refuses_missing_or_partial_items () =
   with_base_path (fun base_path ->
@@ -374,10 +397,160 @@ let test_download_refuses_wrong_identity_and_corrupt_bytes () =
       ["bytes",`Int 100;"sha256",`String (String.make 64 '0');"name",`String "../outside.txt";
        "body_base64",`String (Base64.encode_string "other note")])
 
+let download_fixture ~base_path content =
+  let wire=match Operator.file_to_yojson ~base_path ~index:0 (access [Store.Evidence_note content]) with
+    | Ok result -> `Assoc ["ok",`Bool true;"result",result]
+    | Error detail -> Alcotest.fail detail in
+  match Masc_tui_evidence_file.decode ~task_id:"task-download" ~verification_id:"vr-download" ~index:0 wire with
+  | Ok file -> file | Error detail -> Alcotest.fail detail
+
+let test_export_preserves_destination_and_saved_effects () =
+  with_base_path_env (fun env base ->
+    let module File=Masc_tui_evidence_file in
+    let content="selected original\r\n한글\n" in
+    let file=download_fixture ~base_path:base content in
+    let progress=Atomic.make File.Not_started in
+    let calls=ref 0 in
+    let result=File.export ~fs:env#fs ~directory:base ~progress ~admitted:(fun () -> Ok ())
+      ~open_file:(Some (fun path ->
+        incr calls;
+        Alcotest.(check string) "viewer receives the actual downloaded file" content (Eio.Path.load Eio.Path.(env#fs / path));
+        Error "no desktop viewer")) file in
+    Alcotest.(check bool) "viewer failure is not success" true (Result.is_error result);
+    Alcotest.(check int) "viewer is never replayed" 1 !calls;
+    (match Atomic.get progress with
+     | File.Saved path -> Alcotest.(check string) "confirmed copy survives viewer failure" content (Eio.Path.load Eio.Path.(env#fs / path))
+     | File.Not_started | File.Writing _ -> Alcotest.fail "saved path was lost");
+    let denied=Atomic.make File.Not_started in
+    let before=Array.length (Sys.readdir base) in
+    ignore (File.export ~fs:env#fs ~directory:base ~progress:denied
+      ~admitted:(fun () -> Error "workspace changed") ~open_file:None file);
+    Alcotest.(check bool) "withdrawn admission never starts a write" true (Atomic.get denied=File.Not_started);
+    Alcotest.(check int) "no file created on admission refusal" before (Array.length (Sys.readdir base));
+    let failed=Atomic.make File.Not_started in
+    let result=File.export ~fs:env#fs ~directory:(Filename.concat base "missing-directory")
+      ~progress:failed ~admitted:(fun () -> Ok ()) ~open_file:None file in
+    Alcotest.(check bool) "failed write is not saved" true (Result.is_error result);
+    (match Atomic.get failed with
+     | File.Writing path -> Alcotest.(check bool) "failed destination is still known" false (Filename.is_relative path)
+     | File.Not_started | File.Saved _ -> Alcotest.fail "failed write lost or certified its destination"))
+
+let test_export_rechecks_authority_and_propagates_cancellation () =
+  with_base_path_env (fun env base ->
+    let module File=Masc_tui_evidence_file in
+    let file=download_fixture ~base_path:base "cancelled viewer retains downloaded bytes" in
+    let progress=Atomic.make File.Not_started in
+    let admissions=ref 0 and opened=ref false in
+    let result=File.export ~fs:env#fs ~directory:base ~progress
+      ~admitted:(fun () -> incr admissions; if !admissions=1 then Ok () else Error "workspace withdrawn after save")
+      ~open_file:(Some (fun _ -> opened:=true;Ok ())) file in
+    Alcotest.(check bool) "withdrawn opener refused" true (Result.is_error result);
+    Alcotest.(check bool) "no viewer launched after authority withdrawal" false !opened;
+    (match Atomic.get progress with File.Saved _ -> () | File.Not_started | File.Writing _ -> Alcotest.fail "write receipt lost on later withdrawal");
+    let cancelled=Atomic.make File.Not_started in
+    (match File.export ~fs:env#fs ~directory:base ~progress:cancelled ~admitted:(fun () -> Ok ())
+      ~open_file:(Some (fun _ -> raise (Eio.Cancel.Cancelled Exit))) file with
+     | _ -> Alcotest.fail "cancellation was swallowed"
+     | exception Eio.Cancel.Cancelled Exit -> ());
+    match Atomic.get cancelled with
+    | File.Saved path -> Alcotest.(check bool) "cancelled viewer retains confirmed local path" true (Sys.file_exists path)
+    | File.Not_started | File.Writing _ -> Alcotest.fail "cancelled viewer lost confirmed save")
+
+let http_get_evidence ~router ?token target =
+  let output=Buffer.create 1024 in
+  let connection=Httpun.Server_connection.create (fun reqd ->
+    Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+  let auth=match token with None -> "" | Some token -> "Authorization: Bearer " ^ token ^ "\r\n" in
+  let wire="GET " ^ target ^ " HTTP/1.1\r\nHost: localhost\r\n" ^ auth ^ "\r\n" in
+  let input=Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in
+  ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
+  let rec drain () = match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let bytes=List.fold_left (fun count (iov:Bigstringaf.t Httpun.IOVec.t) ->
+        Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);count+iov.len) 0 iovecs in
+      Httpun.Server_connection.report_write_result connection (`Ok bytes);drain ()
+    | `Yield | `Close _ -> () in
+  drain ();
+  let lines=String.split_on_char '\n' (Buffer.contents output) in
+  let status=match lines with
+    | first::_ -> (match String.split_on_char ' ' first with _::code::_ -> int_of_string code | _ -> Alcotest.fail "invalid HTTP status")
+    | [] -> Alcotest.fail "missing HTTP status" in
+  let rec body = function "\r"::rest -> String.concat "\n" rest | _::rest -> body rest | [] -> Alcotest.fail "missing HTTP body" in
+  status,Yojson.Safe.from_string (body lines)
+
+let test_actual_download_route_and_local_export () =
+  let open Masc in
+  with_base_path_env (fun env base ->
+    ignore (Server_startup_state.mark_state_ready ());
+    let state=Mcp_server.For_testing.create_state ~base_path:base in
+    Auth.save_auth_config base {Masc_domain.default_auth_config with enabled=true;require_token=true};
+    let token agent_name role = match Auth.create_token base ~agent_name ~role with
+      | Ok (raw,_) -> raw | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error) in
+    let admin=token "download-admin" Masc_domain.Admin and worker=token "download-worker" Masc_domain.Worker in
+    let prior=Server_auth.For_testing.snapshot_server_state () in
+    Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_server_state prior) (fun () ->
+      Server_auth.publish_server_state state;
+      let router=Server_routes_http_routes_verification.add_routes (Http_server_eio.Router.create ()) in
+      let pdf="%PDF-1.7\n" ^ String.make ceiling 'p' in
+      let binary=filed_binary ~base_path:base ~request_id:"vr-http-body" ~index:0 ~format:"pdf" pdf in
+      let png=png_of_length (ceiling+1) in
+      let image=filed_binary ~base_path:base ~request_id:"vr-http-body" ~index:1 ~format:"png" png in
+      let output=`Assoc ["task_title",`String "download selected evidence";"required_artifacts",`List [];
+        "submitted_evidence",`List (List.map Store.submitted_evidence_item_to_yojson [binary;image])] in
+      let request=match Verification.create_request ~base_path:base ~task_id:"task-http-download" ~worker:"producer" ~output ~criteria:[] () with
+        | Ok value -> value | Error detail -> Alcotest.fail detail in
+      let target ?(task_id=request.task_id) ?(index="0") ?(expected_base=base) () =
+        Uri.to_string (Uri.make ~path:"/api/v1/verification/evidence" ~query:[
+          "task_id",[task_id];"verification_id",[request.id];"item_index",[index];
+          "expected_base_path",[expected_base];"expected_masc_root",[Common.masc_dir_from_base_path ~base_path:base]] ()) in
+      let get ?token target=http_get_evidence ~router ?token target in
+      let denied status ?token target =
+        let actual,body=get ?token target in
+        Alcotest.(check int) "HTTP boundary refusal" status actual;
+        Alcotest.(check bool) "no binary payload on refusal" false
+          (match Yojson.Safe.Util.member "result" body with `Null -> false | _ -> true) in
+      denied 401 (target ());
+      denied 403 ~token:worker (target ());
+      denied 409 ~token:admin (target ~expected_base:(Filename.concat base "another-workspace") ());
+      denied 400 ~token:admin (target ~task_id:"another-task" ());
+      denied 400 ~token:admin (target ~index:"-1" ());
+      denied 400 ~token:admin (target ~index:"2" ());
+      List.iteri (fun index (original,name) ->
+        let status,wire=get ~token:admin (target ~index:(string_of_int index) ()) in
+        Alcotest.(check int) "large retained file is downloadable" 200 status;
+        let file=match Masc_tui_evidence_file.decode ~task_id:request.task_id ~verification_id:request.id ~index wire with
+          | Ok file -> file | Error detail -> Alcotest.fail detail in
+        let progress=Atomic.make Masc_tui_evidence_file.Not_started in
+        match Masc_tui_evidence_file.export ~fs:env#fs ~directory:base ~progress
+          ~admitted:(fun () -> Ok ()) ~open_file:None file with
+        | Error detail -> Alcotest.fail detail
+        | Ok path ->
+          Alcotest.(check string) "real HTTP to local file preserves original binary" original (Eio.Path.load Eio.Path.(env#fs / path));
+          Alcotest.(check bool) "original filename retained" true (String.ends_with ~suffix:name path))
+        [pdf,"shot-0.pdf";png,"shot-1.png"];
+      (match Operator.previews ~base_path:base [binary;image] with
+      | [Some (Operator.Withheld Operator.Not_image_format);
+         Some (Operator.Withheld (Operator.Over_delivery_ceiling _))] -> ()
+      | _ -> Alcotest.fail "operator download changed model-facing preview rules");
+      let path=match binary with
+        | Store.Evidence_artifact_binary {body=Some relative;_} ->
+          Filename.concat (Common.masc_dir_from_base_path ~base_path:base) relative
+        | _ -> Alcotest.fail "binary was not retained" in
+      let changed=Bytes.of_string pdf in
+      Bytes.set changed (Bytes.length changed-1) 'q';
+      Fs_compat.save_file path (Bytes.to_string changed);
+      denied 400 ~token:admin (target ());
+      Fs_compat.save_file path (pdf ^ "extra");
+      denied 400 ~token:admin (target ())))
+
 let () =
   Alcotest.run "Verification operator evidence"
     [ ( "download", [
+        Alcotest.test_case "actual HTTP permissions, identity and large binary download to local file" `Quick test_actual_download_route_and_local_export;
+        Alcotest.test_case "viewer and write failures retain their destinations" `Quick test_export_preserves_destination_and_saved_effects;
+        Alcotest.test_case "authority withdrawal and cancellation preserve actual effects" `Quick test_export_rechecks_authority_and_propagates_cancellation;
         Alcotest.test_case "saving creates a private local copy with original bytes" `Quick test_download_saves_a_private_local_copy;
+        Alcotest.test_case "long original filenames remain usable" `Quick test_export_preserves_long_original_filename;
         Alcotest.test_case "original text and non-image binary bytes round trip" `Quick test_download_preserves_original_bytes;
         Alcotest.test_case "partial and missing snapshots cannot be saved as complete files" `Quick test_download_refuses_missing_or_partial_items;
         Alcotest.test_case "identity and content integrity are required" `Quick test_download_refuses_wrong_identity_and_corrupt_bytes;

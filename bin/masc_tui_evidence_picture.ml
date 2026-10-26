@@ -186,14 +186,15 @@ let draws_pixels = function
 let board_body content =
   let field name = function `Assoc fields -> List.assoc_opt name fields | _ -> None in
   let text name json = match field name json with Some (`String text) -> Some text | _ -> None in
-  let entry json = match text "author" json, text "body" json with
+  let entry ~body_field json = match text "author" json, text body_field json with
     | Some author, Some body -> Some (author ^ "\n" ^ body)
     | _ -> None in
   match Yojson.Safe.from_string content with
   | json ->
     (match field "source" json, field "post" json, field "comments" json with
      | Some (`String "board"), Some post, Some (`List comments) ->
-       (match text "title" post, entry post, List.map entry comments with
+       (match text "title" post, entry ~body_field:"body" post,
+              List.map (entry ~body_field:"content") comments with
         | Some title, Some post, comments when List.for_all Option.is_some comments ->
           Some (String.concat "\n\n" (title :: post :: List.filter_map Fun.id comments))
         | _ -> None)

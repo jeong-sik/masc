@@ -93,6 +93,47 @@ let state base =
   state.server_identity <- Some (identity base);
   state
 
+let test_board_snapshot_projects_real_comments_without_losing_source () = with_root @@ fun base ->
+  let module Board = Masc.Board in
+  let post_id = Board.Post_id.of_string "p-0123456789abcdef0123456789abcdef" |> Result.get_ok in
+  let post : Board.post =
+    { id=post_id; author=Board.Agent_id.of_string "producer" |> Result.get_ok;
+      title="Original review question"; body="Original claim\nwith its supporting facts";
+      post_kind=Board.Automation_post; meta_json=None; visibility=Board.Internal;
+      audience=None; created_at=1.; content_updated_at=1.; updated_at=2.; expires_at=0.;
+      votes_up=0; votes_down=0; reply_count=1; pinned=false; hearth=None;
+      thread_id=None; origin=None; closed=None } in
+  let comment : Board.comment =
+    { id=Board.Comment_id.of_string "c-0123456789abcdef0123456789abcdef" |> Result.get_ok;
+      post_id; parent_id=None; author=Board.Agent_id.of_string "reviewer" |> Result.get_ok;
+      content="Original objection\n보존해야 하는 댓글 근거"; created_at=2.; expires_at=0.;
+      votes_up=0; votes_down=0 } in
+  let content = Yojson.Safe.to_string (`Assoc ["source",`String "board";
+    "post",Board.post_to_yojson post; "comments",`List [Board.comment_to_yojson comment]]) in
+  let digest = Digestif.SHA256.(to_hex (digest_string content)) in
+  let verification_id = "verification-board-snapshot" in
+  let request : Store.request_header = {id=verification_id;task_id;worker="producer";created_at=3.} in
+  let access = Store.Evidence_available {request;items=[Store.Evidence_collaboration {
+    reference="board:" ^ Board.Post_id.to_string post_id; content; sha256=digest}]} in
+  let wire = `Assoc ["ok",`Bool true;"result",`Assoc ["task_id",`String task_id;
+    "verification_id",`String verification_id;"evidence",Operator.access_to_yojson ~base_path:base access]] in
+  let decoded = match Masc.Tui_decode.decode_verification_evidence_for_request
+      ~task_id ~verification_id wire with
+    | Ok decoded -> decoded | Error detail -> fail detail in
+  let contains original projected =
+    let rec search offset = offset + String.length original <= String.length projected
+      && (String.sub projected offset (String.length original) = original || search (offset + 1)) in
+    search 0 in
+  match Picture.prepare ~display:Masc_tui_portrait_view.No_picture
+      ~convert:(fun _ -> fail "Board evidence cannot launch an image converter") decoded with
+  | Picture.Items [Source_item {source=Ev_collaboration {ev_reference;ev_content;ev_sha256};body}] ->
+      check bool "projection retains the post payload" true (contains post.body body);
+      check bool "projection retains the actual serialized comment payload" true (contains comment.content body);
+      check string "original source reference survives projection" ("board:" ^ Board.Post_id.to_string post_id) ev_reference;
+      check string "original snapshot bytes survive projection" content ev_content;
+      check string "original source digest survives projection" digest ev_sha256
+  | Picture.Items _ | Access_unavailable _ -> fail "real Board comments prevented readable source preparation"
+
 let test_original_request_survives_new_submission_and_late_reply () = with_root @@ fun base ->
   let config = Masc.Workspace.default_config base and expected = identity base in
   let state = state base in
@@ -303,7 +344,9 @@ let () = Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
     run "verification evidence original resource reads"
-      ["resources",[test_case "original submission and reopened detail retain exact evidence" `Quick
+      ["resources",[test_case "actual Board comment snapshots retain readable content and original source" `Quick
+        test_board_snapshot_projects_real_comments_without_losing_source;
+        test_case "original submission and reopened detail retain exact evidence" `Quick
         test_original_request_survives_new_submission_and_late_reply;
         test_case "root replacement and admission receipts cannot borrow evidence" `Quick
         test_workspace_and_receipt_cannot_borrow_filed_evidence;

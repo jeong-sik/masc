@@ -7943,9 +7943,7 @@ type verification_export_request = {
   vex_index : int;
   vex_authority : workspace_authority;
   vex_reading : unit ref;
-  vex_saved_path : string option Atomic.t;
-      (** [Some] only after the exclusive local write completed. This receipt
-          survives a later viewer failure or interruption. *)
+  vex_progress : Masc_tui_evidence_file.progress Atomic.t;
 }
 
 type usage_section = Usage_plan | Usage_trend | Usage_keepers
@@ -8991,7 +8989,7 @@ type state = {
   mutable verification_evidence_request: verification_evidence_request option;
   mutable verification_evidence_cursor: int;
   mutable verification_evidence_index_open: bool;
-  mutable verification_evidence_saved: (verification_evidence_key * int * string) list;
+  mutable verification_evidence_saved: (verification_evidence_key * int * Masc_tui_evidence_file.progress) list;
   (* One cache is shared by the calls surface and chat full-detail mode. The
      scope and generation are the authority: cursor position is not, because
      palette/Answering can open a chat without moving the roster cursor. *)

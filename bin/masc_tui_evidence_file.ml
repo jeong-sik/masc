@@ -34,17 +34,34 @@ let decode ~task_id ~verification_id ~index json =
   then Error "The downloaded evidence does not match its recorded size or SHA-256"
   else Ok {name; contents}
 
-let save ~fs ~directory t =
-  let directory = if Filename.is_relative directory then Filename.concat (Sys.getcwd ()) directory else directory in
-  let name = "masc-evidence-" ^ Random_id.uuid_v7 () ^ "-" ^ t.name in
-  let path = Filename.concat directory name in
+type progress = Not_started | Writing of string | Saved of string
+
+let save ~fs ~directory ~directory_name ~path t =
   try
     Eio.Path.with_open_dir Eio.Path.(fs / directory) (fun parent ->
-      Fs_compat.create_capability_file_exclusive ~parent ~leaf:name
-        ~permissions:0o600 t.contents)
-    |> Result.map_error Fs_compat.capability_write_error_to_string
-    |> Result.map (fun () -> path)
+      let destination = Eio.Path.(parent / directory_name) in
+      Eio.Path.mkdir ~perm:0o700 destination;
+      Eio.Path.with_open_dir destination (fun parent ->
+        Fs_compat.create_capability_file_exclusive ~parent ~leaf:t.name
+          ~permissions:0o600 t.contents))
+    |> Result.map_error (fun error -> path ^ ": " ^ Fs_compat.capability_write_error_to_string error)
   with
-  | Eio.Io _ as ex -> Error (Format.asprintf "%a" Eio.Exn.pp ex)
-  | Sys_error detail -> Error detail
-  | Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
+  | Eio.Io _ as ex -> Error (path ^ ": " ^ Format.asprintf "%a" Eio.Exn.pp ex)
+  | Sys_error detail -> Error (path ^ ": " ^ detail)
+  | Unix.Unix_error (code, _, _) -> Error (path ^ ": " ^ Unix.error_message code)
+
+let export ~fs ~directory ~progress ~admitted ~open_file t =
+  let ( let* ) = Result.bind in
+  let* () = admitted () in
+  let directory = if Filename.is_relative directory then Filename.concat (Sys.getcwd ()) directory else directory in
+  let directory_name = "masc-evidence-" ^ Random_id.uuid_v7 () in
+  let path = Filename.concat (Filename.concat directory directory_name) t.name in
+  Atomic.set progress (Writing path);
+  let* () = save ~fs ~directory ~directory_name ~path t in
+  Atomic.set progress (Saved path);
+  match open_file with
+  | None -> Ok path
+  | Some open_file ->
+    let* () = admitted () in
+    let* () = open_file path in
+    Ok path

@@ -315,7 +315,10 @@ let verification_detail_lines ~width
     ~sanitize:Keeper_chat.terminal_safe_text text
     |> List.map (fun line -> style, "  " ^ line) in
   wrap Ansi.bold request.vr_task_title
-  @ wrap (match request.vr_review with Review_stopped _ -> Theme.warn () | _ -> Ansi.reset)
+  @ wrap (match request.vr_review with
+      | Review_stopped _ -> Theme.warn ()
+      | Review_unobserved | Review_running _ | Review_approved _ | Review_rejected _
+      | Review_superseded _ -> Ansi.reset)
       (review_detail request.vr_review)
   @ wrap (Theme.recede ()) "작업 → 증거 제출 → 자동 검증 → Task 완료 · 운영자는 직접 승인하거나 반려할 수 있습니다."
   @ wrap (Theme.recede ()) (Printf.sprintf "제출 증거 %d개 · 요구 증거 %d항목 · 개수는 충족 여부가 아닙니다."
@@ -343,7 +346,8 @@ let verification_contract_lines state ~width (request : Masc.Tui_decode.verifica
 let evidence_name = function
   | Masc_tui_evidence_picture.Source_item {source=Ev_collaboration {ev_reference;_};_} ->
     "협업 기록 · " ^ ev_reference
-  | Masc_tui_evidence_picture.Source_item {source=_;body=_} -> "협업 기록"
+  | Masc_tui_evidence_picture.Source_item
+      {source=(Ev_note _ | Ev_artifact _ | Ev_artifact_unreadable _ | Ev_binary _);_} -> "협업 기록"
   | Masc_tui_evidence_picture.Text_item item -> (match item with
       | Ev_note note -> "메모 · " ^ Terminal_text.single_line note
       | Ev_collaboration {ev_reference; _} -> "협업 기록 · " ^ ev_reference
@@ -372,10 +376,14 @@ let verification_evidence_index state request ~width observation =
       request.vr_submitted_by in
     judgement_detail_rows ~width ([Ansi.bold, Printf.sprintf "  증거 %d / %d · e/E 다음/이전 · i 목록 · o 열기 · s 저장" (if count = 0 then 0 else index + 1) count]
       @ rows @ [Theme.recede (), location]
-      @ List.filter_map (fun (key, saved_index, path) ->
+      @ List.filter_map (fun (key, saved_index, progress) ->
           if key.vek_request_id = request.vr_request_id
              && key.vek_task_id = request.vr_task_id && saved_index = index
-          then Some (Ansi.reset, "  이 기기에 저장한 파일: " ^ path) else None)
+          then (match progress with
+            | Masc_tui_evidence_file.Not_started -> None
+            | Writing path -> Some (Theme.warn (), "  저장 시도 경로(완료 미확인): " ^ path)
+            | Saved path -> Some (Ansi.reset, "  이 기기에 저장한 파일: " ^ path))
+          else None)
           state.verification_evidence_saved), index
   | Absent | Loading | Failed _ | Ready (Masc_tui_evidence_picture.Access_unavailable _)
   | Stale (Masc_tui_evidence_picture.Access_unavailable _, _) -> [], 0

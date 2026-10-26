@@ -287,7 +287,7 @@ let filed_body_path relative =
          && String.ends_with ~suffix:".bin" file -> true
   | _ -> false
 
-let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
+let read_binary_body_base64_at_limit ~max_bytes ~base_path (item : submitted_evidence_item) =
   match item with
   | Evidence_artifact_binary { body = Some relative; bytes = expected_bytes; sha256 = expected_sha256; _ } ->
     if not (filed_body_path relative)
@@ -296,13 +296,13 @@ let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
     let ownership_root = Common.masc_dir_from_base_path ~base_path in
     let path = Filename.concat ownership_root relative in
     (match Fs_compat.load_owned_regular_file_prefix ~ownership_root
-             ~max_bytes:verification_evidence_max_bytes path with
+             ~max_bytes path with
      | Error error ->
        Error (Body_unreadable (Fs_compat.owned_regular_file_read_error_to_string error))
      | Ok None -> Error (Body_unreadable "filed binary body is missing")
      | Ok (Some body) when body.truncated ->
        Error (Over_delivery_ceiling
-         { bytes = body.file_size; ceiling = verification_evidence_max_bytes })
+         { bytes = body.file_size; ceiling = max_bytes })
      | Ok (Some body) ->
        let actual_bytes = String.length body.content in
        let actual_sha256 = Digestif.SHA256.(digest_string body.content |> to_hex) in
@@ -316,6 +316,20 @@ let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
   | Evidence_artifact _ -> Error Not_binary
   | Evidence_invalid_reference -> Error Not_binary
   | Evidence_artifact_unreadable _ -> Error Not_binary
+
+let read_binary_body_base64 ~base_path item =
+  read_binary_body_base64_at_limit ~max_bytes:verification_evidence_max_bytes ~base_path item
+
+let read_binary_body_for_operator_base64 ~base_path item =
+  match item with
+  | Evidence_artifact_binary { bytes; _ } when bytes >= 0 ->
+    (match read_binary_body_base64_at_limit ~max_bytes:bytes ~base_path item with
+     | Error (Over_delivery_ceiling _) ->
+       Error (Body_unreadable "filed body exceeds its recorded size")
+     | result -> result)
+  | Evidence_artifact_binary _ -> Error (Body_unreadable "negative recorded file size")
+  | Evidence_collaboration _ | Evidence_note _ | Evidence_artifact _
+  | Evidence_invalid_reference | Evidence_artifact_unreadable _ -> Error Not_binary
 
 let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_path
     ~worker ~reference relative_path =

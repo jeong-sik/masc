@@ -17204,7 +17204,7 @@ let export_verification_evidence state ~mailbox ~open_file =
   | Some _, None -> report_action state "error" "이 기기의 파일 시스템을 사용할 수 없습니다."
   | Some (key, index, _, _), Some env ->
     let request = {vex_key=key;vex_index=index;vex_authority=state.workspace_authority;
-      vex_reading=state.workspace_read_authority;vex_saved_path=Atomic.make None} in
+      vex_reading=state.workspace_read_authority;vex_progress=Atomic.make Masc_tui_evidence_file.Not_started} in
     let host=server_peer_host and port=state.port in
     let read = capture_workspace_json_read state (fun () ->
       Masc_tui_http.fetch_verification_evidence_file ~host ~port ~task_id:key.vek_task_id
@@ -17220,16 +17220,12 @@ let export_verification_evidence state ~mailbox ~open_file =
       (fun () ->
         let ( let* ) = Result.bind in
         let* file = read () in
-        let* () = current () in
-        let* path = Masc_tui_evidence_file.save ~fs:env#fs ~directory:(Filename.get_temp_dir_name ()) file in
-        Atomic.set request.vex_saved_path (Some path);
-        if not open_file then Ok path
-        else
-          let* () = current () |> Result.map_error (fun detail -> detail ^ "; saved copy: " ^ path) in
-          match Eio_guard.run_in_systhread ~label:"tui-evidence-open" (fun () ->
-            Masc_tui_browser.open_url (Uri.to_string (Uri.make ~scheme:"file" ~path ()))) with
-          | Ok _ -> Ok path
-          | Error detail -> Error ("사본 저장: " ^ path ^ " · 외부 앱을 열지 못했습니다: " ^ detail))
+        let open_file = if not open_file then None else Some (fun path ->
+          Eio_guard.run_in_systhread ~label:"tui-evidence-open" (fun () ->
+            Masc_tui_browser.open_url (Uri.to_string (Uri.make ~scheme:"file" ~path ())))
+          |> Result.map (fun _ -> ())) in
+        Masc_tui_evidence_file.export ~fs:env#fs ~directory:(Filename.get_temp_dir_name ())
+          ~progress:request.vex_progress ~admitted:current ~open_file file)
 
 let open_harness_detail state =
   match state.harness with
@@ -19510,16 +19506,20 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
              (Goal_confirmation_read.complete ~equal:String.equal read request result)
        | Goal_confirmation.Submitting _ -> ())
   | Verification_evidence_exported (request, result) ->
-      let saved = Atomic.get request.vex_saved_path in
+      let progress = Atomic.get request.vex_progress in
+      let location = match progress with
+        | Masc_tui_evidence_file.Not_started -> ""
+        | Writing path -> " · 저장 시도 경로(완료 미확인): " ^ path
+        | Saved path -> " · 저장한 사본: " ^ path in
       if request.vex_authority = state.workspace_authority
          && request.vex_reading == state.workspace_read_authority then
-        Option.iter (fun path -> state.verification_evidence_saved <-
-          (request.vex_key, request.vex_index, path) :: state.verification_evidence_saved) saved;
+        (match progress with
+         | Masc_tui_evidence_file.Not_started -> ()
+         | Writing _ | Saved _ -> state.verification_evidence_saved <-
+             (request.vex_key, request.vex_index, progress) :: state.verification_evidence_saved);
       (match result with
-       | Error detail -> report_action state "error" ("Evidence: " ^ detail
-           ^ (match saved with None -> "" | Some path -> " · 저장한 사본: " ^ path))
-       | Ok path ->
-         report_action state "system" ("증거 사본 저장: " ^ path))
+       | Error detail -> report_action state "error" ("Evidence: " ^ detail ^ location)
+       | Ok path -> report_action state "system" ("증거 사본 저장: " ^ path))
   | Verification_evidence_loaded (request, result) ->
       let key = Masc_tui_fetched.request_key request.ver_ticket in
       let admitted = state.verification_detail_request_id = Some key.vek_request_id
@@ -30637,6 +30637,16 @@ and is loaded on demand through keeper_skill.
                (selected_inventory_lane state) in
            state.lanes_mode <- Lanes_inventory_detail target;
            state.lane_run_detail_scroll <- 0
+       | Some "i" when state.view = Verification
+           && Option.is_some state.verification_detail_request_id ->
+           state.verification_evidence_index_open <- not state.verification_evidence_index_open;
+           state.verification_detail_scroll <- 0
+       | Some (("e" | "E") as key) when state.view = Verification
+           && Option.is_some state.verification_detail_request_id ->
+           step_verification_evidence state (if key = "e" then 1 else -1)
+       | Some (("o" | "s") as key) when state.view = Verification
+           && Option.is_some state.verification_detail_request_id ->
+           export_verification_evidence state ~mailbox:async_messages ~open_file:(key = "o")
        | Some "i" when state.view = Overview ->
            goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
        | Some "i"
@@ -33516,16 +33526,6 @@ and is loaded on demand through keeper_skill.
            (* Cancel wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_task_cancel ()
-       | Some "i" when state.view = Verification
-           && Option.is_some state.verification_detail_request_id ->
-           state.verification_evidence_index_open <- not state.verification_evidence_index_open;
-           state.verification_detail_scroll <- 0
-       | Some (("e" | "E") as key) when state.view = Verification
-           && Option.is_some state.verification_detail_request_id ->
-           step_verification_evidence state (if key = "e" then 1 else -1)
-       | Some (("o" | "s") as key) when state.view = Verification
-           && Option.is_some state.verification_detail_request_id ->
-           export_verification_evidence state ~mailbox:async_messages ~open_file:(key = "o")
        | Some "x" | Some "X" when state.view = Verification ->
            (* Reject wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)

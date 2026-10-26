@@ -129,6 +129,13 @@ let file_to_yojson ~base_path ~index = function
     let text ~name content =
       Ok (name, Base64.encode_string content, String.length content,
         Digestif.SHA256.(to_hex (digest_string content))) in
+    let artifact_name reference =
+      match Store.classify_evidence_reference reference with
+      | Store.Artifact_reference relative when Store.valid_producer_relative_path relative ->
+        Ok (Filename.basename relative)
+      | Store.Artifact_reference _ | Store.Note_reference _
+      | Store.Collaboration_reference _ | Store.Unresolvable_reference ->
+        Error "The artifact does not name a valid producer-relative file" in
     let* name, body_base64, bytes, sha256 =
       match if index < 0 then None else List.nth_opt items index with
       | None -> Error "The selected evidence item does not exist"
@@ -139,12 +146,13 @@ let file_to_yojson ~base_path ~index = function
         else text ~name:"source.json" content
       | Some (Store.Evidence_artifact { truncated = true; _ }) ->
         Error "Only a truncated text snapshot was retained; a complete file cannot be exported"
-      | Some (Store.Evidence_artifact { content; bytes; _ }) ->
+      | Some (Store.Evidence_artifact { reference; content; bytes; _ }) ->
         if String.length content <> bytes then Error "The text snapshot does not contain the complete recorded file"
-        else text ~name:"artifact.txt" content
+        else let* name = artifact_name reference in text ~name content
       | Some (Store.Evidence_artifact_binary { reference; bytes; sha256; _ } as item) ->
-        (match Store.read_binary_body_base64 ~base_path item with
-         | Ok body -> Ok (Filename.basename reference, body, bytes, sha256)
+        let* name = artifact_name reference in
+        (match Store.read_binary_body_for_operator_base64 ~base_path item with
+         | Ok body -> Ok (name, body, bytes, sha256)
          | Error Store.Not_binary -> Error "The evidence is not a binary file"
          | Error Store.Body_not_filed -> Error "No copy of this file was retained"
          | Error (Store.Body_unreadable detail) -> Error ("The retained file cannot be read: " ^ detail)

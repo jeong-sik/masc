@@ -1221,7 +1221,7 @@ let test_the_unresolved_list_is_bounded_by_the_page () =
 let test_review_observation_refreshes_without_changing_the_submission () =
   with_temp_base_path (fun base_path ->
     let request=create_pending_request ~base_path ~task_id:"task-observed" ~worker:"w" ~criteria:[] ~evidence:[] in
-    let registry=Verification_run_registry.global () in
+    let registry=Masc.Verification_run_registry.global () in
     let observation () =
       let json=D.requests_json ~base_path () in
       match member "requests" json with
@@ -1229,12 +1229,12 @@ let test_review_observation_refreshes_without_changing_the_submission () =
       | _ -> Alcotest.fail "request missing" in
     let state () = Yojson.Safe.Util.(member "state" (observation ()) |> to_string) in
     Alcotest.(check string) "no attempt observed" "unobserved" (state ());
-    Verification_run_registry.register_running registry ~verification_id:request.id
+    Masc.Verification_run_registry.register_running registry ~verification_id:request.id
       ~task_id:request.task_id ~producer:request.worker ~authority_kind:"system_llm_agent"
       ~authority_actor:"verifier_exact" ~started_at:1.;
     Alcotest.(check string) "fresh running observation" "running" (state ());
-    Verification_run_registry.mark_completed registry ~verification_id:request.id
-      ~outcome:(Verification_run_registry.Infrastructure_unavailable {stage=Lookup_surface;detail="workspace missing"})
+    Masc.Verification_run_registry.mark_completed registry ~verification_id:request.id
+      ~outcome:(Masc.Verification_run_registry.Infrastructure_unavailable {stage=Lookup_surface;detail="workspace missing"})
       ~tools:[] ~elapsed_s:1. ();
     Alcotest.(check string) "fresh stopped observation" "unavailable" (state ());
     Alcotest.(check string) "actual reason retained" "workspace missing"

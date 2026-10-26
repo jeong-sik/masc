@@ -117,7 +117,7 @@ let test_stdio_controller () =
                 (List.exists (function S.ImageContent _ -> true | _ -> false) state_only.content);
               check bool "and keeps the seat facts" true
                 (member "saves_name" state_only = `String "hello.com"
-                 && member "controller" state_only = member "controller" screen);
+                 && member "controller" state_only = `String "fixture");
               let input_history = Yojson.Safe.Util.(data observed |> member "rows" |> to_list |> List.hd
                 |> member "fields" |> member "input_history") in
               let count = Yojson.Safe.Util.(input_history |> member "entry_count" |> to_int) in

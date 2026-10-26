@@ -495,8 +495,8 @@ let test_input_acts_through_the_shared_page_scripts () =
   check (pair int int) "the wheel's delta" (0, 120) (to_int (field "dx" wheel), to_int (field "dy" wheel));
   (* ego shows who acts and what beside its cursor. *)
   check string "an input with no actor is the agent's" "MASC · agent · scroll_at" (text (field "cursor" wheel));
-  (match dispatch peer ~actor:"keeper/sangsu" Live.Page_interact (interact_args (Lane.Click_at {point;viewport;button=Lane.Pointer.Primary})) with
-   | Ok _ -> check string "an input names its actor" "MASC · keeper/sangsu · click_at" (text (field "cursor" (last ()).args))
+  (match dispatch peer ~actor:"keeper/fixture-peer" Live.Page_interact (interact_args (Lane.Click_at {point;viewport;button=Lane.Pointer.Primary})) with
+   | Ok _ -> check string "an input names its actor" "MASC · keeper/fixture-peer · click_at" (text (field "cursor" (last ()).args))
    | other -> failf "a click with an actor was %s" (failure_kind other));
   (* Keys. *)
   by_step ["page.keyboard",(fun _ -> input_answer ())];
@@ -1039,8 +1039,8 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     (answer "ref click" (click (Lane.Target_ref 12)));
   check string "the dialog and URL checks come before native input" {|["info","url","click @12"]|} (seen ());
   check string "ego's click carries the cursor label" {|["MASC · agent · click"]|} (printed "labels ");
-  ignore (answer "named click" (on ~actor:"keeper/sangsu" (Lane.Click_target (Lane.Target_ref 12))));
-  check string "and names the actor" {|["MASC · keeper/sangsu · click"]|} (printed "labels ");
+  ignore (answer "named click" (on ~actor:"keeper/fixture-peer" (Lane.Click_target (Lane.Target_ref 12))));
+  check string "and names the actor" {|["MASC · keeper/fixture-peer · click"]|} (printed "labels ");
   ignore (answer "role" (click (Lane.Target_role {role="button";name="Say \"hi\"";exact=true})));
   check string "a role target is ego's role locator with a JSON name"
     {|["info","url","click loc=role:button[name=\"Say \\\"hi\\\"\"]"]|} (seen ());
@@ -1673,8 +1673,8 @@ let test_an_upload_through_a_file_chooser_answers_what_it_handed () =
     (List.map text (Yojson.Safe.Util.to_list (field "paths" (last ()))));
   check string "and the opener as given" "#attach" (text (field "opener" (last ())));
   check string "whose click is labelled" "MASC · agent · upload" (text (field "cursor" (last ())));
-  ignore (choose ~actor:"keeper/sangsu" paths);
-  check string "with the actor when there is one" "MASC · keeper/sangsu · upload" (text (field "cursor" (last ())));
+  ignore (choose ~actor:"keeper/fixture-peer" paths);
+  check string "with the actor when there is one" "MASC · keeper/fixture-peer · upload" (text (field "cursor" (last ())));
   Lane.Upload_lease.release snapshot;
   check bool "the copies outlive the upload's own scope" true (List.for_all Sys.file_exists paths);
   reply := (fun _ -> answered (obj ["error",`Null;"dialog",ego_dialog "alert" "uploaded";"tab",row]));

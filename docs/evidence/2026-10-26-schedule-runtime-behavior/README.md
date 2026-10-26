@@ -56,8 +56,8 @@ destination delivery, failover, Lane worker or storage fault recovery is proved.
 actual `Failed / Turn_cancelled` state after a shared server restart.
 `backend-recovery-admission.json` and `backend-recovery-observed.json` record a new
 recovery request admitted and subsequently read back as `Queued`. These are
-selected actual API fields, not suite pass receipts. No completed backend suite
-result is included here.
+selected actual API fields; these Keeper operation receipts contain no completed
+suite results. Completed targeted CI evidence is recorded below.
 
 The later `restart-expiry-3` used installed commit
 `1ce158d50d3eb48648e6deea7f668172f914fea3`, executable SHA-256

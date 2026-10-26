@@ -84,6 +84,7 @@ let reasoning_replay_override_wire
   | Force_no_replay -> "force-no-replay"
   | Force_drop_without_tool_preserve_with_tool -> "drop-without-tool-preserve-with-tool"
   | Force_preserve_always -> "preserve-always"
+  | Force_preserve_responses_text -> "preserve-responses-text"
   | Force_turn_scoped_system_context_preserve_always -> "turn-scoped-system-context-preserve-always"
   | Force_preserve_with_request_tools -> "preserve-with-request-tools"
   | Force_latest_user_turn_tool_calls -> "latest-user-turn-tool-calls"

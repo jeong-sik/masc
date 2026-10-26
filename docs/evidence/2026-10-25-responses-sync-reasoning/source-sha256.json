@@ -1,0 +1,58 @@
+[
+  {
+    "path": "lib/runtime/runtime_adapter.ml",
+    "sha256": "a0adbe7bc2db44377987147145193ae0898a0dca33818e7d22445d2071647319"
+  },
+  {
+    "path": "lib/server/server_dashboard_runtime_declaration_projection.ml",
+    "sha256": "6ede3b117b75fb1673b0c8d11767b0740617333f0e283dce3137484f82622dd5"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/backend_openai_responses.ml",
+    "sha256": "32506568808384b7e29867612d964cb9d8d65df48e51e674789be25334287144"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/backend_openai_responses.mli",
+    "sha256": "2a9a5e3e10df979c939f31d7b537fdba11edbb504a530b4630a9efd952ded6de"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/capabilities.ml",
+    "sha256": "6eb3da09e2bfa6a4347975cf444e733196a8a691682fb1f603a8ae2cf7142fc8"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/capabilities.mli",
+    "sha256": "82617790ffc83d9820ad7d157f950dbfe115b9372f74b89176c7ba7a8582dc15"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/capability_vocab.ml",
+    "sha256": "b1ebb4253a7f9506f3709ab0f0a5d3fd701a2b5f25e72e05072233101af191d6"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/capability_vocab.mli",
+    "sha256": "ee27f7582e05cf8ab0321505f2cfb0d9f9772e773da1175ca4c3e9b23a7965e9"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/message_origin_lowering.ml",
+    "sha256": "f9d195044ba3596989e92e35b517aee30f6b4d00c0aa17275aff03f4d2c1ce31"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/reasoning_dialect.ml",
+    "sha256": "1e4ba5a2f83228773ff54df55d562f1bc448d7a401b81c8472a15eb46a566f4c"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/reasoning_dialect.mli",
+    "sha256": "ecb9e431a2bd9905d7dc43a1a42402efc1d785c8915ccaf1008fcc1d2eda787a"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/responses_reasoning.ml",
+    "sha256": "a927d96b5e4c2283abef5b4601349f8f4c28000b4cf24d4cadeec6739e5c4fff"
+  },
+  {
+    "path": "packages/agent_core/lib/llm_provider/responses_reasoning.mli",
+    "sha256": "da33725f60006a06f187b87af14d2004b3a8c4091f023fd731890afd473267b5"
+  },
+  {
+    "path": "packages/agent_core/test/test_responses_reasoning_content.ml",
+    "sha256": "74c9a4f54b78eccccad22302b84dc72c6e1236d3aeb015b82f09cae6c3c4cb6e"
+  }
+]

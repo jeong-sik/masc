@@ -148,7 +148,9 @@ type replay_capability =
 
 (** [tools_present] describes the effective outgoing tools array after any
     tool-choice suppression. Omission describes a request without tools. It
-    changes selection only; the stable producing-source stamp is unchanged. *)
+    changes selection only; the stable producing-source stamp is unchanged.
+    Responses retains exact source rotation even when plaintext is explicitly
+    admitted, because the same envelope may carry endpoint-bound opaque state. *)
 val replay_capability_for_provider_config
   :  ?tools_present:bool
   -> Provider_config.t

@@ -227,7 +227,7 @@ let base_of_capabilities (caps : Capabilities.capabilities) =
 
 let apply_replay_override caps dialect =
   match caps.Capabilities.reasoning_replay_override with
-  | Default_reasoning_replay -> dialect
+  | Default_reasoning_replay | Force_preserve_responses_text -> dialect
   | Force_no_replay -> { dialect with replay_policy = No_replay }
   | Force_drop_without_tool_preserve_with_tool ->
     { dialect with replay_policy = Tool_call_assistant_messages_all_history }
@@ -612,7 +612,7 @@ let base_for_provider_config (config : Provider_config.t) =
        A catalog/manifest override remains authoritative: the transport
        default applies only when the capability row says [Default]. *)
     (match caps.reasoning_replay_override with
-     | Default_reasoning_replay ->
+     | Default_reasoning_replay | Force_preserve_responses_text ->
        { dialect with replay_policy = Tool_call_assistant_messages_latest_user_turn }
      | Force_no_replay
      | Force_drop_without_tool_preserve_with_tool
@@ -656,15 +656,24 @@ let apply_clear_thinking_replay_gate (config : Provider_config.t) dialect =
   | Always_preserved_thinking -> dialect
 ;;
 
-(* The OpenAI Responses envelope keeps reasoning as provider-held state rather
-   than as replayable content. This is the transport fact owned by
-   {!Provider_http_codec} (the single kind-keyed dispatch this module is allowed
-   to consult), applied identically to the stable and the request-local dialect
-   so the stamped contract and the consuming contract cannot disagree. *)
+(* Responses defaults to opaque provider-held reasoning. A dedicated typed
+   capability may admit plaintext replay; a Chat preserve-always declaration
+   cannot enable it accidentally. Apply this to both stable source stamping
+   and request-local dialects so their contracts remain identical. *)
 let apply_transport_replay_override (config : Provider_config.t) dialect =
   match Provider_http_codec.of_config config with
   | Provider_http_codec.Openai_responses ->
-    { dialect with replay_policy = Provider_opaque_state;content_carrier=Canonical_blocks }
+    let replay_policy = match Provider_config.capabilities_for_config_model config with
+      | Some {Capabilities.reasoning_replay_override=Force_preserve_responses_text;_} ->
+        All_assistant_messages
+      | Some {Capabilities.reasoning_replay_override=
+          (Default_reasoning_replay | Force_no_replay
+           | Force_drop_without_tool_preserve_with_tool | Force_latest_user_turn_tool_calls
+           | Force_initial_system_latest_user_turn_tool_calls | Force_preserve_always
+           | Force_turn_scoped_system_context_preserve_always | Force_preserve_with_request_tools);_}
+      | None -> Provider_opaque_state
+    in
+    { dialect with replay_policy;content_carrier=Canonical_blocks }
   | Openai_chat | Glm_chat -> dialect
   | Anthropic_messages | Ollama_chat | Gemini_generate_content ->
     {dialect with content_carrier=Canonical_blocks}
@@ -767,7 +776,11 @@ let replay_capability_for_provider_config ?(tools_present = false) config =
          | (false, _, _) | (true, true, _) | (true, false, Provider_opaque_state) ->
            contract
        in
-       { target; contract; rotation = rotation_policy dialect })
+       { target; contract
+       ; rotation = (match Provider_http_codec.of_config config with
+           | Openai_responses -> Reasoning_replay_contract.Require_identical_source
+           | Openai_chat | Glm_chat | Anthropic_messages | Ollama_chat | Gemini_generate_content ->
+             rotation_policy dialect) })
     (reasoning_source_for_provider_config config)
 ;;
 

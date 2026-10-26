@@ -737,3 +737,8 @@
  (name test_cohere_schema_wire)
  (modules test_cohere_schema_wire)
  (libraries agent_core_test_deps alcotest))
+
+(test
+ (name test_responses_reasoning_content)
+ (modules test_responses_reasoning_content)
+ (libraries agent_core llm_provider alcotest yojson))

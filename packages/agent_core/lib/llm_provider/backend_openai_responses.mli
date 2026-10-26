@@ -12,7 +12,10 @@ val project_history
   -> Provider_config.t
   -> Types.message list
   -> (Reasoning_history_projection.t, Reasoning_history_projection.error) result
-(** The history this codec will actually serialize: reasoning blocks it cannot
+(** The history this codec will actually serialize: plaintext Thinking and opaque
+    Responses reasoning are supported carriers. The declared replay policy still
+    decides which may be sent (OpenAI opaque-only excludes plaintext). Other
+    reasoning blocks it cannot
     carry, and blocks the config's replay policy excludes, are already gone.
 
     Exported so a caller that must size a request before building it asks the
@@ -55,7 +58,9 @@ val build_request
 
 (** Parse a Responses API JSON response into AGENT_CORE canonical content blocks.
 
-    Reasoning summary items become {!Types.Thinking}; function call items become
+    Full reasoning text becomes {!Types.Thinking}, with summary as fallback.
+    Nonblank encrypted reasoning preserves the complete opaque item instead.
+    Function call items become
     {!Types.ToolUse} with [ToolUse.id = call_id], so existing tool execution can
     correlate outputs via [function_call_output.call_id]. *)
 val parse_response_result : string -> (Types.api_response, string) result

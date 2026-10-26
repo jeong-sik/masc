@@ -116,7 +116,7 @@ and `lib/llm_provider/capability_manifest.mli` for the authoritative schema cont
 | `preserve_thinking_control_format` | string | from base | Historical reasoning replay/preserve wire control. Accepted values: `none`, `thinking_object_keep_all`, `chat_template_kwargs_preserve_thinking`, `always_preserved`, `thinking_object_clear_thinking`. |
 | `reasoning_output_format` | string | from base | Request-side reasoning output split control. Accepted values: `none`, `split_reasoning_fields`. |
 | `reasoning_streaming_format` | string | from base | Streaming reasoning parser format (`default`, `none`, `template_parser`, `delta:<field>`, `delta_details:<field>`). |
-| `reasoning_replay` | string | `default` | Optional multi-turn reasoning replay override. Accepted values: `default`, `no_replay`, `drop_without_tool`, `latest_user_turn_tool_calls`, `preserve_always`. |
+| `reasoning_replay` | string | `default` | Optional multi-turn reasoning replay override. Accepted values: `default`, `no_replay`, `drop_without_tool`, `latest_user_turn_tool_calls`, `preserve_always`, `preserve_responses_text`. The last option admits plaintext only on the Responses transport; it leaves other transports at their default and does not certify an endpoint. |
 | `emits_usage_tokens` | bool | from base | Whether the standard response carries usage tokens (`input_tokens`/`output_tokens`). |
 | `supported_models` | string[] | from base | Exact client-side model allow-list. Must be non-empty; blank, padded, or duplicate ids are rejected. |
 

@@ -1,9 +1,11 @@
 """Publication must not turn a partial behavior run into release approval."""
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 
@@ -16,6 +18,76 @@ spec = importlib.util.spec_from_file_location(
 assert spec is not None and spec.loader is not None
 publication = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(publication)
+
+
+class ReleaseCollection(unittest.TestCase):
+    def collection_script(self):
+        workflow = (CI.parents[1] / '.github/workflows/release-build.yml').read_text()
+        marker = '      - name: Verify advertised release assets\n        run: |\n'
+        self.assertEqual(workflow.count(marker), 1)
+        lines = []
+        for line in workflow.split(marker, 1)[1].splitlines():
+            if line and not line.startswith('          '):
+                break
+            lines.append(line[10:])
+        return '\n'.join(lines)
+
+    def fixture(self, root):
+        scripts = root / 'scripts'
+        scripts.mkdir()
+        for name in ('install.sh', 'install-runtime-setup.py'):
+            (scripts / name).write_bytes(('fixture ' + name).encode())
+        dist = root / 'dist'
+        dist.mkdir()
+        names = {'masc-exec-shim-linux-amd64', 'masc-exec-shim-linux-arm64'}
+        for arch in publication.PLATFORMS:
+            names.update(name + '-' + arch for name in (
+                'masc', 'masc-tui', 'masc-browser-host', 'masc-deployment-preflight-helper',
+                'masc-check-runtime-deployment-preflight', 'masc-exec-ssh-bootstrap'))
+            names.update({f'masc-dashboard-{arch}.tar.gz',
+                          f'masc-release-dashboard-bundle-{arch}.py',
+                          f'masc-runtime-{arch}.tar.gz'})
+        for name in names:
+            (dist / name).write_bytes(('fixture ' + name).encode())
+        (dist / 'not-advertised').write_bytes(b'not a release asset')
+        return dist
+
+    def collect(self, root):
+        return subprocess.run(['/bin/bash', '-e', '-o', 'pipefail', '-c', self.collection_script()],
+                              cwd=root, text=True, capture_output=True)
+
+    def test_actual_collection_keeps_bootstrap_bytes_for_publication(self):
+        with tempfile.TemporaryDirectory(prefix='masc-release-collection-') as directory:
+            root = Path(directory)
+            dist = self.fixture(root)
+            result = self.collect(root)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            assets = root / 'release-assets'
+            for arch in publication.PLATFORMS:
+                name = 'masc-exec-ssh-bootstrap-' + arch
+                self.assertEqual((assets / name).read_bytes(), (dist / name).read_bytes())
+            self.assertFalse((assets / 'not-advertised').exists())
+            # Exercise the publication consumer with checksums of the files the
+            # actual collection step copied, without GNU-find/macOS differences.
+            sums = []
+            for path in sorted(assets.iterdir()):
+                sums.append(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name)
+            (assets / 'SHA256SUMS').write_text('\n'.join(sums) + '\n')
+            publication.validate_distribution(assets, root)
+            (assets / 'masc-exec-ssh-bootstrap-linux-x64').write_bytes(b'changed after checksumming')
+            with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                publication.validate_distribution(assets, root)
+
+    def test_actual_collection_refuses_each_missing_platform_bootstrap(self):
+        for arch in publication.PLATFORMS:
+            with self.subTest(arch=arch), tempfile.TemporaryDirectory(prefix='masc-release-missing-') as directory:
+                root = Path(directory)
+                dist = self.fixture(root)
+                name = 'masc-exec-ssh-bootstrap-' + arch
+                (dist / name).unlink()
+                result = self.collect(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('required release asset missing: ' + name, result.stdout)
 
 
 class ReleaseBehavior(unittest.TestCase):

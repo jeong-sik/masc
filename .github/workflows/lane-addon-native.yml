@@ -54,7 +54,7 @@ jobs:
           # Build native candidates and stage the shipped package resources.
           opam exec -- dune build --profile release \
             bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
-            bin/deployment_preflight_helper.exe test/test_lane_addon.exe \
+            bin/deployment_preflight_helper.exe bin/masc_exec_ssh_bootstrap.exe test/test_lane_addon.exe \
             test/test_lane_addon_worker.exe test/test_lane_addon_sources.exe \
             test/test_lane_addon_surface.exe test/test_lane_addon_store_query.exe \
             test/test_lane_addon_resource_events.exe \
@@ -97,6 +97,7 @@ jobs:
           cp _build/default/bin/masc_tui.exe dist/masc-tui-macos-arm64
           cp _build/default/bin/masc_browser_host.exe dist/masc-browser-host-macos-arm64
           cp _build/default/bin/deployment_preflight_helper.exe dist/masc-deployment-preflight-helper-macos-arm64
+          cp _build/default/bin/masc_exec_ssh_bootstrap.exe dist/masc-exec-ssh-bootstrap-macos-arm64
           cp scripts/check-runtime-deployment-preflight.sh dist/masc-check-runtime-deployment-preflight-macos-arm64
           python3 scripts/package-macos-runtime.py --dist dist \
             --stage "$RUNNER_TEMP/masc-lane-runtime" --platform macos-arm64 \

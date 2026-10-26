@@ -191,7 +191,7 @@ def browser_addon_programs(build):
 
 
 def binaries(build):
-    for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
+    for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe", "masc_exec_ssh_bootstrap.exe"):
         executable(build / exe, exe)
     browser_addon_programs(build)
 
@@ -230,6 +230,9 @@ class LocalBuildInstall(unittest.TestCase):
                  "--base-path", str(base)],
                 env=unnamed_env(root), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+            bootstrap = prefix / "masc-exec-ssh-bootstrap"
+            self.assertEqual(bootstrap.read_bytes(), (build / "masc_exec_ssh_bootstrap.exe").read_bytes())
+            self.assertTrue(os.access(bootstrap, os.X_OK))
             for program in BROWSER_ADDON_PROGRAMS:
                 installed = prefix / program.replace("_", "-")
                 self.assertEqual(installed.read_bytes(), (build / f"{program}.exe").read_bytes())
@@ -242,7 +245,7 @@ class LocalBuildInstall(unittest.TestCase):
             root = Path(temporary).resolve()
             build = root / "build"
             build.mkdir()
-            for exe in ("masc_tui.exe", "masc_browser_host.exe"):
+            for exe in ("masc_tui.exe", "masc_browser_host.exe", "masc_exec_ssh_bootstrap.exe"):
                 executable(build / exe, exe)
             fake_masc(build / "main_eio.exe")
             preflight_helper(build)
@@ -266,7 +269,7 @@ class LocalBuildInstall(unittest.TestCase):
             root = Path(temporary).resolve()
             build = root / "build"
             build.mkdir()
-            for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
+            for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe", "masc_exec_ssh_bootstrap.exe"):
                 executable(build / exe, exe)
             preflight_helper(build)
             prefix = root / "prefix"
@@ -300,7 +303,29 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(record.read_text().splitlines(), [
                 "build", "--root", str(checkout), "./bin/main_eio.exe", "./bin/masc_tui.exe",
-                "./bin/masc_browser_host.exe", "./bin/deployment_preflight_helper.exe"])
+                "./bin/masc_browser_host.exe", "./bin/deployment_preflight_helper.exe",
+                "./bin/masc_exec_ssh_bootstrap.exe"])
+
+    def test_missing_ssh_bootstrap_installs_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build)
+            (build / "masc_exec_ssh_bootstrap.exe").unlink()
+            prefix = root / "prefix"
+            prefix.mkdir()
+            previous = executable(prefix / "masc", "old masc").read_bytes()
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--base-path", str(workspace(root)), "--no-browser-addon"],
+                env=unnamed_env(root), capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("masc_exec_ssh_bootstrap.exe", result.stderr)
+            self.assertEqual((prefix / "masc").read_bytes(), previous)
+            self.assertFalse((prefix / "masc-tui").exists())
 
     def test_a_missing_browser_addon_program_installs_nothing(self):
         for program in BROWSER_ADDON_PROGRAMS:
@@ -588,6 +613,7 @@ class LocalBuildInstall(unittest.TestCase):
             fake_masc(build / "main_eio.exe")
             executable(build / "masc_tui.exe", "tui")
             executable(build / "masc_browser_host.exe", "new")
+            executable(build / "masc_exec_ssh_bootstrap.exe", "ssh bootstrap")
             browser_addon_programs(build)
             preflight_helper(build)
             prefix = root / "prefix"
@@ -619,6 +645,7 @@ class LocalBuildInstall(unittest.TestCase):
         fake_masc(build / "main_eio.exe")
         executable(build / "masc_tui.exe", "tui")
         executable(build / "masc_browser_host.exe", "new")
+        executable(build / "masc_exec_ssh_bootstrap.exe", "ssh bootstrap")
         browser_addon_programs(build)
         preflight_helper(build)
         prefix = root / "prefix"
@@ -714,7 +741,7 @@ class LocalBuildInstall(unittest.TestCase):
                     json.dumps({"pid": extension.pid, "ended": None}))
                 build = root / "build"
                 build.mkdir()
-                for exe in ("masc_tui.exe", "masc_browser_host.exe"):
+                for exe in ("masc_tui.exe", "masc_browser_host.exe", "masc_exec_ssh_bootstrap.exe"):
                     executable(build / exe, exe)
                 browser_addon_programs(build)
                 fake_masc(build / "main_eio.exe")
@@ -750,6 +777,7 @@ class LocalBuildInstall(unittest.TestCase):
         fake_masc(build / "main_eio.exe")
         executable(build / "masc_tui.exe", "tui")
         executable(build / "masc_browser_host.exe", "new")
+        executable(build / "masc_exec_ssh_bootstrap.exe", "ssh bootstrap")
         browser_addon_programs(build)
         preflight_helper(build)
         prefix = root / "prefix"
@@ -1392,6 +1420,7 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertEqual(arguments, ["build", "--root", str(checkout), "./bin/main_eio.exe",
                                          "./bin/masc_tui.exe", "./bin/masc_browser_host.exe",
                                          "./bin/deployment_preflight_helper.exe",
+                                         "./bin/masc_exec_ssh_bootstrap.exe",
                                          *[f"./bin/{program}.exe" for program in BROWSER_ADDON_PROGRAMS]])
 
     def test_dune_local_takes_the_install_build_line(self):

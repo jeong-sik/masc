@@ -20,6 +20,7 @@
 #     masc-<arch>, masc-tui-<arch>,
 #     masc-deployment-preflight-helper-<arch>,
 #     masc-check-runtime-deployment-preflight-<arch>
+#     masc-exec-ssh-bootstrap-<arch>
 #   arch is the release arch label (e.g. linux-x64, linux-arm64, macos-arm64)
 #   and must match the host so install.sh's detect_asset resolves to it.
 set -euo pipefail
@@ -41,6 +42,7 @@ ASSETS=(
   "masc-browser-host-$ARCH"
   "masc-deployment-preflight-helper-$ARCH"
   "masc-check-runtime-deployment-preflight-$ARCH"
+  "masc-exec-ssh-bootstrap-$ARCH"
   "masc-dashboard-$ARCH.tar.gz"
   "masc-release-dashboard-bundle-$ARCH.py"
   "masc-runtime-$ARCH.tar.gz"
@@ -119,12 +121,15 @@ case "$ARCH" in
   macos-*) PATH="$(dirname "$(readlink "$prefix/masc")")/python/bin:$PATH"; export PATH ;;
 esac
 
-for a in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
+for a in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap; do
   [ -x "$prefix/$a" ] || { echo "install-smoke: installer did not place $a" >&2; exit 1; }
 done
-echo "install-smoke: installer placed all five executables"
+echo "install-smoke: installer placed all six executables"
 "$prefix/masc-tui" --help > "$work/tui-help.txt"
 "$prefix/masc-browser-host" --help > "$work/browser-host-help.txt"
+"$prefix/masc-exec-ssh-bootstrap" --help > "$work/ssh-bootstrap-help.txt"
+grep -q -- '--endpoint' "$work/ssh-bootstrap-help.txt"
+grep -q -- '--keeper' "$work/ssh-bootstrap-help.txt"
 
 
 shim_dest="$base/.masc/microvm/shim/masc-exec-shim"

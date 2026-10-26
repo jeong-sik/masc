@@ -1112,7 +1112,7 @@ uninstall_masc() {
     die "unfinished installation transaction at $uninstall_prefix/.masc-install-transaction; recover or roll back that installation before uninstalling"
   fi
   local targets=()
-  for name in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight; do
+  for name in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap; do
     target="$uninstall_prefix/$name"
     [ ! -d "$target" ] || [ -L "$target" ] || die "refusing to remove unexpected executable directory: $target"
     targets+=("$target")
@@ -1317,6 +1317,7 @@ TUI_ASSET="masc-tui-$PLATFORM_SUFFIX"
 BROWSER_HOST_ASSET="masc-browser-host-$PLATFORM_SUFFIX"
 PREFLIGHT_HELPER_ASSET="masc-deployment-preflight-helper-$PLATFORM_SUFFIX"
 PREFLIGHT_GATE_ASSET="masc-check-runtime-deployment-preflight-$PLATFORM_SUFFIX"
+SSH_BOOTSTRAP_ASSET="masc-exec-ssh-bootstrap-$PLATFORM_SUFFIX"
 DASHBOARD_ASSET="masc-dashboard-$PLATFORM_SUFFIX.tar.gz"
 BUNDLE_HELPER_ASSET="masc-release-dashboard-bundle-$PLATFORM_SUFFIX.py"
 log "platform: $ASSET"
@@ -1446,6 +1447,7 @@ TUI_DEST="$PREFIX/masc-tui"
 BROWSER_HOST_DEST="$PREFIX/masc-browser-host"
 PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"
 PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"
+SSH_BOOTSTRAP_DEST="$PREFIX/masc-exec-ssh-bootstrap"
 
 model_catalog_env_value() {
   if [ -n "${AGENT_CORE_MODEL_CATALOG:-}" ]; then
@@ -1575,6 +1577,7 @@ install_release_companion "$TUI_ASSET" "$TUI_DEST"
 install_release_companion "$BROWSER_HOST_ASSET" "$BROWSER_HOST_DEST"
 install_release_companion "$PREFLIGHT_HELPER_ASSET" "$PREFLIGHT_HELPER_DEST"
 install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
+install_release_companion "$SSH_BOOTSTRAP_ASSET" "$SSH_BOOTSTRAP_DEST"
 
 # The guest exec shim (RFC-0427 B-2). The release ships one static Linux
 # binary per guest architecture; the guest is arm64 on an Apple Silicon host

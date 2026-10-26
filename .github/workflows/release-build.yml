@@ -154,7 +154,8 @@ jobs:
             bin/main_eio.exe \
             bin/masc_tui.exe \
             bin/masc_browser_host.exe \
-            bin/deployment_preflight_helper.exe
+            bin/deployment_preflight_helper.exe \
+            bin/masc_exec_ssh_bootstrap.exe
 
       # Built in a container whose glibc is the support floor, not on the
       # runner. A binary records the oldest glibc that provides each symbol it
@@ -297,6 +298,8 @@ jobs:
           cp "$MASC_BIN_DIR"/masc_browser_host.exe dist/masc-browser-host-${{ matrix.arch }}
           cp "$MASC_BIN_DIR"/deployment_preflight_helper.exe \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }}
+          cp "$MASC_BIN_DIR"/masc_exec_ssh_bootstrap.exe \
+            dist/masc-exec-ssh-bootstrap-${{ matrix.arch }}
           cp scripts/check-runtime-deployment-preflight.sh \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
           chmod +x dist/masc-${{ matrix.arch }}
@@ -304,7 +307,8 @@ jobs:
           chmod +x dist/masc-browser-host-${{ matrix.arch }}
           chmod +x \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
-            dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
+            dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }} \
+            dist/masc-exec-ssh-bootstrap-${{ matrix.arch }}
 
       # The build step enforces the floor on what it produced; this enforces it
       # on what actually ships. The two differ if a copy goes wrong, if a step
@@ -324,7 +328,8 @@ jobs:
             dist/masc-${{ matrix.arch }} \
             dist/masc-tui-${{ matrix.arch }} \
             dist/masc-browser-host-${{ matrix.arch }} \
-            dist/masc-deployment-preflight-helper-${{ matrix.arch }}
+            dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
+            dist/masc-exec-ssh-bootstrap-${{ matrix.arch }}
 
       - name: Bundle relocatable macOS libraries and Python
         if: runner.os == 'macOS'
@@ -353,6 +358,7 @@ jobs:
             --archive "dist/masc-dashboard-${{ matrix.arch }}.tar.gz" \
             --companion masc-tui "dist/masc-tui-${{ matrix.arch }}" \
             --companion masc-browser-host "dist/masc-browser-host-${{ matrix.arch }}" \
+            --companion masc-exec-ssh-bootstrap "dist/masc-exec-ssh-bootstrap-${{ matrix.arch }}" \
             --companion masc-deployment-preflight-helper "dist/masc-deployment-preflight-helper-${{ matrix.arch }}" \
             --companion masc-check-runtime-deployment-preflight "dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}" \
             ${runtime_args[@]+"${runtime_args[@]}"}
@@ -521,6 +527,7 @@ jobs:
               "masc-browser-host-$arch" \
               "masc-deployment-preflight-helper-$arch" \
               "masc-check-runtime-deployment-preflight-$arch" \
+              "masc-exec-ssh-bootstrap-$arch" \
               "masc-dashboard-$arch.tar.gz" \
               "masc-release-dashboard-bundle-$arch.py"; do
               if [ ! -f "dist/$asset" ]; then

@@ -13,7 +13,7 @@ import tempfile
 import urllib.request
 
 NAMES = ('masc', 'masc-tui', 'masc-browser-host', 'masc-deployment-preflight-helper',
-         'masc-check-runtime-deployment-preflight')
+         'masc-check-runtime-deployment-preflight', 'masc-exec-ssh-bootstrap')
 MACH = {b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'}
 
 # Run inside the staged interpreter. HTTP rejection is still a response over
@@ -246,6 +246,7 @@ def package(dist, stage, platform, commit, lock_path):
     for command in ([str(stage.resolve() / 'masc'), 'build-commit'],
                     [str(stage.resolve() / 'masc-tui'), '--help'],
                     [str(stage.resolve() / 'masc-deployment-preflight-helper'), '--help'],
+                    [str(stage.resolve() / 'masc-exec-ssh-bootstrap'), '--help'],
                     [str(stage.resolve() / 'python/bin/python3'), '-I', '-c',
                      PYTHON_HTTPS_PROBE]):
         subprocess.run(['/usr/bin/sandbox-exec', '-p', profile, *command], env=clean, check=True)

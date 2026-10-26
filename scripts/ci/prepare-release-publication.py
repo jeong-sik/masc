@@ -120,6 +120,7 @@ def validate_distribution(directory, checkout):
         expected.update({f'masc-{arch}', f'masc-tui-{arch}', f'masc-browser-host-{arch}',
                          f'masc-deployment-preflight-helper-{arch}',
                          f'masc-check-runtime-deployment-preflight-{arch}',
+                         f'masc-exec-ssh-bootstrap-{arch}',
                          f'masc-dashboard-{arch}.tar.gz', f'masc-release-dashboard-bundle-{arch}.py',
                          f'masc-runtime-{arch}.tar.gz'})
     actual = {p.name for p in directory.iterdir()}

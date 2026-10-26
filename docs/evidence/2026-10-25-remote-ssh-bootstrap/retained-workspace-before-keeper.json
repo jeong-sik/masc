@@ -1,0 +1,11 @@
+{
+  "cwd": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+  "hostname": "7c0b77a2fd78",
+  "uid": 1000,
+  "files": [
+    "retained file.bin"
+  ],
+  "preserved_files": {
+    "retained file.bin": "6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21"
+  }
+}

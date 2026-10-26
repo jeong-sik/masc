@@ -57,13 +57,14 @@
 #                                       [--keep-build] [--no-guest-shim]
 #                                       [--no-browser-addon]
 #   --prefix        where masc, masc-tui, masc-browser-host, the browser Add-on
-#                   programs and the deployment preflight pair go (default
+#                   programs, SSH bootstrap and deployment preflight pair go (default
 #                   ~/.local/bin)
 #   --manifest-dir  Firefox native messaging manifests (default: the per-user directory)
 #   --skip-build    install what --build-dir already holds
 #   --build-dir     directory holding main_eio.exe, masc_tui.exe, masc_browser_host.exe,
 #                   masc_native_addon_launcher.exe, masc_browser_addon_worker.exe,
-#                   masc_browser_process_owner.exe and deployment_preflight_helper.exe
+#                   masc_browser_process_owner.exe, deployment_preflight_helper.exe,
+#                   and masc_exec_ssh_bootstrap.exe
 #                   (default <repo>/_build/default/bin)
 #   --base-path     workspace whose runtime.toml the new build must accept, and
 #                   whose browser lane host is brought up to this build when no
@@ -142,7 +143,7 @@ if [ "$skip_build" = false ]; then
   # older than the pin. --root: a worktree under .worktrees sits inside the
   # parent checkout's dune project, which excludes that directory.
   build_targets=(./bin/main_eio.exe ./bin/masc_tui.exe ./bin/masc_browser_host.exe
-    ./bin/deployment_preflight_helper.exe)
+    ./bin/deployment_preflight_helper.exe ./bin/masc_exec_ssh_bootstrap.exe)
   if [ "$browser_addon" = true ]; then
     for program in "${browser_addon_programs[@]}"; do
       build_targets+=("./bin/$program.exe")
@@ -166,6 +167,10 @@ fi
 # still change a value this build refuses. The helper names the workspace the
 # way masc does; this script only reads its answer.
 preflight_helper="$build_dir/deployment_preflight_helper.exe"
+if [ ! -x "$build_dir/masc_exec_ssh_bootstrap.exe" ]; then
+  echo "install-local-build: missing executable $build_dir/masc_exec_ssh_bootstrap.exe; nothing installed" >&2
+  exit 1
+fi
 if [ "$skip_build" = true ]; then
   build_hint="Build it, or drop --skip-build."
 else
@@ -461,11 +466,12 @@ else
   done
 fi
 install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deployment-preflight-helper"
+install -m 755 "$build_dir/masc_exec_ssh_bootstrap.exe" "$prefix/masc-exec-ssh-bootstrap"
 install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"
 if [ "$browser_addon" = true ]; then
-  echo "installed masc, masc-tui, masc-browser-host, masc-native-addon-launcher, masc-browser-addon-worker, masc-browser-process-owner, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight into $prefix"
+  echo "installed masc, masc-tui, masc-browser-host, masc-native-addon-launcher, masc-browser-addon-worker, masc-browser-process-owner, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix"
 else
-  echo "installed masc, masc-tui, masc-browser-host, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight into $prefix (no browser Add-on)"
+  echo "installed masc, masc-tui, masc-browser-host, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix (no browser Add-on)"
 fi
 
 # The masc just installed writes the browser Add-on package it carries into

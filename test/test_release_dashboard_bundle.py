@@ -200,7 +200,8 @@ class Distribution(unittest.TestCase):
         mirror = self.root / "release" / "v9.9.9"
         mirror.mkdir(parents=True)
         for name in [self.asset, "masc-tui-" + self.arch, "masc-browser-host-" + self.arch, "masc-deployment-preflight-helper-" + self.arch,
-                     "masc-check-runtime-deployment-preflight-" + self.arch]:
+                     "masc-check-runtime-deployment-preflight-" + self.arch,
+                     "masc-exec-ssh-bootstrap-" + self.arch]:
             shutil.copy2(self.binary, mirror / name)
         companions = [(name, self.binary) for name in sorted(bundle.COMPANIONS)]
         runtime = None
@@ -313,6 +314,8 @@ class Distribution(unittest.TestCase):
         result = self.run_installer(mirror)
         self.assertEqual(result.returncode, 0, result.stderr)
         installed = (self.prefix / "masc").resolve()
+        self.assertEqual((self.prefix / "masc-exec-ssh-bootstrap").read_bytes(),
+                         (mirror / ("masc-exec-ssh-bootstrap-" + self.arch)).read_bytes())
         bundle.verify_tree(installed.parent, self.asset)
         command = next(line.strip() for line in result.stdout.splitlines()
                        if line.startswith('  env '))
@@ -324,6 +327,15 @@ class Distribution(unittest.TestCase):
         again = self.run_installer(mirror)
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertEqual((self.prefix / "masc").resolve(), installed)
+
+    def test_missing_ssh_bootstrap_asset_does_not_replace_installed_binary(self):
+        previous = self.old()
+        mirror = self.mirror()
+        (mirror / ("masc-exec-ssh-bootstrap-" + self.arch)).unlink()
+        result = self.run_installer(mirror, ["--force"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.prefix / "masc").read_bytes(), previous)
+        self.assertFalse((self.prefix / "masc-exec-ssh-bootstrap").exists())
 
     def test_real_installer_later_smoke_failure_restores_previous_binary(self):
         previous = self.old()

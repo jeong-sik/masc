@@ -67,6 +67,7 @@ release_binaries=(
   bin/masc_tui.exe
   bin/masc_browser_host.exe
   bin/deployment_preflight_helper.exe
+  bin/masc_exec_ssh_bootstrap.exe
 )
 
 # Run inside the container with --run-contract-test, not exported and run on

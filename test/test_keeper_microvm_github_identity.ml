@@ -76,6 +76,8 @@ let unconfigured () = captured_value (Github.captured_tool_identity_of_files [])
 
 let configured f =
   let config = Masc.Workspace.default_config f.base_path in
+  let keepers = Masc.Workspace.keepers_runtime_dir config in
+  if not (Sys.file_exists keepers) then Unix.mkdir keepers 0o700;
   let directory = captured_value (Github.ensure_config_dir ~config ~keeper_name) in
   let hosts = "github.com:\n    user: fixture\n    oauth_token: fake-identity-store-token\n    git_protocol: https\n" in
   write (Filename.concat directory "hosts.yml") hosts;

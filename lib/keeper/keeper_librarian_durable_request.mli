@@ -20,6 +20,9 @@ val owner_to_json : owner -> Yojson.Safe.t
 val owner_matches_json : owner -> Yojson.Safe.t -> (unit, string) result
 val fresh_request_id : owner -> string
 val scope_of_request_id : string -> (string, string) result
+val minted_on : string -> (string, string) result
+(** The UTC day, [YYYY-MM-DD], this history request ID was minted. A finished
+    replacement chain settles under the day of its root. *)
 val observe_record_owner : base_path:string -> keepers_dir:string ->
   Lane_addon_tool_request_owner.retained -> (owner, string) result
 

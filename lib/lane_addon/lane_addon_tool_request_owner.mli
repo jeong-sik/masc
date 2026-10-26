@@ -146,6 +146,8 @@ module For_testing : sig
       propagate. No writer is called for a rejected or already-stored batch.
       Production {!advance_events} uses [Lane_addon_store.save_tool_request_owner]. *)
 end
+val listed : retained -> Record.t
+(** The record {!discover} lists for this retained original, without its body. *)
 type settle_error = Settle_unavailable of string | Settle_changed
 val settle : store:Lane_addon_store.t -> date:string -> Record.t -> (unit, settle_error) result
 (** Move one original, its record and then its body, into the settled archive

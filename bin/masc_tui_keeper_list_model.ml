@@ -178,16 +178,9 @@ let primary_activity_of_row row =
         Verifying
       else if queued > 0 || cancelling > 0 then External_waiting
       else if waiting_state row = Some Keeper_waiting_blocked then External_waiting
-      else
-        match activity, waiting_state row with
-        | Some Masc.Tui_decode.Keeper_activity_idle, _ -> Idle
-        | _, Some Keeper_waiting_idle -> Idle
-        | Some Masc.Tui_decode.Keeper_activity_unknown, _ -> Unknown
-        | None, _ -> Unknown
-        | Some (Masc.Tui_decode.Keeper_activity_waiting | Masc.Tui_decode.Keeper_activity_running
-               | Masc.Tui_decode.Keeper_activity_streaming | Masc.Tui_decode.Keeper_activity_tool
-               | Masc.Tui_decode.Keeper_activity_preparing | Masc.Tui_decode.Keeper_activity_attempt_failed), _ ->
-            External_waiting)
+      else if activity = Some Masc.Tui_decode.Keeper_activity_idle
+              || waiting_state row = Some Keeper_waiting_idle then Idle
+      else Unknown)
     | Some Masc.Tui_decode.Keeper_activity_attempt_failed -> Failure
 
 let badges_of_row row =

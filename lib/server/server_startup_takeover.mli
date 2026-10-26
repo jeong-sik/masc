@@ -1,7 +1,3 @@
-type acquire_result =
-  | Acquired
-  | Already_running of { pid : int }
-
 type base_path_lease
 
 type base_path_lock_rejection =
@@ -106,83 +102,6 @@ val base_path_contention_message :
   base_path:string -> lock_path:string -> base_path_owner -> string
 (** Recovery guidance shared by HTTP and stdio entrypoints. *)
 
-val pid_lock_path : int -> string
-
-val status_line_is_healthy : string -> bool
-
-(** When [pid] started, as a source-tagged token: ["proc:<boot_id>:<ticks>"]
-    from /proc/sys/kernel/random/boot_id and field 22 of /proc/<pid>/stat
-    where procfs is mounted, otherwise
-    ["ps:<lstart>"] from [ps -o lstart=] (C locale, UTC). [None] when neither
-    can report it. The pid lock records its writer's token next to the pid,
-    and a takeover signals a live, unresponsive holder only when the two are
-    equal: pid numbers are reused, a (pid, start time) pair is not. *)
-val process_started : int -> string option
-
-(** State of a recorded PID as the takeover reads it. [Zombie] is a process
-    that exited and awaits its parent's reap: [kill pid 0] still succeeds, but
-    it holds no port and never answers, so its lock is stale. *)
-type process_state =
-  | Running
-  | Zombie
-  | Gone
-
-(** [signal_reachable] is whether [kill pid 0] succeeded; [ps_stat] is the
-    output of [ps -o stat=], [None] when ps could not report. *)
-val process_state_of_observation :
-  signal_reachable:bool -> ps_stat:string option -> process_state
-
-val acquire_pid_lock :
-  ?lock_path:string ->
-  ?probe_timeout_sec:float ->
-  ?term_timeout_sec:float ->
-  ?kill_wait_sec:float ->
-  ?poll_interval_sec:float ->
-  int ->
-  acquire_result
-
-(** Path of the takeover forensics breadcrumb derived from [lock_path]
-    (the pid-lock file the takeover contends on). *)
-val takeover_breadcrumb_path : lock_path:string -> string
-
-(** Written by the killer immediately before signalling an unresponsive
-    incumbent during [acquire_pid_lock], so the victim's SIGTERM path (or the
-    next boot, after a SIGKILL escalation) can attribute the shutdown to this
-    takeover instead of an unknown external sender. Best-effort: a write
-    failure logs a warning and never blocks lock acquisition. *)
-val write_takeover_breadcrumb :
-  lock_path:string -> port:int -> target_pid:int -> signal_name:string -> unit
-
-type takeover_breadcrumb =
-  { breadcrumb_path : string
-  ; age_sec : float
-  ; killer_pid : int option
-      (** Parsed from the payload for self-filtering at boot; [None] when the
-          payload is not the expected JSON shape. The raw [payload] is always
-          preserved for logging. *)
-  ; payload : string
-  }
-
-type takeover_breadcrumb_read =
-  | Breadcrumb_found of takeover_breadcrumb
-  | Breadcrumb_stale of
-      { breadcrumb_path : string
-      ; age_sec : float
-      }
-  | Breadcrumb_absent
-  | Breadcrumb_unreadable of
-      { breadcrumb_path : string
-      ; reason : string
-      }
-
-(** Reads the breadcrumb next to [lock_path]. [max_age_sec] (default 600 s,
-    covering the supervisor restart cooldown plus a slow boot) bounds how old
-    a breadcrumb may be to still explain the current signal; older files are
-    reported as [Breadcrumb_stale] so a previous incident is never mistaken
-    for the present one. *)
-val read_takeover_breadcrumb :
-  ?max_age_sec:float -> lock_path:string -> unit -> takeover_breadcrumb_read
-
 (** Acquire the process-lifetime owner lease below a current-UID-owned [0700]
     private directory in the explicitly supplied host run root, then establish
     and validate [<base_path>/.masc]. A group- or world-writable [run_dir] is
@@ -191,11 +110,10 @@ val read_takeover_breadcrumb :
 
     The effective UID is the host trust principal: the private directory blocks
     mutation by other UIDs, while processes already running as that UID are in
-    the same host authority domain. Malicious same-UID rename, unlink, or chmod
-    is outside the portable boundary because OCaml 5.4 exposes no
-    [openat]/dirfd-relative no-follow API. Acquisition revalidates directory and
-    file identities at every commit boundary and fails closed on an observed
-    change; the residual lifetime race is tracked by #24344. *)
+    the same host authority domain. Acquisition revalidates directory and file
+    identities at every commit boundary and fails closed on an observed change.
+    The retained lease descriptor does not make later path-based persistence
+    descriptor-relative; the residual lifetime boundary is tracked by #24344. *)
 val acquire_base_path_lock :
   run_dir:string ->
   string ->
@@ -216,18 +134,6 @@ val prepare_base_path_lease_exec_handoff :
   (unit, base_path_lock_rejection) result
 
 module For_testing : sig
-  val acquire_pid_lock_with_start_reader :
-    started_for_pid:(int -> string option) ->
-    ?lock_path:string ->
-    ?probe_timeout_sec:float ->
-    ?term_timeout_sec:float ->
-    ?kill_wait_sec:float ->
-    ?poll_interval_sec:float ->
-    int ->
-    acquire_result
-  (** Injects start-token observations while keeping the real signal and wait
-      path. Used to model PID reuse during the TERM grace deterministically. *)
-
   (** Immutable synchronization boundaries around the external lease open and
       the final identity checks. Production acquisition closes over no-op
       functions; no mutable test hook is reachable from production callers.

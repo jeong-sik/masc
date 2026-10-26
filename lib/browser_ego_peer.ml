@@ -66,7 +66,6 @@ let result_marker = "masc-ego-result "
 type page = Managed of string | Unmanaged of string
 
 type input_state = Released | Release_uncertain
-  | Dialog_pointer of { tab_id : int; button : Browser_lane.Native_workflow.pointer_button }
 
 type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
 
@@ -742,15 +741,11 @@ let close_tab t id =
 let no_dialog_refused = "no dialog is open in this tab"
 let answer_dialog t id ~accept text =
   let* label = label_of t id in
-  let release = match t.input_state with
-    | Dialog_pointer {tab_id;button} when tab_id=id -> Some button
-    | Released | Release_uncertain | Dialog_pointer _ -> None in
   let action, interaction = if accept then "accept_dialog", Browser_lane.Action.Accept_dialog text
     else "dismiss_dialog", Browser_lane.Action.Dismiss_dialog in
   match run_step t ~window_s:(tab_window id interaction) ~step:"page.dialog"
           ~args:(obj ["label",str label;"tabId",`Int id;"accept",`Bool accept;
-            "text",(match text with Some text -> str text | None -> `Null);
-            "releaseButton",(match release with None -> `Null | Some button -> str (Browser_lane.Native_workflow.pointer_button_name button))]) (String.concat "\n" [
+            "text",(match text with Some text -> str text | None -> `Null)]) (String.concat "\n" [
       agent_page;
       "    const page = task.page(args.label);";
       "    const open = " ^ open_dialog "page" ^ ";";
@@ -758,22 +753,12 @@ let answer_dialog t id ~accept text =
       "    else {";
       "      const answered = !args.accept ? await page.dismissDialog() : args.text === null ? await page.acceptDialog() : await page.acceptDialog(args.text);";
       "      if (answered === false) emit({ok: false, before: true, error: " ^ Yojson.Safe.to_string (str no_dialog_refused) ^ "});";
-      "      else {";
-      "        let inputReleased = false;";
-      "        if (args.releaseButton !== null) {";
-      "          await page.mouse.up({button: args.releaseButton});";
-      "          inputReleased = !(await page.info()).dialog;";
-      "        }";
-      "        emit({ok: true, value: {dialog: open, inputReleased}});";
-      "      }";
+      "      else emit({ok: true, value: {dialog: open}});";
       "    }";
       "  }" ]) with
   | Error failure ->
     Error (effect_failure ~unknown:(Printf.sprintf "the dialog of tab %d may have been answered: list this connection's tabs" id) failure)
   | Ok value ->
-    (match release with
-     | Some _ when field "inputReleased" value = Some (`Bool true) -> t.input_state <- Released
-     | Some _ | None -> ());
     let answered = match field "dialog" value with
       | Some dialog -> (match ego_dialog dialog with Ok dialog -> ["dialog",Browser_surface.dialog_json dialog] | Error _ -> [])
       | None -> [] in
@@ -850,7 +835,7 @@ let upload t id ~selector ~paths =
 let choose_files ?actor t id ~opener ~paths =
   let* () = match t.input_state with
     | Released -> Ok ()
-    | (Release_uncertain | Dialog_pointer _) -> Error (Live.Before_effect
+    | Release_uncertain -> Error (Live.Before_effect
         "ego input release is unconfirmed; read the browser, then end this task space before opening a fresh connection") in
   let* label = label_of t id in
   let* chosen = chosen_files paths in
@@ -1248,7 +1233,7 @@ let interact ?actor t args =
   let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url action in
   let* () = match t.input_state with
     | Released -> Ok ()
-    | (Release_uncertain | Dialog_pointer _) -> Error (Live.Before_effect
+    | Release_uncertain -> Error (Live.Before_effect
         "ego input release is unconfirmed; read the browser, then end this task space before opening a fresh connection") in
   let* () = match request.action with
     | Browser_lane.Drag_to {duration_ms;_} | Browser_lane.Drag {duration_ms;_} when duration_ms <> 0 ->
@@ -1407,7 +1392,7 @@ let workflow ?actor t args =
   let* _ = pre (Browser_page_script.text_cap (Some request.max_chars)) in
   let* label = label_of t request.tab_id in
   let* () = match t.input_state with Released -> Ok ()
-    | (Release_uncertain | Dialog_pointer _) -> Error (Live.Before_effect "ego input release is unconfirmed; inspect and end this task space before more input") in
+    | Release_uncertain -> Error (Live.Before_effect "ego input release is unconfirmed; inspect and end this task space before more input") in
   let arguments = match Browser_lane.Native_workflow.to_json request with
     | `Assoc fields -> obj (("label",str label)::("cursor",str (cursor_label ~actor ~verb:"workflow"))::fields)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
@@ -1429,18 +1414,13 @@ let workflow ?actor t args =
     let* outcome=Browser_ego_workflow.decode request value |> Result.map_error unknown in
     let input_released=match outcome with Browser_ego_workflow.Completed _ -> true
       | Stopped {input_released;_} -> input_released in
-    if holds_input then
-      (if input_released then t.input_state <- Released
-       else match outcome with
-         | Browser_ego_workflow.Stopped {pending_pointer_release=Some button;_} ->
-           t.input_state <- Dialog_pointer {tab_id=request.tab_id;button}
-         | Browser_ego_workflow.Completed _ | Stopped {pending_pointer_release=None;_} -> ());
+    if holds_input && input_released then t.input_state <- Released;
     let receipt_of value=match value with
       | `Assoc fields -> Ok (obj (("tabId",`Int request.tab_id)::("action",str "workflow")::fields))
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (unknown "workflow receipt is not an object") in
     match outcome with
     | Browser_ego_workflow.Completed value -> receipt_of value
-    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input_released=_;pending_pointer_release=_} ->
+    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input_released=_} ->
       let message=head detail ^ "; read the same tab before continuing; never replay the workflow" in
       if completed_effect then
         let* receipt=receipt_of value in Error (Live.Partial_failure {tab_id=request.tab_id;receipt;message})

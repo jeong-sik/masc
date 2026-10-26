@@ -29,10 +29,6 @@ type action =
   | Wait_for_function of page_code
   | Fetch of string
 type step = { action : action; options : native_options option }
-type pointer_button = Left | Middle | Right
-(** The exact button owned by a pointer action; [None] for all other actions. *)
-val pointer_button : step -> pointer_button option
-val pointer_button_name : pointer_button -> string
 type snapshot_scope = Viewport | Full_page
 type t = private { tab_id : int; expected_url : string; steps : step list;
   snapshot_scope : snapshot_scope; max_chars : int }
@@ -55,7 +51,8 @@ type t = private { tab_id : int; expected_url : string; steps : step list;
 val of_json : Yojson.Safe.t -> (t, string) result
 val to_json : t -> Yojson.Safe.t
 val is_effect : action -> bool
-(** May leave a pointer button or key held when the SDK result is lost. *)
+(** May leave a pointer button or key held when the SDK result is lost or
+    interrupted by a dialog. Paste uses the SDK's ControlOrMeta+V sequence. *)
 val holds_input : action -> bool
 
 val method_name : action -> string

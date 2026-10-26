@@ -131,9 +131,9 @@ jobs:
                   arguments=(--browser-screenshot)
                 fi
                 python3 -c 'import json,sys; print(json.dumps({"suite":sys.argv[1],"arguments":sys.argv[2:]}))' \
-                  "$suite" "${arguments[@]}" >> proof/test-invocations.jsonl
+                  "$suite" ${arguments[@]+"${arguments[@]}"} >> proof/test-invocations.jsonl
                 set +e
-                "_build/default/$target" "${arguments[@]}" </dev/null 2>&1 | tee "proof/$suite.log"
+                "_build/default/$target" ${arguments[@]+"${arguments[@]}"} </dev/null 2>&1 | tee "proof/$suite.log"
                 result=("${PIPESTATUS[@]}")
                 set -e
                 printf '%s\t%s\t%s\n' "$suite" "${result[0]}" "${result[1]}" >> proof/test-results.tsv

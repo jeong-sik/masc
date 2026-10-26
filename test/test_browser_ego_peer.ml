@@ -798,7 +798,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.goto" | "page.history" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/next";"title",str "Next"]])
     | "page.close" -> answered (obj ["closed",`Bool true])
     | "page.dialog" -> answered (obj ["dialog",ego_dialog "alert" "hello"])
-    | "space.hand_off" -> answered `Null
+    | "space.hand_off" -> answered (obj ["spaceId",`Int 51;"spaceName",str "masc"])
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.target" -> answered resolved
@@ -1107,6 +1107,7 @@ const seen = [];
 process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
 const taskSpace = async space => ({
   spaceId: space,
+  name: "MASC login",
   ownership: %s,
   tabs: async () => { seen.push("tabs"); return [{label: "p1", openedBy: "agent", url: "https://app.slack.com/", title: "Slack", active: true}]; },
   page: () => ({info: async () => ({url: "https://app.slack.com/"})}),
@@ -1131,7 +1132,9 @@ let test_the_space_goes_to_the_operator_and_back () =
   let answer label = function
     | Ok answer -> Yojson.Safe.to_string answer
     | other -> failf "%s was %s" label (failure_kind other) in
-  check string "the space is handed to the operator" {|{"action":"hand_off"}|} (answer "hand-off" (act Lane.Action.Hand_off));
+  check string "the hand-off identifies the same space for the operator"
+    {|{"action":"hand_off","spaceId":51,"spaceName":"MASC login"}|}
+    (answer "hand-off" (act Lane.Action.Hand_off));
   check string "by ego's own handOff" {|["handOff"]|} (seen ());
   ownership := "agentDelegatedToUser";
   check bool "while the operator holds it, a step is refused before any effect" true

@@ -83,6 +83,17 @@ the current receipt contains only popup and dialog information. See the
 [pointer implementation](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/driver/page-actions.ts#L1183)
 and [keyboard implementation](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/driver/page-keyboard.ts#L115).
 
+For login, 2FA or captcha, hand the same live client to the operator with
+`BrowserAct action=hand_off`. Its receipt names `spaceId` and `spaceName` from
+that TaskSpace before handoff; no Page operation follows the handoff. Use those
+values in `masc_ask` with the required human step, original Task/Goal binding and
+browser/tab context. Await explicit completion before `take_over`, then list
+tabs and observe the page to verify login. A question or an invisible-window
+report is not completion. See the [Keeper procedure](../../skills/browser-lanes/references/connection.md#로그인인증-인계).
+These tools are composed by the Keeper; handoff does not automatically create
+an Ask, show a window, or verify credentials. The identity receipt and guidance
+are source changes; a real Keeper login handoff remains unverified.
+
 `evaluate` and `waitForFunction` take browser `source` and optional
 `argumentJson`. The source never executes in the host Node process. Page code,
 including a wait predicate, can have effects before failing. `fetch` accepts

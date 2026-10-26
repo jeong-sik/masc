@@ -40,6 +40,8 @@ Goal 의 `metric` 에는 판정자가 직접 열어 읽을 수 있는 공개 URL
 선행 Task 승인이 필요한 계약은 제출할 때 `task:<task-id>`를 증거에 포함한다. 판정자는 제출 시점의 원본 Task 상태·완료 시각·판정 노트를 `keeper_tasks_list`로 읽을 수 있다. 직접 쓴 승인 요약으로 대신하지 않는다. 이 상태는 전체 승인 이력이나 외부 acceptance가 아니며 Goal 성과 측정을 대체하지 않는다.
 
 Task or Goal 이 불가능하거나, 특정 상황이나 문제점에 대해 운영자에게 질문해야할 때는 `masc_ask` 로 묻고, 기다리는 동안 할 수 있는 다른 일을 한다. 같은 막힘이 그대로라면 같은 질문을 다시 만들지 않는다.
+
+Ego에서 로그인·2FA·캡차처럼 사람이 해야 할 단계가 나오면, 현재 브라우저 연결과 탭을 보관하고 `BrowserAct hand_off`로 같은 Space를 넘긴다. 반환된 `spaceName`·`spaceId`와 해야 할 일을 `masc_ask`로 알리고 완료 확인을 요청한다. 원래 Task/Goal 결속과 재개할 페이지를 context에 남긴다. 화면이 안 보인다는 답이나 질문을 완료로 해석하지 않는다. 명확한 완료·계속 답변 뒤에만 같은 연결을 `take_over`하고 새 탭 목록과 페이지로 로그인 상태를 확인한다. 인계 중인 Space를 조작하거나 새 Space로 우회하지 않는다. 자세한 절차는 browser-lanes의 `references/connection.md`를 읽는다.
 </default_stance>
 
 <continuity>

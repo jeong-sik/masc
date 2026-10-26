@@ -119,6 +119,10 @@ module Make (Capture : Capture) : sig
         Not an atomic cross-scope snapshot, global cache or effect authority. *)
     val record_count : t -> int
     (** Gate records this observation decoded. Pass observation only. *)
+    val executions : t -> string list
+    (** Every execution ID the observed gate records name. *)
+    val execution_records : t -> execution_id:string -> Lane_addon_tool_request_owner.retained list
+    (** The observed gate records of one execution, in scope order. *)
     val validate : t -> capture:Capture.t -> parent:Lane_addon_tool_request_owner.retained ->
       (chain, string) Stdlib.result
     (** Bind an already restored original parent to this same-owner observation.

@@ -449,6 +449,9 @@ module Inventory = struct
         Records.add execution_id (record::siblings) by_execution)) (Ok (Records.empty,Records.empty)) records in
     Ok {store;owner;by_id;by_execution=Records.map List.rev by_execution}
   let record_count t = Records.cardinal t.by_id
+  let executions t = List.map fst (Records.bindings t.by_execution)
+  let execution_records t ~execution_id =
+    Option.value (Records.find_opt execution_id t.by_execution) ~default:[]
   let validate t ~capture ~(parent : Owner.retained) =
     let store=t.store and owner=t.owner in
     let* () = require (parent.scope=Capture.scope owner && parent.request_id=Capture.request_id capture)

@@ -39,14 +39,14 @@
 |---|---|---|---|
 | 생성 | Keeper에게 단발 메시지를 예약한다 | tool schema → tool_schedule → Schedule_service/store | 소스; wiring 기존 테스트 있음, 이번 미실행 |
 | 생성 | Lane installation/action을 예약한다 | Keeper payload와 구분된 shape, 혼합 shape 거절 | 소스; 실제 Lane worker 이번 미실행 |
-| 생성 | 제목·메시지·대상·알 수 없는 필드를 검증한다 | strict schema/domain/wiring validation | 소스 + domain 실행 |
+| 생성 | 제목·메시지·대상·알 수 없는 필드를 검증한다 | strict schema/domain/wiring validation | 소스; domain 실행은 envelope/반복 규칙에 한정, tool validation 미실행 |
 | 생성 | 상대 지연을 생성 시점 기준으로 적용한다 | tool_wiring의 call-clock 시나리오 | 소스; 이번 미실행 |
 | 생성 | 과거·현재 초 경계 예약의 허용 여부가 일관된다 | tool_wiring past/current-second 및 update changed-time 시나리오 | 소스; 이번 미실행 |
-| 시간 | one-shot 시각·ISO offset을 처리한다 | domain, Time_codec, wiring | domain 실행; tool 경로 미실행 |
+| 시간 | one-shot 시각·ISO offset을 처리한다 | domain, Time_codec, wiring | 소스; production Time_codec의 단발 admission/offset 경로 미실행 |
 | 시간 | interval·daily·cron을 반복한다 | domain next_due 계산 | domain 28건에 포함, 실행 |
 | 시간 | cron 목록·범위·step·요일/날짜 조합을 해석한다 | 5-field grammar; wildcard 및 day OR 규칙 | 실행 |
 | 시간 | 윤일·불가능한 날짜·장기간 다음 날짜를 구분한다 | domain leap/impossible date 시나리오 | 실행 |
-| 시간 | 시간대를 정한다 | UTC/KST/Asia-Seoul 및 고정 offset, DST IANA 거절 | 실행; DST 자동 보정 기능 아님 |
+| 시간 | 시간대를 정한다 | UTC/KST/Asia/Seoul 및 고정 offset, DST IANA 거절 | 실행; DST 자동 보정 기능 아님 |
 | 시간 | runner tick보다 작은 interval을 생성·수정한다 | create/update admission이 거절, 저장된 양수 interval load와 별개 | 소스; wiring 이번 미실행 |
 | 만료 | expires_at을 두고 예약한다 | due/expiry domain 판정; Task 만료와 별도 도메인 | domain 실행; 실제 만료 dispatch 미실행 |
 | 권한 | operator/creator/recipient가 수정·취소한다 | authorize_row_change / authorize_replacement, spoof 거절 | 소스; 기존 권한 테스트 이번 미실행 |

@@ -34,7 +34,7 @@ let () =
   List.iter (fun field -> assert (Result.is_error (Q.of_args (`Assoc [field]))))
     ["task_ids", `List []; "task_ids", `List [`Int 1]; "query", `String " "; "assignee", `Int 1];
   let filter : C.filter =
-    { lifecycle = Q.Active_and_done_tasks
+    { lifecycle = Q.Active_tasks
     ; projection = "compact"
     ; selection = query } in
   let cursor : C.t = {after={priority=seed.priority;created_at=seed.created_at;id=seed.id};filter} in

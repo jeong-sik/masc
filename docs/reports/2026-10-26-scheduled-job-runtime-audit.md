@@ -23,7 +23,8 @@
 - 격리된 임시 base와 loopback 포트를 사용했다. provider endpoint는 연결되지 않는
   `127.0.0.1:9`이며 운영 workspace의 예약·Keeper·runtime 설정은 변경하지 않았다.
 - [입력·응답·검사·재현 스크립트](../evidence/2026-10-26-schedule-runtime-behavior/README.md)를 보존했다.
-  각 서버는 해당 실행이 끝난 뒤 정상 종료됐고 임시 base는 제거됐다.
+  초기 `api-extended-1`과 `retarget-cancel-4`의 서버는 exit 0으로 끝났고 임시 base는 제거됐다.
+  추가 restart run의 exit 124/0은 아래 절에서 별도로 구분한다.
 
 ## 새로 실행한 행동
 
@@ -120,7 +121,7 @@ shutdown 성공 수가 아니다. 따라서 이 실행은 guard 종료 뒤의 �
 | 범위 | 현재 증거와 다음 확인 |
 |---|---|
 | recurrence·timezone·cron·윤일 | domain 28개와 위 짧은 interval downtime 실행; 장기 downtime·daily/cron 통합 실행은 미검증 |
-| continuous busy 중 예약 진입 | #46133–#46135 소스 승인·병합 확인. 이번 바이너리는 그 전 커밋이므로 실제 설치·tool-boundary 양보·소비 완료 미검증 |
+| continuous busy 중 예약 진입 | #46133–#46135 소스 승인·병합 확인. 초기 bc3038a 실행은 그 전 커밋이며, 이후 1ce158d 추가 실행은 paused 시나리오여서 busy/tool-boundary 양보·소비 완료를 검증하지 않음 |
 | paused/offline → Resume/Boot | paused 보존은 이번에 실행. 재개 후 정확한 발생의 처리·ACK·결과 전달은 미검증 |
 | F2 startup recovery 최초 실패 | 현 소스 후보 유지. 같은 process에서 저장소 회복 후 수렴하는지 주입 실행 필요 |
 | F3 권한 확인과 mutation 사이 경합 | 순차 creator/recipient 검사는 통과. retarget과 취소/수정의 결정적인 경합은 미검증 |

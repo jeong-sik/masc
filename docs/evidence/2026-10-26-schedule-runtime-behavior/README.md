@@ -10,17 +10,19 @@ it does not overwrite the earlier component evidence.
 | `retarget-cancel-4` | 17 pass / 1 fail, exit 1 | Explicitly paused, zero-turn A retains the exact occurrence after retarget to B and successful cancel |
 | `restart-expiry-3` | 23 state checks pass, probe exit 0; server exits 124 then 0 | Stored instances, accepted source and notes survive expiry/restart; unaccepted expiry emits no wake; missed interval has one retained wake and a later next due |
 
-Both used installed commit `bc3038a22374705db648bebd7f556223b3e84727`,
+The first two runs used installed commit `bc3038a22374705db648bebd7f556223b3e84727`,
 executable SHA-256 `833298c99525205f929bab74ee6d45a53601c340bd1b084a2473e183c7663a57`.
 The `requested_source` in each provenance file is the checkout observed by the
-harness, not the executed server commit. Both owned servers stopped with exit 0.
+harness, not the executed server commit. Those two owned servers stopped with exit 0.
 
 `api-records.json` retains unmodified request/response records except the large
 health response was omitted. The build/path observation is preserved in each
 provenance file. The final owner status is a selected-field projection, explicitly
 named `owner-final-status-selected.json`; the actual full status response is also
-present in its MCP record. All names, messages, credentials and workspaces were
-created solely for these probes. Bearer tokens and HTTP authentication headers
+present in its MCP record. The disposable-workspace runs use synthetic names,
+messages and credentials created solely for these probes. The separate backend
+request receipts refer to the existing MASC Keeper, not a synthetic Keeper.
+Bearer tokens and HTTP authentication headers
 were never recorded. The image promotion in the F1 probe only records an already
 present host image in the disposable workspace's own catalog; it builds or starts
 no image for the test. Keeper registration still starts its keepalive, so the

@@ -43,34 +43,34 @@ let prepare_read json =
   let* filter=Browser_page_script.elements_filter_of_json (fun key -> List.assoc_opt key fields) in
   let* ()=match mode,(filter.within,filter.selector) with
     | `Elements,((None|Some _),(None|Some _))
-    | (`Text|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),(None,None) -> Ok ()
-    | (`Text|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),((Some _,_)|(_,Some _)) ->
+    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),(None,None) -> Ok ()
+    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),((Some _,_)|(_,Some _)) ->
         Error "within and selector apply to mode elements only" in
   let elements_projection=match filter.within,filter.selector with None,None -> Raw | (Some _,_|_,Some _) -> Scoped_elements filter in
   let top_scene=frame_path=[] && (match mode with `Scene|`Regions -> true
-    | `Text|`Elements|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog -> false) in
+    | `Text|`Html|`Elements|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog -> false) in
   let* ()=if not top_scene && List.exists (fun key -> List.mem_assoc key fields)
       ["scope";"expectedUrl";"navigationSource"] then
       Error "scope, expectedUrl and navigationSource support top-document scene or regions only" else Ok () in
   let* ()=match mode with
     | `Snapshot -> Ok ()
-    | `Text|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog ->
+    | `Text|`Html|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog ->
       if List.exists (fun key -> List.mem_assoc key fields) ["snapshotScope";"root"]
       then Error "snapshotScope and root apply to mode snapshot only" else Ok () in
   let contextual=frame_path<>[] || (match mode with `Frames|`Dialog -> true
-    | `Text|`Elements|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies -> false) in
+    | `Text|`Html|`Elements|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies -> false) in
   if contextual then
     let* ()=match request.route,mode with
       | Browser_selection.Exact B.Automation_route,_ -> Ok ()
       | Exact (Live_route _),(`Text|`Elements|`Frames) -> Ok ()
-      | Exact (Live_route _),(`Dialog|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies) ->
+      | Exact (Live_route _),(`Dialog|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies) ->
           Error "a live browser reads text, elements and frames in a frame; a dialog shows on its BrowserTabs row"
       | Automatic,_|Exact Stagehand_route,_ -> Error "frame and dialog reads require an explicit automation or live browser" in
     let* tab_id=tab request in
     let* mode=match mode with
       | `Text -> Ok (`Text max_chars) | `Elements -> Ok (`Elements filter) | `Frames -> Ok `Frames
       | `Dialog when frame_path=[] -> Ok `Dialog
-      | `Dialog|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies -> Error "framePath supports text, elements and frames" in
+      | `Dialog|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies -> Error "framePath supports text, elements and frames" in
     let projection=match mode with `Elements _ -> elements_projection
       | `Text _|`Frames|`Dialog -> Raw in
     prepared request projection (B.Page_context {tab_id;frame_path;mode})
@@ -112,6 +112,11 @@ let prepare_read json =
         | Automatic|Exact (Live_route _|Stagehand_route) -> Error "cookie reads require automation" in
       let* tab_id=tab request in prepared request Raw (B.Page_cookies {tab_id})
   | `Text -> prepared request Raw (B.Page_read {tab_id=request.tab_id;max_chars=Some max_chars})
+  (* The whole source of the top document; a browser that cannot read it
+     refuses at selection. *)
+  | `Html ->
+      let* ()=match cap with None -> Ok () | Some _ -> Error "maxChars applies to text; html returns the whole document source" in
+      let* tab_id=tab request in prepared request Raw (B.Page_document {tab_id})
   | `Elements -> prepared request elements_projection (B.Page_elements {tab_id=request.tab_id;filter})
   | `Frames|`Dialog -> Error "contextual read requires a frame or dialog mode"
 let prepare ~upload_paths tool json =

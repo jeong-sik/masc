@@ -276,9 +276,15 @@ let test_malformed_arguments_reach_no_browser () =
     ; "a scene with no tab", addon_tool Cap.Read ["lane",`String "automation";"mode",`String "scene"]
     ; "a malformed act", addon_tool Cap.Act []
     ; "an unknown session action", addon_tool Cap.Session ["action",`String "unknown"]
-    ; "a malformed navigation URL", addon_tool Cap.Goto ["url",`Int 1] ];
+    ; "a malformed navigation URL", addon_tool Cap.Goto ["url",`Int 1]
+    ; "a document source read with a text cap", read ["mode",`String "html";"maxChars",`Int 100]
+    ; "a document source read with no tab", addon_tool Cap.Read ["lane",`String "automation";"mode",`String "html"]
+    ; "a document source read in a frame",
+      read ["mode",`String "html";"framePath",`List [`String "#frame"]] ];
   check bool "a well-formed text read goes on to find the browser Add-on" true
-    (reaches_the_addon_lookup (read ["mode",`String "text"]))
+    (reaches_the_addon_lookup (read ["mode",`String "text"]));
+  check bool "a document source read with a tab goes on to find the browser Add-on" true
+    (reaches_the_addon_lookup (read ["mode",`String "html"]))
 
 (* A click or fill on an ego snapshot target goes to a live connection only,
    with expectedUrl. *)

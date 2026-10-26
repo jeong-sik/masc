@@ -38,6 +38,11 @@ sequence and returns one final snapshot. Split the call when intermediate
 results require a new decision. Retain `completed` progress on failure and
 never replay the sequence after uncertain effects.
 
+When the work needs the page's markup, `BrowserRead` `mode = "html"` returns
+the top document's whole source for an observed `tabId`, without `maxChars`.
+A live extension or BiDi connection and automation Firefox serve it; ego and
+Stagehand refuse it before dispatch.
+
 Use `BrowserRead` `mode = "scene"` or `"screenshot"` before coordinate input.
 `BrowserInteract` retains URL, document and viewport guards; `BrowserAct` serves
 the closed tab/frame action set. Inputs, clicks, hover, drag, scrolling and keys

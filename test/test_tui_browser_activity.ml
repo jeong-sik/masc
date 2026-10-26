@@ -13,7 +13,7 @@ let read ?(generation=1) document session =
   A.finish_read request (Ok document) pending
 let loaded ?(lane=Browser_lane.Lane_name.Automation) document = read document (A.create (owner ~lane "A"))
 let receipt ?(durability=R.Durable) ?(registry=R.Exact_output_registry_applied R.Targets_runtime_bindings) () = R.{
-  source_revision="saved";order="9";durability;lock_warnings=[];
+  source_revision="saved";order="9";durability;lock_warnings=[];ignored_legacy_keys=[];
   application={operation="raw";routing_status=Routing_applied;routing_requires_restart=false;routing_applied_at=Not_applied;
     keeper_status=Keeper_not_configured;keeper_requires_restart=false;keeper_applied_at=Not_applied;
     keeper_configured_count=0;keeper_pending_keys=[];keeper_applied_keys=[];keeper_preempted_keys=[];

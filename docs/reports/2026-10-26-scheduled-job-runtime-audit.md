@@ -158,7 +158,10 @@ head `932d071e624ce26c075f486a4e07b0fd9ac1d4ed`, ref `audit/scheduled-job-runtim
 
 동일한 다섯 suite의 새 `Test` [run 40325758202](https://github.com/jeong-sik/masc/actions/runs/40325758202)는
 head `ae6cabc219bccb6eb57726d81c3f8cc99ba3e04e`, ref `audit/scheduled-job-runtime-20261026`로
-접수했다. 접수 상태와 실제 결론은 별개이며, 완료된 성공 결과는 아직 이 보고서에 없다.
+실행해 **conclusion=success**로 완료됐다. 실제 suite-runner artifact를 받아 52/58/22/56/7건,
+총 **195개 case**의 실행과 suite별 OK를 확인했다. admission 원본은 그대로 보존하고 완료 영수증과
+로그 발췌·원본 digest를 추가했다. 이는 해당 head의 타깃 검사이며 전체 회귀·설치된 바이너리·
+실제 provider 전환·F1 수리 성공 증거가 아니다. 이후 감사 문서 head로 CI 결속을 이월하지 않는다.
 
 F1 후속 수리는 현재 target만 확대하는 변경으로 끝내면 안 된다. 이전 instance의 receipt는
 retention으로 잘릴 수 있어 canonical durable queue discovery의 오류를 보존해야 한다.

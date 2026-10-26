@@ -81,3 +81,12 @@ separately in the manifest; the excerpt does not claim to have that digest.
 the actual `Interrupted_by_restart` failure. `targeted-ci-after-restack-admission.json`
 records the new exact-head five-suite dispatch after adopting the existing
 compile fix. Neither an admission nor an in-progress run is a completed pass.
+
+`targeted-ci-after-restack-result.json` records the completed **Test** run
+40325758202, head `ae6cabc219bccb6eb57726d81c3f8cc99ba3e04e`, ref
+`audit/scheduled-job-runtime-20261026`, conclusion **success**. The downloaded
+`suite-runner-log` artifact confirms five suites with 52/58/22/56/7 cases (195 total).
+`targeted-ci-after-restack-excerpt.txt` retains the targeted runner, suite headings
+and success summaries in order, trimming trailing line whitespace. The original
+full-log digest and archive digest are recorded separately. This is targeted CI
+evidence for that head, not whole-feature, real-provider, installed-binary or F1 repair proof.

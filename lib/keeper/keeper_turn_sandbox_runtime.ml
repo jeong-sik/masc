@@ -1367,15 +1367,7 @@ let microvm_start_failure_message failure =
   | Runtime_context_unavailable -> failed "microvm runtime filesystem or Eio execution is unavailable"
   | Guest_identity_store_unavailable error -> failed (Keeper_microvm_github_identity.error_message error)
   | Guest_facts_refused refusal ->
-    let detail = match refusal with
-      | Keeper_microvm_boot_plan.Invalid_requested_plan errors ->
-        "invalid requested plan: " ^ String.concat "; "
-          (List.map Keeper_microvm_boot_plan.invalid_plan_message errors)
-      | Keeper_microvm_boot_plan.Guest_facts_unreadable _ -> "runtime guest facts are unreadable; guest preserved"
-      | Keeper_microvm_boot_plan.Image_command_unavailable detail ->
-        "runtime image command unavailable; guest preserved: " ^ detail
-      | Keeper_microvm_boot_plan.Runtime_reports_other_than_asked _ -> "runtime guest facts disagree with the requested plan; guest preserved" in
-    failed detail
+    failed (Keeper_microvm_boot_plan.refusal_message refusal)
   | Backend_unresolved detail
   | Guest_state_unreadable detail
   | Adopted_guest_volume_unverified detail

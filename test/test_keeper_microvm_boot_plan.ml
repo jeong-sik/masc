@@ -145,6 +145,23 @@ let test_all_runtime_security_disagreements_are_named () =
     (Plan.differences ~image_command plan changed = [Plan.User; Plan.Working_directory; Plan.Command;
       Plan.Mounts; Plan.Root_filesystem; Plan.Capabilities; Plan.Network; Plan.Environment; Plan.Labels])
 
+let test_command_refusal_reports_fields_without_values () =
+  let requested_secret = "requested-private-credential" in
+  let observed_secret = "observed-private-credential" in
+  let plan = {plan with environment = ["CREDENTIAL", requested_secret]} in
+  let actual = {(facts ()) with plan_label = Some (Plan.digest plan);
+    command = ["opam"; "exec"; "--"; "tail"; "-f"; "/dev/null"];
+    environment = ["CREDENTIAL", observed_secret]} in
+  match Plan.assess ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] (Plan.Facts actual) with
+  | Plan.Refuse refusal ->
+    let message = Plan.refusal_message refusal in
+    check string "diagnostic identifies the actual mismatched fields"
+      "runtime guest facts disagree with the requested plan (fields: command, environment); guest preserved"
+      message;
+    List.iter (fun secret -> check bool "diagnostic does not expose credential values" false
+      (Astring.String.is_infix ~affix:secret message)) [requested_secret; observed_secret]
+  | Plan.Matches_plan | Plan.Replace _ -> fail "same-plan command mismatch must preserve and refuse"
+
 let flag_value flag argv =
   let rec find = function
     | key :: value :: _ when key = flag -> Some value
@@ -291,7 +308,8 @@ let () = run "Keeper Apple boot plan"
                  ; test_case "same plan disagrees with runtime" `Quick test_label_separates_change_from_runtime_disagreement
                  ; test_case "identity and runtime refusal order" `Quick test_identity_refusal_priority
                  ; test_case "unreadable facts preserve guest" `Quick test_unreadable_is_not_replacement
-                 ; test_case "every security disagreement is retained" `Quick test_all_runtime_security_disagreements_are_named]
+                 ; test_case "every security disagreement is retained" `Quick test_all_runtime_security_disagreements_are_named
+                 ; test_case "command refusal names fields without credentials" `Quick test_command_refusal_reports_fields_without_values]
   ; "boot", [test_case "actual Apple argv projects its labelled plan" `Quick test_boot_projects_the_labelled_plan
              ; test_case "ephemeral routing is outside plan identity" `Quick test_ephemeral_routes_do_not_change_plan_identity
              ; test_case "renderer refuses duplicate keys in both orders" `Quick test_renderer_rejects_order_sensitive_duplicates

@@ -1,0 +1,50 @@
+{
+  "schema": "schedule-behavior-component-audit.v1",
+  "base_head": "88df3ad213bd6ac290f41032d3362dff606b2ec0",
+  "source_state": "Worktree inputs identified by source_sha256; base_head is provenance, not an executed commit.",
+  "source_sha256": {
+    "lib/crypto_rng/crypto_rng.mli": "531a9b90ebb515b021be8a3dc390137eedbfa4edc752501b275767ba3821466d",
+    "lib/crypto_rng/crypto_rng.ml": "7b57304ba6c389fb525ccba3fc7bfeb39c31330b130c07037f3bc62d9cf6e823",
+    "lib/random_id/random_id.mli": "9315634ce502c720e3f32b539d5e42dde802398d5e2c9b039f4225856b3c0c74",
+    "lib/random_id/random_id.ml": "725fc4ff4936e142adadd1679e493a7caaace6283b60d3983ed760937f0f95bc",
+    "lib/schedule/schedule_contract_values.mli": "516a8eea953f479daa2c2e97dcf17381d65e867d6dbaf25ee457d13f3048224f",
+    "lib/schedule/schedule_contract_values.ml": "979abf56c73a992db7a401e401c611f46e351f07ec65bb8fcb0c78c924a947cb",
+    "lib/core/json_util.ml": "b1fea064f3da9252986044b2d6087ea95bbb229a944119ed84d38cc1a2f43281",
+    "lib/schedule/schedule_domain.mli": "5cad91b3e72ea2f1b4b34d46e37f947dc2d1ef59eca610059d3794bddafeeee2",
+    "lib/schedule/schedule_domain.ml": "62497b3437f67eb1804934a8563be2d88d662b0bbfe055b1dce8868be8989e1f",
+    "lib/time_codec/time_codec.mli": "ed957d4d881e31c9b1b01ca8f6cc503b88e705ba0e81bafab98b9a3da0b627e9",
+    "lib/time_codec/time_codec.ml": "c3a8849c2835a1bf94bd1bbf03104ceb7966c0c40a8dcca178fd75dba565f920",
+    "lib/tui_schedule_observation.mli": "8dadc2fbef29dbdb58ebe11579ca87bd3e07260a8ebfc4abc84c05d9443186c3",
+    "lib/tui_schedule_observation.ml": "d1271234992b4195041f06fe2144d1194eca9291a1c595fa5c49f7fdb89b37ac",
+    "test/test_schedule_domain.ml": "42b074b4abe399710463a3fa55964e2728b74318902853234dbdeca2cd0a213f",
+    "test/test_tui_schedule_observation.ml": "2edc158170205f9c919eedbed0e35e7799a24c1ac41c92b0b8156574d3480b04",
+    "docs/evidence/2026-10-25-schedule-drain-projection/produced-pages.json": "add089963d99cf44cddaa61fa3d55ecc581042429e072fc3f26182ff32111191",
+    "bin/masc_tui_types.ml": "8bad505450d275b41dc0cd38388aacc52dc85c9d45211fcd2837540735594ff1",
+    "lib/tui_decode.mli": "8d679c704c2057da8778d4fd0ea56ed1daa78c43ab3e4ef16fd72eef1e3a390f",
+    "test/test_tui_keys.ml": "3df25a1b3d0871082a3581c8e3ced6baaa767ae9ba1f7215fa2dbcf81a3b0647"
+  },
+  "producer_replay": {
+    "completed:committed": "settling",
+    "completed:unprojected": "settling",
+    "completed:projected": "completed",
+    "completed:retired": "completed",
+    "completed:unreadable_receipt": "unknown",
+    "failed:committed": "settling",
+    "failed:unprojected": "settling",
+    "failed:projected": "failed",
+    "cancelled:committed": "settling",
+    "cancelled:unprojected": "settling",
+    "cancelled:projected": "cancelled",
+    "transferred:committed": "transferring",
+    "transferred:unprojected": "transferring",
+    "transferred:projected": "queued_at:drain-target"
+  },
+  "scope": "domain, occurrence-decoder, historical producer-row replay, source-extracted selection",
+  "not_proven": [
+    "full integration typecheck",
+    "backend current-head execution",
+    "model/result destination delivery",
+    "complete TUI execution",
+    "installation"
+  ]
+}

@@ -223,6 +223,7 @@ let test_failed_schedule_snapshot_uses_the_same_display_boundary () =
          { scs_status = "unknown"; scs_read_error = reason
          ; scs_request_count = None; scs_truncated = false
          ; scs_next_due_iso = None; scs_counts = None; scs_rows = []
+         ; scs_observed_at_iso = "2026-10-26T08:59:00Z"
          ; scs_runner_status = Masc.Tui_decode.Runner_unrecognised "unknown"
          };
        state.schedules_error <- Some "older transport failure";

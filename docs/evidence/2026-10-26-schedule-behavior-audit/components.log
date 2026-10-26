@@ -1,0 +1,99 @@
+$ ocamlfind ocamlc -thread -w +4+32+69 -warn-error +a -package ppx_enumerate,yojson,digestif.c,mirage-crypto-rng.unix,uuidm,alcotest,ptime,unix,threads -c crypto_rng.mli crypto_rng.ml random_id.mli random_id.ml schedule_contract_values.mli schedule_contract_values.ml json_util.ml schedule_domain.mli schedule_domain.ml time_codec.mli time_codec.ml tui_schedule_observation.mli tui_schedule_observation.ml
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
+
+$ ocamlfind ocamlc -thread -w +32+69-4 -warn-error +a -package ppx_enumerate,yojson,digestif.c,mirage-crypto-rng.unix,uuidm,alcotest,ptime,unix,threads -linkpkg crypto_rng.cmo random_id.cmo schedule_contract_values.cmo json_util.cmo schedule_domain.cmo time_codec.cmo tui_schedule_observation.cmo test_schedule_domain.ml -o test_schedule_domain
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
+
+$ /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-audit-tgr7714h/test_schedule_domain --color=never
+Testing `Schedule_domain'.
+This run has ID `FOOOAT4D'.
+
+  [OK]          request           0   request starts scheduled.
+  [OK]          request           1   payload requires object envelope.
+  [OK]          request           2   payload requires envelope fields.
+  [OK]          request           3   payload rejects retired schema_version.
+  [OK]          request           4   invalid recurrence rejected.
+  [OK]          request           5   mark due only affects scheduled.
+  [OK]          request           6   interval recurrence next due.
+  [OK]          request           7   daily recurrence next due uses fixed-of...
+  [OK]          request           8   daily recurrence next due accepts expli...
+  [OK]          request           9   daily recurrence rejects DST IANA timez...
+  [OK]          request          10   cron recurrence next due weekdays.
+  [OK]          request          11   cron recurrence supports steps ranges a...
+  [OK]          request          12   cron step admission and next due.
+  [OK]          request          13   cron day wildcards preserve selected va...
+  [OK]          request          14   cron recurrence rejects invalid express...
+  [OK]          request          15   cron recurrence finds occurrence beyond...
+  [OK]          request          16   cron recurrence rejects impossible cale...
+  [OK]          mark_due          0   all_schedule_statuses is populated.
+  [OK]          mark_due          1   expiry precedes becoming due.
+  [OK]          mark_due          2   only Scheduled advances to Due.
+  [OK]          mark_due          3   requests before due_at are untouched.
+  [OK]          mark_due          4   pass-through preserves other fields.
+  [OK]          codec             0   schedule roundtrip.
+  [OK]          codec             1   cron schedule roundtrip.
+  [OK]          codec             2   payload digest is the canonical SHA-256.
+  [OK]          codec             3   recurrence summary.
+  [OK]          codec             4   missing recurrence is rejected.
+  [OK]          codec             5   wake record roundtrip.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-audit-tgr7714h/_build/_tests/Schedule_domain'.
+Test Successful in 0.011s. 28 tests run.
+
+$ ocamlfind ocamlc -thread -w +4+32+69 -warn-error +a -package ppx_enumerate,yojson,digestif.c,mirage-crypto-rng.unix,uuidm,alcotest,ptime,unix,threads -linkpkg crypto_rng.cmo random_id.cmo schedule_contract_values.cmo json_util.cmo schedule_domain.cmo time_codec.cmo tui_schedule_observation.cmo test_tui_schedule_observation.ml -o test_tui_schedule_observation
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
+
+$ /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-audit-tgr7714h/test_tui_schedule_observation --color=never
+Testing `schedule occurrence observation'.
+This run has ID `RFRV7BV5'.
+
+  [OK]          delivery and execution          0   one-shot delivery and int...
+  [OK]          delivery and execution          1   turn boundaries require d...
+  [OK]          delivery and execution          2   durable outcomes and unse...
+  [OK]          delivery and execution          3   exact occurrence isolation.
+  [OK]          delivery and execution          4   unavailable and contradic...
+  [OK]          delivery and execution          5   terminal contradiction re...
+  [OK]          delivery and execution          6   cross-source terminal dis...
+  [OK]          delivery and execution          7   exact queue absence is no...
+  [OK]          delivery and execution          8   transfer ACK belongs to p...
+  [OK]          delivery and execution          9   cancelled definition reta...
+  [OK]          delivery and execution         10   missing stimulus remains ...
+  [OK]          delivery and execution         11   dispatch failure and abse...
+  [OK]          delivery and execution         12   malformed wire evidence.
+
+Full test results in `/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-audit-tgr7714h/_build/_tests/schedule occurrence observation'.
+Test Successful in 0.005s. 13 tests run.
+
+$ ocamlfind ocamlc -package yojson -linkpkg tui_schedule_observation.cmo replay.ml -o replay
+
+$ /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-audit-tgr7714h/replay
+completed:committed settling
+completed:unprojected settling
+completed:projected completed
+completed:retired completed
+completed:unreadable_receipt unknown
+failed:committed settling
+failed:unprojected settling
+failed:projected failed
+cancelled:committed settling
+cancelled:unprojected settling
+cancelled:projected cancelled
+transferred:committed transferring
+transferred:unprojected transferring
+transferred:projected queued_at:drain-target
+
+$ ocamlfind ocamlc -thread -w +4+32+69 -warn-error +a -package ppx_enumerate,yojson,digestif.c,mirage-crypto-rng.unix,uuidm,alcotest,ptime,unix,threads -linkpkg crypto_rng.cmo random_id.cmo schedule_contract_values.cmo json_util.cmo schedule_domain.cmo time_codec.cmo tui_schedule_observation.cmo tui_decode.ml selection.ml -o selection
+findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/c, /Users/dancer/.opam/5.5.1/lib/digestif
+
+$ /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-schedule-audit-tgr7714h/selection
+PASS one-shot pending retained
+PASS one-shot started retained
+PASS occurrence clock preserved
+PASS other Keeper excluded
+PASS latest historical result only
+PASS pending before future declaration
+PASS missing one-shot remains actionable
+PASS transferred pending remains visible
+
+$ git rev-parse HEAD
+88df3ad213bd6ac290f41032d3362dff606b2ec0

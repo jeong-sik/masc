@@ -201,6 +201,7 @@ let decode_schedule_row json =
     optional_nested_int_field json "keeper_reaction_evidence"
       "quarantined_record_count"
   in
+  let* sch_occurrence = Masc.Tui_schedule_observation.decode json in
   let* sch_runner_hold = Tui_decode.decode_schedule_runner_hold json in
   Ok
     { sch_schedule_instance_id
@@ -246,6 +247,7 @@ let decode_schedule_row json =
     ; sch_wake_cancelled_recorded_at_iso
     ; sch_reaction_quarantined
     ; sch_reaction_latest_at_iso
+    ; sch_occurrence
     ; sch_runner_hold
     }
 
@@ -256,6 +258,7 @@ let decode_schedule_rows json_list =
    the route reports [status = "unknown"] with a null [request_count] and an
    empty row list, and the pane must not draw that as "no schedules". *)
 let snapshot_of_json json =
+  let* scs_observed_at_iso = Masc.Tui_decode_fields.required_string_field json "generated_at" in
   let* scs_status = Masc.Tui_decode_fields.required_string_field json "status" in
   let* scs_read_error =
     Masc.Tui_decode_fields.optional_string_field json "schedule_store_read_error"
@@ -331,7 +334,8 @@ let snapshot_of_json json =
   let* scs_rows = decode_schedule_rows rows in
   let* scs_runner_status = Tui_decode.decode_schedule_runner_status json in
   Ok
-    { scs_status
+    { scs_observed_at_iso
+    ; scs_status
     ; scs_read_error
     ; scs_request_count
     ; scs_truncated

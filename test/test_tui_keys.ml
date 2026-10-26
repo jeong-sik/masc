@@ -81,6 +81,7 @@ let schedule_form_row : schedule_row =
   ; sch_queue_ack_recorded_at_iso = None
   ; sch_wake_cancelled_recorded_at_iso = None
   ; sch_reaction_quarantined = None
+  ; sch_occurrence = { Masc.Tui_schedule_observation.stage = No_occurrence; due_at_iso = None }
   ; sch_runner_hold = None
   }
 

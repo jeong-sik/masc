@@ -1706,22 +1706,38 @@ the TUI cannot check it.
 A path that cannot be read, or a file that is empty, is refused on the
 footer. Nothing takes the screen to report a failure.
 
-#### Upcoming Keeper Jobs
+#### Keeper Job notifications
 
-Chat shows the selected Keeper's next scheduled Job above the composer. Press
-**F9** to expand or fold the upcoming list. The summary includes the Job, local
-month/day and time, and the time until or since its due instant. It does not
-change or run a schedule.
+Chat keeps the selected Keeper's scheduled Job status above the composer.
+Press **F9** to expand or fold the list. Arrival is a persistent status notice:
+it does not create repeated chat messages or popups on every elapsed interval.
+The existing Keeper-scoped refresh updates this notice; opening or drawing it
+does not dispatch, interrupt or acknowledge a wake.
 
-Proximity is repeated in text: elapsed due time is red, within one hour is
-warning yellow, later today is informational cyan, and later dates use the
-secondary foreground. Theme and NO_COLOR handling apply. A passed due instant
-is not evidence of a failed or completed Job.
+A delivered one-shot stays visible while queued, even though the schedule
+store calls its dispatch `succeeded`. The notice separates queued delivery,
+turn start, turn end, consumption and the durable occurrence result. A turn
+ending does not prove the work completed. A durable completed occurrence confirms
+turn processing, not delivery of the requested result to a channel or file.
+Transferred pending work names the recipient; an exact queue miss stays unconfirmed
+instead of appearing queued. Cancelling a declaration does not settle an
+occurrence the server still finds pending, including at a transferred owner.
+Failure includes its recorded reason;
+unknown or conflicting evidence remains unconfirmed. A retained receipt whose
+exact stimulus is unavailable stays visible as unconfirmed when the server
+reports missing identity, preserving the other Jobs on the page. Being busy on another
+request never makes this Job appear started.
 
-The list uses the Keeper-scoped schedule read and includes Scheduled/Due work,
-not completed or currently running occurrences. Read failures retain the last
-observation with a refresh-failed label; an unread store is not an empty list.
-A capped server page is marked partial. Extra Job rows yield to the existing
+For a repeating Job, the last occurrence and next firing are distinct. A held
+next firing says whether the earlier wake remains unconsumed or the Keeper is
+shutting down. Pending work and failures use warning/error styling respectively;
+an elapsed due time alone is never a failure. Text carries the meaning with
+NO_COLOR as well. The list retains active/pending work and the latest closed
+result rather than showing the entire closed history.
+
+Read failures retain the last observation with its timestamp and refresh-failed
+label; an unread store is not an empty list. A stale/unhealthy runner's hold
+names when it was observed. A capped server page is marked partial. Extra Job rows yield to the existing
 chat input and transcript minimum on a small terminal. Keeper Automation remains
 the place to inspect the full schedule page.
 

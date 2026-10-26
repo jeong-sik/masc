@@ -41,6 +41,11 @@ documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔
 | click, dblclick, hover | selector |
 | fill | selector, text |
 | press | selector, key |
+| focus | selector |
+| reload | 없음 |
+| keyboard.type, keyboard.insertText | text |
+| keyboard.paste | text, 선택적 html |
+| keyboard.press | key |
 | selectOption | selector, value 또는 중복 없는 values; []는 선택 해제 |
 | goto | url: 절대 HTTP(S) 주소 |
 | waitForURL | url: SDK의 문자열/glob |
@@ -52,6 +57,11 @@ documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔
 각 step의 선택적 `timeoutMs`는 음이 아닌 JavaScript-safe 정수로 SDK에 그대로 전달한다.
 생략하면 SDK 기본 대기를 사용한다. MASC는 별도의 step 개수·누적 실행 시간 제한을 추가하지 않는다.
 실행은 기존 호스트 권한과 명시적 취소를 따른다.
+
+`keyboard.*` 메서드는 `timeoutMs`를 받지 않는다. 현재 포커스가 입력 대상을 정하므로
+앞에서 관측한 selector로 `focus`를 실행한다. `keyboard.insertText`는 문자열을 직접 넣고,
+`keyboard.paste`는 plain text 또는 `{text, html}`을 native 붙여넣기로 전달한 뒤 SDK가
+운영자 클립보드를 복원한다. 리치 편집기에는 실제 결과를 읽거나 screenshot으로 확인한다.
 
 `expectedUrl`은 실행을 시작할 때만 검사한다. 이후 이동이 일어나면 native wait로
 목적지·요소·로드 상태를 기다린다. 마지막에는 native snapshot이 돌아온다.

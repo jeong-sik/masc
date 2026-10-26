@@ -95,7 +95,17 @@ export class ArtifactAppSession {
       if(this.frozen&&appRequestApplied(current,this.frozen.request)){this.acknowledge(current,this.frozen);return}
       resourceOrigins(current.data)
       this.server=current
-      this.mode=this.frozen&&current.version===this.frozen.request.expected_version
+      if(!this.frozen){
+        const unchanged=equalJson(this.data,current.data)
+        this.mode=unchanged?'ready':'conflict';this.wanted=false
+        if(unchanged){
+          if(this.recovery)discardAppInput(this.recovery)
+          for(const copy of this.imported)discardAppInput(copy)
+          this.imported=[];this.recovery=null
+        }else this.retain()
+        this.emit();return
+      }
+      this.mode=current.version===this.frozen.request.expected_version
         &&!current.receipts.some(receipt=>receipt.id===this.frozen!.request.id)?'retry':'conflict'
       this.wanted=false;this.retain();this.emit()
     }catch{if(this.current()){this.mode='unknown';this.wanted=false;this.options.result(this.instance,this.change,'error');this.emit()}}

@@ -116,3 +116,10 @@ it('binds an old in-flight receipt to its document instance while a new instance
   expect(result).toHaveBeenLastCalledWith('reloaded-document',1,'saved')
   expect(session.snapshot().server.data).toEqual(inputs('new frame'))
 })
+it('keeps an idle check ready when the server state is identical',async()=>{
+  vi.mocked(readAppState).mockResolvedValue(initial)
+  const {session}=open()
+  await session.check()
+  expect(session.snapshot().mode).toBe('ready')
+  expect(session.snapshot().pending).toBe(false)
+})

@@ -1313,7 +1313,7 @@ let test_startup_sweep_serializes_inventory_with_boot () =
       Eio.Promise.await release_listing;
       Unix.WEXITED 0,
       nerdctl_entry ~base_path:bin_dir ~keeper:meta.name ~id:deleted_id ~name
-    | [ "nerdctl"; "rm"; "-f"; target ] ->
+    | [ "nerdctl"; "rm"; "--force"; target ] ->
       Alcotest.(check string) "delete the full id from the inventory" deleted_id target;
       Eio.Promise.resolve delete_started_r ();
       Eio.Promise.await release_delete;

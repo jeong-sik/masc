@@ -43,7 +43,7 @@ let delta_to_string : Live.delta -> string = function
   | Live.Thinking {text;_} -> Printf.sprintf "thinking(%s)" text
   | Live.Thinking_snapshot {text;index;response} ->
       Printf.sprintf "thinking_snapshot(%s,index=%d,response=%d.%d)" text index
-        response.Live.response_generation response.Live.response_scope
+        response.Masc.Keeper_chat_events.response_generation response.Masc.Keeper_chat_events.response_scope
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%d/%d,%s)" occurrence.stream_scope
         occurrence.block_index (Option.value ~default:"unnamed" tool_name)

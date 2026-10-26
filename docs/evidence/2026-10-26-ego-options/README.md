@@ -84,7 +84,26 @@ number-option integer bounds. Some suites passed; the scenario did not pass.
 The corrected candidate `c530c671ce160996d216af172896d3f15a6715eb` was submitted
 to the same workflow as run
 [40313912338](https://github.com/jeong-sik/masc/actions/runs/40313912338).
-Only dispatch acceptance is recorded here; its conclusion has not been read.
+That run concluded **failure** at the stale TUI BiDi-only drag assertion after
+the four executable builds and six preceding suites passed. PR #46141 replaces
+the footer-text assertion with typed BiDi/Ego capability and request decisions.
+
+The repaired parent candidate `c2c04d0aa651bd9feb2f377c6a8db7deefdcbc32` passed
+**Minimal manual checks**, run
+[40317334445](https://github.com/jeong-sik/masc/actions/runs/40317334445), workflow
+ref `main`, workflow SHA `68814a433b691da990e449cba0c28e619c51b7c1`, scenario
+`browser-lane`. This is the focused scenario's result, not all regression tests
+or proof for the later Page observation extension.
+
+[`page-observations-component-proof.json`](page-observations-component-proof.json)
+records the later URL/title/info/snapshot/events/timeout extension separately.
+The unchanged production workflow codec, emitter and receipt decoder compile
+standalone with only namespace aliases and pass seven actual OCaml test cases.
+Thirty Node fixture tests exercise the emitted JavaScript, including consumed
+event-buffer uncertainty, malformed observation values and dialog stops. The
+current production tool-definition loader accepts the extended schema. File
+hashes bind these checks to their sources. None of these fixtures execute the
+new calls in real Ego or through an installed Keeper.
 
 There is no installed-MASC, real-Keeper, operator-visible motion or full Goal
 completion claim. Unsupported SDK and Space lifecycle work remains in the

@@ -24,6 +24,9 @@ type action =
   | Evaluate of page_code
   | Wait_for_function of page_code
   | Fetch of string
+  | Url | Title | Info | Snapshot
+  | Events
+  | Wait_for_timeout of float
 type step = { action : action; options : native_options option }
 type snapshot_scope = Viewport | Full_page
 type t = { tab_id : int; expected_url : string; steps : step list;
@@ -117,7 +120,8 @@ let options_of_json action raw =
     | Wait_for_function _ -> Some ["timeout";"polling"]
     | Fetch _ -> Some ["timeout";"method";"headers";"body";"cache";"credentials";"integrity";
         "keepalive";"mode";"redirect";"referrer";"referrerPolicy"]
-    | Keyboard_insert_text _|Keyboard_paste _|Evaluate _ -> None in
+    | Snapshot -> Some ["scope";"root";"includeActionMarks";"includeStableLocator"]
+    | Keyboard_insert_text _|Keyboard_paste _|Evaluate _|Url|Title|Info|Events|Wait_for_timeout _ -> None in
   let* allowed=Option.to_result ~none:"this SDK method accepts no options" allowed in
   let* fields=object_fields allowed raw in
   let strings values=List.for_all (function _,`String _ -> true | _,_ -> false) values in
@@ -126,7 +130,9 @@ let options_of_json action raw =
         && Result.is_ok (number "x" fields) && Result.is_ok (number "y" fields) in
   let valid name value=match name,value with
     | ("label"|"referer"|"method"|"body"|"integrity"|"referrer"),`String _ -> true
-    | ("force"|"clearFirst"|"keepalive"),`Bool _ -> true
+    | ("force"|"clearFirst"|"keepalive"|"includeActionMarks"|"includeStableLocator"),`Bool _ -> true
+    | "scope",`String ("full_page"|"only_within_viewport"|"subtree") -> true
+    | "root",`String value -> String.trim value<>""
     | "button",`String ("left"|"middle"|"right")
     | "waitUntil",`String ("commit"|"domcontentloaded"|"load"|"networkidle")
     | "cache",`String ("default"|"no-store"|"reload"|"no-cache"|"force-cache"|"only-if-cached")
@@ -144,11 +150,20 @@ let options_of_json action raw =
     | "headers",`Assoc values -> strings values
         && List.length values=List.length (List.sort_uniq String.compare (List.map fst values))
     | _,_ -> false in
-  if List.for_all (fun (name,value) -> valid name value) fields then Ok raw
-  else Error "invalid native SDK option value"
+  let* ()=if List.for_all (fun (name,value) -> valid name value) fields then Ok ()
+    else Error "invalid native SDK option value" in
+  match action,List.assoc_opt "scope" fields,List.assoc_opt "root" fields with
+  | Snapshot,Some (`String "subtree"),Some (`String _) -> Ok raw
+  | Snapshot,Some (`String "subtree"),None -> Error "subtree snapshot requires root from the same Page"
+  | Snapshot,(None|Some _),Some _ -> Error "snapshot root requires subtree scope"
+  | Snapshot,(None|Some _),None -> Ok raw
+  | (Click _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
+    |Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
+    |Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
+    |Evaluate _|Wait_for_function _|Fetch _|Url|Title|Info|Events|Wait_for_timeout _),_,_ -> Ok raw
 let step_of_json value =
   let* fields = object_fields ["method";"selector";"destination";"x";"y";"text";"html";"key";"url";
-    "selectionJson";"state";"source";"argumentJson";"options"] value in
+    "selectionJson";"state";"source";"argumentJson";"milliseconds";"options"] value in
   let* method_ = text "method" fields in
   let arguments names = object_fields ("method" :: "options" :: names) value in
   let selector () = text "selector" fields in
@@ -220,6 +235,16 @@ let step_of_json value =
       let* url=match Uri.scheme (Uri.of_string raw) with None -> Ok raw
         | Some _ -> url raw in
       Ok (Fetch url)
+    | "url"|"title"|"info"|"snapshot"|"events" ->
+      let* _=arguments [] in
+      (match method_ with
+       | "url" -> Ok Url | "title" -> Ok Title | "info" -> Ok Info
+       | "snapshot" -> Ok Snapshot | "events" -> Ok Events
+       | _ -> Error "unknown native Page observation method")
+    | "waitForTimeout" ->
+      let* _=arguments ["milliseconds"] in let* milliseconds=number "milliseconds" fields in
+      if milliseconds>=0. then Ok (Wait_for_timeout milliseconds)
+      else Error "waitForTimeout milliseconds must be nonnegative"
     | _ -> Error "unsupported native Page method" in
   let* options=match List.assoc_opt "options" fields with None -> Ok None
     | Some value -> Result.map Option.some (options_of_json action value) in
@@ -245,13 +270,14 @@ let is_effect = function
   | Click _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _ | Mouse_move _ | Mouse_wheel _
   | Fill _ | Press _ | Focus _ | Reload
   | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
-  | Select_option _ | Goto _ | Evaluate _ | Wait_for_function _ | Fetch _ -> true
-  | Wait_for_url _ | Wait_for_selector _ | Wait_for_load_state _ -> false
+  | Select_option _ | Goto _ | Evaluate _ | Wait_for_function _ | Fetch _ | Events -> true
+  | Wait_for_url _ | Wait_for_selector _ | Wait_for_load_state _|Url|Title|Info|Snapshot|Wait_for_timeout _ -> false
 let holds_input = function
   | Click _|Double_click _|Mouse_click _|Drag_and_drop _|Press _|Keyboard_press _|Keyboard_type _|Keyboard_paste _ -> true
   | Hover _|Mouse_move _|Mouse_wheel _|Fill _|Focus _|Reload
   | Keyboard_insert_text _|Select_option _|Goto _
-  | Wait_for_url _|Wait_for_selector _|Wait_for_load_state _|Evaluate _|Wait_for_function _|Fetch _ -> false
+  | Wait_for_url _|Wait_for_selector _|Wait_for_load_state _|Evaluate _|Wait_for_function _|Fetch _
+  | Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> false
 let method_name = function
   | Click _ -> "click" | Double_click _ -> "dblclick" | Hover _ -> "hover" | Fill _ -> "fill"
   | Press _ -> "press" | Select_option _ -> "selectOption" | Goto _ -> "goto" | Wait_for_url _ -> "waitForURL"
@@ -262,6 +288,8 @@ let method_name = function
   | Evaluate _ -> "evaluate" | Wait_for_function _ -> "waitForFunction" | Fetch _ -> "fetch"
   | Drag_and_drop _ -> "dragAndDrop"
   | Mouse_click _ -> "mouse.click" | Mouse_move _ -> "mouse.move" | Mouse_wheel _ -> "mouse.wheel"
+  | Url -> "url" | Title -> "title" | Info -> "info" | Snapshot -> "snapshot" | Events -> "events"
+  | Wait_for_timeout _ -> "waitForTimeout"
 let string value = `String value
 let code_fields = function
   | Expression source -> ["source",string source]
@@ -282,7 +310,8 @@ let step_to_json {action;options} =
     | Mouse_click {x;y}|Mouse_move {x;y}|Mouse_wheel {x;y} -> ["x",`Float x;"y",`Float y]
     | Fill {selector=s;text} -> selector s @ ["text",string text]
     | Press {selector=s;key} -> selector s @ ["key",string key]
-    | Reload -> []
+    | Reload|Url|Title|Info|Snapshot|Events -> []
+    | Wait_for_timeout milliseconds -> ["milliseconds",`Float milliseconds]
     | Keyboard_type text | Keyboard_insert_text text -> ["text",string text]
     | Keyboard_paste {text;html} -> ["text",string text]
         @ Option.to_list (Option.map (fun html -> "html",string html) html)

@@ -60,14 +60,14 @@ Neither means fully supported.
 | --- | --- | --- |
 | `Page.goto` | `page.goto`, native workflow goto with referer/timeout/waitUntil | Installed MASC/Keeper route unverified |
 | `Page.reload` | `page.act` reload, native workflow reload with timeout/waitUntil | Installed MASC/Keeper route unverified |
-| `Page.snapshot` | BrowserRead snapshot and final workflow snapshot | Subtree/root and action-mark/stable-locator choices in workflows |
+| `Page.snapshot` | BrowserRead and final workflow snapshot; step snapshot preserves native scope/root and action-mark/stable-locator options | New step options require real SDK and installed-route proof |
 | `Page.screenshot` | `page.capture` with brokered image data | Full-page, clip, scale/raw choices |
-| `Page.url` | Internal guards and returned page observations | Direct SDK state result within a workflow |
+| `Page.url` | Native workflow url returns the SDK value as a step receipt | Installed MASC/Keeper route unverified |
 | `Page.waitForURL` | Native workflow waitForURL | String/glob supported; RegExp and function matchers not exposed |
 | `Page.waitForEvent` | Internal download watch | General event waits and typed handle lifecycle |
-| `Page.waitForTimeout` | None | Explicit native duration, without using fixed sleeps as state verification |
-| `Page.title` | Internal observations and workflow result | Direct SDK state result within a workflow |
-| `Page.info` | Internal viewport/dialog checks | Full native state as a returned workflow observation |
+| `Page.waitForTimeout` | Native workflow explicit finite nonnegative milliseconds | Real SDK/installed-route proof; elapsed time is not state verification |
+| `Page.title` | Native workflow title returns the SDK value as a step receipt | Installed MASC/Keeper route unverified |
+| `Page.info` | Native workflow info returns native state; dialog stops following steps | Installed MASC/Keeper route unverified |
 | `Page.acceptDialog` | `page.act` accept_dialog | Native boolean receipt and per-goal ownership evidence |
 | `Page.dismissDialog` | `page.act` dismiss_dialog | Native boolean receipt and per-goal ownership evidence |
 | `Page.evaluate` | Native workflow evaluate, browser expression/call with JSON | Safety-timeout metadata beyond message not retained; installed MASC/Keeper route unverified |
@@ -76,7 +76,7 @@ Neither means fully supported.
 | `Page.cdp` | Fixed internal history commands only | General Page protocol calls with explicit effect and lifecycle handling |
 | `Page.waitForSelector` | Native workflow waitForSelector | Native states and timeout exposed; installed MASC route unverified |
 | `Page.waitForLoadState` | Native workflow with optional state, timeout/idleMs | Installed MASC/Keeper route unverified |
-| `Page.events` | None | Read/clear event ownership across rounds |
+| `Page.events` | Native workflow events drains only this SDK process's Page buffer; consumption counts as an effect and is never replayed | Real SDK and installed-route proof; durable cross-process event history is not supplied by this method |
 | `Page.click` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |
 | `Page.dblclick` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |
 | `Page.hover` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |

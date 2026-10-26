@@ -57,6 +57,10 @@ documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔
 | evaluate | source, 선택적 argumentJson |
 | waitForFunction | source, 선택적 argumentJson |
 | fetch | url: HTTP(S) 절대 주소 또는 페이지 상대 주소 |
+| url, title, info | 없음; native Page 상태를 step receipt로 반환 |
+| snapshot | 선택적 options: scope, root, includeActionMarks, includeStableLocator |
+| events | 없음; SDK 프로세스의 해당 Page 이벤트 버퍼를 읽고 비움 |
+| waitForTimeout | milliseconds: 0 이상 유한한 밀리초 |
 
 `selector`는 관측한 native locator를 그대로 쓴다. workflow 메서드 이름은
 단일 조작의 `double_click`·`select_option` 대신 SDK의 `dblclick`·`selectOption`이다.
@@ -69,7 +73,8 @@ selectOption의 `selectionJson` 예시는 `"{\"label\":\"Beta\"}"`이며 `{value
 실행은 기존 호스트 권한과 명시적 취소를 따른다.
 
 `keyboard.type`·`keyboard.press`는 `options.delay`를 받는다. `evaluate`·`keyboard.insertText`·
-`keyboard.paste`는 options를 받지 않는다. `label` 옵션은 포인터 동작에만 넣는다.
+`keyboard.paste`·`url`·`title`·`info`·`events`·`waitForTimeout`은 options를 받지 않는다.
+`label` 옵션은 포인터 동작에만 넣는다.
 현재 포커스가 입력 대상을 정하므로
 앞에서 관측한 selector로 `focus`를 실행한다. `keyboard.insertText`는 문자열을 직접 넣고,
 `keyboard.paste`는 plain text 또는 `{text, html}`을 native 붙여넣기로 전달한 뒤 SDK가
@@ -86,6 +91,15 @@ selectOption의 `selectionJson` 예시는 `"{\"label\":\"Beta\"}"`이며 `{value
 fetch의 `options`는 timeout, method, 문자열 값의 headers 객체, body, cache, credentials,
 integrity, keepalive, mode, redirect, referrer, referrerPolicy를 받는다.
 호스트 파일 경로인 `saveAs`는 아직 다운로드 broker 연결이 필요해 받지 않는다.
+step `snapshot`의 scope는 SDK의 `full_page`, `only_within_viewport`, `subtree`다.
+subtree에만 같은 Page에서 관측한 현재 `root` ref를 넣고, subtree이면 root가 필수다.
+두 inclusion 옵션의 false도 그대로 전달된다. step snapshot의 원문은 해당 receipt에
+남고, 마지막에는 최상위 snapshotScope/maxChars에 따른 snapshot이 추가로 돌아온다.
+`info`가 dialog를 반환하면 다음 단계는 실행하지 않는다.
+
+`events`는 관측 버퍼를 소비하므로 효과로 기록하며, 응답 유실이나 실패 뒤에 재실행하지
+않는다. SDK 프로세스를 넘어 보존되는 이벤트 기록이 아니다. `waitForTimeout`은 명시적
+고정 대기이며 화면 준비를 증명하지 않는다. 앱 준비 확인에는 상태 대기 메서드를 쓴다.
 전체 메서드별 옵션은 [native workflow 인자](../../../docs/guides/ego-native-workflow.md)를 읽는다.
 전체 SDK의 현재 연결·옵션·미지원 범위는
 [전수 목록](../../../docs/guides/ego-sdk-coverage.md)에 기록한다.

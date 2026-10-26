@@ -56,7 +56,7 @@ let selected_repository_reading (state : state) =
       Some (capture ~title:("Workspace / " ^ repo.rp_name)
         (errors
          @ [ ( ui_text state
-                 ~ko:"1. 저장소 기본 정보 (Repository & Remote)"
+                 ~ko:"1. 저장소 기본 정보"
                  ~en:"1. Repository & Remote"
              , format_fields
                  [ "Repository", repo.rp_name
@@ -67,7 +67,7 @@ let selected_repository_reading (state : state) =
                  ; "Auto sync", (if repo.rp_auto_sync then "on" else "off")
                  ] )
            ; ( ui_text state
-                 ~ko:"2. 로컬 경로 · 배정된 키퍼 (Local Path & Keepers)"
+                 ~ko:"2. 로컬 경로 · 배정된 키퍼"
                  ~en:"2. Local Path & Keepers"
              , format_fields (repository_context_fields repo) )
            ]))

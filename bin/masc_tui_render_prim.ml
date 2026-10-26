@@ -797,11 +797,10 @@ let surface_strip (state : state) ~cols =
     else Message_layout.display_width badge + waiting_badge_gap_cells
   in
   let budget = max 8 (cols - 1 - badge_reserved) in
-  let bilingual = state.ui_language = Lang_ko && budget >= 112 in
   let label i =
     let surface, name = ring.(i) in
     Masc_tui_types.surface_ring_display_label ~lang:state.ui_language
-      ~bilingual surface name
+      surface name
     ^ badge_of_surface surface
   in
   (* Plain-cell width of entry [i] inside a window starting at [lo]. *)

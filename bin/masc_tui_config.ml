@@ -11,6 +11,7 @@ type t = {
   opening : (opening, string) result;
   last_chat_keeper : (Keeper_id.Keeper_name.t option, string) result;
   theme : string option;
+  language : string option;
   board_sort : string option;
   candle : string option;
   reduce_motion : bool option;
@@ -41,6 +42,8 @@ let runtime_toml_path ~base_path =
 let tui_table = Runtime_toml_namespace.(key Tui)
 
 let theme_of_doc doc = Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".theme")
+
+let language_of_doc doc = Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".language")
 
 let opening_keeper_of_doc doc =
   match List.assoc_opt (tui_table ^ ".opening_keeper") doc with
@@ -144,6 +147,27 @@ let set_theme ~base_path theme =
    A save that lands must still tell the reader them: the key is inert from
    this commit on, and the reader is the one who has to decide whether to
    clean it up. The message is one line -- the state bar is one line. *)
+
+let text_with_language content ~language =
+  Toml_line_editor.edit_table_scalar content ~path:tui_table ~key:"language"
+    ~value:(Some language)
+
+(* Store [language] ("ko" or "en") in the same runtime.toml [load] reads,
+   under the same write lock as the theme pick. Unlike the theme there is no
+   legacy-keys receipt: the key is new, so nothing old can shadow it.
+
+   The error is returned rather than swallowed: by the time this is called
+   the language is already on the screen, so a reader who is not told would
+   take the screen as proof it was stored and find the old one back after a
+   restart. *)
+let set_language ~base_path language =
+  match
+    Runtime.edit_config_text
+      ~runtime_config_path:(runtime_toml_path ~base_path)
+      (fun content -> text_with_language content ~language)
+  with
+  | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
+  | Error message -> Error message
 
 (* Whether masc lifts colours the reader's theme leaves under the readable
    floor, [tui].lift_colours. Absent reads as "yes", which is what masc did
@@ -270,6 +294,7 @@ let load ~base_path =
        | Ok None -> Ok None
        | Error reason -> Error ("Conversation history unavailable: " ^ reason));
     theme = read theme_of_doc;
+    language = read language_of_doc;
     board_sort = read (fun doc -> Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".board_sort"));
     candle = read (fun doc -> Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".candle"));
     reduce_motion = read reduce_motion_of_doc;

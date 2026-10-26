@@ -143,20 +143,24 @@ let test_an_oversize_export_is_refused_rather_than_shortened () =
    pipe EOF; without an Eio runtime it degrades to the Unix fallback and every
    read fails before the ceiling is ever consulted. So the suite boots one,
    the way the sandbox read backend's own suite does. *)
-(* An unwritable store root must come back as the export's own failure, the
-   same typed path a failed atomic replacement takes: the handler translates
-   [Sys_error] into the Failed Runtime_failure result that says why the bytes
-   could not be stored. Before the store normalized directory creation the
-   same setup escaped as a raw [Unix.Unix_error], skipping the handler's
-   [Sys_error] arm and landing in the generic dispatch net with a message that
-   never mentioned the store. *)
+(* A blocked store root must return the canonical store failure through the
+   export's typed Runtime_failure result. Compare the public producer and
+   consumer directly: parent validation may reject the path before mkdir. *)
 let test_an_unwritable_store_root_fails_the_export_not_the_dispatch () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> remove_tree base) @@ fun () ->
   let masc_dir = Filename.concat base ".masc" in
   ensure_dir masc_dir;
-  write_file (Filename.concat masc_dir "tool_blobs") "not a directory";
-  let execution = run_export ~base ~emitting:8 in
+  let blocked_root = Filename.concat masc_dir "tool_blobs" in
+  write_file blocked_root "not a directory";
+  let bytes = String.make 8 'x' in
+  let store_failure =
+    match Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:base)
+            ~bytes ~mime:"application/octet-stream" with
+    | _reference -> Alcotest.fail "a blocked store root accepted a durable put"
+    | exception Sys_error detail -> detail
+  in
+  let execution = run_export ~base ~emitting:(String.length bytes) in
   (match execution.Keeper_tool_execution.disposition with
    | Tool_result.Failed Tool_result.Runtime_failure -> ()
    | Tool_result.Failed _ ->
@@ -169,15 +173,14 @@ let test_an_unwritable_store_root_fails_the_export_not_the_dispatch () =
     "the failure names the store path it could not create"
     true
     (String_util.contains_substring said "tool_blobs");
-  Alcotest.(check bool)
-    "and names the operating system's reason"
-    true
-    (String_util.contains_substring said "mkdir");
-  Alcotest.(check bool)
-    "with the reason's readable message, as the store contract renders it \
-     (not the raw exception's ENOTDIR spelling)"
-    true
-    (String_util.contains_substring said "Not a directory")
+  Alcotest.(check string)
+    "export preserves the exact canonical store failure"
+    store_failure
+    said;
+  Alcotest.(check string)
+    "failed storage preserves the blocked root bytes"
+    "not a directory"
+    (In_channel.with_open_bin blocked_root In_channel.input_all)
 ;;
 
 let with_materialization f =

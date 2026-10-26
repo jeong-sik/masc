@@ -326,7 +326,7 @@ let test_editor_publishes_and_never_overwrites () =
     ; ctx_work = Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture"
     ; source_context = None
     ; owned_job_replay = None
-    ; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
+    ; artifact_draft_scope = None; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
     ; net = None; mcp_session_id = None; continuation_channel = None
     ; gate_context = None; turn_ref = None; gate_grant = None; tool_use_id = None; trace_id = None
     ; result_projection = None
@@ -512,7 +512,7 @@ let test_owned_draft_validates_and_publishes_exact_bytes () =
     ; ctx_work = Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture"
     ; source_context = None
     ; owned_job_replay = None
-    ; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
+    ; artifact_draft_scope = None; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
     ; net = None; mcp_session_id = None; continuation_channel = None
     ; gate_context = None; turn_ref = None; gate_grant = None; tool_use_id = None; trace_id = None
     ; result_projection = None; capability_authority = Keeper_tool_runtime.Frozen_surface authority } in

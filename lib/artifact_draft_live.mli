@@ -1,8 +1,9 @@
 (** Ephemeral, connection-bound draft presence and latest-state notifications.
     No timers, persisted presence, or author-to-presence inference. *)
+type source = Dashboard_connection | Keeper_turn of Ids.Turn_ref.t
 type session
 type error = Missing_session | Owner_mismatch
-val join : base_path:string -> actor:string -> target:Artifact_draft.target -> session
+val join : base_path:string -> actor:string -> source:source -> target:Artifact_draft.target -> session
 val id : session -> string
 val leave : session -> unit
 val find : base_path:string -> actor:string -> target:Artifact_draft.target -> session_id:string -> (session, error) result

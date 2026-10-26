@@ -158,6 +158,7 @@ let memory_identity ~tool_name ~input ~evidence =
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_peer_artifact)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_artifact_read)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_skill_validate)
+  | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_artifact_draft)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_artifact_publish)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_skill_publish)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_workspace_memory_read)

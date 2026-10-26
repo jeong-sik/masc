@@ -11,6 +11,7 @@ val fusion_decision : Masc_domain.tool_schema
 val fusion_status : Masc_domain.tool_schema
 val peer_artifact : Masc_domain.tool_schema
 val artifact_read : Masc_domain.tool_schema
+val artifact_draft : Masc_domain.tool_schema
 val artifact_publish : Masc_domain.tool_schema
 val skill_validate : Masc_domain.tool_schema
 val skill_publish : Masc_domain.tool_schema

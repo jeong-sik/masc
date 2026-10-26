@@ -8,7 +8,9 @@ export const ArtifactDraftLiveSchema = Schema.Struct({
   schema: Schema.Literal('masc.artifact_draft_live.v1'),
   session_id: Schema.String.pipe(Schema.nonEmptyString()), target: ArtifactDraftTargetSchema,
   peers: Schema.Array(Schema.Struct({ session_id: Schema.String.pipe(Schema.nonEmptyString()),
-    actor: Schema.String.pipe(Schema.nonEmptyString()), position: Schema.NullOr(ArtifactDraftPositionSchema),
+    actor: Schema.String.pipe(Schema.nonEmptyString()), source: Schema.Union(
+      Schema.Struct({ kind: Schema.Literal('dashboard_connection') }),
+      Schema.Struct({ kind: Schema.Literal('keeper_turn'), turn_ref: Schema.String.pipe(Schema.nonEmptyString()) })), position: Schema.NullOr(ArtifactDraftPositionSchema),
     observed_at: Schema.String.pipe(Schema.nonEmptyString()) })),
   document: Schema.NullOr(ArtifactDraftViewSchema),
 })

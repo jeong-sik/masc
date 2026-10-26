@@ -101,7 +101,7 @@ let tag_of_runtime_handler
   | Tool_peer_artifact
   | Tool_artifact_read
   | Tool_skill_validate
-  | Tool_artifact_publish | Tool_skill_publish
+  | Tool_artifact_draft | Tool_artifact_publish | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
   | Tool_memory_select
@@ -185,7 +185,7 @@ let runtime_schema_for_descriptor
     | Keeper_tool_descriptor.Tool_tools_list | Keeper_tool_descriptor.Tool_capability_search
     | Keeper_tool_descriptor.Tool_context_status | Keeper_tool_descriptor.Tool_peer_artifact
     | Keeper_tool_descriptor.Tool_artifact_read | Keeper_tool_descriptor.Tool_skill_validate
-    | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish | Keeper_tool_descriptor.Tool_workspace_memory_read
+    | Keeper_tool_descriptor.Tool_artifact_draft | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish | Keeper_tool_descriptor.Tool_workspace_memory_read
     | Keeper_tool_descriptor.Tool_memory_search | Keeper_tool_descriptor.Tool_memory_select
     | Keeper_tool_descriptor.Tool_memory_retract | Keeper_tool_descriptor.Tool_memory_write
     | Keeper_tool_descriptor.Tool_constitution_write | Keeper_tool_descriptor.Tool_constitution_read

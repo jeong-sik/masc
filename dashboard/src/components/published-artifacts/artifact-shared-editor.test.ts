@@ -70,7 +70,7 @@ it('binds actual editor transactions to exact CRLF source, handles remote edits 
   const authority = seedSharedDocument('원고 😀\r\n다음\r\n')
   const target = { artifact_id: `artifact-${'a'.repeat(32)}`, generation: '019f0000-0000-7000-8000-000000000000' }
   let sequence = 0, receive!: (frame: ArtifactDraftLiveFrame) => void
-  let peers: ArtifactDraftLiveFrame['peers'] = [{ session_id: 'self', actor: 'human', position: null, observed_at: '2026-10-25T13:00:00Z' }]
+  let peers: ArtifactDraftLiveFrame['peers'] = [{ session_id: 'self', actor: 'human', source: { kind: 'dashboard_connection' }, position: null, observed_at: '2026-10-25T13:00:00Z' }]
   const snapshot = (): ArtifactDraftView => ({ content: sharedSource(authority), selection: null, draft: { schema: 'masc.artifact_draft.v1', target,
     state: draftBase64(sharedState(authority)), base_revision: 1, base_sha256: 'a'.repeat(64), sequence, updated_by: 'human', updated_at: '2026-10-25T13:00:00Z' } })
   const frame = () => ({ schema: 'masc.artifact_draft_live.v1' as const, target, session_id: 'self', peers, document: snapshot() })
@@ -93,7 +93,7 @@ it('binds actual editor transactions to exact CRLF source, handles remote edits 
   editor.dispatch({ changes: { from: 0, insert: '내 글 ' } })
   await waitFor(() => expect(sharedSource(authority)).toBe('내 글 원고 😀\r\n다음\r\n'))
   authority.getText('content').insert(authority.getText('content').length, '상대 글\n'); sequence++
-  peers = [...peers, { session_id: 'other', actor: 'keeper-fixture', position: selectSharedSource(authority, { anchor: 0, head: 3 }), observed_at: '2026-10-25T13:01:00Z' }]
+  peers = [...peers, { session_id: 'other', actor: 'keeper-fixture', source: { kind: 'keeper_turn', turn_ref: 'fixture#1' }, position: selectSharedSource(authority, { anchor: 0, head: 3 }), observed_at: '2026-10-25T13:01:00Z' }]
   receive(frame())
   await waitFor(() => expect(editor.state.doc.toString()).toBe(sharedSource(authority)))
   await screen.findByLabelText('keeper-fixture의 편집 위치')

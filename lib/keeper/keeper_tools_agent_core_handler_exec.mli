@@ -29,6 +29,7 @@ val execute_with_observers
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
   -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
@@ -58,6 +59,7 @@ val execute_with_observers_from_meta
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
   -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t

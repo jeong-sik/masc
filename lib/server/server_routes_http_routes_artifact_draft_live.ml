@@ -89,7 +89,7 @@ let add_routes router = router
     | Error message, _, _ -> refuse request reqd (Store.Invalid message)
     | Ok _, None, _ | Ok _, _, None -> refuse request reqd (Store.Unavailable "server runtime not initialized")
     | Ok target, Some sw, Some clock ->
-      let session = Live.join ~base_path ~actor ~target in
+      let session = Live.join ~base_path ~actor ~source:Live.Dashboard_connection ~target in
       (* Register before reading: a newer commit already broadcast to this room
          wins over the initial read. Failed admission leaves no presence. *)
       try match Store.read ~base_path ~artifact_id:target.artifact_id () with

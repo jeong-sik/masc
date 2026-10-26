@@ -31,6 +31,7 @@ let execute_with_observers_with_authority
       ?prepared_edit
       ?prepared_write
       ?turn_sandbox_factory
+      ?artifact_draft_scope
       ?sw
       ?clock
       ?proc_mgr
@@ -90,6 +91,7 @@ let execute_with_observers_with_authority
             ?prepared_edit
             ?prepared_write
             ?turn_sandbox_factory
+            ?artifact_draft_scope
             ?sw
             ?clock
             ?proc_mgr
@@ -117,6 +119,7 @@ let execute_with_observers_with_authority
             ?prepared_edit
             ?prepared_write
             ?turn_sandbox_factory
+            ?artifact_draft_scope
             ?sw
             ?clock
             ?proc_mgr
@@ -143,6 +146,7 @@ let execute_with_observers_with_authority
             ?prepared_edit
             ?prepared_write
             ?turn_sandbox_factory
+            ?artifact_draft_scope
             ?sw
             ?clock
             ?proc_mgr
@@ -169,6 +173,7 @@ let execute_with_observers_with_authority
             ?prepared_edit
             ?prepared_write
             ?turn_sandbox_factory
+            ?artifact_draft_scope
             ?sw
             ?clock
             ?proc_mgr

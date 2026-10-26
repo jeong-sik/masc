@@ -2,7 +2,8 @@ module Draft = Artifact_draft
 module Engine = Artifact_document_engine
 module Rooms = Map.Make (struct type t = string * string * string let compare = Stdlib.compare end)
 module Peers = Map.Make (String)
-type session = { id : string; base_path : string; actor : string; target : Draft.target }
+type source = Dashboard_connection | Keeper_turn of Ids.Turn_ref.t
+type session = { source : source; id : string; base_path : string; actor : string; target : Draft.target }
 type peer =
   { session : session; position : Engine.selection option; observed_at : string
   ; announced_sequence : int option }
@@ -18,8 +19,8 @@ let notify room =
   let previous = room.wake in
   let pulse, wake = Eio.Promise.create () in room.pulse <- pulse; room.wake <- wake;
   Eio.Promise.resolve previous ()
-let join ~base_path ~actor ~target = Mutex.protect mutex (fun () ->
-  let session = { id = Random_id.uuid_v7 (); base_path; actor; target } in
+let join ~base_path ~actor ~source ~target = Mutex.protect mutex (fun () ->
+  let session = { id = Random_id.uuid_v7 (); source; base_path; actor; target } in
   let room = match Rooms.find_opt (key session) !rooms with
     | Some room -> room
     | None -> let pulse, wake = Eio.Promise.create () in
@@ -41,7 +42,7 @@ let find ~base_path ~actor ~target ~session_id = Mutex.protect mutex (fun () ->
   | None -> Error Missing_session
   | Some room -> match Peers.find_opt session_id room.peers with
     | None -> Error Missing_session
-    | Some peer when not (String.equal peer.session.actor actor) -> Error Owner_mismatch
+    | Some peer when peer.session.source <> Dashboard_connection || not (String.equal peer.session.actor actor) -> Error Owner_mismatch
     | Some peer -> Ok peer.session)
 let position session position = Mutex.protect mutex (fun () ->
   match Rooms.find_opt (key session) !rooms with
@@ -76,6 +77,9 @@ let observe session = Mutex.protect mutex (fun () ->
         `Assoc ["draft", Draft.to_json draft; "content", `String content; "selection", `Null] in
     let peers = Peers.bindings room.peers |> List.map (fun (_, peer) -> `Assoc
       ["session_id", `String peer.session.id; "actor", `String peer.session.actor;
+       "source", (match peer.session.source with
+         | Dashboard_connection -> `Assoc ["kind", `String "dashboard_connection"]
+         | Keeper_turn turn_ref -> `Assoc ["kind", `String "keeper_turn"; "turn_ref", Ids.Turn_ref.to_yojson turn_ref]);
        "position", Option.fold ~none:`Null ~some:Engine.selection_to_json peer.position;
        "observed_at", `String peer.observed_at]) in
     Some (`Assoc ["schema", `String "masc.artifact_draft_live.v1"; "session_id", `String session.id;

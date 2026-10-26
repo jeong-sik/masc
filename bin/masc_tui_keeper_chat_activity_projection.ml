@@ -603,6 +603,7 @@ let handler_activity_kind handler =
   | Tool_context_status
   | Tool_peer_artifact
   | Tool_artifact_read
+  | Tool_artifact_draft
   | Tool_artifact_publish
   | Tool_skill_validate
   | Tool_skill_publish

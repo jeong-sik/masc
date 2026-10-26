@@ -21,3 +21,15 @@
  (name test_artifact_draft_live)
  (modules test_artifact_draft_live)
  (libraries masc masc.artifact_document_engine alcotest eio eio_main yojson))
+
+(test
+ (name test_keeper_artifact_draft)
+ (modules test_keeper_artifact_draft)
+ (libraries masc masc.tool_types masc.artifact_document_engine masc.masc_process masc.masc_core masc.masc_types masc.fs_compat
+  alcotest eio eio_main unix yojson))
+
+(test
+ (name test_keeper_artifact_draft_bundle)
+ (modules test_keeper_artifact_draft_bundle)
+ (libraries masc masc_test_deps masc.masc_random_id masc.tool_types masc.artifact_document_engine masc.masc_process masc.masc_core masc.masc_types masc.fs_compat
+  alcotest eio eio_main unix yojson))

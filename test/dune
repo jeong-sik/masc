@@ -3374,6 +3374,11 @@
  (libraries browser_addon_fixture masc_test_deps masc.runtime masc.browser_lane masc.lane_addon_call_context)
  (deps ../bin/masc_native_addon_launcher.exe))
 
+(rule
+ (alias runtest-browser-native-screenshot)
+ (deps ../bin/masc_native_addon_launcher.exe)
+ (action (run %{exe:test_keeper_vision_tool.exe} --browser-screenshot)))
+
 (test
  (name test_keeper_portrait_read)
  (modules test_keeper_portrait_read)
@@ -5164,6 +5169,11 @@
  (name test_browser_lane)
  (modules test_browser_lane)
  (libraries alcotest eio_main eio yojson masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
+
+(test
+ (name test_browser_capture_options)
+ (modules test_browser_capture_options)
+ (libraries alcotest masc.browser_lane))
 
 (include stanzas/test_browser_activity.inc)
 

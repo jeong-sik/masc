@@ -896,7 +896,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Text_read -> Page_read {tab_id=Some 1; max_chars=None}
     | Document_source -> Page_document {tab_id=1}
     | Element_inventory -> Page_elements {tab_id=Some 1;filter={within=None;selector=None}}
-    | Viewport_capture -> Page_capture {tab_id=1}
+    | Viewport_capture -> Page_capture {tab_id=1;options=None}
     | Scene_read -> Page_scene {tab_id=1; max_chars=1000; view=Content; scope=None}
     | Accessibility_snapshot -> Page_snapshot {tab_id=1; max_chars=1000; scope=Snapshot_viewport}
     | Native_workflow ->
@@ -989,6 +989,83 @@ let in_node script =
   match Unix.waitpid [] pid with
   | _, Unix.WEXITED 0 -> In_channel.with_open_bin out In_channel.input_all
   | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> fail "node did not run the step"
+
+(* Execute the generated capture script against a Page stand-in, including its
+   actual screenshot call and file write. This proves the adapter boundary,
+   not the installed SDK's rendering or a real browser's pixels. *)
+let test_native_capture_options_and_owned_file () =
+  let directory = capture_directory () in
+  let expected = ref (obj []) and image = ref png and echo = ref None in
+  let written = ref [] in
+  let observed_state = state ~url:"https://app.slack.com/" ~width:800 in
+  let run ~window_s script =
+    match (sent_of ~window_s script).step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+    | "tabs.list" -> answered tabs
+    | other -> failf "capture must use the native runner, got bounded step %s" other in
+  let run_native script =
+    let sent = sent_of ~window_s:0. script in
+    check string "native capture step" "page.capture" sent.step;
+    check bool "exact native arguments" true (field "options" sent.args = !expected);
+    let path = text (field "path" sent.args) in
+    check string "broker owns the output directory" directory (Filename.dirname path);
+    written := path :: !written;
+    let stand_in = Printf.sprintf {js|
+import {writeFileSync} from 'node:fs';
+const page = {
+  info: async () => ({url: 'https://app.slack.com/'}),
+  evaluate: async () => (%s),
+  screenshot: async options => {
+    console.log('capture-options ' + JSON.stringify(options));
+    writeFileSync(options.path, Buffer.from(%s, 'base64'));
+    return options.path;
+  },
+};
+const taskSpace = async () => ({ownership: 'agent',
+  tabs: async () => [{label:'p1', targetId:'T1', openedBy:'agent'}], page: () => page});
+|js} (Yojson.Safe.to_string observed_state)
+      (Yojson.Safe.to_string (str (Base64.encode_string !image))) in
+    let output = in_node (stand_in ^ script) in
+    let screenshot_options = match List.find_opt (String.starts_with ~prefix:"capture-options ")
+        (String.split_on_char '\n' output) with
+      | Some line -> Yojson.Safe.from_string (after ~prefix:"capture-options " line)
+      | None -> fail "the native Page.screenshot method was not called" in
+    let expected_fields = match !expected with `Assoc fields -> fields | _ -> fail "options must be an object" in
+    check bool "Page.screenshot receives exactly the native options and host path" true
+      (Yojson.Safe.equal screenshot_options (obj (expected_fields @ ["path",str path])));
+    match !echo with
+    | None -> Ok output
+    | Some options -> answered (obj ["label",str "p1";"path",str path;
+        "before",observed_state;"after",observed_state;"captureOptions",options]) in
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
+      ~space:(Browser_configuration.Named_space "masc") ~version:"fixture" ~capture_directory:directory with
+    | Ok peer -> peer | Error detail -> fail detail in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let capture () = dispatch peer Live.Page_capture (obj ["tabId",`Int 1;"options",!expected]) in
+  let removed () = check bool "only owned capture files are consumed" true
+      (List.for_all (fun path -> not (Sys.file_exists path)) !written) in
+  List.iter (fun options ->
+    expected := options;
+    (match capture () with
+     | Ok reply ->
+       check bool "native receipt retains the exact requested options" true (field "captureOptions" reply = options);
+       check string "native PNG bytes" (Base64.encode_string png) (text (field "data" reply));
+       (match reply with
+        | `Assoc fields -> check bool "native capture has no pointer viewport" false (List.mem_assoc "viewport" fields)
+        | _ -> fail "capture did not return an object")
+     | Error _ -> fail "native capture failed");
+    removed ()) [obj []; obj ["fullPage",`Bool true;"scale",str "css";"raw",`Bool false];
+      obj ["fullPage",`Bool false;"clip",obj ["x",`Float 4.5;"y",`Float 8.;
+        "width",`Float 100.;"height",`Float 90.;"scale",`Float 2.];"raw",`Bool true]];
+  echo := Some (obj []);
+  check string "a different native option receipt is rejected" "ego answered different native screenshot options"
+    (before_effect "mismatched capture options" (capture ()));
+  removed ();
+  echo := None;
+  image := png ^ String.make (Masc.Keeper_vision_tool.max_image_bytes ()) '\000';
+  check string "Vision's configured image boundary applies before publication" "screenshot exceeds Vision image size limit"
+    (before_effect "oversized native PNG" (capture ()));
+  removed ()
 
 (* The snapshot script runs in node against a stand-in for ego whose one agent
    page answers [text]; it prints the options each snapshot call got. *)
@@ -2369,6 +2446,7 @@ let () =
       test_case "a page script error is answered from the page" `Quick test_a_page_script_error_is_answered_from_the_page;
       test_case "an answer past the limit is refused" `Quick test_an_answer_past_the_limit_is_refused;
       test_case "a capture reads and removes its file" `Quick test_capture_reads_and_removes_the_file;
+      test_case "native captures preserve options and consume owned files" `Quick test_native_capture_options_and_owned_file;
       test_case "effects answer what happened" `Quick test_effects_answer_what_happened;
       test_case "history moves one entry and waits for it" `Quick test_history_moves_one_entry;
       test_case "a snapshot reads ego's own tree" `Quick test_a_snapshot_reads_egos_own_tree;

@@ -553,7 +553,9 @@ let execute ~tabs ~call ?actor verb =
     | Browser_lane.Tabs_list -> list_tabs ~tabs ~call
     | Browser_lane.Page_goto { url; tab_id } -> goto ~tabs ~call ~url ~tab_id
     | Browser_lane.Page_act action -> tab_action ~tabs ~call action
-    | Browser_lane.Page_capture { tab_id } -> capture ~tabs ~call ~tab_id
+    | Browser_lane.Page_capture {options=Some _;_} ->
+      Error (Browser_lane.Rejected_before_effect "native screenshot options require an Ego connection")
+    | Browser_lane.Page_capture { tab_id; options=None } -> capture ~tabs ~call ~tab_id
     | Browser_lane.Page_read { tab_id; max_chars } -> read_text ~tabs ~call ~tab_id ~max_chars
     | Browser_lane.Page_elements { tab_id; filter } -> read_elements ~tabs ~call ~tab_id ~filter
     | Browser_lane.Page_scene { tab_id; max_chars; view; scope } -> read_scene ~tabs ~call ~tab_id ~max_chars ~view ~scope

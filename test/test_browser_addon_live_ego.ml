@@ -387,7 +387,7 @@ let scenario mode =
           check bool "retirement answers after the space ended" true (finished ());
           ignore (Eio.Promise.await_exn reading))
         else (
-        let shot = answered (issue (B.Page_capture {tab_id=1})) in
+        let shot = answered (issue (B.Page_capture {tab_id=1;options=None})) in
         check string "the screenshot" (Base64.encode_string "\137PNG\r\n\026\nfixture")
           Yojson.Safe.Util.(shot |> member "data" |> member "data" |> to_string);
         check string "a new tab" {|{"ok":true,"data":{"tabId":2,"action":"open_tab","created":true,"url":"https://fixture.test/channel","title":"Opened","active":true}}|}

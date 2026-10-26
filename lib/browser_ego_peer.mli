@@ -76,6 +76,9 @@ type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) re
     it. A space of the same name that the operator owns is refused by ego.
     [version] is ego lite's version. Screenshots are written under
     [capture_directory], which this process owns, and removed once read.
+    Reads are bounded by the existing Keeper Vision image limit. Captures use
+    the SDK-owned execution wait; native option captures retain their own
+    page image scope instead of a viewport pointer frame.
     [now] is the time in seconds; a command that runs twice gives its
     second run what is left of its window. Downloads that agent pages start
     are saved and published through [downloads]. [run_native] uses the same

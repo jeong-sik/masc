@@ -958,7 +958,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | Text_read -> Page_read {tab_id=Some 1; max_chars=None}
       | Document_source -> Page_document {tab_id=1}
       | Element_inventory -> Page_elements {tab_id=Some 1;filter={within=None;selector=None}}
-      | Viewport_capture -> Page_capture {tab_id=1}
+      | Viewport_capture -> Page_capture {tab_id=1;options=None}
       | Scene_read -> Page_scene {tab_id=1; max_chars=1000; view=Content; scope=None}
       | Accessibility_snapshot -> Page_snapshot {tab_id=1; max_chars=1000; scope=Snapshot_viewport}
       | Native_workflow ->

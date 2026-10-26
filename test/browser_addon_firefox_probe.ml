@@ -230,7 +230,7 @@ let () =
        let* receipt=Browser_addon_host.issue host
         ~preference:(Browser_selection.Exact (Browser_lane.Live_route
           (Some (require (Browser_lane.client_id_of_string first_client)))))
-        (Browser_lane.Page_capture {tab_id=tab}) |> Result.map_error Tool_result.message in
+        (Browser_lane.Page_capture {tab_id=tab;options=None}) |> Result.map_error Tool_result.message in
        let* data=Browser_surface.capture_from ~binding:receipt.binding ~tab_id:tab ~started receipt.data in
        let* encoded=Option.to_result ~none:"capture has no PNG" (string "data" data) in
        let* bytes=Base64.decode encoded |> Result.map_error (fun (`Msg message) -> message) in

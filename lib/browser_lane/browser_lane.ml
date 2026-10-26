@@ -20,6 +20,7 @@ module Action = Browser_action
 module Keyboard = Browser_keyboard
 module Upload_lease = Browser_upload_lease
 module Document = Browser_document
+module Capture = Browser_capture_options
 module Lane_name = Browser_lane_name
 module Lane_token = Browser_lane_token
 
@@ -95,7 +96,7 @@ type verb =
   | Page_console of { tab_id : int }
   | Page_network of { tab_id : int }
   | Page_cookies of { tab_id : int }
-  | Page_capture of { tab_id : int }
+  | Page_capture of { tab_id : int; options : Capture.t option }
   | Page_scene of { tab_id : int; max_chars : int; view : scene_view; scope : node_ref option }
   (* The connection's own accessibility snapshot of a page, with the refs its
      element actions accept (an ego task space; RFC-browser-live-ego). *)
@@ -151,6 +152,7 @@ let reply_policy = function
 (* SDK-native navigation and selector/ref input need no MASC execution clock. Scene,
    coordinate and custom-waypoint adapters retain their existing guards. *)
 let ego_reply_policy = function
+  | Page_capture _ -> Executor_owned
   | Page_goto _ -> Executor_owned
   | Page_act action ->
     (match action with
@@ -177,7 +179,7 @@ let ego_reply_policy = function
      | Press_key _ | Scroll _ | Hover_at _ | Tap_at _ | Swipe _ | Click_at _
      | Scroll_at _ | Drag _ | Follow_link _ | Click_node _ | Fill_node _ -> Reply_window)
   | (Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _
-    | Page_network _ | Page_cookies _ | Page_capture _ | Page_scene _ | Page_snapshot _
+    | Page_network _ | Page_cookies _ | Page_scene _ | Page_snapshot _
     | Page_native_workflow _ | Session_open _ | Session_close | Session_status
     | Page_elements _ | Page_context _ | Page_instruct _
     | Page_locate _ | Page_extract _) as verb -> reply_policy verb
@@ -407,8 +409,9 @@ let verb_json = function
     `Assoc ["verb",`String "page.scene";"args",scene_args ~tab_id ~max_chars ~view ~scope]
   | Page_snapshot {tab_id;max_chars;scope} ->
     `Assoc ["verb",`String "page.snapshot";"args",snapshot_args ~tab_id ~max_chars ~scope]
-  | Page_capture { tab_id } ->
-    `Assoc ["verb", `String "page.capture"; "args", `Assoc ["tabId", `Int tab_id]]
+  | Page_capture { tab_id; options } ->
+    `Assoc ["verb", `String "page.capture"; "args", `Assoc (["tabId", `Int tab_id]
+      @ Option.to_list (Option.map (fun value -> "options",Capture.to_json value) options))]
   | Page_native_workflow workflow ->
     `Assoc ["verb",`String "page.native_workflow";"args",Native_workflow.to_json workflow]
   | Page_interact { tab_id; frame_path; expected_url; action } ->
@@ -566,7 +569,8 @@ let live_capability = function
   | Page_read _ -> Some Text_read
   | Page_document _ -> Some Document_source
   | Page_elements _ -> Some Element_inventory
-  | Page_capture _ -> Some Viewport_capture
+  | Page_capture {options=None;_} -> Some Viewport_capture
+  | Page_capture {options=Some _;_} -> Some Native_workflow
   | Page_scene _ -> Some Scene_read
   | Page_native_workflow _ -> Some Native_workflow
   | Page_snapshot _ -> Some Accessibility_snapshot
@@ -600,6 +604,7 @@ let handoff_refused = "Space control actions apply only to an ego connection on 
 (* Why the automation lane does not serve a verb, if it does not.
    Model-assisted locate is admitted separately by the installed executor. *)
 let automation_refusal = function
+  | Page_capture {options=Some _;_} -> Some "native screenshot options require an Ego connection"
   | Page_native_workflow _ -> Some "native workflows require an ego connection"
   | Page_interact {action; _} when acts_on_snapshot_target action -> Some snapshot_target_refused
   | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Space_status | Action.Wait_for_control _ | Action.Adopt_tab _ | Action.Release_tab _)) -> Some handoff_refused
@@ -619,6 +624,7 @@ let verb_allowed_on_automation verb = Option.is_none (automation_refusal verb)
    are served; frames, dialogs, downloads, the idle document observer and
    other BrowserAct actions are not served. *)
 let verb_allowed_on_stagehand = function
+  | Page_capture {options=Some _;_} -> false
   | Page_native_workflow _ -> false
   | Page_interact {action; _} when acts_on_snapshot_target action -> false
   | Session_open _ | Session_close | Session_status | Tabs_list | Page_goto _ | Page_capture _
@@ -825,7 +831,7 @@ let settled_activity_of_json = function
 let activity_scope = function
   | Page_native_workflow workflow -> Some workflow.tab_id
   | Page_interact {tab_id;_} | Page_document {tab_id} | Page_downloads {tab_id}
-  | Page_console {tab_id} | Page_network {tab_id} | Page_cookies {tab_id} | Page_capture {tab_id}
+  | Page_console {tab_id} | Page_network {tab_id} | Page_cookies {tab_id} | Page_capture {tab_id;_}
   | Page_scene {tab_id;_} | Page_snapshot {tab_id;_} | Page_context {tab_id;_}
   | Page_instruct {tab_id;_} | Page_locate {tab_id;_} | Page_extract {tab_id;_}
   | Page_act (Action.Control (Action.Adopt_tab {tab_id;_}|Action.Release_tab tab_id))

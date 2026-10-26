@@ -177,7 +177,7 @@ let test_capture_passes_the_surface () =
       Masc.Browser_selection.Owned_stagehand
   in
   let captured =
-    match Executor.execute ~tabs ~call:(call fake) (Lane.Page_capture { tab_id = 1 }) with
+    match Executor.execute ~tabs ~call:(call fake) (Lane.Page_capture {tab_id = 1 ;options=None}) with
     | Lane.Answered (`Assoc fields) when List.assoc_opt "ok" fields = Some (`Bool true) ->
       Masc.Browser_surface.capture_from ~binding ~tab_id:1 ~started:0L
         (Option.value (List.assoc_opt "data" fields) ~default:`Null)
@@ -204,7 +204,7 @@ let test_capture_refuses_a_moving_page () =
   ignore (listed tabs fake);
   fake.scrolls_while_capturing <- true;
   check bool "the page scrolled between the reads" true
-    (refused (Executor.execute ~tabs ~call:(call fake) (Lane.Page_capture { tab_id = 0 })))
+    (refused (Executor.execute ~tabs ~call:(call fake) (Lane.Page_capture {tab_id = 0 ;options=None})))
 ;;
 
 let test_sentence_verbs () =
@@ -680,7 +680,7 @@ let test_script_throw_keeps_its_reason () =
   let tabs = Executor.Tabs.create () and fake = fake [ shop () ] ~active:(Some "P2") in
   ignore (listed tabs fake);
   fake.script_throws <- Some "scene_document_changed";
-  match Executor.execute ~tabs ~call:(call fake) (Lane.Page_capture { tab_id = 0 }) with
+  match Executor.execute ~tabs ~call:(call fake) (Lane.Page_capture {tab_id = 0 ;options=None}) with
   | Lane.Refused reason -> check string "the thrown reason" "scene_document_changed" reason
   | _ -> fail "a throw in the page script is refused with its reason"
 ;;

@@ -201,16 +201,21 @@ let parse_capture_request json =
   | Some _ -> Ok request
   | None -> Error "tabId is required for a screenshot"
 
-let capture_from ~binding ~tab_id ~started data =
+let parse_screenshot_request = function
+  | `Assoc fields when List.for_all (fun (key,_) -> List.mem key ["lane";"clientId";"tabId";"screenshotOptions"]) fields
+      && List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) ->
+    let* request=parse_capture_request (`Assoc (List.remove_assoc "screenshotOptions" fields)) in
+    let* options=Browser_lane.Capture.of_optional_json (List.assoc_opt "screenshotOptions" fields) in
+    Ok (request,options)
+  | _ -> Error "unknown or duplicate screenshot request fields"
+
+let capture_image_from ~binding ~tab_id ~started data =
   let selected=Browser_binding.selected binding in
   let lane_name=source_name selected.route in
   match field "tabId" data, field "url" data, field "title" data,
         field "mimeType" data, field "data" data with
   | Some (`Int actual), Some (`String url), Some (`String title),
     Some (`String "image/png"), Some (`String image) when actual = tab_id ->
-    let* viewport = match field "viewport" data with
-      | Some json -> Browser_lane.Pointer.viewport_of_json json
-      | None -> Error "screenshot lacks viewport metadata; update the browser connector" in
     let max_bytes = Keeper_vision_tool.max_image_bytes () in
     let* () = if String.length image > ((max_bytes + 2) / 3) * 4
       then Error "screenshot exceeds Vision image size limit" else Ok () in
@@ -225,6 +230,30 @@ let capture_from ~binding ~tab_id ~started data =
         @ Browser_binding.connection_fields binding
         @ ["tabId", `Int tab_id;
            "title", `String title; "url", `String url; "mimeType", `String "image/png";
-           "data", `String image; "viewport", Browser_lane.Pointer.viewport_to_json viewport;
+           "data", `String image;
            "elapsed_ms", `Float elapsed_ms]))
   | _ -> Error "screenshot response does not match the requested tab or PNG contract"
+
+let capture_from ~binding ~tab_id ~started data =
+  let* ()=if field "captureOptions" data=None then Ok ()
+    else Error "native screenshot cannot be projected as a viewport pointer frame" in
+  let* image=capture_image_from ~binding ~tab_id ~started data in
+  let* viewport=match field "viewport" data with
+    | Some json -> Browser_lane.Pointer.viewport_of_json json
+    | None -> Error "screenshot lacks viewport metadata; update the browser connector" in
+  match image with
+  | `Assoc fields -> Ok (`Assoc (("viewport",Browser_lane.Pointer.viewport_to_json viewport)::fields))
+  | _ -> Error "invalid viewport screenshot projection"
+
+let native_capture_from ~binding ~tab_id ~started ~options data =
+  let* ()=match data with
+    | `Assoc fields when List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok ()
+    | _ -> Error "invalid or duplicate native screenshot response fields" in
+  let* observed=Browser_lane.Capture.of_optional_json (field "captureOptions" data) in
+  let* ()=if observed=Some options && field "viewport" data=None then Ok ()
+    else Error "native screenshot options or coordinate scope do not match the request" in
+  let* image=capture_image_from ~binding ~tab_id ~started data in
+  match image with
+  | `Assoc fields -> Ok (`Assoc (("scope",`String "page")::
+      ("captureOptions",Browser_lane.Capture.to_json options)::fields))
+  | _ -> Error "invalid native screenshot projection"

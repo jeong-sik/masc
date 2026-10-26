@@ -506,26 +506,37 @@ let remove path = match Unix.unlink path with
 (* ego writes the screenshot to a file and answers its path. The page's URL
    and viewport are read on each side of it, as the BiDi capture does. *)
 let capture t args =
+  let* options=Browser_lane.Capture.of_optional_json (field "options" args) in
   let* label = target t args in
   t.captures <- t.captures + 1;
   let path = Filename.concat t.capture_directory (Printf.sprintf "ego-capture-%d-%d.png" t.space.id t.captures) in
-  let taken = ask t ~step:"page.capture"
-      ~args:(obj ["label",label;"state",str (page_function Browser_page_script.capture_state);"path",str path])
+  let taken = run_native_step t ~step:"page.capture"
+      ~args:(obj (["label",label;"state",str (page_function Browser_page_script.capture_state);"path",str path]
+        @ Option.to_list (Option.map (fun value -> "options",Browser_lane.Capture.to_json value) options)))
       (on_page (String.concat "\n" [
          "    const state = pageCall(args.state, \"{}\");";
          "    const before = await page.evaluate(state);";
-         "    const path = await page.screenshot({path: args.path});";
+         "    const path = await page.screenshot({...args.options, path: args.path});";
          "    const after = await page.evaluate(state);";
-         "    emit({ok: true, value: {label: tab.label, before, after, path}});" ])) in
+         "    emit({ok: true, value: {label: tab.label, before, after, path, ...(args.options === undefined ? {} : {captureOptions: args.options})}});" ]))
+      |> Result.map_error step_failure_message in
   let image = match taken with
     | Error _ -> Ok None
-    | Ok _ -> Fs_compat.load_owned_regular_file ~ownership_root:t.capture_directory path
-      |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+    | Ok _ ->
+      let* image=Fs_compat.load_owned_regular_file_prefix ~ownership_root:t.capture_directory
+        ~max_bytes:(Env_config_keeper.KeeperVision.max_image_bytes ()) path
+        |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+      (match image with
+       | Some image when image.truncated -> Error "screenshot exceeds Vision image size limit"
+       | Some image -> Ok (Some image.content)
+       | None -> Ok None) in
   let* () = remove path in
   let* value = taken in
   let* image = image in
   let* label = match field "label" value with Some (`String label) -> Ok label | _ -> Error "ego answered a capture without its page label" in
   let* () = if field "path" value = Some (str path) then Ok () else Error "ego wrote the screenshot somewhere else" in
+  let* observed_options=Browser_lane.Capture.of_optional_json (field "captureOptions" value) in
+  let* ()=if observed_options=options then Ok () else Error "ego answered different native screenshot options" in
   let* before = page_json (Option.value ~default:`Null (field "before" value)) in
   let* after = page_json (Option.value ~default:`Null (field "after" value)) in
   let* image = match image with
@@ -535,8 +546,10 @@ let capture t args =
   match field "url" before, field "url" after, field "viewport" before, field "viewport" after, field "title" after with
   | Some (`String url), Some (`String after_url), Some viewport, Some after_viewport, Some title ->
     if url <> after_url || viewport <> after_viewport then Error "viewport_changed_during_capture"
-    else Ok (obj ["tabId",`Int (remember t (Managed label));"url",str url;"title",title;"mimeType",str "image/png";
-      "data",str (Base64.encode_string image);"viewport",viewport])
+    else Ok (obj (["tabId",`Int (remember t (Managed label));"url",str url;"title",title;"mimeType",str "image/png";
+      "data",str (Base64.encode_string image)]
+      @ (match options with None -> ["viewport",viewport]
+          | Some options -> ["captureOptions",Browser_lane.Capture.to_json options])))
   | _ -> Error "the capture state lacks the page URL, title or viewport"
 
 (* Effects. Only a page the space manages and an agent opened takes one: ego

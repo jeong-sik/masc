@@ -42,11 +42,13 @@ let scene host json=run (fun () ->
   projection (Browser_scene.project request ~binding:receipt.binding ~started receipt.data))
 let capture host json=run (fun () ->
   let started=Mtime_clock.elapsed_ns () in
-  let* request=parse Browser_surface.parse_capture_request json in
+  let* request,options=parse Browser_surface.parse_screenshot_request json in
   let* ()=bound request in
   let* tab_id=input (Option.to_result ~none:"screenshot requires tabId" request.tab_id) in
-  let* receipt=Host.issue host ~preference:request.route (B.Page_capture {tab_id}) in
-  projection (Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data))
+  let* receipt=Host.issue host ~preference:request.route (B.Page_capture {tab_id;options}) in
+  projection (match options with
+    | None -> Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data
+    | Some options -> Browser_surface.native_capture_from ~binding:receipt.binding ~tab_id ~started ~options receipt.data))
 let interact host json=run (fun () ->
   let* request=parse Browser_interaction.parse json in
   let* receipt=Host.issue host ~preference:request.route

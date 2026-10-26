@@ -40,9 +40,17 @@ val project_read : read_plan -> binding:Browser_binding.t -> started:int64 ->
 
 val parse_capture_request : Yojson.Safe.t -> (request, string) result
 (** Capture requires an explicit tab ID; it never falls back to an active tab. *)
+val parse_screenshot_request : Yojson.Safe.t ->
+  (request * Browser_lane.Capture.t option, string) result
+(** Capture request plus optional screenshotOptions. Native options select a
+    separate image contract; no caller-owned filesystem path is accepted. *)
 val capture_from : binding:Browser_binding.t -> tab_id:int -> started:int64 ->
   Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** Viewport PNG as bare base64, source/tab identity, URL/title and elapsed time. *)
+val native_capture_from : binding:Browser_binding.t -> tab_id:int -> started:int64 ->
+  options:Browser_lane.Capture.t -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+(** Native PNG with exact requested options and scope=page. It carries no
+    viewport coordinate frame, including when options are explicitly empty. *)
 
 val parse_client_id : Yojson.Safe.t -> (Browser_lane.client_id option, string) result
 val source_name : Browser_lane.route -> string

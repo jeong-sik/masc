@@ -7,7 +7,16 @@ module X = Verifier_review_execution
 module W = Verifier_review_worker
 
 let get = function Ok value -> value | Error detail -> Alcotest.fail detail
-let owner = function Ok value -> value | Error _ -> Alcotest.fail "original owner unavailable"
+let retained = function
+  | Ok () -> ()
+  | Error (O.Original_invalid detail | Identity_mismatch detail
+    | Retain_store_unavailable detail | Already_retained detail) ->
+    Alcotest.fail ("original retain failed: " ^ detail)
+let owner = function
+  | Ok value -> value
+  | Error (O.Load_store_unavailable detail | Corrupt_original detail) ->
+    Alcotest.fail ("original owner unavailable: " ^ detail)
+  | Error O.Not_found -> Alcotest.fail "original owner not found"
 let verification_id = "vrf-journal-recovery"
 let installation_id = "fixture.verifier"
 let package_id = "fixture.review"
@@ -36,10 +45,13 @@ let with_fixture f = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     "[[models]]\nmodel_id = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_native_streaming = false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"review-journal-test" source
     |> get |> Llm_provider.Model_catalog.set_global;
-  let store = Lane_addon_store.create ~root:(Filename.concat
-    (Common.masc_dir_from_base_path ~base_path) "lane-addons") in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  (* Original retention requires an existing owned parent as its authority
+     anchor; the store creates only its own descendants. *)
+  Unix.mkdir masc_root 0o700;
+  let store = Lane_addon_store.create ~root:(Filename.concat masc_root "lane-addons") in
   let original = make_original () in
-  O.retain ~store ~verification_id ~attempt:0 ~installation_id ~package_id original |> owner;
+  O.retain ~store ~verification_id ~attempt:0 ~installation_id ~package_id original |> retained;
   let current = ref (O.load_retained ~store ~verification_id ~attempt:0 ~installation_id ~package_id |> owner) in
   current := O.advance ~store !current P.Dispatch_intended |> owner;
   f env sw base_path store original current))

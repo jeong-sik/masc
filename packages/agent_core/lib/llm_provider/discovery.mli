@@ -87,9 +87,11 @@ type endpoint_status =
 (** Probe explicitly-declared endpoints and return their current status.
     Non-reachable endpoints are returned with [healthy = false].
     Does not raise for endpoint failures; all probe errors are captured in the
-    corresponding [failures] field. When [timeout_s] is supplied, [clock] is
-    mandatory and bounds each complete HTTP request, including its response body.
-    Omitting [timeout_s] preserves the caller's existing unbounded behavior;
+    corresponding [failures] field. An explicit [timeout_s] overrides every
+    endpoint's [discovery_timeout_s]; otherwise each endpoint declaration applies.
+    [clock] is mandatory whenever the effective deadline is present and bounds
+    each complete HTTP request, including its response body. With neither a caller
+    nor an endpoint deadline, the existing unbounded behavior is preserved;
     AGENT_CORE does not choose a fallback deadline. *)
 val discover
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -213,8 +215,9 @@ val first_discovered_model_id_for_url : string -> string option
 val context_for_model : string -> (string * int) option
 
 (** Probe [endpoints], update the shared per-slot context state,
-    and return the full status list.  Replaces [discover] when
-    the caller also wants the context state kept current. *)
+    and return the full status list. Replaces [discover] when the caller also
+    wants the context state kept current. [clock] is forwarded to discovery so
+    each endpoint's declared [discovery_timeout_s] can be enforced. *)
 val refresh_and_sync
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> sw:Eio.Switch.t

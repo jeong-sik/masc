@@ -49,7 +49,9 @@ val get_cached_or_refresh : unit -> endpoint_info list
     - the cached result is empty (including every call after an empty probe).
 
     The staleness decision reads the endpoints and timestamp from the
-    same immutable snapshot. *)
+    same immutable snapshot. Global probes use each active endpoint's declared
+    [discovery_timeout_s] with the captured clock. No fallback deadline is chosen;
+    an undeclared endpoint retains its existing unbounded behavior. *)
 
 val cache_age_seconds : unit -> float
 (** Wall-clock seconds since the last successful refresh. *)

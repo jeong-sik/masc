@@ -96,9 +96,11 @@ type endpoint_refresh_error =
   | No_healthy_endpoints of Discovery.endpoint_status list
 
 (** Probe explicit typed endpoint declarations and replace the active endpoint
-    snapshot with the healthy declarations. The previous snapshot is retained
-    when [endpoints] is empty or none is healthy; the returned error preserves
-    endpoint-local probe failures. No port scan or fallback declaration occurs.
+    snapshot with the healthy declarations. [clock] is forwarded to the probe and
+    active endpoints retain their declared [discovery_timeout_s]. The previous
+    snapshot is retained when [endpoints] is empty or none is healthy; the returned
+    error preserves endpoint-local probe failures. No port scan or fallback
+    declaration occurs.
     @since 0.86.0 *)
 val refresh_llama_endpoints
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

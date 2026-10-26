@@ -105,12 +105,12 @@ let publish_model_observation observed key model_id =
 let refresh_cache () =
   let observed = Atomic.get state in
   match observed.environment with
-  | Some { switch; net; clock = _ } ->
+  | Some { switch; clock; net } ->
     let endpoints =
       Llm_provider.Provider_registry.active_llama_endpoints ()
     in
     let results =
-      Llm_provider.Discovery.discover ~headers:[] ~sw:switch ~net ~endpoints ()
+      Llm_provider.Discovery.discover ~headers:[] ~clock ~sw:switch ~net ~endpoints ()
     in
     let now = Time_compat.now () in
     let retained =

@@ -2465,9 +2465,9 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                     projection resets both observations on every request. *)
                  state.last_request := Option.map (fun request ->
                    {request with request={request.request with
-                     tail_bytes=request.request.tail_bytes + retained_bytes}}) !state.last_request;
+                     tail_bytes=request.request.tail_bytes + retained_bytes}}) !(state.last_request);
                  state.request_range := Option.map (fun range ->
-                   {range with Keeper_continuity_request.custom_projection_changed=true}) !state.request_range;
+                   {range with Keeper_continuity_request.custom_projection_changed=true}) !(state.request_range);
                  List.filter (fun message -> not (Keeper_client_tool_outbox.is_context_message message))
                    messages @ [message]) (project messages))
       }

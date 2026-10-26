@@ -884,7 +884,7 @@ let test_wake_fail_closed_rejects_conflicting_delivery () =
     in
     let conflicting : Keeper_event_queue.stimulus =
       { post_id = Keeper_event_queue.fusion_completion_post_id conflicting_payload
-      ; urgency = Keeper_event_queue.Normal
+      ; urgency = Keeper_event_queue.Immediate
       ; arrived_at = 1.0
       ; payload = Keeper_event_queue.Fusion_completed conflicting_payload
       }

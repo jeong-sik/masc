@@ -97,6 +97,48 @@ let test_cleanup_report_keeps_guest_skip_reason () =
     | Ok _ -> Alcotest.fail "malformed cleanup report accepted")
     [ {|{"skip":false,"entries":[]}|}; "not JSON" ]
 
+let test_slow_keeper_does_not_block_another_cleanup () =
+  Eio_main.run @@ fun _env ->
+  let running = Server_keeper_build_maintenance.create_running () in
+  Eio.Switch.run @@ fun sw ->
+  let started, mark_started = Eio.Promise.create () in
+  let release, allow_release = Eio.Promise.create () in
+  let other, mark_other = Eio.Promise.create () in
+  let duplicate = ref false in
+  Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"slow" (fun () ->
+    Eio.Promise.resolve mark_started ();
+    Eio.Promise.await release);
+  Eio.Promise.await started;
+  Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"slow"
+    (fun () -> duplicate := true);
+  Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"other"
+    (fun () -> Eio.Promise.resolve mark_other ());
+  Eio.Promise.await other;
+  Alcotest.(check bool) "in-flight Keeper is not duplicated" false !duplicate;
+  Eio.Promise.resolve allow_release ()
+
+exception Stop_cleanup_fixture
+
+let test_cancelled_cleanup_releases_its_reservation () =
+  Eio_main.run @@ fun _env ->
+  let running = Server_keeper_build_maintenance.create_running () in
+  let joined = ref false in
+  (try Eio.Switch.run (fun sw ->
+     let started, mark_started = Eio.Promise.create () in
+     Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"cancelled"
+       (fun () -> Fun.protect
+         ~finally:(fun () -> joined := true)
+         (fun () -> Eio.Promise.resolve mark_started (); Eio.Fiber.await_cancel ()));
+     Eio.Promise.await started;
+     Eio.Switch.fail sw Stop_cleanup_fixture)
+   with Stop_cleanup_fixture -> ());
+  Alcotest.(check bool) "cancelled callback joined before scope returns" true !joined;
+  let reran = ref false in
+  Eio.Switch.run (fun sw ->
+    Server_keeper_build_maintenance.schedule ~sw ~running ~keeper_name:"cancelled"
+      (fun () -> reran := true));
+  Alcotest.(check bool) "next scope can schedule the Keeper again" true !reran
+
 let () =
   Alcotest.run "Keeper build maintenance admission"
     [ "metadata", [
@@ -104,4 +146,6 @@ let () =
       Alcotest.test_case "Owner identity must match" `Quick test_cleanup_rejects_other_owner;
       Alcotest.test_case "Profile errors refuse cleanup" `Quick test_cleanup_rejects_invalid_profile;
       Alcotest.test_case "Guest skip reason is not empty success" `Quick test_cleanup_report_keeps_guest_skip_reason;
+      Alcotest.test_case "Slow Keeper does not block another cleanup" `Quick test_slow_keeper_does_not_block_another_cleanup;
+      Alcotest.test_case "Cancelled cleanup releases its reservation" `Quick test_cancelled_cleanup_releases_its_reservation;
     ] ]

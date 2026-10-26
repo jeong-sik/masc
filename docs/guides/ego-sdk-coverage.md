@@ -38,10 +38,10 @@ Neither means fully supported.
 | `TaskSpace.spaceId` | SDK-observed ID follows client inventory, tool receipts, stored screenshots and the TUI connection identity | Installed-route proof and per-goal Space lifecycle |
 | `TaskSpace.name` | SDK-observed attachment name follows the same context | Current-name refresh, per-goal lifecycle and actual visible UI proof |
 | `TaskSpace.ownership` | Checked before scripts and handoff | Current ownership projection in Keeper and UI observations |
-| `TaskSpace.page` | Internal permanent label resolution | Expose durable Page label with numbered tab provenance |
+| `TaskSpace.page` | Permanent label resolution; tab inventory and document-read projection retain the observed label | Lifecycle tools and installed-route proof |
 | `TaskSpace.userPage` | None | Claim/takeover boundary attribution and explicit adoption |
 | `TaskSpace.pages` | Managed pages known through tab enumeration | Direct lifecycle-aware managed inventory |
-| `TaskSpace.tabs` | `tabs.list` | Goal/Space ownership and unmanaged-tab provenance in public DTO |
+| `TaskSpace.tabs` | `tabs.list` preserves label, target ID and `agent`/`unknown` origin for readable and unavailable tabs | Per-goal scope, lifecycle and installed-route proof |
 | `TaskSpace.newPage` | `page.act` open_tab | Per-goal Space and returned permanent label |
 | `TaskSpace.adopt` | None; unmanaged pages refused | Explicitly authorized adoption with conservative ownership |
 | `TaskSpace.release` | None | Return an unknown-origin managed page without closing it |
@@ -49,10 +49,10 @@ Neither means fully supported.
 | `TaskSpace.handOff` | `page.act` hand_off returns same-Space ID/name; Keeper guidance composes `masc_ask` and explicit-confirmation resume | Real Keeper login handoff, per-goal scope and UI control-state projection |
 | `TaskSpace.finish` | Internal connection teardown uses `keep:[]` | Goal completion with explicit keep policy and retained-page receipt |
 | `TaskSpace.cdp` | None | Explicit Target/Browser protocol boundary and lifecycle reconciliation |
-| `Page.label` | Internal permanent labels | Tool/UI provenance and resume identity |
-| `Page.spaceId` | Space known internally | Tool/UI provenance |
-| `Page.openedBy` | Conservatively checked for closure | Preserve origin attribution through public inventory and lifecycle tools |
-| `Page.targetId` | Unmanaged-tab identification only | Advanced Target protocol provenance; never use as durable Page identity |
+| `Page.label` | Inventory and document-read DTO retain the permanent label; TUI shows it for the selected tab | Installed/UI proof and lifecycle-aware resume |
+| `Page.spaceId` | Bound connection Space accompanies inventory and read receipts | Installed-route proof |
+| `Page.openedBy` | Inventory/read DTO and TUI retain the SDK `agent` or `unknown` origin; closure remains conservative | Lifecycle tools and installed/UI proof |
+| `Page.targetId` | Inventory/read DTO retain the observed target ID, including unmanaged tabs | Advanced Target protocol lifecycle; target IDs are ephemeral |
 
 ## Page operations
 
@@ -161,3 +161,11 @@ receipt delivery.
 The Goal remains incomplete while any required SDK, Space, selection, recovery,
 installed Keeper or actual UI evidence is missing. See
 [`tui-browser-lanes.md`](tui-browser-lanes.md) for the current product flow.
+
+The Page context contract follows the pinned SDK's
+[`TabInventoryItem`](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L401).
+Each Ego tab carries `egoPage: {label, targetId, openedBy}`; `label: null` means
+unmanaged, and `openedBy` is exactly `agent` or `unknown`. An unknown origin does
+not mean the user created the tab. The same context survives partial inventories
+and document projection. These observations grant no adoption, takeover or close
+authority. The TUI changes are source integration; visible behavior is unverified.

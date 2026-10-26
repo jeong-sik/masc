@@ -7,8 +7,26 @@ let dialog_kind_to_wire = function
 let dialog_kind_of_wire = function
   | "alert" -> Some Alert | "confirm" -> Some Confirm | "prompt" -> Some Prompt
   | "beforeunload" -> Some Beforeunload | _ -> None
+type ego_page_origin = Agent_created | Unknown_origin
+type ego_page = { label : string option; target_id : string; opened_by : ego_page_origin }
+let ego_page_to_json page = `Assoc [
+  "label",(match page.label with None -> `Null | Some label -> `String label);
+  "targetId",`String page.target_id;
+  "openedBy",`String (match page.opened_by with Agent_created -> "agent" | Unknown_origin -> "unknown")]
+let ego_page_of_json = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=["label";"openedBy";"targetId"] ->
+    (match List.assoc_opt "label" fields,List.assoc_opt "targetId" fields,List.assoc_opt "openedBy" fields with
+     | Some label,Some (`String target_id),Some (`String origin) when String.trim target_id<>"" ->
+       let label=match label with `Null -> Ok None
+         | `String value when String.trim value<>"" -> Ok (Some value)
+         | _ -> Error "invalid Ego Page label" in
+       let opened_by=match origin with "agent" -> Ok Agent_created | "unknown" -> Ok Unknown_origin
+         | _ -> Error "unknown Ego Page origin" in
+       Result.bind label (fun label -> Result.map (fun opened_by -> {label;target_id;opened_by}) opened_by)
+     | (None|Some _),(None|Some _),(None|Some _) -> Error "invalid Ego Page provenance")
+  | _ -> Error "invalid or duplicate Ego Page provenance fields"
 type tab = { id : int; title : string; url : string; active : bool; window_id : int option;
-  dialog : dialog option }
+  dialog : dialog option; ego_page : ego_page option }
 type selection = Requested of tab | Active of tab | None_active
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -45,6 +63,9 @@ let parse_request = function
     Ok {route; tab_id}
   | _ -> Error "body must be a JSON object"
 let decode_tab json =
+  let* ()=match json with
+    | `Assoc fields when List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok ()
+    | _ -> Error "invalid or duplicate browser tab fields" in
   match field "id" json, field "title" json, field "url" json, field "active" json with
   | Some (`Int id), Some (`String title), Some (`String url), Some (`Bool active) ->
     let* window_id = match field "windowId" json with
@@ -61,7 +82,10 @@ let decode_tab json =
             | Some kind, Some (`String value) -> Ok (Some {kind;message;default_value=Some value})
             | None, _ | Some _, Some _ -> Error "malformed browser tab dialog")
          | _ -> Error "malformed browser tab dialog") in
-    Ok {id;title;url;active;window_id;dialog}
+    let* ego_page=match field "egoPage" json with
+      | None -> Ok None
+      | Some value -> Result.map Option.some (ego_page_of_json value) in
+    Ok {id;title;url;active;window_id;dialog;ego_page}
   | _ -> Error "malformed browser tab"
 let rec decode_tabs = function
   | [] -> Ok []
@@ -88,6 +112,7 @@ let dialog_json {kind;message;default_value} =
 let tab_json tab = `Assoc (["id",`Int tab.id;"title",`String tab.title;
   "url",`String tab.url;"active",`Bool tab.active]
   @ (match tab.window_id with Some window_id -> ["windowId",`Int window_id] | None -> [])
+  @ (match tab.ego_page with None -> [] | Some page -> ["egoPage",ego_page_to_json page])
   @ match tab.dialog with
     | None -> []
     | Some {kind;message;default_value} ->
@@ -128,6 +153,26 @@ let selected_tab plan=match plan.selection with
 let project_read plan ~binding ~started ~page =
   let selected=Browser_binding.selected binding in
   let lane_name=source_name selected.route in
+  let check_provenance provenance=match Browser_binding.backend binding,provenance with
+    | Browser_capabilities.Connected Browser_lane.Ego_task_space,Some _ -> Ok ()
+    | Connected Ego_task_space,None -> Error "Ego tab is missing its Page provenance"
+    | (Connected (Web_extension|Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable),None -> Ok ()
+    | (Connected (Web_extension|Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable),Some _ ->
+      Error "Ego Page provenance requires an Ego connection" in
+  let rec check_tabs = function
+    | [] -> Ok ()
+    | (tab:tab)::rest -> let* ()=check_provenance tab.ego_page in check_tabs rest in
+  let* ()=check_tabs plan.inventory.tabs in
+  let rec check_unavailable = function
+    | [] -> Ok ()
+    | row::rest ->
+      let* ()=match row with
+        | `Assoc fields when List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok ()
+        | _ -> Error "invalid or duplicate unavailable tab fields" in
+      let* provenance=match field "egoPage" row with
+        | None -> Ok None | Some value -> Result.map Option.some (ego_page_of_json value) in
+      let* ()=check_provenance provenance in check_unavailable rest in
+  let* ()=match plan.inventory.completeness with Complete -> Ok () | Partial rows -> check_unavailable rows in
   let* page = match plan.selection,page with
     | None_active,None -> Ok `Null
     | None_active,Some _ | (Requested _|Active _),None -> Error "page does not match the selected tab"

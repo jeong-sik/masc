@@ -406,6 +406,19 @@ let test_picker_empty_row () =
   let two, _ = accept_clients ~generation:30 (Ok (found [firefox; zen])) (discover (create ())) in
   expect "connections to offer need no empty row" (two.clients = Some [firefox; zen] && row two = None)
 
+let test_page_context_decode () =
+  let context : Masc.Browser_surface.ego_page =
+    {label=Some "p1";target_id="T1";opened_by=Masc.Browser_surface.Agent_created} in
+  let value=match tab 2 "Page" with `Assoc fields ->
+    `Assoc (("egoPage",Masc.Browser_surface.ego_page_to_json context)::fields) | _ -> assert false in
+  let parsed=success (parse_tab value) in
+  expect "TUI retains SDK Page context without inferring control" (parsed.ego_page=Some context);
+  let unknown={context with label=None;opened_by=Unknown_origin} in
+  let value=match tab 2 "User tab" with `Assoc fields ->
+    `Assoc (("egoPage",Masc.Browser_surface.ego_page_to_json unknown)::fields) | _ -> assert false in
+  expect "unmanaged and unknown origin remain distinct observations"
+    ((success (parse_tab value)).ego_page=Some unknown)
+
 let test_clients_decode () =
   let row ?(transport="web_extension") ?(space=`Null) id browser =
     `Assoc ["clientId", `String id; "browser", `String browser; "transport", `String transport; "space",space; "interactions", `List []; "lastActivities", `List []] in
@@ -804,6 +817,7 @@ let () =
      "client connection ownership", test_client_connection_ownership;
      "picker empty row reads the list", test_picker_empty_row;
      "client inventory contract", test_clients_decode;
+     "native Page context contract", test_page_context_decode;
      "screenshot drag support follows the connection", test_screenshot_drag_support;
      "every pointer gesture is decided before it is sent", test_pointer_decision;
      "a refused gesture stays until the next input", test_unserved_gesture;

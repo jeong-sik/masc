@@ -272,31 +272,36 @@ let ego_dialog json : (Browser_surface.dialog, string) result =
    the space manages says whether a JavaScript dialog blocks it, as a BiDi
    row does; a page whose dialog state could not be read is listed among
    the unavailable tabs with why, as BiDi lists a tab it could not read. *)
-type listed_tab = Listed of { page : page; title : string; url : string; active : bool; dialog : Browser_surface.dialog option }
-  | Unread of { page : page; url : string; reason : string }
+type listed_tab = Listed of { page : page; title : string; url : string; active : bool;
+    dialog : Browser_surface.dialog option; provenance : Browser_surface.ego_page }
+  | Unread of { page : page; url : string; reason : string; provenance : Browser_surface.ego_page }
 let tab_rows t =
   let* listed = ask t ~step:"tabs.list" ~args:`Null (String.concat "\n" [
       "  const rows = [];";
       "  for (const tab of await task.tabs()) {";
-      "    const row = {label: tab.label ?? null, targetId: tab.targetId, title: tab.title, url: tab.url, active: tab.active, dialog: null, dialogUnread: null};";
+      "    const row = {label: tab.label ?? null, targetId: tab.targetId, openedBy: tab.openedBy, title: tab.title, url: tab.url, active: tab.active, dialog: null, dialogUnread: null};";
       "    if (tab.label) { try { row.dialog = " ^ open_dialog "task.page(tab.label)" ^ "; } catch (error) { row.dialogUnread = String(error && error.message || error); } }";
       "    rows.push(row);";
       "  }";
       "  emit({ok: true, value: rows});" ]) in
   let row json =
-    let* page = match field "label" json, field "targetId" json with
-      | Some (`String label), _ when label <> "" -> Ok (Managed label)
-      | Some `Null, Some (`String target) when target <> "" -> Ok (Unmanaged target)
-      | _ -> Error "ego listed a tab without a label or a target id" in
+    let* ()=match json with
+      | `Assoc fields when List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok ()
+      | _ -> Error "ego listed duplicate or invalid tab fields" in
+    let* provenance=match field "label" json,field "targetId" json,field "openedBy" json with
+      | Some label,Some target_id,Some opened_by -> Browser_surface.ego_page_of_json
+          (obj ["label",label;"targetId",target_id;"openedBy",opened_by])
+      | _ -> Error "ego listed a tab without Page provenance" in
+    let page=match provenance.label with Some label -> Managed label | None -> Unmanaged provenance.target_id in
     match field "title" json, field "url" json, field "active" json with
     | Some (`String title), Some (`String url), Some (`Bool active) ->
       (match field "dialog" json, field "dialogUnread" json with
-       | Some `Null, Some `Null -> Ok (Listed {page; title; url; active; dialog = None})
+       | Some `Null, Some `Null -> Ok (Listed {page; title; url; active; dialog = None;provenance})
        | Some (`Assoc _ as dialog), Some `Null ->
          (match ego_dialog dialog with
-          | Ok dialog -> Ok (Listed {page; title; url; active; dialog = Some dialog})
-          | Error reason -> Ok (Unread {page; url; reason}))
-       | Some `Null, Some (`String reason) -> Ok (Unread {page; url; reason = "ego did not read whether a dialog blocks this page: " ^ reason})
+          | Ok dialog -> Ok (Listed {page; title; url; active; dialog = Some dialog;provenance})
+          | Error reason -> Ok (Unread {page; url; reason;provenance}))
+       | Some `Null, Some (`String reason) -> Ok (Unread {page; url; provenance;reason = "ego did not read whether a dialog blocks this page: " ^ reason})
        | _ -> Error "ego listed a tab without its dialog state")
     | _ -> Error "ego listed a tab without its title, URL or active state" in
   let* rows = match listed with
@@ -310,11 +315,13 @@ let tab_rows t =
   let numbered = List.map (fun row -> remember t (page_of row), row) rows in
   t.pages <- List.filter (fun (page, _) -> List.exists (fun row -> page_of row = page) rows) t.pages;
   let tabs, unavailable = List.fold_left (fun (tabs, unavailable) (index, (id, row)) -> match row with
-    | Listed {title; url; active; dialog; _} ->
-      obj (["id",`Int id;"index",`Int index;"url",str url;"title",str title;"active",`Bool active]
+    | Listed {title; url; active; dialog; provenance; _} ->
+      obj (["id",`Int id;"index",`Int index;"url",str url;"title",str title;"active",`Bool active;
+        "egoPage",Browser_surface.ego_page_to_json provenance]
         @ match dialog with Some dialog -> ["dialog",Browser_surface.dialog_json dialog] | None -> []) :: tabs, unavailable
-    | Unread {url; reason; _} ->
-      tabs, obj ["id",`Int id;"index",`Int index;"error",str reason;"url",str url] :: unavailable)
+    | Unread {url; reason; provenance; _} ->
+      tabs, obj ["id",`Int id;"index",`Int index;"error",str reason;"url",str url;
+        "egoPage",Browser_surface.ego_page_to_json provenance] :: unavailable)
     ([], []) (List.mapi (fun index row -> index, row) numbered) in
   Ok (match unavailable with
     | [] -> `List (List.rev tabs)

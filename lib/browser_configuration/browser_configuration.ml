@@ -8,9 +8,9 @@ type ego_space = Named_space of string | Existing_space of int
 [@@deriving show, eq]
 let validate_ego_space = function
   | Named_space name when String.trim name<>"" -> Ok ()
-  | Existing_space id when id>0 && Int64.of_int id<=9007199254740991L -> Ok ()
+  | Existing_space id when id>=0 && Int64.of_int id<=9007199254740991L -> Ok ()
   | Named_space _|Existing_space _ ->
-      Error "must be a non-empty task space name or a positive JavaScript-safe Space ID"
+      Error "must be a non-empty task space name or a nonnegative JavaScript-safe Space ID"
 type live_ego = { command : string; space : ego_space }
 [@@deriving show, eq]
 type t = {
@@ -115,7 +115,7 @@ let space ~path entries =
         | TomlOffsetDateTime _ | TomlLocalDateTime _ | TomlLocalDate _
         | TomlLocalTime _ | TomlArray _ | TomlTable _ | TomlInlineTable _
         | TomlTableArray _) ->
-    Error (path ^ ".space must be a non-empty task space name or a positive JavaScript-safe Space ID")
+    Error (path ^ ".space must be a non-empty task space name or a nonnegative JavaScript-safe Space ID")
 
 (* A table that is there names an ego-browser to run, so both keys are needed. *)
 let parse_live_ego ~path = function

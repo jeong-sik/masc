@@ -213,7 +213,7 @@ let test_exact_numeric_space_resume () =
     (Result.is_error (open_reference (Existing_space 51) (attachment 51 "user")));
   check int "no takeover or claim follows" 1 (List.length !calls);
   check bool "invalid ID is refused before SDK entry" true
-    (Result.is_error (open_reference (Existing_space 0) (attachment 51 "agent")));
+    (Result.is_error (open_reference (Existing_space (-1)) (attachment 51 "agent")));
   check int "invalid ID runs no script" 0 (List.length !calls);
   (match open_reference (Named_space "51") (attachment 74 "agent") with Ok _ -> () | Error detail -> fail detail);
   check bool "numeric-looking names remain names" true ((List.hd !calls).space=str "51")

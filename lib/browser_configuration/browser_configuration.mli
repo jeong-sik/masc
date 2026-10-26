@@ -34,7 +34,7 @@ type live_bidi = { firefox : string; profile : string; port : int }
 type ego_space = Named_space of string | Existing_space of int
 [@@deriving show, eq]
 val validate_ego_space : ego_space -> (unit, string) result
-(** Nonblank names and positive JavaScript-safe IDs only. A numeric-looking
+(** Nonblank names and nonnegative JavaScript-safe IDs only. A numeric-looking
     string remains a name; only a TOML integer selects an existing Space. *)
 type live_ego = { command : string; space : ego_space }
 [@@deriving show, eq]

@@ -985,9 +985,9 @@ let resolve t ~label ~deadline input =
   | Error failure -> Error (Live.Before_effect (step_failure_message failure))
   | Ok answer -> page_json answer |> Result.map_error (fun detail -> Live.Before_effect detail)
 
-(* An input that opened a JavaScript dialog is done: the page reads nothing
-   until the dialog is answered, so the receipt is the tab's row and the
-   dialog, which a Keeper answers with accept_dialog or dismiss_dialog. *)
+(* An input can stop at a JavaScript dialog. The receipt reports the tab's
+   row and dialog; answering the dialog is separate from input-release
+   settlement and does not establish that the original gesture completed. *)
 let dialog_receipt ~id ~verb ~unknown value =
   let guard = page_json (Option.value ~default:`Null (field "guard" value)) in
   let dialog = match field "dialog" value with Some opened -> ego_dialog opened | None -> Error "ego reported no dialog" in

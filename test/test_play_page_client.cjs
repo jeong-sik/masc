@@ -12,8 +12,9 @@ const script = source.match(/let page_script =\s*\{play\|">([\s\S]*?)<\/script>/
 assert.ok(script, 'the script served by /play exists');
 
 const activity = [{ at: 1, who: 'operator', action: 'pass minsu' }];
-const seat = { name: 'minsu', connected:true, machine: true, controller: 'minsu', controller_recoverable: false, saves_name: 'game',
-  participants: ['minsu', 'operator'] };
+const seat = { name: 'minsu', connected:true, machine: true, controller: 'minsu', controller_recoverable: false, saves_name: 'game' };
+const roster = { participants: ['minsu', 'operator'] };
+const PARTICIPANTS_PATH = '/api/v1/play/participants';
 const frame = { state: 'changed', change_count: 3, incarnation: 'machine-1',
   screen: { format: 'rgb8', width: 1, height: 1, rgb_base64: '/wAA' }, activity };
 const layout = { saves_name: 'game', buttons: [
@@ -22,7 +23,8 @@ const layout = { saves_name: 'game', buttons: [
 const response = (json, status = 200) => ({ status, json: async () => json });
 const emptyRoom = { viewer:'minsu', messages:[], members:[], has_more:false, presence_seconds:60 };
 const roomMessage = (id, text, who = 'keeper-a') => ({ id, text, who, at:1, speaker:'keeper', machine:'dos' });
-const gameReply = ({ url }) => response(url === '/api/v1/play/seat' ? seat : url === '/api/v1/play/pad' ? layout : frame);
+const gameReply = ({ url }) => response(url === '/api/v1/play/seat' ? seat : url === '/api/v1/play/pad' ? layout
+  : url === PARTICIPANTS_PATH ? roster : frame);
 
 function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomReply = () => response(emptyRoom),
   sessionReply = ({ body }) => response({ ok:true, connected:body.connected }) } = {}) {
@@ -706,6 +708,7 @@ for (const [name, badScreen] of [
     const page = fixture(({ url }) => {
       if (url === '/api/v1/play/seat') return response(seat);
       if (url === '/api/v1/play/pad') return response(layout);
+      if (url === PARTICIPANTS_PATH) return response(roster);
       if (++liveReads === 1) return response({ ...frame, screen: badScreen });
       return response(url.includes('since=') ? { ...frame, state: 'unchanged' } : frame);
     });
@@ -813,8 +816,9 @@ test('a malformed frame does not prevent new activity from refreshing the contro
 test('choosing a handoff discovers an invite added while the machine stays idle', async () => {
   let invited = false;
   const page = fixture(({ url, method }) => {
-    if (url === '/api/v1/play/seat') return response(invited
-      ? { ...seat, participants: [...seat.participants, 'newplayer'] } : seat);
+    if (url === '/api/v1/play/seat') return response(seat);
+    if (url === PARTICIPANTS_PATH) return response(invited
+      ? { participants: [...roster.participants, 'newplayer'] } : roster);
     if (url === '/api/v1/play/pad') return response(layout);
     if (method === 'POST') return response({ ok: true });
     return response(url.includes('since=') ? { ...frame, state: 'unchanged' } : frame);
@@ -886,14 +890,59 @@ test('an older seat response cannot overwrite a newer poll result', async () => 
   assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
 });
 
+test('seat polls and machine activity do not read the handoff roster', async () => {
+  let rosterReads = 0;
+  let seatReads = 0;
+  let change = 3;
+  const page = fixture(({ url }) => {
+    if (url === '/api/v1/play/seat') { seatReads += 1; return response(seat); }
+    if (url === '/api/v1/play/pad') return response(layout);
+    if (url === PARTICIPANTS_PATH) { rosterReads += 1; return response(roster); }
+    change += 1;
+    return response({ ...frame, change_count: change,
+      activity: [{ at: change, who: 'operator', action: 'move-' + change }] });
+  });
+  await page.settle();
+  assert.equal(rosterReads, 1, 'opening the page reads the roster once');
+  assert.equal(page.get('pass-to').options.some(option => option.value === 'operator'), true);
+  const seatsBefore = seatReads;
+  await page.poll(300);
+  await page.poll(300);
+  await page.poll(5000);
+  assert.ok(seatReads > seatsBefore, 'activity and the periodic poll still read the seat');
+  assert.equal(rosterReads, 1, 'seat reads leave the roster alone');
+  page.get('pass-to').handlers.focus?.();
+  await page.settle();
+  assert.equal(rosterReads, 2, 'opening the handoff selector reads the roster');
+});
+
+test('an earlier roster answer cannot replace a later one', async () => {
+  const pending = [];
+  const page = fixture(({ url }) => {
+    if (url === PARTICIPANTS_PATH) return new Promise(resolve => pending.push(resolve));
+    return gameReply({ url });
+  });
+  await page.settle();
+  page.get('pass-to').handlers.focus?.();
+  await page.settle();
+  assert.equal(pending.length, 2);
+  pending[1](response({ participants: ['minsu', 'operator', 'newplayer'] }));
+  await page.settle();
+  pending[0](response({ participants: ['minsu', 'operator'] }));
+  await page.settle();
+  assert.equal(page.get('pass-to').options.some(option => option.value === 'newplayer'), true);
+});
+
 test('reopening a focused handoff selector refreshes new invites once per opening', async () => {
   let invited = false;
   let seatReads = 0;
   const page = fixture(({ url }) => {
     if (url === '/api/v1/play/seat') {
       seatReads += 1;
-      return response(invited ? { ...seat, participants: [...seat.participants, 'newplayer'] } : seat);
+      return response(seat);
     }
+    if (url === PARTICIPANTS_PATH) return response(invited
+      ? { participants: [...roster.participants, 'newplayer'] } : roster);
     if (url === '/api/v1/play/pad') return response(layout);
     return response(frame);
   });
@@ -2106,9 +2155,9 @@ for (const status of [401, 403]) {
     await page.settle();
     assert.match(page.get('turn').textContent, /초대가 끝났거나 회수됐어요/);
     assert.equal(page.get('leave').disabled, true);
-    assert.equal(page.requests.length, 2, 'seat and frame start independently');
+    assert.equal(page.requests.length, 3, 'seat, roster and frame start independently');
     await page.roomTick();
-    assert.equal(page.requests.length, 2, 'closed observation sends no further traffic');
+    assert.equal(page.requests.length, 3, 'closed observation sends no further traffic');
     assert.equal(Map.prototype.get.call(storage, 'masc.play.invite'), 'unread-identity');
   });
 }
@@ -2659,6 +2708,7 @@ test('held initial seat authority cannot block first or subsequent live observat
   const page = fixture(({ url }) => {
     if (url === '/api/v1/play/seat') { seatReads += 1; return held; }
     if (url === '/api/v1/play/pad') return response(layout);
+    if (url === PARTICIPANTS_PATH) return response(roster);
     liveReads += 1;
     return response({ ...frame, change_count: liveReads,
       activity: [{ at: liveReads, who: 'operator', action: 'initial-frame-' + liveReads }] });

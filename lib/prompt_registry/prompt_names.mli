@@ -106,7 +106,8 @@ val mcp_operator_remote : string
 val mcp_seat : string
 
 (** [GET /play/agent.md]: how an agent handed an invite link joins the seat.
-    Variables: [mcp_url], [seat_url], [screen_url], [moves]. *)
+    Variables: [mcp_url], [seat_url], [participants_url], [session_url],
+    [screen_url], [room_url], [moves]. *)
 val play_agent_guide : string
 
 (** MCP [tool_help] prompt body pieces, rendered at [prompts/get] time.

@@ -70,14 +70,13 @@
     for its response after the atomic session departure has been acknowledged.
 
     [GET /api/v1/play/seat] needs [CanPlayMachine] from a bearer and answers
-    [{name, connected, machine, controller, controller_recoverable, saves_name, participants}]: the bearer's name,
+    [{name, connected, machine, controller, controller_recoverable, saves_name}]: the bearer's name,
     its durable handoff eligibility, whether a machine is loaded, who holds the DOS controller ([null] when
-    free), whether the holder has authoritatively departed, the loaded
-    program's saves name (the pad layout's key), and
-    every connected keeper, operator and unexpired invite ({!Play_seat.participants}).
+    free), whether the holder has authoritatively departed, and the loaded
+    program's saves name (the pad layout's key).
     The attached shared DOS Add-on is asked before the credential
     transaction, so a slow worker never holds the workspace credential lock;
-    inside the transaction the seat reads participants and participation and
+    inside the transaction the seat reads the caller's participation and
     judges the observed holder's departure with
     {!Keeper_machine_controller_authority.holder_left}. The read does not
     release a controller; the next actual move rechecks departure through
@@ -87,6 +86,16 @@
     [503 {code: "keepers_unreadable"}]. *)
 
 val seat_path : string
+
+val participants_path : string
+(** [GET /api/v1/play/participants] needs [CanPlayMachine] from a bearer and
+    answers [{participants}]: every connected keeper, operator and unexpired
+    invite ({!Play_seat.hand_to}), the names [pass] accepts. It reads every
+    credential and each one's participation, so it is not part of the seat
+    poll; the page reads it when it opens and when a player opens the handoff
+    selector. A fleet that does not list answers
+    [503 {code: "keepers_unreadable"}]. *)
+
 val session_path : string
 (** [POST /api/v1/play/session] with exactly [{connected: boolean}]. False
     durably excludes this credential generation from handoff targets and

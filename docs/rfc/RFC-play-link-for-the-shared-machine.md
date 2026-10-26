@@ -206,6 +206,10 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
     글자 입력은 서버의 적용 확인 뒤에만 지우고,
     응답을 기다리는 같은 입력은 두 번 보내지 않는다.
   - "넘기기": 초대된 이름과 keeper 목록에서 골라 `pass` 한다.
+    이 목록은 자리 응답에 넣지 않고 `GET /api/v1/play/participants` 로 따로 읽는다.
+    목록을 만들려면 모든 credential 과 그 참여 상태를 읽어야 하는데, 자리는 게스트마다
+    몇 초에 한 번, 그리고 화면 활동이 있을 때마다 읽기 때문이다. 페이지는 열릴 때와
+    넘기기 선택 상자를 열 때 목록을 읽는다. 실제 `pass` 는 서버가 그 순간의 명단으로 다시 검사한다(§2.8).
 - 공용 게임 room(`/api/v1/play/room`)을 함께 보여 준다. TUI 관전자, 초대된
   참여자, Keeper가 `masc_play_room`으로 명시적으로 보낸 메시지만 저장하며,
   MSX와 DOS가 같은 대화를 쓴다. Keeper의 사적인 대화·지시·초대 토큰은
@@ -231,7 +235,7 @@ related: ["0439", "machine-spectating-goes-through-lanes"]
   읽는 에이전트도 이 줄은 본다.
   - 안내문은 공개다. 토큰도 워크스페이스 상태도 담지 않는다. `#` 뒤가 bearer 토큰이라고 알려 줄 뿐이다.
   - 글은 프롬프트 `play.agent_guide`(`config/prompts/play.agent_guide.md`)에 둔다. 운영자가 override 로 고칠 수 있다.
-  - 주소와 스키마는 서버가 채운다: `MASC_HTTP_BASE_URL` 뒤에 `/mcp/play`, seat, `screen.png`, room, §2.5 이동
+  - 주소와 스키마는 서버가 채운다: `MASC_HTTP_BASE_URL` 뒤에 `/mcp/play`, seat, participants, session, `screen.png`, room, §2.5 이동
     라우트 네 개. 이동마다 그 라우트가 본문을 검사하는 도구 스키마를 그대로 싣는다
     (`Server_routes_http_routes_dos.moves`). 복사본이 아니라서 스키마가 바뀌면 안내문도 같이 바뀐다.
   - `MASC_HTTP_BASE_URL` 이 없으면 들어올 주소가 없으므로 `409 not_ready` 다. 초대 발급 조건과 같다.

@@ -1,0 +1,168 @@
+{
+  "purpose": "Isolated combined-source runtime proof candidate; not a new implementation, integration approval, merge target, release or operating installation",
+  "base": "9377c7f3025d68e3856d2afd3762468dabc77813",
+  "assembled_product_head": "66b0d26af22ed635a159a768fd937f36f0c4cc1d",
+  "authority": {
+    "keeper": "e-masc-the-leader",
+    "operation_id": "kmsg-248668f42f1ee939905bd13fa54ee88d",
+    "state": "Succeeded",
+    "original_operation_reply_sha256": "3bf2d9df46b239f4872a6850b1fc0003b58341798a0fdf0a97c0ee4f4e23ab44",
+    "original_operation_reply_bytes": 10069
+  },
+  "excluded_prs": [
+    46253,
+    46206
+  ],
+  "conflicts": [],
+  "source_slices": [
+    {
+      "pr": 46234,
+      "original_head": "cfa9b817faa736c2f112fca5957d748d66727294",
+      "original_base_ref_sha": "df4642b0f3083938037f866fee3d325de69353ad",
+      "github_pr_merge_base": "df4642b0f3083938037f866fee3d325de69353ad",
+      "candidate_before": "9377c7f3025d68e3856d2afd3762468dabc77813",
+      "candidate_after": "7baf4155aa18ebf393f9bb6990b3f5bf377486f3",
+      "replayed_commits": [
+        {
+          "original": "42a3a86327d4d8afd4b6f9deef0c8f06f795c216",
+          "candidate": "79c00d77e15cbf193320a9d8fe7f7e4b8c3434f9"
+        },
+        {
+          "original": "105a3ebd6dc87118e0d44bb215808556dcbf91d7",
+          "candidate": "23138697a8566a63c8140eecda4f201e8c07dee3"
+        },
+        {
+          "original": "cfa9b817faa736c2f112fca5957d748d66727294",
+          "candidate": "7baf4155aa18ebf393f9bb6990b3f5bf377486f3"
+        }
+      ],
+      "original_review_diff": "a34d1b425cbcb07c781b739dff0fb5a672ebe0a4d2b91cb356876c18c35a61ff",
+      "candidate_review_diff": "a34d1b425cbcb07c781b739dff0fb5a672ebe0a4d2b91cb356876c18c35a61ff",
+      "review_diff_identical": true,
+      "original_patch_id": "f01cbe87c3c780773e862ce466a1541921a34b94",
+      "candidate_patch_id": "f01cbe87c3c780773e862ce466a1541921a34b94"
+    },
+    {
+      "pr": 46233,
+      "original_head": "b07769be553f54d14873c72f9ccd161d4085799e",
+      "original_base_ref_sha": "cfa9b817faa736c2f112fca5957d748d66727294",
+      "github_pr_merge_base": "cfa9b817faa736c2f112fca5957d748d66727294",
+      "candidate_before": "7baf4155aa18ebf393f9bb6990b3f5bf377486f3",
+      "candidate_after": "ba0d87ef94e22c62ad7f85ca7f8ecc364a27a570",
+      "replayed_commits": [
+        {
+          "original": "39e1fcc4979d10bc41c9825518caf49935232ecf",
+          "candidate": "1220fcfccbee92bd3255b273c07f2e08446b23cf"
+        },
+        {
+          "original": "b07769be553f54d14873c72f9ccd161d4085799e",
+          "candidate": "ba0d87ef94e22c62ad7f85ca7f8ecc364a27a570"
+        }
+      ],
+      "original_review_diff": "f8429dd5757456330de3373256bd53de41a8fb9a3cb387e0c75bcc5acf43e428",
+      "candidate_review_diff": "f8429dd5757456330de3373256bd53de41a8fb9a3cb387e0c75bcc5acf43e428",
+      "review_diff_identical": true,
+      "original_patch_id": "b912b8c01b7851abe31ccec8e49021a3bcf86304",
+      "candidate_patch_id": "b912b8c01b7851abe31ccec8e49021a3bcf86304"
+    },
+    {
+      "pr": 46240,
+      "original_head": "fa23bf437c3679bb4b7bd7c47eb592675697e370",
+      "original_base_ref_sha": "b07769be553f54d14873c72f9ccd161d4085799e",
+      "github_pr_merge_base": "b07769be553f54d14873c72f9ccd161d4085799e",
+      "candidate_before": "ba0d87ef94e22c62ad7f85ca7f8ecc364a27a570",
+      "candidate_after": "063db3dbf3156a9e63ce3d46c8b1f953db839051",
+      "replayed_commits": [
+        {
+          "original": "285f81270d23a2c9275c2798da9593b0022b4d91",
+          "candidate": "6cc7bbece66a568908274d57f0e1f501b4624904"
+        },
+        {
+          "original": "dd332955dd87d839322f9ac1c566e559cd426ce2",
+          "candidate": "d8a7d925f3847ef94f89ec863230edd63c622d4b"
+        },
+        {
+          "original": "fa23bf437c3679bb4b7bd7c47eb592675697e370",
+          "candidate": "063db3dbf3156a9e63ce3d46c8b1f953db839051"
+        }
+      ],
+      "original_review_diff": "7289fc2893d1350485b531bb9b039f1b3af944cb8b94ef24b9062f8140a8c85f",
+      "candidate_review_diff": "7289fc2893d1350485b531bb9b039f1b3af944cb8b94ef24b9062f8140a8c85f",
+      "review_diff_identical": true,
+      "original_patch_id": "edfb651d6236be96e90b0c82ccfd192ed93d2b2c",
+      "candidate_patch_id": "edfb651d6236be96e90b0c82ccfd192ed93d2b2c"
+    },
+    {
+      "pr": 46248,
+      "original_head": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+      "original_base_ref_sha": "fa23bf437c3679bb4b7bd7c47eb592675697e370",
+      "github_pr_merge_base": "fa23bf437c3679bb4b7bd7c47eb592675697e370",
+      "candidate_before": "063db3dbf3156a9e63ce3d46c8b1f953db839051",
+      "candidate_after": "cc3842997a668a3d1a21601de34e83a3f7b114b7",
+      "replayed_commits": [
+        {
+          "original": "c40cde2c6c1c3562f05c881be5fbd6ebccbd8b4c",
+          "candidate": "d7d26b06a50fe5a63b012ad0c967cb8cc36d1214"
+        },
+        {
+          "original": "22014660f23d80e8043846230fdd1a9b3b40278f",
+          "candidate": "fae134f3cde1ed2d04bf09508da2aef05966b617"
+        },
+        {
+          "original": "2861571c6fa3b6403cf12980feea3a109dabca71",
+          "candidate": "1533cb2e1ea7328d8b67e03b9e493d4892d2c4e5"
+        },
+        {
+          "original": "4c94fcce84f59c751ebd4867a2f0dee0e3abb188",
+          "candidate": "05620de09da685fa66c56e24f50735ff759673e0"
+        },
+        {
+          "original": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+          "candidate": "cc3842997a668a3d1a21601de34e83a3f7b114b7"
+        }
+      ],
+      "original_review_diff": "a060a4cb2defb855c54507ced2baeef61ca44a9416a155d34598874f4a795c62",
+      "candidate_review_diff": "a060a4cb2defb855c54507ced2baeef61ca44a9416a155d34598874f4a795c62",
+      "review_diff_identical": true,
+      "original_patch_id": "7e47cf5009901acf08e32c58134499e339acc2c1",
+      "candidate_patch_id": "7e47cf5009901acf08e32c58134499e339acc2c1"
+    },
+    {
+      "pr": 46202,
+      "original_head": "6dedd652df1273c9476a04643b445601e30181ad",
+      "original_base_ref_sha": "a7e0feac83eed783f87e054f0f5bebec22330560",
+      "github_pr_merge_base": "fae95aaf9575fff4c9c7a18cd1dcf1d428d4227a",
+      "candidate_before": "cc3842997a668a3d1a21601de34e83a3f7b114b7",
+      "candidate_after": "66b0d26af22ed635a159a768fd937f36f0c4cc1d",
+      "replayed_commits": [
+        {
+          "original": "01987c0f011c26768cc57f08128784f2a70f50cd",
+          "candidate": "d71786869ccb5a9d8e331be4503ac92de8134377"
+        },
+        {
+          "original": "77ca7c5a523d069dea10945e381c99be6b41c9e4",
+          "candidate": "3da0652b806a326f0e1965964f410316e31d47b2"
+        },
+        {
+          "original": "acd8f15318716b4542afdcb95de0f1fc61897530",
+          "candidate": "024161509323fdac370df907b5e4bc7953ffc40f"
+        },
+        {
+          "original": "c1988fa722c11b9efa205dbed9156338a736821f",
+          "candidate": "5596b764ef59d3f87d4523aa2d0530190f5f94cc"
+        },
+        {
+          "original": "6dedd652df1273c9476a04643b445601e30181ad",
+          "candidate": "66b0d26af22ed635a159a768fd937f36f0c4cc1d"
+        }
+      ],
+      "original_review_diff": "ecc28a0919d50257b956b9d228ef5dac3e04362b8bf161a37d256cfeec2e9532",
+      "candidate_review_diff": "ecc28a0919d50257b956b9d228ef5dac3e04362b8bf161a37d256cfeec2e9532",
+      "review_diff_identical": true,
+      "original_patch_id": "cb7145a91067f3e479ad69c875787104c8e02035",
+      "candidate_patch_id": "cb7145a91067f3e479ad69c875787104c8e02035"
+    }
+  ],
+  "execution": "not requested or observed at retention",
+  "review": "Combined-source review is separate; original approvals are not inherited"
+}

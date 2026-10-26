@@ -8,7 +8,6 @@ type state =
 
 type process_github_identity_snapshot =
   { args : string list
-  ; environment : (string * string) list
   ; host_dir : string
   ; revision : string
   ; cleanup : unit -> unit
@@ -1634,7 +1633,6 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
                  | Ok projection ->
                    let snapshot =
                      { args = projection.args
-                     ; environment = projection.environment
                      ; host_dir = projection.host_snapshot_dir
                      ; revision = projection.revision
                      ; cleanup = projection.cleanup

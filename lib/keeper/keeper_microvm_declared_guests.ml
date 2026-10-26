@@ -76,7 +76,7 @@ let read_source directory =
             if entries <> after_entries || not (same_stat before (Unix.lstat canonical))
                || not (same_stat original (Unix.lstat directory))
             then raise Source_changed;
-            List.iter (fun file ->
+            List.iter (fun (file : file_observation) ->
               if not (same_stat file.stat (Unix.lstat (Filename.concat canonical file.leaf)))
               then raise Source_changed) files;
             { directory; stat = before; entries; files }) (list ())))

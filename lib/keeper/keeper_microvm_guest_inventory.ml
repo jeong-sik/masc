@@ -63,12 +63,15 @@ let read_apple ~timeout_sec =
   | Ok (Unix.WEXITED 0, stdout) -> inventory_of_apple_json stdout
   | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _stdout) ->
     Error (Command_failed status)
-  | Error {reason = Capture_cleanup_failed; status = _} ->
-    Error (Output_unavailable Capture_cleanup_failed)
-  | Error {reason = _; status = Some ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status)}
-      when status <> Unix.WEXITED 0 -> Error (Command_failed status)
-  | Error {reason; status = (None | Some (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _))} ->
-    Error (Output_unavailable reason)
+  | Error {reason; status} ->
+    match reason with
+    | Capture_cleanup_failed -> Error (Output_unavailable Capture_cleanup_failed)
+    | (Capture_directory_unavailable | Capture_incomplete | Capture_failed
+      | Capture_unreadable | Capture_permissions_invalid | Capture_length_mismatch) as reason ->
+      match status with
+      | None | Some (Unix.WEXITED 0) -> Error (Output_unavailable reason)
+      | Some ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status) ->
+        Error (Command_failed status)
 ;;
 
 let read ~backend ~guest_name ~timeout_sec =

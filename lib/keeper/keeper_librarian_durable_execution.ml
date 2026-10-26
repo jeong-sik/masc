@@ -240,26 +240,35 @@ let rec consume_one ~config ~keeper_name ~wake =
     | Ok (Refused (final,_)) -> Ok (Consumer.Memory_not_committed [refusal_report final]) in
   (* Discovery does not initialize an epoch or create a replacement request.
      Any malformed old original fails the full inventory before fresh selection. *)
+  let inventory_started=Mtime_clock.now () in
   match Owner.discover ~store ~base_path ~keepers_dir ~keeper_id:keeper_name with
   | Error failure -> error (Owner.error_to_string failure)
   | Ok originals ->
     let validated=match originals with
-      | [] -> Ok []
+      | [] -> Ok ([],0)
       | (_,request)::_ ->
         (* One complete read-only gate observation for this inventory pass.
            Recovery and dispatch below deliberately retain their fresh reads. *)
         let* inventory=io (fun () -> Keeper_librarian_durable_gate.Inventory.read ~store
           ~owner:(Request.physical_owner request)) in
-        List.fold_left (fun result ((record,request) as original) ->
+        let* unfinished=List.fold_left (fun result ((record,request) as original) ->
           let* unfinished=result in
           let* frontier=io (fun () -> Commit.validate_inventory ~inventory ~store ~request ~record) in
           match frontier with
           | Commit.Unfinished -> Ok (original::unfinished)
           | Commit.Settled -> Ok unfinished) (Ok []) originals in
+        Ok (unfinished,Keeper_librarian_durable_gate.Inventory.record_count inventory) in
     match validated with
     | Error detail -> error detail
-    | Ok unfinished ->
+    | Ok (unfinished,gate_records) ->
     let unfinished=List.rev unfinished in
+    (* Every pass reads and verifies the whole retained inventory, so its size
+       and time are what the pass costs before any new work. *)
+    Log.Keeper.info ~keeper_name
+      "durable Librarian inventory validated: originals=%d unfinished=%d gate_records=%d elapsed_ms=%.1f"
+      (List.length originals) (List.length unfinished) gate_records
+      (Int64.to_float (Mtime.Span.to_uint64_ns (Mtime.span inventory_started (Mtime_clock.now ())))
+       /. 1_000_000.);
     match validate_lineage originals with
     | Error detail -> error detail
     | Ok superseded ->

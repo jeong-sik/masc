@@ -89,6 +89,8 @@ val restore_size_evidence : store:Lane_addon_store.t ->
     (** Acquire and strictly decode the complete gate scope once for one
         read-only inventory-validation pass under the caller's serialized owner.
         Not an atomic cross-scope snapshot, global cache or effect authority. *)
+    val record_count : t -> int
+    (** Gate records this observation decoded. Pass observation only. *)
     val validate : t -> capture:Keeper_librarian_durable_request.t -> parent:Lane_addon_tool_request_owner.retained ->
       (chain, string) Stdlib.result
     (** Bind an already restored original parent to this same-owner observation.

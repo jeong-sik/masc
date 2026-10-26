@@ -52,7 +52,8 @@ type store_error =
       ; wake : Schedule_domain.wake_record
       }
   | Schedule_not_due_candidate
-  | Schedule_not_running
+  | Running_attempt_superseded of { schedule_id : string }
+  | Running_attempt_unavailable of { schedule_id : string; reason : string }
   | Persistence_failed of string
   | Corrupt_ledger of
       { primary_err : string
@@ -64,6 +65,24 @@ type failure_scope = Occurrence_failure | Schedule_failure
 type running_recovery_reason =
   | Retryable_dispatch_failure of string
   | Interrupted_by_process_restart
+
+type attempt_scope =
+  { root : string
+  ; device : int
+  ; inode : int
+  ; backend : Workspace_utils.storage_backend
+  }
+
+type running_attempt =
+  { original : Schedule_domain.schedule_request
+  ; attempt_id : Schedule_domain.wake_attempt_id
+  ; scope : attempt_scope
+  }
+
+type started_dispatch =
+  { request : Schedule_domain.schedule_request
+  ; attempt : running_attempt
+  }
 
 type read_error =
   | Corrupt_read_ledger of
@@ -190,7 +209,10 @@ let store_error_to_string = function
       schedule_id
       (Schedule_domain.wake_status_to_string wake.Schedule_domain.status)
   | Schedule_not_due_candidate -> "schedule is not due"
-  | Schedule_not_running -> "schedule is not running"
+  | Running_attempt_superseded { schedule_id } ->
+    Printf.sprintf "schedule %s running attempt was superseded" schedule_id
+  | Running_attempt_unavailable { schedule_id; reason } ->
+    Printf.sprintf "schedule %s running attempt authority unavailable: %s" schedule_id reason
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
   | Corrupt_ledger { primary_err; recovery_err } ->
     corrupt_message ~primary_err ~recovery_err
@@ -292,6 +314,19 @@ let state_of_yojson = function
     in
     let* wakes =
       collect_results Schedule_domain.wake_record_of_yojson wakes_json
+    in
+    let* () =
+      let ids = Hashtbl.create (List.length wakes) in
+      let rec unique = function
+        | [] -> Ok ()
+        | (wake : wake_record) :: rest ->
+          (match wake.attempt_identity with
+           | Unidentified -> unique rest
+           | Identified id ->
+             let key = wake_attempt_id_to_string id in
+             if Hashtbl.mem ids key then Error "duplicate wake attempt_id"
+             else (Hashtbl.add ids key (); unique rest))
+      in unique wakes
     in
     let* notes =
       collect_results Schedule_domain.schedule_note_of_yojson notes_json
@@ -561,10 +596,11 @@ let wake_is_settleable ~schedules (wake : Schedule_domain.wake_record) =
   | Some { Schedule_domain.status = Succeeded | Failed | Cancelled | Expired; _ } -> false
 ;;
 
-let settle_running_wake ~now ~reason (wake : wake_record) =
+let settle_running_wake ~now ~kind ~reason (wake : wake_record) =
   { wake with
     status = Wake_failed
   ; finished_at = Some now
+  ; settlement_kind = Some kind
   ; error = Some reason
   }
 ;;
@@ -588,6 +624,7 @@ let settle_wakes_for_cancelled_schedule ~now wakes ~schedule_id =
        then
          settle_running_wake
            ~now
+           ~kind:Cancelled_schedule
            ~reason:"cancelled schedule settles its in-flight wake"
            wake
        else wake)
@@ -617,6 +654,7 @@ let prune_wakes ~now ~schedules wakes =
       (fun wake ->
          settle_running_wake
            ~now
+           ~kind:Orphaned_attempt
            ~reason:"schedule left running; wake disposed at store sweep"
            wake)
       to_dispose
@@ -730,9 +768,11 @@ let is_due_wake_candidate (request : schedule_request) =
 
 let get_schedule config ~schedule_id = find_schedule (read_state config) schedule_id
 
-let make_wake_record ~now (request : schedule_request) =
+let make_wake_record ~attempt_id ~now (request : schedule_request) =
   { schedule_instance_id = request.schedule_instance_id
   ; schedule_id = request.schedule_id
+  ; attempt_identity = Identified attempt_id
+  ; settlement_kind = None
   ; started_at = now
   ; finished_at = None
   ; due_at = request.due_at
@@ -794,11 +834,10 @@ let running_wake_missing wakes (request : schedule_request) =
 ;;
 
 let update_latest_running_wake wakes (request : schedule_request) update =
-  let schedule_id = request.schedule_id in
   let rec loop acc = function
     | [] -> Error (running_wake_missing wakes request)
     | (wake : wake_record) :: rest
-      when String.equal wake.schedule_id schedule_id
+      when is_occurrence_wake request wake
            && wake.status = Wake_running ->
       Ok (List.rev_append acc (update wake :: rest))
     | wake :: rest -> loop (wake :: acc) rest
@@ -810,6 +849,9 @@ let fail_wake_for_recovery ~now ~reason wake =
   { wake with
     status = Wake_failed
   ; finished_at = Some now
+  ; settlement_kind = Some (match reason with
+      | Retryable_dispatch_failure _ -> Retryable_failure
+      | Interrupted_by_process_restart -> Process_interrupted)
   ; detail = None
   ; error = Some (running_recovery_reason_to_string reason)
   }
@@ -1192,69 +1234,184 @@ let reschedule_due_recurring config ~now ~schedule_ids =
       Ok (next_state, changed)))
 ;;
 
-let start_due_candidate ?started_at config ~now ~schedule_id =
+let same_occurrence (left : schedule_request) (right : schedule_request) =
+  String.equal left.schedule_id right.schedule_id
+  && String.equal left.schedule_instance_id right.schedule_instance_id
+  && Float.equal left.due_at right.due_at
+  && String.equal (payload_digest left.payload) (payload_digest right.payload)
+;;
+
+let attempt_unavailable schedule_id reason =
+  Error (Running_attempt_unavailable { schedule_id; reason })
+;;
+
+let load_authoritative config ~schedule_id =
+  match load_primary config with
+  | Ok state -> Ok state
+  | Error failure ->
+    attempt_unavailable schedule_id
+      (primary_failure_message ~path:(schedules_path config) failure)
+;;
+
+let attempt_scope config ~schedule_id =
+  Cancel_safe.protect
+    ~on_exn:(fun exn -> attempt_unavailable schedule_id (Printexc.to_string exn))
+    (fun () ->
+      let root = Fs_compat.realpath (Workspace_utils.masc_dir config) in
+      let stat = Unix.stat root in
+      Ok { root; device = stat.st_dev; inode = stat.st_ino; backend = config.Workspace_utils.backend })
+;;
+
+let same_backend left right =
+  match left, right with
+  | Workspace_utils.Memory left, Workspace_utils.Memory right -> left == right
+  | Workspace_utils.FileSystem left, Workspace_utils.FileSystem right -> left == right
+  | Workspace_utils.Memory _, Workspace_utils.FileSystem _
+  | Workspace_utils.FileSystem _, Workspace_utils.Memory _ -> false
+;;
+
+let same_scope left right =
+  String.equal left.root right.root && left.device = right.device && left.inode = right.inode
+  && same_backend left.backend right.backend
+;;
+
+let start_due_candidate ?started_at config ~now ~(candidate : schedule_request) =
   (* [now] is the runner tick that judged the candidate due; [started_at] is
      the moment this attempt actually began. They differ by however long the
      tick spent before reaching this schedule, and a wake stamped with the
      tick time reports that delay as zero. *)
   let started_at = Option.value started_at ~default:now in
+  let schedule_id = candidate.schedule_id in
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let* state = load_for_mutation config in
+    let* state = load_authoritative config ~schedule_id in
     match find_schedule state schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
-      if not (is_due_wake_candidate request) then
+      if not (is_due_wake_candidate request && same_occurrence candidate request) then
         Error Schedule_not_due_candidate
       else
         let updated = { request with status = Running } in
+        let* scope = attempt_scope config ~schedule_id in
+        let attempt_id = fresh_wake_attempt_id () in
+        let wake = make_wake_record ~attempt_id ~now:started_at request in
         let schedules = replace_schedule state.schedules updated in
-        let wakes = make_wake_record ~now:started_at request :: state.wakes in
+        let wakes = wake :: state.wakes in
+        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
+        let* () = write_state config next_state in
+        Ok { request = updated; attempt = { original = updated; attempt_id; scope } })
+;;
+
+type settlement = Accept of Yojson.Safe.t option | Fail of failure_scope * string
+  | Retry of running_recovery_reason
+
+let settled_request ~now (request : schedule_request) = function
+  | Retry _ -> { request with status = Due }
+  | Fail (Schedule_failure, _) -> { request with status = Failed }
+  | Accept _ ->
+    (match Schedule_domain.next_due_after ~now request with
+     | Some due_at -> { request with status = Scheduled; due_at }
+     | None -> { request with status = Succeeded })
+  | Fail (Occurrence_failure, _) ->
+    (match Schedule_domain.next_due_after ~now request with
+     | Some due_at -> { request with status = Scheduled; due_at }
+     | None -> { request with status = Failed })
+;;
+
+let settle_wake ~finished_at verdict wake =
+  match verdict with
+  | Accept detail -> { wake with status = Wake_succeeded; finished_at = Some finished_at;
+      settlement_kind = Some Accepted; detail; error = None }
+  | Fail (scope, error) -> { wake with status = Wake_failed; finished_at = Some finished_at;
+      settlement_kind = Some (match scope with Schedule_failure -> Schedule_rejected
+        | Occurrence_failure -> Occurrence_rejected); detail = None; error = Some error }
+  | Retry reason -> fail_wake_for_recovery ~now:finished_at ~reason wake
+;;
+
+let same_verdict ~now attempt (request : schedule_request) (wake : wake_record) verdict =
+  match wake.finished_at with
+  | None -> false
+  | Some finished_at ->
+    let expected = settled_request ~now attempt.original verdict in
+    let expected_wake = settle_wake ~finished_at verdict wake in
+    request.status = expected.status && Float.equal request.due_at expected.due_at
+    && wake.status = expected_wake.status
+    && wake.settlement_kind = expected_wake.settlement_kind
+    && Option.equal String.equal wake.error expected_wake.error
+    && Option.equal Yojson.Safe.equal wake.detail expected_wake.detail
+;;
+
+let terminal_evidence_valid (wake : wake_record) =
+  wake.finished_at <> None
+  && (match wake.settlement_kind with
+      | None -> false
+      | Some Accepted -> wake.status = Wake_succeeded && wake.error = None
+      | Some (Schedule_rejected | Occurrence_rejected | Retryable_failure
+             | Process_interrupted | Unsupported_payload) ->
+        wake.status = Wake_failed && wake.error <> None && wake.detail = None
+      | Some (Cancelled_schedule | Orphaned_attempt) ->
+        wake.status = Wake_failed && wake.error <> None)
+;;
+
+let settle_running config ~now ~finished_at ~(attempt : running_attempt) verdict =
+  let schedule_id = attempt.original.schedule_id in
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* scope = attempt_scope config ~schedule_id in
+    let* () = if same_scope scope attempt.scope then Ok ()
+      else attempt_unavailable schedule_id "workspace or backend changed" in
+    let* state = load_authoritative config ~schedule_id in
+    match find_schedule state schedule_id with
+    | None -> Error Schedule_not_found
+    | Some request ->
+      let superseded () = Error (Running_attempt_superseded { schedule_id }) in
+      let is_attempt (wake : wake_record) = match wake.attempt_identity with
+        | Identified id -> String.equal (wake_attempt_id_to_string id)
+            (wake_attempt_id_to_string attempt.attempt_id)
+        | Unidentified -> false in
+      let* current_running =
+        let running = List.filter (fun (wake : wake_record) ->
+          is_occurrence_wake request wake && wake.status = Wake_running) state.wakes in
+        match request.status, running with
+        | Running, [ wake ] ->
+          if wake.settlement_kind <> None || wake.finished_at <> None
+             || wake.error <> None || wake.detail <> None
+          then attempt_unavailable schedule_id "running wake carries terminal settlement evidence"
+          else (match wake.attempt_identity with
+           | Unidentified -> attempt_unavailable schedule_id "current running wake is unidentified"
+           | Identified _ -> Ok (Some wake))
+        | Running, [] -> Error (running_wake_missing state.wakes request)
+        | Running, _ :: _ :: _ -> attempt_unavailable schedule_id "multiple current running wakes"
+        | (Scheduled | Due | Succeeded | Failed | Cancelled | Expired), [] -> Ok None
+        | (Scheduled | Due | Succeeded | Failed | Cancelled | Expired), _ :: _ ->
+          attempt_unavailable schedule_id "non-running request retains a current running wake" in
+      if not (String.equal request.schedule_instance_id attempt.original.schedule_instance_id)
+      then superseded ()
+      else if (match current_running with Some wake -> not (is_attempt wake) | None -> false)
+      then superseded ()
+      else match List.find_opt is_attempt state.wakes with
+      | None ->
+        if not (Float.equal request.due_at attempt.original.due_at) then superseded ()
+        else attempt_unavailable schedule_id "the exact attempt wake is absent"
+      | Some wake when not (is_occurrence_wake attempt.original wake) ->
+        attempt_unavailable schedule_id "attempt identity contradicts its occurrence"
+      | Some ({ status = (Wake_succeeded | Wake_failed); _ } as wake) ->
+        if not (terminal_evidence_valid wake)
+        then attempt_unavailable schedule_id "terminal wake lacks consistent typed settlement evidence"
+        else if same_verdict ~now attempt request wake verdict then Ok request else superseded ()
+      | Some ({ status = Wake_running; _ } as wake) ->
+        if request.status <> Running || not (same_occurrence request attempt.original)
+        then attempt_unavailable schedule_id "the exact running wake contradicts its request"
+        else
+        let updated = settled_request ~now request verdict in
+        let schedules = replace_schedule state.schedules updated in
+        let wakes = List.map (fun current -> if is_attempt current
+          then settle_wake ~finished_at verdict wake else current) state.wakes in
         let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
 
-let accept_running ?finished_at config ~now ~schedule_id ?detail () =
-  (* [now] anchors the next occurrence; [finished_at] stamps the wake. The
-     two are one value only when the caller has no clock of its own. *)
-  let finished_at = Option.value finished_at ~default:now in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let* state = load_for_mutation config in
-    match find_schedule state schedule_id with
-    | None -> Error Schedule_not_found
-    | Some request ->
-      if request.status <> Running
-      then (
-        match
-          last_wake_for_schedule_instance
-            state
-            ~schedule_instance_id:request.schedule_instance_id
-            ~schedule_id
-        with
-        | Some { status = (Wake_succeeded | Wake_failed); _ } ->
-          Ok request
-        | Some { status = Wake_running; _ } | None ->
-          Error Schedule_not_running)
-      else
-        let updated =
-          match Schedule_domain.next_due_after ~now request with
-          | Some due_at -> { request with status = Scheduled; due_at }
-          | None -> { request with status = Succeeded }
-        in
-        let schedules = replace_schedule state.schedules updated in
-        let* wakes =
-          update_latest_running_wake state.wakes request
-            (fun wake ->
-               { wake with
-                 status = Wake_succeeded
-               ; finished_at = Some finished_at
-               ; detail
-               ; error = None
-               })
-        in
-        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
-        let* () = write_state config next_state in
-        Ok updated)
+let accept_running ?finished_at config ~now ~attempt ?detail () =
+  settle_running config ~now ~finished_at:(Option.value finished_at ~default:now) ~attempt (Accept detail)
 ;;
 
 let cancel_matching config ~should_cancel =
@@ -1295,59 +1452,13 @@ let cancel_matching config ~should_cancel =
     else Ok ())
 ;;
 
-let fail_running ?finished_at config ~now ~schedule_id ~failure_scope ~error =
-  let finished_at = Option.value finished_at ~default:now in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let* state = load_for_mutation config in
-    match find_schedule state schedule_id with
-    | None -> Error Schedule_not_found
-    | Some request ->
-      if request.status <> Running then
-        Error Schedule_not_running
-      else
-        let updated =
-          match failure_scope with
-          | Schedule_failure -> { request with status = Failed }
-          | Occurrence_failure ->
-            (match Schedule_domain.next_due_after ~now request with
-             | Some due_at -> { request with status = Scheduled; due_at }
-             | None -> { request with status = Failed })
-        in
-        let schedules = replace_schedule state.schedules updated in
-        let* wakes =
-          update_latest_running_wake state.wakes request
-            (fun wake ->
-               { wake with
-                 status = Wake_failed
-               ; finished_at = Some finished_at
-               ; detail = None
-               ; error = Some error
-               })
-        in
-        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
-        let* () = write_state config next_state in
-        Ok updated)
+let fail_running ?finished_at config ~now ~attempt ~failure_scope ~error =
+  settle_running config ~now ~finished_at:(Option.value finished_at ~default:now) ~attempt
+    (Fail (failure_scope, error))
 ;;
 
-let retry_running ?finished_at config ~now ~schedule_id ~reason =
-  let finished_at = Option.value finished_at ~default:now in
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let* state = load_for_mutation config in
-    match find_schedule state schedule_id with
-    | None -> Error Schedule_not_found
-    | Some request ->
-      if request.status <> Running then
-        Error Schedule_not_running
-      else
-        let updated = { request with status = Due } in
-        let schedules = replace_schedule state.schedules updated in
-        let* wakes =
-          update_latest_running_wake state.wakes request
-            (fail_wake_for_recovery ~now:finished_at ~reason)
-        in
-        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
-        let* () = write_state config next_state in
-        Ok updated)
+let retry_running ?finished_at config ~now ~attempt ~reason =
+  settle_running config ~now ~finished_at:(Option.value finished_at ~default:now) ~attempt (Retry reason)
 ;;
 
 let recover_running_on_startup config ~now =
@@ -1388,22 +1499,24 @@ let recover_running_on_startup config ~now =
       Ok (next_state, recovered))
 ;;
 
-let fail_due_candidate ?attempted_at config ~now ~schedule_id ~error =
+let fail_due_candidate ?attempted_at config ~now ~(candidate : schedule_request) ~error =
   (* The consumer refused the payload before any work began, so the attempt
      starts and ends at the same instant: [attempted_at] (default [now]). *)
   let attempted_at = Option.value attempted_at ~default:now in
+  let schedule_id = candidate.schedule_id in
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let* state = load_for_mutation config in
+    let* state = load_authoritative config ~schedule_id in
     match find_schedule state schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
-      if not (is_due_wake_candidate request) then
+      if not (is_due_wake_candidate request && same_occurrence candidate request) then
         Error Schedule_not_due_candidate
       else
         let updated = { request with status = Failed } in
         let wake =
-          { (make_wake_record ~now:attempted_at request) with
+          { (make_wake_record ~attempt_id:(fresh_wake_attempt_id ()) ~now:attempted_at request) with
             status = Wake_failed
+          ; settlement_kind = Some Unsupported_payload
           ; finished_at = Some attempted_at
           ; error = Some error
           }

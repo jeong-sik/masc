@@ -86,6 +86,17 @@ let store_ok label = function
   | Error err -> fail (label ^ ": " ^ store_error_to_string err)
 ;;
 
+let current_candidate config ~schedule_id =
+  match get_schedule config ~schedule_id with
+  | Some request -> request
+  | None -> fail "fixture candidate disappeared"
+;;
+
+let start_request ?started_at config ~now ~schedule_id =
+  start_due_candidate ?started_at config ~now
+    ~candidate:(current_candidate config ~schedule_id)
+;;
+
 let check_error label expected = function
   | Ok _ -> fail (label ^ ": expected error")
   | Error actual ->
@@ -274,12 +285,10 @@ let test_running_wake_missing_says_whether_the_wake_finished () =
   ignore (insert_ok config settled);
   ignore (insert_ok config absent);
   ignore (store_ok "refresh" (refresh_due config ~now:201.0));
-  ignore
-    (store_ok "start settled"
-       (start_due_candidate config ~now:202.0 ~schedule_id:settled.schedule_id));
-  ignore
-    (store_ok "start absent"
-       (start_due_candidate config ~now:202.0 ~schedule_id:absent.schedule_id));
+  let settled_dispatch = store_ok "start settled"
+      (start_request config ~now:202.0 ~schedule_id:settled.schedule_id) in
+  let absent_dispatch = store_ok "start absent"
+      (start_request config ~now:202.0 ~schedule_id:absent.schedule_id) in
   let state = read_state config in
   let wakes =
     List.filter_map
@@ -301,7 +310,7 @@ let test_running_wake_missing_says_whether_the_wake_finished () =
       ]
   in
   Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string state_json);
-  (match fail_running config ~now:204.0 ~schedule_id:settled.schedule_id
+  (match fail_running config ~now:204.0 ~attempt:settled_dispatch.attempt
       ~failure_scope:Schedule_failure ~error:"x" with
    | Error (Running_wake_settled { schedule_id; wake }) ->
      check string "settled names the schedule" settled.schedule_id schedule_id;
@@ -309,7 +318,7 @@ let test_running_wake_missing_says_whether_the_wake_finished () =
        (Schedule_domain.wake_status_to_string wake.status)
    | Ok _ -> fail "a running schedule without a running wake was failed"
    | Error err -> fail (store_error_to_string err));
-  (match fail_running config ~now:204.0 ~schedule_id:absent.schedule_id
+  (match fail_running config ~now:204.0 ~attempt:absent_dispatch.attempt
       ~failure_scope:Schedule_failure ~error:"x" with
    | Error (Running_wake_absent { schedule_id }) ->
      check string "absent names the schedule" absent.schedule_id schedule_id
@@ -338,12 +347,11 @@ let test_a_recurring_occurrence_is_not_settled_by_an_earlier_wake () =
   ignore (insert_ok config request);
   let schedule_id = request.schedule_id in
   ignore (store_ok "first refresh" (refresh_due config ~now:201.0));
-  ignore (store_ok "first start" (start_due_candidate config ~now:202.0 ~schedule_id));
-  let advanced = store_ok "first accept" (accept_running config ~now:203.0 ~schedule_id ()) in
+  let first = store_ok "first start" (start_request config ~now:202.0 ~schedule_id) in
+  let advanced = store_ok "first accept" (accept_running config ~now:203.0 ~attempt:first.attempt ()) in
   let second_due = advanced.due_at +. 1.0 in
   ignore (store_ok "second refresh" (refresh_due config ~now:second_due));
-  ignore
-    (store_ok "second start" (start_due_candidate config ~now:second_due ~schedule_id));
+  let second = store_ok "second start" (start_request config ~now:second_due ~schedule_id) in
   let state = read_state config in
   let wakes =
     List.filter
@@ -369,7 +377,7 @@ let test_a_recurring_occurrence_is_not_settled_by_an_earlier_wake () =
       ]
   in
   Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string state_json);
-  match fail_running config ~now:(second_due +. 1.0) ~schedule_id
+  match fail_running config ~now:(second_due +. 1.0) ~attempt:second.attempt
       ~failure_scope:Occurrence_failure ~error:"x" with
   | Error (Running_wake_absent { schedule_id = refused }) ->
     check string "absent names the schedule" schedule_id refused
@@ -425,7 +433,7 @@ let test_running_wake_is_settleable_so_prune_keeps_it () =
   (match refresh_due config ~now:201.0 with
    | Ok _ -> ()
    | Error err -> fail (store_error_to_string err));
-  (match start_due_candidate config ~now:202.0 ~schedule_id:req.schedule_id with
+  (match start_request config ~now:202.0 ~schedule_id:req.schedule_id with
    | Ok _ -> ()
    | Error err -> fail (store_error_to_string err));
   let after_start = read_state config in
@@ -486,6 +494,8 @@ let test_legacy_running_wake_against_cancelled_schedule_is_disposed_by_sweep () 
   let legacy_wake =
     { schedule_instance_id = legacy_id ^ ".legacy"
     ; schedule_id = legacy_id
+    ; attempt_identity = Unidentified
+    ; settlement_kind = None
     ; started_at = 100.0
     ; finished_at = None
     ; due_at = 100.0
@@ -684,8 +694,8 @@ let test_startup_recovery_returns_only_running_schedule_to_due () =
   (match refresh_due config ~now:201.0 with
    | Ok _ -> ()
    | Error err -> fail (store_error_to_string err));
-  (match start_due_candidate config ~now:202.0 ~schedule_id:interrupted.schedule_id with
-   | Ok running -> check_status "interrupted is running" Running running.status
+  (match start_request config ~now:202.0 ~schedule_id:interrupted.schedule_id with
+   | Ok running -> check_status "interrupted is running" Running running.request.status
    | Error err -> fail (store_error_to_string err));
   let reason = Interrupted_by_process_restart in
   (match recover_running_on_startup config ~now:203.0 with
@@ -729,20 +739,20 @@ let test_startup_recovery_uses_exact_occurrence_across_clock_rollback () =
   in
   ignore (insert_ok config request);
   ignore (refresh_due config ~now:201.0);
-  ignore (start_due_candidate config ~now:300.0 ~schedule_id:request.schedule_id);
+  let first = store_ok "first start" (start_request config ~now:300.0 ~schedule_id:request.schedule_id) in
   let advanced =
-    match accept_running config ~now:301.0 ~schedule_id:request.schedule_id () with
+    match accept_running config ~now:301.0 ~attempt:first.attempt () with
     | Ok stored -> stored
     | Error err -> fail (store_error_to_string err)
   in
   check_status "older wake was delivered" Scheduled advanced.status;
   ignore (refresh_due config ~now:advanced.due_at);
   let current =
-    match start_due_candidate config ~now:100.0 ~schedule_id:request.schedule_id with
+    match start_request config ~now:100.0 ~schedule_id:request.schedule_id with
     | Ok stored -> stored
     | Error err -> fail (store_error_to_string err)
   in
-  check_status "clock-rollback occurrence is running" Running current.status;
+  check_status "clock-rollback occurrence is running" Running current.request.status;
   (match recover_running_on_startup config ~now:101.0 with
    | Ok (_, recovered) ->
      check int "exact current occurrence recovered" 1 recovered
@@ -849,9 +859,8 @@ let test_start_and_accept_persist_wake_record () =
   (match refresh_due config ~now:201.0 with
    | Ok (_, changed) -> check int "became due" 1 changed
    | Error err -> fail (store_error_to_string err));
-  (match start_due_candidate config ~now:202.0 ~schedule_id:req.schedule_id with
-   | Ok running -> check_status "running" Running running.status
-   | Error err -> fail (store_error_to_string err));
+  let started = store_ok "start" (start_request config ~now:202.0 ~schedule_id:req.schedule_id) in
+  check_status "running" Running started.request.status;
   let running_state = read_state config in
   check int "one wake" 1 (List.length running_state.wakes);
   let wake = List.hd running_state.wakes in
@@ -863,7 +872,7 @@ let test_start_and_accept_persist_wake_record () =
   check string "payload digest" (payload_digest req.payload)
     wake.payload_digest;
   (match
-     accept_running config ~now:203.0 ~schedule_id:req.schedule_id
+     accept_running config ~now:203.0 ~attempt:started.attempt
        ~detail:(`Assoc [ "kind", `String "test.done" ])
        ()
    with
@@ -897,11 +906,9 @@ let test_accept_running_completes_wake_receipt () =
   (match refresh_due config ~now:201.0 with
    | Ok _ -> ()
    | Error err -> fail (store_error_to_string err));
-  (match start_due_candidate config ~now:202.0 ~schedule_id:request.schedule_id with
-   | Ok _ -> ()
-   | Error err -> fail (store_error_to_string err));
+  let started = store_ok "start" (start_request config ~now:202.0 ~schedule_id:request.schedule_id) in
   (match
-     accept_running config ~now:203.0 ~schedule_id:request.schedule_id
+     accept_running config ~now:203.0 ~attempt:started.attempt
        ~detail:(`Assoc [ "kind", `String "consumer.accepted" ])
        ()
    with
@@ -932,8 +939,8 @@ let test_accept_running_keeps_backend_commit_when_local_mirror_fails () =
     Workspace_utils.Memory (Backend.Memory.create ()) } in
   let request = insert_ok memory (make_request ~schedule_id:"accepted-with-stale-local-mirror" ()) in
   ignore (store_ok "mark due" (refresh_due memory ~now:201.0));
-  ignore (store_ok "start due" (start_due_candidate memory ~now:202.0
-    ~schedule_id:request.schedule_id));
+  let started = store_ok "start due" (start_request memory ~now:202.0
+    ~schedule_id:request.schedule_id) in
   let local_path = schedules_path memory in
   let local_before = Fs_compat.load_file local_path in
   (* The canonical Memory writer commits its backend before trying this local
@@ -944,7 +951,7 @@ let test_accept_running_keeps_backend_commit_when_local_mirror_fails () =
   Unix.mkdir local_path 0o755;
   let detail = `Assoc [ "kind", `String "consumer.accepted" ] in
   let accepted = accept_running memory ~now:203.0 ~finished_at:204.0
-      ~schedule_id:request.schedule_id ~detail () in
+      ~attempt:started.attempt ~detail () in
   check bool "the canonical local mirror target still rejects file replacement" true
     (Sys.is_directory local_path);
   check string "the pre-acceptance local mirror bytes are preserved"
@@ -968,6 +975,239 @@ let test_accept_running_keeps_backend_commit_when_local_mirror_fails () =
   check_status "caller observes committed acceptance" Succeeded stored.status
 ;;
 
+let write_attempt_fixture config (state : Schedule_store.state) =
+  let json = `Assoc
+    [ "version", `Int state.version; "updated_at", `Float state.updated_at
+    ; "schedules", `List (List.map schedule_request_to_yojson state.schedules)
+    ; "wakes", `List (List.map wake_record_to_yojson state.wakes)
+    ; "notes", `List (List.map schedule_note_to_yojson state.notes) ] in
+  Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string json)
+;;
+
+let attempt_fixture ?recurrence config schedule_id =
+  let candidate = insert_ok config (make_request ~schedule_id ?recurrence ()) in
+  ignore (store_ok "mark due" (refresh_due config ~now:201.0));
+  let started = store_ok "start identified attempt"
+      (start_due_candidate config ~now:202.0 ~candidate) in
+  candidate, started
+;;
+
+let attempt_id_of_latest config (request : schedule_request) =
+  match last_wake_for_schedule_instance (read_state config)
+      ~schedule_instance_id:request.schedule_instance_id ~schedule_id:request.schedule_id with
+  | Some { attempt_identity = Identified id; _ } -> wake_attempt_id_to_string id
+  | Some { attempt_identity = Unidentified; _ } -> fail "new attempt is unidentified"
+  | None -> fail "new attempt has no wake"
+;;
+
+let expect_superseded = function
+  | Error (Running_attempt_superseded _) -> ()
+  | Error error -> fail ("expected supersession, got " ^ store_error_to_string error)
+  | Ok _ -> fail "stale attempt retained settlement authority"
+;;
+
+let test_same_clock_attempts_fence_all_old_settlements () =
+  with_workspace @@ fun config ->
+  let candidate, first = attempt_fixture config "same-clock-attempts" in
+  let first_id = attempt_id_of_latest config candidate in
+  let reason = Retryable_dispatch_failure "first refusal" in
+  ignore (store_ok "settle first as retry"
+    (retry_running config ~now:203.0 ~attempt:first.attempt ~reason));
+  let second = store_ok "start same occurrence at same clock"
+      (start_due_candidate config ~now:202.0 ~candidate) in
+  check bool "same occurrence and same clock still have distinct persisted ids" false
+    (String.equal first_id (attempt_id_of_latest config candidate));
+  let before = Workspace_core.read_text config (schedules_path config) in
+  expect_superseded (accept_running config ~now:203.0 ~attempt:first.attempt ());
+  expect_superseded (fail_running config ~now:203.0 ~attempt:first.attempt
+    ~failure_scope:Schedule_failure ~error:"stale failure");
+  expect_superseded (retry_running config ~now:203.0 ~attempt:first.attempt ~reason);
+  check string "stale accept/fail/retry leave the newer Running attempt untouched"
+    before (Workspace_core.read_text config (schedules_path config));
+  ignore (insert_ok config (make_request ~schedule_id:"unrelated-mutation" ()));
+  let detail = `Assoc [ "accepted", `Bool true ] in
+  ignore (store_ok "unrelated ledger mutation does not revoke the exact attempt"
+    (accept_running config ~now:203.0 ~finished_at:204.0 ~attempt:second.attempt ~detail ()));
+  let settled = Workspace_core.read_text config (schedules_path config) in
+  ignore (store_ok "same accept is idempotent"
+    (accept_running config ~now:203.0 ~finished_at:999.0 ~attempt:second.attempt
+      ~detail ()));
+  check string "repeat accept preserves original timestamp, details and version"
+    settled (Workspace_core.read_text config (schedules_path config));
+  expect_superseded (accept_running config ~now:203.0 ~attempt:second.attempt
+    ~detail:(`String "a different receipt is not the same committed verdict") ());
+  expect_superseded (retry_running config ~now:203.0 ~attempt:second.attempt ~reason)
+;;
+
+let test_repeated_failed_verdicts_preserve_exact_receipts () =
+  List.iter (fun verdict -> with_workspace @@ fun config ->
+    let _, started = attempt_fixture ~recurrence:(Interval { interval_sec = 60 })
+        config "repeat-failed-verdict" in
+    let settle finished_at = match verdict with
+      | `Retry -> retry_running config ~now:203.0 ~finished_at ~attempt:started.attempt
+          ~reason:(Retryable_dispatch_failure "not delivered")
+      | `Occurrence -> fail_running config ~now:203.0 ~finished_at ~attempt:started.attempt
+          ~failure_scope:Occurrence_failure ~error:"occurrence refused"
+      | `Schedule -> fail_running config ~now:203.0 ~finished_at ~attempt:started.attempt
+          ~failure_scope:Schedule_failure ~error:"definition refused" in
+    ignore (store_ok "first verdict" (settle 204.0));
+    let before = Workspace_core.read_text config (schedules_path config) in
+    ignore (store_ok "same exact verdict" (settle 999.0));
+    check string "repeat verdict does not rewrite the old receipt or row" before
+      (Workspace_core.read_text config (schedules_path config)))
+    [ `Retry; `Occurrence; `Schedule ]
+;;
+
+let test_terminal_attempt_requires_typed_exact_verdict () =
+  List.iter (fun kind -> with_workspace @@ fun config ->
+    let _, started = attempt_fixture config "terminal-evidence" in
+    ignore (store_ok "accept" (accept_running config ~now:203.0 ~attempt:started.attempt ()));
+    let state = read_state config in
+    write_attempt_fixture config { state with wakes = List.map
+      (fun (wake : wake_record) -> { wake with settlement_kind = kind }) state.wakes };
+    let before = Workspace_core.read_text config (schedules_path config) in
+    (match accept_running config ~now:203.0 ~attempt:started.attempt () with
+     | Error (Running_attempt_unavailable _) -> ()
+     | Error error -> fail (store_error_to_string error)
+     | Ok _ -> fail "untyped or contradictory receipt approved a fenced replay");
+    check string "missing or contradictory verdict has no write" before
+      (Workspace_core.read_text config (schedules_path config))) [ None; Some Retryable_failure ];
+  with_workspace @@ fun config ->
+  let _, started = attempt_fixture config "different-failure-scope" in
+  ignore (store_ok "reject definition"
+    (fail_running config ~now:203.0 ~attempt:started.attempt
+      ~failure_scope:Schedule_failure ~error:"same text"));
+  let before = Workspace_core.read_text config (schedules_path config) in
+  expect_superseded (fail_running config ~now:203.0 ~attempt:started.attempt
+    ~failure_scope:Occurrence_failure ~error:"same text");
+  check string "identical one-shot status and error do not disguise a different scope"
+    before (Workspace_core.read_text config (schedules_path config))
+;;
+
+let test_stale_candidates_and_later_occurrences_are_fenced () =
+  with_workspace @@ fun config ->
+  let original = insert_ok config (make_request ~schedule_id:"candidate-replaced"
+      ~recurrence:(Interval { interval_sec = 60 }) ()) in
+  ignore (store_ok "original due" (refresh_due config ~now:201.0));
+  let replacement = make_request ~schedule_id:original.schedule_id
+      ~recurrence:(Interval { interval_sec = 60 }) () in
+  let replacement = store_ok "replace definition"
+      (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:201.0 replacement) in
+  ignore (store_ok "replacement due" (refresh_due config ~now:201.0));
+  let before = Workspace_core.read_text config (schedules_path config) in
+  check_error "stale start refuses replacement" Schedule_not_due_candidate
+    (start_due_candidate config ~now:202.0 ~candidate:original);
+  check_error "stale rejection refuses replacement" Schedule_not_due_candidate
+    (fail_due_candidate config ~now:202.0 ~candidate:original ~error:"old payload refusal");
+  check string "stale candidate has no write" before (Workspace_core.read_text config (schedules_path config));
+  let first = store_ok "start replacement" (start_due_candidate config ~now:202.0 ~candidate:replacement) in
+  let next = store_ok "advance replacement"
+      (accept_running config ~now:203.0 ~attempt:first.attempt ()) in
+  ignore (store_ok "next occurrence due" (refresh_due config ~now:next.due_at));
+  check_error "old due snapshot cannot start later occurrence" Schedule_not_due_candidate
+    (start_due_candidate config ~now:next.due_at ~candidate:replacement);
+  check_error "old rejection cannot fail later occurrence" Schedule_not_due_candidate
+    (fail_due_candidate config ~now:next.due_at ~candidate:replacement ~error:"old refusal");
+  let second = store_ok "start later occurrence" (start_due_candidate config ~now:next.due_at ~candidate:next) in
+  let before = Workspace_core.read_text config (schedules_path config) in
+  expect_superseded (accept_running config ~now:203.0 ~attempt:first.attempt ());
+  check string "previous occurrence cannot settle a later Running occurrence" before
+    (Workspace_core.read_text config (schedules_path config));
+  ignore (store_ok "current occurrence still settles"
+    (accept_running config ~now:next.due_at ~attempt:second.attempt ()));
+  (* Pruning history cannot make the old capability a permanent retry that
+     blocks a schedule the authoritative row has advanced beyond. *)
+  let state = read_state config in
+  write_attempt_fixture config { state with wakes = List.filter
+    (fun (wake : wake_record) -> not (Float.equal wake.due_at original.due_at)) state.wakes };
+  expect_superseded (accept_running config ~now:203.0 ~attempt:first.attempt ())
+;;
+
+let test_attempt_authority_refuses_missing_primary_and_duplicate_ids () =
+  List.iter (fun fault -> with_workspace @@ fun config ->
+    let _, started = attempt_fixture config "strict-attempt-authority" in
+    let state = read_state config in
+    let mirror_before = Workspace_core.read_text config (schedules_recovery_path config) in
+    (match fault with
+     | `Missing -> Workspace_core.delete_path config (schedules_path config)
+     | `Duplicate -> write_attempt_fixture config { state with wakes = List.hd state.wakes :: state.wakes });
+    let before = match fault with
+      | `Missing -> None
+      | `Duplicate -> Some (Workspace_core.read_text config (schedules_path config)) in
+    (match accept_running config ~now:203.0 ~attempt:started.attempt () with
+     | Error (Running_attempt_unavailable _) -> ()
+     | Error error -> fail ("authority failure was misclassified: " ^ store_error_to_string error)
+     | Ok _ -> fail "mirror-only or duplicate-id authority approved a settlement");
+    check string "refused settlement preserves the recovery evidence" mirror_before
+      (Workspace_core.read_text config (schedules_recovery_path config));
+    match before with
+    | None -> check bool "refused settlement does not recreate a missing primary" false
+        (Sys.file_exists (schedules_path config))
+    | Some bytes -> check string "refused settlement preserves corrupt primary" bytes
+        (Workspace_core.read_text config (schedules_path config))) [ `Missing; `Duplicate ]
+;;
+
+let test_legacy_recovery_does_not_invent_attempt_authority () =
+  with_workspace @@ fun config ->
+  let candidate, started = attempt_fixture config "legacy-recovery" in
+  let state = read_state config in
+  write_attempt_fixture config { state with wakes = List.map
+    (fun (wake : wake_record) -> { wake with attempt_identity = Unidentified;
+      settlement_kind = None }) state.wakes };
+  (match accept_running config ~now:203.0 ~attempt:started.attempt () with
+   | Error (Running_attempt_unavailable _) -> ()
+   | Error error -> fail (store_error_to_string error)
+   | Ok _ -> fail "unidentified running wake approved a fenced settlement");
+  let _, recovered = store_ok "recover historical running input"
+      (recover_running_on_startup config ~now:204.0) in
+  check int "historical attempt is recovered once" 1 recovered;
+  let fresh = store_ok "new identified attempt after recovery"
+      (start_due_candidate config ~now:202.0 ~candidate) in
+  let wakes = (read_state config).wakes in
+  check bool "historical wake identity remains absent" true
+    (List.exists (fun (wake : wake_record) -> wake.attempt_identity = Unidentified
+      && wake.status = Wake_failed && wake.settlement_kind = Some Process_interrupted) wakes);
+  ignore (attempt_id_of_latest config candidate);
+  expect_superseded (retry_running config ~now:205.0 ~attempt:started.attempt
+    ~reason:(Retryable_dispatch_failure "old capability"));
+  ignore (store_ok "fresh capability settles after historical recovery"
+    (accept_running config ~now:205.0 ~attempt:fresh.attempt ()))
+;;
+
+let test_attempt_capability_survives_primary_failure_but_not_scope_change () =
+  with_workspace @@ fun config ->
+  let _, started = attempt_fixture config "retry-exact-capability" in
+  let other_backend = { config with Workspace_utils.backend =
+    Workspace_utils.Memory (Backend.Memory.create ()) } in
+  (match accept_running other_backend ~now:203.0 ~attempt:started.attempt () with
+   | Error (Running_attempt_unavailable _) -> ()
+   | Error error -> fail (store_error_to_string error)
+   | Ok _ -> fail "another backend accepted the capability");
+  let other_path = Filename.concat config.Workspace_utils.base_path "other-attempt-workspace" in
+  let other_workspace = { config with Workspace_utils.base_path = other_path;
+    workspace_path = other_path } in
+  Workspace_utils.mkdir_p (Workspace_utils.masc_dir other_workspace);
+  (match accept_running other_workspace ~now:203.0 ~attempt:started.attempt () with
+   | Error (Running_attempt_unavailable _) -> ()
+   | Error error -> fail (store_error_to_string error)
+   | Ok _ -> fail "another workspace accepted the capability");
+  let staging = schedules_path config ^ ".tmp-atomic" in
+  Unix.mkdir staging 0o755;
+  let reason = Retryable_dispatch_failure "retry after storage repair" in
+  (match retry_running config ~now:203.0 ~finished_at:204.0 ~attempt:started.attempt ~reason with
+   | Error (Persistence_failed _) -> ()
+   | Error error -> fail (store_error_to_string error)
+   | Ok _ -> fail "true primary write failure unexpectedly settled the attempt");
+  Unix.rmdir staging;
+  ignore (store_ok "same exact capability survives primary failure"
+    (retry_running config ~now:203.0 ~finished_at:204.0 ~attempt:started.attempt ~reason));
+  let before = Workspace_core.read_text config (schedules_path config) in
+  ignore (store_ok "same retry receipt is idempotent"
+    (retry_running config ~now:203.0 ~finished_at:999.0 ~attempt:started.attempt ~reason));
+  check string "repair replay preserves first committed finish time" before
+    (Workspace_core.read_text config (schedules_path config))
+;;
+
 let test_fail_due_candidate_records_failed_wake () =
   with_workspace
   @@ fun config ->
@@ -977,7 +1217,7 @@ let test_fail_due_candidate_records_failed_wake () =
    | Ok (_, changed) -> check int "became due" 1 changed
    | Error err -> fail (store_error_to_string err));
   (match
-     fail_due_candidate config ~now:202.0 ~schedule_id:req.schedule_id
+     fail_due_candidate config ~now:202.0 ~candidate:req
        ~error:"unsupported payload"
    with
    | Ok stored -> check_status "failed" Failed stored.status
@@ -1022,10 +1262,8 @@ let test_terminal_wakes_are_bounded_per_schedule () =
         (match refresh_due config ~now with
          | Ok _ -> ()
          | Error err -> fail (store_error_to_string err));
-        (match start_due_candidate config ~now:(now +. 1.0) ~schedule_id with
-         | Ok _ -> ()
-         | Error err -> fail (store_error_to_string err));
-        (match accept_running config ~now:(now +. 2.0) ~schedule_id () with
+        let started = store_ok "start" (start_request config ~now:(now +. 1.0) ~schedule_id) in
+        (match accept_running config ~now:(now +. 2.0) ~attempt:started.attempt () with
          | Ok _ -> ()
          | Error err -> fail (store_error_to_string err));
         turn (n - 1) (now +. 60.0))
@@ -1065,10 +1303,8 @@ let test_wake_list_is_scoped_to_its_instance_and_newest_first () =
       (match refresh_due config ~now with
        | Ok _ -> ()
        | Error err -> fail (store_error_to_string err));
-      (match start_due_candidate config ~now:(now +. 1.0) ~schedule_id:"loop-2" with
-       | Ok _ -> ()
-       | Error err -> fail (store_error_to_string err));
-      (match accept_running config ~now:(now +. 2.0) ~schedule_id:"loop-2" () with
+      let started = store_ok "start" (start_request config ~now:(now +. 1.0) ~schedule_id:"loop-2") in
+      (match accept_running config ~now:(now +. 2.0) ~attempt:started.attempt () with
        | Ok _ -> ()
        | Error err -> fail (store_error_to_string err));
       turn (n - 1) (now +. 60.0))
@@ -1133,10 +1369,9 @@ let test_recurring_occurrences_remain_dispatchable () =
    | Error err -> fail (store_error_to_string err));
   check int "first occurrence candidate" 1
     (List.length (due_wake_candidates (read_state config)));
-  (match start_due_candidate config ~now:202.0 ~schedule_id:req.schedule_id with
-   | Ok running -> check_status "running first occurrence" Running running.status
-   | Error err -> fail (store_error_to_string err));
-  (match accept_running config ~now:203.0 ~schedule_id:req.schedule_id () with
+  let started = store_ok "start" (start_request config ~now:202.0 ~schedule_id:req.schedule_id) in
+  check_status "running first occurrence" Running started.request.status;
+  (match accept_running config ~now:203.0 ~attempt:started.attempt () with
    | Ok stored ->
      check_status "rescheduled" Scheduled stored.status;
      check (float 0.001) "next due" 260.0 stored.due_at
@@ -1384,11 +1619,10 @@ let cancelled_request_with_wake_receipt config ~schedule_id =
   in
   let stored = insert_ok config request in
   ignore (store_ok "refresh_due" (refresh_due config ~now:201.0));
-  ignore
-    (store_ok "start_due_candidate"
-       (start_due_candidate config ~now:202.0 ~schedule_id:stored.schedule_id));
+  let started = store_ok "start_due_candidate"
+      (start_request config ~now:202.0 ~schedule_id:stored.schedule_id) in
   let advanced =
-    store_ok "accept_running" (accept_running config ~now:203.0 ~schedule_id:stored.schedule_id ())
+    store_ok "accept_running" (accept_running config ~now:203.0 ~attempt:started.attempt ())
   in
   check string "recurring request advanced past the occurrence" "scheduled"
     (schedule_status_to_string advanced.status);
@@ -1422,17 +1656,12 @@ let test_prune_does_not_bind_orphan_receipt_to_reused_public_id () =
   in
   ignore (insert_ok config old_request);
   ignore (store_ok "refresh old request" (refresh_due config ~now:201.0));
-  ignore
-    (store_ok
-       "start old occurrence"
-       (start_due_candidate
-          config
-          ~now:202.0
-          ~schedule_id:old_request.schedule_id));
+  let started = store_ok "start old occurrence"
+      (start_request config ~now:202.0 ~schedule_id:old_request.schedule_id) in
   ignore
     (store_ok
        "dispatch old occurrence"
-       (accept_running config ~now:203.0 ~schedule_id:old_request.schedule_id ()));
+       (accept_running config ~now:203.0 ~attempt:started.attempt ()));
   let old_state = read_state config in
   Workspace_core.write_text
     config
@@ -1792,10 +2021,10 @@ let retention_s = days_to_seconds Schedule_store.terminal_schedule_retention_day
 
 let run_to_completion config ~schedule_id ~finished_at =
   ignore (store_ok "refresh" (refresh_due config ~now:201.0));
-  ignore (store_ok "start" (start_due_candidate config ~now:202.0 ~schedule_id));
+  let started = store_ok "start" (start_request config ~now:202.0 ~schedule_id) in
   ignore
     (store_ok "accept"
-       (accept_running config ~now:finished_at ~schedule_id ()))
+       (accept_running config ~now:finished_at ~attempt:started.attempt ()))
 ;;
 
 let note_on config ~schedule_id ~now =
@@ -2186,6 +2415,20 @@ let () =
             test_accept_running_completes_wake_receipt;
           test_case "accepted backend commit survives local mirror failure" `Quick
             test_accept_running_keeps_backend_commit_when_local_mirror_fails;
+          test_case "same-clock attempts fence all old settlements" `Quick
+            test_same_clock_attempts_fence_all_old_settlements;
+          test_case "repeated failed verdicts preserve exact receipts" `Quick
+            test_repeated_failed_verdicts_preserve_exact_receipts;
+          test_case "terminal attempts require typed exact verdicts" `Quick
+            test_terminal_attempt_requires_typed_exact_verdict;
+          test_case "stale candidates and later occurrences are fenced" `Quick
+            test_stale_candidates_and_later_occurrences_are_fenced;
+          test_case "attempt authority refuses mirror-only and duplicate ids" `Quick
+            test_attempt_authority_refuses_missing_primary_and_duplicate_ids;
+          test_case "legacy recovery does not invent attempt authority" `Quick
+            test_legacy_recovery_does_not_invent_attempt_authority;
+          test_case "attempt capability survives primary failure but not scope change" `Quick
+            test_attempt_capability_survives_primary_failure_but_not_scope_change;
           test_case "startup recovery returns only running schedule to due" `Quick
             test_startup_recovery_returns_only_running_schedule_to_due;
           test_case "startup recovery ignores wall-clock rollback" `Quick

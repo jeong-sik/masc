@@ -2252,7 +2252,7 @@ let test_operator_input_recovery () =
     | Ready _ -> fail "dialog lost its pending input" in
   check string "pending input names original command" "original-input-command" pending.command_id;
   ignore (answer "answer dialog" (dispatch peer Live.Page_act (Lane.Action.to_json
-    (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Accept_dialog None}))));
+    (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))));
   ignore (before_effect "dialog answer is not input-reset authority" (dispatch peer Live.Page_native_workflow (args [])));
   let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
     status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);

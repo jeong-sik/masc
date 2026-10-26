@@ -394,22 +394,22 @@ additional_properties = false
 [[params.items.params.params]]
 name = "timeout"
 type = "number"
-minimum = 0
+minimum = 0.0
 
 [[params.items.params.params]]
 name = "delay"
 type = "number"
-minimum = 0
+minimum = 0.0
 
 [[params.items.params.params]]
 name = "idleMs"
 type = "number"
-minimum = 0
+minimum = 0.0
 
 [[params.items.params.params]]
 name = "polling"
 type = "number"
-minimum = 0
+minimum = 0.0
 
 [[params.items.params.params]]
 name = "clickCount"

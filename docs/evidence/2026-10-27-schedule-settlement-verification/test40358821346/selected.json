@@ -1,0 +1,486 @@
+[
+  {
+    "source_line": 8,
+    "text": "Testing `Schedule_store'."
+  },
+  {
+    "source_line": 21,
+    "text": "  [OK]          state               0   concurrent notes retain accepted appe..."
+  },
+  {
+    "source_line": 28,
+    "text": "  [OK]          state               1   note read failure differs from absence."
+  },
+  {
+    "source_line": 36,
+    "text": "  [OK]          state               2   insert persists and bumps version."
+  },
+  {
+    "source_line": 43,
+    "text": "  [OK]          state               3   duplicate insert rejected without bump."
+  },
+  {
+    "source_line": 54,
+    "text": "  [OK]          state               4   update replaces active definition wit..."
+  },
+  {
+    "source_line": 64,
+    "text": "  [OK]          state               5   update accepts due and refuses terminal."
+  },
+  {
+    "source_line": 75,
+    "text": "  [OK]          state               6   update refuses exactly where modify_a..."
+  },
+  {
+    "source_line": 81,
+    "text": "  [OK]          state               7   update requires existing schedule."
+  },
+  {
+    "source_line": 91,
+    "text": "  [OK]          state               8   update refuses only a changed due tim..."
+  },
+  {
+    "source_line": 100,
+    "text": "  [OK]          state               9   running wake missing says whether the..."
+  },
+  {
+    "source_line": 107,
+    "text": "  [OK]          state              10   a recurring occurrence is not settled..."
+  },
+  {
+    "source_line": 114,
+    "text": "  [OK]          state              11   corrupt primary recovers from last-good."
+  },
+  {
+    "source_line": 124,
+    "text": "  [OK]          state              12   a finished schedule leaves the ledger..."
+  },
+  {
+    "source_line": 132,
+    "text": "  [OK]          state              13   the retention window is the caller's ..."
+  },
+  {
+    "source_line": 138,
+    "text": "  [OK]          state              14   a clock behind the ledger forgets not..."
+  },
+  {
+    "source_line": 145,
+    "text": "  [OK]          state              15   a quiet tick forgets only what is pas..."
+  },
+  {
+    "source_line": 153,
+    "text": "  [OK]          state              16   a schedule expired past the retention..."
+  },
+  {
+    "source_line": 162,
+    "text": "  [OK]          state              17   a mutation encodes the ledger once on..."
+  },
+  {
+    "source_line": 171,
+    "text": "  [OK]          state              18   an unchanged ledger is decoded once."
+  },
+  {
+    "source_line": 181,
+    "text": "  [OK]          state              19   primary cache respects backend author..."
+  },
+  {
+    "source_line": 188,
+    "text": "  [OK]          state              20   a read that misses decodes on the pool."
+  },
+  {
+    "source_line": 189,
+    "text": "  [OK]          state              21   a schedule time that is not finite is..."
+  },
+  {
+    "source_line": 196,
+    "text": "  [OK]          state              22   a ledger that cannot be encoded fails..."
+  },
+  {
+    "source_line": 203,
+    "text": "  [OK]          corruption          0   absent ledger reads empty."
+  },
+  {
+    "source_line": 222,
+    "text": "  [OK]          corruption          1   read provenance preserves bytes and s..."
+  },
+  {
+    "source_line": 229,
+    "text": "  [OK]          corruption          2   both unparseable return read error."
+  },
+  {
+    "source_line": 236,
+    "text": "  [OK]          corruption          3   startup recovery refuses corrupt ledger."
+  },
+  {
+    "source_line": 241,
+    "text": "  [OK]          corruption          4   read_state raises on corrupt ledger."
+  },
+  {
+    "source_line": 249,
+    "text": "  [OK]          corruption          5   absent mirror separates uninitialised..."
+  },
+  {
+    "source_line": 256,
+    "text": "  [OK]          corruption          6   mutation refused and corrupt ledger p..."
+  },
+  {
+    "source_line": 263,
+    "text": "  [OK]          corruption          7   primary write failure is surfaced."
+  },
+  {
+    "source_line": 272,
+    "text": "  [OK]          corruption          8   recovery mirror write failure preserv..."
+  },
+  {
+    "source_line": 277,
+    "text": "  [OK]          corruption          9   cancel refused on corrupt ledger."
+  },
+  {
+    "source_line": 283,
+    "text": "  [OK]          corruption         10   last-good is parseable after good write."
+  },
+  {
+    "source_line": 292,
+    "text": "  [OK]          corruption         11   absent primary recovers from last-good."
+  },
+  {
+    "source_line": 302,
+    "text": "  [OK]          corruption         12   write after absent primary restores i..."
+  },
+  {
+    "source_line": 310,
+    "text": "  [OK]          corruption         13   absent primary and absent mirror read..."
+  },
+  {
+    "source_line": 320,
+    "text": "  [OK]          corruption         14   absent primary with unparseable mirro..."
+  },
+  {
+    "source_line": 325,
+    "text": "  [OK]          lifecycle           0   non-scheduled initial status rejected."
+  },
+  {
+    "source_line": 332,
+    "text": "  [OK]          lifecycle           1   cancel request marks cancelled."
+  },
+  {
+    "source_line": 339,
+    "text": "  [OK]          lifecycle           2   running wake stays live across refuse..."
+  },
+  {
+    "source_line": 346,
+    "text": "  [OK]          lifecycle           3   legacy running wake against cancelled..."
+  },
+  {
+    "source_line": 353,
+    "text": "  [OK]          due                 0   due candidates dispatch without sched..."
+  },
+  {
+    "source_line": 360,
+    "text": "  [OK]          due                 1   due candidate starts without authoriz..."
+  },
+  {
+    "source_line": 370,
+    "text": "  [OK]          due                 2   refresh_due expires scheduled and due."
+  },
+  {
+    "source_line": 380,
+    "text": "  [OK]          due                 3   reschedule due recurring rows."
+  },
+  {
+    "source_line": 389,
+    "text": "  [OK]          due                 4   reschedule due cron rows."
+  },
+  {
+    "source_line": 406,
+    "text": "  [OK]          due                 5   start and accept persist wake record."
+  },
+  {
+    "source_line": 415,
+    "text": "  [OK]          due                 6   durable acceptance completes wake rec..."
+  },
+  {
+    "source_line": 428,
+    "text": "  [OK]          due                 7   accepted backend commit survives loca..."
+  },
+  {
+    "source_line": 441,
+    "text": "  [OK]          due                 8   startup recovery returns only running..."
+  },
+  {
+    "source_line": 452,
+    "text": "  [OK]          due                 9   startup recovery ignores wall-clock r..."
+  },
+  {
+    "source_line": 463,
+    "text": "  [OK]          due                10   fail due candidate records failed wake."
+  },
+  {
+    "source_line": 475,
+    "text": "  [OK]          due                11   recurring occurrences remain dispatch..."
+  },
+  {
+    "source_line": 482,
+    "text": "  [OK]          due                12   terminal wakes are bounded per schedule."
+  },
+  {
+    "source_line": 492,
+    "text": "  [OK]          due                13   wake list is scoped to its instance, ..."
+  },
+  {
+    "source_line": 502,
+    "text": "  [OK]          due                14   prune deletes terminal request and wa..."
+  },
+  {
+    "source_line": 511,
+    "text": "  [OK]          due                15   prune scopes wake receipt ownership b..."
+  },
+  {
+    "source_line": 593,
+    "text": "  [OK]          due                16   contract vocabularies own strings and..."
+  },
+  {
+    "source_line": 595,
+    "text": "Test Successful in 2.507s. 59 tests run."
+  },
+  {
+    "source_line": 602,
+    "text": "Testing `Schedule_consumer_dispatch'."
+  },
+  {
+    "source_line": 613,
+    "text": "  [OK]          keeper_wake          0   board post schedule is rejected with..."
+  },
+  {
+    "source_line": 637,
+    "text": "  [OK]          keeper_wake          1   absent owner fails one occurrence an..."
+  },
+  {
+    "source_line": 650,
+    "text": "  [OK]          keeper_wake          2   keeper wake for a not-current owner ..."
+  },
+  {
+    "source_line": 716,
+    "text": "  [OK]          keeper_wake          3   keeper wake records wake receipt."
+  },
+  {
+    "source_line": 727,
+    "text": "  [OK]          keeper_wake          4   routed schedule carries occurrence d..."
+  },
+  {
+    "source_line": 741,
+    "text": "  [OK]          keeper_wake          5   a recurring wake supersedes the earl..."
+  },
+  {
+    "source_line": 754,
+    "text": "  [OK]          keeper_wake          6   supersede withdraws the wake a faile..."
+  },
+  {
+    "source_line": 762,
+    "text": "  [OK]          keeper_wake          7   one call cancels every pending occur..."
+  },
+  {
+    "source_line": 772,
+    "text": "  [OK]          keeper_wake          8   reused schedule id does not match pr..."
+  },
+  {
+    "source_line": 778,
+    "text": "  [OK]          keeper_wake          9   keeper purge cancels future schedule..."
+  },
+  {
+    "source_line": 792,
+    "text": "  [OK]          keeper_wake         10   cancelled schedule enqueued wake lea..."
+  },
+  {
+    "source_line": 805,
+    "text": "  [OK]          keeper_wake         11   schedule cancel tool withdraws the q..."
+  },
+  {
+    "source_line": 820,
+    "text": "  [OK]          keeper_wake         12   schedule cancel mid-turn withdraws t..."
+  },
+  {
+    "source_line": 832,
+    "text": "  [OK]          keeper_wake         13   retirement cancel withdraws the wake..."
+  },
+  {
+    "source_line": 841,
+    "text": "  [OK]          keeper_wake         14   dispatch drops a wake withdrawn afte..."
+  },
+  {
+    "source_line": 847,
+    "text": "  [OK]          keeper_wake         15   withdrawal skips an entry a turn set..."
+  },
+  {
+    "source_line": 854,
+    "text": "  [OK]          keeper_wake         16   owner absent pending demand is drain..."
+  },
+  {
+    "source_line": 864,
+    "text": "  [OK]          keeper_wake         17   shutdown fence rejects schedule inta..."
+  },
+  {
+    "source_line": 900,
+    "text": "  [OK]          keeper_wake         18   fenced purge settles on the first ti..."
+  },
+  {
+    "source_line": 914,
+    "text": "  [OK]          keeper_wake         19   delivered purge releases only its ow..."
+  },
+  {
+    "source_line": 923,
+    "text": "  [OK]          keeper_wake         20   shutdown fence covers direct durable..."
+  },
+  {
+    "source_line": 932,
+    "text": "  [OK]          keeper_wake         21   transferred retry uses resolved owne..."
+  },
+  {
+    "source_line": 939,
+    "text": "  [OK]          keeper_wake         22   shutdown join waits for in-flight sc..."
+  },
+  {
+    "source_line": 950,
+    "text": "  [OK]          keeper_wake         23   keeper wake durable state failure re..."
+  },
+  {
+    "source_line": 966,
+    "text": "  [OK]          keeper_wake         24   cancelled occurrence recovery does n..."
+  },
+  {
+    "source_line": 982,
+    "text": "  [OK]          keeper_wake         25   terminal retry repairs missing stimu..."
+  },
+  {
+    "source_line": 989,
+    "text": "  [OK]          keeper_wake         26   terminal retry requires acceptance c..."
+  },
+  {
+    "source_line": 998,
+    "text": "  [OK]          keeper_wake         27   retry before terminal reconciliation..."
+  },
+  {
+    "source_line": 1010,
+    "text": "  [OK]          keeper_wake         28   an unstarted owner accepts the occur..."
+  },
+  {
+    "source_line": 1026,
+    "text": "  [OK]          keeper_wake         29   an interval wake to an unstarted own..."
+  },
+  {
+    "source_line": 1040,
+    "text": "  [OK]          keeper_wake         30   interval wake retries acceptance com..."
+  },
+  {
+    "source_line": 1054,
+    "text": "  [OK]          keeper_wake         31   completed interval wake retries acce..."
+  },
+  {
+    "source_line": 1065,
+    "text": "  [OK]          keeper_wake         32   due wake bypasses proactive policy."
+  },
+  {
+    "source_line": 1075,
+    "text": "  [OK]          keeper_wake         33   dashboard resolver refreshes target ..."
+  },
+  {
+    "source_line": 1098,
+    "text": "  [OK]          keeper_wake         34   dashboard observes committed complet..."
+  },
+  {
+    "source_line": 1115,
+    "text": "  [OK]          keeper_wake         35   dashboard observes committed failure..."
+  },
+  {
+    "source_line": 1132,
+    "text": "  [OK]          keeper_wake         36   dashboard observes committed cancell..."
+  },
+  {
+    "source_line": 1150,
+    "text": "  [OK]          keeper_wake         37   dashboard observes committed transfe..."
+  },
+  {
+    "source_line": 1162,
+    "text": "  [OK]          keeper_wake         38   keeper wake queue evidence rejects s..."
+  },
+  {
+    "source_line": 1174,
+    "text": "  [OK]          keeper_wake         39   dashboard live supported non-termina..."
+  },
+  {
+    "source_line": 1184,
+    "text": "  [OK]          keeper_wake         40   dashboard live supported non-termina..."
+  },
+  {
+    "source_line": 1197,
+    "text": "  [OK]          keeper_wake         41   keeper wake ledger failure is retrya..."
+  },
+  {
+    "source_line": 1209,
+    "text": "  [OK]          keeper_wake         42   unattributed ledger damage does not ..."
+  },
+  {
+    "source_line": 1218,
+    "text": "  [OK]          keeper_wake         43   dashboard keeps unattributed damage ..."
+  },
+  {
+    "source_line": 1230,
+    "text": "  [OK]          keeper_wake         44   dashboard row names the occurrence t..."
+  },
+  {
+    "source_line": 1241,
+    "text": "  [OK]          keeper_wake         45   dashboard hold keeps the time a fail..."
+  },
+  {
+    "source_line": 1285,
+    "text": "  [OK]          keeper_wake         46   startup recovery retries before admi..."
+  },
+  {
+    "source_line": 1318,
+    "text": "  [OK]          keeper_wake         47   successful recovery survives a norma..."
+  },
+  {
+    "source_line": 1329,
+    "text": "  [OK]          keeper_wake         48   a runner tick refreshes the cached s..."
+  },
+  {
+    "source_line": 1340,
+    "text": "  [OK]          keeper_wake         49   dashboard projects quarantined and u..."
+  },
+  {
+    "source_line": 1351,
+    "text": "  [OK]          keeper_wake         50   keeper wake rejects invalid keeper n..."
+  },
+  {
+    "source_line": 1352,
+    "text": "  [OK]          keeper_wake         51   keeper wake receipt decoder rejects ..."
+  },
+  {
+    "source_line": 1362,
+    "text": "  [OK]          keeper_wake         52   consumed grant without outcome stays..."
+  },
+  {
+    "source_line": 1374,
+    "text": "  [OK]          keeper_wake         53   consumed grant with outcome retires ..."
+  },
+  {
+    "source_line": 1384,
+    "text": "  [OK]          keeper_wake         54   projection failure keeps spent repla..."
+  },
+  {
+    "source_line": 1396,
+    "text": "  [OK]          keeper_wake         55   rejection projection precedes turn i..."
+  },
+  {
+    "source_line": 1404,
+    "text": "  [OK]          keeper_wake         56   consumed occurrence retry does not e..."
+  },
+  {
+    "source_line": 1414,
+    "text": "  [OK]          keeper_wake         57   unconsumed grant replay stays action..."
+  },
+  {
+    "source_line": 1416,
+    "text": "Test Successful in 4.951s. 58 tests run."
+  }
+]

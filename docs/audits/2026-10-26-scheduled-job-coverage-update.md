@@ -2,7 +2,7 @@
 
 [최초 감사](2026-10-26-scheduled-job-behavior-audit.md)의 59개 행을 같은 순서로
 다시 대조했다. 과거 실행 기록을 새 결과로 덮지 않고 이 표에 현재 판정과 한계를 적는다.
-**전체 PASS가 아니다. F1 취소 잔류와 F6 busy 작업 조기 소비가 실제로 재현됐다.**
+**전체 PASS가 아니다. F1 취소 잔류와 F6 busy 작업 조기 소비의 실제 반례는 보존한다. 수리와 새 실행의 범위는 해당 행에 따로 적는다.**
 
 CI 근거는 **Test [40325758202](https://github.com/jeong-sik/masc/actions/runs/40325758202)**,
 head `ae6cabc219bccb6eb57726d81c3f8cc99ba3e04e`, ref
@@ -31,9 +31,9 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 5 | 과거·현재 초 경계 예약의 허용 여부가 일관된다 | W32–33, W46, S-state8; API33 | 과거 거절·현재 초·원래 overdue 시각 보존 실행. |
 | 6 | one-shot 시각·ISO offset을 처리한다 | W15 | 생산 생성의 +09:00/−03:30·소수 초·잘못된 offset/civil date 실행. |
 | 7 | interval·daily·cron을 반복한다 | W5, W45, S-due3–4, R-tick10–14 | interval tick·daily first due·cron reschedule 실행. 장기간 daily/cron loop 미검증. |
-| 8 | cron 목록·범위·step·요일/날짜 조합을 해석한다 | 기존 domain28; S-due4 | 문법 전반은 기존 domain 근거. 새 CI는 weekday cron 한 사례만 추가. |
-| 9 | 윤일·불가능한 날짜·장기간 다음 날짜를 구분한다 | 기존 domain28; W15 | 기존 윤일/장기 탐색 근거 유지. 새 CI는 invalid civil date admission 추가. |
-| 10 | 시간대를 정한다 | 기존 domain28; W15/W45/S-due4 | offset/UTC 일부 통합 실행. DST/IANA 정책 전체의 새 runtime 증거 아님. |
+| 8 | cron 목록·범위·step·요일/날짜 조합을 해석한다 | Domain37의 request10–16; S-due4 | Test40365052184에서 기존 cron steps/ranges/lists·wildcard·불가능 날짜·장기 다음 날짜 case도 실행. 장기간 서버 반복 운용 증거와 구분. |
+| 9 | 윤일·불가능한 날짜·장기간 다음 날짜를 구분한다 | Domain37의 request15–16; W15 | Test40365052184의 장기 다음 날짜·불가능한 calendar 거절 실행과 기존 civil-date admission 근거. 실제 서버 장기 운용은 미검증. |
+| 10 | 시간대를 정한다 | Domain37의 request7–9; W15/W45/S-due4 | Test40365052184에서 fixed-offset 별명·명시 offset 허용과 DST/IANA 거절 정책 실행. DST 전환 지원을 제공한다는 뜻은 아니다. |
 | 11 | runner tick보다 작은 interval을 생성·수정한다 | W43, R-tick14 | create sub-tick 거절과 저장된 값 처리 실행. update 동일 경계 독립 증거는 없음. |
 | 12 | expires_at을 두고 예약한다 | S-due2, S-state16; restart-expiry-3 | 저장소 expiry와 실제 downtime expiry 실행. accepted source는 보존됨. |
 | 13 | operator/creator/recipient가 수정·취소한다 | W37–41, C11; API33 | named 권한·직접 Operator_caller 취소 실행. HTTP credential→Operator 인증은 미검증. |
@@ -72,8 +72,8 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 46 | ledger와 queue 종단 증거가 충돌하면 완료로 만들지 않는다 | 기존 decoder conflict | 새 195개에 직접 TUI terminal-conflict case 없음. 이전 component 근거 유지. |
 | 47 | 이전 owner ACK와 새 owner pending을 구분한다 | C21/33/37; 기존 decoder/재생 | 실제 transfer outbox/projection/cached target 실행. 실제 model-to-model 인계 미검증. |
 | 48 | 재시작 전 Running을 Due로 복원한다 | S-due7–8 | 실제 filesystem Running→Due recovery 함수/idempotence 실행. 새 process bootstrap은 아님. |
-| 49 | 첫 startup recovery 실패 후 같은 process에서 회복한다 | S-corruption3는 인접 거절 경계 | F2 첫 recovery write 실패→회복→같은 process 재시도는 여전히 미재현. |
-| 50 | dispatch 실패 정산 write 실패 뒤 같은 process에서 회복한다 | 직접 새 case 없음 | F5 retry/fail settlement write 자체 실패→Running 잔류/수렴은 여전히 미재현. |
+| 49 | 첫 startup recovery 실패 후 같은 process에서 회복한다 | Test40358821346 Consumer의 keeper_wake46–47, 117 PASS; Test40365052184에 같은 source 포함 | genuine Running·실제 publication 실패→첫 recovery 실패→저장 복원→같은 maintenance state의 다음 cadence 성공, 성공 뒤 normal crash가 startup으로 돌아가지 않음 실행. 실제 서버 프로세스 bootstrap/설치 binary는 미검증. |
+| 50 | dispatch 실패 정산 write 실패 뒤 같은 process에서 회복한다 | Test40365052184의 exact attempt/primary fault 회귀; 후속 PR46248 | Store의 실제 primary 실패·같은 capability 재정산은 실행. 보류 intent를 다음 production cadence에 보존/재시도하는 PR46248은 작성·독립 소스 검토 완료, Test40369739062는 head22014660의 직접 Eio 의존 참조로 suite 전 컴파일 실패. canonical wrapper로 수정한 head2861571의 Test40371389026 결과는 미관측. 실제 서버 binary 수렴은 미검증. |
 | 51 | 손상·stale receipt·결과 불확실을 성공으로 덮지 않는다 | S-corruption2–3/6–9, C23–27/34/38/41/43/47/49 | 손상·write failure·retired/stale/noncanonical receipt 거절 실행. 전체 runtime 장애 복구는 아님. |
 | 52 | 도착한 단발이 dispatch Succeeded여도 계속 보인다 | 기존 chat_schedule_entries 추출 결정 | 새 195개에 해당 TUI suite 없음. 실제 채팅 표시 미검증. |
 | 53 | 선택한 Keeper의 예약만 보인다 | 기존 selection; W35는 backend owner만 | TUI Keeper 전환·generation·shared-read UI 실행 미검증. |
@@ -97,3 +97,13 @@ F6 Test40341860767은 b5c976 head에서 Connector32 PASS, Owner103 PASS/3 FAIL�
 이후 Test40348100243의 ccb000 head에서 Owner106 PASS/skip0/fail0를 확인했다.
 main 위로 rebase한 6dedd head의 결과로 이월하지 않는다.
 소스 작성·리뷰·CI·격리 binary 실행·운영 설치를 구분하며, 전체 기능 PASS는 아니다.
+
+
+2026-10-27 보강: [정산·복구 검증 bundle](../evidence/2026-10-27-schedule-settlement-verification/README.md)은
+workflow **Test40358821346**, head `b07769be553f54d14873c72f9ccd161d4085799e`,
+ref `fix/schedule-ledger-commit-result-20261027`, conclusion **success**의 117 PASS와
+workflow **Test40365052184**, head `fa23bf437c3679bb4b7bd7c47eb592675697e370`,
+ref `fix/schedule-attempt-authority-20261027`, conclusion **success**의 420 PASS를 보존한다.
+두 실행은 중복 suite를 포함하므로 합쳐서 새 시나리오 수로 세지 않는다. 이 근거로
+8–10행의 기존 domain 정책 실행과 49행의 생산 maintenance 조합 복구를 보강했다.
+50행의 후속 pending loop, actual process restart·모델·TUI·설치는 따로 검증해야 한다.

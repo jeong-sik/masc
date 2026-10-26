@@ -22,9 +22,28 @@ type attempted_transition =
 
 val attempted_transition_to_string : attempted_transition -> string
 
+type mutation_authority =
+  | Operator_authority
+  | Named_authority of
+      { name : string
+      ; wake_keeper_name : Schedule_domain.schedule_request -> string option
+      }
+(** Constructed from the trusted dispatch caller, never call arguments.
+    A named caller changes rows it scheduled or rows that wake it. The
+    consumer supplies its canonical, read-only wake-target projection because
+    this library treats payloads as opaque. [None] means no Keeper target.
+    Both current-row and replacement ownership are checked under the ledger
+    mutation lock; an earlier observation grants no authority. *)
+
 type store_error =
   | Schedule_already_exists
   | Schedule_not_found
+  | Not_schedule_owner of
+      { schedule_id : string
+      ; caller : string
+      ; scheduled_by_id : string
+      ; wake_target : string option
+      }
   | Invalid_initial_status of string
   | Transition_refused of
       { schedule_id : string
@@ -116,6 +135,12 @@ val read_state : Workspace_utils.config -> state
     Never writes to disk. *)
 val read_state_result : Workspace_utils.config -> (state, read_error) result
 
+val with_ledger_lock : Workspace_utils.config -> (unit -> 'a) -> 'a
+(** Serialize a composed durable transfer through its target projection with
+    schedule mutation. Acquire any ordered Keeper intake fences before this
+    lock and durable queue locks inside it. Never call this from a store
+    mutation callback, which already owns the ledger lock. *)
+
 type recovery_cause = Primary_missing | Primary_unusable
 
 type read_source =
@@ -162,14 +187,18 @@ val insert_request :
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 
-type timing_update = Replace_timing | Keep_timing
+type timing_update = Replace_timing | Keep_timing | Keep_recurrence
 (** [Keep_timing] reads the current due time, recurrence and expiry under the
     mutation lock. A content editor cannot restore a stale timing snapshot.
     An expiry on the replacement request replaces the stored one; an absent
-    expiry keeps it. Only [Replace_timing] can remove an expiry. *)
+    expiry keeps it. [Keep_recurrence] replaces the due time and expiry while
+    retaining the latest recurrence under the mutation lock: the caller
+    supplied a due input but omitted the recurrence kind. Both
+    [Replace_timing] and [Keep_recurrence] can remove an expiry. *)
 
 val update_request :
   Workspace_utils.config ->
+  authority:mutation_authority ->
   now:float ->
   runner_tick_sec:float ->
   ?timing_update:timing_update ->
@@ -184,10 +213,14 @@ val update_request :
     [Changed_due_already_past]; the stored due time sent back unchanged is
     accepted whatever the clock says. [timing_update] defaults to
     [Replace_timing]; [Keep_timing] retains the latest stored time, recurrence
-    and expiry. *)
+    and expiry. [Keep_recurrence] retains only the latest recurrence, while
+    replacing due time and expiry. The current row and its replacement must both belong to
+    [authority] before any write. Replacement ownership uses the current
+    row's scheduler, and the stored requester and scheduler are preserved. *)
 
 val cancel_request :
   Workspace_utils.config ->
+  authority:mutation_authority ->
   schedule_id:string ->
   cancellation:Schedule_domain.cancellation ->
   withdraw_queued_wakes:
@@ -200,8 +233,10 @@ val cancel_request :
     ledger lock, it calls [withdraw_queued_wakes] with the stored request so
     the caller removes the wakes already queued for it; this library has no
     view of those queues. A withdrawal [Error] is [Persistence_failed] and
-    nothing is written. [Running] and terminal requests are
-    [Transition_refused]. *)
+    no schedule ledger change is written; earlier queue withdrawals remain
+    durable. [Running] and terminal requests are
+    [Transition_refused]. Current-row ownership is checked before the
+    withdrawal callback or any write; an unauthorized request has no effects. *)
 
 val refresh_due :
   Workspace_utils.config ->

@@ -47,6 +47,7 @@ let cancel_request config ~schedule_id =
   | Ok cancellation ->
     Schedule_store.cancel_request
       config
+      ~authority:Operator_authority
       ~schedule_id
       ~cancellation
       ~withdraw_queued_wakes:(fun _request _cancellation -> Ok ())
@@ -145,7 +146,7 @@ let test_update_replaces_active_definition_with_fresh_instance () =
     { (make_request ~schedule_id:original.schedule_id ()) with due_at = 350.0 }
   in
   let before = read_state config in
-  let updated = store_ok "update" (update_request config ~runner_tick_sec ~now:100.0 replacement) in
+  let updated = store_ok "update" (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:100.0 replacement) in
   let after = read_state config in
   check string "stable public id" original.schedule_id updated.schedule_id;
   check bool "fresh instance" false
@@ -163,10 +164,10 @@ let test_update_accepts_due_but_refuses_terminal_definition () =
   ignore (insert_ok config due);
   ignore (store_ok "refresh due" (refresh_due config ~now:201.0));
   let replacement = make_request ~schedule_id:due.schedule_id () in
-  ignore (store_ok "replace due" (update_request config ~runner_tick_sec ~now:201.0 replacement));
+  ignore (store_ok "replace due" (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:201.0 replacement));
   ignore (store_ok "cancel replacement" (cancel_request config ~schedule_id:due.schedule_id));
   let before = read_state config in
-  (match update_request config ~runner_tick_sec ~now:201.0 (make_request ~schedule_id:due.schedule_id ()) with
+  (match update_request config ~authority:Operator_authority ~runner_tick_sec ~now:201.0 (make_request ~schedule_id:due.schedule_id ()) with
    | Error (Transition_refused { schedule_id; current; attempted; last_wake }) ->
      check string "the refusal names the schedule" due.schedule_id schedule_id;
      check_status "the refusal reads the stored status" Cancelled current;
@@ -219,7 +220,7 @@ let test_update_refuses_exactly_where_modify_allowed_says_no () =
        let label = schedule_status_to_string status in
        match
          ( modify_allowed status
-         , update_request config ~runner_tick_sec ~now:100.0 (make_request ~schedule_id:(id_of status) ()) )
+         , update_request config ~authority:Operator_authority ~runner_tick_sec ~now:100.0 (make_request ~schedule_id:(id_of status) ()) )
        with
        | true, Ok _ -> ()
        | false, Error (Transition_refused { current; _ }) ->
@@ -244,10 +245,10 @@ let test_update_refuses_only_a_changed_due_time_behind_the_clock () =
   let unchanged = make_request ~schedule_id:original.schedule_id () in
   ignore
     (store_ok "the stored due time sent back is accepted"
-       (update_request config ~runner_tick_sec ~now:500.0 unchanged));
+       (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:500.0 unchanged));
   let moved = { (make_request ~schedule_id:original.schedule_id ()) with due_at = 150.0 } in
   let before = read_state config in
-  (match update_request config ~runner_tick_sec ~now:500.9 moved with
+  (match update_request config ~authority:Operator_authority ~runner_tick_sec ~now:500.9 moved with
    | Error (Changed_due_already_past { schedule_id; stored_due_at; due_at; now }) ->
      check string "the refusal names the schedule" original.schedule_id schedule_id;
      check (float 0.0) "the stored due time" 200.0 stored_due_at;
@@ -259,7 +260,7 @@ let test_update_refuses_only_a_changed_due_time_behind_the_clock () =
   let future = { (make_request ~schedule_id:original.schedule_id ()) with due_at = 900.0 } in
   ignore
     (store_ok "a due time moved into the future is accepted"
-       (update_request config ~runner_tick_sec ~now:500.0 future))
+       (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:500.0 future))
 ;;
 
 (* A running schedule with no running wake is one of two facts: the wake was
@@ -382,7 +383,7 @@ let test_update_requires_an_existing_schedule () =
   with_workspace
   @@ fun config ->
   check_error "missing update" Schedule_not_found
-    (update_request config ~runner_tick_sec ~now:100.0 (make_request ~schedule_id:"missing" ()))
+    (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:100.0 (make_request ~schedule_id:"missing" ()))
 ;;
 
 let test_store_rejects_non_scheduled_initial_status () =

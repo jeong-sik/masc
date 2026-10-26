@@ -500,13 +500,14 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
            ~from_keeper
            ~to_keeper
            (fun ~source_intake_token ~target_intake_token ->
-              transfer_pending_under_reservation
-                config
-                ~source_intake_token
-                ~target_intake_token
-                ~from_keeper
-                ~to_keeper
-                request)
+              Schedule_store.with_ledger_lock config (fun () ->
+                transfer_pending_under_reservation
+                  config
+                  ~source_intake_token
+                  ~target_intake_token
+                  ~from_keeper
+                  ~to_keeper
+                  request))
        in
        let reservation_release = Keeper_lifecycle_reservation.release token in
        (match outcome with

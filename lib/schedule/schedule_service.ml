@@ -92,6 +92,7 @@ let create
 
 let update
       config
+      ~authority
       ~now
       ~runner_tick_sec
       ?timing_update
@@ -110,15 +111,15 @@ let update
     make_request ~schedule_id ?requested_at ?expires_at ~requested_by
       ~scheduled_by ~due_at ~payload ~source ?recurrence ()
   in
-  Schedule_store.update_request config ~now ~runner_tick_sec ?timing_update request |> map_store
+  Schedule_store.update_request config ~authority ~now ~runner_tick_sec ?timing_update request |> map_store
 ;;
 
-let cancel config ~schedule_id ~cancelled_by ~reason ~withdraw_queued_wakes =
+let cancel config ~authority ~schedule_id ~cancelled_by ~reason ~withdraw_queued_wakes =
   let* cancellation =
     Schedule_domain.make_cancellation ~cancelled_by ~reason
     |> Result.map_error (fun msg -> Invalid_request msg)
   in
-  Schedule_store.cancel_request config ~schedule_id ~cancellation ~withdraw_queued_wakes
+  Schedule_store.cancel_request config ~authority ~schedule_id ~cancellation ~withdraw_queued_wakes
   |> map_store
 ;;
 

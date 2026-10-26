@@ -284,7 +284,9 @@ let project_claimed_owner owner =
             ~from_keeper:keeper_name
             ~to_keeper:transfer.to_keeper
             (fun ~source_intake_token:_ ~target_intake_token ->
-               project_open_owner ~target_intake_token ())
+               Schedule_store.with_ledger_lock
+                 (Workspace.default_config base_path)
+                 (fun () -> project_open_owner ~target_intake_token ()))
         with
         | Keeper_shutdown_intake_fence.Transfer_intake_committed result -> result
         | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved operation_id

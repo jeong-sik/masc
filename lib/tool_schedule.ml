@@ -657,6 +657,15 @@ let refusal_of_service_error (err : Schedule_service.service_error) =
       ; "runner_tick_sec", `Float runner_tick_sec
       ]
   | Schedule_service.Store_error
+      (Schedule_store.Not_schedule_owner
+        { schedule_id; caller; scheduled_by_id; wake_target }) ->
+    typed Schedule_contract_values.Refusal_not_schedule_owner
+      [ "schedule_id", `String schedule_id
+      ; "caller", `String caller
+      ; "scheduled_by_id", `String scheduled_by_id
+      ; "wake_target", (match wake_target with None -> `Null | Some name -> `String name)
+      ]
+  | Schedule_service.Store_error
       (Schedule_store.Transition_refused { schedule_id; current; attempted; last_wake })
     ->
     typed
@@ -772,6 +781,15 @@ let authorize_replacement ctx ~schedule_id ~(stored : Schedule_domain.schedule_r
            ~wake_target:keeper_wake_target)
 ;;
 
+let mutation_authority ctx =
+  let* name = caller_name ctx ~instead:"only a named caller may change a schedule" in
+  match ctx.caller with
+  | Operator_caller _ -> Ok Schedule_store.Operator_authority
+  | Named_caller _ | Unnamed_caller ->
+    Ok (Schedule_store.Named_authority
+      { name; wake_keeper_name = Schedule_payload_projection.wake_keeper_name })
+;;
+
 (* TEL-OK: schedule tools return [Tool_result.t] through the shared
    [Tool_dispatch] paths; [Server_bootstrap_maintenance] installs the canonical
    dispatch observer that records tool telemetry and metrics once for keeper and
@@ -830,6 +848,12 @@ let handle_write ~action ~tool_name ~start_time ctx args =
         (* The observed time validates the replacement definition; the
            mutation re-reads its current value under the ledger lock. *)
         Ok (request.due_at, Schedule_store.Keep_timing)
+      | Update_schedule, Some _, None, _ :: _ ->
+        (* An explicit instant/delay does not use the observed recurrence or
+           its timezone to compute due_at. Multiple inputs are refused by
+           the resolver; only the recurrence is re-read at commit. *)
+        let* due_at = resolve_due_at ~dispatched_at recurrence args in
+        Ok (due_at, Schedule_store.Keep_recurrence)
       | (Create_schedule | Update_schedule), _, _, _ ->
         let* due_at = resolve_due_at ~dispatched_at recurrence args in
         Ok (due_at, Schedule_store.Replace_timing)
@@ -846,6 +870,7 @@ let handle_write ~action ~tool_name ~start_time ctx args =
     in
     let* () = refuse_other_actor ~actor:caller ~prefix:"requested_by" args in
     let* () = refuse_other_actor ~actor:caller ~prefix:"scheduled_by" args in
+    let* authority = mutation_authority ctx in
     let caller_as_creator () = Ok (caller, caller, payload) in
     let* requested_by, scheduled_by, payload =
       match action, schedule_id with
@@ -898,7 +923,7 @@ let handle_write ~action ~tool_name ~start_time ctx args =
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, Some schedule_id ->
         Schedule_service.update
-          ctx.config ~now:dispatched_at ~runner_tick_sec ~timing_update ~schedule_id ~requested_at ?expires_at
+          ctx.config ~authority ~now:dispatched_at ~runner_tick_sec ~timing_update ~schedule_id ~requested_at ?expires_at
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, None ->
         Error (Schedule_service.Invalid_request "schedule_id is required")
@@ -1320,14 +1345,16 @@ let handle_cancel ~tool_name ~start_time ctx args =
     in
     let* () = refuse_other_actor ~actor:cancelled_by ~prefix:"cancelled_by" args in
     let* _stored = authorize_row_change ctx ~schedule_id in
-    Ok (schedule_id, reason, cancelled_by)
+    let* authority = mutation_authority ctx in
+    Ok (schedule_id, reason, cancelled_by, authority)
   in
   match result with
   | Error refusal -> refusal_result ~tool_name ~start_time refusal
-  | Ok (schedule_id, reason, cancelled_by) ->
+  | Ok (schedule_id, reason, cancelled_by, authority) ->
     (match
        Schedule_service.cancel
          ctx.config
+         ~authority
          ~schedule_id
          ~cancelled_by
          ~reason
@@ -1384,6 +1411,7 @@ let handle_note_add ~tool_name ~start_time ctx args =
      | Error
          ((Schedule_store.Schedule_already_exists
           | Schedule_store.Schedule_not_found
+          | Schedule_store.Not_schedule_owner _
           | Schedule_store.Invalid_initial_status _
           | Schedule_store.Transition_refused _
           | Schedule_store.Changed_due_already_past _

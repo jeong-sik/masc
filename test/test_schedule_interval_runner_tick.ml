@@ -136,7 +136,7 @@ let insert config ~runner_tick_sec interval_sec =
 ;;
 
 let modify config ~text interval_sec =
-  Schedule_store.update_request config ~now:requested_at ~runner_tick_sec
+  Schedule_store.update_request config ~authority:Schedule_store.Operator_authority ~now:requested_at ~runner_tick_sec
     (request_exn ~schedule_id:"sched-interval-tick" ~text interval_sec)
 ;;
 

@@ -268,7 +268,7 @@ let target_projection_failure_json source_result detail =
     ]
 ;;
 
-let execute_transfer ~base_path ~keeper_name prepared =
+let execute_transfer ~config ~base_path ~keeper_name prepared =
   let transfer = prepared.transfer in
   let execute_fenced ~source_intake_token ~target_intake_token =
     let* source_result =
@@ -326,7 +326,9 @@ let execute_transfer ~base_path ~keeper_name prepared =
       ~base_path
       ~from_keeper:keeper_name
       ~to_keeper:transfer.to_keeper
-      execute_fenced
+      (fun ~source_intake_token ~target_intake_token ->
+         Schedule_store.with_ledger_lock config (fun () ->
+           execute_fenced ~source_intake_token ~target_intake_token))
   with
   | Keeper_shutdown_intake_fence.Transfer_intake_committed result -> result
   | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved operation_id ->
@@ -383,7 +385,7 @@ let validate_fresh_transfer_target config target_keeper =
   | Ok None -> Error ("target keeper does not exist: " ^ target_keeper)
 ;;
 
-let replay_committed_request ~base_path ~keeper_name request =
+let replay_committed_request ~config ~base_path ~keeper_name request =
   match request with
   | Reprioritize _ -> Ok None
   | Cancel
@@ -437,7 +439,7 @@ let replay_committed_request ~base_path ~keeper_name request =
      | Some (Transfer_projected witness) ->
        Ok (Some (Some (audit_source_of_witness witness), projected_result_json witness))
      | Some (Transfer_current prepared) ->
-       execute_transfer ~base_path ~keeper_name prepared
+       execute_transfer ~config ~base_path ~keeper_name prepared
        |> Result.map Option.some)
 ;;
 
@@ -521,7 +523,7 @@ let run_admitted_request
        | Transfer_projected witness ->
          Ok (Some (audit_source_of_witness witness), projected_result_json witness)
        | Transfer_current prepared ->
-         execute_transfer ~base_path ~keeper_name prepared)
+         execute_transfer ~config ~base_path ~keeper_name prepared)
   | Reprioritize { source_ref; source_incarnation; urgency } ->
     execute_reprioritization
       ~base_path
@@ -609,7 +611,7 @@ let run_fresh_request ~config ~base_path ~keeper_name request =
 let run ~config ~keeper_name request =
   let base_path = config.Workspace.base_path in
   let* replay =
-    replay_committed_request ~base_path ~keeper_name request
+    replay_committed_request ~config ~base_path ~keeper_name request
   in
   match replay with
   | Some result -> Ok result
@@ -618,7 +620,7 @@ let run ~config ~keeper_name request =
      | Ok _ as result -> result
      | Error original_error ->
        let* replay =
-         replay_committed_request ~base_path ~keeper_name request
+         replay_committed_request ~config ~base_path ~keeper_name request
        in
        (match replay with
         | Some result -> Ok result

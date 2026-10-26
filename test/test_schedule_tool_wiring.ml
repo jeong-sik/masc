@@ -47,7 +47,7 @@ let register_wake_target config keeper_name =
      | Error detail -> fail ("keeper meta write failed: " ^ detail))
 ;;
 
-let with_config f =
+let with_config ?(strict_executor = false) f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -64,7 +64,13 @@ let with_config f =
     | Ok None -> Ok false
     | Error detail -> Error detail);
   register_wake_target config "schedule-keeper";
-  f config
+  if strict_executor then
+    Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+      (fun () ->
+         let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+         Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool pool) (fun () -> f config))
+  else f config
 ;;
 
 let human id : Schedule_domain.actor =
@@ -526,7 +532,7 @@ let test_content_edit_preserves_due_and_recurrence () =
 (* The expiry is part of the timing a content edit keeps. A content edit that
    dropped it would turn an expiring schedule into one that never reaches
    [Expired]. An expiry sent on the call wins, and an update that also sends a
-   due input is a full replacement, so omitting the expiry there still clears
+   due input replaces expiry, so omitting the expiry there still clears
    it, as the tool description says. *)
 let test_content_edit_keeps_expiry () =
   with_config @@ fun config ->
@@ -574,7 +580,7 @@ let test_content_edit_preserves_concurrently_changed_due () =
       {hour=10; minute=0; second=0; timezone="UTC"} in
   let context = { (schedule_ctx config) with
     admit_keeper_wake_creation = (fun _config ~keeper_name:_ write ->
-      match Schedule_service.update config ~now:100. ~runner_tick_sec ~schedule_id
+      match Schedule_service.update config ~authority:Schedule_store.Operator_authority ~now:100. ~runner_tick_sec ~schedule_id
           ~requested_by:original.requested_by ~scheduled_by:original.scheduled_by
           ~due_at:latest_due ~payload:(Schedule_domain.payload_to_yojson original.payload)
           ~source:original.source ~recurrence:latest_recurrence () with
@@ -594,6 +600,84 @@ let test_content_edit_preserves_concurrently_changed_due () =
   check string "new content is committed" "after"
     Yojson.Safe.Util.(Schedule_domain.payload_to_yojson stored.payload
       |> member "body" |> member "message" |> to_string)
+;;
+
+(* Both edits use the public tool. U1 has already observed the old recurrence
+   when its intake callback completes U2's explicit cadence change. U1 must
+   replace the due time it actually supplied, not restore the old cadence.
+   Explicit due inputs resolve independently of recurrence/calendar timezone. *)
+let check_due_edit_keeps_concurrent_recurrence
+    ~schedule_id ~initial_fields ~latest_fields ~latest_recurrence
+    ~due_input ~expected_due_at =
+  with_config @@ fun config ->
+  let created = dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc ([ "schedule_id", `String schedule_id
+               ; "keeper_name", `String "schedule-keeper"
+               ; "message", `String "original cadence"
+               ; "due_at_unix", `Float future_due_at
+               ; "expires_at_unix", `Float (future_due_at +. 3600.) ] @ initial_fields)) in
+  check bool "original cadence created" true (Tool_result.is_success created);
+  let concurrent_instance = ref None in
+  let context = { (schedule_ctx config) with
+    admit_keeper_wake_creation = (fun _config ~keeper_name:_ write ->
+      let changed = dispatch_exn config Tool_schemas_schedule.Update_request
+          (`Assoc ([ "schedule_id", `String schedule_id
+                   ; "keeper_name", `String "schedule-keeper"
+                   ; "message", `String "concurrent cadence change"
+                   ; "due_at_unix", `Float (future_due_at +. 600.)
+                   ; "expires_at_unix", `Float (future_due_at +. 7200.) ] @ latest_fields)) in
+      check bool "explicit concurrent recurrence update commits" true
+        (Tool_result.is_success changed);
+      let committed = match Schedule_store.get_schedule config ~schedule_id with
+        | Some row -> row | None -> fail "concurrent update lost schedule" in
+      check bool "latest recurrence established before U1 resumes" true
+        (committed.recurrence = latest_recurrence);
+      concurrent_instance := Some committed.schedule_instance_id;
+      write ()) } in
+  let updated = match Tool_schedule.dispatch context
+      ~name:(schedule_tool_name Tool_schemas_schedule.Update_request)
+      ~args:(`Assoc [ "schedule_id", `String schedule_id
+                   ; "keeper_name", `String "schedule-keeper"
+                   ; "message", `String "due-only replacement"
+                   ; due_input ]) with
+    | Some result -> result | None -> fail "update tool missing" in
+  check bool "due-only replacement succeeds" true (Tool_result.is_success updated);
+  let stored = match Schedule_store.get_schedule config ~schedule_id with
+    | Some row -> row | None -> fail "due-only replacement lost schedule" in
+  check (float 0.) "caller's explicit due time wins" expected_due_at stored.due_at;
+  check bool "latest recurrence survives omitted kind" true
+    (stored.recurrence = latest_recurrence);
+  check (option (float 0.)) "due-only omission still removes expiry" None stored.expires_at;
+  check string "caller's replacement content is saved" "due-only replacement"
+    Yojson.Safe.Util.(Schedule_domain.payload_to_yojson stored.payload
+      |> member "body" |> member "message" |> to_string);
+  (match !concurrent_instance with
+   | Some instance -> check bool "replacement receives its own instance" false
+       (String.equal instance stored.schedule_instance_id)
+   | None -> fail "concurrent update was never applied")
+;;
+
+let test_due_edit_keeps_concurrent_daily_to_interval () =
+  check_due_edit_keeps_concurrent_recurrence
+    ~schedule_id:"due-edit-daily-to-interval"
+    ~initial_fields:[ "recurrence_kind", `String "daily"
+                    ; "recurrence_hour", `Int 9
+                    ; "recurrence_minute", `Int 0
+                    ; "recurrence_timezone", `String "Asia/Seoul" ]
+    ~latest_fields:[ "recurrence_kind", `String "interval"; "recurrence_interval_sec", `Int 60 ]
+    ~latest_recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+    ~due_input:("due_at_iso", `String "2100-01-01T09:20:00+09:00")
+    ~expected_due_at:(future_due_at +. 1200.)
+;;
+
+let test_due_edit_keeps_concurrent_interval_to_one_shot () =
+  check_due_edit_keeps_concurrent_recurrence
+    ~schedule_id:"due-edit-interval-to-one-shot"
+    ~initial_fields:[ "recurrence_kind", `String "interval"; "recurrence_interval_sec", `Int 60 ]
+    ~latest_fields:[ "recurrence_kind", `String "one_shot" ]
+    ~latest_recurrence:Schedule_domain.One_shot
+    ~due_input:("due_at_unix", `Float (future_due_at +. 1200.))
+    ~expected_due_at:(future_due_at +. 1200.)
 ;;
 
 (* The checkpoint encoder rejects an object that binds the same key twice,
@@ -1792,6 +1876,130 @@ let test_an_update_keeps_the_rows_actors_and_its_target_rule () =
    ignored: the HTTP boundary already replaced it (#37149), and the MCP path
    does not stamp, so the tool itself must refuse -- otherwise an MCP caller
    names any actor it likes on create, cancel and note_add. *)
+(* The real update path reads its authorization snapshot before entering
+   Keeper intake. Interleave another public update at that boundary: the old
+   recipient must not edit the definition after it stops waking that caller. *)
+let test_recipient_edit_rechecks_the_current_target () =
+  with_config @@ fun config ->
+  let schedule_id = "recipient-edit-retargeted" in
+  let creator = Tool_schedule.Named_caller "scheduler-agent" in
+  register_wake_target config "replacement-keeper";
+  let created = dispatch_exn ~caller:creator config Tool_schemas_schedule.Create_request
+      (create_args ~schedule_id ()) in
+  check bool "creator schedules A" true (Tool_result.is_success created);
+  let committed = ref None in
+  let ctx = { (schedule_ctx ~caller:(Tool_schedule.Named_caller "schedule-keeper") config) with
+    admit_keeper_wake_creation = (fun _config ~keeper_name:_ write ->
+      let retarget = dispatch_exn ~caller:creator config Tool_schemas_schedule.Update_request
+          (`Assoc [ "schedule_id", `String schedule_id
+                  ; "keeper_name", `String "replacement-keeper"
+                  ; "message", `String "creator's replacement" ]) in
+      check bool "creator retargets B before recipient commits" true
+        (Tool_result.is_success retarget);
+      committed := Some (Schedule_store.read_state config);
+      write ()) } in
+  let result = match Tool_schedule.dispatch ctx
+      ~name:(schedule_tool_name Tool_schemas_schedule.Update_request)
+      ~args:(`Assoc [ "schedule_id", `String schedule_id
+                   ; "keeper_name", `String "schedule-keeper"
+                   ; "message", `String "stale recipient edit" ]) with
+    | Some result -> result
+    | None -> fail "update tool missing" in
+  check_refusal "former recipient cannot overwrite B"
+    Schedule_contract_values.Refusal_not_schedule_owner result;
+  let open Yojson.Safe.Util in
+  let facts = Tool_result.data result in
+  check string "refusal identifies current target" "replacement-keeper"
+    (facts |> member "wake_target" |> to_string);
+  check string "refusal identifies caller" "schedule-keeper"
+    (facts |> member "caller" |> to_string);
+  check string "refusal identifies scheduler" "scheduler-agent"
+    (facts |> member "scheduled_by_id" |> to_string);
+  let before = match !committed with
+    | Some state -> state | None -> fail "retarget did not commit" in
+  check int "refused edit leaves the ledger version unchanged" before.version
+    (Schedule_store.read_state config).version;
+  let stored = stored_schedule config schedule_id in
+  check string "creator's content survives" "creator's replacement"
+    (Schedule_domain.payload_to_yojson stored.payload |> member "body" |> member "message" |> to_string);
+  check bool "creator can still edit the retargeted row" true
+    (Tool_result.is_success
+       (dispatch_exn ~caller:creator config Tool_schemas_schedule.Update_request
+          (`Assoc [ "schedule_id", `String schedule_id
+                  ; "keeper_name", `String "schedule-keeper"
+                  ; "message", `String "creator's next edit" ])))
+;;
+
+let test_locked_cancel_refuses_a_former_recipient_before_withdrawal () =
+  with_config @@ fun config ->
+  let schedule_id = "cancel-retargeted-owner" in
+  let creator = Tool_schedule.Named_caller "scheduler-agent" in
+  register_wake_target config "replacement-keeper";
+  ignore (dispatch_exn ~caller:creator config Tool_schemas_schedule.Create_request
+    (create_args ~schedule_id ()) : Tool_result.result);
+  let observed = stored_schedule config schedule_id in
+  check (option string) "original recipient" (Some "schedule-keeper")
+    (Schedule_payload_projection.wake_keeper_name observed);
+  let changed = dispatch_exn ~caller:creator config Tool_schemas_schedule.Update_request
+      (`Assoc [ "schedule_id", `String schedule_id
+              ; "keeper_name", `String "replacement-keeper"
+              ; "message", `String "retargeted" ]) in
+  check bool "retarget commits" true (Tool_result.is_success changed);
+  let before = Schedule_store.read_state config in
+  let withdrawals = ref 0 in
+  let withdraw request _cancellation =
+    incr withdrawals;
+    check (option string) "withdrawal sees the current target" (Some "replacement-keeper")
+      (Schedule_payload_projection.wake_keeper_name request);
+    Ok () in
+  let cancel name = Schedule_service.cancel config
+      ~authority:(Schedule_store.Named_authority
+        { name; wake_keeper_name = Schedule_payload_projection.wake_keeper_name })
+      ~schedule_id ~cancelled_by:(automated name) ~reason:"no longer needed"
+      ~withdraw_queued_wakes:withdraw in
+  (match cancel "schedule-keeper" with
+   | Error (Schedule_service.Store_error (Schedule_store.Not_schedule_owner
+       { caller; scheduled_by_id; wake_target; schedule_id = refused_id })) ->
+     check string "refused schedule" schedule_id refused_id;
+     check string "former recipient" "schedule-keeper" caller;
+     check string "current scheduler" "scheduler-agent" scheduled_by_id;
+     check (option string) "current target" (Some "replacement-keeper") wake_target
+   | Error err -> fail (Schedule_service.service_error_to_string err)
+   | Ok _ -> fail "former recipient cancelled the retargeted row");
+  check int "unauthorized cancel never calls withdrawal" 0 !withdrawals;
+  check int "unauthorized cancel never writes the ledger" before.version
+    (Schedule_store.read_state config).version;
+  (match cancel "scheduler-agent" with
+   | Ok request -> check bool "creator cancels" true (request.status = Schedule_domain.Cancelled)
+   | Error err -> fail (Schedule_service.service_error_to_string err));
+  check int "authorized creator withdraws once" 1 !withdrawals
+;;
+
+let test_locked_replacement_uses_the_current_scheduler () =
+  with_config @@ fun config ->
+  let schedule_id = "replacement-owner-current-row" in
+  let original = create_service_exn config ~schedule_id ~due_at:future_due_at
+      ~payload:(keeper_wake_payload "original") () in
+  let before = Schedule_store.read_state config in
+  let payload = `Assoc [ "kind", `String Schedule_supported_kinds.keeper_wake
+    ; "body", `Assoc [ "keeper_name", `String "other-keeper"; "message", `String "moved" ] ] in
+  let result = Schedule_service.update config
+      ~authority:(Schedule_store.Named_authority
+        { name = "schedule-keeper"; wake_keeper_name = Schedule_payload_projection.wake_keeper_name })
+      ~now:100. ~runner_tick_sec ~schedule_id
+      ~requested_by:(automated "schedule-keeper") ~scheduled_by:(automated "schedule-keeper")
+      ~due_at:original.due_at ~payload ~source:original.source () in
+  (match result with
+   | Error (Schedule_service.Store_error (Schedule_store.Not_schedule_owner
+       { scheduled_by_id; wake_target; schedule_id = _; caller = _ })) ->
+     check string "current scheduler decides replacement ownership" "scheduler-agent" scheduled_by_id;
+     check (option string) "replacement target is refused" (Some "other-keeper") wake_target
+   | Error err -> fail (Schedule_service.service_error_to_string err)
+   | Ok _ -> fail "replacement supplied its own scheduling authority");
+  check int "invalid replacement leaves the ledger unchanged" before.version
+    (Schedule_store.read_state config).version
+;;
+
 let test_a_named_caller_is_the_actor_not_the_argument () =
   with_config
   @@ fun config ->
@@ -2105,6 +2313,7 @@ let test_status_active_lists_every_status_that_is_not_terminal () =
   (match
      Schedule_service.cancel
        config
+       ~authority:Schedule_store.Operator_authority
        ~schedule_id:"sched-gone"
        ~cancelled_by:(human "operator")
        ~reason:"list fixture"
@@ -2251,10 +2460,243 @@ let test_note_tool_reports_actual_primary_write_failure () =
   check string "failed primary write preserves mirror" mirror_before (Workspace_core.read_text config mirror)
 ;;
 
+(* Compose the public schedule tools with real durable queue transitions.
+   Queue seeds represent accepted occurrences, not model/runtime execution. *)
+let f1_ok label = function
+  | Ok value -> value
+  | Error detail -> failf "%s: %s" label detail
+;;
+
+let f1_state config keeper_name =
+  Keeper_event_queue_persistence.load_state_result
+    ~base_path:config.Workspace.base_path ~keeper_name |> f1_ok "read queue"
+;;
+
+let f1_seed config keeper_name schedule_id occurrence =
+  let source : Keeper_event_queue.stimulus =
+    { post_id = "f1-" ^ occurrence; urgency = Keeper_event_queue.Normal
+    ; arrived_at = 1.0
+    ; payload = Schedule_due
+        { schedule_id; schedule_instance_id = "instance-" ^ occurrence
+        ; occurrence_id = occurrence; due_at = 1.0; payload_digest = "f1-digest"
+        ; title = None; message = "old occurrence"; result_delivery = None }
+    }
+  in
+  Keeper_event_queue_persistence.update_result
+    ~base_path:config.Workspace.base_path ~keeper_name
+    (fun pending -> Keeper_event_queue.enqueue pending source)
+  |> f1_ok "seed accepted occurrence";
+  source
+;;
+
+let f1_create config schedule_id =
+  check bool "public create succeeds" true
+    (Tool_result.is_success
+       (dispatch_exn config Tool_schemas_schedule.Create_request
+          (create_args ~schedule_id ())));
+  stored_schedule config schedule_id
+;;
+
+let f1_cancel config schedule_id =
+  dispatch_exn config Tool_schemas_schedule.Cancel_request
+    (`Assoc [ "schedule_id", `String schedule_id; "reason", `String "withdraw old work" ])
+;;
+
+let f1_empty config keeper_name =
+  check int (keeper_name ^ " has no pending work") 0
+    (f1_state config keeper_name |> Keeper_event_queue_state.pending |> Keeper_event_queue.length)
+;;
+
+let f1_transfer_commit config ~from_keeper ~to_keeper source operation_id =
+  let selection =
+    f1_state config from_keeper |> Keeper_event_queue_state.pending_selections
+    |> List.find (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal source selection.source)
+  in
+  let meta = match Keeper_meta_store.read_meta config to_keeper with
+    | Ok (Some meta) -> meta
+    | Ok None -> fail "missing transfer target metadata"
+    | Error detail -> fail detail
+  in
+  let transfer : Keeper_event_queue_persistence.accepted_transfer =
+    { source; source_incarnation = selection.admitted_revision
+    ; operator_operation_id = operation_id; from_keeper; to_keeper
+    ; target_trace_id = meta.runtime.trace_id }
+  in
+  Keeper_event_queue_persistence.transfer_pending_accepted_result
+    ~base_path:config.Workspace.base_path ~keeper_name:from_keeper
+    ~applied_at:2.0 ~transfer () |> f1_ok "commit transfer outbox" |> ignore;
+  transfer
+;;
+
+let f1_recover config keeper_name =
+  match Keeper_event_queue_recovery.project_owner_result
+          ~base_path:config.Workspace.base_path ~keeper_name with
+  | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+  | Ok _ -> fail "expected transfer recovery convergence"
+  | Error error -> fail (Keeper_event_queue_recovery.projection_error_to_string error)
+;;
+
+let test_cancel_finds_old_target_and_all_instances () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-old-target" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  let meta = match Keeper_meta_store.read_meta config "schedule-keeper" with
+    | Ok (Some meta) -> meta | _ -> fail "missing old owner metadata" in
+  Keeper_meta_store.replace_snapshot config { meta with paused = true }
+  |> f1_ok "pause old owner";
+  (* More accepted instances than the retained terminal-wake history bound.
+     None is found through ledger wake history or live registry registration. *)
+  for n = 0 to Schedule_store.terminal_wakes_retained_per_schedule do
+    ignore (f1_seed config "schedule-keeper" schedule_id (string_of_int n)
+            : Keeper_event_queue.stimulus)
+  done;
+  let unrelated = f1_seed config "schedule-keeper" "another-public-id" "unrelated" in
+  register_wake_target config "replacement-keeper";
+  check bool "public retarget succeeds" true
+    (Tool_result.is_success (dispatch_exn config Tool_schemas_schedule.Update_request
+       (`Assoc [ "schedule_id", `String schedule_id
+               ; "keeper_name", `String "replacement-keeper"; "message", `String "new target" ])));
+  check bool "old owner is absent from live registry" true
+    (Option.is_none (Keeper_registry.get ~base_path:config.Workspace.base_path "schedule-keeper"));
+  check bool "public cancellation succeeds" true (Tool_result.is_success (f1_cancel config schedule_id));
+  check bool "only the unrelated public schedule survives" true
+    (f1_state config "schedule-keeper" |> Keeper_event_queue_state.pending
+     |> Keeper_event_queue.to_list = [unrelated]);
+  f1_empty config "replacement-keeper";
+  check bool "cancelled ledger follows withdrawal" true
+    ((stored_schedule config schedule_id).status = Schedule_domain.Cancelled)
+;;
+
+let test_cancel_keeper_to_lane_still_withdraws () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-keeper-to-lane" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  ignore (f1_seed config "schedule-keeper" schedule_id "before-lane" : Keeper_event_queue.stimulus);
+  check bool "public Keeper-to-Lane update succeeds" true
+    (Tool_result.is_success (dispatch_exn config Tool_schemas_schedule.Update_request
+       (`Assoc [ "schedule_id", `String schedule_id; "installation_id", `String "operator-quiz"
+               ; "action", `Assoc [ "kind", `String "compose" ] ])));
+  check bool "Lane definition cancels" true (Tool_result.is_success (f1_cancel config schedule_id));
+  f1_empty config "schedule-keeper"
+;;
+
+let test_cancel_refuses_outbox_then_recovers_multihop () =
+  with_config ~strict_executor:true @@ fun config ->
+  let schedule_id = "f1-multi-hop" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  register_wake_target config "transfer-middle";
+  register_wake_target config "transfer-final";
+  let source = f1_seed config "schedule-keeper" schedule_id "transferred" in
+  ignore (f1_transfer_commit config ~from_keeper:"schedule-keeper"
+      ~to_keeper:"transfer-middle" source "first-hop"
+      : Keeper_event_queue_persistence.accepted_transfer);
+  check bool "unfinished transfer refuses public cancel" false
+    (Tool_result.is_success (f1_cancel config schedule_id));
+  check bool "refused cancellation preserves active definition" true
+    ((stored_schedule config schedule_id).status = Schedule_domain.Scheduled);
+  f1_recover config "schedule-keeper";
+  ignore (f1_transfer_commit config ~from_keeper:"transfer-middle"
+      ~to_keeper:"transfer-final" source "second-hop"
+      : Keeper_event_queue_persistence.accepted_transfer);
+  check bool "second unfinished transfer also refuses cancel" false
+    (Tool_result.is_success (f1_cancel config schedule_id));
+  f1_recover config "transfer-middle";
+  check bool "cancel after both recoveries succeeds" true
+    (Tool_result.is_success (f1_cancel config schedule_id));
+  List.iter (f1_empty config) [ "schedule-keeper"; "transfer-middle"; "transfer-final" ]
+;;
+
+let f1_snapshot config keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path) keeper_name)
+    Keeper_event_queue_persistence.snapshot_filename
+;;
+
+let test_cancel_strict_read_error_preserves_pending () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-corrupt-owner" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  ignore (f1_seed config "schedule-keeper" schedule_id "valid" : Keeper_event_queue.stimulus);
+  ignore (f1_seed config "z-corrupt-owner" "unrelated" "corrupt" : Keeper_event_queue.stimulus);
+  let snapshot = f1_snapshot config "z-corrupt-owner" in
+  Out_channel.with_open_bin snapshot (fun channel -> output_string channel "invalid queue");
+  check bool "corrupt current state refuses cancel" false
+    (Tool_result.is_success (f1_cancel config schedule_id));
+  check int "preflight failure preserves pending work" 1
+    (f1_state config "schedule-keeper" |> Keeper_event_queue_state.pending |> Keeper_event_queue.length);
+  check bool "ledger remains active" true
+    ((stored_schedule config schedule_id).status = Schedule_domain.Scheduled)
+;;
+
+let test_cancel_discovery_error_is_not_empty_success () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-discovery" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  let root = Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path in
+  rm_rf root;
+  Out_channel.with_open_bin root (fun channel -> output_string channel "not a directory");
+  check bool "invalid discovery root refuses cancel" false
+    (Tool_result.is_success (f1_cancel config schedule_id));
+  check bool "discovery refusal preserves definition" true
+    ((stored_schedule config schedule_id).status = Schedule_domain.Scheduled)
+;;
+
+let test_cancel_partial_withdrawal_does_not_claim_rollback () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-partial" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  ignore (f1_seed config "a-first-owner" schedule_id "first" : Keeper_event_queue.stimulus);
+  ignore (f1_seed config "z-last-owner" schedule_id "last" : Keeper_event_queue.stimulus);
+  let injected = ref false in
+  Keeper_event_queue_persistence.install_state_change_observer (fun () ->
+    if not !injected then (
+      injected := true;
+      Out_channel.with_open_bin (f1_snapshot config "z-last-owner")
+        (fun channel -> output_string channel "injected read failure after first withdrawal")));
+  Fun.protect
+    ~finally:(fun () -> Keeper_event_queue_persistence.install_state_change_observer ignore)
+    (fun () ->
+       check bool "partial withdrawal returns failure" false
+         (Tool_result.is_success (f1_cancel config schedule_id)));
+  check bool "fault was injected after the first durable change" true !injected;
+  f1_empty config "a-first-owner";
+  check bool "schedule ledger remains active after partial failure" true
+    ((stored_schedule config schedule_id).status = Schedule_domain.Scheduled);
+  check bool "first withdrawal retains a canonical disposition" true
+    (Option.is_some (f1_state config "a-first-owner" |> Keeper_event_queue_state.last_transition))
+;;
+
+let test_cancel_ledger_write_failure_retains_withdrawal () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-ledger-write-failure" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  ignore (f1_seed config "schedule-keeper" schedule_id "before-write" : Keeper_event_queue.stimulus);
+  let primary = Filename.concat (Workspace_utils.masc_dir config) "schedules.json" in
+  let before = Workspace_core.read_text config primary in
+  let staging = primary ^ ".tmp-atomic" in
+  Unix.mkdir staging 0o755;
+  Fun.protect ~finally:(fun () -> Unix.rmdir staging) (fun () ->
+    check bool "ledger publication failure returns failure" false
+      (Tool_result.is_success (f1_cancel config schedule_id)));
+  f1_empty config "schedule-keeper";
+  check string "failed publication preserves the active ledger" before
+    (Workspace_core.read_text config primary);
+  check bool "retry converges without restoring old work" true
+    (Tool_result.is_success (f1_cancel config schedule_id))
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
-      , [ test_case "note distinguishes absent schedule from unreadable ledger" `Quick
+      , [ test_case "cancel ledger write failure retains withdrawal" `Quick test_cancel_ledger_write_failure_retains_withdrawal
+        ; test_case "cancel finds old target and all instances" `Quick test_cancel_finds_old_target_and_all_instances
+        ; test_case "Keeper-to-Lane cancellation withdraws old wakes" `Quick test_cancel_keeper_to_lane_still_withdraws
+        ; test_case "unfinished transfer refuses cancel then recovers multi-hop" `Quick test_cancel_refuses_outbox_then_recovers_multihop
+        ; test_case "cancel refuses corrupt durable owner" `Quick test_cancel_strict_read_error_preserves_pending
+        ; test_case "cancel refuses discovery failure" `Quick test_cancel_discovery_error_is_not_empty_success
+        ; test_case "partial cancel preserves durable effects and reports failure" `Quick test_cancel_partial_withdrawal_does_not_claim_rollback
+        ; test_case "note distinguishes absent schedule from unreadable ledger" `Quick
             test_note_tool_distinguishes_missing_schedule_from_unreadable_ledger
         ; test_case "note reports actual primary write failure" `Quick
             test_note_tool_reports_actual_primary_write_failure
@@ -2274,6 +2716,10 @@ let () =
             test_content_edit_keeps_expiry
         ; test_case "content edit keeps a concurrent retime" `Quick
             test_content_edit_preserves_concurrently_changed_due
+        ; test_case "due edit keeps a concurrent daily-to-interval change" `Quick
+            test_due_edit_keeps_concurrent_daily_to_interval
+        ; test_case "due edit keeps a concurrent interval-to-one-shot change" `Quick
+            test_due_edit_keeps_concurrent_interval_to_one_shot
         ; test_case "results survive the checkpoint encoder" `Quick
             test_results_survive_the_checkpoint_encoder
         ; test_case "creation boundary owns result delivery destination" `Quick
@@ -2334,6 +2780,12 @@ let () =
             test_a_keeper_cannot_cancel_another_keepers_schedule
         ; test_case "an update keeps the row's actors and its target rule" `Quick
             test_an_update_keeps_the_rows_actors_and_its_target_rule
+        ; test_case "recipient edit rechecks the current target" `Quick
+            test_recipient_edit_rechecks_the_current_target
+        ; test_case "locked cancel refuses a former recipient before withdrawal" `Quick
+            test_locked_cancel_refuses_a_former_recipient_before_withdrawal
+        ; test_case "locked replacement uses the current scheduler" `Quick
+            test_locked_replacement_uses_the_current_scheduler
         ; test_case "a named caller is the actor, not the argument" `Quick
             test_a_named_caller_is_the_actor_not_the_argument
         ; test_case "a call gives exactly one due input" `Quick

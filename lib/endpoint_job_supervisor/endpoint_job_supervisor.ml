@@ -11,10 +11,10 @@ type error =
   | Pipe_unavailable | Pipe_cleanup_failed of pipe_end list
   | Registry_cleanup_failed of File_lock_eio.durable_lock_error
   | Interrupted | Supervisor_failed
-  | Codec_error of P.codec_error
   | Publication_failed of Fs_compat.capability_write_error
   | Recovery_failed of string
   | Receipt_storage_unavailable
+  | Result_encoding_failed of Endpoint_job_result.error
 let pipe_tag = function
   | Child_stdin -> "child stdin" | Child_stdout -> "child stdout"
   | Child_stderr -> "child stderr" | Input_writer -> "stdin writer"
@@ -27,10 +27,10 @@ let error_to_string = function
   | Registry_cleanup_failed e -> File_lock_eio.durable_lock_error_to_string e
   | Interrupted -> "original job supervision interrupted"
   | Supervisor_failed -> "original job supervision failed"
-  | Codec_error e -> P.error_to_string e
   | Publication_failed e -> Fs_compat.capability_write_error_to_string e
   | Recovery_failed detail -> "result publication recovery: " ^ detail
   | Receipt_storage_unavailable -> "original result storage unavailable"
+  | Result_encoding_failed e -> Endpoint_job_result.error_to_string e
 exception Cleanup_failed of pipe_end list
 type input_delivery = Written of int64 | Write_failed of { confirmed_prefix : int64 }
 type settled = { physical_exit : G.exit_observation; stdin : input_delivery; stdout : O.seal; stderr : O.seal }
@@ -76,37 +76,24 @@ let await_observation t =
   let* settled=await_settled t in
   let* observed,_=observe_settled t settled in Ok observed
 
-let result_leaf="terminal-result.json"
+let result_leaf=Endpoint_job_result.leaf
 let receipt_io f = try Ok (f ()) with
   | Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _ -> Error Receipt_storage_unavailable
 let cpu f = Domain_pool_ref.submit_cpu_or_inline f
 let result_content (observation : observation) launch_id =
-  let* status=P.response_to_json observation.status |> Result.map_error (fun e -> Codec_error e) in
   let boundary=observation.settled.physical_exit.boundary in
-  let preparation=match boundary.preparation with
-    | G.Pending -> `Assoc ["state",`String "pending"]
-    | G.Ready -> `Assoc ["state",`String "ready"]
+  let preparation : Endpoint_job_result.preparation=match boundary.preparation with
+    | G.Pending -> Pending
+    | G.Ready -> Ready
     | G.Rejected {stage;error} ->
       (* Display evidence only. No reader may parse this diagnostic to infer
          exec, non-start, retry or signalling authority. *)
-      let detail=G.error_to_string (G.Child_rejected {stage;error}) in
-      `Assoc ["state",`String "rejected";"diagnostic_b64",`String (Base64.encode_string detail)] in
-  let decision=match boundary.decision with
-    | G.Undecided -> "undecided" | Activate_requested -> "activate_requested" | Abort_requested -> "abort_requested" in
-  let control=match boundary.control with
-    | G.Open -> `Assoc ["state",`String "open"]
-    | G.Ended -> `Assoc ["state",`String "ended"]
-    | G.Failed failure ->
-      (* Display evidence only, like a rejection diagnostic. *)
-      let detail=G.error_to_string (G.control_failure_error failure) in
-      `Assoc ["state",`String "failed";"diagnostic_b64",`String (Base64.encode_string detail)] in
-  let stdin=match observation.settled.stdin with
-    | Written count -> `Assoc ["state",`String "written";"byte_length",`String (Int64.to_string count)]
-    | Write_failed {confirmed_prefix} ->
-      `Assoc ["state",`String "write_failed";"confirmed_prefix",`String (Int64.to_string confirmed_prefix)] in
-  Ok (Yojson.Safe.to_string (`Assoc ["version",`Int 1;"status",status;
-    "launch_id",`String (P.Id.to_string launch_id);"stdin",stdin;
-    "gate",`Assoc ["preparation",preparation;"decision",`String decision;"control",control]]))
+      Rejected {diagnostic=G.error_to_string (G.Child_rejected {stage;error})} in
+  let input : Endpoint_job_result.input_delivery=match observation.settled.stdin with
+    | Written bytes -> Accepted bytes | Write_failed {confirmed_prefix} -> Incomplete {confirmed_prefix} in
+  let gate : Endpoint_job_result.gate={preparation;decision=boundary.decision;control=boundary.control} in
+  Endpoint_job_result.encode ~status:observation.status ~launch_id ~input ~gate
+  |> Result.map_error (fun e -> Result_encoding_failed e)
 
 let verify_receipt ~sw ~storage ~root_stat ~content ~sha256 =
   let* opened=receipt_io (fun () -> Fs_compat.open_owned_reader ~sw ~parent:storage ~leaf:result_leaf) in

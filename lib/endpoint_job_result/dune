@@ -1,0 +1,6 @@
+(include_subdirs no)
+(library
+ (name endpoint_job_result)
+ (public_name masc.endpoint_job_result)
+ (modules endpoint_job_result)
+ (libraries endpoint_job_registry endpoint_job_protocol endpoint_job_output endpoint_process_gate fs_compat masc_core eio unix yojson digestif base64 optint))

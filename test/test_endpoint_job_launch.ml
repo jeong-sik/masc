@@ -4,6 +4,7 @@ module R = Endpoint_job_registry
 module G = Endpoint_process_gate
 module O = Endpoint_job_output
 module S = Endpoint_job_supervisor
+module D = Endpoint_job_result
 let require = function Ok value -> value | Error e -> Alcotest.fail e
 let get value = value |> Result.map_error L.error_to_string |> require
 let registry value = value |> Result.map_error R.error_to_string |> require
@@ -502,7 +503,7 @@ let supervisor_owns_original_input_and_both_outputs = fixture (fun ~env ~sw:_ ~s
        check "ready means durable physical observation rather than payload success" (original=S.original owner && sha256=receipt.sha256)
      | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "receipt did not remain bound to its original observation");
     let json=Yojson.Safe.from_string receipt.content in
-    let wire=Yojson.Safe.Util.member "status" json in
+    let wire=Yojson.Safe.Util.(json |> member "payload" |> member "status") in
     let status=P.response_of_json wire |> Result.map_error P.error_to_string |> require in
     (match status with
      | P.Status {original;result=P.Result_pending;_} -> check "frozen receipt has no self-referential digest" (original=S.original owner)
@@ -726,7 +727,7 @@ let result_observer_cancel_and_source_progress_preserve_publication = fixture (f
          check "returned readiness retains latest same-launch cancellation progress" (revision=R.revision current && hash=receipt.sha256)
        | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "publication rolled back cancellation progress");
       let json=Yojson.Safe.from_string receipt.content in
-      let status=P.response_of_json Yojson.Safe.Util.(member "status" json) |> Result.map_error P.error_to_string |> require in
+      let status=P.response_of_json Yojson.Safe.Util.(json |> member "payload" |> member "status") |> Result.map_error P.error_to_string |> require in
       (match status with
        | P.Status {revision=2L;cancel_requested=false;result=P.Result_pending;_} -> ()
        | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "later cancellation rewrote the frozen original receipt");
@@ -870,6 +871,145 @@ let replacement_output_sync_failure_never_seals target stage = fixture (fun ~env
   match independent.status with
   | P.Status {phase=P.Termination_observed (P.Exited 8);result=P.Result_ready _;_} -> ()
   | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "failed output sync blocked another actual original")
+
+let result_read value=value |> Result.map_error D.error_to_string |> require
+let persisted_result ~env ~store fixture script = Eio.Switch.run (fun sw ->
+  let binding,permit=prepare store fixture "05" script in
+  let original=supervised ~sw ~env fixture permit in
+  binding,(S.await_result original |> supervise))
+let recovered_bytes original stream byte_length =
+  let buffer=Buffer.create 128 in
+  let rec read offset=if offset=byte_length then Buffer.contents buffer else
+    let chunk=D.read_output original ~stream ~offset ~max_bytes:max_int |> result_read in
+    check "recovered original output makes actual range progress" (String.length chunk.data>0);
+    Buffer.add_string buffer chunk.data;read (Int64.add offset (Int64.of_int (String.length chunk.data))) in
+  read 0L
+let terminal_result_reopens_after_owner_exit_and_boot_change = fixture (fun ~env ~sw ~store fixture ->
+  let binding,receipt=persisted_result ~env ~store fixture (binary_script ^ "; exit 7") in
+  let original=R.load store ~binding |> registry in
+  let cancelled=R.request_cancel original ~confirmed_admission_id:(id "04") |> registry in
+  let rebooted=R.open_registry ~sw ~fs:env#fs ~root_path:fixture.registry_path
+    ~route:{route with boot_id=id "09"} ~owner ~payload_uid:fixture.uid |> registry in
+  Eio.Switch.run (fun read_sw ->
+    let storage=original_storage ~sw:read_sw rebooted binding in
+    check "known host digest never silently adopts another result"
+      (Result.is_error (D.load ~sw:read_sw ~storage ~expected_sha256:(Some (digest "different result"))));
+    let restored=D.load ~sw:read_sw ~storage ~expected_sha256:(Some receipt.sha256) |> result_read in
+    check "recovered receipt keeps its original exact digest and accepted stdin fact"
+      (D.sha256 restored=receipt.sha256 && D.input_delivery restored=D.Accepted 0L);
+    let gate=D.gate restored in
+    check "raw gate evidence survives without reconstructing a kernel handle"
+      (gate.preparation=D.Ready && gate.decision=G.Activate_requested && gate.control=G.Ended);
+    (match D.inspect restored |> result_read with
+     | P.Status {original;revision;phase=P.Termination_observed (P.Exited 7);cancel_requested=true;
+         result=P.Result_ready hash;stdout=P.Sealed stdout;stderr=P.Sealed stderr} ->
+       check "restored readiness retains original admission and later cancellation without changing receipt"
+         (original.binding=binding && original.admission_id=id "04" && revision=R.revision cancelled && hash=receipt.sha256);
+       let out=D.read_output restored ~stream:P.Stdout ~offset:0L ~max_bytes:max_int |> result_read in
+       check "recovered binary range retains complete original extent" (out.extent=P.Sealed stdout);
+       check "both recovered complete stream digests match original bytes"
+         (stdout.sha256=digest (binary_bytes ()) && stderr.sha256=digest "e\000\255");
+       Alcotest.(check string) "all original binary stdout bytes survive restart readback"
+         (binary_bytes ()) (recovered_bytes restored P.Stdout stdout.byte_length);
+       Alcotest.(check string) "all original stderr bytes survive independently"
+         "e\000\255" (recovered_bytes restored P.Stderr stderr.byte_length)
+     | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "restart invented execution or lost its original terminal result");
+    check "terminal readback cannot recreate an old-boot launch permit"
+      (R.commit_launch (R.storage_record storage) ~confirmed_admission_id:(id "04") ~launch_id:(id "10")=Error R.Endpoint_replaced)))
+
+let terminal_result_strictly_rejects_corrupt_records () =
+  List.iter (fun change -> fixture (fun ~env ~sw ~store fixture ->
+    let binding,_=persisted_result ~env ~store fixture "printf original; exit 7" in
+    let path=leaf fixture binding S.result_leaf in
+    let fields=match Yojson.Safe.from_file path with `Assoc fields -> fields
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Alcotest.fail "actual receipt missing" in
+    let update name f fields=List.map (fun (key,value) -> key,if key=name then f value else value) fields in
+    let object_ f=function `Assoc values -> `Assoc (f values)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Alcotest.fail "actual receipt object missing" in
+    let payload_change values=match change with
+      | `Unknown -> ("unexpected",`Bool true)::values
+      | `Bad_input -> update "stdin" (fun _ -> `Assoc ["state",`String "written";"byte_length",`String "1"]) values
+      | `Bad_launch -> update "launch_id" (fun _ -> `String (P.Id.to_string (id "12"))) values
+      | `Wrong_admission -> update "status" (object_ (update "admission_id" (fun _ -> `String (P.Id.to_string (id "13"))))) values
+      | `Old_revision -> update "status" (object_ (update "revision" (fun _ -> `String "1"))) values
+      | `Duplicate_gate -> update "gate" (object_ (fun fields -> ("control",`String "ended")::fields)) values
+      | `Checksum -> update "status" (object_ (update "phase" (fun _ ->
+          `Assoc ["state",`String "termination_observed";"physical_status",`Assoc ["kind",`String "exited";"code",`String "8"]]))) values
+      | `Missing_version -> values in
+    let fields=update "payload" (object_ payload_change) fields in
+    (* A valid checksum on hostile structured input ensures rejection comes
+       from original/schema validation, not only accidental byte corruption. *)
+    let fields=if change=`Checksum then fields else
+      let payload=List.assoc "payload" fields in
+      let checksum=Digestif.SHA256.(to_hex (digest_string ("masc_endpoint_terminal_result_v1\000" ^ Yojson.Safe.to_string payload))) in
+      update "payload_sha256" (fun _ -> `String checksum) fields in
+    let fields=if change=`Missing_version then List.remove_assoc "version" fields else fields in
+    Unix.chmod path 0o600;Yojson.Safe.to_file path (`Assoc fields);Unix.chmod path 0o400;
+    let before=read path in
+    let storage=original_storage ~sw store binding in
+    check "corrupt original terminal receipt cannot become readiness" (Result.is_error (D.load ~sw ~storage ~expected_sha256:None));
+    Alcotest.(check string) "read failure preserves exact malformed evidence without repair" before (read path);
+    check "failed result recovery never grants another launch"
+      (R.commit_launch (R.storage_record storage) ~confirmed_admission_id:(id "04") ~launch_id:(id "14")=Error R.Launch_already_requested);
+    let _,next=prepare store fixture "07" "printf independent; exit 8" in
+    ignore (Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise))) ())
+    [`Unknown;`Bad_input;`Bad_launch;`Wrong_admission;`Old_revision;`Duplicate_gate;`Checksum;`Missing_version]
+
+let terminal_result_missing_data_never_becomes_empty () =
+  List.iter (fun missing -> fixture (fun ~env ~sw ~store fixture ->
+    let binding,receipt=persisted_result ~env ~store fixture "printf original; exit 7" in
+    let path=leaf fixture binding (match missing with `Receipt -> S.result_leaf | `Output -> "stdout.bin") in
+    let before=read path in
+    (match missing with
+     | `Receipt -> Unix.rename path (path ^ ".evidence")
+     | `Output -> Out_channel.with_open_bin path (fun oc -> output_string oc "tampered"));
+    let storage=original_storage ~sw store binding in
+    check "unavailable receipt or mismatched output cannot certify a terminal result"
+      (Result.is_error (D.load ~sw ~storage ~expected_sha256:(Some receipt.sha256)));
+    (match missing with
+     | `Receipt -> Alcotest.(check string) "missing canonical receipt retains its evidence" before (read (path ^ ".evidence"))
+     | `Output -> Alcotest.(check string) "failed output hash preserves changed evidence" "tampered" (read path))) ()) [`Receipt;`Output]
+
+let terminal_result_final_attachment_mutation_is_refused () =
+  List.iter (fun target -> fixture (fun ~env ~sw ~store fixture ->
+    let binding,receipt=persisted_result ~env ~store fixture "printf original; exit 7" in
+    let storage=original_storage ~sw store binding in
+    let path=leaf fixture binding (match target with `Receipt -> S.result_leaf | `Output -> "stdout.bin") in
+    let original=read path in
+    let result=D.For_testing.load ~sw ~storage ~expected_sha256:(Some receipt.sha256)
+      ~after_receipt_read:(fun () -> ()) ~before_ready:(fun () ->
+        Unix.rename path (path ^ ".evidence");
+        Out_channel.with_open_bin path (fun oc -> output_string oc original);
+        Unix.chmod path (match target with `Receipt -> 0o400 | `Output -> 0o600);
+        let _,next=prepare store fixture "07" "exit 8" in
+        ignore (Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise))) in
+    check "final readiness cannot adopt a byte-identical later inode" (Result.is_error result);
+    Alcotest.(check string) "final refusal preserves the exact original evidence" original (read (path ^ ".evidence"))) ()) [`Receipt;`Output]
+
+let terminal_reader_cancel_and_scope_preserve_original = fixture (fun ~env ~sw:_ ~store fixture ->
+  let binding,receipt=persisted_result ~env ~store fixture (binary_script ^ "; exit 7") in
+  let entered,signal=Eio.Promise.create () and blocked,_=Eio.Promise.create () in
+  let cancelled=ref false in
+  Eio.Fiber.first
+    (fun () -> try Eio.Switch.run (fun read_sw ->
+      let storage=original_storage ~sw:read_sw store binding in
+      ignore (D.For_testing.load ~sw:read_sw ~storage ~expected_sha256:(Some receipt.sha256)
+        ~after_receipt_read:(fun () -> Eio.Promise.resolve signal ();Eio.Promise.await blocked)
+        ~before_ready:(fun () -> ()) |> result_read);
+      Alcotest.fail "cancelled reader exposed unchecked readiness")
+      with Eio.Cancel.Cancelled _ as ex -> cancelled:=true;raise ex)
+    (fun () -> Eio.Promise.await entered;
+      let _,next=prepare store fixture "07" "exit 8" in
+      ignore (Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise)));
+  check "cancelled reader does not own the original process or receipt" !cancelled;
+  let restored=Eio.Switch.run (fun read_sw ->
+    let storage=original_storage ~sw:read_sw store binding in
+    let loaded=D.load ~sw:read_sw ~storage ~expected_sha256:(Some receipt.sha256) |> result_read in
+    let chunk=D.read_output loaded ~stream:P.Stdout ~offset:0L ~max_bytes:max_int |> result_read in
+    check "fresh reader retains original binary bytes" (chunk.data=String.sub (binary_bytes ()) 0 (String.length chunk.data));
+    loaded) in
+  check "reader scope closure cannot leave usable dangling descriptors" (Result.is_error (D.inspect restored));
+  check "cancelled/closed observers preserve the exact original receipt" (digest (read (leaf fixture binding S.result_leaf))=receipt.sha256))
 
 let sealed_output_reopens_after_owner_exit_and_boot_change = fixture (fun ~env ~sw ~store fixture ->
   let binding,settled=completed_output ~env ~store fixture binary_script in
@@ -1079,6 +1219,11 @@ let () =
       "same-byte spool file sync failure stays unavailable",replacement_output_sync_failure_never_seals `Spool Fs_compat.Owned_reader_for_testing.Sync_file;
       "same-byte spool parent sync failure stays unavailable",replacement_output_sync_failure_never_seals `Spool Fs_compat.Owned_reader_for_testing.Sync_parent;
       "same-byte seal file sync failure stays unavailable",replacement_output_sync_failure_never_seals `Seal Fs_compat.Owned_reader_for_testing.Sync_file;
-      "same-byte seal parent sync failure stays unavailable",replacement_output_sync_failure_never_seals `Seal Fs_compat.Owned_reader_for_testing.Sync_parent] in
+      "same-byte seal parent sync failure stays unavailable",replacement_output_sync_failure_never_seals `Seal Fs_compat.Owned_reader_for_testing.Sync_parent;
+      "terminal receipt reopens across owner exit and boot change",terminal_result_reopens_after_owner_exit_and_boot_change;
+      "terminal reader rejects corrupt schema, checksum and original coordinates",terminal_result_strictly_rejects_corrupt_records;
+      "missing terminal receipt or changed output never becomes empty completion",terminal_result_missing_data_never_becomes_empty;
+      "terminal readiness rejects later byte-identical inode replacement",terminal_result_final_attachment_mutation_is_refused;
+      "terminal reader cancellation and scope preserve the original",terminal_reader_cancel_and_scope_preserve_original] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

@@ -89,6 +89,9 @@ let delta_to_string : Live.delta -> string = function
   | Live.Text {text=text; _} -> "text(" ^ text ^ ")"
   | Live.Media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
   | Live.Thinking {text;_} -> "thinking(" ^ text ^ ")"
+  | Live.Thinking_snapshot {text;index;response} ->
+      Printf.sprintf "thinking_snapshot(%s,index=%d,response=%d.%d)" text index
+        response.E.response_generation response.E.response_scope
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%s,%s)" (occurrence_to_string occurrence)
         (Option.value ~default:"unnamed" tool_name)

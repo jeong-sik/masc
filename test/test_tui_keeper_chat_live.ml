@@ -41,6 +41,9 @@ let delta_to_string : Live.delta -> string = function
   | Live.Text {text=text; _} -> Printf.sprintf "text(%s)" text
   | Live.Media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
   | Live.Thinking {text;_} -> Printf.sprintf "thinking(%s)" text
+  | Live.Thinking_snapshot {text;index;response} ->
+      Printf.sprintf "thinking_snapshot(%s,index=%d,response=%d.%d)" text index
+        response.Live.response_generation response.Live.response_scope
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%d/%d,%s)" occurrence.stream_scope
         occurrence.block_index (Option.value ~default:"unnamed" tool_name)

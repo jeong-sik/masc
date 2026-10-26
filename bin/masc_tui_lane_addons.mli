@@ -128,6 +128,15 @@ type installation_reading =
 val installation_reading : t -> installation_reading
 
 val initial : t
+
+val text_entry_open : t -> bool
+(** Whether a typed character is text here: a draft line, an action form, or
+    the installer's fields. The command screens -- the lists, the evidence
+    prompt, the subscription panel, a formless action menu -- answer
+    [false]. The main loop asks this before reading a Hangul character back
+    as the Latin key an input method replaced, so those three screens keep
+    the text the operator is typing. *)
+
 val parse_request : string -> (request, string) result
 val decode : Yojson.Safe.t -> (snapshot, string) result
 type read_target =

@@ -6679,3 +6679,5 @@
 (include stanzas/test_keeper_direct_goal_provider_wire.inc)
 
 (include stanzas/test_startup_listener_authority.inc)
+
+(include stanzas/test_tui_key_ime.inc)

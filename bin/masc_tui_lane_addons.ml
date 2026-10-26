@@ -103,6 +103,18 @@ let initial = { installer=None;package_directory=None;subscription_panel=None;ev
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
+
+(* Whether a typed character is text on the screen this view is showing. The
+   installer, an action form and a draft line take the characters; every
+   other screen reads them as commands. The main loop asks this before
+   reading a Hangul character back into the Latin key a Korean input method
+   replaced (Masc_tui_key_ime), so it does not restate the three. *)
+let text_entry_open view =
+  Option.is_some view.installer
+  || (match view.action_menu with
+      | Some { form = Some _; _ } -> true
+      | Some _ | None -> false)
+  || Option.is_some view.draft
 let ( let* ) = Result.bind
 let field name = function
   | `Assoc fields -> (match List.assoc_opt name fields with Some v -> Ok v | None -> Error ("missing " ^ name))

@@ -23354,6 +23354,12 @@ let main
      any notice set after it. *)
   let csi_pause_notice = ref None in
   let paste_guard_idle_notified = ref false in
+  (* The Latin keys a composed Hangul syllable still owes the dispatch. A
+     terminal that composes before committing delivers [과] as one key event;
+     the command reading below replays each key the operator pressed, one per
+     loop turn, so the sequence reaches the dispatch in the order it was
+     typed. *)
+  let hangul_latin_queue : string Queue.t = Queue.create () in
   (* Palette and graphics share one bounded startup probe because both replies
      arrive on the key stream. The probe removes only replies to these exact
      questions and puts every other consumed byte back into this same reader.
@@ -25072,10 +25078,17 @@ and is loaded on demand through keeper_skill.
         match interrupted_paste with
         | Some paste -> Some (Pasted paste)
         | None when !skip_input_after_interrupt -> None
-        | None ->
-          let input = read_input ~timeout:input_timeout input_reader () in
-          Option.iter (observe_input_received input_reader) input;
-          input
+        | None -> (
+          (* A replayed key never went through the reader, so it skips the
+             startup observation the terminal's own input feeds, and it waits
+             for the interrupt arms above to clear the same way a key the
+             operator pressed after them would. *)
+          match Queue.take_opt hangul_latin_queue with
+          | Some latin_key -> Some (Key latin_key)
+          | None ->
+            let input = read_input ~timeout:input_timeout input_reader () in
+            Option.iter (observe_input_received input_reader) input;
+            input)
       in
       let input = match input with
         | Some (Mouse_wheel (direction, _, _))
@@ -25740,6 +25753,38 @@ and is loaded on demand through keeper_skill.
       let text_target =
         if not compact_viewport && reading_search_editing then Some Text_row_search
         else text_input_target state ~compact_viewport in
+      let key =
+        (* The terminal hands this loop the character an input method produced,
+           not the key the operator pressed. In Korean mode a [j] arrives as
+           [ㅓ] and matches no spelling below, while control keys and escape
+           sequences pass the input method untouched and keep working: every
+           letter shortcut was silently dead in Korean mode. The two-set
+           layout is reversible, so a context that reads the key as a command
+           reads the Latin keys back, replayed exactly as typed. What takes
+           characters as text keeps the Hangul: the open field [text_target]
+           names, the chat surface's own composer (it takes every printable as
+           draft), the roster composer while it holds focus, and the lane
+           Add-ons screens typing into a draft, a form or the installer.
+           Shift does not survive the input method ([ㅓ] is both [j] and [J]),
+           so an uppercase shortcut stays out of reach in Korean mode -- a
+           limit of every terminal program, not a spelling this can add. *)
+        let command_reading =
+          Option.is_none text_target
+          && not state.composer_focused
+          && not (view_is_chat state.view)
+          && Option.for_all
+               (fun view -> not (Masc_tui_lane_addons.text_entry_open view))
+               state.lane_addons
+        in
+        match key with
+        | Some name when command_reading -> (
+            match Masc_tui_key_ime.latin_keys name with
+            | Some (first :: rest) ->
+                List.iter (fun latin_key -> Queue.add latin_key hangul_latin_queue) rest;
+                Some first
+            | Some [] | None -> Some name)
+        | Some _ | None -> key
+      in
       let insert_reading_search document insert text =
         if not compact_viewport then begin
           let _,cols=get_terminal_size () in

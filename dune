@@ -15,6 +15,10 @@
   ; the tree builds from logs/ and git does not track it.
   logs))
 
+; Generated evidence may contain incomplete source snapshots and dune files.
+; Keep those files available as data without evaluating their build stanzas.
+(data_only_dirs artifacts)
+
 ; Warning 32 (unused value declaration) is set here, once, for the whole
 ; tree. It used to be decided per library: of 121 stanzas under lib/, 84
 ; opted in and 37 did not, so an unreachable value in any of those 37

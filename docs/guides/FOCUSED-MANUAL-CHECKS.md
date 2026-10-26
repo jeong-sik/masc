@@ -5,6 +5,22 @@ explicit manual checks, not an additional PR or release gate. Run commands
 from the repository root and record the exact head, command, exit status and
 observed scope. The constitution governs build and CI requests.
 
+## Dune source discovery
+
+```bash
+python3 test/test_dune_source_discovery.py
+```
+
+This check requires Dune 3.22 or newer. It copies the actual root `dune` file
+into temporary projects and queries `dune describe workspace`; it does not
+compile MASC. Incomplete includes and invalid build stanzas under `artifacts/`
+must be ignored while normal sources remain visible and their errors still
+fail. Controls without the root boundary must reject the same snapshots.
+The check is also included in `@runtest` and selectable as
+`TARGET_SUITES=test_dune_source_discovery` in the existing Test workflow.
+It does not prove a full build, runtime behavior or discovery outside the
+declared output directory.
+
 ## Shell boundaries
 
 ```bash

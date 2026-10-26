@@ -1012,10 +1012,11 @@ let[@warning "-32"] json_object_missing_key key json =
   | exception Yojson.Safe.Util.Type_error _ -> false
 ;;
 
-let%test "build_request rejects forced tool_choice for unknown model without override" =
+let%test "build_request rejects forced tool_choice for a declared provider without policy" =
   let config =
     Provider_config.make
       ~kind:OpenAI_compat
+      ~provider_id:"missing-tool-choice-policy"
       ~model_id:"mystery-xyz-v1"
       ~base_url:"http://localhost"
       ~tool_choice:Any
@@ -1066,6 +1067,7 @@ let%test "build_request rejects named tool_choice when capability-false" =
       ~model_id:"mystery-xyz-v1"
       ~base_url:"http://localhost"
       ~tool_choice:(Tool "calc")
+      ~model_capabilities_override:Capabilities.default_capabilities
       ()
   in
   match build_request ~config ~messages:[] () with
@@ -1167,10 +1169,7 @@ let%test "explicit json_schema response_format overrides json mode compatibility
   body |> member "response_format" |> member "type" |> to_string = "json_schema"
 ;;
 
-let%test "a forced tool_choice on a model with no tool-choice capability is rejected" =
-  (* An unknown model_id resolves to supports_tool_choice=false, and a forced
-     choice on it fails closed rather than reaching a wire that would drop it
-     silently. *)
+let%test "anonymous chat serializes forced tool_choice without inventing model policy" =
   let config =
     Provider_config.make
       ~kind:OpenAI_compat
@@ -1179,12 +1178,11 @@ let%test "a forced tool_choice on a model with no tool-choice capability is reje
       ~tool_choice:Any
       ()
   in
-  match build_request ~config ~messages:[] () with
-  | exception Invalid_argument msg ->
-    String.starts_with
-      ~prefix:"Backend_openai_request.effective_tool_choice: openai_compat model"
-      msg
-  | _ -> false
+  let _, source = Provider_config.resolve_request_capabilities config in
+  let body = build_request ~config ~messages:[] () |> Yojson.Safe.from_string in
+  Option.is_none (Provider_config.capabilities_for_config_model config)
+  && source = Provider_config.Provider_default_capability
+  && Yojson.Safe.Util.(body |> member "tool_choice" |> to_string) = "required"
 ;;
 
 let%test "build_request serializes thinking object for deepseek-v4-flash" =

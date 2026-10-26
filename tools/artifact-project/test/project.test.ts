@@ -8,7 +8,7 @@ import { Window } from 'happy-dom'
 import { buildProject, decodeProject, type ProjectRequest } from '../src/project.ts'
 
 function request(files: Record<string, string | Buffer>): ProjectRequest {
-  return { schema: 'masc.artifact_project.v1', entry_html: 'index.html', install_scripts: false,
+  return { schema: 'masc.artifact_project.v1', build: { kind: 'browser_modules', entry_html: 'index.html' }, install_scripts: false,
     files: Object.entries(files).map(([path, contents]) => ({ path, content_base64: Buffer.from(contents).toString('base64') })) }
 }
 async function workspace() { return mkdtemp(join(tmpdir(), 'masc-project-test-')) }
@@ -38,13 +38,14 @@ test('installs real React/npm packages, compiles TSX and dynamic imports, embeds
     'src/message.ts': 'export const label: string = "클릭 완료";',
   })
   const frozen = structuredClone(value), root = await workspace(), result = await buildProject(value, root)
+  assert.ok(result.output.kind === 'html' && result.build.kind === 'browser_modules')
   assert.deepEqual(value, frozen)
-  assert.equal(result.install.mode, 'install'); assert.equal(result.build.esbuild, '0.28.2')
-  assert.equal(result.artifact.sha256, createHash('sha256').update(result.artifact.content).digest('hex'))
+  assert.equal(result.install.mode, 'ci'); assert.equal(result.install.lock_source, 'resolved'); assert.equal(result.build.esbuild, '0.28.2')
+  assert.equal(result.output.artifact.sha256, createHash('sha256').update(result.output.artifact.content).digest('hex'))
   assert.equal((await readFile(join(result.run_directory, 'result.json'), 'utf8')), JSON.stringify(result) + '\n')
   const window = new Window({ settings: { disableCSSFileLoading: true, disableJavaScriptFileLoading: true } })
   try {
-    window.document.write(result.artifact.content)
+    window.document.write(result.output.artifact.content)
     const styles = [...window.document.querySelectorAll('style')].map(node => node.textContent ?? '')
     assert.ok(styles[0].includes('red')); assert.ok(styles[1].includes('blue'))
     assert.ok(styles[1].includes('data:image/png;base64,'))
@@ -63,8 +64,9 @@ test('installs real React/npm packages, compiles TSX and dynamic imports, embeds
   const locked = structuredClone(value)
   locked.files.push({ path: 'package-lock.json', content_base64: Buffer.from(result.install.lock_content).toString('base64') })
   const again = await buildProject(locked, root)
-  assert.equal(again.install.mode, 'ci'); assert.equal(again.install.lock_sha256, result.install.lock_sha256)
-  assert.equal(again.artifact.content, result.artifact.content)
+  assert.ok(again.output.kind === 'html')
+  assert.equal(again.install.mode, 'ci'); assert.equal(again.install.lock_source, 'supplied'); assert.equal(again.install.lock_sha256, result.install.lock_sha256)
+  assert.equal(again.output.artifact.content, result.output.artifact.content)
 })
 
 test('install hooks are explicit, do not inherit host secrets, and input bytes stay unchanged', async () => {
@@ -104,9 +106,10 @@ test('rejects imports outside the project and unresolved local resources, retain
 
 test('literal fragment/query characters in entry directories resolve local assets correctly', async () => {
   const value = request({ 'package.json': '{}', 'src/view#1?part/index.html': '<img src="logo.png">', 'src/view#1?part/logo.png': png })
-  value.entry_html = 'src/view#1?part/index.html'
+  value.build.entry_html = 'src/view#1?part/index.html'
   const result = await buildProject(value, await workspace())
-  assert.ok(result.artifact.content.includes('data:image/png;base64,'))
+  assert.ok(result.output.kind === 'html')
+  assert.ok(result.output.artifact.content.includes('data:image/png;base64,'))
 })
 
 test('preserves distinct SVG fragment identifiers across HTML attributes and inline CSS URLs', async () => {
@@ -118,9 +121,10 @@ test('preserves distinct SVG fragment identifiers across HTML attributes and inl
   })
   const result = await buildProject(value, await workspace())
   const encoded = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`
-  assert.ok(result.artifact.content.includes(`id="a" src="${encoded}#icon-a"`))
-  assert.ok(result.artifact.content.includes(`id="b" src="${encoded}#icon-b"`))
-  assert.ok(result.artifact.content.includes(`${encoded}#icon-b`))
+  assert.ok(result.output.kind === 'html')
+  assert.ok(result.output.artifact.content.includes(`id="a" src="${encoded}#icon-a"`))
+  assert.ok(result.output.artifact.content.includes(`id="b" src="${encoded}#icon-b"`))
+  assert.ok(result.output.artifact.content.includes(`${encoded}#icon-b`))
 })
 
 

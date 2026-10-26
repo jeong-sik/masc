@@ -694,6 +694,64 @@ let original_storage ~sw store binding =
 let binary_script="/usr/bin/python3 -c 'import sys;sys.stdout.buffer.write(bytes(range(256))*1025);sys.stderr.buffer.write(bytes([101,0,255]))'"
 let binary_bytes ()=String.init (256*1025) (fun i -> Char.chr (i mod 256))
 
+let replace_byte_identical_output fixture binding =
+  let spool=leaf fixture binding "stdout.bin" and seal=leaf fixture binding "stdout.seal.json" in
+  let original=read spool in
+  let old_spool=Unix.lstat spool and old_seal=Unix.lstat seal in
+  let fields=match Yojson.Safe.from_file seal with `Assoc fields -> fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Alcotest.fail "actual private seal missing" in
+  Unix.rename spool (spool ^ ".evidence");
+  Out_channel.with_open_bin spool (fun oc -> output_string oc original);Unix.chmod spool 0o600;
+  let current=Unix.lstat spool in
+  let fields=List.map (fun (key,value) -> key,match key with
+    | "file_device" -> `String (string_of_int current.st_dev)
+    | "file_inode" -> `String (string_of_int current.st_ino)
+    | _ -> value) fields in
+  Unix.rename seal (seal ^ ".evidence");Yojson.Safe.to_file seal (`Assoc fields);Unix.chmod seal 0o400;
+  check "same-byte replacement supplies two genuinely new physical attachments"
+    (old_spool.st_ino<>current.st_ino && old_seal.st_ino<>(Unix.lstat seal).st_ino);
+  Alcotest.(check string) "replacement preserves every original byte while rebinding the valid seal" original (read spool)
+
+let result_syncs_byte_identical_replacement_before_readiness = fixture (fun ~env ~sw:_ ~store fixture ->
+  Eio.Switch.run (fun sw ->
+    let binding,permit=prepare store fixture "05" "printf original; exit 7" in
+    let changed=ref false in
+    let owner=supervised ~sw ~env fixture permit ~before_result_publish:(fun () ->
+      replace_byte_identical_output fixture binding;changed:=true) in
+    let actual=S.await_settled owner |> supervise in
+    exit 7 actual.physical_exit;
+    let receipt=S.await_result owner |> supervise in
+    check "actual cached output is compared after the same-byte inode replacement" !changed;
+    (match receipt.status with
+     | P.Status {result=P.Result_ready _;stdout=P.Sealed {byte_length;sha256};_} ->
+       check "durability confirmation retains the original actual byte seal"
+         (byte_length=actual.stdout.byte_length && sha256=actual.stdout.sha256)
+     | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "verified synchronized output did not produce its original result");
+    Alcotest.(check string) "synchronized current spool retains original bytes" "original" (read (leaf fixture binding "stdout.bin"));
+    Alcotest.(check string) "detached capture evidence is never rewritten" "original" (read (leaf fixture binding "stdout.bin.evidence"))))
+
+let replacement_output_sync_failure_never_seals target stage = fixture (fun ~env ~sw:_ ~store fixture ->
+  let binding,_=completed_output ~env ~store fixture "printf original" in
+  replace_byte_identical_output fixture binding;
+  let failed_leaf=match target with `Spool -> "stdout.bin" | `Seal -> "stdout.seal.json" in
+  let reached=ref false in
+  let result=Eio.Switch.run (fun read_sw ->
+    let storage=original_storage ~sw:read_sw store binding in
+    O.For_testing.reopen ~sw:read_sw ~storage ~stream:P.Stdout
+      ~after_chunk:(fun () -> ()) ~after_stat:(fun ~leaf:_ -> ())
+      ~before_sync:(fun ~leaf actual -> if leaf=failed_leaf && actual=stage then (
+        reached:=true;raise (Unix.Unix_error (Unix.EIO,"fsync",leaf))))) in
+  check "fault reaches the real matched file or parent sync boundary" !reached;
+  (match result with Error O.Invalid_storage -> ()
+   | Error _ | Ok _ -> Alcotest.fail "sync failure exposed a sealed same-byte replacement");
+  Alcotest.(check string) "failed sync preserves current original bytes" "original" (read (leaf fixture binding "stdout.bin"));
+  Alcotest.(check string) "failed sync preserves detached original capture bytes" "original" (read (leaf fixture binding "stdout.bin.evidence"));
+  let _,next=prepare store fixture "07" "printf independent; exit 8" in
+  let independent=Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_result |> supervise) in
+  match independent.status with
+  | P.Status {phase=P.Termination_observed (P.Exited 8);result=P.Result_ready _;_} -> ()
+  | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> Alcotest.fail "failed output sync blocked another actual original")
+
 let sealed_output_reopens_after_owner_exit_and_boot_change = fixture (fun ~env ~sw ~store fixture ->
   let binding,settled=completed_output ~env ~store fixture binary_script in
   exit 0 settled.physical_exit;
@@ -750,6 +808,7 @@ let sealed_output_hash_observer_cancellation_preserves_original = fixture (fun ~
     (fun () -> try Eio.Switch.run (fun read_sw ->
       let storage=original_storage ~sw:read_sw store binding in
       ignore (O.For_testing.reopen ~sw:read_sw ~storage ~stream:P.Stdout
+        ~before_sync:(fun ~leaf:_ _ -> ())
         ~after_stat:(fun ~leaf:_ -> ())
         ~after_chunk:(fun () -> Eio.Promise.resolve signal ();Eio.Promise.await blocked) |> output);
       Alcotest.fail "cancelled hash exposed an unchecked sealed reader")
@@ -772,7 +831,7 @@ let sealed_output_hash_releases_lock_and_preserves_cancel_progress = fixture (fu
   let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
   Fun.protect ~finally:unblock (fun () ->
     Eio.Fiber.fork ~sw (fun () ->
-      let result=O.For_testing.reopen ~sw ~storage ~stream:P.Stdout ~after_stat:(fun ~leaf:_ -> ()) ~after_chunk:(fun () ->
+      let result=O.For_testing.reopen ~sw ~storage ~stream:P.Stdout ~before_sync:(fun ~leaf:_ _ -> ()) ~after_stat:(fun ~leaf:_ -> ()) ~after_chunk:(fun () ->
         if !first then (first:=false;Eio.Promise.resolve signal ();Eio.Promise.await resume)) in
       Eio.Promise.resolve finish result);
     Eio.Promise.await entered;
@@ -807,6 +866,7 @@ let sealed_output_atomic_open_rejects_raced_special_leaf target change = fixture
   let changed=ref false in
   let storage=original_storage ~sw store binding in
   let result=O.For_testing.reopen ~sw ~storage ~stream:P.Stdout ~after_chunk:(fun () -> ())
+    ~before_sync:(fun ~leaf:_ _ -> ())
     ~after_stat:(fun ~leaf -> if leaf=name then (
       changed:=true;
       Unix.rename path evidence;
@@ -886,6 +946,11 @@ let () =
       "post-publish deleted seal refuses readiness",result_readiness_requires_current_original_files `After `Delete_seal;
       "post-publish replaced seal refuses readiness",result_readiness_requires_current_original_files `After `Replace_seal;
       "post-publish deleted receipt refuses readiness",result_readiness_requires_current_original_files `After `Delete_receipt;
-      "post-publish replaced receipt refuses readiness",result_readiness_requires_current_original_files `After `Replace_receipt] in
+      "post-publish replaced receipt refuses readiness",result_readiness_requires_current_original_files `After `Replace_receipt;
+      "same-byte replacement streams are synchronized before result readiness",result_syncs_byte_identical_replacement_before_readiness;
+      "same-byte spool file sync failure stays unavailable",replacement_output_sync_failure_never_seals `Spool Fs_compat.Owned_reader_for_testing.Sync_file;
+      "same-byte spool parent sync failure stays unavailable",replacement_output_sync_failure_never_seals `Spool Fs_compat.Owned_reader_for_testing.Sync_parent;
+      "same-byte seal file sync failure stays unavailable",replacement_output_sync_failure_never_seals `Seal Fs_compat.Owned_reader_for_testing.Sync_file;
+      "same-byte seal parent sync failure stays unavailable",replacement_output_sync_failure_never_seals `Seal Fs_compat.Owned_reader_for_testing.Sync_parent] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

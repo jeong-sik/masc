@@ -1796,7 +1796,10 @@ let owned_reader_pread reader ~offset ~length =
     Eio_unix.Fd.use_exn "owned reader pread" reader (fun fd -> owned_reader_pread_unix fd offset length))
 ;;
 
-let sync_owned_reader ~parent ~leaf reader =
+module Owned_reader_sync_stage = struct
+  type t = Sync_file | Sync_parent
+end
+let sync_owned_reader_with_hook ~before_sync ~parent ~leaf reader =
   try
     let result=Eio.Cancel.protect (fun () ->
       let relative=match owned_relative_path [leaf] with
@@ -1818,7 +1821,8 @@ let sync_owned_reader ~parent ~leaf reader =
                 (fun ~file ~parent ~stat ->
                   if not (same stat) then owned_file_error (Filesystem_identity_changed {path})
                   else (
-                    Unix.fsync file;Unix.fsync parent;
+                    before_sync Owned_reader_sync_stage.Sync_file;Unix.fsync file;
+                    before_sync Owned_reader_sync_stage.Sync_parent;Unix.fsync parent;
                     if same (Unix.fstat held) then Ok ()
                     else owned_file_error (Filesystem_identity_changed {path}))) in
               Result.join checked))) in
@@ -1835,6 +1839,14 @@ let sync_owned_reader ~parent ~leaf reader =
   | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | Invalid_argument _) as cause ->
     owned_file_operation_error ~path:leaf Read_contents cause
 ;;
+
+let sync_owned_reader ~parent ~leaf reader =
+  sync_owned_reader_with_hook ~before_sync:(fun _ -> ()) ~parent ~leaf reader
+;;
+module Owned_reader_for_testing = struct
+  type sync_stage = Owned_reader_sync_stage.t = Sync_file | Sync_parent
+  let sync_owned_reader = sync_owned_reader_with_hook
+end
 
 let owned_inventory_entry_digest root relative =
   let path = owned_inventory_path root relative in

@@ -21,6 +21,10 @@ type error =
       ; failure : Fs_compat.Publication_recovery.lane_release_failure }
   | Invalid_publication_target of Fs_compat.capability_publication_target_error
   | Publication_failed of Fs_compat.capability_write_error
+  | Removal_failed of string
+      (** Canonical cleanup failed; deletion may be partial or its final fsync
+          unconfirmed. The exact tree remains unavailable until another call
+          obtains a new successful full guest-absence inventory. *)
   | Filesystem_operation_failed of exn * Printexc.raw_backtrace
 
 val error_message : error -> string
@@ -61,3 +65,27 @@ val publish_if_guest_absent :
     parents remain exactly 0700. A publication error, including [Target_created],
     stays an error in this call. A later load must independently settle recovery, permissions,
     bytes, fsync and lane release before returning a snapshot. *)
+
+type removal = Removed | Already_absent
+
+val remove_if_guest_absent :
+  fs:Eio.Fs.dir_ty Eio.Path.t ->
+  coordinator:Keeper_microvm_lifecycle.t -> scope:Keeper_microvm_lifecycle.keeper_scope ->
+  base_path:string -> keeper_name:string -> backend:Keeper_microvm_backend.t ->
+  network_mode:Keeper_types_profile_sandbox.network_mode -> timeout_sec:float ->
+  (removal, error) result
+(** Read a new complete backend inventory inside the borrowed lifecycle owner,
+    then settle the dedicated canonical recovery lane before removing the
+    exact guest snapshot beneath its frozen no-follow owned parent chain.
+    Present/unavailable inventory leaves the tree and its modes untouched.
+
+    An owned 0500 target is changed to 0700 only through its held descriptor
+    after absence is proved. A later removal call may accept that same owned
+    0700 state for partial-cleanup recovery; load/publish never accept it as a
+    ready snapshot. Unknown entries are only unlinked by the canonical no-follow
+    remover. Parents and external link targets are never repaired or removed.
+
+    [Already_absent] differs from removing an existing empty snapshot. A failed
+    preparation, cleanup or scope release remains an error and can leave an
+    owned 0700 target or partial tree. No automatic retry or saved absence
+    witness authorizes a subsequent mutation. *)

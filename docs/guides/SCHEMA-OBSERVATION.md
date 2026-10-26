@@ -30,7 +30,13 @@ Use matching owned workloads for comparisons and keep each mode's report.
 The command starts the server and retains diagnostic events until its owned work
 settles during shutdown. Run the intended Keeper workload, then stop this server
 normally with Ctrl-C or SIGTERM. The owner writes `report.json` in the output
-directory after shutdown. No background observation remains after the process
+directory after shutdown. It streams the compact v1 JSON value through a staged
+atomic writer, preserving event order and a final newline; it does not build a
+second complete JSON tree or report string. The events themselves remain in
+memory until shutdown, and the largest event still determines transient chunk
+size. This is report serialization after shutdown, not live event streaming.
+Payload and parent-directory sync failures are reported rather than treated as
+successful publication. No background observation remains after the process
 ends. To turn observation off, start the next server with ordinary `masc start`,
 or select `--observation-mode disabled` for an explicit comparison run.
 

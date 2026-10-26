@@ -965,12 +965,15 @@ let run_cmd ?schema_observation ?(record_default = false) ~executable_path host 
         ~finally:(fun () ->
           (* All server-owned switches and pool jobs have settled. The
              observer binding is gone before snapshot serialization and I/O. *)
-          let report = Agent_core.Base.Schema_observation.snapshot observer
-            |> Agent_core.Base.Schema_observation.report_to_json in
-          match Fs_compat.save_file_atomic (Filename.concat directory "report.json")
-                  (Yojson.Safe.pretty_to_string report ^ "\n") with
+          let report = Agent_core.Base.Schema_observation.snapshot observer in
+          match Fs_compat.write_file_atomic_strict_staged
+                  (Filename.concat directory "report.json")
+                  ~write:(fun channel ->
+                    Agent_core.Base.Schema_observation.write_report_json
+                      ~write:(output_string channel) report) with
           | Ok () -> ()
-          | Error detail -> failwith ("schema observation report: " ^ detail))
+          | Error failure ->
+            Printexc.raise_with_backtrace failure.exception_ failure.backtrace)
   in
   (match Eio_main.run run_observed with
    | () -> ()

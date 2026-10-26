@@ -101,6 +101,17 @@ val snapshot : t -> report
 (** Immutable scalar snapshot. Join owned work before the final snapshot;
     publication to disk belongs to the diagnostic owner outside measured spans. *)
 val report_to_json : report -> Yojson.Safe.t
+val write_report_json : write:(string -> unit) -> report -> unit
+(** Emit the same v1 JSON value as {!report_to_json}, compactly and with a
+    final LF, preserving every event and its order. Only header fields and one
+    event are encoded at a time; no complete JSON tree or report string is
+    built. The largest individual event still determines transient chunk size.
+
+    The caller owns output, flushing, closing and atomic publication. [write]
+    is called synchronously and is not retained. Its exceptions, including
+    cancellation, propagate unchanged; a failure can leave partial output for
+    the caller's publication boundary to discard. Run outside measured work,
+    after joining the observer's owned operations. *)
 val report_of_json : Yojson.Safe.t -> (report, string) result
 (** Strict versioned inverse: exact fields, closed tags, finite valid clocks,
     unique ordered event IDs and matching observer/scope identities. *)

@@ -442,8 +442,8 @@ let event_json (event : event) =
   `Assoc ["sequence", `Int event.sequence; "scope", scope_to_json event.scope; "payload", payload_json event.payload]
 let allocation_scope = "calling_domain_interval_not_process_or_exclusive_operation"
 let overhead_scope = "bookkeeping_estimate_inclusive_nested_calls_excludes_its_probes_and_final_update_and_report_io"
-let report_to_json report =
-  `Assoc ["schema_version", `Int 1; "observer_id", id_json report.report_observer_id
+let report_header_fields report =
+  ["schema_version", `Int 1; "observer_id", id_json report.report_observer_id
     ; "mode", `String (mode_name report.report_mode)
     ; "clock_origin_ns", option_json id_json report.clock_origin_ns
     ; "clock_domain", `String "process_monotonic_ns"
@@ -453,8 +453,31 @@ let report_to_json report =
     ; "probe_calls", `Int report.probe_calls
     ; "bookkeeping", `Assoc ["calls", `Int report.bookkeeping.calls
       ; "elapsed_ns", id_json report.bookkeeping.elapsed_ns
-      ; "calling_domain_allocated_bytes", `Float report.bookkeeping.allocated_bytes]
-    ; "events", `List (List.map event_json report.events)]
+      ; "calling_domain_allocated_bytes", `Float report.bookkeeping.allocated_bytes]]
+;;
+
+let events_field = "events"
+
+let report_to_json report =
+  `Assoc (report_header_fields report
+    @ [events_field, `List (List.map event_json report.events)])
+;;
+
+let write_report_json ~write report =
+  let json value = write (Yojson.Safe.to_string value) in
+  write "{";
+  List.iter (fun (name, value) ->
+    json (`String name);
+    write ":";
+    json value;
+    write ",") (report_header_fields report);
+  json (`String events_field);
+  write ":[";
+  let first = ref true in
+  List.iter (fun event ->
+    if !first then first := false else write ",";
+    json (event_json event)) report.events;
+  write "]}\n"
 ;;
 
 (* Strict inverse. Field equality rejects duplicates as well as unknown fields. *)

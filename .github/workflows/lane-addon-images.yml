@@ -45,7 +45,7 @@ jobs:
           ref: ${{ inputs.source_sha || github.sha }}
           persist-credentials: false
       - name: Test package protocols
-        run: python3 -m unittest discover -s addons/tests -p 'test_*.py' -v
+        run: scripts/ci/addon-tests-each-file.sh -v
       - id: discover
         env:
           PACKAGE_SCOPE: ${{ inputs.scope }}

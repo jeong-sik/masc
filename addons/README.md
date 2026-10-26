@@ -140,8 +140,12 @@ protocol revision 2025-06-18. Package-specific processing remains in each worker
 Run the Python package feature tests without building OCaml or an image:
 
 ```sh
-python3 -m unittest discover -s addons/tests -v
+scripts/ci/addon-tests-each-file.sh -v
 ```
+
+Each test file runs in its own Python process, because every worker is a
+top-level `server.py` and one interpreter would hand a later file the first
+add-on's `server` module.
 
 These tests execute the Python stdio workers and cover Web counterexamples,
 source coverage, actor provenance, MSX incarnations, supplied-row statistics and

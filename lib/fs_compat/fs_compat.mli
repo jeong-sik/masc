@@ -872,9 +872,13 @@ val create_capability_file_exclusive
   -> string
   -> (unit, capability_write_error) result
 
-(** Durable exclusive directory publication, using the canonical journal stage
-    layout and the target's directory mode. Every captured file and the payload
-    directory are synced before the descriptor-relative no-replace rename.
+(** Durable exclusive directory publication. The canonical journal stage is the
+    directory payload itself; file publication keeps its nested [stage/payload].
+    A sealed directory is renamed within the same parent, preserving its final
+    mode from first public visibility without changing the recovery record
+    format (which identifies the exact stage and target). Every captured file
+    and the payload directory are synced before the descriptor-relative
+    no-replace rename.
     Cleanup only removes exact owned entries; sealed directory permissions are
     restored through a held descriptor. Unknown or replaced entries are retained.
     Published targets are never removed. [Target_created] after an error means

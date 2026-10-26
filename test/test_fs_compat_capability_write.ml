@@ -2578,7 +2578,7 @@ let test_directory_publication_private_and_no_replace ~fs () =
       | Fs_compat.Publish_exclusive ->
         check bool "target absent before publish" false (Sys.file_exists target);
         let stage = only_entry_except directory [] in
-        let payload = Filename.concat (Filename.concat directory stage) "payload" in
+        let payload = Filename.concat directory stage in
         check int "private directory already sealed" 0o500 (Unix.stat payload).st_perm;
         check string "private bytes complete" "exact\000\255\r\n"
           (read_file (Filename.concat payload "hosts.yml"));
@@ -2611,7 +2611,7 @@ let test_directory_sealed_cleanup ~fs () =
          incr syncs;
          if !syncs = 3 then (
            let stage = only_entry_except directory [] in
-           let payload = Filename.concat (Filename.concat directory stage) "payload" in
+           let payload = Filename.concat directory stage in
            check int "fault occurs after directory sealed" 0o500 (Unix.stat payload).st_perm;
            raise Exit)
        | _ -> ()) with
@@ -2633,7 +2633,7 @@ let test_directory_cleanup_preserves_replaced_entries ~fs () =
          | Fs_compat.Publish_exclusive ->
            let stage = only_entry_except directory [] in
            let stage_path = Filename.concat directory stage in
-           let payload = Filename.concat stage_path "payload" in
+           let payload = stage_path in
            (match replacement with
             | `Child ->
               Unix.chmod payload 0o700;
@@ -2641,16 +2641,17 @@ let test_directory_cleanup_preserves_replaced_entries ~fs () =
               Unix.rename child (Filename.concat payload "original-hosts.yml");
               write_file child "foreign";
               planted := Some (child, (Unix.stat child).st_ino)
-            | `Payload ->
-              Unix.rename payload (Filename.concat stage_path "original");
-              Unix.mkdir payload 0o700;
-              write_file (Filename.concat payload "foreign") "foreign";
-              planted := Some (payload, (Unix.stat payload).st_ino)
             | `Stage ->
               Unix.rename stage_path (Filename.concat directory "detached-stage");
               Unix.mkdir stage_path 0o700;
               write_file (Filename.concat stage_path "foreign") "foreign";
-              planted := Some (stage_path, (Unix.stat stage_path).st_ino));
+              planted := Some (stage_path, (Unix.lstat stage_path).st_ino)
+            | `Symlink ->
+              Unix.rename stage_path (Filename.concat directory "detached-stage");
+              let sentinel = Filename.concat directory "foreign-target" in
+              write_file sentinel "foreign";
+              Unix.symlink sentinel stage_path;
+              planted := Some (stage_path, (Unix.lstat stage_path).st_ino));
            raise Exit
          | _ -> ()) with
      | Ok () -> fail "injected stage replacement became success"
@@ -2659,10 +2660,10 @@ let test_directory_cleanup_preserves_replaced_entries ~fs () =
     (match !planted with
      | None -> fail "replacement callback not reached"
      | Some (path, inode) ->
-       check int "foreign inode never removed" inode (Unix.stat path).st_ino);
+       check int "foreign inode never removed" inode (Unix.lstat path).st_ino);
     check bool "no public target" false (Sys.file_exists (Filename.concat directory "snapshot"));
     check_directory_recovery_count recovery Fs_compat_test_support.Publication_recovery_for_testing.Owned 1)
-    [`Child; `Payload; `Stage]
+    [`Child; `Stage; `Symlink]
 ;;
 
 let test_directory_post_publish_failure ~fs () =
@@ -2700,11 +2701,11 @@ let test_directory_final_inventory_refuses_drift ~fs () =
          | Fs_compat.Publish_exclusive ->
            let stage = only_entry_except directory [] in
            let stage_path = Filename.concat directory stage in
-           let payload = Filename.concat stage_path "payload" in
+           let payload = stage_path in
            Unix.chmod payload 0o700;
            let path = Filename.concat payload "hosts.yml" in
            (match replacement with
-            | `Child -> Unix.rename path (Filename.concat stage_path "original-hosts.yml")
+            | `Child -> Unix.rename path (Filename.concat directory "original-hosts.yml")
             | `Unknown -> ());
            let path = match replacement with
              | `Child -> path | `Unknown -> Filename.concat payload "foreign" in
@@ -2745,7 +2746,7 @@ let test_directory_cleanup_rechecks_after_hooks ~fs () =
            if !unlink_hooks = 2 then (
              let stage = only_entry_except directory [] in
              let stage_path = Filename.concat directory stage in
-             let payload = Filename.concat stage_path "payload" in
+             let payload = stage_path in
              let path = match replacement with
                | `Child ->
                  let child = Filename.concat payload "config.yml" in
@@ -2753,7 +2754,7 @@ let test_directory_cleanup_rechecks_after_hooks ~fs () =
                  write_file child "foreign bytes";
                  child
                | `Payload ->
-                 Unix.rename payload (Filename.concat stage_path "detached-payload");
+                 Unix.rename payload (Filename.concat directory "detached-payload");
                  Unix.mkdir payload 0o700;
                  payload
              in
@@ -2804,7 +2805,6 @@ let test_directory_cancellation ~fs () =
 ;;
 
 let test_directory_outer_stage_removal_rechecks_after_hook ~fs () =
-  List.iter (fun during_cleanup ->
     with_directory_fixture @@ fun directory ->
     with_replace_context ~fs directory @@ fun parent recovery ->
     let foreign = ref None in
@@ -2817,17 +2817,14 @@ let test_directory_outer_stage_removal_rechecks_after_hook ~fs () =
     in
     (match publish_directory ~recovery ~directory ~parent (snapshot_payload ())
        ~before_stage:(function
-         | Fs_compat.Publish_exclusive when during_cleanup -> raise Exit
-         | Fs_compat.Remove_staging_directory when not during_cleanup ->
-           plant_empty_foreign_stage ()
-         | Fs_compat.Cleanup_remove_staging_directory when during_cleanup ->
+         | Fs_compat.Publish_exclusive -> raise Exit
+         | Fs_compat.Cleanup_remove_staging_directory ->
            plant_empty_foreign_stage ()
          | _ -> ()) with
      | Ok () -> fail "foreign outer stage was removed"
      | Error error ->
        check bool "rename effect reflects the actual phase" true
-         (error.target_effect =
-            (if during_cleanup then Fs_compat.Target_unchanged else Fs_compat.Target_created));
+         (error.target_effect = Fs_compat.Target_unchanged);
        check bool "outer stage authority failure retained" true
          (has_write_cleanup_stage Fs_compat.Cleanup_verify_staging_directory_identity error));
     (match !foreign with
@@ -2835,14 +2832,50 @@ let test_directory_outer_stage_removal_rechecks_after_hook ~fs () =
      | Some (path, inode) ->
        check int "foreign empty directory not removed" inode (Unix.stat path).st_ino);
     let final = Filename.concat directory "snapshot" in
-    if during_cleanup then
-      check bool "prepublish cleanup did not create final" false (Sys.file_exists final)
-    else (
-      check string "published final survives stage failure" "exact\000\255\r\n"
-        (read_file (Filename.concat final "hosts.yml"));
-      check int "published mode survives stage failure" 0o500 (Unix.stat final).st_perm);
-    check_directory_recovery_count recovery Fs_compat_test_support.Publication_recovery_for_testing.Owned 1)
-    [false; true]
+    check bool "prepublish cleanup did not create final" false (Sys.file_exists final);
+    check_directory_recovery_count recovery Fs_compat_test_support.Publication_recovery_for_testing.Owned 1
+;;
+
+let test_directory_first_public_observation_is_sealed ~fs () =
+  List.iter (fun permissions ->
+    with_directory_fixture @@ fun directory ->
+    with_replace_context ~fs directory @@ fun parent recovery ->
+    let target = require_recovery_target ~allowed_root_path:directory ~parent
+        ~leaf:"snapshot" ~permissions in
+    let final = Filename.concat directory "snapshot" in
+    let staged = ref None in
+    let observed_public = ref false in
+    require_ok (Capability_write_test.create_capability_directory_exclusive
+      ~recovery ~parent ~target (snapshot_payload ())
+      ~before_stage:(function
+        | Fs_compat.Publish_exclusive ->
+          check bool "public leaf absent before sealed rename" false (Sys.file_exists final);
+          let stage = Filename.concat directory (only_entry_except directory []) in
+          let stat = Unix.stat stage in
+          check int "stage sealed before namespace publication" permissions stat.st_perm;
+          staged := Some (stage, stat.st_dev, stat.st_ino)
+        | Fs_compat.Sync_parent ->
+          let stat = Unix.stat final in
+          check int "first public observation is already sealed" permissions stat.st_perm;
+          (match !staged with
+           | None -> fail "private stage not observed"
+           | Some (stage, dev, inode) ->
+             check int "same directory inode was published" inode stat.st_ino;
+             check int "same device was published" dev stat.st_dev;
+             check bool "canonical stage name moved away" false (Sys.file_exists stage));
+          observed_public := true
+        | _ -> ()));
+    check bool "postrename observation was exercised" true !observed_public;
+    check (list string) "only completed public snapshot remains" ["snapshot"]
+      (directory_entries directory);
+    (* Mode 000 is checked before this fixture-only permission restoration. *)
+    Unix.chmod final 0o500;
+    check string "sealed publication retains exact bytes" "exact\000\255\r\n"
+      (read_file (Filename.concat final "hosts.yml"));
+    List.iter (fun leaf -> check int "published file remains sealed" 0o400
+      (Unix.stat (Filename.concat final leaf)).st_perm) ["hosts.yml"; "config.yml"];
+    check_directory_recovery_count recovery Fs_compat_test_support.Publication_recovery_for_testing.Owned 0)
+    [0o500; 0]
 ;;
 
 let () =
@@ -2861,6 +2894,7 @@ let () =
         ; test_case "directory cleanup rechecks authority after hooks" `Quick (test_directory_cleanup_rechecks_after_hooks ~fs)
         ; test_case "directory cancellation preserves publication boundary" `Quick (test_directory_cancellation ~fs)
         ; test_case "directory outer stage removal rechecks after hooks" `Quick (test_directory_outer_stage_removal_rechecks_after_hook ~fs)
+        ; test_case "directory is sealed from first public observation" `Quick (test_directory_first_public_observation_is_sealed ~fs)
         ; test_case "standalone exclusive publication reopens its owner" `Quick
             (test_standalone_exclusive_publication ~fs)
         ; test_case "atomic replace mode" `Quick

@@ -244,8 +244,13 @@ val create_capability_file_exclusive
     target permissions are the final directory mode; each captured file has
     its own mode. Files and the directory are synced before publication.
 
-    Staging uses the canonical recovery journal layout, not a caller-selected
-    partial-directory prefix. Failure cleanup only removes identity-verified
+    The canonical operation stage directory is itself the directory payload;
+    file publication retains its nested [stage/payload] layout. Publishing the
+    sealed directory renames its stage leaf within the same parent, avoiding
+    the write permission required to change a directory's parent. Prepared and
+    Bound records already identify that exact stage and final target, so the
+    durable recovery format is shared unchanged. No caller-selected partial
+    prefix is accepted. Failure cleanup only removes identity-verified
     entries created by this operation, reopening permissions through its held
     directory descriptor when necessary. Unknown entries or identity changes
     retain the stage and recovery evidence. A published target is never removed.

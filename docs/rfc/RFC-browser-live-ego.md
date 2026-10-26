@@ -273,7 +273,8 @@ execution evidence.
 ### Read the bound Space's native status
 
 `page.act` action `space_status` requires the observed live client ID and reads
-only that peer's bound numeric Space through the SDK. It returns `spaceId`,
+only that peer's bound numeric Space from the SDK's `listTaskSpaces` inventory.
+It does not construct a TaskSpace handle or initialise background Page discovery. It returns `spaceId`,
 `spaceName`, verbatim native `ownership` and `observedAt`, without Page calls,
 claim, takeover or input settlement. Delegation does not block this metadata
 query; missing or foreign IDs never fall back to a name or create a Space.

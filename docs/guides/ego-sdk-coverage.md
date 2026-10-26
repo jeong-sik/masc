@@ -31,13 +31,13 @@ Neither means fully supported.
 | SDK entry | Current MASC integration | Remaining boundary |
 | --- | --- | --- |
 | `profiles` | None | Profile selection only after explicit user request; no general profile inspection |
-| `listTaskSpaces` | None in Keeper tools | Discover existing goal Spaces without creating replacements |
+| `listTaskSpaces` | space_status reads the native inventory and returns only the already bound numeric Space | General Goal Space discovery and lifecycle without replacements |
 | `taskSpace` | Configuration accepts a name or exact numeric ID; subsequent rounds use the bound ID. Explicit BrowserSession Goal binding pins Keeper initial discovery to an observed Space across client UUID changes; missing connections never fall back | One configured Space per worker; automatic creation, multi-Goal worker lifecycle and installed Keeper routing remain unverified |
 | `claimTaskSpace` | None | Explicit approval and user-owned Space admission |
 | `takeOverTaskSpace` | `page.act` take_over | Explicit operator control boundary, currently only configured Space |
 | `TaskSpace.spaceId` | SDK-observed ID follows client inventory, tool receipts, stored screenshots and the TUI connection identity | Installed-route proof and per-goal Space lifecycle |
-| `TaskSpace.name` | Attachment name follows connection context; explicit space_status returns the current SDK-observed name for the same numeric ID | Per-goal lifecycle and actual visible UI proof |
-| `TaskSpace.ownership` | Explicit page.act space_status returns native ownership and observation time without Page calls or changing control; private operator form displays the last cached observation | General connection/TUI projection and real installed Keeper/UI proof |
+| `TaskSpace.name` | Attachment name follows connection context; explicit space_status returns the native-inventory name for the same numeric ID | Per-goal lifecycle and actual visible UI proof |
+| `TaskSpace.ownership` | Explicit page.act space_status reads native listTaskSpaces ownership and observation time without constructing a TaskSpace handle, Page calls or changing control; private operator form displays the last cached observation | General connection/TUI projection and real installed Keeper/UI proof |
 | `TaskSpace.page` | Permanent label resolution; tab inventory and document-read projection retain the observed label | Lifecycle tools and installed-route proof |
 | `TaskSpace.userPage` | None | Claim/takeover boundary attribution and explicit adoption |
 | `TaskSpace.pages` | Managed pages known through tab enumeration | Direct lifecycle-aware managed inventory |

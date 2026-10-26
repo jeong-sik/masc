@@ -209,10 +209,12 @@ let with_download_root t = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as args -> args
 let run_step t ~window_s ~step ~args body =
   asked t.run ~window_s ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body
-let run_native_step ?(holder=Agent_holds) t ~step ~args body =
-  match t.run_native (script ~step ~space:(`Int t.space.id) ~holder ~args:(with_download_root t args) body) with
+let run_native_script t source =
+  match t.run_native source with
   | Error failure -> Error (Unanswered failure)
   | Ok output -> answer output
+let run_native_step t ~step ~args body =
+  run_native_script t (script ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body)
 (* A read has no effect, so however it failed, nothing happened. *)
 let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
@@ -1406,12 +1408,24 @@ let wait_for_control t options =
      | (None|Some _),(None|Some _),(None|Some _) -> Error (Live.Before_effect "invalid native control wait observation"))
   | Ok _ -> Error (Live.Before_effect "invalid native control wait observation")
 
+let space_status_script ~space_id = String.concat "\n" [
+  "// masc-ego: space.status";
+  "const emit = answer => console.log(" ^ Yojson.Safe.to_string (str result_marker) ^ " + JSON.stringify(answer));";
+  "const args = JSON.parse(" ^ Yojson.Safe.to_string (str (Yojson.Safe.to_string (obj ["spaceId",`Int space_id]))) ^ ");";
+  "try {";
+  "  const matches = (await listTaskSpaces()).filter(space => space.id === args.spaceId);";
+  "  if (matches.length !== 1) throw new Error('the bound Space is absent or ambiguous in the native inventory');";
+  "  const observed = matches[0];";
+  "  emit({ok: true, value: {spaceId: observed.id, name: observed.name, ownership: observed.ownership}});";
+  "} catch (error) {";
+  "  emit({ok: false, error: String(error && error.message || error)});";
+  "}" ]
+
 let space_status t =
   (* A failed refresh must not leave an earlier owner looking current. The
      numeric helper never creates a replacement, and no Page is addressed. *)
   t.space_observation <- None;
-  let* value=run_native_step ~holder:Either_holds t ~step:"space.status" ~args:`Null
-    "    emit({ok: true, value: {spaceId: task.spaceId, name: task.name, ownership: task.ownership}});"
+  let* value=run_native_script t (space_status_script ~space_id:t.space.id)
     |> Result.map_error (fun failure -> Live.Before_effect (step_failure_message failure)) in
   let* observation=Browser_ego_space_observation.of_sdk ~expected_id:t.space.id ~observed_at:(t.now ()) value
     |> Result.map_error (fun detail -> Live.Before_effect detail) in

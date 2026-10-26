@@ -218,4 +218,7 @@ val decode_memory_health_snapshot :
   Yojson.Safe.t -> (memory_health_snapshot, string) result
 (** Decode the fleet memory-health snapshot served at
     [/api/v1/dashboard/keeper-memory-health]. Every consumed field is
-    required: a keeper the server left out is invisible here, not defaulted. *)
+    required: a keeper the server left out is invisible here, not defaulted.
+    The required [execution] object carries a separate availability diagnostic.
+    This stored-memory projection does not interpret its contents or use
+    availability as proof of provider success or a Memory commit. *)

@@ -412,6 +412,43 @@ let test_the_same_stall_is_posted_once () =
     (stalled_posts_for ~verification_id:"vrf-stall-1")
 ;;
 
+(* Pending journal observations share one notice despite different diagnostics
+   or timer admissions. Operator repair is a distinct, non-replaying state. *)
+let test_original_observation_notice_is_posted_once_until_repair () =
+  Eio_main.run @@ fun _env ->
+  Masc.Board_dispatch.reset_for_test ();
+  let verification_id = "vrf-original-observation-stall" in
+  let notify cause disposition detail =
+    VP.notify_stalled_verification ~authority:stall_authority
+      ~subject:(VP.Task_review { task_id = "task-original-observation"; verification_id; disposition })
+      ~gate:(CA.For_testing.stalled_gate cause) ~detail
+  in
+  List.iter
+    (fun (detail, delay) ->
+       let cause = CA.For_testing.Execution_pending { detail } in
+       (match CA.For_testing.retry_request_of_stop_cause cause with
+        | CA.For_testing.Observe_original_requested -> ()
+        | CA.For_testing.Retry_requested | CA.For_testing.No_retry_requested ->
+          Alcotest.fail "pending original must request observation only");
+       notify cause (VP.Original_observation_scheduled { delay }) detail)
+    [ "journal is still open", VP.Full_interval { seconds = 60.0 }
+    ; "same original is still pending", VP.Shared_timer
+    ; "journal has no terminal yet", VP.Full_interval { seconds = 60.0 }
+    ];
+  Alcotest.(check int) "changing detail and timer do not repost the original observation" 1
+    (stalled_posts_for ~verification_id);
+  let detail = "original effect requires operator reconciliation" in
+  let cause = CA.For_testing.Execution_repair_required { detail } in
+  (match CA.For_testing.retry_request_of_stop_cause cause with
+   | CA.For_testing.No_retry_requested -> ()
+   | CA.For_testing.Retry_requested | CA.For_testing.Observe_original_requested ->
+     Alcotest.fail "repair must not request replay or continued observation");
+  notify cause VP.Original_repair_required detail;
+  notify cause VP.Original_repair_required "same repair with more diagnostic detail";
+  Alcotest.(check int) "repair is new information and is posted once" 2
+    (stalled_posts_for ~verification_id)
+;;
+
 (* Re-submitting one task posted the same 'Verify: <title>' each time
    (audit-adversarial-20260912 R10: 55 titles with three or more posts). The
    title carries the verification id, so two requests for one task are two
@@ -5418,6 +5455,8 @@ let () =
         test_stall_disposition_metadata_decodes_strictly;
       Alcotest.test_case "the same stall is posted once" `Quick
         test_the_same_stall_is_posted_once;
+      Alcotest.test_case "original observation notice is posted once until repair" `Quick
+        test_original_observation_notice_is_posted_once_until_repair;
       Alcotest.test_case "a different stall still reaches the board" `Quick
         test_a_different_stall_still_reaches_the_board;
       Alcotest.test_case "a disposition change is its own stall" `Quick

@@ -583,7 +583,7 @@ let system_authority = Verifier_review_publication.authority
 type retry_request =
   | Retry_requested
   | Observe_original_requested
-    | No_retry_requested
+  | No_retry_requested
 
 (* What the scheduler did with one request. [Armed_timer]: this request
    forked the timer, which fires after the full interval. [Joined_running_timer]:
@@ -629,8 +629,8 @@ type stop_cause =
               carries per-candidate outcomes (2026-10-07 audit F-02). *)
       }
   | Execution_pending of { detail : string }
-    | Execution_repair_required of { detail : string }
-    | Raised of { detail : string }
+  | Execution_repair_required of { detail : string }
+  | Raised of { detail : string }
 
 type process_outcome =
   | Committed

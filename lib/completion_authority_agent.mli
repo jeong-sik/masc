@@ -116,7 +116,8 @@ module For_testing : sig
 
   (** What one review attempt asks of the retry scheduler. A request, not an
       outcome: whether a retry is armed is known only once the scheduler
-      answers with a [retry_admission]. *)
+      answers with a [retry_admission]. [Observe_original_requested] schedules
+      observation of the retained execution; it grants no provider replay. *)
   type retry_request =
     | Retry_requested
     | Observe_original_requested

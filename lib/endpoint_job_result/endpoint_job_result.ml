@@ -95,12 +95,19 @@ let decode_payload json =
   let* input=read_input (List.assoc "stdin" values) in
   let* gate=read_gate (List.assoc "gate" values) in
   match status with
-  | P.Status {original;revision;cancel_requested;phase=P.Termination_observed physical_status;
-      result=P.Result_pending;stdout=P.Sealed stdout;stderr=P.Sealed stderr} ->
+  | P.Status {original;revision;cancel_requested;phase;result;stdout;stderr} ->
+    let* physical_status=match phase with
+      | P.Termination_observed physical -> Ok physical
+      | Queued | Starting | Running | Finished _ | Not_started _ -> invalid () in
+    let* ()=match result with P.Result_pending -> Ok () | Result_ready _ -> invalid () in
+    let sealed = function
+      | P.Sealed {byte_length;sha256} -> Ok ({byte_length;sha256} : seal)
+      | Growing _ -> invalid () in
+    let* stdout=sealed stdout in
+    let* stderr=sealed stderr in
     Ok {original;revision;cancel_requested;physical_status;launch_id;input;gate;
-      stdout={byte_length=stdout.byte_length;sha256=stdout.sha256};
-      stderr={byte_length=stderr.byte_length;sha256=stderr.sha256}}
-  | P.Admitted _ | Status _ | Output _ | Released _ | Refused _ | Held _ -> invalid ()
+      stdout;stderr}
+  | P.Admitted _ | Output _ | Released _ | Refused _ | Held _ -> invalid ()
 let payload_digest payload =
   let content="masc_endpoint_terminal_result_v1\000" ^ Yojson.Safe.to_string payload in
   Digestif.SHA256.(to_hex (digest_string content))

@@ -38,6 +38,7 @@ val error_to_string : error -> string
 type activation = Requested | Held of error
 val activation : t -> activation
 val original : t -> P.original
+val specification : t -> P.spec
 val storage : t -> Eio.Fs.dir_ty Eio.Path.t
 (** The same original capability owned by the job Switch, for the trusted
     supervisor's output/result publication. Never reopen its pathname. *)

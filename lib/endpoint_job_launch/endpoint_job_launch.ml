@@ -24,6 +24,7 @@ type t = { target : R.launch_target; group : G.Group.t; child : G.t; activation 
   ; storage : Eio.Fs.dir_ty Eio.Path.t; publication_lock : Eio.Mutex.t }
 let activation t = t.activation
 let original t = P.original ~binding:t.target.binding ~admission_id:t.target.admission_id
+let specification t = t.target.spec
 let storage t = t.storage
 let with_storage_publication t f = Eio.Mutex.use_ro t.publication_lock f
 let rendezvous_leaf = "launch-rendezvous.json"

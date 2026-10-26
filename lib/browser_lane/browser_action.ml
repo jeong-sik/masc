@@ -21,7 +21,8 @@ type interaction =
   | Unblock_requests
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
-type control = Hand_off | Take_over
+type control_wait = { interval_ms : float option; timeout_ms : float option }
+type control = Hand_off | Take_over | Wait_for_control of control_wait
 type t = Open_tab of string | Open_window of string | Control of control
   | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
 let reply_timeout_sec = function
@@ -140,6 +141,20 @@ let parse_hosts fields = match List.assoc_opt "hosts" fields with
     else match List.find_opt (fun host -> not (is_host host)) hosts with
       | Some host -> Error ("hosts must be lowercase host names or IPv4 addresses such as ads.example.com, not " ^ host)
       | None -> Ok hosts
+let control_wait_of_json = function
+  | `Assoc fields when List.for_all (fun (key,_) -> List.mem key ["interval";"timeout"]) fields
+      && List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) ->
+    let milliseconds key=match List.assoc_opt key fields with
+      | None -> Ok None
+      | Some (`Int value) when value>0 -> Ok (Some (float_of_int value))
+      | Some (`Float value) when Float.is_finite value && value>0. -> Ok (Some value)
+      | Some _ -> Error (key ^ " must be positive finite SDK milliseconds") in
+    let* interval_ms=milliseconds "interval" in
+    let* timeout_ms=milliseconds "timeout" in Ok {interval_ms;timeout_ms}
+  | _ -> Error "invalid or duplicate control wait options"
+let control_wait_to_json {interval_ms;timeout_ms} = `Assoc (
+  (match interval_ms with None -> [] | Some value -> ["interval",`Float value])
+  @ (match timeout_ms with None -> [] | Some value -> ["timeout",`Float value]))
 let parse = function
   | `Assoc fields ->
     let string key = match List.assoc_opt key fields with
@@ -171,6 +186,11 @@ let parse = function
      | "open_window" -> let* () = exact ["url"] in let* url = string "url" in Ok (Open_window url)
      | "hand_off" -> let* () = exact [] in Ok (Control Hand_off)
      | "take_over" -> let* () = exact [] in Ok (Control Take_over)
+     | "wait_for_control" ->
+       let* ()=exact ["controlOptions"] in
+       let* options=control_wait_of_json (match List.assoc_opt "controlOptions" fields with
+         | None -> `Assoc [] | Some value -> value) in
+       Ok (Control (Wait_for_control options))
      | "upload" ->
        let* target = match List.mem_assoc "selector" fields, List.mem_assoc "opener" fields with
          | true, false -> Result.map (fun selector -> File_input selector) (nonempty "selector")
@@ -209,6 +229,8 @@ let to_json = function
   | Open_window url -> `Assoc ["action",`String "open_window";"url",`String url]
   | Control Hand_off -> `Assoc ["action",`String "hand_off"]
   | Control Take_over -> `Assoc ["action",`String "take_over"]
+  | Control (Wait_for_control options) -> `Assoc ["action",`String "wait_for_control";
+      "controlOptions",control_wait_to_json options]
   | On_tab {tab_id;frame_path;interaction} ->
     let action, args = match interaction with
       | Upload {target;paths} ->

@@ -42,7 +42,13 @@ type interaction =
     operator for a step only a person can take, such as a sign-in or a
     captcha; [Take_over] takes it back, once the operator has said they are
     done. Nothing checks that they said so. *)
-type control = Hand_off | Take_over
+type control_wait = { interval_ms : float option; timeout_ms : float option }
+(** Positive finite SDK milliseconds. Missing values keep SDK defaults. *)
+val control_wait_to_json : control_wait -> Yojson.Safe.t
+type control = Hand_off | Take_over | Wait_for_control of control_wait
+(** [Wait_for_control] calls the native SDK within the current agent-owned
+    Space. It does not claim or take over a user-held Space, clear uncertain
+    input state, or authorize later commands. *)
 type t = Open_tab of string | Open_window of string | Control of control
   | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
 (** Reply observation window shared by built-in and Add-on action callers.

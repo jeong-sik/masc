@@ -45,7 +45,7 @@ Neither means fully supported.
 | `TaskSpace.newPage` | `page.act` open_tab | Per-goal Space and returned permanent label |
 | `TaskSpace.adopt` | None; unmanaged pages refused | Explicitly authorized adoption with conservative ownership |
 | `TaskSpace.release` | None | Return an unknown-origin managed page without closing it |
-| `TaskSpace.waitForControl` | None | SDK wait without taking control away from the operator |
+| `TaskSpace.waitForControl` | `page.act` wait_for_control forwards native interval/timeout and uses the SDK clock within an agent-owned Space | Real SDK/installed-route proof; no handoff completion or takeover implied |
 | `TaskSpace.handOff` | `page.act` hand_off returns same-Space ID/name; Keeper guidance composes `masc_ask` and explicit-confirmation resume | Real Keeper login handoff, per-goal scope and UI control-state projection |
 | `TaskSpace.finish` | Internal connection teardown uses `keep:[]` | Goal completion with explicit keep policy and retained-page receipt |
 | `TaskSpace.cdp` | None | Explicit Target/Browser protocol boundary and lifecycle reconciliation |

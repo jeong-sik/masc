@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { getStaticTOMLValue, parseTOML } from 'toml-eslint-parser'
 import { readBrowserActivity, writeBrowserActivity } from './browser-lane-activity'
 
 describe('Browser activity TOML boundaries', () => {
@@ -50,6 +51,52 @@ describe('Browser activity TOML boundaries', () => {
     '[browser.live.bidi]\nfirefox = 1\n',
     '[browser.live]\nbidi = 1\n',
   ])('refuses what the Keeper Firefox table does not take: %s', source => {
+    expect(() => readBrowserActivity(source, 'live')).toThrow()
+  })
+  it.each([
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace="masc" # keep\n',
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace="32" # keep\n',
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace=32 # keep\n',
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace=0 # keep\n',
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace=9007199254740991 # keep\n',
+    '[browser.live]\nego={command="/ego-browser",space=32} # keep\n',
+    '[browser]\nlive.ego={command="/ego-browser",space="32"} # keep\n',
+    'browser.live.ego={command="/ego-browser",space=32} # keep\n',
+    'browser={live={ego={command="/ego-browser",space="masc"}}} # keep\n',
+  ])('edits every lane with Ego configured without changing the Space reference: %s', source => {
+    // These are trusted fixed fixtures; production keeps its AST-only reader.
+    const native = (text: string) => (getStaticTOMLValue(parseTOML(text)) as {
+      browser: { live: { ego: { command: string; space: string | number } } }
+    }).browser.live.ego
+    for (const lane of ['live', 'automation', 'stagehand'] as const) {
+      expect(readBrowserActivity(source, lane)).toEqual({ enabled: true })
+      const changed = writeBrowserActivity(source, lane, false)
+      expect(native(changed)).toEqual(native(source))
+      expect(changed).toContain('# keep')
+      for (const other of ['live', 'automation', 'stagehand'] as const)
+        expect(readBrowserActivity(changed, other)).toEqual({ enabled: other !== lane })
+    }
+  })
+  it('retains the other lane flags and Keeper Firefox when Ego is configured', () => {
+    const native = '[browser.live.bidi]\nfirefox="/firefox"\nprofile="/profile"\n["browser"."live"."ego"]\ncommand="/ego-browser"\nspace=32\n'
+    const source = '[browser.live]\nenabled=false\n[browser.stagehand]\nenabled=false\n' + native
+    const changed = writeBrowserActivity(source, 'automation', false)
+    expect(changed).toContain(native)
+    expect(readBrowserActivity(changed, 'live')).toEqual({ enabled: false })
+    expect(readBrowserActivity(changed, 'stagehand')).toEqual({ enabled: false })
+    expect(readBrowserActivity(changed, 'automation')).toEqual({ enabled: false })
+  })
+  it.each([
+    '[browser.live]\nego=false', '[[browser.live.ego]]',
+    '[browser.live.ego]\ncommand=1\nspace=32',
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace=" "',
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace=-1',
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace=9007199254740992',
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace=32.0',
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace=true',
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace=[]',
+    '[browser.live.ego]\ncommand="/ego-browser"\nspace=32\nheadless=true',
+  ])('refuses unsupported Ego structure or reference types: %s', source => {
     expect(() => readBrowserActivity(source, 'live')).toThrow()
   })
   it('keeps flat driver paths intact when editing Live and moves them only for Automation', () => {

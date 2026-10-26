@@ -31,9 +31,23 @@ function browserTable(source: string) {
     if (name !== undefined && name !== 'live' && name !== 'automation' && name !== 'stagehand')
       throw new Error(`browser.${name}는 지원하지 않는 설정입니다.`)
     if (name === 'automation') automationTable = true
-    // [browser.live.bidi] names the Keeper Firefox the server starts
-    // (RFC-browser-keeper-firefox §3.1); Browser_configuration.parse owns its
-    // rules. Here it is only recognised, so the activity flags stay editable.
+    // Native connection tables remain intact while activity flags change.
+    // Browser_configuration.parse owns complete backend/path validation.
+    if (name === 'live' && field === 'ego') {
+      const setting = path[3]
+      if (setting === undefined) {
+        if (node.type !== 'TOMLInlineTable' && !(node.type === 'TOMLTable' && node.kind === 'standard'))
+          throw new Error(`${path.join('.')}는 TOML table이어야 합니다.`)
+        for (const entry of node.body) visit([...path, ...keyPath(entry.key)], entry.value)
+      } else if (path.length === 4 && setting === 'command') {
+        stringValue()
+      } else if (path.length === 4 && setting === 'space') {
+        if (node.type !== 'TOMLValue' || !(node.kind === 'string' && node.value.trim() !== ''
+          || node.kind === 'integer' && Number.isSafeInteger(node.value) && node.value >= 0))
+          throw new Error(`${path.join('.')}는 Space 이름 또는 음수가 아닌 안전한 정수 ID여야 합니다.`)
+      } else throw new Error(`${path.join('.')}는 지원하지 않는 설정입니다.`)
+      return
+    }
     if (name === 'live' && field === 'bidi') {
       const setting = path[3]
       if (setting === undefined) {

@@ -1,0 +1,45 @@
+{
+  "schema": "masc.keeper.volume_lifecycle_audit.v1",
+  "provenance": "operator-authorized local read-only inventory and native Git housekeeping receipts",
+  "runtime_commit": "072357f887d63a44fff071808556d66dd5637b08",
+  "runtime_instance_id": "01a177a1-9049-7000-a3c0-e192b58516f4",
+  "runtime_log_window_start": "2026-10-26T09:53:59Z",
+  "snapshot_utc": "2026-10-26T10:38:40.194967+00:00",
+  "recorded_at": "2026-10-26T19:39:34.203275+09:00",
+  "volume_count": 55,
+  "allocated_host_image_bytes_before": 556888281088,
+  "allocated_host_image_bytes_after": 541975375872,
+  "ownership_snapshot_counts": {
+    "work_attached_registered": 14,
+    "work_unattached_registered": 22,
+    "work_unattached_unregistered": 3,
+    "build_attached_registered": 14,
+    "build_unattached_registered": 2
+  },
+  "manual_git_pack_bytes_reduced": 12167888896,
+  "manual_repacked_repositories": 9,
+  "recorded_ext4_errors": 0,
+  "full_readonly_fsck_passed": [
+    "tui-developer",
+    "jazz-developer"
+  ],
+  "boot_trim_success_log_count": 13,
+  "boot_trim_timeout_log_count": 1,
+  "later_container_list_attempts": "Two attempts failed with Apple XPC timeout; not absent state",
+  "limitations": [
+    "Pack size is measured by native Git count-objects, not physical host free-space attribution.",
+    "Volume allocation changed concurrently; wkbl volume also shrank through activity outside these commands.",
+    "All-volume checks inspect superblock metadata; full offline fsck was limited to two unattached images.",
+    "No source checkout, registered work volume, Keeper memory, ref/reflog expiration or unreachable object pruning performed.",
+    "Context-reviewer was attached independently during inspection; its offline check was skipped."
+  ],
+  "local_receipt_sha256": {
+    "summary.json": "a62039b659af9eae345a5bbddc35c6aa3ee42f3e0a1f006e726299cdd14ec61e",
+    "volume-allocation-after.json": "526400e59e48179d8316e75d33010e56ee62fe9d4715c3b9be7e8719269ad3bc",
+    "health-after.json": "0bf363e4e15d76be6727fa261c1b6b37ad0545c7bee8d14c9974b6d2997ac12e",
+    "filesystem-superblock-check-after.json": "7fad6eb6dcf347a59d01941d5f5e38908ed5eb31b473d6f3e6def02cc5804537",
+    "readonly-e2fsck-results.json": "a78873b88f5f1d1d5453a4726a2dd2ca1b5441853f5f35e72ca6f948199a6974",
+    "git-repack-all-classified.json": "eb401723291e2cb77e89725df0c4862b687abb98b1d021cfd5029a6149f2a15b",
+    "automatic-reclaim-runtime-log-evidence.json": "61e5b32182a58bb4afb662049c7b452635cd6ae7bbea5a05550f9be9cd3036df"
+  }
+}

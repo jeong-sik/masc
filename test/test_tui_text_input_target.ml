@@ -48,8 +48,9 @@ let test_collab_input_ownership () =
   state.palette_open <- true;
   let view, read = Masc_tui_collab.loading (Masc_tui_collab.create ()) in
   let view = Masc_tui_collab.listed view read (Ok
-      [{ Masc.Tui_decode.pi_name = "guest1"; pi_expires_at = None;
-         pi_expired = false; pi_controller = Masc.Tui_decode.Invite_not_controller }]) in
+      { Masc.Tui_decode.pis_rows =
+          [{ Masc.Tui_decode.pi_name = "guest1"; pi_expires_at = None; pi_expired = false }]
+      ; pis_controller = Masc.Tui_decode.Play_controller_free }) in
   let show view = state.collab <- Some view in
   show view;
   check target "Collab browsing hides the underlying palette" None

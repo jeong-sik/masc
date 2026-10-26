@@ -19892,10 +19892,11 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
        | Error detail ->
            play_notice state ~sink:target ~kind:Notice_failure
              ("play invites: " ^ detail)
-       | Ok [] ->
+       | Ok { Tui_decode.pis_rows = []; pis_controller } ->
            play_notice state ~sink:target ~kind:Notice_reply
-             "No shared DOS play invites"
-       | Ok invites ->
+             (String.concat "\n"
+                ("No shared DOS play invites" :: Masc_tui_collab.controller_summary pis_controller))
+       | Ok { Tui_decode.pis_rows = invites; pis_controller } ->
            let row invite =
              let expires_at =
                match invite.Tui_decode.pi_expires_at with
@@ -19904,10 +19905,12 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
              in
              invite.pi_name ^ " · expires " ^ expires_at
              ^ (if invite.pi_expired then " · expired" else "")
-             ^ Masc_tui_collab.controller_note invite.pi_controller
+             ^ Masc_tui_collab.controller_note pis_controller invite.pi_name
            in
            play_notice state ~sink:target ~kind:Notice_reply
-             ("Shared DOS play invites:\n" ^ String.concat "\n" (List.map row invites))))
+             (String.concat "\n"
+                (("Shared DOS play invites:" :: Masc_tui_collab.controller_summary pis_controller)
+                 @ List.map row invites))))
   | Play_invite_issued (request, target, result) ->
       let outcome = match result with
         | Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _ -> Change_confirmed

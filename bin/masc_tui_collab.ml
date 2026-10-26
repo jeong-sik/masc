@@ -1,6 +1,6 @@
 type form = Browsing | Name of string | Hours of string * string | Confirm_revoke of string | Confirm_resolution of string
 type write_access = Writable | Pending of string | Uncertain of { request_id : string; notice : string } | Read_only of string
-type inventory = Loading | Listed of Masc.Tui_decode.play_invite_row list | Failed of string
+type inventory = Loading | Listed of Masc.Tui_decode.play_invites | Failed of string
 type read = Read of unit ref
 type mutation = Mutation of unit ref
 type t = {
@@ -39,11 +39,12 @@ let listed t read result =
       let t = {t with read = None} in
       (match result with
        | Error error -> {t with inventory = Failed error}
-       | Ok rows ->
+       | Ok listed ->
+           let rows = listed.Masc.Tui_decode.pis_rows in
            let selected = match t.selected with
              | Some name when List.exists (fun row -> String.equal row.Masc.Tui_decode.pi_name name) rows -> Some name
              | Some _ | None -> Option.map (fun row -> row.Masc.Tui_decode.pi_name) (List.nth_opt rows 0) in
-           {t with inventory = Listed rows; selected})
+           {t with inventory = Listed listed; selected})
 let notice t message = {t with message = Some message}
 let busy t =
   let mutation = Mutation (ref ()) in
@@ -58,7 +59,7 @@ let paste t text = match t.form with
   | Name value -> {t with form = Name (value ^ text)}
   | Hours (name, value) -> {t with form = Hours (name, value ^ text)}
   | Browsing | Confirm_revoke _ | Confirm_resolution _ -> t
-let rows t = match t.inventory with Listed rows -> rows | Loading | Failed _ -> []
+let rows t = match t.inventory with Listed listed -> listed.Masc.Tui_decode.pis_rows | Loading | Failed _ -> []
 let selected t = List.find_opt (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) (rows t)
 let move t delta =
   let rows = rows t in
@@ -127,10 +128,17 @@ let hints t = match t.form with
   | Confirm_revoke _ -> "Enter:revoke this invite  Esc:cancel"
   | Confirm_resolution _ -> "Enter:I verified the server request finished  Esc:keep blocked"
 
-let controller_note = function
-  | Masc.Tui_decode.Invite_holds_controller -> " · controlling"
-  | Masc.Tui_decode.Invite_not_controller -> ""
-  | Masc.Tui_decode.Invite_controller_unobserved -> " · controller unknown"
+let controller_note controller name = match controller with
+  | Masc.Tui_decode.Play_controller_held holder when String.equal holder name -> " · controlling"
+  | Masc.Tui_decode.Play_controller_held _ | Masc.Tui_decode.Play_controller_free
+  | Masc.Tui_decode.Play_machine_absent | Masc.Tui_decode.Play_controller_unobserved _ -> ""
+
+let controller_summary = function
+  | Masc.Tui_decode.Play_controller_held holder -> ["DOS controller: " ^ holder]
+  | Masc.Tui_decode.Play_controller_free -> []
+  | Masc.Tui_decode.Play_machine_absent -> ["No DOS machine is loaded."]
+  | Masc.Tui_decode.Play_controller_unobserved reason ->
+      ["DOS controller unknown: " ^ Masc.Tui_terminal_text.sanitize_terminal_text reason]
 
 let lines ~height t =
   let heading = ["Shared machines · observation does not send game input";
@@ -152,16 +160,20 @@ let lines ~height t =
   let body = match t.inventory with
     | Loading -> ["Reading invites…"]
     | Failed error -> ["Could not read invites: " ^ error; "r retries the read; machine observation remains available."]
-    | Listed [] -> [if t.write_access = Writable then "No invites. Press n to create a play link." else "No invites."]
-    | Listed rows ->
-        let available = max 1 (height - List.length heading - List.length form - List.length message - 2) in
+    | Listed {Masc.Tui_decode.pis_rows = []; pis_controller} ->
+        controller_summary pis_controller
+        @ [if t.write_access = Writable then "No invites. Press n to create a play link." else "No invites."]
+    | Listed {Masc.Tui_decode.pis_rows = rows; pis_controller} ->
+        let summary = controller_summary pis_controller in
+        let available =
+          max 1 (height - List.length heading - List.length form - List.length message - List.length summary - 2) in
         let index = match List.find_index (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) rows with
           | Some index -> index | None -> 0 in
         let first = max 0 (index - available + 1) in
-        rows |> List.filteri (fun index _ -> index >= first && index < first + available)
+        summary @ (rows |> List.filteri (fun index _ -> index >= first && index < first + available)
         |> List.map (fun row ->
           (if Some row.Masc.Tui_decode.pi_name = t.selected then "› " else "  ") ^ row.pi_name
-          ^ controller_note row.pi_controller
+          ^ controller_note pis_controller row.pi_name
           ^ (if row.pi_expired then " · expired" else "")
-          ^ " · " ^ (match row.pi_expires_at with Some date -> date | None -> "expiry not recorded")) in
+          ^ " · " ^ (match row.pi_expires_at with Some date -> date | None -> "expiry not recorded"))) in
   heading @ form @ message @ body @ [""; "Links issued here remain in this TUI session. Enter opens the retained QR/link."]

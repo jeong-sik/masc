@@ -24,7 +24,7 @@ val write_access : t -> write_access -> t
     The confirmation retains that request ID; a different unknown request
     withdraws the old confirmation. *)
 val loading : t -> t * read
-val listed : t -> read -> (Masc.Tui_decode.play_invite_row list, string) result -> t
+val listed : t -> read -> (Masc.Tui_decode.play_invites, string) result -> t
 (** Only the latest read of this view may replace its inventory. *)
 val notice : t -> string -> t
 val settled : t -> mutation -> t
@@ -36,7 +36,10 @@ val paste : t -> string -> t
     confirmation discard pasted text. Validation remains on Enter. *)
 val key : t -> string -> t * action
 val hints : t -> string
-val controller_note : Masc.Tui_decode.play_invite_controller -> string
-(** The suffix an invite row shows for its standing to the DOS controller,
-    shared by the Collab list and the chat [/play] list. *)
+val controller_note : Masc.Tui_decode.play_controller -> string -> string
+(** The suffix the invite row named by the string shows when it holds the DOS
+    controller. Shared by the Collab list and the chat [/play] list. *)
+val controller_summary : Masc.Tui_decode.play_controller -> string list
+(** The line the invite list shows about the DOS controller, if any: who
+    holds it, that no machine is loaded, or why it could not be asked. *)
 val lines : height:int -> t -> string list

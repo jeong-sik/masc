@@ -4,7 +4,8 @@
     - [POST /api/v1/play/invites] [{name, hours}] issues a [Player]
       credential and answers [{name, expires_at, link}]. The link carries the
       raw token after [#]; this answer is its only copy.
-    - [GET /api/v1/play/invites] lists them, with who holds the DOS controller.
+    - [GET /api/v1/play/invites] lists them, and says once who holds the DOS
+      controller, including when no machine is loaded or it cannot be asked.
     - [DELETE /api/v1/play/invites/<name>] deletes the credential and frees the
       controller the name still holds. Asked again for a name with no
       credential and no keeper, it frees a controller the name took back.
@@ -114,34 +115,41 @@ let query_workspace_precondition ~config request =
     | _ -> Error (`Bad_request, Server_refusal.json ~code:"invalid_workspace_precondition"
         "expected_base_path and expected_masc_root must each occur once")
 
+(* Who holds the shared DOS controller, read once for the whole invite list.
+   No loaded program is a known answer: nobody holds it. [Unobserved] is left
+   for a machine that could not be asked, and the invites, which are
+   credentials, stay listed either way. *)
+type controller_observation =
+  | Held_by of string
+  | Free
+  | No_machine
+  | Unobserved of string
+
 let current_controller ~config =
   match Machine_addon_host.call_shared ~config ~principal:Lane_addon_call_context.Anonymous
       ~name:"masc_dos_screen" ~arguments:(`Assoc []) with
   | Ok result when result.Mcp_protocol.Mcp_types.is_error <> Some true ->
       (match result.structured_content with
        | Some (`Assoc fields) -> (match List.assoc_opt "controller" fields with
-           | Some (`String name) -> Ok (Some name)
-           | Some `Null -> Ok None
-           | _ -> Error "worker controller observation is malformed")
-       | _ -> Error "worker controller observation is unavailable")
-  | Ok result -> Error (Agent_core.Mcp.text_of_tool_result result)
+           | Some (`String name) -> Held_by name
+           | Some `Null -> Free
+           | _ -> Unobserved "worker controller observation is malformed")
+       | _ -> Unobserved "worker controller observation is unavailable")
+  | Ok result ->
+      (match Machine_controller_contract.screen_error_of_meta result._meta with
+       | Some Machine_controller_contract.Screen_no_machine -> No_machine
+       | Some (Machine_controller_contract.Screen_capture_failed
+              | Machine_controller_contract.Screen_encode_failed) | None ->
+           Unobserved (Agent_core.Mcp.text_of_tool_result result))
   | Error (Lane_addon_runtime.Unavailable message | Lane_addon_runtime.Outcome_unknown message
       | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message
-        | Activity_disabled message | Activity_unobserved message)) -> Error message
+        | Activity_disabled message | Activity_unobserved message)) -> Unobserved message
 
-(* How one listed invite stands to the shared DOS controller. The invites are
-   credentials and stay listable when the machine cannot be asked, as right
-   after a restart with no machine loaded; that answer is [Unobserved], never
-   folded into [Not_holding]. *)
-type controller_relation =
-  | Holds
-  | Not_holding
-  | Unobserved
-
-let controller_relation_json = function
-  | Holds -> `String "holds"
-  | Not_holding -> `String "not_holding"
-  | Unobserved -> `String "unobserved"
+let controller_json = function
+  | Held_by name -> `Assoc [ ("state", `String "held"); ("name", `String name) ]
+  | Free -> `Assoc [ ("state", `String "free") ]
+  | No_machine -> `Assoc [ ("state", `String "no_machine") ]
+  | Unobserved reason -> `Assoc [ ("state", `String "unobserved"); ("reason", `String reason) ]
 
 let list_json ~config =
   match Play_invite.list ~base_path:config.Workspace.base_path ~now:(Time_compat.now ()) with
@@ -150,14 +158,11 @@ let list_json ~config =
   | Error (Play_invite.Invalid_expiry (Masc_domain.Credential_expiry.Invalid_timestamp stamp)) ->
     `Service_unavailable, Server_refusal.json ~code:"invalid_credential_expiry" ("invalid credential expiry: " ^ stamp)
   | Ok invites ->
-    let relation_of =
-      match current_controller ~config with
-      | Ok controller ->
-        fun invite_name -> if controller = Some invite_name then Holds else Not_holding
-      | Error detail ->
-        Log.DosLog.info "play invites listed without a controller observation: %s" detail;
-        fun _ -> Unobserved
-    in
+    let controller = current_controller ~config in
+    (match controller with
+     | Unobserved reason ->
+       Log.DosLog.warn "play invites listed without a controller observation: %s" reason
+     | Held_by _ | Free | No_machine -> ());
     `OK, `Assoc
     [ ( "invites"
       , `List
@@ -167,9 +172,9 @@ let list_json ~config =
                  [ ("name", `String invite_name)
                  ; ("expires_at", Json_util.string_opt_to_json expires_at)
                  ; ("expired", `Bool expired)
-                 ; ("controller", controller_relation_json (relation_of invite_name))
                  ])
-             invites))
+             invites) )
+    ; ("controller", controller_json controller)
     ]
 
 type release =

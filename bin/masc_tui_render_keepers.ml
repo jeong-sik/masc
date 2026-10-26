@@ -230,9 +230,9 @@ let keeper_detail_text (row : Keeper_list_model.row) =
     | "" -> None
     | word -> Some ("health " ^ word)
   in
-  List.filter_map Fun.id
-    [ approval; questions; keeper_waiting_detail row; keeper_task_detail row; health ]
-  @ List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
+  List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
+  @ List.filter_map Fun.id
+      [ approval; questions; keeper_waiting_detail row; keeper_task_detail row; health ]
   |> String.concat " · "
 
 let keeper_column_header (columns : Render_schedule.keeper_columns) =

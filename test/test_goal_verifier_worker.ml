@@ -765,7 +765,7 @@ let retain_unattributable_metadata store =
     ~summary:(`Assoc []) ~request:(`Assoc [])
     |> Result.map_error Lane_addon_tool_request_owner.error_to_string)
 
-let retain_noncanonical_metadata store ~goal_id ~request_id ?(attempt=0) =
+let retain_noncanonical_metadata store ~goal_id ~request_id ~attempt =
   let noncanonical = Yojson.Safe.to_string
     (`List [`String goal_id; `String request_id; `Int attempt]) ^ " " in
   get (Lane_addon_tool_request_owner.retain ~store ~scope:"goal-proof-reviews"
@@ -813,7 +813,7 @@ let expect_noncanonical_neighbor_to_commute config store goal_id =
 let test_noncanonical_other_goal_does_not_block_new_review () =
   with_workspace (fun config store _ ->
     let goal_id = pending config in
-    ignore (retain_noncanonical_metadata store ~goal_id:"other-goal" ~request_id:"other-request");
+    ignore (retain_noncanonical_metadata store ~goal_id:"other-goal" ~request_id:"other-request" ~attempt:0);
     let calls = ref 0 in
     with_reviewer (actual_approve calls) (fun () ->
       expect_noncanonical_neighbor_to_commute config store goal_id;
@@ -822,7 +822,7 @@ let test_noncanonical_other_goal_does_not_block_new_review () =
 let test_noncanonical_previous_request_does_not_block_new_review () =
   with_workspace (fun config store _ ->
     let goal_id = pending config in
-    ignore (retain_noncanonical_metadata store ~goal_id ~request_id:"previous-request");
+    ignore (retain_noncanonical_metadata store ~goal_id ~request_id:"previous-request" ~attempt:0);
     let calls = ref 0 in
     with_reviewer (actual_approve calls) (fun () ->
       expect_noncanonical_neighbor_to_commute config store goal_id;
@@ -833,7 +833,7 @@ let test_noncanonical_same_request_never_starts_new_review () =
     let goal_id = pending config in
     let authority = get (A.create_goal_review ~config ~goal_id) in
     let request_id = (A.goal_review_subject authority).request_id in
-    ignore (retain_noncanonical_metadata store ~goal_id ~request_id);
+    ignore (retain_noncanonical_metadata store ~goal_id ~request_id ~attempt:0);
     let calls = ref 0 in
     with_reviewer (actual_approve calls) (fun () ->
       (match Agent.process_pending_work config {Agent.goal_id} with

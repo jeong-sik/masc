@@ -640,7 +640,8 @@ let test_gemini_wire_states_reach_structured () =
     let acc = Wire_acc.create_stream_acc () in
     let chunk = match Wire_stream.parse_gemini_sse_chunk (Yojson.Safe.to_string wire) with
       | Gemini_chunk chunk -> chunk
-      | Gemini_unsupported_part _ | Gemini_unsupported_response _ | Gemini_parse_failed _ ->
+      | Gemini_provider_error _ | Gemini_unsupported_part _ | Gemini_unsupported_response _
+      | Gemini_parse_failed _ ->
         Alcotest.fail "Gemini wire fixture did not parse" in
     (match Wire_stream.gemini_chunk_to_events state chunk with
      | Error error -> Alcotest.fail error.reason

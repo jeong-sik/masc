@@ -205,6 +205,7 @@ let%test "clean stream finalizes Ok: Gemini finishReason" =
      (match Streaming.gemini_chunk_to_events st chunk with
       | Ok (events, _telemetry) -> accumulate_events acc events
       | Error _ -> ())
+   | Streaming.Gemini_provider_error _ -> ()
    | Streaming.Gemini_unsupported_part _ -> ()
    | Streaming.Gemini_unsupported_response _ -> ()
    | Streaming.Gemini_parse_failed _ -> ());
@@ -953,6 +954,18 @@ let complete_stream_http
                        ?first_event_timeout:first_event_timeout_s
                        ?body_timeout:body_timeout_s
                        ~reader
+                       ~on_bodiless_body:(fun body ->
+                         (* A 200 the transport accepted as SSE whose body is a
+                            bare JSON error object, not an event stream: read
+                            the envelope as an in-stream error so its declared
+                            status reaches retry classification. Anything else
+                            falls through to the usual incomplete-stream
+                            failure at finalization. *)
+                         (match
+                            Streaming.sse_error_event_of_bodiless_body ~raw:body body
+                          with
+                          | None -> ()
+                          | Some evt -> dispatch ([ evt ], None)))
                        ~on_data:(fun ~event_type data ->
                          observe_wire_chunk data;
                          let () =
@@ -1024,6 +1037,13 @@ let complete_stream_http
                                    | Ok events -> events
                                    | Error { reason } ->
                                      [ Types.SSEParseFailed { raw = data; reason } ], None)
+                                | Streaming.Gemini_provider_error
+                                    { message; error_type; provider_status; report; raw }
+                                  ->
+                                  ( [ Types.SSEError
+                                        { message; error_type; provider_status; report; raw }
+                                    ]
+                                  , None )
                                 | Streaming.Gemini_parse_failed { reason; raw } ->
                                   [ Types.SSEParseFailed { raw; reason } ], None
                                 | Streaming.Gemini_unsupported_part { part; raw } ->

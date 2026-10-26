@@ -13,6 +13,7 @@ let check label cond =
 let parse_gemini_chunk data =
   match Streaming.parse_gemini_sse_chunk data with
   | Streaming.Gemini_chunk chunk -> Some chunk
+  | Streaming.Gemini_provider_error _ -> None
   | Streaming.Gemini_unsupported_part _ -> None
   | Streaming.Gemini_unsupported_response _ -> None
   | Streaming.Gemini_parse_failed _ -> None
@@ -219,11 +220,113 @@ let test_tool_use_id_roundtrip () =
   Printf.printf "  functionResponse.name: %s (resolved from allocated id)\n" fr_name
 ;;
 
+(* ── 6. error envelopes keep their provider status, in-stream and bodiless ── *)
+let test_error_envelope_classification () =
+  Printf.printf "=== error envelope classification ===\n";
+  (match
+     Streaming.parse_gemini_sse_chunk
+       {|{"error":{"code":429,"message":"slow down","status":"RESOURCE_EXHAUSTED"}}|}
+   with
+   | Streaming.Gemini_provider_error { message; provider_status; report; raw; _ } ->
+     check "in-stream 429 message preserved" (String.equal message "slow down");
+     check
+       "in-stream 429 declares its status"
+       (match provider_status with
+        | Some { Types.status = 429; error_body } -> string_has error_body "slow down"
+        | Some _ | None -> false);
+     check "in-stream 429 report is stated" (report = Types.Provider_stated);
+     check "in-stream 429 raw preserved" (string_has raw "RESOURCE_EXHAUSTED")
+   | Streaming.Gemini_chunk _ -> check "in-stream 429 is not content" false
+   | Streaming.Gemini_unsupported_part _ -> check "in-stream 429 is not a Part kind" false
+   | Streaming.Gemini_unsupported_response _ ->
+     check "in-stream 429 is not a response kind" false
+   | Streaming.Gemini_parse_failed { reason; _ } ->
+     Printf.printf "  FAIL: in-stream 429 collapsed into malformed: %s\n" reason;
+     exit 1);
+  (match
+     Streaming.parse_gemini_sse_chunk
+       {|{"error":{"code":400,"message":"bad key","status":"INVALID_ARGUMENT"}}|}
+   with
+   | Streaming.Gemini_provider_error { message; provider_status; report; _ } ->
+     check "in-stream 400 message preserved" (String.equal message "bad key");
+     check "in-stream 400 declares no status" (provider_status = None);
+     check "in-stream 400 report is stated" (report = Types.Provider_stated)
+   | Streaming.Gemini_chunk _ -> check "in-stream 400 is not content" false
+   | Streaming.Gemini_unsupported_part _ -> check "in-stream 400 is not a Part kind" false
+   | Streaming.Gemini_unsupported_response _ ->
+     check "in-stream 400 is not a response kind" false
+   | Streaming.Gemini_parse_failed { reason; _ } ->
+     Printf.printf "  FAIL: in-stream 400 collapsed into malformed: %s\n" reason;
+     exit 1);
+  (match Streaming.parse_gemini_sse_chunk {|{"error":{"code":"RATE_LIMITED","message":"m"}}|} with
+   | Streaming.Gemini_provider_error { provider_status; _ } ->
+     check "string code declares no status" (provider_status = None)
+   | Streaming.Gemini_chunk _
+   | Streaming.Gemini_unsupported_part _
+   | Streaming.Gemini_unsupported_response _
+   | Streaming.Gemini_parse_failed _ ->
+     check "string code is still a provider error" false);
+  (* A 200 body with no SSE framing at all: the envelope, not an incomplete
+     stream. *)
+  let bodiless_429 = {|{"error":{"code":429,"message":"slow down"}}|} in
+  (match Streaming.sse_error_event_of_bodiless_body ~raw:bodiless_429 bodiless_429 with
+   | Some (Types.SSEError { message; provider_status; report; raw; _ }) ->
+     check "bodiless 429 message preserved" (String.equal message "slow down");
+     check
+       "bodiless 429 declares its status"
+       (match provider_status with
+        | Some { Types.status = 429; _ } -> true
+        | Some _ | None -> false);
+     check "bodiless 429 report is stated" (report = Types.Provider_stated);
+     check "bodiless 429 raw preserved" (String.equal raw bodiless_429)
+   | Some _ -> check "bodiless 429 is an SSE error event" false
+   | None -> check "bodiless 429 is read as an error" false);
+  check
+    "non-envelope body is not an error"
+    (Streaming.sse_error_event_of_bodiless_body
+       ~raw:{|{"candidates":[]}|}
+       {|{"candidates":[]}|}
+     = None);
+  check
+    "invalid JSON body is not an error"
+    (Streaming.sse_error_event_of_bodiless_body ~raw:"{not-json" "{not-json" = None);
+  check
+    "non-object body is not an error"
+    (Streaming.sse_error_event_of_bodiless_body ~raw:"[1,2]" "[1,2]" = None);
+  (* End to end: the bodiless 429 reaches retry classification as the refusal
+     its status line would have been. *)
+  (match Streaming.sse_error_event_of_bodiless_body ~raw:bodiless_429 bodiless_429 with
+   | None -> check "bodiless 429 reaches the accumulator" false
+   | Some evt ->
+     let acc = Complete_stream_acc.create_stream_acc () in
+     Complete_stream_acc.accumulate_event acc evt;
+     (match Complete_stream_acc.finalize_stream_acc acc with
+      | Ok _ -> check "bodiless 429 fails the stream" false
+      | Error serr ->
+        let { Complete_stream_error.error = err; diagnostic = _ } =
+          Complete_stream_error.project_stream_error serr
+        in
+        (match err with
+         | Http_client.HttpError { code = 429; body; retry_after_header } ->
+           let refusal =
+             Retry.classify_refusal ~retry_after_header ~status:429 ~body
+           in
+           check "bodiless 429 is retryable" (Retry.is_retryable refusal)
+         | Http_client.HttpError _ -> check "bodiless 429 keeps its status" false
+         | Http_client.NetworkError _
+         | Http_client.TimeoutError _
+         | Http_client.AcceptRejected _
+         | Http_client.ProviderTerminal _
+         | Http_client.ProviderFailure _ ->
+           check "bodiless 429 is not a wire failure" false)))
+;;
+
 let () =
   test_disable_parallel ();
   test_cache_system_prompt ();
   test_vertex_ai_url ();
   test_sse_function_call ();
   test_tool_use_id_roundtrip ();
-  Printf.printf "\nALL 5 EDGE CASES PASSED\n"
+  test_error_envelope_classification ();
+  Printf.printf "\nALL 6 EDGE CASES PASSED\n"
 ;;

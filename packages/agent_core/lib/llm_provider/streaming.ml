@@ -2543,6 +2543,13 @@ type gemini_unsupported_response = Gemini_multiple_candidates of { count : int }
 
 type gemini_sse_parse_result =
   | Gemini_chunk of gemini_chunk
+  | Gemini_provider_error of
+      { message : string
+      ; error_type : string option
+      ; provider_status : Types.provider_status option
+      ; report : Types.provider_report
+      ; raw : string
+      }
   | Gemini_unsupported_part of
       { part : gemini_unsupported_part
       ; raw : string
@@ -3205,6 +3212,48 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
   Ok { gem_model = model_version; gem_parts = parts; gem_finish_reason; gem_usage }
 ;;
 
+let gemini_provider_error_of_json ~raw json =
+  Option.map
+    (fun (envelope : Openai_error_envelope.t) ->
+      Gemini_provider_error
+        { message = envelope.message
+        ; error_type = envelope.error_type
+        ; provider_status = envelope.provider_status
+        ; report = envelope.report
+        ; raw
+        })
+    (Option.bind
+       (assoc_field_opt "error" json)
+       Openai_error_envelope.of_error_value)
+;;
+
+(* A 200 response the transport accepted as SSE but whose body carries no
+   [data:] payload at all: some providers and gateways answer with a bare
+   JSON error object instead of an event stream. Read the envelope the same
+   way an in-stream chunk would, so the declared status (429/5xx) reaches
+   retry classification instead of surfacing as an incomplete stream. [None]
+   keeps the caller's previous behaviour for anything that is not an error
+   envelope. *)
+let sse_error_event_of_bodiless_body ~raw body =
+  match Yojson.Safe.from_string body with
+  | exception (Yojson.Json_error _ | Invalid_argument _) -> None
+  | (`Assoc _ as json) ->
+    (match
+       Option.bind (assoc_field_opt "error" json) Openai_error_envelope.of_error_value
+     with
+     | None -> None
+     | Some envelope ->
+       Some
+         (Types.SSEError
+            { message = envelope.message
+            ; error_type = envelope.error_type
+            ; provider_status = envelope.provider_status
+            ; report = envelope.report
+            ; raw
+            }))
+  | (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) -> None
+;;
+
 let parse_gemini_sse_chunk data_str : gemini_sse_parse_result =
   match Yojson.Safe.from_string data_str with
   | exception Yojson.Json_error message ->
@@ -3212,14 +3261,17 @@ let parse_gemini_sse_chunk data_str : gemini_sse_parse_result =
   | exception Invalid_argument message ->
     Gemini_parse_failed { raw = data_str; reason = "json_invalid_argument: " ^ message }
   | json ->
-    (match parse_gemini_json json with
-     | Ok chunk -> Gemini_chunk chunk
-     | Error (Gemini_payload_malformed reason) ->
-       Gemini_parse_failed { raw = data_str; reason }
-     | Error (Gemini_payload_unsupported_part part) ->
-       Gemini_unsupported_part { raw = data_str; part }
-     | Error (Gemini_payload_unsupported_response response) ->
-       Gemini_unsupported_response { raw = data_str; response })
+    (match gemini_provider_error_of_json ~raw:data_str json with
+     | Some provider_error -> provider_error
+     | None ->
+       (match parse_gemini_json json with
+        | Ok chunk -> Gemini_chunk chunk
+        | Error (Gemini_payload_malformed reason) ->
+          Gemini_parse_failed { raw = data_str; reason }
+        | Error (Gemini_payload_unsupported_part part) ->
+          Gemini_unsupported_part { raw = data_str; part }
+        | Error (Gemini_payload_unsupported_response response) ->
+          Gemini_unsupported_response { raw = data_str; response }))
 ;;
 
 let gemini_message_start_for_model (state : openai_stream_state) raw_model =

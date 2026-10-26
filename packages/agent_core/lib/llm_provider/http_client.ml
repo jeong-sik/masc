@@ -3228,12 +3228,16 @@ let read_sse
       ?first_event_timeout
       ?body_timeout
       ?(max_event_bytes = Api_common.max_response_body)
+      ?(max_bodiless_body_bytes = 64 * 1024)
       ~reader
       ~on_data
+      ?on_bodiless_body
       ()
   =
   let site = "read_sse" in
   if max_event_bytes <= 0 then invalid_arg "read_sse: max_event_bytes must be positive";
+  if max_bodiless_body_bytes <= 0
+  then invalid_arg "read_sse: max_bodiless_body_bytes must be positive";
   require_clock_when_idle ~site ~clock ~idle_timeout;
   require_clock_when_first_event ~site ~clock ~first_event_timeout ~body_timeout;
   (* SSE keepalive comments carry no payload. Skipping them inside the
@@ -3270,13 +3274,38 @@ let read_sse
      is what closes that shape. *)
   let budget_anchor = ref None in
   let first_line = ref true in
+  (* A 200 response the caller accepted as SSE sometimes carries no [data:]
+     payload at all: some providers and gateways answer with a bare JSON
+     error object instead of an event stream. Retain those raw lines -- only
+     while no data payload has been dispatched, and only under
+     [max_bodiless_body_bytes] -- so [on_bodiless_body] can read the envelope
+     at EOF instead of the stream failing as merely incomplete. A body over
+     the cap, or any dispatched data, drops the retention: the callback never
+     sees a truncated body. *)
+  let data_dispatched = ref false in
+  let bodiless_body = Buffer.create 256 in
+  let bodiless_body_over_cap = ref false in
   let read_protocol_line () =
     let line = read_sse_line reader in
-    if !first_line
-    then (
-      first_line := false;
-      strip_initial_utf8_bom line)
-    else line
+    let line =
+      if !first_line
+      then (
+        first_line := false;
+        strip_initial_utf8_bom line)
+      else line
+    in
+    (match on_bodiless_body with
+     | None -> ()
+     | Some _ ->
+       if (not !data_dispatched) && not !bodiless_body_over_cap
+       then (
+         let added = String.length line + 1 in
+         if Buffer.length bodiless_body + added > max_bodiless_body_bytes
+         then bodiless_body_over_cap := true
+         else (
+           Buffer.add_string bodiless_body line;
+           Buffer.add_char bodiless_body '\n')));
+    line
   in
   let read_meaningful_line () =
     let rec inner () =
@@ -3321,6 +3350,10 @@ let read_sse
         in
         Buffer.clear data_buffer;
         data_seen := false;
+        (* The stream has a body now: retention has no reader left, so drop
+           what it held rather than carrying it to EOF. *)
+        data_dispatched := true;
+        Buffer.clear bodiless_body;
         let renew_gap () =
           renew_after_payload
             ~anchor:budget_anchor
@@ -3402,6 +3435,11 @@ let read_sse
       (* An event without its blank dispatch boundary is incomplete. The
          stream accumulator will fail closed when no terminal marker arrives;
          do not invent a final event at EOF. *)
+      (match on_bodiless_body with
+       | Some on_bodiless_body
+         when not !data_dispatched && not !bodiless_body_over_cap ->
+         on_bodiless_body (Buffer.contents bodiless_body)
+       | Some _ | None -> ());
       ()
   in
   loop ()
@@ -4018,6 +4056,53 @@ let%test "read_sse: no clock/idle_timeout preserves default behaviour" =
       payloads := d :: !payloads;
       Continue Output) ();
     List.rev !payloads = [ "hello"; "world" ])
+;;
+
+let%test "read_sse: on_bodiless_body fires for a body with no data payload" =
+  Eio_main.run (fun _env ->
+    let body = {|{"error":{"code":429,"message":"slow down"}}|} in
+    let flow = Eio.Flow.string_source (body ^ "\n") in
+    let reader = Eio.Buf_read.of_flow ~max_size:1024 flow in
+    let data_calls = ref 0 in
+    let bodiless = ref None in
+    read_sse
+      ~reader
+      ~on_data:(fun ~event_type:_ _ ->
+        incr data_calls;
+        Continue Output)
+      ~on_bodiless_body:(fun raw -> bodiless := Some raw)
+      ();
+    !data_calls = 0 && !bodiless = Some (body ^ "\n"))
+;;
+
+let%test "read_sse: on_bodiless_body stays silent once data is dispatched" =
+  Eio_main.run (fun _env ->
+    let flow = Eio.Flow.string_source "data: hello\n\n" in
+    let reader = Eio.Buf_read.of_flow ~max_size:1024 flow in
+    let data_calls = ref 0 in
+    let bodiless_calls = ref 0 in
+    read_sse
+      ~reader
+      ~on_data:(fun ~event_type:_ _ ->
+        incr data_calls;
+        Continue Output)
+      ~on_bodiless_body:(fun _ -> incr bodiless_calls)
+      ();
+    !data_calls = 1 && !bodiless_calls = 0)
+;;
+
+let%test "read_sse: on_bodiless_body never sees a truncated body" =
+  Eio_main.run (fun _env ->
+    let flow = Eio.Flow.string_source {|{"error":{"code":429,"message":"slow down"}}|} in
+    let reader = Eio.Buf_read.of_flow ~max_size:1024 flow in
+    let bodiless_calls = ref 0 in
+    read_sse
+      ~reader
+      ~max_bodiless_body_bytes:16
+      ~on_data:(fun ~event_type:_ _ -> Continue Output)
+      ~on_bodiless_body:(fun _ -> incr bodiless_calls)
+      ();
+    !bodiless_calls = 0)
 ;;
 
 let%test "read_sse: idle_timeout fires when stream stalls mid-read" =

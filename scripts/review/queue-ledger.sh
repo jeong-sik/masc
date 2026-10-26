@@ -52,7 +52,7 @@ while IFS=$'\t' read -r pr author base head branch draft; do
     if [ -n "$state" ] && [ "$state" != PASS ]; then
       waits=$(printf '%s' "$value" | jq -r '[.blockers[] | "\(.state) by \(.actor // "unidentified") at \(.kind):\(.id // "unknown") since \(.decision_at)"] | join("; ")')
     fi
-    if [ "$state" = PASS ]; then
+    if [ -z "$state" ] || [ "$state" = PASS ]; then
       if check_current_ci; then
         [ "$review_policy" != release ] || evidence="release run $release_run"
         if { [ "$review_policy" = source ] && [ "$cited" != - ]; } ||

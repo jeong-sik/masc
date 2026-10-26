@@ -739,6 +739,24 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
         self.assertEqual(r.stdout, "")
 
 
+class QueueAdmissionDiagnosticCase(GuardHarness):
+    def test_unstructured_formal_cr_names_the_actor_and_record(self):
+        shutil.copy(HERE / "queue-ledger.sh", self.scripts / "queue-ledger.sh")
+        request = {"id": 88, "state": "CHANGES_REQUESTED",
+                   "body": "Please fix the unresolved finding.",
+                   "user": {"login": "blocked-reviewer"}}
+        (self.data / "reviews.json").write_text(json.dumps([request]))
+        gh = self.tmp / "gh"
+        gh.write_text(gh.read_text().replace('shift\n',
+            f'if [ "$1" = pr ]; then printf "41487\\tauthor-keeper\\tmain\\t{HEAD}\\tfix/x\\tfalse\\n"; exit 0; fi\nshift\n', 1))
+        result = subprocess.run(
+            ["bash", str(self.scripts / "queue-ledger.sh"), "--repo", "o/r"],
+            env=dict(os.environ, LEDGER_GH=str(gh), FAKE_DIR=str(self.data)),
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("open CHANGES_REQUESTED from blocked-reviewer (review 88)", result.stdout)
+
+
 class PrintFooterCase(GuardHarness):
     def setUp(self):
         super().setUp()

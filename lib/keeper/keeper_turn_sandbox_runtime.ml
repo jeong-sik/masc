@@ -1983,6 +1983,14 @@ let read_apple_guest ~timeout_sec ~container_name =
       ~argv:(Keeper_sandbox_microvm.inspect_argv_for backend ~container_name) with
   | Error error -> unanswered (Keeper_microvm_cli_output.error_message error)
   | Ok (Unix.WEXITED 0, stdout) ->
+    let module Inventory = Keeper_microvm_inventory_json in
+    let ( let* ) = Result.bind in
+    let* inventory = Inventory.of_apple_json stdout
+      |> Result.map_error (fun error -> Guest_state_unreadable (Inventory.invalid_inventory_message error)) in
+    let* () = match Inventory.presence ~guest_name:container_name inventory with
+      | Ok Inventory.Present -> Ok ()
+      | Ok Inventory.Absent | Error Inventory.Invalid_guest_name ->
+        Error (Guest_state_unreadable "runtime inspect did not identify the requested guest") in
     (match Keeper_sandbox_microvm.running_of_inspect_json_for backend stdout with
      | Ok false -> Ok Apple_stopped
      | Ok true -> Ok (Apple_running (Keeper_sandbox_microvm.apple_guest_facts ~container_name stdout))

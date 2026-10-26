@@ -66,7 +66,7 @@ val microvm_remote_endpoint_of_running :
 
 val microvm_remote_endpoint :
   ?timeout_sec:float -> t -> (Keeper_sandbox_remote.t, string) result
-(** {!microvm_remote_endpoint_of_running} after ensuring the guest is up. The
+(** {!microvm_remote_endpoint_of_running} after ensuring the guest is up.
     Apple completes its first process handoff under Keeper lifecycle ownership,
     including durable identity validation, shim verification and build cleanup. *)
 

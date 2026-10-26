@@ -2,6 +2,7 @@ import { appRequest, appRequestApplied, equalJson, readAppState, writeAppState, 
   type AppState,type AppRequest,type JsonObject } from '../api/artifact-app-data'
 import type { ArtifactWorkspace } from '../api/published-artifacts'
 import { frameInputs,type FrameInputs } from './artifact-app-frame'
+import { resourceOrigins } from './artifact-app-resources'
 import { retainAppInput,discardAppInput,appInputRecoveries,type AppRecovery } from './artifact-app-recovery'
 
 export type AppSessionMode='ready'|'saving'|'checking'|'unknown'|'retry'|'conflict'
@@ -21,7 +22,7 @@ export class ArtifactAppSession {
   private frozen:Operation|null=null
   private recovery:AppRecovery|null=null
   private imported:AppRecovery[]=[]
-  constructor(private readonly options:Options){this.server=options.initial;this.data=structuredClone(options.initial.data);frameInputs(this.data)}
+  constructor(private readonly options:Options){this.server=options.initial;this.data=structuredClone(options.initial.data);frameInputs(this.data);resourceOrigins(this.data)}
   private current():boolean{return this.active&&this.options.current()}
   attachFrame(instance:string):void {
     if(!this.current()||instance===''||this.instance===instance)return
@@ -34,8 +35,8 @@ export class ArtifactAppSession {
   private emit():void{if(this.current())this.options.changed(this.snapshot())}
   refreshCopies():void{this.emit()}
   private retain():void{this.recovery=retainAppInput(this.id,this.options.workspace,this.server,this.data,this.frozen?.request??null)}
-  input(inputs:FrameInputs,change:number,commit:boolean):void {
-    if(!this.current()||this.instance===null||change<=this.change)return
+  input(inputs:FrameInputs,change:number,commit:boolean):boolean {
+    if(!this.current()||this.instance===null||change<=this.change)return false
     this.change=change
     this.data=structuredClone({...this.data,forms:inputs.forms,app:inputs.app})
     if(this.frozen||!equalJson(this.data,this.server.data))this.retain()
@@ -46,6 +47,13 @@ export class ArtifactAppSession {
     }
     this.emit()
     if(commit&&this.mode==='ready')void this.save()
+    return true
+  }
+  async setResources(origins:readonly string[]):Promise<void> {
+    if(!this.current()||this.mode!=='ready'||this.frozen)return
+    const resource_origins=[...resourceOrigins({resource_origins:[...origins]})]
+    this.data=structuredClone({...this.data,resource_origins});this.retain();this.emit()
+    await this.save()
   }
   async save():Promise<void> {
     if(!this.current()||this.mode!=='ready'||this.frozen)return
@@ -67,6 +75,7 @@ export class ArtifactAppSession {
     }
   }
   private acknowledge(saved:AppState,operation:Operation):void {
+    resourceOrigins(saved.data)
     this.server=saved;this.frozen=null;this.mode='ready'
     if(equalJson(this.data,saved.data)){
       if(this.recovery)discardAppInput(this.recovery)
@@ -84,6 +93,7 @@ export class ArtifactAppSession {
       const current=await readAppState(this.server.target,this.options.workspace,this.server.actor)
       if(!this.current()||this.frozen!==operation)return
       if(this.frozen&&appRequestApplied(current,this.frozen.request)){this.acknowledge(current,this.frozen);return}
+      resourceOrigins(current.data)
       this.server=current
       this.mode=this.frozen&&current.version===this.frozen.request.expected_version
         &&!current.receipts.some(receipt=>receipt.id===this.frozen!.request.id)?'retry':'conflict'
@@ -107,7 +117,7 @@ export class ArtifactAppSession {
     if(!this.current()||this.snapshot().pending||this.mode!=='ready'||!sameAppTarget(copy.target,this.server.target)||copy.actor!==this.server.actor
       ||copy.workspace.basePath!==this.options.workspace.basePath||copy.workspace.mascRoot!==this.options.workspace.mascRoot)return
     if(copy.request&&!sameAppTarget(copy.target,copy.request.target))return
-    frameInputs(copy.data)
+    frameInputs(copy.data);resourceOrigins(copy.data)
     this.data=structuredClone(copy.data);this.imported.push(copy)
     this.frozen=copy.request?{request:structuredClone(copy.request),instance:null,change:this.change}:null
     this.mode=this.frozen?'unknown':'conflict';this.wanted=false;this.retain()

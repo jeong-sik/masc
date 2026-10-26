@@ -75,8 +75,10 @@
     free), whether the holder has authoritatively departed, the loaded
     program's saves name (the pad layout's key), and
     every connected keeper, operator and unexpired invite ({!Play_seat.participants}).
-    Seat and controller state are read from the attached shared DOS Add-on
-    under one credential transaction, and departure is judged with
+    The attached shared DOS Add-on is asked before the credential
+    transaction, so a slow worker never holds the workspace credential lock;
+    inside the transaction the seat reads participants and participation and
+    judges the observed holder's departure with
     {!Keeper_machine_controller_authority.holder_left}. The read does not
     release a controller; the next actual move rechecks departure through
     its own host admission. A missing or unreadable worker answers

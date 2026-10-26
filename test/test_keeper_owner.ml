@@ -5665,48 +5665,82 @@ let test_owner_projection_concurrent_writers_preserve_other_keys () =
   Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
     Eio.Switch.run @@ fun sw ->
     let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
-    let start name =
-      owner_ok (start_owner ~sw ~store ~keeper_name:name ~initial_meta:(Some (make_meta name)))
+    let start name updated_at =
+      let initial = { (make_meta name) with updated_at } in
+      owner_ok (start_owner ~sw ~store ~keeper_name:name ~initial_meta:(Some initial))
     in
     let first_name = "projection-writer-first" in
     let second_name = "projection-writer-second" in
-    let first = start first_name in
-    let second = start second_name in
+    let first_odd = start first_name "odd-generation" in
+    let first_even = start first_name "even-generation" in
+    let second_odd = start second_name "odd-generation" in
+    let second_even = start second_name "even-generation" in
     let install name owner =
       Keeper_owner_projection.install ~base_path ~keeper_name:name owner
     in
     let remove name owner =
       Keeper_owner_projection.remove ~base_path ~keeper_name:name owner
     in
-    let check_name name =
+    let check_name name updated_at =
       match Keeper_owner_projection.lookup ~base_path ~keeper_name:name with
       | Owner_absent -> fail "concurrent writer lost a projection key"
       | Owner_projection { meta = None; _ } -> fail "concurrent lookup lost metadata"
       | Owner_projection { meta = Some meta; _ } ->
-          check string "concurrent lookup retains the named Owner" name meta.name
+          check string "concurrent lookup retains the named Owner" name meta.name;
+          check string "concurrent lookup retains this round's replacement"
+            updated_at meta.updated_at
     in
-    let writer name owner stale =
+    let stopped = Atomic.make false in
+    let requested_round = Atomic.make 0 in
+    let completed_rounds = Atomic.make 0 in
+    let rec await_round round =
+      if Atomic.get stopped then false
+      else if Atomic.get requested_round >= round then true
+      else (Domain.cpu_relax (); await_round round)
+    in
+    let rec await_completed round =
+      if Atomic.get completed_rounds = 2 * round then ()
+      else if Atomic.get stopped then fail "projection writer stopped before completing its round"
+      else (Domain.cpu_relax (); await_completed round)
+    in
+    let writer name odd even =
       Domain.spawn (fun () ->
-        for _ = 1 to 300 do
-          install name owner;
-          remove name stale
-        done)
+        let finished_normally = ref false in
+        Fun.protect
+          ~finally:(fun () ->
+            if not !finished_normally then Atomic.set stopped true)
+          (fun () ->
+            let current = ref None in
+            for round = 1 to 300 do
+              if await_round round then (
+                Option.iter (remove name) !current;
+                let replacement = if round mod 2 = 1 then odd else even in
+                install name replacement;
+                current := Some replacement;
+                Atomic.incr completed_rounds)
+            done;
+            finished_normally := true))
+    in
+    let stop_and_join writer =
+      Atomic.set stopped true;
+      Domain.join writer
     in
     Fun.protect
-      ~finally:(fun () -> remove first_name first; remove second_name second)
+      ~finally:(fun () ->
+        List.iter (remove first_name) [first_odd; first_even];
+        List.iter (remove second_name) [second_odd; second_even])
       (fun () ->
-        install first_name first;
-        install second_name second;
-        let first_writer = writer first_name first second in
-        Fun.protect ~finally:(fun () -> Domain.join first_writer) (fun () ->
-          let second_writer = writer second_name second first in
-          Fun.protect ~finally:(fun () -> Domain.join second_writer) (fun () ->
-            for _ = 1 to 300 do
-              check_name first_name;
-              check_name second_name
-            done));
-        check_name first_name;
-        check_name second_name))
+        let first_writer = writer first_name first_odd first_even in
+        Fun.protect ~finally:(fun () -> stop_and_join first_writer) (fun () ->
+          let second_writer = writer second_name second_odd second_even in
+          Fun.protect ~finally:(fun () -> stop_and_join second_writer) (fun () ->
+            for round = 1 to 300 do
+              Atomic.set requested_round round;
+              await_completed round;
+              let updated_at = if round mod 2 = 1 then "odd-generation" else "even-generation" in
+              check_name first_name updated_at;
+              check_name second_name updated_at
+            done))))
 ;;
 
 let test_registry_reads_owner_atomic_projection () =

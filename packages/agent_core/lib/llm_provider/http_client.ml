@@ -2037,9 +2037,9 @@ let get_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
   in
   catch_network (fun () ->
     let* origin = parse_uri url in
-    with_client ?cache ~sw ~net ~origin (fun ~sw client ->
-      let hdr = Http.Header.of_list (maybe_add_connection_close ?cache headers) in
-      with_explicit_deadline deadline (fun () ->
+    with_explicit_deadline deadline (fun () ->
+      with_client ?cache ~sw ~net ~origin (fun ~sw client ->
+        let hdr = Http.Header.of_list (maybe_add_connection_close ?cache headers) in
         let resp, resp_body =
           Cohttp_eio.Client.get ~sw client ~headers:hdr origin.uri
         in

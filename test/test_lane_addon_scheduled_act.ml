@@ -123,9 +123,9 @@ let create_schedule ?installation_id ?(recurrence = Schedule_domain.Interval { i
   |> Result.map_error Schedule_service.service_error_to_string |> unwrap
 
 let tick config ~now =
-  Schedule_runner.tick ~consumer:Consumers.consumer config ~now
+  Schedule_runner.tick ~pending_settlements:[] ~consumer:Consumers.consumer config ~now
     ~retention_days:Schedule_store.terminal_schedule_retention_days
-  |> Result.map_error Schedule_runner.runner_error_to_string |> unwrap
+  |> Result.map_error Schedule_runner.tick_failure_to_string |> unwrap
 
 (* The one dispatch of [schedule_id] in a tick. *)
 let dispatch_of (result : Schedule_runner.tick_result) schedule_id =

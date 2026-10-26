@@ -1,6 +1,7 @@
 open Alcotest
 module P = Endpoint_job_protocol
 module R = Endpoint_job_registry
+module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
 let require = function Ok value -> value | Error e -> fail e
 let get = function Ok value -> value | Error e -> fail (R.error_to_string e)
 let id suffix = P.Id.of_string ("019a0000-0000-7000-8000-0000000000" ^ suffix) |> require
@@ -212,6 +213,208 @@ let test_private_authority_and_filesystem_aliases () =
     check string "outside evidence is never modified by failed recovery" content
       (In_channel.with_open_bin outside In_channel.input_all))) [`Symlink;`Hardlink]
 
+let cancel record =
+  R.request_cancel record ~confirmed_admission_id:(R.admission_id record) |> get
+
+let test_cancel_before_launch_preserves_original_and_blocks_admission () =
+  fixture (fun ~env:_ ~sw:_ ~root:_ ~registry ~open_root ->
+    let b=binding (id "05") in let original=admitted registry b in
+    check bool "another admission cannot cancel this operation" true
+      (R.request_cancel original ~confirmed_admission_id:(id "99")=Error R.Binding_mismatch);
+    let cancelled=cancel original in
+    check int64 "cancellation advances the ready head once" 2L (R.revision cancelled);
+    check bool "cancellation is retained before any callback" true
+      (R.cancellation_state cancelled=R.Cancellation_requested && R.launch_state cancelled=R.Not_requested);
+    let recovered=R.load (open_root () |> get) ~binding:b |> get in
+    check bool "reopen preserves the same cancelled input and admission" true
+      (R.cancellation_state recovered=R.Cancellation_requested && R.specification recovered=spec
+       && R.admission_id recovered=R.admission_id original);
+    let duplicate=cancel original in
+    check int64 "duplicate cancellation does not create another revision" (R.revision recovered) (R.revision duplicate);
+    let repeated=R.admit registry ~new_admission_id:(id "99") ~binding:b ~spec |> get in
+    check bool "repeating Start cannot resurrect a cancelled original" true
+      (R.cancellation_state repeated=R.Cancellation_requested && R.admission_id repeated=R.admission_id original);
+    check bool "the stale ready record cannot obtain a launch permit" true
+      (R.commit_launch original ~confirmed_admission_id:(id "04") ~launch_id:(id "06")=Error R.Launch_cancelled);
+    check bool "the recovered cancellation cannot obtain a launch permit" true
+      (R.commit_launch recovered ~confirmed_admission_id:(id "04") ~launch_id:(id "06")=Error R.Launch_cancelled))
+
+let test_cancel_wins_over_an_unconsumed_launch_permit () =
+  fixture (fun ~env:_ ~sw:_ ~root:_ ~registry ~open_root ->
+    let b=binding (id "05") in let original=admitted registry b in
+    let permit=commit original in
+    let cancelled=cancel original in
+    check int64 "cancellation follows the original launch intent" 3L (R.revision cancelled);
+    check bool "the cancelled record preserves the original launch ID" true
+      (R.launch_state cancelled=R.Requested (id "06") && R.cancellation_state cancelled=R.Cancellation_requested);
+    let count=ref 0 in
+    (match R.with_launch permit (fun _ -> incr count) with
+     | R.Not_performed R.Launch_cancelled -> ()
+     | R.Not_performed _ | R.Performed _ -> fail "a cancelled issued permit entered its callback");
+    check int "no payload startup callback ran" 0 !count;
+    let recovered=R.load (open_root () |> get) ~binding:b |> get in
+    check bool "recovered cancellation still identifies the same launch" true
+      (R.launch_state recovered=R.Requested (id "06") && R.cancellation_state recovered=R.Cancellation_requested);
+    check int64 "duplicate cancel of a launched intent remains idempotent" 3L (R.revision (cancel original)))
+
+let test_lost_cancel_reply_is_reconciled_without_republication () =
+  List.iter (fun launch_requested -> fixture (fun ~env:_ ~sw:_ ~root:_ ~registry ~open_root ->
+    let b=binding (id "05") in let original=admitted registry b in
+    if launch_requested then ignore (commit original);
+    (match R.For_testing.request_cancel ~after_publication:(fun () -> raise Interrupted)
+        original ~confirmed_admission_id:(id "04") with
+     | exception Interrupted -> ()
+     | Ok _ | Error _ -> fail "lost cancellation reply boundary was not reached");
+    let reopened=open_root () |> get in
+    let recovered=R.load reopened ~binding:b |> get in
+    check bool "lost reply does not lose cancellation intent" true
+      (R.cancellation_state recovered=R.Cancellation_requested);
+    let again=R.For_testing.request_cancel ~after_publication:(fun () -> fail "duplicate cancel published again")
+        recovered ~confirmed_admission_id:(id "04") |> get in
+    check int64 "retry acknowledges the original cancellation revision" (R.revision recovered) (R.revision again);
+    check bool "retry cannot rewrite the original launch identity" true
+      (R.launch_state recovered=R.launch_state again && R.admission_id recovered=R.admission_id again)))
+    [false;true]
+
+let test_cancel_race_with_active_startup_leaves_other_jobs_progressing () =
+  fixture (fun ~env ~sw ~root:_ ~registry ~open_root:_ ->
+    Eio.Time.with_timeout_exn env#clock 10. (fun () ->
+      let original=admitted registry (binding (id "05")) in let permit=commit original in
+      let entered,signal=Eio.Promise.create () in let release_startup,unblock=Eio.Promise.create () in
+      let finished,finish=Eio.Promise.create () in
+      let release ()=if Eio.Promise.peek release_startup=None then Eio.Promise.resolve unblock () in
+      Fun.protect ~finally:release (fun () ->
+        Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve finish
+          (R.with_launch permit (fun _ -> Eio.Promise.resolve signal ();Eio.Promise.await release_startup;"started")));
+        Eio.Promise.await entered;
+        check bool "cancel does not wait while that startup is active" true
+          (R.request_cancel original ~confirmed_admission_id:(id "04")=Error R.Busy);
+        let other=admitted registry (binding (id "07")) in let other_cancelled=cancel other in
+        check bool "independent cancellation commits before the first startup releases" true
+          (R.cancellation_state other_cancelled=R.Cancellation_requested && Eio.Promise.peek finished=None);
+        release ();
+        check string "the actual startup result survives the concurrent request" "started"
+          (Eio.Promise.await finished |> completed);
+        let cancelled=cancel original in
+        check bool "the same original can be cancelled after its startup settles" true
+          (R.cancellation_state cancelled=R.Cancellation_requested && R.launch_state cancelled=R.Requested (id "06")))))
+
+let test_cancel_keeps_boot_and_payload_identity_authority () =
+  fixture (fun ~env:_ ~sw:_ ~root:_ ~registry ~open_root ->
+    let b=binding (id "05") in ignore (admitted registry b);
+    let rebooted=open_root ~route:{route with boot_id=id "08"} () |> get in
+    let old=R.load rebooted ~binding:b |> get in
+    check bool "a replaced endpoint cannot cancel its old boot" true
+      (R.request_cancel old ~confirmed_admission_id:(id "04")=Error R.Endpoint_replaced);
+    let changed=open_root ~payload_uid:(chosen_payload_uid ()+1) () |> get in
+    let old=R.load changed ~binding:b |> get in
+    check bool "changed payload configuration cannot retarget cancellation" true
+      (R.request_cancel old ~confirmed_admission_id:(id "04")=Error R.Execution_identity_changed);
+    let original=R.load registry ~binding:b |> get in
+    check bool "rejected cancellation leaves the original executable" true
+      (R.cancellation_state original=R.No_cancellation);
+    check string "the original identity still owns its permitted startup" "original"
+      (R.with_launch (commit original) (fun _ -> "original") |> completed))
+
+let test_uncertain_cancel_requires_successful_original_resync () =
+  List.iter (fun launch_requested -> fixture (fun ~env:_ ~sw:_ ~root ~registry ~open_root ->
+    let b=binding (id "05") in let original=admitted registry b in
+    if launch_requested then ignore (commit original);
+    let fault=Recovery_test.parent_sync_dispatch_fault
+        ~exception_:(Sys_error "injected cancellation parent sync failure") in
+    (match Recovery_test.with_replace_dispatch_fault fault (fun () ->
+        R.request_cancel original ~confirmed_admission_id:(id "04")) with
+     | Error (R.Publication_failed failure) ->
+       check bool "the real cancellation rename completed before failure" true
+         (failure.target_effect=Fs_compat.Target_replaced);
+       (match failure.primary_failure with
+        | Fs_compat.Write_primary_failure failed ->
+          check bool "publication parent sync actually failed" true (failed.stage=Fs_compat.Sync_parent)
+        | Fs_compat.Recovery_primary_failure _ | Fs_compat.Recovery_access_primary_failure _ ->
+          fail "the injected failure did not reach the publication parent sync");
+       check bool "cleanup could not confirm the parent sync either" true
+         (List.exists (function
+           | Fs_compat.Write_cleanup_failure failed -> failed.stage=Fs_compat.Cleanup_sync_parent
+           | Fs_compat.Recovery_cleanup_failure _ -> false) failure.cleanup_failures)
+     | Error error -> fail (R.error_to_string error)
+     | Ok _ -> fail "an uncertain cancellation publication was acknowledged");
+    let reopened=open_root () |> get in
+    let pending=R.load reopened ~binding:b |> get in
+    check bool "visible cancellation still names the exact original" true
+      (R.cancellation_state pending=R.Cancellation_requested && R.binding pending=b
+       && R.admission_id pending=id "04" && R.specification pending=spec);
+    let claim=claim_path root b in
+    let inode=(Unix.lstat claim).st_ino in
+    let bytes=In_channel.with_open_bin claim In_channel.input_all in
+    let sync_attempts=ref 0 in
+    let no_publication ()=fail "a duplicate cancellation republished its claim" in
+    (match R.For_testing.request_cancel
+        ~before_resync_parent:(fun () -> incr sync_attempts;raise (Unix.Unix_error (Unix.EIO,"fsync","cancel parent")))
+        ~after_publication:no_publication pending ~confirmed_admission_id:(id "04") with
+     | Error (R.Authority_unavailable _) -> ()
+     | Error error -> fail (R.error_to_string error)
+     | Ok _ -> fail "a duplicate cancellation acknowledged a failed resync");
+    check int "failed retry entered the real parent sync boundary" 1 !sync_attempts;
+    let unchanged=R.load reopened ~binding:b |> get in
+    check int64 "failed resync leaves the same cancellation revision" (R.revision pending) (R.revision unchanged);
+    let confirmed=R.For_testing.request_cancel
+        ~before_resync_parent:(fun () -> incr sync_attempts)
+        ~after_publication:no_publication unchanged ~confirmed_admission_id:(id "04") |> get in
+    check int "successful retry also settles the actual parent sync" 2 !sync_attempts;
+    check int64 "durable duplicate ACK preserves the original revision" (R.revision pending) (R.revision confirmed);
+    check bool "durable duplicate ACK preserves admission, input and launch coordinates" true
+      (R.binding confirmed=b && R.admission_id confirmed=R.admission_id pending
+       && R.specification confirmed=R.specification pending && R.payload_uid confirmed=R.payload_uid pending
+       && R.launch_state confirmed=R.launch_state pending && R.cancellation_state confirmed=R.Cancellation_requested);
+    check int "resync never replaces the original cancellation inode" inode (Unix.lstat claim).st_ino;
+    check string "resync never rewrites the original cancellation bytes" bytes
+      (In_channel.with_open_bin claim In_channel.input_all))) [false;true]
+
+let test_cancel_rejects_rebound_job_and_known_launch_coordinates () =
+  List.iter (fun fault -> fixture (fun ~env:_ ~sw:_ ~root ~registry ~open_root:_ ->
+    let b=binding (id "05") in let ready=admitted registry b in
+    let permit,original=match fault with
+      | `Job_rebound -> None,ready
+      | `Known_launch_rebound | `Cancelled_launch_rebound ->
+        let permit=commit ready in
+        Some permit,(R.load registry ~binding:b |> get)
+      | `Cancelled_ready_resurrected -> None,cancel ready in
+    if fault=`Cancelled_launch_rebound then ignore (cancel original);
+    let claim=claim_path root b in
+    let json=Yojson.Safe.from_file claim in
+    let fields=match json with `Assoc fields -> fields | _ -> fail "fixture claim is not an object" in
+    let replace key value fields = (key,value)::List.remove_assoc key fields in
+    let fields=match fault with
+      | `Job_rebound ->
+        let job=job_path root b in Unix.rename job (job ^ ".evidence");Unix.mkdir job 0o700;
+        List.iter (fun name ->
+          let content=In_channel.with_open_bin (Filename.concat (job ^ ".evidence") name) In_channel.input_all in
+          let target=Filename.concat job name in Out_channel.with_open_bin target (fun oc -> output_string oc content);
+          Unix.chmod target (if name="lease" then 0o600 else 0o400)) ["admission_id";"original.json";"lease"];
+        let stat=Unix.lstat job in
+        fields |> replace "job_device" (`String (string_of_int stat.st_dev))
+          |> replace "job_inode" (`String (string_of_int stat.st_ino))
+      | `Known_launch_rebound | `Cancelled_launch_rebound ->
+        replace "launch_id" (`String (P.Id.to_string (id "07"))) fields
+      | `Cancelled_ready_resurrected ->
+        fields |> replace "state" (`String "launch_requested")
+          |> replace "launch_id" (`String (P.Id.to_string (id "07"))) in
+    Unix.chmod claim 0o600;
+    Yojson.Safe.to_file claim (`Assoc fields);Unix.chmod claim 0o400;
+    let before=In_channel.with_open_bin claim In_channel.input_all in
+    ignore (R.load registry ~binding:b |> get);
+    check bool "stale original never cancels rebound execution coordinates" true
+      (R.request_cancel original ~confirmed_admission_id:(id "04")=Error R.Stale_record);
+    check string "rejection publishes no cancellation over the rebound claim" before
+      (In_channel.with_open_bin claim In_channel.input_all);
+    Option.iter (fun permit ->
+      let entered=ref false in
+      (match R.with_launch permit (fun _ -> entered:=true) with
+       | R.Not_performed R.Stale_record -> ()
+       | R.Not_performed _ | R.Performed _ -> fail "rebound original was not rejected before cancellation/launch");
+      check bool "no rebound startup callback ran" false !entered) permit))
+    [`Job_rebound;`Known_launch_rebound;`Cancelled_launch_rebound;`Cancelled_ready_resurrected]
+
 let ()=run "endpoint job registry" ["original durable admission",[
   test_case "original admission is idempotent and survives reopen" `Quick test_original_admission_survives_reopen;
   test_case "preparing interruptions resume original admission and directory" `Quick test_preparing_boundaries_resume_original;
@@ -221,4 +424,11 @@ let ()=run "endpoint job registry" ["original durable admission",[
   test_case "busy startup leaves an independent owner executable" `Quick test_busy_owner_does_not_block_other_owner;
   test_case "missing and corrupt originals never become replacement work" `Quick test_missing_or_corrupt_original_does_not_reconstruct;
   test_case "changed boot or payload configuration never retargets the original" `Quick test_owner_boot_and_execution_identity_cannot_retarget;
-  test_case "private authority, symlinks and hardlinks remain explicit refusals" `Quick test_private_authority_and_filesystem_aliases]]
+  test_case "private authority, symlinks and hardlinks remain explicit refusals" `Quick test_private_authority_and_filesystem_aliases;
+  test_case "cancel before launch preserves original and cannot resurrect" `Quick test_cancel_before_launch_preserves_original_and_blocks_admission;
+  test_case "cancel wins over an unconsumed launch permit" `Quick test_cancel_wins_over_an_unconsumed_launch_permit;
+  test_case "lost cancellation reply is reconciled without republication" `Quick test_lost_cancel_reply_is_reconciled_without_republication;
+  test_case "uncertain cancellation needs a successful original claim resync" `Quick test_uncertain_cancel_requires_successful_original_resync;
+  test_case "cancel during startup leaves independent jobs progressing" `Quick test_cancel_race_with_active_startup_leaves_other_jobs_progressing;
+  test_case "cancel preserves original boot and payload identity authority" `Quick test_cancel_keeps_boot_and_payload_identity_authority;
+  test_case "cancel rejects rebound job and known launch coordinates" `Quick test_cancel_rejects_rebound_job_and_known_launch_coordinates]]

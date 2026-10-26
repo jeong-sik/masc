@@ -25,8 +25,8 @@
   "command": "See README: interpreter only, no compilation; Unix and Mtime bytecode libraries.",
   "current_files": {
     "README.md": {
-      "bytes": 7174,
-      "sha256": "5edc623ecc8dc80485ccedac8955eb2b0341e0e52b1fa3ade597b3d2c6c8e874"
+      "bytes": 7412,
+      "sha256": "bc0d4ef08f7747098bd69501d62bfc0e3b5ede6c5b3f1065513e8a391f4f2922"
     },
     "comparison.json": {
       "bytes": 4094,

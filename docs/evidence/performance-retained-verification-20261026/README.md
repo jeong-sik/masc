@@ -1,14 +1,18 @@
 # Retained-file verification: bounded reread allocation
 
 The running `1ce158d50d3eb48648e6deea7f668172f914fea3` server still allocates
-heavily while restoring retained Lane requests. One 31.767-second window of
-the existing Memprof reports estimates 127,685,600,000 allocated bytes and
+heavily while restoring retained Lane requests. Two existing Memprof report
+requests started 31.767 seconds apart; their counter differences estimate
+127,685,600,000 allocated bytes and
 109,614,400,000 bytes reaching the major heap. Dropped samples stayed at
 4,270,314: no new drops in this window, with historical loss still present.
 The two raw reports and their derived [summary](live-window-summary.json)
 are retained here. The endpoint exposes only the largest 30 sites; common
 site deltas are not a complete attribution. Sampling, report collection and
 the shared host affect the observation.
+The actual snapshots occur within their HTTP request brackets, so their
+interval is bounded between 30.076157417 and 31.836511333 seconds. These
+counters do not establish an exact allocation throughput.
 
 All seven health observations identify the same source, executable and
 runtime instance, with 25 Keeper fibers. Sampled RSS spans 18,424,840,192 to

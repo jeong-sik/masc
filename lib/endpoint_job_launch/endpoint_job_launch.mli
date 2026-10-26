@@ -25,7 +25,6 @@ type execution =
 
 type error =
   | Scope_unavailable
-  | Original_mismatch
   | Registry_error of R.error
   | Group_error of G.Group.error
   | Process_error of G.error
@@ -61,9 +60,10 @@ val launch_effect_workspace :
     and resources still owned by [sw]. No restart or lost reply grants replay.
     Journal coordinates alone never restore lost kernel wait/signal authority. *)
 
-val cancel : registry:R.t -> t -> (R.record, error) result
-(** Load and verify this owner's original admission, specification, payload UID
-    and known launch ID; commit cancellation before retiring/killing its exact
+val cancel : t -> (R.record, error) result
+(** Revalidate through the opaque original record captured by the launch permit,
+    preserving its exact registry, admission, job and known launch identity.
+    Commit cancellation before retiring/killing its exact
     original kernel tree. A returned record proves durable intent plus a kill
     request, not termination. Missing/replaced authority issues no signal. *)
 
@@ -82,6 +82,6 @@ module For_testing : sig
     R.launch_intent -> (t, error) result R.launch_outcome
   (** Actual paused child and durable rendezvous, before activation intent. *)
   val cancel :
-    after_intent:(R.record -> unit) -> registry:R.t -> t -> (R.record, error) result
+    after_intent:(R.record -> unit) -> t -> (R.record, error) result
   (** Actual committed cancellation, before the original tree kill request. *)
 end

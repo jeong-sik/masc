@@ -5,13 +5,12 @@ let ( let* ) = Result.bind
 
 type execution = { executable : string; env : string list; cwd : string; payload_gid : int }
 type error =
-  | Scope_unavailable | Original_mismatch
+  | Scope_unavailable
   | Registry_error of R.error | Group_error of G.Group.error | Process_error of G.error
   | Codec_error of P.codec_error | Storage_unavailable
   | Publication_failed of Fs_compat.capability_write_error | Recovery_failed of string
 let error_to_string = function
   | Scope_unavailable -> "execution boundary unavailable"
-  | Original_mismatch -> "original launch authority changed"
   | Registry_error e -> R.error_to_string e
   | Group_error e -> G.Group.error_to_string e
   | Process_error e -> G.error_to_string e
@@ -96,13 +95,8 @@ let launch_with_hook ~after_rendezvous ~sw ~fs ~cgroup_parent_path ~(execution :
     let activation=match activate () with Ok () -> Requested | Error e -> Held e in
     Ok {target;group=tree;child;activation})
 
-let cancel_with_hook ~after_intent ~registry t =
-  let* current=R.load registry ~binding:t.target.binding |> Result.map_error (fun e -> Registry_error e) in
-  let* ()=if R.binding current=t.target.binding && R.specification current=t.target.spec
-      && R.admission_id current=t.target.admission_id && R.payload_uid current=t.target.payload_uid
-      && R.launch_state current=R.Requested t.target.launch_id
-    then Ok () else Error Original_mismatch in
-  let* committed=R.request_cancel current ~confirmed_admission_id:t.target.admission_id
+let cancel_with_hook ~after_intent t =
+  let* committed=R.request_cancel t.target.original_record ~confirmed_admission_id:t.target.admission_id
     |> Result.map_error (fun e -> Registry_error e) in
   after_intent committed;
   let* ()=G.Group.kill_tree t.group |> group in
@@ -116,7 +110,7 @@ let await_quiescent t =
 let launch_effect_workspace ~sw ~fs ~cgroup_parent_path ~execution ~stdin ~stdout ~stderr intent =
   launch_with_hook ~after_rendezvous:(fun () -> ()) ~sw ~fs ~cgroup_parent_path
     ~execution ~stdin ~stdout ~stderr intent
-let cancel ~registry t = cancel_with_hook ~after_intent:(fun _ -> ()) ~registry t
+let cancel t = cancel_with_hook ~after_intent:(fun _ -> ()) t
 module For_testing = struct
   let launch_effect_workspace = launch_with_hook
   let cancel = cancel_with_hook

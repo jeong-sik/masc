@@ -97,7 +97,7 @@ let publication_failure_retains_paused_owner = fixture (fun ~env ~sw:_ ~store fi
   check "paused owner never ran payload" (not (Sys.file_exists (Filename.concat fixture.work "activated")));
   Alcotest.(check string) "conflicting evidence preserved" "conflicting original evidence" (read path);
   let observed=ref false in
-  ignore (L.For_testing.cancel ~registry:store ~after_intent:(fun current ->
+  ignore (L.For_testing.cancel ~after_intent:(fun current ->
     observed:=true;
     check "original cancel intent exists before original kernel tree kill"
       (R.cancellation_state current=R.Cancellation_requested)) child |> get);
@@ -128,7 +128,8 @@ let wait_and_cancel_require_original_authority = fixture (fun ~env ~sw:_ ~store 
   let input,writer=Unix.pipe ~cloexec:true () and reader,output=Unix.pipe ~cloexec:true () in
   Fun.protect ~finally:(fun () -> List.iter Unix.close [input;writer;reader;output]) (fun () ->
     Eio.Switch.run (fun sw ->
-      let binding,permit=prepare store fixture "05" "printf ready; exec /bin/cat" in
+      let script="printf ready; exec /bin/cat" in
+      let binding,permit=prepare store fixture "05" script in
       let child=start ~sw ~env fixture permit ~input ~output in
       Eio_unix.await_readable reader;
       let bytes=Bytes.create 5 in
@@ -136,9 +137,21 @@ let wait_and_cancel_require_original_authority = fixture (fun ~env ~sw:_ ~store 
       Alcotest.(check string) "original payload actually entered and waits on its own input" "ready" (Bytes.sub_string bytes 0 n);
       let other_root=Filename.concat fixture.root "other-registry" in Unix.mkdir other_root 0o700;
       let other=R.open_registry ~sw ~fs:env#fs ~root_path:other_root ~route ~owner ~payload_uid:fixture.uid |> registry in
-      (match L.cancel ~registry:other child with
-       | Error (L.Registry_error _) -> ()
-       | Error _ | Ok _ -> Alcotest.fail "missing original authority issued a cancel");
+      let other_binding,_other_permit=prepare other fixture "05" script in
+      let actual=R.load store ~binding |> registry in
+      let alternate=R.load other ~binding:other_binding |> registry in
+      check "another valid protected registry has every matching public coordinate"
+        (R.binding alternate=R.binding actual && R.specification alternate=R.specification actual
+         && R.admission_id alternate=R.admission_id actual && R.payload_uid alternate=R.payload_uid actual
+         && R.launch_state alternate=R.launch_state actual && R.revision alternate=R.revision actual);
+      let other_claim=Filename.concat other_root (P.Id.to_string binding.operation_id ^ ".claim.json") in
+      let alternate_bytes=read other_claim in
+      let actual_claim=Filename.concat fixture.registry_path (P.Id.to_string binding.operation_id ^ ".claim.json") in
+      Unix.rename actual_claim (actual_claim ^ ".unavailable");
+      Fun.protect ~finally:(fun () -> Unix.rename (actual_claim ^ ".unavailable") actual_claim) (fun () ->
+        match L.cancel child with
+        | Error (L.Registry_error _) -> ()
+        | Error _ | Ok _ -> Alcotest.fail "a matching alternate replaced unavailable original cancellation authority");
       let entered,signal=Eio.Promise.create () in
       Eio.Fiber.first
         (fun () -> Eio.Promise.resolve signal ();ignore (L.await_quiescent child |> get);
@@ -155,9 +168,19 @@ let wait_and_cancel_require_original_authority = fixture (fun ~env ~sw:_ ~store 
       let n=Eio_unix.run_in_systhread (fun () -> Unix.read reader echoed 0 (Bytes.length echoed)) in
       Alcotest.(check string) "same original still performs work after unavailable authority and cancelled wait"
         input_bytes (Bytes.sub_string echoed 0 n);
-      ignore (L.cancel ~registry:store child |> get);
+      ignore (L.For_testing.cancel ~after_intent:(fun committed ->
+        let actual=R.load store ~binding |> registry in
+        check "actual origin cancellation is durable before the original tree kill"
+          (R.cancellation_state committed=R.Cancellation_requested
+           && R.cancellation_state actual=R.Cancellation_requested);
+        let alternate_now=R.load other ~binding:other_binding |> registry in
+        check "matching alternate registry never acquires the cancellation"
+          (R.cancellation_state alternate_now=R.No_cancellation
+           && R.revision alternate_now=R.revision alternate
+           && R.launch_state alternate_now=R.launch_state alternate)) child |> get);
       let current=R.load store ~binding |> registry in
       check "known original cancellation is durably retained" (R.cancellation_state current=R.Cancellation_requested);
+      Alcotest.(check string) "cancellation never rewrites the alternate original claim" alternate_bytes (read other_claim);
       let physical=L.await_quiescent child |> get in
       check "cancel requests settle the original main and tree" (physical.status=G.Signaled 9))))
 

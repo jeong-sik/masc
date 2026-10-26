@@ -85,7 +85,8 @@ let cancellation_state record = match record.claim.state with
   | Cancel_requested _ -> Cancellation_requested
 
 type launch_target =
-  { binding : P.binding; spec : P.spec; admission_id : P.Id.t; launch_id : P.Id.t; payload_uid : int }
+  { binding : P.binding; spec : P.spec; admission_id : P.Id.t; launch_id : P.Id.t; payload_uid : int
+  ; original_record : record }
 type 'a launch_outcome =
   | Not_performed of error
   | Performed of { value : 'a; release_error : File_lock_eio.durable_lock_error option }
@@ -540,7 +541,7 @@ let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
         after_original ();
         let* storage=launch_storage ~sw current in
         Ok (perform {binding;spec=current.spec;admission_id=current.claim.admission_id;
-          launch_id=intent.launch_id;payload_uid=current.claim.payload_uid} ~storage))) in
+          launch_id=intent.launch_id;payload_uid=current.claim.payload_uid;original_record=current} ~storage))) in
     match attempt with
     | File_lock_eio.Lock_held_elsewhere -> Not_performed Busy
     | Lock_attempted (Lock_not_acquired error) -> Not_performed (Lock_failed error)

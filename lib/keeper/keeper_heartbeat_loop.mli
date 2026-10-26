@@ -340,9 +340,16 @@ module For_testing : sig
   (** Revalidate a provider wait against its dispatch and observed path rest. *)
   (** The production retention pass against the durable queue. Counts are
       observations only; no pending source is acknowledged by this pass. *)
-  val retain_connector_attention_sources :
+  val retain_checkpoint_sources :
     base_path:string -> keeper_name:string ->
     Keeper_event_queue_state.pending_selection list -> unit
+  val settle_checkpoint_sources :
+    base_path:string -> keeper_name:string ->
+    acknowledge:(Keeper_event_queue_state.pending_selection -> bool) ->
+    Keeper_event_queue_state.pending_selection list -> bool
+  (** Production checkpoint settlement. Scheduled work and Connector input
+      remain pending; only attention reaches [acknowledge]. Returns whether
+      the whole batch was acknowledged, including the caller's HITL guard. *)
 
   (** Whether post-turn HITL settlement may project a continuation before its
       queue source is acknowledged. *)

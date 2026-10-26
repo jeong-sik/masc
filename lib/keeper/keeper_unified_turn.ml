@@ -455,12 +455,13 @@ let make_autonomous_yield_probe ~sources ~on_attention_read ~wake ~base_path ~ke
   in
   match wake with
   (* A nonempty [Woken] is the event queue input already selected for this
-     turn. It may yield for chat delivery. Two successors may preempt at a
+     turn. It may yield for chat delivery. Successors may preempt at a
      persisted post-tool boundary: an approved Gate resolution whose grant is
      still unspent (#28809 — the source may be the very checkpoint that
      resolution continues). The selected source remains pending and resumes
-     after the preemptor. Other queued successors still wait for the source
-     terminal. *)
+     after the preemptor. A schedule absent from this turn's intake snapshot
+     may also preempt; already-waiting work cannot repeatedly preempt the
+     successor that just received its slot. *)
   | Keeper_registry.Woken (_ :: _) ->
     fun () ->
       let existing_preemptor =
@@ -1236,7 +1237,7 @@ let run_keeper_cycle
                            }
                            ~yield_requested:
                              (make_autonomous_yield_probe
-                                ~sources:(Keeper_heartbeat_source_batch.selections
+                                ~sources:(Keeper_heartbeat_source_batch.pending_at_intake
                                   (Keeper_heartbeat_source_batch.sources turn_input))
                                 ~on_attention_read:(fun () -> ())
                                 ~wake

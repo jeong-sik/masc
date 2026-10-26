@@ -6688,3 +6688,9 @@
 (include stanzas/test_tui_key_ime.inc)
 
 (include stanzas/test_fs_exclusive_create_crash.inc)
+
+(test
+ (name test_tui_schedule_observation)
+ (modules test_tui_schedule_observation)
+ (flags (:standard -open Masc))
+ (libraries masc alcotest yojson))

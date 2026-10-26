@@ -49,7 +49,7 @@ Keeper 는 `keeper_skill` 을 같은 `identity` 에 `file = "references/<파일>
 | Ctrl-D | compact → results → full → compact | `Tools_compact` |
 | Ctrl-R | folded → full → hidden → folded | `Reasoning_folded` |
 | Ctrl-S | 턴 상세 접기/펼치기 | 기존 상태 유지 |
-| F9 | 현재 Keeper 예약 Job 요약/목록 | 다음 Job 한 줄 |
+| F9 | 현재 Keeper 예약 Job 상태 요약/목록 | 대기·보류·최근 결과 한 줄 |
 
 기본 설정을 알리는 `metadata:off`, `journal:off` 배지를 붙이지 않는다.
 사용자가 연 상세 모드만 제목 옆에 표시한다. 모든 단축키는 도움말에서 찾는다.

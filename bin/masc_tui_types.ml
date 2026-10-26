@@ -1,6 +1,7 @@
 [@@@warning "-32-69"]
 open Masc_tui_identity_model
 
+module Tui_schedule_observation = Masc.Tui_schedule_observation
 module Tui_decode = Masc.Tui_decode
 module System_logs_view = Masc_tui_system_logs
 module Memory_category = Masc.Keeper_memory_os_types
@@ -2730,6 +2731,7 @@ type schedule_row = {
   sch_reaction_quarantined: int option;
       (** Ledger records the projection could not match. Nonzero is why a
           status reads worse than the steps below it look. *)
+  sch_occurrence: Tui_schedule_observation.t;
   sch_runner_hold: Tui_decode.schedule_runner_hold option;
       (** The occurrence the schedule runner is holding back because the
           target Keeper has not taken the previous one yet. A held occurrence
@@ -2895,6 +2897,7 @@ let schedule_create_form_json () =
     rather than an empty list, and the pane keeps the two facts apart the
     same way. *)
 type schedule_snapshot = {
+  scs_observed_at_iso: string;
   scs_status: string;
   scs_read_error: string option;
   scs_request_count: int option;
@@ -2920,6 +2923,7 @@ let chat_schedule_toggle_label = "F9"
 (** Display-only proximity; these bands never affect dispatch or expiry. *)
 type chat_schedule_proximity =
   | Schedule_elapsed | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown
+  | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled
 
 let chat_schedule_proximity ~now = function
   | None -> Schedule_unknown
@@ -2930,22 +2934,54 @@ let chat_schedule_proximity ~now = function
       if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
       else Schedule_later
 
+(* The declaration's next firing and its last delivered occurrence are
+   separate clocks. A one-shot marked Succeeded can still be queued. *)
 let chat_schedule_entries ~keeper_name snapshot =
   let target = "keeper:" ^ keeper_name in
-  snapshot.scs_rows
-  |> List.filter_map (fun row ->
-       let owns = match row.sch_payload_target with
-         | Some actual -> String.equal actual target
-         | None -> row.sch_payload_keeper_name = Some keeper_name in
-       if not owns then None else
-       let due = match row.sch_next_due_at_iso with
-         | Some _ as value -> value
-         | None -> row.sch_due_at_iso in
-       match Schedule_domain.schedule_status_of_string row.sch_status with
-       | Ok (Scheduled | Due) -> Some (row, Option.bind due Time_codec.parse_rfc3339_opt)
-       | Ok (Running | Succeeded | Failed | Cancelled | Expired) -> None
-       | Error _ -> Some (row, None))
-  |> List.stable_sort (fun (_, left) (_, right) -> match left, right with
+  let owns row = match row.sch_payload_target with
+    | Some actual -> String.equal actual target
+    | None -> row.sch_payload_keeper_name = Some keeper_name in
+  let rows = List.filter owns snapshot.scs_rows in
+  let active row = match Schedule_domain.schedule_status_of_string row.sch_status with
+    | Ok (Scheduled | Due | Running) -> true
+    | Ok (Succeeded | Failed | Cancelled | Expired) -> false
+    | Error _ -> true in
+  let unsettled row =
+    match row.sch_occurrence.Tui_schedule_observation.stage with
+    | Queued | Turn_started | Turn_ended | Consumed | Settling | Transferring | Unknown _
+    | Dispatching -> true
+    | No_occurrence | Dispatch_failed _ | Completed | Failed _ | Cancelled _ -> false in
+  let observed row =
+    match row.sch_reaction_latest_at_iso, row.sch_last_wake_started_at_iso with
+    | Some at, _ | None, Some at -> Time_codec.parse_rfc3339_opt at
+    | None, None -> Time_codec.parse_rfc3339_opt row.sch_requested_at_iso in
+  let latest_result =
+    rows |> List.filter (fun row -> not (active row || unsettled row))
+    |> List.filter (fun row -> match row.sch_occurrence.Tui_schedule_observation.stage with
+         | No_occurrence ->
+             (match Schedule_domain.schedule_status_of_string row.sch_status with
+              | Ok Failed -> true
+              | Ok (Scheduled | Due | Running | Succeeded | Cancelled | Expired) | Error _ -> false)
+         | Dispatch_failed _ | Completed | Failed _ | Cancelled _ -> true
+         | Dispatching | Queued | Turn_started | Turn_ended | Consumed | Settling
+         | Transferring | Unknown _ -> false)
+    |> List.stable_sort (fun left right -> Option.compare Float.compare (observed right) (observed left))
+    |> List.take 1 in
+  let selected = List.filter (fun row -> active row || unsettled row) rows @ latest_result in
+  let due row =
+    let at = if unsettled row then row.sch_occurrence.Tui_schedule_observation.due_at_iso
+      else match row.sch_next_due_at_iso with Some _ as at -> at | None -> row.sch_due_at_iso in
+    Option.bind at Time_codec.parse_rfc3339_opt in
+  let priority row =
+    match row.sch_runner_hold with
+    | Some _ -> 0
+    | None ->
+        if Tui_schedule_observation.needs_attention row.sch_occurrence.stage then 0
+        else if active row then 1 else 2 in
+  selected |> List.map (fun row -> row, due row)
+  |> List.stable_sort (fun (left, left_due) (right, right_due) ->
+       let order = Int.compare (priority left) (priority right) in
+       if order <> 0 then order else match left_due, right_due with
        | Some left, Some right -> Float.compare left right
        | Some _, None -> -1 | None, Some _ -> 1 | None, None -> 0)
 
@@ -20897,34 +20933,87 @@ let keeper_message_schedule_rows state ~now ~max_rows =
                            || Option.is_none snapshot.scs_request_count -> notice "저장소 조회 불가"
       | Some snapshot ->
           let entries = chat_schedule_entries ~keeper_name snapshot in
-          let freshness = if failed then " · 이전 관측/갱신 실패"
-            else if reading then " · 갱신 중" else "" in
+          let kept = failed || reading in
+          let observed = match Time_codec.parse_rfc3339_opt snapshot.scs_observed_at_iso with
+            | None -> plain snapshot.scs_observed_at_iso
+            | Some at ->
+                let tm = Unix.localtime at in
+                Printf.sprintf "%02d-%02d %02d:%02d" (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min in
+          let with_freshness text =
+            if kept then "이전 관측 " ^ observed
+              ^ (if failed then "/갱신 실패" else "/갱신 중") ^ " · " ^ text
+            else text in
           let partial = if snapshot.scs_truncated then " · 일부 목록" else "" in
           let describe (row, due) =
             let proximity = chat_schedule_proximity ~now due in
-            let band = match proximity with
-              | Schedule_elapsed -> "예정 시각 지남" | Schedule_soon -> "1시간 이내"
-              | Schedule_today -> "오늘" | Schedule_later -> "이후" | Schedule_unknown -> "시각 미확인" in
             let clock = match due with
-              | None -> band
+              | None -> "시각 미확인"
               | Some due ->
                   let tm = Unix.localtime due in
-                  let distance = Masc_tui_message_layout.span_text (Float.abs (due -. now)) in
-                  Printf.sprintf "%s %02d-%02d %02d:%02d (%s %s)" band
-                    (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min distance
-                    (if due > now then "후" else "전") in
+                  Printf.sprintf "%02d-%02d %02d:%02d 예정"
+                    (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min in
+            let reason label = function
+              | None -> label
+              | Some reason -> label ^ ": " ^ plain reason in
+            let stage = row.sch_occurrence.Tui_schedule_observation.stage in
+            let tone, occurrence = match stage with
+              | No_occurrence ->
+                  (match Schedule_domain.schedule_status_of_string row.sch_status with
+                   | Ok Running -> Schedule_pending, "예약 전달 중"
+                   | Ok Failed -> Schedule_failed, "예약 전달 실패"
+                   | Ok (Scheduled | Due) ->
+                       (match proximity with
+                        | Schedule_elapsed -> Schedule_pending, "예정 시각 지남 · 실행 상태 미확인"
+                        | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown -> proximity, "예약 대기"
+                        | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled -> proximity, "예약 대기")
+                   | Ok (Succeeded | Cancelled | Expired) | Error _ -> Schedule_unknown, "실행 상태 미확인")
+              | Dispatching -> Schedule_pending, "예약 전달 중"
+              | Dispatch_failed error -> Schedule_failed, reason "최근 회차 전달 실패" error
+              | Queued -> Schedule_pending, "예약 도착 · 처리 대기"
+              | Turn_started -> Schedule_running, "최근 회차 턴 시작 확인"
+              | Turn_ended -> Schedule_pending, "최근 회차 턴 종료 · 결과 확인 중"
+              | Consumed -> Schedule_pending, "최근 회차 소비 확인 · 결과 미확인"
+              | Completed -> Schedule_settled, "최근 회차 처리 완료"
+              | Failed error -> Schedule_failed, reason "최근 회차 처리 실패" error
+              | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why
+              | Settling -> Schedule_pending, "최근 회차 결과 기록 중"
+              | Transferring -> Schedule_pending, "최근 회차 인계 기록 중"
+              | Unknown why -> Schedule_pending, plain why in
+            let hold = match row.sch_runner_hold with
+              | None -> ""
+              | Some hold ->
+                  let wording = match hold.Tui_decode.srh_reason with
+                    | Hold_previous_wake_untaken -> "다음 회차 보류: 이전 예약 미소비"
+                    | Hold_target_shutdown_fenced _ -> "다음 회차 보류: Keeper 종료 처리 중" in
+                  let freshness = if kept then Tui_decode.List_kept else Tui_decode.List_latest in
+                  let as_of = match Tui_decode.schedule_hold_reading
+                      ~freshness ~runner:snapshot.scs_runner_status hold with
+                    | Hold_current -> ""
+                    | Hold_as_of checked ->
+                        let tm = Unix.localtime checked in
+                        Printf.sprintf " (%02d-%02d %02d:%02d 관측)"
+                          (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min in
+                  " · " ^ wording ^ as_of in
             let title = match row.sch_payload_summary with
               | Some value -> value | None -> row.sch_schedule_id in
-            proximity, clock ^ " · " ^ plain title in
+            (* The last occurrence's time is never labelled as the next firing. *)
+            let next = match row.sch_next_due_at_iso, stage with
+              | Some at, (Queued | Turn_started | Turn_ended | Consumed | Completed
+                         | Failed _ | Cancelled _ | Settling | Transferring) ->
+                  " · 다음 예정 " ^ plain at
+              | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Unknown _)
+              | None, (Queued | Turn_started | Turn_ended | Consumed | Completed
+                      | Failed _ | Cancelled _ | Settling | Transferring) -> "" in
+            tone, occurrence ^ hold ^ " · " ^ plain title ^ " · " ^ clock ^ next in
           let toggle = chat_schedule_toggle_label ^ (if state.msg_schedules_expanded then " 접기" else " 펼치기") in
           match entries with
-          | [] -> notice ("관측된 다음 예약 없음" ^ freshness ^ partial)
+          | [] -> notice (with_freshness ("관측된 예약 없음" ^ partial))
           | first :: _ ->
               let proximity, text = describe first in
               let header_text = if state.msg_schedules_expanded && max_rows > 1
                 then Printf.sprintf "예약 Job %d개" (List.length entries)
-                else "다음 Job · " ^ text in
-              let header = proximity, "  " ^ header_text ^ freshness ^ partial ^ " · " ^ toggle in
+                else "예약 Job · " ^ text in
+              let header = proximity, "  " ^ with_freshness header_text ^ partial ^ " · " ^ toggle in
               if not state.msg_schedules_expanded || max_rows = 1 then [header] else
               let available = min 3 (max_rows - 1) in
               let shown = List.take available entries in

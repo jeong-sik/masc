@@ -194,7 +194,8 @@ let test_schedule_responses_follow_keeper_and_generation () =
   let snapshot count : Types.schedule_snapshot =
     { scs_status = "ok"; scs_read_error = None; scs_request_count = Some count
     ; scs_truncated = false; scs_next_due_iso = None; scs_counts = None
-    ; scs_rows = []; scs_runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok }
+    ; scs_rows = []; scs_observed_at_iso = "2026-10-26T08:59:00Z"
+         ; scs_runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok }
   in
   let state = fresh () in
   (* A schedule page is applied only under a ready server identity

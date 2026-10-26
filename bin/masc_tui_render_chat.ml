@@ -4593,10 +4593,10 @@ let render_keeper_message (state : state) =
 
     List.iter (fun (proximity, line) ->
       let style = match proximity with
-        | Schedule_elapsed -> Theme.bad ()
-        | Schedule_soon -> Theme.warn ()
-        | Schedule_today -> Theme.info ()
-        | Schedule_later | Schedule_unknown -> Theme.recede () in
+        | Schedule_failed -> Theme.bad ()
+        | Schedule_elapsed | Schedule_soon | Schedule_pending -> Theme.warn ()
+        | Schedule_today | Schedule_running -> Theme.info ()
+        | Schedule_later | Schedule_unknown | Schedule_settled -> Theme.recede () in
       box_line_styled chat_buf chat_cols ~style line)
       status_frame.kmsf_schedule_rows;
 

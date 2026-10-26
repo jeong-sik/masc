@@ -36,6 +36,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(101);self.send_header('Upgrade','websocket');self.send_header('Connection','Upgrade')
         self.send_header('Sec-WebSocket-Accept',base64.b64encode(hashlib.sha1((key+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode())
         self.end_headers()
+        slow_count=0
         try:
             while True:
                 first,second=self.read_exact(2)
@@ -59,6 +60,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     if mode=='lost':os._exit(3)
                     if mode=='late' and not (root/'late-answered').exists():
                         time.sleep(1);(root/'late-answered').write_text('late')
+                    if mode=='slow' and slow_count==0:time.sleep(1.2)
+                    slow_count+=1
                     result={'contexts':[]}
                 elif method not in ['browser.close','session.end']:
                     self.send_frame({'type':'error','id':request['id'],'error':'unsupported operation','message':'fixture command unavailable'});continue
@@ -147,8 +150,8 @@ let scenario mode =
           entered:=true;
           let client=match B.connected_clients () with [client] -> client | _ -> fail "expected one original BiDi client" in
           let issue ()=dispatch (W.Issue {route=B.Live_route (Some client.client_id);verb=B.Tabs_list;
-            actor=Some "keeper/live-fixture";timeout_sec=B.default_timeout_sec;only_if_idle=false}) in
-          if mode="gate" then Eio.Switch.run (fun sw ->
+            actor=Some "keeper/live-fixture";timeout_sec=(if mode="slow" then 4. else B.default_timeout_sec);only_if_idle=false}) in
+          if mode="gate" || mode="cancel" then Eio.Switch.run (fun sw ->
             let held=Filename.concat root "gate-held" and release=Filename.concat root "release-gate" in
             let release_gate ()=write release "release" in
             (* Release the independent process's gate even if any assertion
@@ -158,20 +161,35 @@ let scenario mode =
                 ["python3";"-c";gate_holder;Filename.concat (Filename.concat root "child-claim") "gate";held;release] in
               let clock=Eio.Stdenv.clock env in
               wait_for clock (fun () -> Sys.file_exists held);
-              let input=Eio.Fiber.fork_promise ~sw issue in
-              Eio.Promise.await validation;
-              let retiring=Eio.Fiber.fork_promise ~sw (fun () -> Eio.Cancel.protect (fun () ->
-                let reply=dispatch W.Retire in retirement:=Some reply;reply)) in
-              let owner_pid=Yojson.Safe.Util.(Yojson.Safe.from_string (read (Filename.concat root "spawned"))
-                |> member "owner" |> to_int) in
-              wait_for clock (fun () -> not (Posix_spawn_detached.group_id_has_members owner_pid));
-              check bool "gate holder is still blocking native settlement" false (Sys.file_exists release);
-              check bool "process stop alone is not a cleanup receipt" true (Eio.Promise.peek retiring=None);
-              release_gate ();
-              ignore (Eio.Process.await blocker);
-              ignore (Eio.Promise.await_exn input);
-              ignore (Eio.Promise.await_exn retiring);
-              Eio.Fiber.await_cancel ()))
+              if mode="cancel" then (
+                let input=Eio.Fiber.fork_promise ~sw (fun () ->
+                  Eio.Fiber.first (fun () -> ignore (issue ()); `Answered)
+                    (fun () -> Eio.Promise.await validation; `Cancelled)) in
+                check bool "caller stopped while validation held the gate" true
+                  (Eio.Promise.await_exn input = `Cancelled);
+                release_gate ();
+                ignore (Eio.Process.await blocker);
+                check bool "the original connection answers the next request" true
+                  (match issue () with W.Issue_result (Ok (B.Answered _)) -> true
+                   | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
+                   | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+                   | Poll_result _|Receipt|Service_refusal _ -> false);
+                check bool "normal retirement joins the original browser" true (dispatch W.Retire=W.Receipt))
+              else (
+                let input=Eio.Fiber.fork_promise ~sw issue in
+                Eio.Promise.await validation;
+                let retiring=Eio.Fiber.fork_promise ~sw (fun () -> Eio.Cancel.protect (fun () ->
+                  let reply=dispatch W.Retire in retirement:=Some reply;reply)) in
+                let owner_pid=Yojson.Safe.Util.(Yojson.Safe.from_string (read (Filename.concat root "spawned"))
+                  |> member "owner" |> to_int) in
+                wait_for clock (fun () -> not (Posix_spawn_detached.group_id_has_members owner_pid));
+                check bool "gate holder is still blocking native settlement" false (Sys.file_exists release);
+                check bool "process stop alone is not a cleanup receipt" true (Eio.Promise.peek retiring=None);
+                release_gate ();
+                ignore (Eio.Process.await blocker);
+                ignore (Eio.Promise.await_exn input);
+                ignore (Eio.Promise.await_exn retiring);
+                Eio.Fiber.await_cancel ())))
           else if mode="lost" then (
             ignore (issue ());Eio.Fiber.await_cancel ())
           else if mode="late" then (
@@ -229,6 +247,15 @@ let scenario mode =
               let pid=int_of_string (read (Filename.concat root "ego-pid")) in
               check bool "the SDK process was joined before caller work" true
                 (match Unix.kill pid 0 with () -> false | exception Unix.Unix_error (Unix.ESRCH,_,_) -> true));
+            if mode="slow" then (
+              check bool "the original client remains connected after a slow answer" true
+                (match B.connected_clients () with [remaining] -> remaining.client_id=client.client_id
+                 | [] | _ :: _ :: _ -> false);
+              check bool "the same connection answers again" true
+                (match issue () with W.Issue_result (Ok (B.Answered _)) -> true
+                 | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
+                 | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+                 | Poll_result _|Receipt|Service_refusal _ -> false));
             check bool "retirement joins the original guardian and peer" true (dispatch W.Retire=W.Receipt);
             check bool "the exact original client cannot register again" true
               (match dispatch (W.Poll {client;window_sec=0.}) with W.Service_refusal _ -> true
@@ -239,12 +266,14 @@ let scenario mode =
             Ego.run ~env ~owner ~downloads:root {command=ego;space=Browser_configuration.Named_space "masc"} work
           else work () in
         let failure=try Live.For_testing.run ~before_command_validation:(fun () ->
-          ignore (Eio.Promise.try_resolve validating ())) ~env ~owner ~directory:allocation worker;None with
+          ignore (Eio.Promise.try_resolve validating ()))
+          ~connection_timeout_sec:(if mode="slow" then 1. else B.default_timeout_sec)
+          ~env ~owner ~directory:allocation worker;None with
           | Invalid_argument detail | Sys_error detail -> Some detail in
-        if mode="normal" || mode="late" || mode="ego-conflict" then check (option string) "normal retirement returns" None failure
+        if mode="normal" || mode="late" || mode="ego-conflict" || mode="slow" || mode="cancel" then check (option string) "normal retirement returns" None failure
         else check bool "failed startup/lost peer does not continue serving" true (Option.is_some failure);
         check bool "owner input is fenced at termination" true (Owner.is_retired owner));
-      check bool "only verified metadata admits caller work" (mode="normal" || mode="ego-conflict" || mode="lost" || mode="gate" || mode="late") !entered;
+      check bool "only verified metadata admits caller work" (mode="normal" || mode="ego-conflict" || mode="slow" || mode="cancel" || mode="lost" || mode="gate" || mode="late") !entered;
       if mode="ego-conflict" then check string "the SDK only performed the read-only inspection"
         "space.inspect\n" (read (Filename.concat root "ego-steps"));
       if mode="gate" then check bool "blocked validation retirement remains unknown after original stop" true
@@ -287,7 +316,7 @@ let scenario mode =
         if mode="wrong-pid" || mode="wrong-profile" then (
           check bool "identity mismatch executes no page command" false (List.mem "browsingContext.getTree" calls);
           check bool "unverified endpoint never receives browser.close" false (List.mem "browser.close" calls))
-        else if mode="normal" || mode="late" || mode="ego-conflict" then (
+        else if mode="normal" || mode="late" || mode="ego-conflict" || mode="slow" || mode="cancel" then (
           check int "original browser is closed once" 1
             (List.length (List.filter (String.equal "browser.close") calls));
           if mode="late" || mode="ego-conflict" then check int "both commands reached the original Firefox" 2
@@ -295,6 +324,9 @@ let scenario mode =
         else if mode="gate" then (
           check bool "no delayed input follows gate release" false (List.mem "browsingContext.getTree" calls);
           check bool "uncertain ownership never replays browser.close" false (List.mem "browser.close" calls)));
+      if mode="cancel" then
+        check int "only the later request reaches Firefox" 1
+          (List.length (List.filter (String.equal "browsingContext.getTree") (String.split_on_char '\n' (read commands))));
       ok (Live.settle config ~incarnation:"0b000000-0000-4000-8000-000000000061" ~directory:allocation)))
 let child mode () =
   let pid=Unix.create_process Sys.executable_name
@@ -312,6 +344,8 @@ let () =
       test_case "wrong profile refuses before page input" `Quick (child "wrong-profile");
       test_case "original client retires once without replacement" `Quick (child "normal");
       test_case "user-owned Ego name keeps the original BiDi peer serving" `Quick (child "ego-conflict");
+      test_case "a slow request within its own window keeps the original client" `Quick (child "slow");
+      test_case "a caller cancelled during validation sends no browser command" `Quick (child "cancel");
       test_case "native gate cannot hold the original process alive during retirement" `Quick (child "gate");
       test_case "unexpected peer loss fences the worker" `Quick (child "lost");
       test_case "a result whose caller stopped waiting keeps the connection" `Quick (child "late")]])

@@ -136,6 +136,22 @@ let test_timed_out_queue_is_not_executed () = with_clients (fun _ connect ->
       ~timeout_sec:0.001 = Ok Lane.Timed_out);
   check bool "later poll drops timed-out queued action" true
     (Lane.take_command ~client_info:client ~window_sec:0.002 = Ok None))
+let test_queued_time_reduces_the_original_window () = with_clients (fun sw connect ->
+  let client = connect Lane.Firefox in
+  let selected = target client.client_id in
+  let result = Eio.Fiber.fork_promise ~sw (fun () ->
+    Lane.issue_for_actor ~actor:None ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:2.) in
+  Time_compat.sleep 0.15;
+  let command = take client in
+  (match Lane.live_request_window ~client_id:client.client_id ~id:command.id with
+   | Lane.Live_waiting_until deadline ->
+       let remaining = Monotonic_deadline.remaining_seconds deadline in
+       check bool "the queued wait consumed the original window" true (remaining > 0. && remaining < 1.95)
+   | Lane.No_live_waiter | Lane.Live_executor_owned -> fail "the original waiter disappeared");
+  ignore (Lane.deliver_result ~client_id:client.client_id ~id:command.id ~payload:(payload "queued"));
+  answered result "queued";
+  check bool "a settled request has no remaining authority" true
+    (Lane.live_request_window ~client_id:client.client_id ~id:command.id = Lane.No_live_waiter))
 let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
   let client = connect Lane.Zen in
   let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
@@ -251,6 +267,15 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
           Lane.issue_for_actor ~actor:None ~target:selected ~verb ~timeout_sec:1.) in
         let command = take info in
         check bool (name ^ " reaches the connection") true (command.verb_json = Lane.verb_json verb);
+        (match Lane.live_reply_policy info.transport verb,
+            Lane.live_request_window ~client_id:info.client_id ~id:command.id with
+         | Lane.Reply_window, Lane.Live_waiting_until deadline ->
+             check bool (name ^ " keeps the issuer's remaining window") true
+               (Monotonic_deadline.remaining_seconds deadline > 0.)
+         | Lane.Executor_owned, Lane.Live_executor_owned -> ()
+         | Lane.Reply_window, (Lane.No_live_waiter | Lane.Live_executor_owned)
+         | Lane.Executor_owned, (Lane.No_live_waiter | Lane.Live_waiting_until _) ->
+             failf "%s lost its reply policy in the queue" name);
         ignore (Lane.deliver_result ~client_id:info.client_id ~id:command.id ~payload:(payload name));
         answered result name
       end else begin
@@ -610,6 +635,7 @@ let () = run "browser client routing" ["ownership", [
   test_case "resolved target expires before dispatch" `Quick test_expired_resolved_target_is_pre_dispatch;
   test_case "a worker-held client outlives the poll window" `Quick test_worker_held_client_outlives_the_poll_window;
   test_case "expired queued actions do not execute" `Quick test_timed_out_queue_is_not_executed;
+  test_case "queue time consumes the issuer's window" `Quick test_queued_time_reduces_the_original_window;
   test_case "disconnect releases pending caller" `Quick test_disconnect_releases_waiter;
   test_case "source and live command policy" `Quick test_sources_and_live_policy;
   test_case "a replacement Space cannot take queued work" `Quick test_space_identity_cannot_take_queued_work;

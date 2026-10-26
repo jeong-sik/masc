@@ -33,8 +33,10 @@ val run : env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t ->
     substitute another lane. Unexpected backend loss revokes the owner and wakes
     the caller's work with an error after joining original resource cleanup. *)
 module For_testing : sig
-  val run : before_command_validation:(unit -> unit) -> env:Eio_unix.Stdenv.base ->
+  val run : before_command_validation:(unit -> unit) -> connection_timeout_sec:float -> env:Eio_unix.Stdenv.base ->
     owner:Browser_addon_owner.t -> directory:string -> (unit -> unit) -> unit
   (** Observe command validation entry before its original native-gate read.
-      The hook changes neither the admitted command nor process authority. *)
+      The hook changes neither the admitted command nor process authority.
+      [connection_timeout_sec] sets the default for connection setup and
+      requests without a local issuer deadline. *)
 end

@@ -16,36 +16,38 @@ let binding ?(backend=P.Remote_ssh) ?(endpoint_incarnation=id "01") ?(boot_id=id
     ?(invocation_sha256=digest "original invocation") spec =
   P.binding ~route:{backend;endpoint_incarnation;boot_id} ~owner:{workspace_id;keeper_name}
     ~operation_id ~invocation_sha256 ~spec_sha256:(P.spec_sha256 spec) |> require
+let pinned ?(admission_id=id "09") binding = P.original ~binding ~admission_id
 let requests binding spec : P.request list =
-  [Start {binding;spec};Inspect binding;
-   Read_output {binding;stream=Stdout;offset=0L;max_bytes=4096};Cancel binding;
-   Release {binding;result_sha256=digest "original result manifest"}]
+  [Start {binding;spec};Reconcile_admission binding;Activate (pinned binding);Inspect (pinned binding);
+   Read_output {original=pinned binding;stream=Stdout;offset=0L;max_bytes=4096};Cancel (pinned binding);
+   Release {original=pinned binding;result_sha256=digest "original result manifest"}]
 let responses binding : P.response list =
   let observations : P.response list =
-  [Status {binding;revision=0L;phase=Queued;cancel_requested=false;result=Result_pending;stdout=Growing 0L;stderr=Growing 0L};
-   Status {binding;revision=1L;phase=Starting;cancel_requested=true;result=Result_pending;stdout=Growing 0L;stderr=Growing 0L};
-   Status {binding;revision=2L;phase=Running;cancel_requested=true;result=Result_pending;stdout=Growing 4L;stderr=Growing 0L};
-   Status {binding;revision=3L;phase=Finished (Exited 0);cancel_requested=false;result=Result_pending;
+  [Admitted {original=pinned binding;revision=1L};
+   Status {original=pinned binding;revision=1L;phase=Queued;cancel_requested=false;result=Result_pending;stdout=Growing 0L;stderr=Growing 0L};
+   Status {original=pinned binding;revision=1L;phase=Starting;cancel_requested=true;result=Result_pending;stdout=Growing 0L;stderr=Growing 0L};
+   Status {original=pinned binding;revision=2L;phase=Running;cancel_requested=true;result=Result_pending;stdout=Growing 4L;stderr=Growing 0L};
+   Status {original=pinned binding;revision=3L;phase=Finished (Exited 0);cancel_requested=false;result=Result_pending;
      stdout=Sealed {byte_length=4L;sha256=digest "data"};stderr=Growing 0L};
-   Status {binding;revision=3L;phase=Finished (Signaled 15);cancel_requested=true;result=Result_pending;
+   Status {original=pinned binding;revision=3L;phase=Finished (Signaled 15);cancel_requested=true;result=Result_pending;
      stdout=Growing 4L;stderr=Sealed {byte_length=0L;sha256=digest ""}};
-   Status {binding;revision=4L;phase=Finished (Exited 0);cancel_requested=false;
+   Status {original=pinned binding;revision=4L;phase=Finished (Exited 0);cancel_requested=false;
      result=Result_ready (digest "original result manifest");
      stdout=Sealed {byte_length=4L;sha256=digest "data"};
      stderr=Sealed {byte_length=0L;sha256=digest ""}};
-   Status {binding;revision=2L;phase=Not_started Cancelled_before_activation;
+   Status {original=pinned binding;revision=2L;phase=Not_started Cancelled_before_activation;
      cancel_requested=true;result=Result_pending;stdout=Growing 0L;stderr=Growing 0L};
-   Status {binding;revision=3L;phase=Not_started Launch_rejected;
+   Status {original=pinned binding;revision=3L;phase=Not_started Launch_rejected;
      cancel_requested=false;result=Result_pending;
      stdout=Sealed {byte_length=0L;sha256=digest ""};stderr=Growing 0L};
-   Status {binding;revision=4L;phase=Not_started Cancelled_before_activation;
+   Status {original=pinned binding;revision=4L;phase=Not_started Cancelled_before_activation;
      cancel_requested=true;result=Result_ready (digest "original non-start result manifest");
      stdout=Sealed {byte_length=0L;sha256=digest ""};stderr=Sealed {byte_length=0L;sha256=digest ""}};
-   Output {binding;revision=3L;stream=Stdout;offset=0L;data="data";
+   Output {original=pinned binding;revision=3L;stream=Stdout;offset=0L;data="data";
      extent=Sealed {byte_length=4L;sha256=digest "data"}};
-   Output {binding;revision=2L;stream=Stderr;offset=9007199254740993L;data="\000\255";
+   Output {original=pinned binding;revision=2L;stream=Stderr;offset=9007199254740993L;data="\000\255";
      extent=Growing 9007199254740995L};
-   Released {binding;revision=4L;result_sha256=digest "original result manifest"}] in
+   Released {original=pinned binding;revision=4L;result_sha256=digest "original result manifest"}] in
   observations @ List.map (fun reason -> P.Refused {binding;reason})
       P.[Unsupported;Unauthenticated;Owner_mismatch;Request_conflict;Endpoint_replaced;Admission_refused;Release_refused]
   @ List.map (fun reason -> P.Held {binding;reason})
@@ -147,9 +149,9 @@ let test_response_cannot_retarget_control () =
     binding (spec ~stdin:"changed exact input" () |> require)] in
   List.iter (fun other -> List.iter (fun response ->
     check bool "another owner/route/boot/call cannot provide an observation or hold" true
-      (P.check_response ~minimum_revision:0L ~request:(P.Cancel b) response=Error P.Binding_mismatch))
+      (P.check_response ~minimum_revision:0L ~request:(P.Cancel (pinned b)) response=Error P.Binding_mismatch))
       (responses other)) others;
-  let wire=P.request_to_json (P.Cancel b) |> get in
+  let wire=P.request_to_json (P.Cancel (pinned b)) |> get in
   List.iter (fun name ->
     let hostile=match wire with `Assoc fields -> `Assoc ((name,`Int 99)::fields)
       | _ -> fail "expected object" in
@@ -158,9 +160,9 @@ let test_response_cannot_retarget_control () =
 
 let test_output_ranges_and_seals () =
   let s=spec () |> require in let b=binding s in
-  let read : P.request=P.Read_output {binding=b;stream=Stdout;offset=0L;max_bytes=2} in
+  let read : P.request=P.Read_output {original=pinned b;stream=Stdout;offset=0L;max_bytes=2} in
   let output ?(revision=2L) ?(stream=P.Stdout) ?(offset=0L) ?(data="ab") ?(extent=P.Growing 4L) () : P.response =
-    Output {binding=b;revision;stream;offset;data;extent} in
+    Output {original=pinned b;revision;stream;offset;data;extent} in
   check bool "an exact growing chunk is accepted" true
     (P.check_response ~minimum_revision:2L ~request:read (output ())=Ok ());
   List.iter (fun response -> check bool "wrong stream/offset/capacity is refused" true
@@ -178,26 +180,26 @@ let test_output_ranges_and_seals () =
   check bool "output can't exceed its known growing extent" true
     (Result.is_error (P.response_to_json (output ~extent:(Growing 1L) ())));
   check bool "a negative request offset is never coerced" true
-    (Result.is_error (P.request_to_json (Read_output {binding=b;stream=Stdout;offset=(-1L);max_bytes=1})))
+    (Result.is_error (P.request_to_json (Read_output {original=pinned b;stream=Stdout;offset=(-1L);max_bytes=1})))
 
 let test_revisions_response_kind_and_release () =
   let s=spec () |> require in let b=binding s in
-  let response : P.response=P.Status {binding=b;revision=2L;phase=Running;
+  let response : P.response=P.Status {original=pinned b;revision=2L;phase=Running;
     cancel_requested=true;result=Result_pending;stdout=Growing 0L;stderr=Growing 0L} in
   check bool "a delayed earlier status cannot roll back an accepted revision" true
-    (P.check_response ~minimum_revision:3L ~request:(P.Inspect b) response=Error P.Response_revision_stale);
+    (P.check_response ~minimum_revision:3L ~request:(P.Inspect (pinned b)) response=Error P.Response_revision_stale);
   let result_sha256=digest "original terminal result" in
-  let release=P.Release {binding=b;result_sha256} in
+  let release=P.Release {original=pinned b;result_sha256} in
   check bool "a generic status cannot certify resource release" true
     (P.check_response ~minimum_revision:2L ~request:release response=Error P.Response_kind_mismatch);
   check bool "release is bound to exact original terminal result" true
     (P.check_response ~minimum_revision:2L ~request:release
-      (P.Released {binding=b;revision=3L;result_sha256=digest "other result"})=Error P.Binding_mismatch);
+      (P.Released {original=pinned b;revision=3L;result_sha256=digest "other result"})=Error P.Binding_mismatch);
   check bool "an exact release receipt is accepted" true
     (P.check_response ~minimum_revision:2L ~request:release
-      (P.Released {binding=b;revision=3L;result_sha256})=Ok ());
+      (P.Released {original=pinned b;revision=3L;result_sha256})=Ok ());
   List.iter (fun reason -> check bool "unavailable/missing authority remains a hold without state rollback" true
-    (P.check_response ~minimum_revision:3L ~request:(P.Inspect b) (P.Held {binding=b;reason})=Ok ()))
+    (P.check_response ~minimum_revision:3L ~request:(P.Inspect (pinned b)) (P.Held {binding=b;reason})=Ok ()))
     P.[Registry_unavailable;Supervisor_unavailable;Operation_not_found;Output_unavailable Stdout]
 
 let test_structural_refusals () =
@@ -214,10 +216,10 @@ let test_structural_refusals () =
     (Result.is_error (P.request_of_json hostile)))
     [set "version" (`Int 2);set "version" (`String "1");set "operation" (`String "kill_pid");
      set "protocol" (`String "synchronous_exec")];
-  let status : P.response=P.Status {binding=b;revision=0L;phase=Queued;cancel_requested=false;result=Result_pending;
+  let status : P.response=P.Status {original=pinned b;revision=1L;phase=Queued;cancel_requested=false;result=Result_pending;
     stdout=Sealed {byte_length=0L;sha256=digest ""};stderr=Growing 0L} in
   check bool "queued jobs cannot claim previously sealed output" true (Result.is_error (P.response_to_json status));
-  let ready : P.response = Status {binding=b;revision=3L;phase=Finished (Exited 0);
+  let ready : P.response = Status {original=pinned b;revision=3L;phase=Finished (Exited 0);
     cancel_requested=false;result=Result_ready (digest "not durably complete");
     stdout=Growing 0L;stderr=Sealed {byte_length=0L;sha256=digest ""}} in
   check bool "a process exit with incomplete streams cannot certify a releasable result" true
@@ -228,8 +230,8 @@ let test_non_start_terminal () =
   let empty : P.extent=P.Sealed {byte_length=0L;sha256=digest ""} in
   let terminal ?(reason=P.Cancelled_before_activation) ?(cancel_requested=true)
       ?(stdout=empty) ?(stderr=empty) ?(result=P.Result_pending) () : P.response =
-    Status {binding=b;revision=3L;phase=Not_started reason;cancel_requested;result;stdout;stderr} in
-  let request=P.Inspect b in
+    Status {original=pinned b;revision=3L;phase=Not_started reason;cancel_requested;result;stdout;stderr} in
+  let request=P.Inspect (pinned b) in
   List.iter (fun reason ->
     let response=terminal ~reason () in
     let wire=P.response_to_json response |> get in
@@ -271,6 +273,46 @@ let test_non_start_terminal () =
   check bool "bootstrap exit code cannot be smuggled into non-start" true
     (Result.is_error (P.response_of_json extra_exit))
 
+let test_original_admission_handshake () =
+  let spec=spec () |> require in let binding=binding spec in
+  let original=pinned binding and replacement=pinned ~admission_id:(id "10") binding in
+  let admitted : P.response=P.Admitted {original;revision=1L} in
+  let status original : P.response=P.Status {original;revision=2L;phase=Starting;
+    cancel_requested=false;result=Result_pending;stdout=Growing 0L;stderr=Growing 0L} in
+  let registration : P.request list=[Start {binding;spec};Reconcile_admission binding] in
+  List.iter (fun request ->
+    check bool "registration only accepts the durable original receipt" true
+      (P.check_response ~minimum_revision:0L ~request admitted=Ok ());
+    check bool "a process status cannot substitute for the registration handshake" true
+      (P.check_response ~minimum_revision:0L ~request (status original)=Error P.Response_kind_mismatch)) registration;
+  let controls : P.request list=[Activate original;Inspect original;Cancel original] in
+  List.iter (fun request ->
+    check bool "later controls remain pinned to the confirmed admission" true
+      (P.check_response ~minimum_revision:1L ~request (status replacement)=Error P.Original_admission_mismatch);
+    check bool "an old registration receipt cannot reactivate or certify later control" true
+      (P.check_response ~minimum_revision:1L ~request admitted=Error P.Response_kind_mismatch))
+    controls;
+  check bool "activation observes its exact original status" true
+    (P.check_response ~minimum_revision:1L ~request:(P.Activate original) (status original)=Ok ());
+  let read : P.request=P.Read_output {original;stream=Stdout;offset=0L;max_bytes=1} in
+  let output : P.response=P.Output {original=replacement;revision=3L;stream=Stdout;offset=0L;data="";extent=Growing 0L} in
+  check bool "replaced admission cannot provide original output" true
+    (P.check_response ~minimum_revision:1L ~request:read output=Error P.Original_admission_mismatch);
+  let result_sha256=digest "original result" in
+  let request : P.request=P.Release {original;result_sha256} in
+  let response : P.response=P.Released {original=replacement;revision=4L;result_sha256} in
+  check bool "same result hash cannot release another admission" true
+    (P.check_response ~minimum_revision:1L ~request response=Error P.Original_admission_mismatch);
+  check bool "Preparing revision cannot masquerade as complete admission" true
+    (Result.is_error (P.response_to_json (P.Admitted {original;revision=0L})));
+  let wire=P.request_to_json (P.Activate original) |> get in
+  let unpinned=match wire with `Assoc fields -> `Assoc (List.remove_assoc "admission_id" fields)
+    | _ -> fail "expected activation object" in
+  check bool "activation never defaults a missing original admission" true
+    (Result.is_error (P.request_of_json unpinned));
+  check bool "delayed registration cannot roll back confirmed progress" true
+    (P.check_response ~minimum_revision:2L ~request:(P.Reconcile_admission binding) admitted=Error P.Response_revision_stale)
+
 let () = run "endpoint job protocol"
   ["protected control boundary",[
     test_case "original binary bytes, domains, routes and exact integer offsets" `Quick test_exact_bytes_and_routes;
@@ -280,4 +322,5 @@ let () = run "endpoint job protocol"
     test_case "output read ranges and complete seals remain exact" `Quick test_output_ranges_and_seals;
     test_case "stale response, operation kind and result release remain distinct" `Quick test_revisions_response_kind_and_release;
     test_case "invalid exec, version and lifecycle claims refuse explicitly" `Quick test_structural_refusals;
-    test_case "non-start settles without fabricated exit, output or result" `Quick test_non_start_terminal]]
+    test_case "non-start settles without fabricated exit, output or result" `Quick test_non_start_terminal;
+    test_case "registration and later controls pin the exact original admission" `Quick test_original_admission_handshake]]

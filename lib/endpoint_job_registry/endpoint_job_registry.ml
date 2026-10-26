@@ -175,7 +175,7 @@ let parse content = cpu (fun () -> try Ok (Yojson.Safe.from_string content)
 let count n = `String (Int64.to_string n)
 
 let claim_json (claim : claim) =
-  let* original=P.request_to_json (P.Inspect claim.binding) |> Result.map_error (fun e -> Invalid_request e) in
+  let* original=P.request_to_json (P.Reconcile_admission claim.binding) |> Result.map_error (fun e -> Invalid_request e) in
   let state,job,launch_id=match claim.state with
     | Preparing -> "preparing",None,None | Ready job -> "ready",Some job,None
     | Launch_requested {job;launch_id} -> "launch_requested",Some job,Some launch_id
@@ -193,8 +193,8 @@ let claim_of_json value =
     "root_device";"root_inode";"revision";"state";"job_device";"job_inode";"launch_id"] value in
   let* ()=if member f "version"=`Int 1 then Ok () else corrupt "unsupported version" in
   let* original=P.request_of_json (member f "original") |> Result.map_error (fun _ -> Corrupt_original "original binding") in
-  let* binding=match original with P.Inspect b -> Ok b
-    | P.Start _ | P.Read_output _ | P.Cancel _ | P.Release _ -> corrupt "original binding kind" in
+  let* binding=match original with P.Reconcile_admission b -> Ok b
+    | P.Start _ | P.Activate _ | P.Inspect _ | P.Read_output _ | P.Cancel _ | P.Release _ -> corrupt "original binding kind" in
   let* admission_id=identifier "admission ID" (member f "admission_id") in
   let* controller_uid=uid "controller UID" (member f "controller_uid") in
   let* payload_uid=uid "payload UID" (member f "payload_uid") in
@@ -269,7 +269,7 @@ let read_record (registry : t) (binding : P.binding) =
   let* request=cpu (fun () -> P.request_of_json original) |> Result.map_error (fun _ -> Corrupt_original "original Start") in
   let* spec=match request with
     | P.Start {binding=original;spec} when original=binding -> Ok spec
-    | P.Start _ | P.Inspect _ | P.Read_output _ | P.Cancel _ | P.Release _ -> corrupt "original Start binding" in
+    | P.Start _ | P.Reconcile_admission _ | P.Activate _ | P.Inspect _ | P.Read_output _ | P.Cancel _ | P.Release _ -> corrupt "original Start binding" in
   let* after=inspect_job registry binding in
   let* ()=if observed=after then validate_root registry else Error (Protection_refused Root_identity_changed) in
   Ok {registry;claim;spec}

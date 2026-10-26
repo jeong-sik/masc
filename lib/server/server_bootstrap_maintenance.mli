@@ -8,7 +8,8 @@ val wake_enqueue_counts_of_dispatches :
 
 type schedule_runner_state
 (** Immutable state owned by one production runner loop. Before the first
-    successful startup recovery no normal tick or dispatch is admitted. *)
+    successful startup recovery no normal tick or dispatch is admitted. Active
+    state retains the last held set and exact pending settlement intents. *)
 
 val initial_schedule_runner_state : schedule_runner_state
 
@@ -24,7 +25,11 @@ val run_schedule_runner_tick :
     production consumer, record its outcome (success, error or crash), then
     drop the cached fleet schedule list so the next read of that page carries
     this tick's runner status and holds. The returned immutable state preserves
-    the held set of the last successful normal tick on failure. Startup
+    the held set on failure and settlement progress from both success and
+    error returns. Progress is captured before clock, telemetry, owner-resume
+    and cache effects: failures
+    in those effects cannot discard new settlement intents. Pending intents
+    retry only their original store verdict, never consumer delivery. Startup
     recovery failures use the same error/crash status and cache invalidation.
     Cancellation propagates. *)
 

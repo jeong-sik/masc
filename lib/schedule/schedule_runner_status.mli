@@ -47,6 +47,11 @@ type last_success =
 
 type snapshot =
   { tick_in_flight : bool
+  ; pending_settlement_count : int
+      (** Latest returned progress, retained even if later tick observation
+          effects fail. Pending work keeps health degraded without dispatches. *)
+  ; settlement_errors : Schedule_runner.settlement_error list
+      (** Typed errors from the latest returned settlement progress. *)
   ; tick_count : int
   ; success_count : int
   ; failure_count : int
@@ -81,6 +86,11 @@ type held_occurrence =
 val reset_for_test : unit -> unit
 
 val record_tick_started : now:float -> unit
+val record_settlement_progress :
+  pending_settlements:Schedule_runner.pending_settlement list ->
+  settlement_errors:Schedule_runner.settlement_error list -> unit
+(** Capture returned settlement progress before fallible observation effects.
+    Does not change tick/dispatch counts or claim the tick finished. *)
 val empty_wake_enqueue_counts : wake_enqueue_counts
 val record_tick_ok :
   ?wake_enqueue_counts:wake_enqueue_counts ->

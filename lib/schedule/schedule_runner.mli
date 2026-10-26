@@ -35,6 +35,24 @@ type held =
   ; reason : hold_reason
   }
 
+type pending_settlement
+(** Immutable, process-local intent for a started attempt's returned rejection.
+    Keeps the exact attempt, original recurrence clock and first successful
+    finish-clock observation. Cancellation/process death are outside retention. *)
+
+type settlement_failure =
+  | Finish_clock_raised of string
+  | Store_settlement_error of Schedule_store.store_error
+  | Store_settlement_raised of string
+
+type settlement_error =
+  { occurrence_id : Schedule_occurrence_id.t
+  ; schedule_id : string
+  ; failure : settlement_failure
+  }
+
+val settlement_error_to_string : settlement_error -> string
+
 type tick_result =
   { due_changed : int
   ; emitted : wake_signal list
@@ -50,6 +68,10 @@ type tick_result =
           due candidate whether to hold, before it emitted or dispatched
           anything. Dispatch can take seconds, so this is earlier than the
           tick's finish (#38411). *)
+  ; pending_settlements : pending_settlement list
+  ; settlement_errors : settlement_error list
+      (** This cadence's failed settlement observations. Replays are not new
+          consumer dispatches or receipts. *)
   }
 
 and dispatch_status =
@@ -116,8 +138,16 @@ type consumer =
 type runner_error =
   | Service_error of Schedule_service.service_error
   | Signal_store_error of string
+  | Tick_raised of string
+
+type tick_failure =
+  { error : runner_error
+  ; pending_settlements : pending_settlement list
+  ; settlement_errors : settlement_error list
+  }
 
 val runner_error_to_string : runner_error -> string
+val tick_failure_to_string : tick_failure -> string
 
 val signal_kind_to_string : signal_kind -> string
 val dispatch_status_to_string : dispatch_status -> string
@@ -142,9 +172,10 @@ val tick :
   ?consumer:consumer ->
   ?clock:(unit -> float) ->
   Workspace_utils.config ->
+  pending_settlements:pending_settlement list ->
   now:float ->
   retention_days:int ->
-  (tick_result, runner_error) result
+  (tick_result, tick_failure) result
 (** Refresh due state and append at-most-once generic wake signals for newly
     observable due work. A durable consumer acceptance completes that wake
     occurrence immediately. Consumer payload rejection is terminal. A retryable
@@ -155,6 +186,23 @@ val tick :
     wake's [started_at] and [finished_at] as the attempt actually begins and
     ends. Without [clock] both stamps copy [now], so a wake reads as
     instantaneous whatever the dispatch cost.
+
+    Incoming pending intents replay only store settlement; their definitions
+    (schedule instance and public id) are excluded from fresh admission in this
+    cadence, including their next recurrence. A replacement instance remains
+    eligible. Failed replay never blocks unrelated
+    due work. The first newly unresolved post-start settlement returns the
+    batch progress immediately, so later callbacks cannot discard that intent.
+    Existing replay precedes fresh work, so new failures cannot postpone old
+    intents. Both [Ok] and [Error] carry the resulting immutable progress,
+    including newly observed finish stamps. Non-cancellation exceptions become
+    [Tick_raised] failures with that progress. Capture returned intents before
+    fallible postprocessing. Cancellation still propagates without an envelope.
+
+    Pre-start unsupported-payload rejection remains Due after a failed write
+    and is reconsidered normally; it is outside these post-start intents.
+    No acceptance intent is replayed: a failed acceptance callback can have
+    caused the consumer to roll its work back.
 
     [retention_days] goes straight to {!Schedule_store.refresh_due}: how long a
     finished schedule stays in the ledger. *)

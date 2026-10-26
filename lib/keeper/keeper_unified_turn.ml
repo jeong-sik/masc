@@ -475,7 +475,7 @@ let make_autonomous_yield_probe ~sources ~on_attention_read ~wake ~base_path ~ke
            | Ok None -> connector_attention_waiting_with_filter ~filter_pending
                ~base_path ~keeper_name)
       in
-      match existing_preemptor with
+      (match existing_preemptor with
       | Error _ as error -> error
       | Ok (Some _) as request -> request
       | Ok None ->
@@ -492,7 +492,7 @@ let make_autonomous_yield_probe ~sources ~on_attention_read ~wake ~base_path ~ke
            let queue = List.fold_left (fun queue (source : Keeper_event_queue_state.pending_selection) ->
              Keeper_event_queue.enqueue queue source.source) Keeper_event_queue.empty pending in
            Ok (Some Keeper_agent_run.{ reason = Durable_stimulus_waiting
-             (durable_stimulus_summary ~now:(Time_compat.now ()) queue) }))
+             (durable_stimulus_summary ~now:(Time_compat.now ()) queue) })))
   | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
     fun () ->
       autonomous_yield_request_with_filter ~filter_pending ~base_path ~keeper_name

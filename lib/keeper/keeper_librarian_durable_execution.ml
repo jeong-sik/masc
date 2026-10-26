@@ -243,12 +243,19 @@ let rec consume_one ~config ~keeper_name ~wake =
   match Owner.discover ~store ~base_path ~keepers_dir ~keeper_id:keeper_name with
   | Error failure -> error (Owner.error_to_string failure)
   | Ok originals ->
-    let validated=List.fold_left (fun result ((record,request) as original) ->
-      let* unfinished=result in
-      let* frontier=io (fun () -> Commit.validate ~store ~request ~record) in
-      match frontier with
-      | Commit.Unfinished -> Ok (original::unfinished)
-      | Commit.Settled -> Ok unfinished) (Ok []) originals in
+    let validated=match originals with
+      | [] -> Ok []
+      | (_,request)::_ ->
+        (* One complete read-only gate observation for this inventory pass.
+           Recovery and dispatch below deliberately retain their fresh reads. *)
+        let* inventory=io (fun () -> Keeper_librarian_durable_gate.Inventory.read ~store
+          ~owner:(Request.physical_owner request)) in
+        List.fold_left (fun result ((record,request) as original) ->
+          let* unfinished=result in
+          let* frontier=io (fun () -> Commit.validate_inventory ~inventory ~store ~request ~record) in
+          match frontier with
+          | Commit.Unfinished -> Ok (original::unfinished)
+          | Commit.Settled -> Ok unfinished) (Ok []) originals in
     match validated with
     | Error detail -> error detail
     | Ok unfinished ->

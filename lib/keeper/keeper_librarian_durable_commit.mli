@@ -33,6 +33,13 @@ val validate : store:Lane_addon_store.t -> request:Keeper_librarian_durable_requ
     moving range receipts/cursors to equal the old ones; they grant no current
     effect or ACK authority. *)
 
+val validate_inventory : inventory:Keeper_librarian_durable_gate.Inventory.t ->
+  store:Lane_addon_store.t -> request:Keeper_librarian_durable_request.t ->
+  record:Lane_addon_tool_request_owner.retained -> (frontier, string) result
+(** Same strict read-only validation as [validate], using one complete gate
+    inventory acquired for this consume pass and the already restored original
+    record. The observation is never accepted by publication or dispatch APIs. *)
+
 val is_superseded : request:Keeper_librarian_durable_request.t ->
   record:Lane_addon_tool_request_owner.retained -> (bool, string) result
 (** Pure strict check of this domain's immutable typed-basis conflict evidence.

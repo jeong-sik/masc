@@ -477,6 +477,73 @@ let test_actual_completed_history_path () = with_fixture (fun ~sw:_ fixture ->
   let _,restored=only_original fixture in
   check json "completed original restores the full retained input/preparation" request_before (Capture.to_json restored);
   check int "already consumed source never creates another provider request" posts (F.post_count fixture.server))
+
+let test_inventory_observation_reuses_verified_inputs () = with_fixture (fun ~sw:_ fixture ->
+  let module Journal = Keeper_librarian_durable_gate in
+  let module Commit = Keeper_librarian_durable_commit in
+  drive_advanced fixture;
+  let parent,capture=only_original fixture in
+  let owner=Capture.physical_owner capture in
+  let gates=io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Journal.scope owner)) |> owned in
+  let gate=match gates with [gate] -> gate | [] | _::_::_ -> fail "expected one completed gate" in
+  let posts=F.post_count fixture.server and positions=progress fixture in
+  memory_action fixture (fun () ->
+    let inventory=io (fun () -> Journal.Inventory.read ~store:fixture.store ~owner) |> get in
+    let validate ()=io (fun () -> Commit.validate_inventory ~inventory ~store:fixture.store
+      ~request:capture ~record:parent) in
+    List.iter (fun (record : Owner.retained) ->
+      let path=Filename.concat (Store.root fixture.store) (Filename.concat Store.tool_request_bodies_directory
+        (Filename.concat (Store.digest record.scope) (record.request_digest ^ ".json"))) in
+      Eio.Switch.run (fun sw ->
+        let hidden=path ^ ".fixture-hidden" in
+        io (fun () -> Unix.rename path hidden);
+        Eio.Switch.on_release sw (fun () -> io (fun () -> Unix.rename hidden path));
+        check bool "one read-only pass reuses its verified parent and gate bodies" true
+          (validate ()=Ok Commit.Settled);
+        check bool "fresh validation never obtains authority from that observation" true
+          (io (fun () -> Commit.validate ~store:fixture.store ~request:capture ~record:parent)
+           |> Result.is_error);
+        check bool "recovery reloads the original parent and acknowledged gate" true
+          (io (fun () -> Journal.recover_root ~store:fixture.store ~owner ~capture)
+           |> Result.is_error);
+        if record.request_id=gate.request_id then
+          check bool "a new inventory refuses an unreadable published gate body" true
+            (io (fun () -> Journal.Inventory.read ~store:fixture.store ~owner)
+             |> Result.is_error))) [parent;gate]);
+  check int "read-only observations do not invoke the provider" posts (F.post_count fixture.server);
+  check bool "read-only observations do not acknowledge new source" true (progress fixture=positions);
+  ignore (run_worker fixture);
+  check int "fresh post-observation wake never redispatches the settled original" posts (F.post_count fixture.server))
+
+let test_inventory_observation_rejects_mixed_parent_and_bad_scope () = with_fixture (fun ~sw:_ fixture ->
+  let module Journal = Keeper_librarian_durable_gate in
+  let module Commit = Keeper_librarian_durable_commit in
+  drive_advanced fixture;
+  let parent,capture=only_original fixture in
+  let owner=Capture.physical_owner capture in
+  memory_action fixture (fun () ->
+    let inventory=io (fun () -> Journal.Inventory.read ~store:fixture.store ~owner) |> get in
+    let other=Store.create ~root:(Filename.concat fixture.base_path "changed-parent-owner") in
+    io (fun () -> Owner.retain ~store:other ~scope:parent.scope ~request_id:parent.request_id
+      ~installation_id:parent.installation_id ~package_id:parent.package_id ~tool:parent.tool
+      ~summary:parent.summary ~request:(`Assoc ["replaced",`Bool true])) |> owned;
+    let changed=io (fun () -> Owner.load ~store:other ~scope:parent.scope ~request_id:parent.request_id)
+      |> owned |> Option.get in
+    check bool "an observation cannot borrow a different original capture" true
+      (io (fun () -> Commit.validate_inventory ~inventory ~store:fixture.store ~request:capture
+        ~record:changed) |> Result.is_error));
+  let posts=F.post_count fixture.server and positions=progress fixture in
+  io (fun () -> Owner.retain ~store:fixture.store ~scope:(Journal.scope owner)
+    ~request_id:"unrelated-invalid-gate" ~installation_id:parent.installation_id
+    ~package_id:parent.package_id ~tool:parent.tool ~summary:`Null
+    ~request:(`Assoc ["version",`Int 1;"unrelated",`Bool true])) |> owned;
+  check bool "complete inventory rejects corruption outside the selected execution" true
+    (io (fun () -> Journal.Inventory.read ~store:fixture.store ~owner) |> Result.is_error);
+  check bool "production wake refuses the corrupt scope before new selection or dispatch" true
+    (Result.is_error (run_worker fixture));
+  check int "corrupt inventory cannot trigger a fresh provider call" posts (F.post_count fixture.server);
+  check bool "corrupt inventory preserves source acknowledgements" true (progress fixture=positions))
+
 let test_actual_official_or_mixed_path kind () = with_fixture ~history_kind:kind (fun ~sw:_ fixture ->
   let atom_before=progress fixture in
   let official ()=io (fun () -> Keeper_librarian_official_progress.read
@@ -1009,6 +1076,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
   test_case "actual original reaches Memory and source ACK" `Quick test_actual_completed_history_path;
+  test_case "one inventory observation reuses verified gate and parent bodies without effect authority" `Quick
+    test_inventory_observation_reuses_verified_inputs;
+  test_case "inventory observation rejects mixed parents and unrelated malformed gates" `Quick
+    test_inventory_observation_rejects_mixed_parent_and_bad_scope;
   test_case "actual official-only original reaches Memory and official ACK" `Quick (test_actual_official_or_mixed_path Official);
   test_case "actual mixed original reaches Memory and both receipt/position kinds" `Quick (test_actual_official_or_mixed_path Mixed);
   test_case "production durable queue stops following phases on actual Pending" `Quick test_production_queue_pending_retains_all_sources;

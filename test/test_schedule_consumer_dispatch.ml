@@ -3941,7 +3941,7 @@ let pause_recovery_keeper config keeper_name =
   | Ok () -> () | Error detail -> fail detail
 ;;
 
-let seed_unsettled_running config ~keeper_name ~now request =
+let seed_unsettled_running config ~keeper_name ~now (request : Schedule_domain.schedule_request) =
   let primary = Filename.concat (Workspace.masc_dir config) "schedules.json" in
   let staging = primary ^ ".tmp-atomic" in
   let snapshot = Filename.concat

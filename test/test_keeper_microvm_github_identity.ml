@@ -80,6 +80,8 @@ let configured f =
   let hosts = "github.com:\n    user: fixture\n    oauth_token: fake-identity-store-token\n    git_protocol: https\n" in
   write (Filename.concat directory "hosts.yml") hosts;
   write (Filename.concat directory "config.yml") "git_protocol: https\r\n";
+  List.iter (fun leaf -> Unix.chmod (Filename.concat directory leaf) 0o600)
+    ["hosts.yml"; "config.yml"];
   captured_value (Github.capture_tool_identity ~config ~keeper_name), directory, hosts
 
 let test_publish_reload () = with_fixture @@ fun f ->

@@ -182,9 +182,11 @@ let primary_activity_of_row row =
         match activity, waiting_state row with
         | Some Masc.Tui_decode.Keeper_activity_idle, _ -> Idle
         | _, Some Keeper_waiting_idle -> Idle
-        | (Some (Masc.Tui_decode.Keeper_activity_idle | Masc.Tui_decode.Keeper_activity_unknown)
-          | None), _ -> Unknown
-        | _, Some (Keeper_waiting_busy | Keeper_waiting_blocked | Keeper_waiting_deferred) ->
+        | Some Masc.Tui_decode.Keeper_activity_unknown, _ -> Unknown
+        | None, _ -> Unknown
+        | Some (Masc.Tui_decode.Keeper_activity_waiting | Masc.Tui_decode.Keeper_activity_running
+               | Masc.Tui_decode.Keeper_activity_streaming | Masc.Tui_decode.Keeper_activity_tool
+               | Masc.Tui_decode.Keeper_activity_preparing | Masc.Tui_decode.Keeper_activity_attempt_failed), _ ->
             External_waiting)
     | Some Masc.Tui_decode.Keeper_activity_attempt_failed -> Failure
 

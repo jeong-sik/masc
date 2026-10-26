@@ -169,7 +169,7 @@ let test_keeper_detail_drops_only_list_attention_reads () =
   let added = Types.surface_needs_delta ~previous:detail ~next:listing in
   check bool "returning adds held calls" true added.Types.needs_operator_approvals;
   check bool "returning adds questions" true added.Types.needs_asks;
-  check bool "returning adds only attention reads" 2
+  check int "returning adds only attention reads" 2
     ([ added.Types.needs_transport; added.needs_keeper_roster; added.needs_fleet_safety
      ; added.needs_board; added.needs_planning; added.needs_system_logs; added.needs_keeper_chat
      ; added.needs_operator_approvals; added.needs_asks; added.needs_runtime_quota

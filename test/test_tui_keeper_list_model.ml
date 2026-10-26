@@ -176,6 +176,7 @@ let test_streaming_keeps_async_and_schedule_badges () =
         ; async_request ~ownership:Decode.Async_ownership_unknown Decode.Async_running "b"
         ]
       ~waiting:(waiting ~items:[waiting_item ~source:Model.Waiting_source_schedule_waiting ()] "row")
+      "row"
   in
   Alcotest.(check bool) "the turn remains primary" true
     (Model.primary_activity_of_row value = Model.Streaming);
@@ -190,6 +191,7 @@ let test_delegate_and_verification_remain_distinct_badges () =
   let value =
     row ~task:(verification_task "row")
       ~waiting:(waiting ~items:[waiting_item ~producer:Model.Wake_keeper_delegate ()] "row")
+      "row"
   in
   Alcotest.(check bool) "delegation is primary without an active turn" true
     (Model.primary_activity_of_row value = Model.Delegating);

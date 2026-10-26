@@ -51,13 +51,16 @@ type endpoint =
   { url : string
   ; protocol : endpoint_protocol
   ; capabilities : Capabilities.capabilities
+  ; discovery_timeout_s : float option
+    (** Declared total deadline for one discovery HTTP request. *)
   }
 
 (** Construct an endpoint declaration. [url] is trimmed. Both protocol and
     capabilities are mandatory declarations; a transport protocol never grants
     model capabilities implicitly. *)
 val endpoint
-  :  protocol:endpoint_protocol
+  :  ?discovery_timeout_s:float
+  -> protocol:endpoint_protocol
   -> capabilities:Capabilities.capabilities
   -> string
   -> endpoint
@@ -213,7 +216,8 @@ val context_for_model : string -> (string * int) option
     and return the full status list.  Replaces [discover] when
     the caller also wants the context state kept current. *)
 val refresh_and_sync
-  :  sw:Eio.Switch.t
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> endpoints:endpoint list
   -> endpoint_status list

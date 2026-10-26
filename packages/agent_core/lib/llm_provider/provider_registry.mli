@@ -101,7 +101,8 @@ type endpoint_refresh_error =
     endpoint-local probe failures. No port scan or fallback declaration occurs.
     @since 0.86.0 *)
 val refresh_llama_endpoints
-  :  sw:Eio.Switch.t
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> endpoints:Discovery.endpoint list
   -> (Discovery.endpoint_status list, endpoint_refresh_error) result

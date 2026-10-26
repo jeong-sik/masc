@@ -5,7 +5,7 @@
 
     @since 0.205.9 *)
 
-type capability_source =
+type capability_source = Provider_config.capability_source =
   | Model_capability
   | Provider_default_capability
 
@@ -14,20 +14,7 @@ let capability_source_to_string = function
   | Provider_default_capability -> "provider_default"
 ;;
 
-let base_capabilities_for_kind = function
-  | Provider_config.Ollama -> Capabilities.ollama_capabilities
-  | Anthropic -> Capabilities.anthropic_capabilities
-  | Kimi -> Capabilities.kimi_capabilities
-  | Glm -> Capabilities.glm_capabilities
-  | Gemini -> Capabilities.gemini_capabilities
-  | OpenAI_compat -> Capabilities.openai_compat_chat_capabilities
-;;
-
-let resolve_capabilities_for_config (config : Provider_config.t) =
-  match Provider_config.capabilities_for_config_model config with
-  | Some caps -> caps, Model_capability
-  | None -> base_capabilities_for_kind config.kind, Provider_default_capability
-;;
+let resolve_capabilities_for_config = Provider_config.resolve_request_capabilities
 
 let warn_on_drift_observation source = function
   | Capabilities.Thinking_returned_but_declared_unsupported ->

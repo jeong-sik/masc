@@ -220,39 +220,8 @@ let provider_id_of_provider_config cfg =
   | None -> PConfig.string_of_provider_kind cfg.kind
 ;;
 
-let base_capabilities_of_kind = function
-  | PConfig.Ollama -> Llm_provider.Capabilities.ollama_capabilities
-  | PConfig.Anthropic -> Llm_provider.Capabilities.anthropic_capabilities
-  | PConfig.Kimi -> Llm_provider.Capabilities.kimi_capabilities
-  | PConfig.OpenAI_compat -> Llm_provider.Capabilities.openai_compat_chat_capabilities
-  | PConfig.Gemini -> Llm_provider.Capabilities.gemini_capabilities
-  | PConfig.Glm -> Llm_provider.Capabilities.glm_capabilities
-;;
-
-let registry_capabilities_for_provider_config (cfg : PConfig.t) =
-  match binding_for_provider_config cfg with
-  | Some binding -> binding.capabilities
-  | None -> base_capabilities_of_kind cfg.kind
-;;
-
-let capabilities_for_provider_config (cfg : PConfig.t) =
-  let caps = registry_capabilities_for_provider_config cfg in
-  match PConfig.capabilities_for_config_model cfg with
-  | Some model_caps -> model_caps
-  | None ->
-    (match
-       (* Same config, so the same wire: this fallback differs from
-          [capabilities_for_config_model] only in the label it qualifies
-          with, not in which of the provider's wires it resolved to. *)
-       Llm_provider.Capabilities.for_provider_model_id
-         ~wire:(Some cfg.kind)
-         ~provider:(match canonical_explicit_provider_id cfg with
-           | Some id -> Llm_provider.Model_catalog.Declared_provider id
-           | None -> Llm_provider.Model_catalog.Anonymous_wire cfg.kind)
-         ~model_id:cfg.model_id
-     with
-     | Some model_caps -> model_caps
-     | None -> caps)
+let capabilities_for_provider_config config =
+  fst (PConfig.resolve_request_capabilities config)
 ;;
 
 let resolve_model binding ~requested_model =

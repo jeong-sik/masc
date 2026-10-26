@@ -229,23 +229,26 @@ let test_endpoint_only_config_does_not_select_catalog_facts () =
       caps.supports_reasoning)
 ;;
 
-let test_explicit_provider_id_selects_catalog_capabilities () =
+let test_explicit_provider_id_requires_selected_catalog_capabilities () =
   with_provider_catalog catalog_json (fun () ->
-    let cfg =
-      Llm_provider.Provider_config.make
-        ~kind:Llm_provider.Provider_config.OpenAI_compat
-        ~provider_id:"subscriber-local"
-        ~model_id:"unlisted-local-model"
-        ~base_url:"https://deliberately-different.example/v9"
-        ~request_path:"/not-the-catalog-path"
-        ()
-    in
-    let caps = Provider_runtime_binding.capabilities_for_provider_config cfg in
-    Alcotest.(check bool) "catalog supports tools" true caps.supports_tools;
-    Alcotest.(check bool)
-      "explicit id selects catalog reasoning capability"
-      true
-      caps.supports_reasoning)
+    let config = Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat ~provider_id:"subscriber-local"
+      ~model_id:"unlisted-local-model"
+      ~base_url:"https://deliberately-different.example/v9"
+      ~request_path:"/not-the-catalog-path" () in
+    let caps = Provider_runtime_binding.capabilities_for_provider_config config in
+    Alcotest.(check bool) "raw provider id does not reopen overlay capability policy" false
+      caps.supports_reasoning;
+    Alcotest.(check bool) "runtime capability agrees with completion admission" true
+      (caps = fst (Llm_provider.Provider_config.resolve_request_capabilities config));
+    let binding = expect_binding "subscriber-local" in
+    let selected = expect_ok (Provider_runtime_binding.to_provider_config
+      ~model:"unlisted-local-model" binding) in
+    let caps = Provider_runtime_binding.capabilities_for_provider_config selected in
+    Alcotest.(check bool) "selected catalog declaration retains reasoning" true
+      caps.supports_reasoning;
+    Alcotest.(check bool) "selected declaration agrees with completion admission" true
+      (caps = fst (Llm_provider.Provider_config.resolve_request_capabilities selected)))
 ;;
 
 (* A model no catalog row names is the deployment's own, and its capability
@@ -308,6 +311,12 @@ let test_shared_endpoint_is_disambiguated_by_explicit_provider_id () =
     in
     Alcotest.(check string) "alpha binding" "shared-alpha" alpha_binding.id;
     Alcotest.(check string) "beta alias canonical binding" "shared-beta" beta_binding.id;
+    Alcotest.(check bool) "raw beta identity alone grants no reasoning policy" false
+      (Provider_runtime_binding.capabilities_for_provider_config beta).supports_reasoning;
+    let alpha = expect_ok (Provider_runtime_binding.to_provider_config
+      ~model:"shared-model" alpha_binding) in
+    let beta = expect_ok (Provider_runtime_binding.to_provider_config
+      ~model:"shared-model" beta_binding) in
     let alpha_caps = Provider_runtime_binding.capabilities_for_provider_config alpha in
     let beta_caps = Provider_runtime_binding.capabilities_for_provider_config beta in
     Alcotest.(check bool) "alpha provider capability" false alpha_caps.supports_reasoning;
@@ -905,7 +914,7 @@ let test_unregistered_openai_compat_identity_remains_typed () =
     (Provider_runtime_binding.provider_id_of_provider_config cfg)
 ;;
 
-let test_registry_fallback_preserves_provider_authority () =
+let test_wire_fallback_preserves_provider_authority () =
   with_model_catalog
     {|[[providers]]
 id = "proxy"
@@ -923,25 +932,161 @@ capabilities_base = "openai_chat_extended"
       let anonymous = config () in
       Alcotest.(check bool) "primary anonymous lookup has no scoped or bare fact" true
         (Llm_provider.Provider_config.capabilities_for_config_model anonymous = None);
-      Alcotest.(check bool) "registry fallback retains anonymous wire base" true
-        (Provider_runtime_binding.capabilities_for_provider_config anonymous
-          = Llm_provider.Capabilities.gemini_capabilities);
+      let check_native_fallback label config =
+        let caps = Provider_runtime_binding.capabilities_for_provider_config config in
+        Alcotest.(check bool) (label ^ " native tools remain supported") true caps.supports_tools;
+        Alcotest.(check bool) (label ^ " tool choice is undeclared") false caps.supports_tool_choice;
+        Alcotest.(check bool) (label ^ " required choice is undeclared") false caps.supports_required_tool_choice;
+        Alcotest.(check bool) (label ^ " named choice is undeclared") false caps.supports_named_tool_choice;
+        Alcotest.(check bool) (label ^ " public admission rejects undeclared forcing") true
+          (Result.is_error (Llm_provider.Complete_common.validate_all
+            {config with tool_choice=Some Llm_provider.Types.Any})) in
+      check_native_fallback "anonymous wire" anonymous;
       Alcotest.(check bool) "declared wire alias resolves its provider base" true
         (Provider_runtime_binding.capabilities_for_provider_config
           (config ~provider_id:"gemini" ())
           = Llm_provider.Capabilities.openai_compat_chat_extended_capabilities);
-      Alcotest.(check bool) "unknown declaration never acquires proxy authority" true
-        (Provider_runtime_binding.capabilities_for_provider_config
-          (config ~provider_id:"unknown" ())
-          = Llm_provider.Capabilities.gemini_capabilities))
+      check_native_fallback "unknown declaration" (config ~provider_id:"unknown" ()))
+;;
+
+(* A frozen missing policy is an observed absence, not permission for the
+   runtime projection to consult a later process catalog. *)
+let test_frozen_absence_survives_model_catalog_replacement () =
+  with_model_catalog "" (fun () ->
+    let config = Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat ~provider_id:"snapshot-provider"
+      ~model_id:"snapshot-model" ~base_url:"https://example.invalid" ()
+      |> Llm_provider.Provider_config.freeze_for_request in
+    Alcotest.(check bool) "missing model policy is frozen" true
+      (Llm_provider.Provider_config.capabilities_for_config_model config = None);
+    let replacement = match Llm_provider.Model_catalog.of_toml_string
+        ~source:"replacement" {|[[models]]
+model_id = "snapshot-model"
+provider_name = "snapshot-provider"
+base = "openai_chat_extended"
+|} with
+      | Ok catalog -> catalog | Error detail -> Alcotest.fail detail in
+    Llm_provider.Model_catalog.set_global replacement;
+    Alcotest.(check bool) "low-level policy retains its observed absence" true
+      (Llm_provider.Provider_config.capabilities_for_config_model config = None);
+    let actual = Provider_runtime_binding.capabilities_for_provider_config config in
+    let expected = Option.value
+      (Llm_provider.Provider_config.capabilities_for_config_model config)
+      ~default:Llm_provider.Capabilities.default_capabilities in
+    Alcotest.(check bool) "runtime projection cannot revive a missing model policy" true
+      (actual = expected))
+;;
+
+let test_frozen_absence_survives_provider_overlay () =
+  with_model_catalog "" (fun () ->
+    let config = Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat ~provider_id:"subscriber-local"
+      ~model_id:"unlisted-local-model" ~base_url:"https://example.invalid" ()
+      |> Llm_provider.Provider_config.freeze_for_request in
+    with_provider_catalog catalog_json (fun () ->
+      let actual = Provider_runtime_binding.capabilities_for_provider_config config in
+      let expected = Option.value
+      (Llm_provider.Provider_config.capabilities_for_config_model config)
+      ~default:Llm_provider.Capabilities.default_capabilities in
+      Alcotest.(check bool) "runtime projection cannot acquire a later provider overlay" true
+        (actual = expected)))
+;;
+
+let test_selected_binding_carries_provider_capabilities () =
+  with_provider_catalog catalog_json (fun () ->
+    let binding = expect_binding "subscriber-alias" in
+    let config = expect_ok (Provider_runtime_binding.to_provider_config
+      ~model:"unlisted-local-model" binding) in
+    Alcotest.(check bool) "binding projects its declared capability into config" true
+      (Option.is_some config.model_capabilities_override);
+    let config = Llm_provider.Provider_config.freeze_for_request config in
+    Llm_provider.Provider_catalog.clear_global ();
+    let actual = Provider_runtime_binding.capabilities_for_provider_config config in
+    let expected = Option.value
+      (Llm_provider.Provider_config.capabilities_for_config_model config)
+      ~default:Llm_provider.Capabilities.default_capabilities in
+    Alcotest.(check bool) "selected provider reasoning survives overlay removal" true
+      actual.supports_reasoning;
+    Alcotest.(check bool) "selected provider facts match request admission" true
+      (actual = expected))
+;;
+
+let test_projected_options_match_public_admission () =
+  with_model_catalog "" (fun () ->
+    List.iter (fun kind ->
+      let config = Llm_provider.Provider_config.make ~kind
+        ~model_id:"undeclared-request-model" ~base_url:"https://example.invalid" ()
+        |> Llm_provider.Provider_config.freeze_for_request in
+      let caps = Provider_runtime_binding.capabilities_for_provider_config config in
+      List.iter (fun choice ->
+        let advertised = match choice with
+          | Llm_provider.Types.Any -> caps.supports_tool_choice && caps.supports_required_tool_choice
+          | Tool _ -> caps.supports_tool_choice && caps.supports_named_tool_choice
+          | Auto | None_ -> true in
+        Alcotest.(check bool) "advertised forcing agrees with full public admission"
+          advertised (Result.is_ok (Llm_provider.Complete_common.validate_all
+            {config with tool_choice=Some choice})))
+        [Llm_provider.Types.Any;Tool "lookup"])
+      Llm_provider.Provider_config.all_provider_kinds;
+    let config = Llm_provider.Provider_config.make ~kind:OpenAI_compat
+      ~model_id:"undeclared-request-model" ~base_url:"https://example.invalid" () in
+    let caps = Provider_runtime_binding.capabilities_for_provider_config config in
+    Alcotest.(check bool) "anonymous chat wire retains its schema protocol" true
+      caps.supports_structured_output;
+    Alcotest.(check bool) "anonymous chat schema uses its retained wire protocol" true
+      (Result.is_ok (Llm_provider.Complete_common.validate_all
+        {config with response_format=Llm_provider.Types.JsonSchema
+          (`Assoc ["type",`String "object"])})))
+;;
+
+let test_anonymous_chat_defaults_do_not_restore_declared_missing_policy () =
+  with_model_catalog "" (fun () ->
+    let config ?provider_id () = Llm_provider.Provider_config.make
+      ~kind:OpenAI_compat ?provider_id ~model_id:"custom-deployment-model"
+      ~base_url:"https://example.invalid/v1" () in
+    let anonymous = config () |> Llm_provider.Provider_config.freeze_for_request in
+    let declared = config ~provider_id:"missing-deployment-policy" ()
+      |> Llm_provider.Provider_config.freeze_for_request in
+    let caps, source = Llm_provider.Provider_config.resolve_request_capabilities anonymous in
+    Alcotest.(check bool) "anonymous wire is a protocol fallback, not a model fact" true
+      (source = Llm_provider.Provider_config.Provider_default_capability);
+    List.iter (fun (name, enabled) -> Alcotest.(check bool) name true enabled)
+      [ "anonymous tools", caps.supports_tools
+      ; "anonymous native streaming", caps.supports_native_streaming
+      ; "anonymous schema protocol", caps.supports_structured_output
+      ; "anonymous image protocol", caps.supports_image_input ];
+    Alcotest.(check bool) "runtime reads the same anonymous request authority" true
+      (Provider_runtime_binding.capabilities_for_provider_config anonymous = caps);
+    let declared_caps = Provider_runtime_binding.capabilities_for_provider_config declared in
+    Alcotest.(check bool) "declared missing policy retains conservative tools" false
+      declared_caps.supports_tools;
+    Alcotest.(check bool) "declared missing policy retains conservative streaming" false
+      declared_caps.supports_native_streaming;
+    Alcotest.(check bool) "declared missing schema policy refuses public admission" true
+      (Result.is_error (Llm_provider.Complete_common.validate_all
+        {declared with response_format=Llm_provider.Types.JsonSchema
+          (`Assoc ["type",`String "object"])}));
+    Alcotest.(check bool) "fallback does not invent model reasoning" false
+      caps.supports_reasoning)
 ;;
 
 let () =
   Alcotest.run
     "Provider_runtime_binding"
-    [ ( "catalog"
-      , [ Alcotest.test_case "registry fallback preserves provider authority" `Quick
-            test_registry_fallback_preserves_provider_authority
+    [ ( "policy authority",
+        [ Alcotest.test_case "anonymous chat versus declared missing policy" `Quick
+            test_anonymous_chat_defaults_do_not_restore_declared_missing_policy
+        ; Alcotest.test_case "projected options match public admission" `Quick
+            test_projected_options_match_public_admission
+        ; Alcotest.test_case "missing model policy survives replacement" `Quick
+            test_frozen_absence_survives_model_catalog_replacement
+        ; Alcotest.test_case "missing provider policy survives overlay" `Quick
+            test_frozen_absence_survives_provider_overlay
+        ; Alcotest.test_case "selected binding carries provider facts" `Quick
+            test_selected_binding_carries_provider_capabilities ])
+    ; ( "catalog"
+      , [ Alcotest.test_case "wire fallback preserves provider authority" `Quick
+            test_wire_fallback_preserves_provider_authority
         ; Alcotest.test_case
             "alias default capabilities"
             `Quick
@@ -956,9 +1101,9 @@ let () =
             `Quick
             test_endpoint_only_config_does_not_select_catalog_facts
         ; Alcotest.test_case
-            "explicit provider id selects catalog capabilities"
+            "provider capabilities require selected binding"
             `Quick
-            test_explicit_provider_id_selects_catalog_capabilities
+            test_explicit_provider_id_requires_selected_catalog_capabilities
         ; Alcotest.test_case
             "an uncatalogued model keeps its three tool-choice flags apart"
             `Quick

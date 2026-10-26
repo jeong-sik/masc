@@ -1,0 +1,16 @@
+{
+  "source_head": "8f2943803e9bc898c9413430299ea4bb0893c6b6",
+  "base": "06c749cf99fd9742d9e2f53748f0f45e8c78fc95",
+  "sha256": {
+    "packages/agent_core/lib/llm_provider/provider_config.ml": "9f20c576b399941c335e304c8dbed6ca8ea10524dae0619e7cfd25cad0488bc7",
+    "packages/agent_core/lib/llm_provider/provider_config.mli": "28a8d49fee85e04d7622ba470aa9d6efc3cae15cd19e661c2d7dfacfaa8d59ee",
+    "packages/agent_core/lib/llm_provider/complete_common.ml": "660aeaf79997fc11de2da6fd26d2fee7a83ad61fcb69f17dd4e04bad929cff68",
+    "packages/agent_core/lib/provider_runtime_binding.ml": "0b9c8b012933ed7a2ed45bac77173ccd4b5487775e0cd408e2470c14aefadd44",
+    "packages/agent_core/lib/provider_runtime_binding.mli": "00e5bc424c10ecd01b1834dbe556838b8b91b893f175b1ba8ce3d06d470b22df",
+    "packages/agent_core/test/test_provider_runtime_binding.ml": "707de961c2828a463c1a6362a0c117e0f8d753ab609007894d39baacfacc5c29",
+    "packages/agent_core/lib/pipeline/pipeline.ml": "ba26b097205ac8a3ec68fc4e5b4e1d815b6359e99b3188ac72aea94729dbd237",
+    "packages/agent_core/test/test_pipeline.ml": "31ddd552991739394802a2e2898151c054f32c03b78ec3c9595147d5ca310693",
+    "lib/provider_tool_support/provider_tool_support.ml": "a9b6d99d871e57caddb321967dff729c2adaf96bec07c5844cf630301c10268a",
+    "test/test_model_capability_presence.ml": "bd5b132def5d1f9d76239d0f3705875615982ba659686e66e70c47e72ac29fd7"
+  }
+}

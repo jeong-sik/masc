@@ -803,6 +803,7 @@ let unwrap_raw_trace = function
 ;;
 
 let test_stream_route_carries_exact_raw_trace_run_id () =
+  List.iter (fun declared_streaming ->
   let trace_path = Filename.temp_file "agent_core-pipeline-capture-id" ".jsonl" in
   Fun.protect
     ~finally:(fun () -> Sys.remove trace_path)
@@ -812,21 +813,30 @@ let test_stream_route_carries_exact_raw_trace_run_id () =
        Eio.Switch.run
        @@ fun sw ->
        let captured_id = ref None in
+       let sync_calls = ref 0 in
+       let stream_calls = ref 0 in
        let response = pipeline_response EndTurn in
        let transport : Llm_provider.Llm_transport.t =
          Llm_provider.Llm_transport.custom ({ complete_sync =
              (fun _req ->
+               incr sync_calls;
                { Llm_provider.Llm_transport.response = Ok response; latency_ms = Some 0 })
          ; complete_stream =
              (fun ?on_telemetry:_ ~on_event:_ request ->
+               incr stream_calls;
                captured_id := request.Llm_provider.Llm_transport.capture_id;
                Ok response)
          })
        in
+       let provider_config = Provider_mock.to_provider_config () in
+       let provider_config = if declared_streaming then
+         {provider_config with model_capabilities_override=Some
+           {Llm_provider.Capabilities.default_capabilities with supports_native_streaming=true}}
+         else provider_config in
        let options =
          { Internal_agent.default_options with
            transport = Some transport
-         ; provider_config = Some (Provider_mock.to_provider_config ())
+         ; provider_config = Some provider_config
          }
        in
        let agent =
@@ -868,15 +878,19 @@ let test_stream_route_carries_exact_raw_trace_run_id () =
         | Error error -> Alcotest.fail (Error.to_string error));
        Alcotest.(check (option string))
          "transport capture identity"
-         (Some expected)
+         (if declared_streaming then Some expected else None)
          !captured_id;
+       Alcotest.(check int) "native stream follows declared support"
+         (if declared_streaming then 1 else 0) !stream_calls;
+       Alcotest.(check int) "undeclared transport uses synchronous fallback"
+         (if declared_streaming then 0 else 1) !sync_calls;
        ignore
          (unwrap_raw_trace
             (Raw_trace.finish_run
                active
                ~final_text:(Some "done")
                ~stop_reason:(Some "EndTurn")
-               ~error:None)))
+               ~error:None)))) [false;true]
 ;;
 
 let text_tool_intent_response () =

@@ -404,6 +404,7 @@ let stalling_response_body bytes =
 ;;
 
 let with_server
+      ?on_request_before_reply
       ?response_delay_s
       ?(status = `OK)
       ?first_response
@@ -425,6 +426,7 @@ let with_server
     let handler _conn _request body =
       ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
       let post_index = Atomic.fetch_and_add completion_posts 1 in
+      Option.iter (fun hook -> hook ()) on_request_before_reply;
       if abort_completion then raise Exit;
       Option.iter (Eio.Time.sleep clock) response_delay_s;
       match first_stalled_response, post_index with
@@ -5356,36 +5358,97 @@ let test_concurrent_duplicate_flow_does_not_double_dispatch () =
     (is_replay left <> is_replay right)
 ;;
 
-let test_cancellation_terminalizes_outer_attempt () =
-  let (timed_out, replay, evidence), posts =
-    with_server ~response_delay_s:0.1 ~response:(openai_response {|{"name":"accepted"}|})
+let check_cancellation_terminalizes_outer_attempt ~after_dispatch () =
+  let reached_boundary, resolve_reached_boundary = Eio.Promise.create () in
+  let (cancelled, replay, receipt_dispatches, evidence), posts =
+    with_server
+      ~on_request_before_reply:(fun () ->
+        Eio.Promise.resolve resolve_reached_boundary ();
+        Eio.Fiber.await_cancel ())
+      ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog [ catalog_entry ~id:"cancel-flow" ~base_url ~native:true ~json:true () ]
     @@ fun snapshot ->
     let flow = start_flow (frozen_flow snapshot [ "cancel-flow" ]) in
-    let timed_out =
-      try
-        ignore
-          (Eio.Time.with_timeout_exn clock 0.01 (fun () -> execute_ok ~net ~clock flow)
-           : (EO.flow_success, _ EO.flow_execution_error) result);
-        false
+    let context_ready, resolve_context_ready = Eio.Promise.create () in
+    let finished, resolve_finished = Eio.Promise.create () in
+    let observed_receipt = ref None in
+    let cancellation_reason = Failure "controlled exact-flow cancellation" in
+    let await ~label promise =
+      match
+        Eio.Time.with_timeout clock 30.0 (fun () -> Ok (Eio.Promise.await promise))
       with
-      | Eio.Time.Timeout -> true
+      | Ok value -> value
+      | Error `Timeout -> failf "%s did not reach its fixture boundary" label
+    in
+    Eio.Fiber.both
+      (fun () ->
+         let cancelled =
+           try
+             Eio.Cancel.sub (fun context ->
+               Eio.Promise.resolve resolve_context_ready context;
+               ignore
+                 (execute_with_accepting_test_validator
+                    ~net ~clock
+                    ~on_measurement_terminal:(fun _ -> Ok ())
+                    ~before_measurement_dispatch:(fun _ -> Ok ())
+                    ~before_dispatch:(fun candidate ->
+                      observed_receipt := Some candidate;
+                      if after_dispatch then Ok ()
+                      else (
+                        Eio.Promise.resolve resolve_reached_boundary ();
+                        Eio.Fiber.await_cancel ()))
+                    ~before_advance:(fun ~failed:_ ~next:_ ->
+                      fail "cancelled attempt advanced to a successor")
+                    flow
+                  : (EO.flow_success, string EO.flow_execution_error) result));
+             false
+           with
+           | Eio.Cancel.Cancelled reason ->
+             check bool "original cancellation reason escapes" true
+               (reason == cancellation_reason);
+             true
+         in
+         Eio.Promise.resolve resolve_finished cancelled)
+      (fun () ->
+         let context = await ~label:"flow context" context_ready in
+         await ~label:"cancel point" reached_boundary;
+         Eio.Cancel.cancel context cancellation_reason);
+    let cancelled = await ~label:"cancelled flow" finished in
+    let receipt_dispatches =
+      match !observed_receipt with
+      | Some (candidate : EO.flow_attempt_receipt) ->
+        EO.receipt_dispatch_count candidate.receipt
+      | None -> fail "cancellation never reached the allocated attempt"
     in
     let replay = execute_ok ~net ~clock flow in
-    timed_out, replay, EO.flow_attempt_evidence flow
+    cancelled, replay, receipt_dispatches, EO.flow_attempt_evidence flow
   in
-  check bool "cancellation escaped" true timed_out;
-  check int "cancellation dispatched at most once" 1 posts;
+  let expected_dispatches = if after_dispatch then 1 else 0 in
+  check bool "controlled cancellation escaped" true cancelled;
+  check int "actual provider POST count at cancellation boundary"
+    expected_dispatches posts;
+  check int "attempt receipt records exact dispatch count"
+    expected_dispatches receipt_dispatches;
+  check bool "published generation dispatch agrees with the chosen boundary" true
+    (EO.flow_evidence_generation_dispatch evidence
+     = (if after_dispatch then EO.Generation_dispatch_started
+        else EO.No_generation_dispatch));
   (match replay with
    | Error (EO.Flow_attempt_already_started _) -> ()
-   | Ok _ | Error _ -> fail "cancelled flow was not terminal");
-  let receipt = (attempt_for evidence "cancel-flow").receipt in
-  check
-    int
-    "cancelled receipt records dispatch"
-    1
-    (EO.generation_receipt_snapshot_dispatch_count receipt)
+   | Ok _ | Error _ -> fail "cancelled flow was not terminal on the next invocation");
+  if after_dispatch then (
+    let receipt = (attempt_for evidence "cancel-flow").receipt in
+    check int "published cancelled receipt records one dispatch" 1
+      (EO.generation_receipt_snapshot_dispatch_count receipt))
+;;
+
+let test_cancellation_before_dispatch_terminalizes_outer_attempt () =
+  check_cancellation_terminalizes_outer_attempt ~after_dispatch:false ()
+;;
+
+let test_cancellation_after_dispatch_terminalizes_outer_attempt () =
+  check_cancellation_terminalizes_outer_attempt ~after_dispatch:true ()
 ;;
 
 let () =
@@ -5657,9 +5720,13 @@ let () =
             `Quick
             test_concurrent_duplicate_flow_does_not_double_dispatch
         ; test_case
-            "cancellation terminalizes outer attempt"
+            "cancellation before dispatch terminalizes with zero POSTs"
             `Quick
-            test_cancellation_terminalizes_outer_attempt
+            test_cancellation_before_dispatch_terminalizes_outer_attempt
+        ; test_case
+            "cancellation after dispatch terminalizes with one POST"
+            `Quick
+            test_cancellation_after_dispatch_terminalizes_outer_attempt
         ] )
     ]
 ;;

@@ -284,20 +284,10 @@ let wire_json_of_schema_uncached (schema : Types.tool_schema) =
      | None -> [])
 ;;
 
+(* Product lookup and publication have one implementation in every observation
+   mode. Return the lookup outcome while holding the cache mutex; diagnostic
+   bookkeeping consumes it only after that mutex has been released. *)
 let wire_schema_entry_locked schema =
-  match Wire_schema_cache.find_opt wire_schema_cache schema with
-  | Some entry -> entry
-  | None ->
-    (* [add] cleans dead bindings while resizing. Avoid sweeping all live
-       buckets on each miss under the shared mutex. *)
-    let entry = Json_only (wire_json_of_schema_uncached schema) in
-    Wire_schema_cache.add wire_schema_cache schema entry;
-    entry
-;;
-
-(* The observed branch records the actual existing lookup, without adding a
-   second find or allocating outcome tuples on the unobserved path. *)
-let wire_schema_entry_observed_locked schema =
   match Wire_schema_cache.find_opt wire_schema_cache schema with
   | Some entry -> entry, Schema_observation.Existing_json
   | None ->
@@ -307,20 +297,14 @@ let wire_schema_entry_observed_locked schema =
 ;;
 
 let wire_json_of_schema schema =
-  if not (Schema_observation.enabled ()) then
-    Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
-      match wire_schema_entry_locked schema with
-      | Json_only json | Json_with_byte_count {json; _} -> json)
-  else
   let entry, outcome =
     Schema_observation.measure ~site:Sdk_wire_json ~schema (fun () ->
       Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
-        wire_schema_entry_observed_locked schema))
+        wire_schema_entry_locked schema))
   in
   Schema_observation.cache ~schema (Json_lookup outcome);
   match entry with
   | Json_only json | Json_with_byte_count { json; _ } -> json
-;;
 ;;
 
 (* What one tool costs the request that carries it. Exported so a caller
@@ -328,11 +312,11 @@ let wire_json_of_schema schema =
    instead: that one also emits [parameters], the derived validation view no
    provider receives, which put masc's Execute at 10,396 bytes against the
    7,239 it sends. *)
-let wire_bytes_of_schema_observed schema =
+let wire_bytes_of_schema schema =
   let entry, json =
     Schema_observation.measure ~site:Sdk_byte_count_lookup ~schema (fun () ->
       Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
-        wire_schema_entry_observed_locked schema))
+        wire_schema_entry_locked schema))
   in
   let count = match entry with
     | Json_with_byte_count _ -> Schema_observation.Existing_byte_count
@@ -351,7 +335,8 @@ let wire_bytes_of_schema_observed schema =
     let byte_count, publication =
       Schema_observation.measure ~site:Sdk_byte_count_publication ~schema (fun () ->
         Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
-          match wire_schema_entry_locked schema with
+          let entry, _ = wire_schema_entry_locked schema in
+          match entry with
           | Json_with_byte_count { byte_count; _ } ->
             byte_count, Schema_observation.Concurrent_byte_count_won
           | Json_only json ->
@@ -360,26 +345,6 @@ let wire_bytes_of_schema_observed schema =
             byte_count, Schema_observation.Published_byte_count)) in
     Schema_observation.cache ~schema (Byte_publication publication);
     byte_count
-;;
-
-let wire_bytes_of_schema schema =
-  if Schema_observation.enabled () then wire_bytes_of_schema_observed schema
-  else
-    let entry =
-      Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
-        wire_schema_entry_locked schema)
-    in
-    match entry with
-    | Json_with_byte_count {byte_count; _} -> byte_count
-    | Json_only json ->
-      let byte_count = String.length (Yojson.Safe.to_string json) in
-      Stdlib.Mutex.protect wire_schema_cache_mutex (fun () ->
-        match wire_schema_entry_locked schema with
-        | Json_with_byte_count {byte_count; _} -> byte_count
-        | Json_only json ->
-          Wire_schema_cache.replace wire_schema_cache schema
-            (Json_with_byte_count {json; byte_count});
-          byte_count)
 ;;
 
 let schema_to_json tool = wire_json_of_schema tool.schema

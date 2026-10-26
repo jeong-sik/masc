@@ -402,6 +402,52 @@ let output_owner_teardown_settles_external_observers = fixture (fun ~env ~sw:_ ~
      | Error _ | Ok _ -> Alcotest.fail "owner teardown left a waiting observer or fabricated a seal");
     check "interrupted capture remains unavailable" (O.extent captured=Error O.Interrupted)))
 
+let output_owner_teardown_finishes_entered_metadata = fixture (fun ~env ~sw ~store fixture ->
+  let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+  let teardown,begin_teardown=Eio.Promise.create () and cancelled,notice_cancel=Eio.Promise.create () in
+  let created,provide_capture=Eio.Promise.create () and drained,finish_scope=Eio.Promise.create () in
+  let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+  Fun.protect ~finally:unblock (fun () ->
+    Eio.Fiber.fork ~sw (fun () ->
+      let captured=Eio.Switch.run (fun job_sw ->
+        let binding,permit=prepare store fixture "05" "printf original" in
+        let source,writer=Eio_unix.pipe job_sw in
+        let owner=Eio_unix.Fd.use_exn "original stdout" (Eio_unix.Resource.fd writer)
+          (fun fd -> start ~output:fd ~sw:job_sw ~env fixture permit) in
+        Eio.Flow.close writer;
+        let captured=O.For_testing.start ~sw:job_sw ~fs:env#fs ~owner ~stream:P.Stdout ~source
+          ~after_chunk:(fun () -> ()) ~on_metadata:(fun operation stage ->
+            match operation,stage with
+            | O.For_testing.Publish "stdout.seal.json",O.For_testing.Acquired ->
+              Eio.Promise.resolve signal ();Eio.Promise.await resume
+            | Open_recovery,Waiting | Open_recovery,Acquired | Publish _,Waiting | Publish _,Acquired -> ()) |> output in
+        Eio.Fiber.fork_daemon ~sw:job_sw (fun () ->
+          try Eio.Fiber.await_cancel () with Eio.Cancel.Cancelled _ as ex ->
+            let bt=Printexc.get_raw_backtrace () in
+            Eio.Promise.resolve notice_cancel ();Printexc.raise_with_backtrace ex bt);
+        Eio.Promise.resolve provide_capture (binding,captured);
+        Eio.Promise.await teardown;
+        captured) in
+      Eio.Promise.resolve finish_scope captured);
+    Eio.Promise.await entered;
+    let binding,captured=Eio.Promise.await created in
+    let manifest=leaf fixture binding "stdout.seal.json" in
+    check "actual seal publication is entered before its manifest exists" (not (Sys.file_exists manifest));
+    Eio.Promise.resolve begin_teardown ();
+    Eio.Promise.await cancelled;
+    check "normal owner teardown waits for its already entered metadata transaction" (Eio.Promise.peek drained=None);
+    unblock ();
+    ignore (Eio.Promise.await drained);
+    (match O.await_sealed captured with
+     | Error O.Interrupted -> ()
+     | Error _ | Ok _ -> Alcotest.fail "owner cancellation was lost after completing the entered publication");
+    check "external output observer retains the original interruption" (O.extent captured=Error O.Interrupted);
+    let json=Yojson.Safe.from_string (read manifest) in
+    Alcotest.(check string) "entered publication finished its actual manifest before scope resource release"
+      (P.Sha256.to_string (digest "original")) Yojson.Safe.Util.(json |> member "sha256" |> to_string);
+    Alcotest.(check string) "normal teardown preserves original spool evidence" "original"
+      (read (leaf fixture binding "stdout.bin"))))
+
 let supervise value = value |> Result.map_error S.error_to_string |> require
 let supervised ?(after_spawn=fun _ -> ()) ~sw ~env fixture permit =
   match S.For_testing.launch_effect_workspace ~after_spawn ~sw ~fs:env#fs
@@ -519,6 +565,7 @@ let () =
       "supervisor owns exact original stdin and both output sources",supervisor_owns_original_input_and_both_outputs;
       "supervisor settles input when the original child already exited",supervisor_early_exit_does_not_wait_on_stdin;
       "supervisor reports failed output before a blocked child exits",supervisor_reports_capture_failure_before_blocked_child_exit;
-      "supervisor teardown settles external observers",supervisor_teardown_settles_external_observers] in
+      "supervisor teardown settles external observers",supervisor_teardown_settles_external_observers;
+      "owner teardown finishes entered metadata then preserves cancellation",output_owner_teardown_finishes_entered_metadata] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

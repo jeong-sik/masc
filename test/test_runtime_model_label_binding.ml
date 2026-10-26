@@ -538,7 +538,7 @@ let ollama_auto_probe_uses_declared_deadline () =
   with_mock_server handler (fun ~sw ~net ~endpoint ->
     Discovery_cache.set_env ~sw ~net;
     with_catalog ~endpoint (fun () ->
-      (match Eio.Time.with_timeout clock 10. (fun () ->
+      (match Eio.Time.with_timeout clock 5. (fun () ->
         Ok (Runtime_model_string.parse_model_string "ollama:auto")) with
        | Ok None -> ()
        | Ok (Some _) -> Alcotest.fail "an unanswered probe invented a model"

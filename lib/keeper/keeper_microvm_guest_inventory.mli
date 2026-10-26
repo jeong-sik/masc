@@ -1,9 +1,9 @@
 (** Complete runtime inventory for deciding whether a guest still exists.
     Labels, ownership and running state do not filter this observation. *)
 
-type presence = Present | Absent
+type presence = Keeper_microvm_inventory_json.presence = Present | Absent
 
-type invalid_inventory =
+type invalid_inventory = Keeper_microvm_inventory_json.invalid_inventory =
   | Invalid_json
   | Expected_array
   | Expected_row_object
@@ -31,7 +31,7 @@ type error =
   | Invalid_inventory of invalid_inventory
   | Output_unavailable of unavailable_output
 
-type scoping_labels =
+type scoping_labels = Keeper_microvm_inventory_json.scoping_labels =
   { component : string
   ; base_path_hash : string
   ; kind : string
@@ -39,7 +39,7 @@ type scoping_labels =
   }
 (** Actual reported values, not assumptions about this server's scope. *)
 
-type row =
+type row = Keeper_microvm_inventory_json.row =
   { name : string
   ; scoping_labels : scoping_labels option
   }
@@ -48,7 +48,7 @@ type row =
     using this row. [Some] still requires explicit current-base/kind/component
     comparison by the owning sweep; foreign labels grant no authority. *)
 
-type t
+type t = Keeper_microvm_inventory_json.t
 (** Validated complete unfiltered inventory. This read-only observation is not
     a lifecycle scope or transferable mutation capability. *)
 

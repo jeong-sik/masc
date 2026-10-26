@@ -545,6 +545,43 @@ let ollama_auto_probe_uses_declared_deadline () =
       Alcotest.(check int) "the bounded discovery attempt really reached the endpoint"
         1 !tag_requests))
 
+let ollama_auto_without_declared_deadline_does_not_probe () =
+  let tag_requests = ref 0 in
+  let handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/api/tags" ->
+      incr tag_requests;
+      Cohttp_eio.Server.respond_string ~status:`OK
+        ~body:{|{"models":[{"name":"unbounded-model"}]}|} ()
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server handler (fun ~sw ~net ~endpoint ->
+    Discovery_cache.set_env ~sw ~net;
+    with_catalog ~endpoint (fun () ->
+      let previous = Provider_catalog.global () in
+      Fun.protect
+        ~finally:(fun () -> match previous with
+          | Some catalog -> Provider_catalog.set_global catalog
+          | None -> Provider_catalog.clear_global ())
+        (fun () ->
+          let overlay = Provider_catalog.of_json (`Assoc [
+            "schema_version", `Int 1;
+            "providers", `List [`Assoc [
+              "id", `String "ollama";
+              "kind", `String "ollama";
+              "base_url", `String endpoint;
+              "request_path", `String "/api/chat";
+              "auth", `Assoc ["type", `String "none"];
+              "capabilities_base", `String "ollama"]]]) in
+          (match overlay with
+           | Ok catalog -> Provider_catalog.set_global catalog
+           | Error detail -> Alcotest.fail detail);
+          Alcotest.(check bool) "an undeclared deadline refuses discovery instead of waiting"
+            true (Runtime_model_string.parse_model_string "ollama:auto" = None);
+          Alcotest.(check int) "an undeclared deadline never starts a probe"
+            0 !tag_requests)))
+
 let ollama_auto_uses_binding_endpoint () = with_catalog (fun () ->
   let calls = ref [] in
   let discover ~headers:_ endpoint = calls := endpoint :: !calls; Some "qwen-local" in
@@ -580,6 +617,7 @@ let () = Alcotest.run "runtime model label binding"
      "cold public cache",`Quick,ollama_auto_reuses_cold_public_observation;
      "credential-scoped cache",`Quick,ollama_auto_scopes_cached_models_to_the_credential;
      "declared probe deadline",`Quick,ollama_auto_probe_uses_declared_deadline;
+     "missing probe deadline",`Quick,ollama_auto_without_declared_deadline_does_not_probe;
      "endpoint discovery",`Quick,ollama_auto_uses_binding_endpoint;
      "no discovered model",`Quick,ollama_auto_without_discovered_model_stays_refused;
      "declared default skips discovery",`Quick,declared_default_skips_discovery;

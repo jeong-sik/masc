@@ -40,6 +40,18 @@ bottom.** Do not require separate parent merges or manually retarget it. For a c
 non-native branch chain, land the parent first and inspect the changed diff
 before landing the child. See the [Native GitHub Stacks guide](../../docs/guides/NATIVE-GITHUB-STACKS.md).
 
+Approval publication records the reviewing account's independent conclusion.
+Other accounts' open `CHANGES_REQUESTED` reviews, including their structured
+verdicts, do not prevent it; they remain blockers for merge admission and source
+receipts. The guard names those pending requests as `APPROVAL ONLY` on stderr
+and never dismisses them. To replace your own latest open change request after
+rereview, pass `--replace-own-cr REVIEW_ID` alongside the reviewed base, diff and
+PASS body. Only that exact owned request is replaced by the new approval.
+Separate issue-comment and `COMMENTED` review verdicts still apply, as do all
+head, diff, identity and Release CI checks. Reviewers can therefore rereview in
+any order without withdrawing each other's findings or posting a PASS comment
+to unblock approval.
+
 `merge-guard.sh --check --repo O/R --pr N --head SHA` checks each included
 PR's current head, independent trusted head-bound approval and latest blocking
 reviews or structured decision. It rechecks stack membership and included

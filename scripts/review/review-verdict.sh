@@ -1,17 +1,22 @@
 # Shared structured verdict reader. Caller supplies GH and repo; read-only.
 # Newest structured verdict for this head; malformed evidence never grants PASS.
-verdict_for() { # pr head [validated own open change-request review id]
-  local lines exclude_review="${3:-}"
+verdict_for() { # pr head [validated own open change-request review id] [approval reviewer login]
+  local lines exclude_review="${3:-}" approval_reviewer="${4:-}"
   [ -z "$exclude_review" ] || [[ "$exclude_review" =~ ^[1-9][0-9]*$ ]] || {
     echo "approve-guard: invalid replacement review id" >&2; return 1;
   }
   lines=$( { "$GH" api --paginate "repos/$repo/issues/$1/comments" --jq '.[] | [.created_at, .body, (.author_association // "UNKNOWN"), (.updated_at // .created_at)] | @tsv' &&
-             "$GH" api --paginate "repos/$repo/pulls/$1/reviews" --jq '.[] | [.submitted_at, .body, (.author_association // "UNKNOWN"), "", .state, (.id|tostring)] | @tsv'; } ) || { echo "approve-guard: verdict read failed: comments/reviews of PR $1" >&2; return 1; }
-  printf '%s\n' "$lines" | awk -F'\t' -v head="$2" -v exclude_review="$exclude_review" '
+             "$GH" api --paginate "repos/$repo/pulls/$1/reviews" --jq '.[] | [.submitted_at, .body, (.author_association // "UNKNOWN"), "", .state, (.id|tostring), .user.login] | @tsv'; } ) || { echo "approve-guard: verdict read failed: comments/reviews of PR $1" >&2; return 1; }
+  printf '%s\n' "$lines" | awk -F'\t' -v head="$2" -v exclude_review="$exclude_review" -v approval_reviewer="$approval_reviewer" '
     { # Columns 5/6 exist only for reviews. Column 4 remains comment edit time.
       # A replacement is validated by approve-guard before every read; it
       # withdraws only that exact open CR, never a comment or another review.
       if ($5=="DISMISSED" || (exclude_review!="" && $5=="CHANGES_REQUESTED" && ("id:" $6)==("id:" exclude_review))) next
+      # A different reviewer may record their own conclusion while these CRs
+      # remain open. Merge/receipt/queue callers omit approval_reviewer and
+      # still consume every refusal. COMMENTED verdicts and issue comments
+      # retain their authority in both paths.
+      if (approval_reviewer!="" && $5=="CHANGES_REQUESTED" && $7!="" && $7!=approval_reviewer) next
       body=$2; sub(/\\n.*/, "", body); sub(/\\r$/, "", body)
       n=split(body, w, " ")
       names_head=0; head_fields=0

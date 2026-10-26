@@ -111,16 +111,25 @@ python3 docs/evidence/performance-retained-verification-20261026/run_probe.py \
 
 ## Review and remaining evidence
 
-The independent [source review](source-review.md) binds the exact final
+The independent [source review](source-review.md) binds the initial measured
 three-file implementation/test diff and baseline. It found no P0/P1/P2
 issues. The reviewer did not execute the helper or review these measurement
 results; this is not a formal GitHub approval or a runtime verdict.
 The original diff bytes are stored as `reviewed.diff.gz`; the review's diff
 digest identifies the decompressed bytes. `provenance.json` records that
 mapping and the retained file hashes.
-Parsing and whitespace checks passed. The added full-module discovery
-scenario exercises large still-valid JSON mutations, truncation/growth and
-recovery; its selected CI result must be read separately when available.
+Parsing and whitespace checks passed. [Test run 40329666119](https://github.com/jeong-sik/masc/actions/runs/40329666119),
+workflow dispatch on `c3cb3715e3a36b56ae17c23820b6b7c83914a602`, ref
+`perf/retained-verification-buffer-20261026`, explicitly selected five
+suites on POSIX. All five executables built and ran: 162 passed, one failed,
+zero skipped. The added large-original discovery scenario passed. The
+[retained receipt](ci-selected-c3cb371.json) preserves the failure and scope.
+The failed preexisting scenario sorted its actual identity list but left
+the expected list unsorted. A test-only correction sorts both complete
+lists with the same comparator, retaining exact identity and duplicate
+checks. Product traversal and the measured production file are unchanged.
+The corrected discovery suite requires a separate result; the original
+failure is not replaced by the four other passing suites.
 
 There is no current-source native comparison, installation, TUI/startup,
 concurrent fleet, Keeper-to-Keeper/Add-on business or production speedup

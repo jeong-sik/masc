@@ -25,8 +25,12 @@
   "command": "See README: interpreter only, no compilation; Unix and Mtime bytecode libraries.",
   "current_files": {
     "README.md": {
-      "bytes": 7412,
-      "sha256": "bc0d4ef08f7747098bd69501d62bfc0e3b5ede6c5b3f1065513e8a391f4f2922"
+      "bytes": 8104,
+      "sha256": "14b1d7eca6105a597a626eddd620528952e4645aa38bfba4db9018dc72fe52dd"
+    },
+    "ci-selected-c3cb371.json": {
+      "bytes": 5661,
+      "sha256": "b0817ef42dae228d75f7742c53fbd364b24a2b326c2d340ea5a15cd21ca241a5"
     },
     "comparison.json": {
       "bytes": 4094,

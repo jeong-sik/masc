@@ -179,6 +179,7 @@ let keeper_badge_text (badge : Keeper_list_model.badge) =
   let glyph = Masc_tui_keeper_mark.badge_glyph badge in
   match badge with
   | Badge_read_error -> glyph ^ " read error"
+  | Badge_waiting_unavailable -> glyph ^ " waiting unavailable"
   | Badge_async { running; ownership_unknown } ->
       Printf.sprintf "%s async %d%s" glyph running
         (if ownership_unknown > 0 then Printf.sprintf " (%d owner?)" ownership_unknown else "")
@@ -202,7 +203,7 @@ let keeper_task_detail (row : Keeper_list_model.row) =
 
 let keeper_waiting_detail (row : Keeper_list_model.row) =
   match row.waiting with
-  | Some { Tui_decode.kwr_waiting_on = item :: rest; _ } ->
+  | Keeper_list_model.Waiting_observed { Tui_decode.kwr_waiting_on = item :: rest; _ } ->
       let detail =
         if not (String.equal (String.trim item.Tui_decode.kwi_what) "") then item.kwi_what
         else if not (String.equal (String.trim item.kwi_next_action) "") then item.kwi_next_action
@@ -210,7 +211,8 @@ let keeper_waiting_detail (row : Keeper_list_model.row) =
       in
       Some (Terminal_text.single_line detail
         ^ (match rest with [] -> "" | _ -> Printf.sprintf " (+%d more)" (List.length rest)))
-  | Some { kwr_waiting_on = []; _ } | None -> None
+  | Keeper_list_model.Waiting_observed { kwr_waiting_on = []; _ }
+  | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> None
 
 let keeper_detail_text (row : Keeper_list_model.row) =
   let approval =
@@ -463,11 +465,12 @@ let keeper_display_entries rows layout =
   | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
       List.map (fun (position, row) -> Keeper_display_row (position, row)) entries
   | Keeper_list_model.Grouped ->
-      let needs_you, active, waiting, inactive = Keeper_list_model.group_counts rows in
+      let needs_you, active, waiting, inactive, unobserved = Keeper_list_model.group_counts rows in
       [ Keeper_list_model.Needs_you, needs_you
       ; Keeper_list_model.Active, active
       ; Keeper_list_model.Waiting, waiting
       ; Keeper_list_model.Inactive, inactive
+      ; Keeper_list_model.Unobserved, unobserved
       ]
       |> List.concat_map (fun (group, count) ->
         let matching =
@@ -486,22 +489,24 @@ let keeper_group_heading_text group count =
     | Keeper_list_model.Active -> "\xe2\x96\xb6", "ACTIVE" (* ▶ *)
     | Keeper_list_model.Waiting -> "\xe2\x97\x8c", "WAITING" (* ◌ *)
     | Keeper_list_model.Inactive -> "\xe2\x97\x8b", "INACTIVE" (* ○ *)
+    | Keeper_list_model.Unobserved -> "?", "UNKNOWN"
   in
   Printf.sprintf "%s %s %d" glyph label count
 
 let keeper_group_heading_style = function
   | Keeper_list_model.Needs_you -> Theme.bad ()
   | Keeper_list_model.Active -> Theme.info ()
-  | Keeper_list_model.Waiting | Keeper_list_model.Inactive -> Theme.recede ()
+  | Keeper_list_model.Waiting | Keeper_list_model.Inactive
+  | Keeper_list_model.Unobserved -> Theme.recede ()
 
 let keeper_view_summary rows layout sort =
   let mode = Keeper_list_model.layout_label layout ^ " · " ^ Keeper_list_model.sort_label sort in
   match layout with
   | Keeper_list_model.Grouped -> "  " ^ mode
   | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
-      let needs_you, active, waiting, inactive = Keeper_list_model.group_counts rows in
-      Printf.sprintf "  %s   ! %d needs you   \xe2\x96\xb6 %d active   \xe2\x97\x8c %d waiting   \xe2\x97\x8b %d inactive"
-        mode needs_you active waiting inactive
+      let needs_you, active, waiting, inactive, unobserved = Keeper_list_model.group_counts rows in
+      Printf.sprintf "  %s   ! %d needs you   \xe2\x96\xb6 %d active   \xe2\x97\x8c %d waiting   \xe2\x97\x8b %d inactive   ? %d unknown"
+        mode needs_you active waiting inactive unobserved
 
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -687,6 +692,19 @@ let render_keeper_list (state : state) =
          (Theme.warn () ^ "  turn/waiting observation: "
           ^ Terminal_text.single_line err ^ Ansi.reset)
    | None -> ());
+  (match state.keeper_waiting_failure with
+   | None -> ()
+   | Some failure ->
+       let detail =
+         match failure with
+         | Tui_decode.Keeper_waiting_sources_unavailable errors ->
+             errors
+             |> List.map (fun item -> Terminal_text.single_line item.Tui_decode.kwi_waiting_on)
+             |> String.concat ", "
+         | Tui_decode.Keeper_waiting_invalid detail -> Terminal_text.single_line detail
+       in
+       box_line buf cols
+         (Theme.warn () ^ "  fleet waiting observation unavailable: " ^ detail ^ Ansi.reset));
   (match state.tools_async_observation_error with
    | Some err ->
        box_line buf cols

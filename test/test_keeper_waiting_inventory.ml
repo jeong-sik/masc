@@ -1054,6 +1054,7 @@ let test_health_retains_recovery_observation_without_known_totals () =
   ignore (create_schedule_exn config ~schedule_id:"health-recovery"
     ~scheduled_by:(automated "unknown-scheduler") : Schedule_domain.schedule_request);
   let primary = Filename.concat (Workspace_utils.masc_dir config) "schedules.json" in
+  let original_primary = Workspace_core.read_text config primary in
   save_text primary "{private primary /sensitive/path token=secret";
   let check_recovery reason =
     let health = Server_keeper_waiting_inventory.health_json config in
@@ -1064,6 +1065,11 @@ let test_health_retains_recovery_observation_without_known_totals () =
     check int "mirror schedules remain observed" 1 U.(health |> member "schedule_ledger" |> member "observed_schedule_count" |> to_int);
     check bool "no authoritative ledger total" true U.(health |> member "schedule_ledger" |> member "schedule_count" = `Null);
     check (list string) "stable repair reason" [reason] U.(health |> member "status_reasons" |> to_list |> List.map to_string);
+    (match Server_keeper_waiting_inventory.keeper_json_by_name config with
+     | Error errors ->
+       check bool "turns waiting observation names the incomplete primary" true
+         (List.exists (fun row -> U.(row |> member "waiting_on" |> to_string) = reason) errors)
+     | Ok _ -> fail "recovery mirror must not become a complete waiting observation");
     check bool "health has no private diagnostic" false
       (String_util.contains_substring (Yojson.Safe.to_string health) "sensitive")
   in
@@ -1077,7 +1083,11 @@ let test_health_retains_recovery_observation_without_known_totals () =
   check string "unreadable is not empty" "unavailable" (json_string_member "status" health);
   check bool "unreadable ledger count unknown" true U.(health |> member "schedule_ledger" |> member "observed_schedule_count" = `Null);
   check bool "unreadable work total unknown" true U.(health |> member "total_row_count" = `Null);
-  check int "read failure remains separate from work" 1 (json_int_member "read_error_count" health)
+  check int "read failure remains separate from work" 1 (json_int_member "read_error_count" health);
+  save_text primary original_primary;
+  (match Server_keeper_waiting_inventory.keeper_json_by_name config with
+   | Ok _ -> ()
+   | Error _ -> fail "restored primary must clear the incomplete waiting observation")
 ;;
 
 let test_health_partial_source_failure_and_exception_are_not_empty () =

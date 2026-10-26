@@ -1286,12 +1286,21 @@ let keeper_json_by_name config =
   let fleet_read_errors =
     List.filter (fun row -> row.source = Read_error) snapshot.global_rows
   in
-  let per_keeper =
-    List.map
-      (fun (keeper_name, busy, rows) -> keeper_name, busy, rows @ fleet_read_errors)
-      snapshot.per_keeper
+  let recovery_errors =
+    match snapshot.schedule_observation with
+    | Ok (_, Recovery_mirror cause) ->
+      let waiting_on =
+        match cause with
+        | Primary_missing -> "schedule_primary_missing"
+        | Primary_unusable -> "schedule_primary_unusable"
+      in
+      [ read_error_row ~waiting_on ~next_action:"repair_schedule_ledger"
+          (`Assoc [ "source", `String "recovery_mirror" ]) ]
+    | Ok (_, (Uninitialized | Primary_ledger)) | Error _ -> []
   in
-  keeper_json_by_name_snapshot { snapshot with per_keeper }
+  match fleet_read_errors @ recovery_errors with
+  | [] -> Ok (keeper_json_by_name_snapshot snapshot)
+  | errors -> Error (List.map waiting_row_json errors)
 ;;
 
 let dashboard_json_of_snapshot snapshot =

@@ -4649,14 +4649,16 @@ let test_turn_observation_replaces_and_refuses_atomically () =
   in
   state.keeper_turns <- [ turn "old" ];
   state.keeper_waiting <- [ waiting "old" ];
-  accept_keeper_turn_observation state ~rows:[ turn "new" ] ~waiting:[ waiting "new" ] ~observed_at:20.;
+  accept_keeper_turn_observation state ~rows:[ turn "new" ]
+    ~waiting:(Tui_decode.Keeper_waiting_observed [ waiting "new" ]) ~observed_at:20.;
   Alcotest.(check int) "accepted rows replace the old observation" 1 (List.length state.keeper_turns);
   Alcotest.(check string) "accepted waiting replaces the old observation" "new"
     (List.hd state.keeper_waiting).Tui_decode.kwr_keeper_name;
   Alcotest.(check (option (float 0.001))) "accepted observation carries its clock" (Some 20.)
     state.keeper_turns_observed_at;
   Alcotest.(check (option string)) "accepted observation clears the old error" None state.keeper_turns_error;
-  accept_keeper_turn_observation state ~rows:[ turn "new" ] ~waiting:[] ~observed_at:30.;
+  accept_keeper_turn_observation state ~rows:[ turn "new" ]
+    ~waiting:(Tui_decode.Keeper_waiting_observed []) ~observed_at:30.;
   Alcotest.(check string) "missing waiting preserves the last good row" "new"
     (List.hd state.keeper_waiting).Tui_decode.kwr_keeper_name;
   Alcotest.(check (option (float 0.001))) "the turn read still carries its newer clock" (Some 30.)
@@ -4667,17 +4669,51 @@ let test_turn_observation_replaces_and_refuses_atomically () =
     ; kwr_since = Some 40.
     }
   in
-  accept_keeper_turn_observation state ~rows:[ turn "new" ] ~waiting:[ observed ] ~observed_at:40.;
+  accept_keeper_turn_observation state ~rows:[ turn "new" ]
+    ~waiting:(Tui_decode.Keeper_waiting_observed [ observed ]) ~observed_at:40.;
   Alcotest.(check bool) "an actually observed waiting row replaces the retained one" true
     ((List.hd state.keeper_waiting).Tui_decode.kwr_state = Tui_decode.Keeper_waiting_busy);
   Alcotest.(check (option (float 0.001))) "the observed waiting timestamp is retained" (Some 40.)
     (List.hd state.keeper_waiting).Tui_decode.kwr_since;
+  let unavailable = Tui_decode.Keeper_waiting_invalid "invalid waiting payload" in
+  let advanced_turn = { (turn "new") with Tui_decode.ktr_chat_control_token = Some "fresh-token" } in
+  accept_keeper_turn_observation state ~rows:[ advanced_turn ]
+    ~waiting:(Tui_decode.Keeper_waiting_unavailable unavailable) ~observed_at:50.;
+  Alcotest.(check (option string)) "turn control token advances independently" (Some "fresh-token")
+    (List.hd state.keeper_turns).Tui_decode.ktr_chat_control_token;
+  Alcotest.(check (option (float 0.001))) "turn observation advances when waiting is unavailable" (Some 50.)
+    state.keeper_turns_observed_at;
+  Alcotest.(check bool) "waiting error is retained separately" true
+    (state.keeper_waiting_failure = Some unavailable);
+  Alcotest.(check bool) "last waiting observation remains retained" true
+    ((List.hd state.keeper_waiting).Tui_decode.kwr_state = Tui_decode.Keeper_waiting_busy);
+  refuse_keeper_turn_observation state "HTTP 503";
+  Alcotest.(check bool) "a transport refusal does not clear waiting failure" true
+    (state.keeper_waiting_failure = Some unavailable);
+  accept_keeper_turn_observation state ~rows:[ advanced_turn ]
+    ~waiting:(Tui_decode.Keeper_waiting_observed []) ~observed_at:55.;
+  Alcotest.(check bool) "a missing waiting row does not clear the failure" true
+    (state.keeper_waiting_failure = Some unavailable);
+  let stale_waiting =
+    select_keeper_waiting_observation ~fresh:[] ~stale:[ advanced_turn ]
+      ~previous_failure:state.keeper_waiting_failure
+      (Tui_decode.Keeper_waiting_observed [ waiting "new" ])
+  in
+  accept_keeper_turn_observation state ~rows:[ advanced_turn ] ~waiting:stale_waiting ~observed_at:56.;
+  Alcotest.(check bool) "stale control generation cannot clear the waiting failure" true
+    (state.keeper_waiting_failure = Some unavailable
+     && (List.hd state.keeper_waiting).Tui_decode.kwr_state = Tui_decode.Keeper_waiting_busy);
+  accept_keeper_turn_observation state ~rows:[ turn "new" ]
+    ~waiting:(Tui_decode.Keeper_waiting_observed [ waiting "new" ]) ~observed_at:60.;
+  Alcotest.(check bool) "a fresh waiting observation clears the failure" true
+    (state.keeper_waiting_failure = None
+     && (List.hd state.keeper_waiting).Tui_decode.kwr_state = Tui_decode.Keeper_waiting_idle);
   refuse_keeper_turn_observation state "HTTP 503";
   Alcotest.(check string) "a failed read keeps the accepted turn" "new"
     (List.hd state.keeper_turns).Tui_decode.ktr_keeper_name;
   Alcotest.(check string) "a failed read keeps the accepted waiting" "new"
     (List.hd state.keeper_waiting).Tui_decode.kwr_keeper_name;
-  Alcotest.(check (option (float 0.001))) "a failed read keeps the accepted clock" (Some 40.)
+  Alcotest.(check (option (float 0.001))) "a failed read keeps the accepted clock" (Some 60.)
     state.keeper_turns_observed_at;
   Alcotest.(check (option string)) "a failed read is visible" (Some "HTTP 503") state.keeper_turns_error
 

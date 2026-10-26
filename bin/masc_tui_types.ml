@@ -9122,6 +9122,7 @@ type state = {
   (* Canonical waiting rows accepted by the same turns response. A missing
      field stays absent here; neither it nor a failed refresh means idle. *)
   mutable keeper_waiting: Tui_decode.keeper_waiting_row list;
+  mutable keeper_waiting_failure: Tui_decode.keeper_waiting_failure option;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
   mutable msg_preparation_details: Masc_tui_preparation_details.t;
@@ -10693,10 +10694,16 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
             if String.equal row.ktr_keeper_name name then Some row.ktr_state else None)
           state.keeper_turns
       in
-      let waiting =
+      let observed_waiting =
         List.find_opt
           (fun (row : Tui_decode.keeper_waiting_row) -> String.equal row.kwr_keeper_name name)
           state.keeper_waiting
+      in
+      let waiting, activity_waiting =
+        match state.keeper_waiting_failure, observed_waiting with
+        | Some _, _ -> Masc_tui_keeper_list_model.Waiting_unavailable, None
+        | None, Some row -> Masc_tui_keeper_list_model.Waiting_observed row, Some row
+        | None, None -> Masc_tui_keeper_list_model.Waiting_unobserved, None
       in
       let approval =
         List.find_opt
@@ -10725,7 +10732,7 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
       ; task
       ; open_questions = keeper_open_question_count state name
       ; async_requests
-      ; last_activity_at = keeper_activity_at ~turn ~waiting keeper
+      ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper
       })
     state.keepers
   |> Masc_tui_keeper_list_model.order_rows ~sort:state.keeper_list_sort
@@ -10802,11 +10809,42 @@ let merge_keeper_waiting ~previous ~rows ~waiting =
       | None -> List.assoc_opt turn.ktr_keeper_name retained)
     rows
 
+let select_keeper_waiting_observation ~fresh ~stale ~previous_failure observation =
+  match observation with
+  | Tui_decode.Keeper_waiting_unavailable _ as unavailable -> unavailable
+  | Tui_decode.Keeper_waiting_observed waiting ->
+    let waiting =
+      List.filter
+        (fun (waiting : Tui_decode.keeper_waiting_row) ->
+          List.exists
+            (fun (turn : Tui_decode.keeper_turn_row) ->
+              String.equal waiting.kwr_keeper_name turn.ktr_keeper_name)
+            fresh)
+        waiting
+    in
+    (match stale, previous_failure with
+     | _ :: _, Some failure -> Tui_decode.Keeper_waiting_unavailable failure
+     | [], _ | _ :: _, None -> Tui_decode.Keeper_waiting_observed waiting)
+
 let accept_keeper_turn_observation state ~rows ~waiting ~observed_at =
   preserve_keeper_list_selection state (fun () ->
     state.keeper_turns <- rows;
-    state.keeper_waiting <- merge_keeper_waiting
-      ~previous:state.keeper_waiting ~rows ~waiting;
+    (match waiting with
+     | Tui_decode.Keeper_waiting_observed waiting ->
+       state.keeper_waiting <- merge_keeper_waiting
+         ~previous:state.keeper_waiting ~rows ~waiting;
+       if List.for_all
+            (fun (turn : Tui_decode.keeper_turn_row) ->
+              List.exists
+                (fun (row : Tui_decode.keeper_waiting_row) ->
+                  String.equal row.kwr_keeper_name turn.ktr_keeper_name)
+                waiting)
+            rows
+       then state.keeper_waiting_failure <- None
+     | Tui_decode.Keeper_waiting_unavailable failure ->
+       state.keeper_waiting <- merge_keeper_waiting
+         ~previous:state.keeper_waiting ~rows ~waiting:[];
+       state.keeper_waiting_failure <- Some failure);
     state.keeper_turns_observed_at <- Some observed_at;
     state.keeper_turns_error <- None)
 
@@ -16117,6 +16155,7 @@ let create_state
   keeper_tool_approvals_read = Snapshot_read.idle;
   keeper_turns = [];
   keeper_waiting = [];
+  keeper_waiting_failure = None;
   keeper_turns_error = None;
   keeper_turns_inflight = false;
   msg_preparation_details = Masc_tui_preparation_details.empty;

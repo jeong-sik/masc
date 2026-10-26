@@ -13813,6 +13813,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_turns_inflight <- false;
   state.keeper_turns <- [];
   state.keeper_waiting <- [];
+  state.keeper_waiting_failure <- None;
   state.keeper_turns_error <- None;
   state.keeper_turn_finishes <- [];
   state.keeper_turns_observed_at <- None;
@@ -21148,6 +21149,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            let rows = fresh @ List.filter (fun previous -> List.exists (fun row ->
              String.equal row.Tui_decode.ktr_keeper_name previous.Tui_decode.ktr_keeper_name) stale)
              state.keeper_turns in
+           let waiting =
+             select_keeper_waiting_observation
+               ~fresh ~stale ~previous_failure:state.keeper_waiting_failure waiting
+           in
            if List.exists (fun row -> not (List.mem_assoc row.Tui_decode.ktr_keeper_name
              state.keeper_chat_control_pending)) stale then launch_keeper_turns_load state ~mailbox;
            let observed_at = Unix.gettimeofday () in

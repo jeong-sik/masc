@@ -34,6 +34,7 @@ let activity_glyph : Masc_tui_keeper_list_model.activity -> string = function
 
 let badge_glyph : Masc_tui_keeper_list_model.badge -> string = function
   | Badge_read_error -> "!"
+  | Badge_waiting_unavailable -> "!"
   | Badge_async _ -> "&"
   | Badge_async_queued _ -> ">"
   | Badge_async_cancelling _ -> "\xc3\x97" (* × *)

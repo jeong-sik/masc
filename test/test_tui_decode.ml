@@ -8415,6 +8415,7 @@ let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
 let keeper_turns_json =
   `Assoc
     [ ("schema", `String "masc.keeper_turns.v1")
+    ; ("waiting_errors", `List [])
     ; ( "keepers"
       , `List
           [ `Assoc
@@ -8601,6 +8602,7 @@ let test_decode_keeper_turns_rejects_unknown_schema () =
 let keeper_turns_waiting_json =
   `Assoc
     [ "schema", `String "masc.keeper_turns.v1"
+    ; "waiting_errors", `List []
     ; "keepers", `List
         [ `Assoc
             [ "keeper_name", `String "echo"
@@ -8641,7 +8643,9 @@ let keeper_turns_waiting_json =
 let test_decode_keeper_turns_projection_reads_waiting () =
   match Tui_decode.decode_keeper_turns_projection keeper_turns_waiting_json with
   | Error detail -> Alcotest.fail detail
-  | Ok { rows = [ idle ]; waiting = [ waiting ] } ->
+  | Ok { rows; waiting } ->
+    (match rows, waiting with
+    | [ idle ], Tui_decode.Keeper_waiting_observed [ waiting ] ->
       Alcotest.(check bool) "turn remains independently readable" true
         (idle.Tui_decode.ktr_state = Tui_decode.Keeper_turn_idle);
       Alcotest.(check string) "waiting owner" "echo" waiting.Tui_decode.kwr_keeper_name;
@@ -8658,16 +8662,25 @@ let test_decode_keeper_turns_projection_reads_waiting () =
            Alcotest.(check string) "wait identity" "keeper-delegate:op-1" item.kwi_waiting_on;
            Alcotest.(check (float 0.001)) "wait began" 10. (Option.get item.kwi_since)
        | items -> Alcotest.failf "expected one waiting item, got %d" (List.length items))
-  | Ok { rows; waiting } ->
-      Alcotest.failf "expected one turn and one waiting row, got %d and %d"
-        (List.length rows) (List.length waiting)
+    | _, Tui_decode.Keeper_waiting_observed _
+    | _, Tui_decode.Keeper_waiting_unavailable _ ->
+        Alcotest.fail "expected one turn and one waiting row")
 
 let test_decode_keeper_turns_projection_keeps_waiting_unobserved () =
   match Tui_decode.decode_keeper_turns_projection keeper_turns_json with
   | Error detail -> Alcotest.fail detail
-  | Ok { rows; waiting = [] } ->
-      Alcotest.(check int) "older server still supplies turn rows" 3 (List.length rows)
-  | Ok { waiting = _ :: _; _ } -> Alcotest.fail "an older server invented a waiting observation"
+  | Ok { rows; waiting } ->
+    (match waiting with
+     | Tui_decode.Keeper_waiting_observed [] ->
+         Alcotest.(check int) "turn rows remain available" 3 (List.length rows)
+     | Tui_decode.Keeper_waiting_observed (_ :: _)
+     | Tui_decode.Keeper_waiting_unavailable _ ->
+         Alcotest.fail "an absent waiting object invented a waiting observation")
+
+let waiting_is_invalid = function
+  | Tui_decode.Keeper_waiting_unavailable (Tui_decode.Keeper_waiting_invalid _) -> true
+  | Tui_decode.Keeper_waiting_unavailable (Tui_decode.Keeper_waiting_sources_unavailable _)
+  | Tui_decode.Keeper_waiting_observed _ -> false
 
 let test_decode_keeper_turns_projection_rejects_unknown_waiting_vocabulary () =
   let rec replace key replacement = function
@@ -8682,13 +8695,72 @@ let test_decode_keeper_turns_projection_rejects_unknown_waiting_vocabulary () =
   in
   List.iter
     (fun (key, value) ->
-      Alcotest.(check bool) "unknown waiting vocabulary is rejected" true
-        (Result.is_error
-           (Tui_decode.decode_keeper_turns_projection (replace key value keeper_turns_waiting_json))))
+      match Tui_decode.decode_keeper_turns_projection (replace key value keeper_turns_waiting_json) with
+      | Ok { rows; waiting } when List.length rows = 1 && waiting_is_invalid waiting -> ()
+      | Ok _ | Error _ -> Alcotest.fail "invalid waiting must not discard the independent turn")
     [ "state", `String "napping"
     ; "source", `String "mystery"
     ; "wake_producer", `String "someone"
     ]
+
+let test_decode_keeper_turns_projection_separates_fleet_errors () =
+  let error_row =
+    `Assoc
+      [ "keeper_name", `Null
+      ; "source", `String "read_error"
+      ; "waiting_on", `String "operator_pending_confirm_store"
+      ; "what", `String "unavailable"
+      ; "wake_producer", `String "read_model_reader"
+      ; "since", `Null
+      ; "due_at", `Null
+      ; "next_action", `String "repair"
+      ]
+  in
+  let wire waiting errors =
+    `Assoc
+      [ "schema", `String "masc.keeper_turns.v1"
+      ; "keepers", `List [ `Assoc
+          [ "keeper_name", `String "echo"; "status", `String "ok"
+          ; "turn", `Null; "chat_control_token", `String "fresh-token"; "waiting", waiting ] ]
+      ; "waiting_errors", errors
+      ]
+  in
+  (match Tui_decode.decode_keeper_turns_projection (wire `Null (`List [ error_row ])) with
+   | Error _ -> Alcotest.fail "fleet error must remain separate from the turn"
+   | Ok { rows; waiting } ->
+     (match rows, waiting with
+      | [ turn ], Tui_decode.Keeper_waiting_unavailable
+            (Tui_decode.Keeper_waiting_sources_unavailable [ error ]) ->
+          Alcotest.(check (option string)) "turn token remains available" (Some "fresh-token")
+            turn.Tui_decode.ktr_chat_control_token;
+          Alcotest.(check bool) "fleet error keeps its source" true
+            (error.Tui_decode.kwi_source = Tui_decode.Waiting_source_read_error)
+      | _, Tui_decode.Keeper_waiting_observed _
+      | _, Tui_decode.Keeper_waiting_unavailable (Tui_decode.Keeper_waiting_invalid _)
+      | _, Tui_decode.Keeper_waiting_unavailable (Tui_decode.Keeper_waiting_sources_unavailable _) ->
+          Alcotest.fail "fleet error must remain separate from the turn"));
+  let replace_error name replacement =
+    match error_row with
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        key, if String.equal key name then replacement else value) fields)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> assert false
+  in
+  let valid_waiting = `Assoc
+      [ "keeper_name", `String "echo"; "state", `String "idle"; "waiting_count", `Int 0
+      ; "since", `Null; "due_at", `Null; "waiting_on", `List [] ] in
+  let invalid_rows =
+    [ wire `Null (`String "not an array")
+    ; wire `Null (`List [ replace_error "keeper_name" (`String "echo") ])
+    ; wire `Null (`List [ replace_error "source" (`String "event_queue_pending") ])
+    ; wire valid_waiting (`List [ error_row ])
+    ]
+  in
+  List.iter
+    (fun json ->
+      match Tui_decode.decode_keeper_turns_projection json with
+      | Ok { rows; waiting } when List.length rows = 1 && waiting_is_invalid waiting -> ()
+      | Ok _ | Error _ -> Alcotest.fail "invalid waiting must preserve the valid turn")
+    invalid_rows
 
 (* GET /api/v1/runtime/resolved, the picker's comprehensive shared document. *)
 let picker_default_runtime =
@@ -13711,6 +13783,8 @@ let () =
           test_decode_keeper_turns_projection_keeps_waiting_unobserved
       ; Alcotest.test_case "projection rejects unknown waiting vocabulary" `Quick
           test_decode_keeper_turns_projection_rejects_unknown_waiting_vocabulary
+      ; Alcotest.test_case "projection separates fleet waiting errors" `Quick
+          test_decode_keeper_turns_projection_separates_fleet_errors
       ] );
     ( "decode_tools",
       [

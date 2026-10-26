@@ -960,10 +960,10 @@ let test_observation_updates_preserve_selected_name () =
   state.keepers <- List.map roster_keeper ["beta"; "alpha"; "gamma"];
   keeper_list_select_name state "beta";
   let turns = [roster_turn "alpha"; roster_turn "gamma"] in
-  accept_keeper_turn_observation state ~rows:turns ~waiting:[] ~observed_at:2.;
+  accept_keeper_turn_observation state ~rows:turns ~waiting:(Tui_decode.Keeper_waiting_observed []) ~observed_at:2.;
   Alcotest.(check (option string)) "turn reorder keeps the name" (Some "beta")
     (selected_roster_name state);
-  accept_keeper_turn_observation state ~rows:[] ~waiting:[] ~observed_at:3.;
+  accept_keeper_turn_observation state ~rows:[] ~waiting:(Tui_decode.Keeper_waiting_observed []) ~observed_at:3.;
   Alcotest.(check (option string)) "clearing turns keeps the name" (Some "beta")
     (selected_roster_name state);
   let async_request name : Tui_decode.async_request_row =

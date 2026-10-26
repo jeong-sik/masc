@@ -214,7 +214,15 @@ let test_installed_keeper_rides_as_an_idle_row () =
 ;;
 
 let test_waiting_read_errors_stay_public () =
-  with_test_state (fun ~sw:_ ~config ~state ->
+  with_test_state (fun ~sw ~config ~state ->
+    let error_response () =
+      with_pending_confirm_read_result (Error "public fixture read failure")
+        (fun () -> turns_response ~state)
+    in
+    let empty_json = Yojson.Safe.from_string (body_of (error_response ())) in
+    (match member "keepers" empty_json, member "waiting_errors" empty_json with
+     | Some (`List []), Some (`List (_ :: _)) -> ()
+     | _ -> Alcotest.fail "an empty fleet must retain its waiting error");
     let keeper_name = "turns-waiting-read-error" in
     let meta =
       match
@@ -231,17 +239,21 @@ let test_waiting_read_errors_stay_public () =
     (match Keeper_meta_store.replace_snapshot config meta with
      | Ok () -> ()
      | Error err -> Alcotest.failf "persist keeper meta: %s" err);
-    let response =
-      with_pending_confirm_read_result (Error "public fixture read failure")
-        (fun () -> turns_response ~state)
-    in
-    Alcotest.(check bool) "a fleet read failure is unavailable, not a healthy fleet" true
-      (String_util.contains_substring response "503 Service Unavailable");
+    (match Keeper_owner_registry.install_from_store
+       ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+     | Ok count -> Alcotest.(check int) "installed owner count" 1 count
+     | Error error -> Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
+    let response = error_response () in
+    Alcotest.(check bool) "the independent turn observation remains available" true
+      (String_util.contains_substring response "200 OK");
     let json = Yojson.Safe.from_string (body_of response) in
     (match member "keepers" json with
-     | None -> ()
-     | Some _ -> Alcotest.fail "a failed fleet observation returned healthy per-Keeper state");
-    match member "waiting_errors" json with
+     | Some (`List [ row ]) ->
+       (match member "status" row, member "chat_control_token" row, member "waiting" row with
+        | Some (`String "ok"), Some (`String _), Some `Null -> ()
+        | _ -> Alcotest.fail "turn owner must remain readable without inventing waiting state")
+     | _ -> Alcotest.fail "the independent Keeper turn row was dropped");
+    (match member "waiting_errors" json with
     | Some (`List items) ->
       let is_injected_error item =
         match member "source" item, member "waiting_on" item, member "keeper_name" item with
@@ -252,7 +264,14 @@ let test_waiting_read_errors_stay_public () =
       Alcotest.(check bool) "the injected fleet read error remains public" true
         (List.exists is_injected_error items)
     | Some _ -> Alcotest.fail "waiting_errors must be an array"
-    | None -> Alcotest.fail "the fleet read error was dropped")
+    | None -> Alcotest.fail "the fleet read error was dropped");
+    let recovered = Yojson.Safe.from_string (body_of (turns_response ~state)) in
+    (match member "keepers" recovered, member "waiting_errors" recovered with
+     | Some (`List [ row ]), Some (`List []) ->
+       (match member "waiting" row with
+        | Some (`Assoc _) -> ()
+        | _ -> Alcotest.fail "a recovered source must return the observed waiting state")
+     | _ -> Alcotest.fail "the recovered observation did not clear the fleet error"))
 ;;
 
 let test_interrupt_rejects_invalid_or_conflicting_identity () =

@@ -476,9 +476,14 @@ let handle_keeper_turns_list state request reqd =
            , `String (Printf.sprintf "keeper name census failed: %s" detail) )
          ])
   | Ok keeper_names ->
-    let waiting_by_name =
+    let waiting_snapshot =
       Domain_pool_ref.submit_io_or_inline (fun () ->
         Server_keeper_waiting_inventory.keeper_json_by_name config)
+    in
+    let waiting_by_name, waiting_errors =
+      match waiting_snapshot with
+      | Error errors -> [], errors
+      | Ok rows -> rows, []
     in
     let waiting_json keeper_name =
       Option.value ~default:`Null (List.assoc_opt keeper_name waiting_by_name)
@@ -534,6 +539,7 @@ let handle_keeper_turns_list state request reqd =
       (`Assoc
          [ ("schema", `String "masc.keeper_turns.v1")
          ; ("keepers", `List (List.map row (List.sort String.compare keeper_names)))
+         ; ("waiting_errors", `List waiting_errors)
          ])
 ;;
 

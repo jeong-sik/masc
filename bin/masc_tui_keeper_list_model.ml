@@ -1,6 +1,6 @@
 type layout = Compact | Detailed | Grouped
 type sort = Priority | Recent | Name
-type attention = Needs_you | Active | Waiting | Inactive
+type attention = Needs_you | Active | Waiting | Inactive | Unobserved
 
 type keeper_waiting_state = Masc.Tui_decode.keeper_waiting_state =
   | Keeper_waiting_idle
@@ -62,6 +62,7 @@ type activity =
 
 type badge =
   | Badge_read_error
+  | Badge_waiting_unavailable
   | Badge_async of { running : int; ownership_unknown : int }
   | Badge_async_queued of int
   | Badge_async_cancelling of int
@@ -69,11 +70,16 @@ type badge =
   | Badge_verification
   | Badge_schedule
 
+type waiting_reading =
+  | Waiting_observed of Masc.Tui_decode.keeper_waiting_row
+  | Waiting_unobserved
+  | Waiting_unavailable
+
 type row = {
   keeper : Masc.Tui_decode.keeper;
   reading : Masc_tui_keeper_control.reading;
   turn : Masc.Tui_decode.keeper_turn_state option;
-  waiting : Masc.Tui_decode.keeper_waiting_row option;
+  waiting : waiting_reading;
   approval : Masc.Tui_decode.keeper_tool_approval option;
   task : Masc.Tui_decode.task option;
   open_questions : int;
@@ -103,11 +109,18 @@ let sort_label = function
 
 let waiting_items row =
   match row.waiting with
-  | None -> []
-  | Some waiting -> waiting.Masc.Tui_decode.kwr_waiting_on
+  | Waiting_unobserved | Waiting_unavailable -> []
+  | Waiting_observed waiting -> waiting.Masc.Tui_decode.kwr_waiting_on
 
 let waiting_state row =
-  Option.map (fun waiting -> waiting.Masc.Tui_decode.kwr_state) row.waiting
+  match row.waiting with
+  | Waiting_observed waiting -> Some waiting.Masc.Tui_decode.kwr_state
+  | Waiting_unobserved | Waiting_unavailable -> None
+
+let waiting_unavailable row =
+  match row.waiting with
+  | Waiting_unavailable -> true
+  | Waiting_observed _ | Waiting_unobserved -> false
 
 let waiting_has_source source items =
   List.exists (fun item -> item.Masc.Tui_decode.kwi_source = source) items
@@ -177,7 +190,8 @@ let primary_activity_of_row row =
         Verifying
       else if queued > 0 || cancelling > 0 then External_waiting
       else if waiting_state row = Some Keeper_waiting_blocked then External_waiting
-      else if activity = Some Masc.Tui_decode.Keeper_activity_idle
+      else if (activity = Some Masc.Tui_decode.Keeper_activity_idle
+               && not (waiting_unavailable row))
               || waiting_state row = Some Keeper_waiting_idle then Idle
       else Unknown)
     | Some Masc.Tui_decode.Keeper_activity_attempt_failed -> Failure
@@ -186,6 +200,7 @@ let badges_of_row row =
   let items = waiting_items row in
   let running, ownership_unknown, queued, cancelling = async_counts row.async_requests in
   [ (if waiting_has_source Waiting_source_read_error items then Some Badge_read_error else None)
+  ; (if waiting_unavailable row then Some Badge_waiting_unavailable else None)
   ; (if running > 0 then Some (Badge_async { running; ownership_unknown }) else None)
   ; (if queued > 0 then Some (Badge_async_queued queued) else None)
   ; (if cancelling > 0 then Some (Badge_async_cancelling cancelling) else None)
@@ -202,13 +217,15 @@ let group_of_row row =
   | Held_call | Question | Confirmation | Failure -> Needs_you
   | Preparing | Streaming | Running | Async_working _ | Deferred -> Active
   | Tool_waiting | Model_waiting | Delegating | Verifying | External_waiting -> Waiting
-  | Idle | Paused | Offline | Unknown -> Inactive
+  | Idle | Paused | Offline -> Inactive
+  | Unknown -> Unobserved
 
 let attention_rank = function
   | Needs_you -> 0
   | Active -> 1
   | Waiting -> 2
   | Inactive -> 3
+  | Unobserved -> 4
 
 let compare_name left right =
   String.compare left.keeper.Masc.Tui_decode.k_name right.keeper.Masc.Tui_decode.k_name
@@ -235,10 +252,11 @@ let order_rows ~sort rows =
 
 let group_counts rows =
   List.fold_left
-    (fun (needs_you, active, waiting, inactive) row ->
+    (fun (needs_you, active, waiting, inactive, unobserved) row ->
       match group_of_row row with
-      | Needs_you -> needs_you + 1, active, waiting, inactive
-      | Active -> needs_you, active + 1, waiting, inactive
-      | Waiting -> needs_you, active, waiting + 1, inactive
-      | Inactive -> needs_you, active, waiting, inactive + 1)
-    (0, 0, 0, 0) rows
+      | Needs_you -> needs_you + 1, active, waiting, inactive, unobserved
+      | Active -> needs_you, active + 1, waiting, inactive, unobserved
+      | Waiting -> needs_you, active, waiting + 1, inactive, unobserved
+      | Inactive -> needs_you, active, waiting, inactive + 1, unobserved
+      | Unobserved -> needs_you, active, waiting, inactive, unobserved + 1)
+    (0, 0, 0, 0, 0) rows

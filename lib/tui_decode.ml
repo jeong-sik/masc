@@ -4589,9 +4589,17 @@ type keeper_waiting_row = {
   kwr_waiting_on : waiting_item list;
 }
 
+type keeper_waiting_failure =
+  | Keeper_waiting_sources_unavailable of waiting_item list
+  | Keeper_waiting_invalid of string
+
+type keeper_waiting_observation =
+  | Keeper_waiting_observed of keeper_waiting_row list
+  | Keeper_waiting_unavailable of keeper_waiting_failure
+
 type keeper_turns_projection = {
   rows : keeper_turn_row list;
-  waiting : keeper_waiting_row list;
+  waiting : keeper_waiting_observation;
 }
 
 let decode_named_vocabulary ~kind table raw =
@@ -4865,15 +4873,49 @@ let decode_keeper_turns = decode_keeper_turn_rows
 
 let decode_keeper_turns_projection json =
   let* rows = decode_keeper_turn_rows json in
-  let* items = required_list_field json "keepers" in
-  let rec loop acc = function
-    | [] -> Ok (List.rev acc)
-    | item :: rest ->
-        let* waiting = decode_optional_keeper_waiting item in
-        let acc = match waiting with None -> acc | Some row -> row :: acc in
-        loop acc rest
+  let decode_waiting () =
+    let* items = required_list_field json "keepers" in
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+          let* waiting = decode_optional_keeper_waiting item in
+          let acc = match waiting with None -> acc | Some row -> row :: acc in
+          loop acc rest
+    in
+    let* waiting = loop [] items in
+    let* error_items = required_list_field json "waiting_errors" in
+    let decode_error json =
+      let* () =
+        match json with
+        | `Assoc fields ->
+            (match List.filter (fun (name, _) -> String.equal name "keeper_name") fields with
+             | [ (_, `Null) ] -> Ok ()
+             | _ -> Error "fleet waiting error requires one null keeper_name")
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+            Error "fleet waiting error must be an object"
+      in
+      let* item = decode_waiting_item json in
+      if item.kwi_source = Waiting_source_read_error then Ok item
+      else Error "fleet waiting error must have read_error source"
+    in
+    let rec errors acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+          let* error = decode_error item in
+          errors (error :: acc) rest
+    in
+    let* errors = errors [] error_items in
+    match errors, waiting with
+    | [], _ -> Ok (Keeper_waiting_observed waiting)
+    | (_ :: _ as errors), [] ->
+        Ok (Keeper_waiting_unavailable (Keeper_waiting_sources_unavailable errors))
+    | _ :: _, _ :: _ -> Error "fleet waiting errors conflict with per-Keeper waiting"
   in
-  let* waiting = loop [] items in
+  let waiting =
+    match decode_waiting () with
+    | Ok observation -> observation
+    | Error detail -> Keeper_waiting_unavailable (Keeper_waiting_invalid detail)
+  in
   Ok { rows; waiting }
 
 type runtime_assignment_source =

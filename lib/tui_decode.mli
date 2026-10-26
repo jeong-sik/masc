@@ -1345,9 +1345,19 @@ type keeper_waiting_row = {
   kwr_waiting_on : waiting_item list;
 }
 
+type keeper_waiting_failure =
+  | Keeper_waiting_sources_unavailable of waiting_item list
+  | Keeper_waiting_invalid of string
+
+type keeper_waiting_observation =
+  | Keeper_waiting_observed of keeper_waiting_row list
+  | Keeper_waiting_unavailable of keeper_waiting_failure
+(** An unavailable fleet source makes the waiting projection incomplete;
+    its error rows do not belong to any one Keeper. *)
+
 type keeper_turns_projection = {
   rows : keeper_turn_row list;
-  waiting : keeper_waiting_row list;
+  waiting : keeper_waiting_observation;
 }
 
 type keeper_current_activity =
@@ -1381,10 +1391,11 @@ val decode_keeper_turns :
 
 val decode_keeper_turns_projection :
   Yojson.Safe.t -> (keeper_turns_projection, string) result
-(** Decode turn rows and the optional canonical [waiting] object on each row.
-    An absent or null waiting object contributes no observation; it never
-    becomes an idle Keeper. Unknown waiting state, source, or wake producer is
-    an error. *)
+(** Decode turn rows independently of the fleet waiting observation.
+    [waiting_errors] contains fleet-scoped failures. An absent or null
+    per-Keeper waiting object contributes no observation; it never becomes an
+    idle Keeper. Malformed waiting data becomes [Keeper_waiting_invalid] while
+    valid turn rows remain available. *)
 
 type runtime_assignment_source =
   | Default_runtime

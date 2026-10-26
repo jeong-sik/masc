@@ -2,7 +2,7 @@
 
 type layout = Compact | Detailed | Grouped
 type sort = Priority | Recent | Name
-type attention = Needs_you | Active | Waiting | Inactive
+type attention = Needs_you | Active | Waiting | Inactive | Unobserved
 
 type keeper_waiting_state = Masc.Tui_decode.keeper_waiting_state =
   | Keeper_waiting_idle
@@ -64,6 +64,7 @@ type activity =
 
 type badge =
   | Badge_read_error
+  | Badge_waiting_unavailable
   | Badge_async of { running : int; ownership_unknown : int }
   | Badge_async_queued of int
   | Badge_async_cancelling of int
@@ -71,11 +72,16 @@ type badge =
   | Badge_verification
   | Badge_schedule
 
+type waiting_reading =
+  | Waiting_observed of Masc.Tui_decode.keeper_waiting_row
+  | Waiting_unobserved
+  | Waiting_unavailable
+
 type row = {
   keeper : Masc.Tui_decode.keeper;
   reading : Masc_tui_keeper_control.reading;
   turn : Masc.Tui_decode.keeper_turn_state option;
-  waiting : Masc.Tui_decode.keeper_waiting_row option;
+  waiting : waiting_reading;
   approval : Masc.Tui_decode.keeper_tool_approval option;
   task : Masc.Tui_decode.task option;
   open_questions : int;
@@ -91,5 +97,5 @@ val primary_activity_of_row : row -> activity
 val badges_of_row : row -> badge list
 val group_of_row : row -> attention
 val order_rows : sort:sort -> row list -> row list
-val group_counts : row list -> int * int * int * int
-(** Counts in [Needs_you, Active, Waiting, Inactive] order. *)
+val group_counts : row list -> int * int * int * int * int
+(** Counts in [Needs_you, Active, Waiting, Inactive, Unobserved] order. *)

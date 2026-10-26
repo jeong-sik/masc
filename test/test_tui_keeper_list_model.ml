@@ -98,7 +98,7 @@ let async_request ?(ownership = Decode.Async_runtime_owned) phase id : Decode.as
   ; ar_ownership = ownership
   }
 
-let row ?(last_activity_at = Some 0.) ?turn ?waiting ?approval ?task
+let row ?(last_activity_at = Some 0.) ?turn ?waiting ?(waiting_unavailable = false) ?approval ?task
     ?(open_questions = 0) ?(async_requests = []) ?(paused = false) ?health name : Model.row =
   let liveness = match health with
     | None -> Control.Unobserved
@@ -107,7 +107,8 @@ let row ?(last_activity_at = Some 0.) ?turn ?waiting ?approval ?task
   { keeper = keeper name
   ; reading = { Control.name = name; paused = paused; liveness = liveness }
   ; turn
-  ; waiting
+  ; waiting = (if waiting_unavailable then Model.Waiting_unavailable else
+      match waiting with Some row -> Model.Waiting_observed row | None -> Model.Waiting_unobserved)
   ; approval
   ; task
   ; open_questions
@@ -212,8 +213,17 @@ let test_unobserved_is_not_idle () =
   let idle = row ~turn:Decode.Keeper_turn_idle ~waiting:(waiting ~state:Model.Keeper_waiting_idle "idle") "idle" in
   Alcotest.(check bool) "unknown remains unknown" true (Model.primary_activity_of_row unknown = Model.Unknown);
   Alcotest.(check bool) "observed idle remains idle" true (Model.primary_activity_of_row idle = Model.Idle);
-  Alcotest.(check bool) "unknown and idle share only the inactive bucket" true
-    (Model.group_of_row unknown = Model.Inactive && Model.group_of_row idle = Model.Inactive)
+  Alcotest.(check bool) "unknown is not counted as inactive" true
+    (Model.group_of_row unknown = Model.Unobserved && Model.group_of_row idle = Model.Inactive);
+  let unavailable = row ~turn:Decode.Keeper_turn_idle ~waiting_unavailable:true "unavailable" in
+  let active = row ~turn:streaming ~waiting_unavailable:true "active" in
+  Alcotest.(check bool) "idle turn with unreadable waiting remains unknown" true
+    (Model.primary_activity_of_row unavailable = Model.Unknown
+     && Model.group_of_row unavailable = Model.Unobserved
+     && List.mem Model.Badge_waiting_unavailable (Model.badges_of_row unavailable));
+  Alcotest.(check bool) "an independent active turn stays active" true
+    (Model.primary_activity_of_row active = Model.Streaming
+     && Model.group_of_row active = Model.Active)
 
 let test_paused_and_offline_hide_stale_activity () =
   let paused = row ~paused:true ~turn:streaming "paused" in
@@ -264,7 +274,7 @@ let test_group_counts () =
     ]
   in
   Alcotest.(check bool) "counts use the same classification" true
-    (Model.group_counts rows = (1, 1, 1, 1))
+    (Model.group_counts rows = (1, 1, 1, 0, 1))
 
 let () =
   Alcotest.run "tui_keeper_list_model"

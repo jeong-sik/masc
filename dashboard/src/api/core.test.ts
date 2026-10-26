@@ -385,6 +385,20 @@ describe('typed API errors', () => {
     expect(error.status).toBe(409)
   })
 
+  it('reads the server refusal code from a top-level `code` field', async () => {
+    const error = await apiRequestErrorFromResponse(
+      'POST',
+      '/api/v1/published-artifacts',
+      new Response(JSON.stringify({
+        error: 'workspace precondition failed',
+        code: 'workspace_precondition_failed',
+      }), { status: 409 }),
+    )
+
+    expect(error.errorCode).toBe('workspace_precondition_failed')
+    expect(error.status).toBe(409)
+  })
+
   it('preserves reconciliation state and authoritative reload instruction', async () => {
     const payload = {
       config_application: { state: 'indeterminate' },

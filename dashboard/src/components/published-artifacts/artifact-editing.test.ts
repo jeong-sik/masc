@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { ApiRequestError, clearStoredToken, get, post, setStoredToken } from '../../api/core'
+import { ApiRequestError, apiRequestErrorFromResponse, clearStoredToken, get, post, setStoredToken } from '../../api/core'
 import type { ExecutionWorkspaceAuthority } from '../../store'
 import { route } from '../../router'
 import { ArtifactsSurface } from './artifacts-surface'
@@ -183,9 +183,9 @@ it('retains the draft origin if the server switches MASC roots under the same ba
   const fallback = vi.mocked(get).getMockImplementation()!
   vi.mocked(get).mockImplementation((path, options) => path === '/health?full=1'
     ? Promise.resolve({ paths: { effective_base_path: '/workspace-a', effective_masc_root: '/runtime-b' } }) : fallback(path, options))
-  vi.mocked(post).mockRejectedValue(new ApiRequestError({
-    method: 'POST', path: list, status: 409, errorCode: 'workspace_precondition_failed',
-  }))
+  vi.mocked(post).mockRejectedValue(await apiRequestErrorFromResponse('POST', list, new Response(
+    JSON.stringify({ error: 'workspace precondition failed', code: 'workspace_precondition_failed' }),
+    { status: 409, statusText: 'Conflict' })))
   fireEvent.click(reader.getByRole('button', { name: '새 버전 저장' }))
   await reader.findByText(/서버의 작업 공간이 바뀌어 저장 요청이 거절되었습니다/)
   expect(post).toHaveBeenCalledTimes(1)
@@ -193,6 +193,20 @@ it('retains the draft origin if the server switches MASC roots under the same ba
   expect(vi.mocked(get).mock.calls.filter(([path]) => path === '/health?full=1')).toHaveLength(1)
   expect(screen.queryByText(/다른 사용자가 먼저 저장했습니다/)).toBeNull()
   expect(screen.queryByRole('region', { name: '문서 저장 요청 결과' })).toBeNull()
+})
+
+it('reports a definite refusal without claiming the write outcome is unknown', async () => {
+  const reader = await edit()
+  const fallback = vi.mocked(get).getMockImplementation()!
+  vi.mocked(get).mockImplementation((path, options) => path === '/health?full=1'
+    ? Promise.resolve(health) : fallback(path, options))
+  vi.mocked(post).mockRejectedValue(await apiRequestErrorFromResponse('POST', list, new Response(
+    JSON.stringify({ error: 'invalid artifact request', code: 'invalid_artifact_request' }),
+    { status: 400, statusText: 'Bad Request' })))
+  fireEvent.click(reader.getByRole('button', { name: '새 버전 저장' }))
+  await reader.findByText(/invalid artifact request/)
+  expect(screen.queryByText(/자동으로 다시 저장하지 않습니다/)).toBeNull()
+  expect((reader.getByRole('button', { name: '새 버전 저장' }) as HTMLButtonElement).disabled).toBe(false)
 })
 
 it('retains a late committed response under the original workspace without reading with a replacement credential', async () => {

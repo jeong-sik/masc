@@ -83,17 +83,21 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
       publication = await publishArtifact(request, expectedWorkspace)
     } catch (error) {
       const message = error instanceof Error ? error.message : '저장 응답을 받지 못했습니다.'
+      // A parsed 4xx response is a definite refusal: the write did not happen.
+      // Only an unreadable outcome (network, timeout, 5xx) is unconfirmed.
+      const refusalStatus = error instanceof ApiRequestError ? error.status : undefined
+      const definiteRefusal = refusalStatus !== undefined && refusalStatus >= 400 && refusalStatus < 500
       if (error instanceof ApiRequestError && error.errorCode === 'workspace_precondition_failed') {
         sending.current = false
         if (current()) setState({ kind: 'ready', message: '서버의 작업 공간이 바뀌어 저장 요청이 거절되었습니다. 작성한 원고는 그대로 남아 있습니다.' })
         return
       }
-      onMutation({ kind: 'unconfirmed', title: sent.title, base: baseRef, detail: message })
+      if (!definiteRefusal) onMutation({ kind: 'unconfirmed', title: sent.title, base: baseRef, detail: message })
       if (!current()) return
       sending.current = false
-      setState(error instanceof ApiRequestError && error.status === 409
-        ? { kind: 'conflict', message: '다른 사용자가 먼저 저장했습니다. 작성한 원고는 그대로 남아 있습니다.' }
-        : { kind: 'unconfirmed', message })
+      if (refusalStatus === 409) setState({ kind: 'conflict', message: '다른 사용자가 먼저 저장했습니다. 작성한 원고는 그대로 남아 있습니다.' })
+      else if (definiteRefusal) setState({ kind: 'ready', message })
+      else setState({ kind: 'unconfirmed', message })
       return
     }
     // Keep the committed identity even if the selected document/workspace was

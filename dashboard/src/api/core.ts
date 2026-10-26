@@ -599,10 +599,13 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
         ? jsonRpcErrorData.auth_error_code.trim()
         : ''
       const authErrorCode = topLevelAuthErrorCode || jsonRpcAuthErrorCode
+      // Server refusals (Server_refusal.json) carry their machine code in a
+      // top-level `code` field, next to a human `error` string.
+      const topLevelErrorCode = typeof parsed.code === 'string' ? parsed.code.trim() : ''
       const errorCode =
         authErrorCode
         || (typeof parsed.error_code === 'string' ? parsed.error_code.trim() : '')
-        || (typeof parsed.code === 'string' ? parsed.code.trim() : '')
+        || topLevelErrorCode
         || structuredErrorCode
         || (typeof parsed.status === 'string' ? parsed.status.trim() : '')
         || errorDetail

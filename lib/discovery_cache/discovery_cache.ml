@@ -110,7 +110,7 @@ let refresh_cache () =
       Llm_provider.Provider_registry.active_llama_endpoints ()
     in
     let results =
-      Llm_provider.Discovery.discover ~headers:[] ~sw:switch ~net ~endpoints
+      Llm_provider.Discovery.discover ~headers:[] ~sw:switch ~net ~endpoints ()
     in
     let now = Time_compat.now () in
     let retained =
@@ -161,7 +161,7 @@ let first_ollama_model_id_for_url ~timeout_s ?(headers=[]) url =
            ~protocol:Llm_provider.Discovery.Ollama_native
            ~capabilities:Llm_provider.Capabilities.ollama_capabilities url
        in
-       (match Llm_provider.Discovery.discover ~headers ~clock ~timeout_s ~sw:switch ~net ~endpoints:[ declared ] with
+       (match Llm_provider.Discovery.discover ~headers ~clock ~timeout_s ~sw:switch ~net ~endpoints:[ declared ] () with
         | [ status ] ->
           (match model_of_status status with
            | Some model_id ->

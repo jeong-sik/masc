@@ -247,7 +247,7 @@ let test_local_compat () =
             ~protocol:Llm_provider.Discovery.Openai_compatible
             ~capabilities:Llm_provider.Capabilities.default_capabilities)
   in
-  let statuses = Llm_provider.Discovery.discover ~headers:[] ~sw ~net:env#net ~endpoints in
+  let statuses = Llm_provider.Discovery.discover ~headers:[] ~sw ~net:env#net ~endpoints () in
   let healthy =
     List.filter (fun (s : Llm_provider.Discovery.endpoint_status) -> s.healthy) statuses
   in

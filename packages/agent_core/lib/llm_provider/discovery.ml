@@ -320,11 +320,11 @@ let first_discovered_model_id_for_url (url : string) : string option =
     snap.model_endpoints
 ;;
 
-let discover ?clock ?timeout_s ~headers ~sw ~net ~endpoints =
+let discover ?clock ?timeout_s ~headers ~sw ~net ~endpoints () =
   Eio.Fiber.List.map (probe_endpoint ~headers ?clock ?timeout_s ~sw ~net) endpoints
 
 let refresh_and_sync ~sw ~net ~endpoints =
-  let statuses = discover ~headers:[] ~sw ~net ~endpoints in
+  let statuses = discover ~headers:[] ~sw ~net ~endpoints () in
   let healthy = List.filter (fun (s : endpoint_status) -> s.healthy) statuses in
   (* llama-server /props reports n_ctx as the per-slot context
      (server total / n_parallel), not the server total. Do NOT divide

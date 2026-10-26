@@ -1030,9 +1030,12 @@ const taskSpace = async () => ({ownership: 'agent',
         (String.split_on_char '\n' output) with
       | Some line -> Yojson.Safe.from_string (after ~prefix:"capture-options " line)
       | None -> fail "the native Page.screenshot method was not called" in
-    let expected_fields = match !expected with `Assoc fields -> fields | _ -> fail "options must be an object" in
-    check bool "Page.screenshot receives exactly the native options and host path" true
-      (Yojson.Safe.equal screenshot_options (obj (expected_fields @ ["path",str path])));
+    let screenshot_fields = match screenshot_options with `Assoc fields -> fields | _ -> fail "options must be an object" in
+    check string "Page.screenshot receives the host path" path (text (field "path" screenshot_options));
+    (* JSON.stringify prints integral coordinates without a decimal point. The
+       strict native codec compares their values and still rejects extra fields. *)
+    check bool "Page.screenshot receives exactly the native options" true
+      (Lane.Capture.of_json (obj (List.remove_assoc "path" screenshot_fields)) = Lane.Capture.of_json !expected);
     match !echo with
     | None -> Ok output
     | Some options -> answered (obj ["label",str "p1";"path",str path;

@@ -251,7 +251,10 @@ let release t = Eio.Cancel.protect (fun () ->
 let valid_string s = not (String.contains s '\000')
 let absolute s = String.length s > 0 && s.[0] = '/' && valid_string s
 
-let create ~sw ~executable ~argv ~env ~cwd ~payload_uid ~payload_gid ~stdin ~stdout ~stderr =
+let create_with_hook ~before_spawn_in_worker ~sw ~executable ~argv ~env ~cwd ~payload_uid ~payload_gid ~stdin ~stdout ~stderr =
+  (* Capture before validation and before the system-thread wait can yield to
+     callers that still own the mutable source arrays. Strings are immutable. *)
+  let argv = Array.copy argv and env = Array.copy env in
   let invalid =
     if not (absolute executable) then Some Executable
     else if Array.length argv = 0 || not (Array.for_all valid_string argv) then Some Arguments
@@ -270,6 +273,7 @@ let create ~sw ~executable ~argv ~env ~cwd ~payload_uid ~payload_gid ~stdin ~std
         Eio.Switch.check sw;
         Eio.Cancel.protect (fun () ->
             let code, error, raw = Eio_unix.run_in_systhread (fun () ->
+                before_spawn_in_worker ();
                 spawn_raw (executable, argv, env, cwd, payload_uid, payload_gid, (stdin, stdout, stderr))) in
             match error with
             | Some error ->
@@ -290,4 +294,9 @@ let create ~sw ~executable ~argv ~env ~cwd ~payload_uid ~payload_gid ~stdin ~std
                 Ok t)
       end
 
-module For_testing = struct let linux_build = linux_build () end
+let create = create_with_hook ~before_spawn_in_worker:(fun () -> ())
+
+module For_testing = struct
+  let linux_build = linux_build ()
+  let create = create_with_hook
+end

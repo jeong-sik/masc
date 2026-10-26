@@ -2,7 +2,7 @@
 
     Linux clone3 creates the pidfd atomically with the child. Before activation
     the child resets inherited signals, closes other descriptors, drops to the
-    explicit distinct non-root UID/GID, clears capabilities, applies no-new-privs
+    explicit distinct non-root UID and explicit GID, clears capabilities, applies no-new-privs
     and waits on its private gate. No OCaml code runs in the cloned child.
 
     This is a process primitive, not an authenticated async backend. The caller
@@ -59,7 +59,10 @@ val create :
   (t, error) result
 (** Eio-only. Creates a paused child in a system thread and registers ownership
     before cancellation can escape. Environment and stdio are explicit, with no
-    implicit credential/environment inheritance. Stdio descriptors are borrowed.
+    implicit credential/environment inheritance. The argument/environment arrays
+    are copied before validation or the first yield. Callers must not mutate
+    them concurrently while that synchronous copy runs. Stdio descriptors are
+    borrowed and must remain open and unreused until create returns or raises.
     No numeric PID or external handle is accepted or returned.
 
     [sw] MUST be endpoint-operation owned, not a control-connection/model-turn
@@ -93,6 +96,14 @@ val release : t -> (exit_observation, error) result
     It does not claim descendant cleanup, complete output or Task/Goal success. *)
 
 module For_testing : sig
+  val create :
+    before_spawn_in_worker:(unit -> unit) ->
+    sw:Eio.Switch.t -> executable:string -> argv:string array -> env:string array ->
+    cwd:string -> payload_uid:int -> payload_gid:int ->
+    stdin:Unix.file_descr -> stdout:Unix.file_descr -> stderr:Unix.file_descr ->
+    (t, error) result
+  (** Interrupt the actual worker before native capture. The hook must not
+      perform Eio effects; exceptions propagate before any child exists. *)
   val linux_build : bool
   (** Compilation platform only, never a functioning kernel capability probe. *)
 end

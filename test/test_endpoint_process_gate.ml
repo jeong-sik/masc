@@ -143,6 +143,33 @@ let owner_teardown = run (fun fixture ->
     check_exit (-9) (get (G.release child));
     check "owner teardown prevented payload" (not (Sys.file_exists fixture.marker)))
 
+let frozen_inputs = run (fun fixture -> Eio.Switch.run (fun sw ->
+    let script = "printf '%s\\n' \"$1\" \"$FROZEN_ENV\"" in
+    let argv = [|"/bin/sh"; "-c"; script; "gate-test"; "original-argument"|] in
+    let env = [|"FROZEN_ENV=original-environment"|] in
+    let reached, notify = Eio.Promise.create () in
+    let mutex = Mutex.create () and condition = Condition.create () and proceed = ref false in
+    let before_spawn_in_worker () =
+      Mutex.lock mutex;
+      Fun.protect ~finally:(fun () -> Mutex.unlock mutex) (fun () ->
+          Eio.Promise.resolve notify ();
+          while not !proceed do Condition.wait condition mutex done) in
+    let child, () = Eio.Fiber.pair
+        (fun () -> get (G.For_testing.create ~before_spawn_in_worker ~sw
+            ~executable:"/bin/sh" ~argv ~env ~cwd:fixture.work
+            ~payload_uid:fixture.uid ~payload_gid:fixture.gid
+            ~stdin:fixture.input ~stdout:fixture.output ~stderr:fixture.output))
+        (fun () ->
+          Eio.Promise.await reached;
+          Mutex.lock mutex;
+          Fun.protect ~finally:(fun () ->
+              proceed := true; Condition.broadcast condition; Mutex.unlock mutex)
+            (fun () -> argv.(4) <- "replaced-argument"; env.(0) <- "FROZEN_ENV=replaced-environment")) in
+    get (G.await_ready child); get (G.activate child);
+    check_exit 0 (get (G.await_exit child));
+    Alcotest.(check string) "worker executes original validated inputs"
+      "original-argument\noriginal-environment\n" (file fixture.output_path)))
+
 let invalid_owner = run (fun fixture -> Eio.Switch.run (fun sw ->
     let result = G.create ~sw ~executable:"/bin/sh" ~argv:[|"/bin/sh"|] ~env:[||]
         ~cwd:fixture.work ~payload_uid:0 ~payload_gid:fixture.gid
@@ -178,5 +205,6 @@ let () =
           "original handle never selects another process", original_handle;
           "wait cancellation and independent progress", waiter_cancellation_and_progress;
           "owner teardown settles paused main", owner_teardown;
+          "source mutation cannot replace validated inputs", frozen_inputs;
           "root payload refusal", invalid_owner] in
   Alcotest.run "Endpoint process gate" ["kernel", List.map (fun (name, test) -> Alcotest.test_case name `Quick test) cases]

@@ -198,7 +198,8 @@ CAMLprim value masc_endpoint_gate_spawn(value input) {
     for(int i=0;i<3;i++) if(sources[i]>=0) close(sources[i]);
     if(directory>=0) close(directory);
     if(child_control>=0) close(child_control);
-    if(pair[0]>=0) close(pair[0]);if(pair[1]>=0) close(pair[1]);
+    if(pair[0]>=0) close(pair[0]);
+    if(pair[1]>=0) close(pair[1]);
     if(error) {
       /* A rare parent-side failure after clone never releases an unowned
          running payload: the gate was not activated. Reap through the pidfd. */

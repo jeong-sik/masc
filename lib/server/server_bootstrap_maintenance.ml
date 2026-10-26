@@ -126,10 +126,14 @@ let wake_enqueue_counts_of_dispatches dispatches =
    schedule list is dropped: the page reports the runner's status and holds,
    and would otherwise keep the previous tick's for up to its cache lifetime
    (#38411). *)
-let run_schedule_runner_tick ~clock config ~previously_held =
+type schedule_runner_state = Startup_pending | Active of Schedule_runner.held list
+
+let initial_schedule_runner_state = Startup_pending
+
+let run_schedule_runner_tick ~clock config ~state =
   let started_at = clock () in
   Schedule_runner_status.record_tick_started ~now:started_at;
-  let held_after_tick =
+  let run_active previously_held =
     try
       match
         Schedule_runner.tick
@@ -188,8 +192,39 @@ let run_schedule_runner_tick ~clock config ~previously_held =
       Log.Server.warn "schedule_runner: tick crashed: %s" error;
       previously_held
   in
+  let active = match state with
+    | Active previously_held -> Some previously_held
+    | Startup_pending ->
+      (try
+         match Schedule_store.recover_running_on_startup config ~now:started_at with
+         | Ok (_, recovered) ->
+           if recovered > 0 then
+             Log.Server.warn
+               "schedule_runner: recovered %d interrupted running schedule(s)" recovered;
+           Some []
+         | Error err ->
+           let error = "startup recovery failed: " ^ Schedule_store.store_error_to_string err in
+           Schedule_runner_status.record_tick_error ~started_at ~finished_at:(clock ()) error;
+           record_schedule_runner_tick_outcome "error";
+           Log.Server.warn "schedule_runner: %s" error;
+           None
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         let error = "startup recovery crashed: " ^ Printexc.to_string exn in
+         Schedule_runner_status.record_tick_crash ~started_at ~finished_at:(clock ()) error;
+         record_schedule_runner_tick_outcome "crash";
+         Log.Server.warn "schedule_runner: %s" error;
+         None)
+  in
+  (* Once recovery succeeded, a later tick failure cannot return this loop to
+     startup: its Running occurrences may now belong to this live process. *)
+  let next_state = match active with
+    | None -> Startup_pending
+    | Some previously_held -> Active (run_active previously_held)
+  in
   Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
-  held_after_tick
+  next_state
 ;;
 
 let latest_keeper_msg_recovery = Atomic.make None
@@ -520,47 +555,19 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~sw
     ~on_error:(log_server_fiber_crash "schedule_runner")
     (fun () ->
-      (* Recover once before this process can start a dispatch. Running is an
-         in-process lease state, so a persisted row here can only belong to the
-         previous process. Repeating this globally on every tick could steal an
-         active dispatch from this same loop. *)
-      let recovery_started_at = Time_compat.now () in
-      (try
-         match
-           Schedule_store.recover_running_on_startup
-             (Mcp_server.workspace_config state)
-             ~now:recovery_started_at
-         with
-         | Ok (_, 0) -> ()
-         | Ok (_, recovered) ->
-           Log.Server.warn
-             "schedule_runner: recovered %d interrupted running schedule(s)"
-             recovered
-         | Error err ->
-           Log.Server.warn
-             "schedule_runner: startup recovery failed: %s"
-             (Schedule_store.store_error_to_string err)
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         Log.Server.warn
-           "schedule_runner: startup recovery crashed: %s"
-           (Printexc.to_string exn));
-      (* [previously_held] is the held set the last successful tick saw. A
-         hold lasts until the target consumes its earlier occurrence, so it is
-         logged when it starts, not on every tick that re-observes it
-         (#37912); /health lists the current set. *)
-      let rec loop previously_held =
-        let held_after_tick =
+      (* Pending startup recovery and the latest successful held set are
+         carried by this loop at the existing cadence. *)
+      let rec loop runner_state =
+        let next_state =
           run_schedule_runner_tick
             ~clock:Time_compat.now
             (Mcp_server.workspace_config state)
-            ~previously_held
+            ~state:runner_state
         in
         Eio.Time.sleep clock schedule_runner_interval_sec;
-        loop held_after_tick
+        loop next_state
       in
-      loop []);
+      loop initial_schedule_runner_state);
   (* Non-public registered tool usage log: durable JSONL observability. *)
   Tool_usage_log.init
     ~base_path:(Mcp_server.workspace_config state).base_path

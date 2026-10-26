@@ -6,17 +6,27 @@ val wake_enqueue_counts_of_dispatches :
   Schedule_runner.dispatch_result list -> Schedule_runner_status.wake_enqueue_counts
 (** Derive keeper-wake delivery counts from typed production consumer receipts. *)
 
+type schedule_runner_state
+(** Immutable state owned by one production runner loop. Before the first
+    successful startup recovery no normal tick or dispatch is admitted. *)
+
+val initial_schedule_runner_state : schedule_runner_state
+
 val run_schedule_runner_tick :
   clock:(unit -> float) ->
   Workspace.config ->
-  previously_held:Schedule_runner.held list ->
-  Schedule_runner.held list
-(** One tick of the schedule runner loop: record its start, run it with the
+  state:schedule_runner_state ->
+  schedule_runner_state
+(** One cadence of the schedule runner loop. Retry failed startup recovery
+    before any normal tick; after its first success never recover active
+    Running occurrences again, including after a normal tick error or crash.
+    Record its start, run it with the
     production consumer, record its outcome (success, error or crash), then
     drop the cached fleet schedule list so the next read of that page carries
-    this tick's runner status and holds. [previously_held] is the held set of
-    the last successful tick, and the result is the one the next tick compares
-    against; a tick that fails returns [previously_held] unchanged. *)
+    this tick's runner status and holds. The returned immutable state preserves
+    the held set of the last successful normal tick on failure. Startup
+    recovery failures use the same error/crash status and cache invalidation.
+    Cancellation propagates. *)
 
 val run_periodic_task_gc : Workspace.config -> days:int -> unit
 (** One archive-first task-only GC pass (audit 2026-10-07 F-06 / D6-11),

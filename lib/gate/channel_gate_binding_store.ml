@@ -320,6 +320,79 @@ let mutate_bindings store ~decide =
                  (Mutation_audit_failed
                     { audit_error; binding_rollback_error })))))
 
+let binding_audit_event ~action ~channel_id ~keeper_name ~actor_name
+    ~previous_keeper =
+  {
+    (* NDT-OK: audit wall-clock is operator-facing telemetry. This helper is
+       called only by the decision callback inside the durable mutation. *)
+    timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
+    action;
+    channel_id;
+    keeper_name;
+    actor_id = actor_name;
+    actor_name;
+    previous_keeper;
+  }
+
+let bind store ~channel_id ~keeper_name ~actor_name =
+  let channel_id = String.trim channel_id in
+  let keeper_name = String.trim keeper_name in
+  if String.equal channel_id "" then
+    Error (Mutation_rejected "channel_id is required")
+  else if String.equal keeper_name "" then
+    Error (Mutation_rejected "keeper_name is required")
+  else
+    mutate_bindings store ~decide:(fun original_bindings ->
+      let previous_keeper =
+        match find_binding_by_channel_id original_bindings ~channel_id with
+        | Some previous -> previous.keeper_name
+        | None ->
+          (* DET-OK: the audit wire contract represents no previous binding
+             with an empty string; this does not affect the decision. *)
+          ""
+      in
+      let updated_bindings =
+        (({ channel_id; keeper_name } : binding)
+         :: List.filter
+              (fun (binding : binding) ->
+                not (String.equal binding.channel_id channel_id))
+              original_bindings)
+        |> List.sort (fun (a : binding) (b : binding) ->
+             String.compare a.channel_id b.channel_id)
+      in
+      let event =
+        binding_audit_event ~action:"bind" ~channel_id ~keeper_name ~actor_name
+          ~previous_keeper
+      in
+      Ok (updated_bindings, event, ()))
+
+let unbind store ?expected_keeper_name ~channel_id ~actor_name () =
+  let channel_id = String.trim channel_id in
+  if String.equal channel_id "" then
+    Error (Mutation_rejected "channel_id is required")
+  else
+    mutate_bindings store ~decide:(fun original_bindings ->
+      match find_binding_by_channel_id original_bindings ~channel_id with
+      | None -> Error "binding not found"
+      | Some removed
+        when (match expected_keeper_name with
+              | Some expected -> not (String.equal expected removed.keeper_name)
+              | None -> false) ->
+        Error "binding changed"
+      | Some removed ->
+        let updated_bindings =
+          List.filter
+            (fun (binding : binding) ->
+              not (String.equal binding.channel_id channel_id))
+            original_bindings
+        in
+        let event =
+          binding_audit_event ~action:"unbind" ~channel_id
+            ~keeper_name:removed.keeper_name ~actor_name
+            ~previous_keeper:removed.keeper_name
+        in
+        Ok (updated_bindings, event, ()))
+
 let rec drop_left n xs =
   if n <= 0 then xs
   else

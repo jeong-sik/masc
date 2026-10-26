@@ -87,4 +87,30 @@ val mutate_bindings :
   t ->
   decide:(binding list -> (binding list * audit_event * 'a, string) result) ->
   ('a, mutation_error) result
+
+val bind :
+  t ->
+  channel_id:string ->
+  keeper_name:string ->
+  actor_name:string ->
+  (unit, mutation_error) result
+(** Trim and validate channel and Keeper names, then atomically replace the
+    channel's binding and append its audit record. Validation precedes store
+    reads; the channel error precedes the Keeper error. The previous owner and
+    wall-clock audit timestamp are observed inside the durable transaction.
+    Each store retains its own paths and [guild_id_field] serialization. *)
+
+val unbind :
+  t ->
+  ?expected_keeper_name:string ->
+  channel_id:string ->
+  actor_name:string ->
+  unit ->
+  (unit, mutation_error) result
+(** Remove an existing binding and append its audit record in one durable
+    transaction. [None] permits any current owner; [Some expected] requires
+    an exact owner match without normalizing [expected]. Missing or changed
+    bindings refuse without writing a binding or audit record. Only the
+    channel name is trimmed; actor identity is retained as supplied. *)
+
 val read_recent_audit : t -> limit:int -> Yojson.Safe.t list

@@ -31,7 +31,9 @@ The check uses the tools the provider codec will actually send, including
 Reasoning outside the target's replay selection can be omitted from the outgoing
 request while remaining in the canonical checkpoint. A new caller query may
 close the previous tool exchange under a latest-user-turn replay contract;
-system follow-ups do not create that boundary. An active exchange that still
+system follow-ups do not create that boundary. If a transmission window omits
+the caller, its retained tool exchange still requires replay; an omitted caller
+does not prove that the exchange ended. An active exchange that still
 requires foreign reasoning or a provider signature remains refused before
 dispatch. Missing or corrupt producer metadata is also refused. Repeated
 `checkpoint.reasoning_replay` failures therefore require inspecting the target

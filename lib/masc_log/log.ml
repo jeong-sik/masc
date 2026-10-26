@@ -338,8 +338,10 @@ module Ring = struct
      [LogEntryRawSchema] contract in [dashboard/src/api/schemas/logs.ts]. *)
   let entry_to_json e =
     (* The dashboard schema requires a non-empty keeper_name string, so
-       [None] encodes as "system". The decoder maps "system" back to
-       [None]: no specific keeper either way. *)
+       [None] encodes as "system" and the decoder maps "system" back to
+       [None]: "system" is reserved for system-originated rows (callers
+       with no keeper pass it explicitly) and never names a real keeper,
+       so the conflation loses nothing the wire format could carry. *)
     let keeper_name_json = match e.keeper_name with
       | Some s -> `String s
       | None -> `String "system"
@@ -991,9 +993,6 @@ module type LOGGER = sig
     ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 
   val warn :
-    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
-
-  val warning :
     ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 
   val error :

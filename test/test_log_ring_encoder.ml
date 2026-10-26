@@ -52,13 +52,19 @@ let test_round_trip_optional_fields () =
   Alcotest.(check bool) "details preserved" true
     (decoded.details = `Assoc [("k", `String "v")]);
   (* [None] encodes as "system" for the dashboard schema and decodes back
-     to [None]: no specific keeper either way. *)
+     to [None]: "system" is reserved, never a real keeper name. *)
   let no_keeper = entry_of () in
   let decoded_none =
     Log.Ring.entry_of_json (Log.Ring.entry_to_json no_keeper)
   in
   Alcotest.(check (option string)) "absent keeper_name" None
-    decoded_none.keeper_name
+    decoded_none.keeper_name;
+  let explicit_system = entry_of ~keeper_name:"system" () in
+  let decoded_system =
+    Log.Ring.entry_of_json (Log.Ring.entry_to_json explicit_system)
+  in
+  Alcotest.(check (option string)) "reserved system keeper_name" None
+    decoded_system.keeper_name
 
 let test_wire_format_field_set () =
   let e = entry_of () in

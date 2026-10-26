@@ -5,3 +5,5 @@
 
 # prototype brand fonts for the parity harness (fetched by scripts/fetch-v2-fonts.sh)
 prototypes/keeper-v2/styles/fonts/
+
+dist-artifact-document/

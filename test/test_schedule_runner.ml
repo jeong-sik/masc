@@ -1355,7 +1355,16 @@ let test_pending_settlements_replay_only_original_store_decision () =
     check int "replay creates no second wake attempt" 1 (List.length wakes);
     let wake = List.hd wakes in
     check (option (float 0.001)) "first observed finish time is preserved" (Some 301.0) wake.finished_at;
-    check bool "typed original verdict is preserved" true (wake.settlement_kind = Some expected_kind))
+    check bool "typed original verdict is preserved" true (wake.settlement_kind = Some expected_kind);
+    let next_calls = ref [] in
+    let next = tick_ok ~consumer:(accepting_consumer next_calls) config ~now:1001.0
+        ~pending_settlements:replayed.pending_settlements in
+    match rejection with
+    | Retryable_dispatch_failure _ | Occurrence_dispatch_rejection _ ->
+      check (list string) "the same definition is eligible again next cadence" [ request.schedule_id ] !next_calls;
+      check int "the next cadence starts its own new attempt" 1 (List.length next.dispatches)
+    | Terminal_dispatch_rejection _ ->
+      check (list string) "terminal definition remains closed next cadence" [] !next_calls)
     [ Retryable_dispatch_failure "retry", Due, 200.0, Retryable_failure
     ; Occurrence_dispatch_rejection "occurrence", Due, 260.0, Occurrence_rejected
     ; Terminal_dispatch_rejection "definition", Failed, 200.0, Schedule_rejected ]

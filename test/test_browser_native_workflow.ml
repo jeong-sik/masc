@@ -146,6 +146,25 @@ let pointer_release () =
    | R.Completed _|R.Stopped _ -> fail "lost release was called confirmed");
   check bool "held input is impossible without a holding operation" true
     (Result.is_error (R.decode (request [step "fill" ["selector",str "#editor";"text",str "x"]]) (obj fields)))
+let dialog_pointer_release () =
+  List.iter (fun (method_,fields,expected) ->
+    let call=step method_ fields in
+    let failed=obj ["index",`Int 0;"method",str method_;"message",str "answer the dialog";
+      "dialog",obj ["type",str "alert";"message",str "hold"]] in
+    let fields=result ~started:true ~completed_effect:true ~completed:[entry 0 method_] ~failure:failed in
+    let fields=("inputReleased",`Bool false)::List.remove_assoc "inputReleased" fields in
+    match ok (R.decode (request [call]) (obj fields)) with
+    | R.Stopped {pending_pointer_release;_} ->
+      check (option string) "only an owned pointer has an exact release plan" expected
+        (Option.map W.pointer_button_name pending_pointer_release)
+    | R.Completed _ -> fail "dialog cannot complete a workflow")
+    ["click",["selector",str "#confirm"],Some "left";
+     "dblclick",["selector",str "#confirm";"options",obj ["button",str "right"]],Some "right";
+     "mouse.click",["x",`Int 1;"y",`Int 2;"options",obj ["button",str "middle"]],Some "middle";
+     "dragAndDrop",["selector",str "#source";"destination",str "#target"],Some "left";
+     "press",["selector",str "#editor";"key",str "ControlOrMeta+Enter"],None;
+     "keyboard.press",["key",str "ControlOrMeta+Enter"],None;
+     "keyboard.type",["text",str "x"],None]
 let proof path =
   let json=Yojson.Safe.from_file path in
   let request=ok (W.of_json (Yojson.Safe.Util.member "request" json)) in
@@ -170,4 +189,5 @@ let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.arg
   test_case "snapshot completes the exact requested sequence" `Quick complete;
   test_case "failed waits and uncertain effects retain progress" `Quick progress_and_uncertainty;
   test_case "drag release is separate from effect completion" `Quick pointer_release;
+  test_case "dialog recovery owns the exact pointer button" `Quick dialog_pointer_release;
   test_case "malformed execution never proves success" `Quick malformed_receipts]]

@@ -25,6 +25,24 @@ type action =
   | Wait_for_function of page_code
   | Fetch of string
 type step = { action : action; options : native_options option }
+type pointer_button = Left | Middle | Right
+let pointer_button_name = function Left -> "left" | Middle -> "middle" | Right -> "right"
+let pointer_button {action;options} =
+  match action with
+  | Click _ | Double_click _ | Drag_and_drop _ | Mouse_click _ ->
+    (match options with
+     | None -> Some Left
+     | Some (`Assoc fields) ->
+       (match List.assoc_opt "button" fields with
+        | None | Some (`String "left") -> Some Left
+        | Some (`String "middle") -> Some Middle
+        | Some (`String "right") -> Some Right
+        | Some (`Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _|`Assoc _) -> None)
+     | Some (`Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _) -> None)
+  | Hover _ | Mouse_move _ | Mouse_wheel _ | Fill _ | Press _ | Focus _ | Reload
+  | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
+  | Select_option _ | Goto _ | Wait_for_url _ | Wait_for_selector _
+  | Wait_for_load_state _ | Evaluate _ | Wait_for_function _ | Fetch _ -> None
 type snapshot_scope = Viewport | Full_page
 type t = { tab_id : int; expected_url : string; steps : step list;
   snapshot_scope : snapshot_scope; max_chars : int }

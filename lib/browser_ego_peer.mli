@@ -129,6 +129,10 @@ val space_id : t -> int
     the same release-uncertain state as raw drag. Coordinate and
     scene drags retain the observed waypoint contract, require zero duration
     and release the button in the same run.
+    A workflow pointer action stopped by a dialog retains its exact button and
+    tab. Answering that dialog explicitly releases that button, and only an
+    observed release permits further input. Keyboard/chord release is not
+    inferred from dialog closure or [page.info].
     Unconfirmed release blocks further input on this peer; read/finish remain
     available. End this task space before opening a fresh peer. Frames are read
     through the snapshot. Snapshot-target click, fill, hover and double-click

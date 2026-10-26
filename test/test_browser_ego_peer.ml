@@ -1985,12 +1985,54 @@ let test_native_workflow_pointer_ownership () =
      "keyboard.press",["key",str "ControlOrMeta+Enter"];
      "keyboard.type",["text",str "x"]]
 
+let test_native_workflow_dialog_pointer_recovery () =
+  List.iter (fun mode ->
+    let issued=ref 0 and answered_dialog=ref false in
+    let method_,fields = match mode with
+      | `Keyboard -> "keyboard.press",["key",str "ControlOrMeta+Enter"]
+      | `Released | `Lost | `Still_open | `Other_tab | `Refused -> "click",["selector",str "#confirm";"options",obj ["button",str "right"]] in
+    let peer=opened (fun sent -> match sent.step with
+      | "tabs.list" -> answered tabs
+      | "page.native_workflow" ->
+        incr issued;
+        if !issued=1 then answered (obj ["completed",`List [obj ["index",`Int 0;"method",str method_;"receipt",obj ["dialog",ego_dialog "alert" "hold"]]];
+          "effectStarted",`Bool true;"completedEffect",`Bool true;"inputReleased",`Bool false;
+          "failure",obj ["index",`Int 0;"method",str method_;"message",str "answer dialog";"dialog",ego_dialog "alert" "hold"]])
+        else answered (obj ["completed",`List [];"effectStarted",`Bool false;"completedEffect",`Bool false;
+          "inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";
+          "url",str "https://app.slack.com/";"title",str "Slack";"snapshot",str "root";"chars",`Int 4;"truncated",`Bool false])
+      | "page.dialog" ->
+        answered_dialog:=true;
+        check bool "keyboard never borrows the pointer plan" true
+          (field "releaseButton" sent.args = if mode=`Keyboard || mode=`Other_tab then `Null else str "right");
+        (match mode with
+         | `Lost -> Error (Peer.Unobserved "dialog response lost")
+         | `Refused -> refused "no dialog is open in this tab"
+         | `Released | `Still_open | `Keyboard | `Other_tab ->
+           answered (obj ["dialog",ego_dialog "alert" "hold";"inputReleased",`Bool (mode=`Released)]))
+      | other -> failf "unexpected dialog recovery fixture step %s" other) in
+    ignore (dispatch peer Live.Tabs_list (obj []));
+    let call steps=dispatch peer Live.Page_native_workflow (obj ["tabId",`Int 1;
+      "expectedUrl",str "https://app.slack.com/";"maxChars",`Int 1000;"steps",`List steps]) in
+    (match call [obj (("method",str method_)::fields)] with
+     | Error (Live.Partial_failure _) -> ()
+     | other -> failf "dialog workflow was %s" (failure_kind other));
+    ignore (dispatch peer Live.Page_act (obj ["action",str "accept_dialog";"tabId",`Int (if mode=`Other_tab then 2 else 1)]));
+    check bool "the original dialog was addressed" true !answered_dialog;
+    match mode,call [] with
+    | `Released,Ok _ -> check int "confirmed exact release permits the next request" 2 !issued
+    | (`Lost|`Still_open|`Keyboard|`Other_tab|`Refused),Error (Live.Before_effect _) ->
+      check int "unconfirmed or unknown key release never dispatches next input" 1 !issued
+    | (`Released|`Lost|`Still_open|`Keyboard|`Other_tab|`Refused),_ -> fail "dialog closure incorrectly changed input ownership")
+    [`Released;`Lost;`Still_open;`Keyboard;`Other_tab;`Refused]
+
 let () =
   run "browser_ego_peer" [
     "ego", [
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
       test_case "native drag preserves release and failure boundaries" `Quick test_native_drag_and_release;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
+      test_case "dialog answers recover only the exact owned pointer" `Quick test_native_workflow_dialog_pointer_recovery;
       test_case "chooser upload respects uncertain input release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
       test_case "the spaces of a name are listed without opening one" `Quick test_the_spaces_of_a_name_are_listed_without_opening_one;

@@ -479,8 +479,79 @@ class VerdictWithdrawalCase(GuardHarness):
                 self.reviews(request)
                 r = self.replacement_check()
                 self.assertEqual(r.returncode, 2)
-                self.assertIn("open CHANGES_REQUESTED", r.stderr)
+                self.assertIn("open CHANGES_REQUESTED" if request["user"]["login"] == "reviewer-account"
+                              else "does not name this account", r.stderr)
                 self.assertEqual(r.stdout, "")
+
+    def test_other_change_requests_do_not_block_recording_an_independent_review(self):
+        for head in (HEAD, "a" * 40):
+            with self.subTest(head=head):
+                request = self.negative_review(login="another-reviewer")
+                request["commit_id"] = head
+                request["body"] = f"verdict: FAIL head: {head} by: another-keeper"
+                self.reviews(request)
+                r = self.replacement_check(replace_id=None)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("WOULD APPROVE", r.stdout)
+                self.assertIn("remain merge blockers: another-reviewer:88", r.stderr)
+                self.assertEqual(json.loads((self.data / "reviews.json").read_text()), [request])
+
+    def test_two_reviewers_can_replace_their_crs_without_dismissing_each_other(self):
+        self.reviews(self.negative_review(), self.negative_review(rid=89, login="another-reviewer"))
+        # Exercise the real publication and readback path. The fake records
+        # APPROVE as a new review; no dismissal operation is implemented.
+        post = self.tmp / "post.py"
+        post.write_text('''import json, os, pathlib, sys
+p = pathlib.Path(os.environ["FAKE_DIR"])
+args = sys.argv[1:]
+assert args[:3] == ["-X", "POST", "repos/o/r/pulls/41487/reviews"], args
+assert "event=APPROVE" in args and "body=@-" in args, args
+reviews = json.loads((p / "reviews.json").read_text())
+rid = max(r["id"] for r in reviews) + 1
+review = {"id": rid, "state": "APPROVED", "author_association": "COLLABORATOR",
+          "body": sys.stdin.read(), "commit_id": next(a.split("=", 1)[1] for a in args if a.startswith("commit_id=")),
+          "user": json.loads((p / "user.json").read_text()), "submitted_at": f"2026-10-09T03:45:{rid % 60:02d}Z"}
+reviews.append(review)
+(p / "reviews.json").write_text(json.dumps(reviews))
+(p / f"review-{rid}.json").write_text(json.dumps(review))
+with (p / "calls.log").open("a") as calls:
+    calls.write("POST " + args[2] + "\\n")
+print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
+''')
+        gh = self.tmp / "gh"
+        gh.write_text(gh.read_text().replace(
+            'shift\n[ "$1" != --paginate ] || shift',
+            'shift\nif [ "$1" = -X ]; then exec python3 "' + str(post) + '" "$@"; fi\n'
+            '[ "$1" != --paginate ] || shift').replace(
+            'repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review.json";;',
+            'repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review-${path##*/}.json";;'))
+        body = self.tmp / "replacement.md"
+        body.write_text(f"verdict: PASS head: {HEAD} by: reviewer-keeper\nindependent source review\n")
+        def approve(rid):
+            return self.run_guard("--replace-own-cr", str(rid), "--review-base", BASE,
+                                  "--review-diff", DIFF, "--body", str(body))
+
+        first = approve(88)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertIn("APPROVED #41487", first.stdout)
+        for mode in ("--merge-check", "--source-receipt"):
+            blocked = self.run_guard(mode)
+            self.assertEqual(blocked.returncode, 2, blocked.stderr)
+            self.assertIn("open CHANGES_REQUESTED from another-reviewer", blocked.stderr)
+
+        (self.data / "user.json").write_text(json.dumps({"login": "another-reviewer"}))
+        second = approve(89)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("APPROVED #41487", second.stdout)
+        for mode in ("--merge-check", "--source-receipt"):
+            admitted = self.run_guard(mode)
+            self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        reviews = json.loads((self.data / "reviews.json").read_text())
+        self.assertEqual([r["state"] for r in reviews],
+                         ["CHANGES_REQUESTED", "CHANGES_REQUESTED", "APPROVED", "APPROVED"])
+        calls = (self.data / "calls.log").read_text()
+        self.assertEqual(calls.count("POST repos/o/r/pulls/41487/reviews"), 2)
+        self.assertNotIn("dismiss", calls)
 
     def test_replacement_does_not_hide_a_separate_newer_fail_review(self):
         for login in ("reviewer-account", "another-reviewer"):

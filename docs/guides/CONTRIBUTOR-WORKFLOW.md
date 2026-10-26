@@ -261,6 +261,12 @@ Update the PR description when scope, evidence or remaining risks change.
 A push creates a new head, so earlier review does not certify new changes.
 Reviewers clear their own REQUEST_CHANGES when the corrected code resolves their
 findings. A green CI run alone does not resolve a finding.
+After rereview, use `approve-guard.sh --replace-own-cr REVIEW_ID` to replace
+your own latest open request with a current-head approval. Other reviewers'
+open change requests do not prevent recording that independent approval, but
+still block merge admission and source receipts until those reviewers resolve
+them. The guard never dismisses another account's request. Separate comment
+verdicts and all head, diff, identity and Release CI checks continue to apply.
 
 The ordinary source-review verdict uses actual values:
 

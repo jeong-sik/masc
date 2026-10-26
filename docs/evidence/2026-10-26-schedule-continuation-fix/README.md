@@ -32,8 +32,8 @@ The async stack is not part of this PR's merge scope.
 
 `ocamlc -stop-after parsing -c <file>` accepted all ten changed OCaml source and
 interface files; `git diff --check` passed. No local Dune build, type check,
-behavioral test or provider invocation was performed by this repair. The caller
-later requested the focused CI recorded below.
+behavioral test or provider invocation was performed locally. The caller
+later requested the focused CI and isolated provider execution recorded below.
 The working command log is under
 `artifacts/schedule-continuation-fix-20261026/parse-only.log`.
 
@@ -43,16 +43,17 @@ and production checkpoint settlement. They cover checkpoint retention, exact
 successor priority, original request/body re-admission, completed-source removal,
 cold queue reload and cancellation/reinsertion. An existing mixed-source case
 now asserts that independent scheduled occurrences cannot share one terminal
-batch. The first CI execution and its failure are recorded below; the subsequent test
-corrections have only been parsed, not executed.
+batch. Both new cases pass in the 32-case Connector suite at the exact
+`b5c9762b27845918eba2acb804434a0da435cc78` execution recorded below. That run
+still fails three separate Owner fixtures; it is not an overall passing run.
 
 Suggested focused targets are `test_keeper_connector_attention_batch`,
 `test_keeper_failed_selection_disposition`, `test_keeper_owner` and
 `test_schedule_consumer_dispatch`. The caller will request the necessary CI.
 Cold queue reload is not process restart or provider-checkpoint replay proof.
-Real-provider effect-before-yield duplication, successor/original effect
-completion, restart, cancellation and replacement remain runtime validation
-requirements. This repair does not add a general exactly-once tool-effect
+Actual DeepSeek/GLM successor/original note completion on product94b2 is
+reported separately below. Effect-before-checkpoint nonduplication, restart,
+cancellation and replacement remain runtime validation requirements. This repair does not add a general exactly-once tool-effect
 protocol or claim arbitrary requested effects are verified by a turn terminal.
 
 ## First focused CI failure and test response
@@ -86,5 +87,52 @@ remain byte-identical. The native proof run targeting that earlier source is
 not changed, cancelled or retried by this response. Its product artifact may
 be compared by those unchanged product inputs; it is not a current-head test
 result. Both modified `.ml` files pass syntax parsing and `git diff --check`.
-The corrected tests remain unexecuted here; the caller owns the two-suite CI
-request. No additional CI request or observation was made by this response.
+At that first correction boundary the tests were unexecuted. The caller then
+requested the exact two-suite execution recorded below; its failure is preserved.
+
+
+## Second focused CI and faithful Owner continuation fixture
+
+**Test [40341860767](https://github.com/jeong-sik/masc/actions/runs/40341860767)**,
+head `b5c9762b27845918eba2acb804434a0da435cc78`, ref
+`fix/schedule-work-continuation-20261026`, completed with **failure**. Connector
+passes all 32 cases, including both new continuation cases. Owner executes 106:
+103 pass and three scheduled-handoff cases fail because the original operation
+does not become terminal. [Selected failure evidence and original digests](https://github.com/jeong-sik/masc/pull/46221)
+retain that result.
+
+All three failing fixtures produce `invalid semantic execution transition:
+action is not admitted in suspended`. The fixture defers the original exact
+checkpoint, then reclaims the operation and reports success without consuming
+that checkpoint. The production runner instead calls
+`Keeper_direct_checkpoint_continuation.consume`, which invokes
+`Owner.resume_direct_checkpoint` before executing the continuation. Claiming the
+operation alone does not resume suspended semantic execution. The natural
+completion case has no suspended checkpoint and passes.
+
+The fixture now follows that existing exact resume path, verifies checkpoint
+consumption and running operation id/digest, and confirms that scheduled-source
+and fresh-chat scopes preserve the original checkpoint. No production source,
+state guard, sleep or polling count is changed. Independent source review found
+no P0–P2 in this test delta; parse and whitespace checks pass. The new correction
+has not yet executed and is not a passing Owner result.
+
+## Isolated actual models and native source boundary
+
+Native **Test [40339887803](https://github.com/jeong-sik/masc/actions/runs/40339887803)**
+uses definition `117dc31e1ca8f71f47bbbe91fa2adab5befb5761`, ref
+`ci/schedule-native-runtime-proof-20261026`, actual product source
+`94b2df25abcdfe20c658322f4156ad63f5546c34`, conclusion **success**. The downloaded
+archive, seven distribution files and embedded source were verified before
+running its server in owned workspaces. That historical source remains distinct
+from later test-only heads even when their product trees are identical.
+
+[Actual repair validation](https://github.com/jeong-sik/masc/pull/46221) retains
+DeepSeek and GLM checkpoint/source readmission, both exact required note effects,
+and delayed first-source ACK. GLM writes the first note only after that source is
+readmitted, with observer11 PASS and producer exit0. The first DeepSeek observer
+remains failed because it missed the sampled overlap; its independent complete
+raw-ledger review is separate evidence. Two after-effect arrivals complete
+sequentially and contain no after-effect checkpoint. These examples do not prove
+arbitrary effects exactly once, account/provider failover, crash recovery,
+external delivery or whole-feature PASS. No production executable was installed.

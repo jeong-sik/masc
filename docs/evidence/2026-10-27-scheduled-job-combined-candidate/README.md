@@ -9,7 +9,9 @@ The selected original commits are replayed with `git cherry-pick -x`; this is
 existing source assembled for verification, not a reimplementation.
 
 A separate clone preserves the operating checkout and all original stacks.
-Its native stack is #46263. This draft is a proof candidate; do not merge it
+Draft PR #46263 was created through `gh stack init` and `gh stack submit`.
+Its current REST `stack` is null; #46263 is the PR number, not a native-stack
+number. This draft is a proof candidate; do not merge it
 into main as another copy of those product PRs. No installed binary, primary
 server or original PR source has been changed by this assembly.
 

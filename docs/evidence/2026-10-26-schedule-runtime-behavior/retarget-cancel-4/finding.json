@@ -1,0 +1,41 @@
+{
+  "finding": "F1",
+  "exact_occurrence_retained_after_successful_cancel": true,
+  "owner_explicitly_paused_before_schedule": true,
+  "source_before": {
+    "queue_index": 0,
+    "post_id": "9e2995669a213ae81e2b7ed1fc483dc0d43e681745562418fb26e2909dda5eb3",
+    "source_ref": "44d5efa0c4966a7b5210dcc91dca827ce18f268c3936c54f3c2c41fd00bf9a04",
+    "source_incarnation": "0",
+    "urgency": "normal",
+    "arrived_at_unix": 1793015967.42757,
+    "payload_kind": "schedule_due"
+  },
+  "retained_rows": [
+    {
+      "keeper_name": "audit-retarget-a",
+      "source": "event_queue_pending",
+      "waiting_on": "schedule_due",
+      "what": "\uc608\uc57d \uc2e4\ud589 \uc2dc\uac01 \ub3c4\ub798 \u00b7 audit-retarget-cancel",
+      "wake_producer": "schedule_runner",
+      "since": 1793015967.42757,
+      "since_iso": "2026-10-26T11:59:27Z",
+      "due_at": null,
+      "due_at_iso": null,
+      "next_action": "keeper_drain_event_queue",
+      "detail": {
+        "queue_index": 0,
+        "post_id": "9e2995669a213ae81e2b7ed1fc483dc0d43e681745562418fb26e2909dda5eb3",
+        "source_ref": "44d5efa0c4966a7b5210dcc91dca827ce18f268c3936c54f3c2c41fd00bf9a04",
+        "source_incarnation": "0",
+        "urgency": "normal",
+        "arrived_at_unix": 1793015967.42757,
+        "payload_kind": "schedule_due"
+      }
+    }
+  ],
+  "original_instance": "01a17814-34d5-7000-94ca-69fa05561225",
+  "cancelled_instance": "01a17814-700e-7000-bd47-6b5077b0149c",
+  "replay_or_resume_performed": false,
+  "external_effect_performed": false
+}

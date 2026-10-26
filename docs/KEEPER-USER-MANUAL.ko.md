@@ -284,6 +284,37 @@ Keeper 11개, `.masc` 하나. 그 런타임을 설명할 뿐이고 다른 환경
 실제 주기 설정은 `keeper.keepalive_interval_sec`입니다. 기상 힌트만으로 작업을
 생성하거나 다음 주기 실행 시각을 다시 미루지 않습니다.
 
+## Keeper가 바쁠 때의 예약 작업
+
+실행 시각이 된 Keeper 예약은 요청된 작업입니다. 대화가 계속 Owner 슬롯을
+차지한다는 이유로 예약을 무기한 대기시키지 않습니다. 현재 턴은 도구 처리가
+끝난 경계에서 체크포인트를 보존하고, Owner는 채팅 후속 작업이 슬롯을 다시
+차지하기 전에 정확한 대기 예약 입력에 턴을 넘깁니다. 도구 없이 자연스럽게
+끝나는 채팅도 다음 슬롯에서 대기 예약을 처리할 기회를 남깁니다. 실행 중인
+도구를 중단하거나 이미 수행한 효과를 다시 실행하는 방식은 아닙니다.
+
+이 인계는 한 턴의 슬롯 우선권이며 Job 완료를 뜻하지 않습니다. 입력을 받는
+시점에 원래 큐 항목의 identity를 다시 확인합니다. 철회되거나 교체된 입력은
+이전 항목의 우선권을 물려받지 않으며, 오래된 인계 예약은 채팅 진입을 막지
+않도록 해제합니다. 현재 턴이 이미 받은 예약은 새 입력으로 보지 않습니다.
+일시정지·shutdown과 원본 저장소의 조회 가능 여부는 계속 적용됩니다.
+
+예약 지연을 조사할 때는 정확한 schedule ID의 조회를 확인하세요.
+`/api/v1/dashboard/scheduled-automation?schedule_id=<id>`에서 다음을 구분합니다.
+
+- `last_wake.detail`은 전달 당시의 접수 기록입니다. enqueue나 그 안의
+  `awaiting_ack`만으로 현재 소비 여부를 판단할 수 없습니다.
+- `keeper_queue_evidence`는 현재 대기·소비 관측을 schedule instance,
+  해당 실행의 예정 시각과 payload digest에 결속합니다.
+- `keeper_reaction_evidence`는 턴 시작·종료와 큐 ACK를 구분합니다.
+- `runner_hold.reason.kind=previous_occurrence_unconsumed`는 이전 wake가 아직
+  소비되지 않았다는 뜻입니다. 반복 예약의 다음 실행을 중복 생성하지 않고
+  보류합니다.
+
+정상 heartbeat나 runner만으로 특정 입력의 진행을 증명할 수 없습니다. 그 입력의
+진입부터 종단 영수증까지 확인하세요. 다음 시각을 정상처럼 보이게 만들려고 큐를
+비우거나 ACK를 만들어 넣지 않습니다.
+
 ## Goal 일시정지와 재개
 
 [Goal 상태 제어](guides/GOAL-LIFECYCLE.md)에서 Pause/Resume과 Block/Unblock을

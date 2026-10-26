@@ -1,0 +1,10 @@
+{
+  "pid": 59248,
+  "started_at_unix": 1793044474.816205,
+  "url": "http://127.0.0.1:51592",
+  "base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-combined-candidate/artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace",
+  "stop_reason": "all mandatory after-effect chain checks completed; stopping owned server normally",
+  "returncode": 0,
+  "stopped_at_unix": 1793044517.8829849,
+  "forced_kill": false
+}

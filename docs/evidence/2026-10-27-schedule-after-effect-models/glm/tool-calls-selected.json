@@ -1,0 +1,95 @@
+{
+  "is_derivative": true,
+  "scope": "All current owned producer JSONL files scanned for this Keeper; select scenario tools for DeepSeek, all three observed calls for GLM. Output strings are original parsed JSON field values from durable producer rows, not controller reserialization.",
+  "entries": [
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+        "one_based_line": 1
+      },
+      "entry": {
+        "ts": 1793044570.116991,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "tool": "keeper_tool_search",
+        "input": {
+          "names": [
+            "masc_schedule_note_add",
+            "masc_schedule_notes_list",
+            "masc_schedule_get"
+          ]
+        },
+        "execution_id": "execution-node-ac013795df57d1e38b0028d84c94f42b",
+        "tool_use_id": "call_75064192be064bfc87b6169b",
+        "keeper_turn_id": 1,
+        "turn": 0,
+        "trace_id": "trace-1793044558619-00000",
+        "session_id": "trace-1793044558619-00000",
+        "wire_outcome": "ok",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "physical_execution_id": "execution-node-ac013795df57d1e38b0028d84c94f42b",
+        "input_fingerprint": "bb4f05e43c412bc76400a876c1ca394c5d62486cbd18272965153b3aff69e34e",
+        "output_fingerprint": "87e0087523c71dea9a716699c810426367ab5fee8a7e5af2422e29778478d591",
+        "output_utf8_sha256": "87e0087523c71dea9a716699c810426367ab5fee8a7e5af2422e29778478d591",
+        "output_omitted": "Tool catalogue result omitted; tool name/input and original producer file coordinate retained."
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+        "one_based_line": 2
+      },
+      "entry": {
+        "ts": 1793044576.688759,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "tool": "masc_schedule_notes_list",
+        "input": {
+          "schedule_id": "schd_2026102708154321d8c7ac2b7"
+        },
+        "output": "{\"status\":\"ok\",\"schedule_id\":\"schd_2026102708154321d8c7ac2b7\",\"limit\":50,\"notes\":[]}",
+        "execution_id": "execution-node-1913f7cb94627ff3ceda2f0c9f9c532c",
+        "tool_use_id": "call_b85914a5e315401a8189e062",
+        "keeper_turn_id": 1,
+        "turn": 1,
+        "trace_id": "trace-1793044558619-00000",
+        "session_id": "trace-1793044558619-00000",
+        "wire_outcome": "ok",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "physical_execution_id": "execution-node-1913f7cb94627ff3ceda2f0c9f9c532c",
+        "input_fingerprint": "0797ceaf07f7c85db0fe821255631b1a95b6a127980ce34a868351c51c513b6b",
+        "output_fingerprint": "6daefe2d77b7f667dbb107116b12de87fe0804016923218c778ffa103ed02ca6"
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+        "one_based_line": 3
+      },
+      "entry": {
+        "ts": 1793044576.690824,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-glm",
+        "tool": "masc_schedule_notes_list",
+        "input": {
+          "schedule_id": "schd_2026102710304512e4b5c9d8f"
+        },
+        "output": "{\"status\":\"ok\",\"schedule_id\":\"schd_2026102710304512e4b5c9d8f\",\"limit\":50,\"notes\":[]}",
+        "execution_id": "execution-node-97c2c77f75aa27af88016953f323785d",
+        "tool_use_id": "call_182ed6760a7b4f19a625cfa5",
+        "keeper_turn_id": 1,
+        "turn": 1,
+        "trace_id": "trace-1793044558619-00000",
+        "session_id": "trace-1793044558619-00000",
+        "wire_outcome": "ok",
+        "model": "runtime",
+        "runtime_profile": "glm-coding.glm-5-3",
+        "physical_execution_id": "execution-node-97c2c77f75aa27af88016953f323785d",
+        "input_fingerprint": "db36de632ad2baa068215c7e58651a376b4cf3a8c015dd93dbaceadc232411ee",
+        "output_fingerprint": "a30f3d3506330b3c6a12c02602cc26db839e7bcbc0b9c293c27f9561e0eeff88"
+      }
+    }
+  ]
+}

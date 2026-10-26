@@ -1,0 +1,40 @@
+{
+  "observed_at": "2026-10-26T19:32:54.707585+00:00",
+  "workflow": "Minimal manual checks",
+  "run_id": 40383985492,
+  "workflow_ref": "main",
+  "workflow_execution_head": "9377c7f3025d68e3856d2afd3762468dabc77813",
+  "source_input": "d9ba3f57570cc1c1782f21d6f4d9303d014fea2e",
+  "artifact_id": 12679998203,
+  "archive_sha256": "55b1e0307a6a8b30820d88b30f50007ab27dfb0d1b323625bfa2ab55aa496133",
+  "observations": [
+    {
+      "executable": "masc",
+      "sha256": "c28a4237b6b6272c7b15c75a41d0ede8cc16463472f946b2c7c955ed83315c27",
+      "args": [
+        "build-commit"
+      ],
+      "exit_code": 0,
+      "stdout_utf8": "d9ba3f57570cc1c1782f21d6f4d9303d014fea2e\n",
+      "stdout_sha256": "7c8c163b4489cc7757a709a56af41280a1e1b97a8b20a1e0a27e374885aa07ff",
+      "stderr_sha256": "0447986d1d9780385b7019eca239d3cee42a60d326788e24c00bcaeed71edddb",
+      "stderr_bytes": 82
+    },
+    {
+      "executable": "masc-tui",
+      "sha256": "fab70f613ff59401dfeb2bf038426340b8a8dd2d58bbc4f37b77a4ed9bd81056",
+      "args": [
+        "--build-commit"
+      ],
+      "exit_code": 0,
+      "stdout_utf8": "d9ba3f57570cc1c1782f21d6f4d9303d014fea2e\n",
+      "stdout_sha256": "7c8c163b4489cc7757a709a56af41280a1e1b97a8b20a1e0a27e374885aa07ff",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_bytes": 0
+    }
+  ],
+  "native_addon_launcher_digest_verified": true,
+  "installed": false,
+  "server_runtime_started": false,
+  "visible_ui_verified": false
+}

@@ -1,0 +1,29 @@
+{
+  "is_derivative": true,
+  "comparisons": [
+    {
+      "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/schedules.json",
+      "expected_sha256": "d8c0b859c56b901fad8e2da09e4615ff634207104d54d4c43122efb675784d40",
+      "current_sha256": "d8c0b859c56b901fad8e2da09e4615ff634207104d54d4c43122efb675784d40",
+      "expected_bytes": 2902,
+      "current_bytes": 2902,
+      "equal": true
+    },
+    {
+      "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/keepers/audit-live-glm/event-queue-v19.json",
+      "expected_sha256": "955113d0a4b86df34033e36082688aa8bfc69f54781249a4681aaebc3623b93f",
+      "current_sha256": "955113d0a4b86df34033e36082688aa8bfc69f54781249a4681aaebc3623b93f",
+      "expected_bytes": 2409,
+      "current_bytes": 2409,
+      "equal": true
+    },
+    {
+      "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/keepers/audit-live-glm/reaction-ledger/v7/2026-10/26.jsonl",
+      "expected_sha256": "868120944d29eeab9f5eded341831f37e75383593a3b1f0bae4645bbb67f606f",
+      "current_sha256": "868120944d29eeab9f5eded341831f37e75383593a3b1f0bae4645bbb67f606f",
+      "expected_bytes": 4846,
+      "current_bytes": 4846,
+      "equal": true
+    }
+  ]
+}

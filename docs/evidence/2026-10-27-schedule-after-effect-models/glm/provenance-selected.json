@@ -1,0 +1,31 @@
+{
+  "is_derivative": true,
+  "checkout_head": "d9ba3f57570cc1c1782f21d6f4d9303d014fea2e",
+  "executable_sha256": "c28a4237b6b6272c7b15c75a41d0ede8cc16463472f946b2c7c955ed83315c27",
+  "runtime_id": "glm-coding.glm-5-3",
+  "schedule_id": "audit-real-model-30fa0db345e24e7790b4f5e0f7c36103",
+  "second_schedule_id": "audit-real-model-30fa0db345e24e7790b4f5e0f7c36103-second",
+  "keeper": "audit-live-glm",
+  "script_sha256": "090ec200c041b55b9b9f197d77aa919d66910c17e73f7473552baa24e87c8d51",
+  "marker": "SCHEDULE_EFFECT_5132996c9d4e4a76855ff188465915bb",
+  "second_marker": "SCHEDULE_EFFECT_5132996c9d4e4a76855ff188465915bb_SECOND",
+  "final_marker": "SCHEDULE_EFFECT_5132996c9d4e4a76855ff188465915bb_AFTER_B",
+  "oracle_version": "after-effect-1",
+  "expected_source": "d9ba3f57570cc1c1782f21d6f4d9303d014fea2e",
+  "workflow_head": "9377c7f3025d68e3856d2afd3762468dabc77813",
+  "workflow_ref": "main",
+  "workflow_run": 40383985492,
+  "artifact_id": 12679998203,
+  "artifact_receipt_sha256": "3d872cfb31f288bb07cb969411bc7052be0af4c202002ec63b4e825abbcd0bf8",
+  "original_v3_sha256": "6ef94873203553b493c5b0d586070fc124f25d945028cab298f2f2dd5275eeff",
+  "archive_sha256": "55b1e0307a6a8b30820d88b30f50007ab27dfb0d1b323625bfa2ab55aa496133",
+  "observation_deadline_unix": 1793045455.6125991,
+  "checkpoint_scope": "Exact source readmission and trace checkpoint lineage; not byte-identical original checkpoint restoration",
+  "build": {
+    "binary_commit": "d9ba3f57570cc1c1782f21d6f4d9303d014fea2e",
+    "binary_commit_source": "embedded",
+    "executable_sha256": "c28a4237b6b6272c7b15c75a41d0ede8cc16463472f946b2c7c955ed83315c27",
+    "runtime_instance_id": "01a179c8-aed2-7000-b839-7dd07c96fc9e",
+    "started_at": "2026-10-26T19:55:57Z"
+  }
+}

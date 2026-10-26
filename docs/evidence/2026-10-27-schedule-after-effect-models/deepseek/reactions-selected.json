@@ -1,0 +1,287 @@
+{
+  "is_derivative": true,
+  "events": [
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 1
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "stimulus",
+        "event_id": "krl:fecae0386669f62e0aba0d9d7a95b0b9a4230172124ea0ad365f62d456ef1716",
+        "keeper_name": "audit-live-deepseek",
+        "recorded_at_unix": 1793044478.443969,
+        "stimulus_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+        "stimulus": {
+          "kind": "schedule_due",
+          "source": "keeper_event_queue",
+          "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+          "urgency": "normal",
+          "arrived_at_unix": 1793044478.411355,
+          "board_updated_at_unix": null,
+          "payload_preview": "schedule_due schedule_id=audit-real-model-ba22dc383b7246c1b57a73aa007ec19d due_at=1793044477.476"
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 2
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "reaction",
+        "event_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032:reaction:turn_started",
+        "keeper_name": "audit-live-deepseek",
+        "recorded_at_unix": 1793044478.482342,
+        "stimulus_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+        "reaction": {
+          "kind": "turn_started",
+          "source": "keeper_event_queue",
+          "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+          "stimulus_kind": "schedule_due"
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 3
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "stimulus",
+        "event_id": "krl:555a93d7ed73b72c5a4d5d527d311bec350d1de14fc2b3fbb47302c18e98b63e",
+        "keeper_name": "audit-live-deepseek",
+        "recorded_at_unix": 1793044492.593514,
+        "stimulus_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+        "stimulus": {
+          "kind": "schedule_due",
+          "source": "keeper_event_queue",
+          "post_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+          "urgency": "normal",
+          "arrived_at_unix": 1793044492.53668,
+          "board_updated_at_unix": null,
+          "payload_preview": "schedule_due schedule_id=audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second due_at=1793044491.939"
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 4
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "reaction",
+        "event_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032:reaction:turn_finished",
+        "keeper_name": "audit-live-deepseek",
+        "recorded_at_unix": 1793044494.368781,
+        "stimulus_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+        "reaction": {
+          "kind": "turn_finished",
+          "source": "keeper_event_queue",
+          "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+          "stimulus_kind": "schedule_due",
+          "disposition": "checkpointed"
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 5
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "reaction",
+        "event_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645:reaction:turn_started",
+        "keeper_name": "audit-live-deepseek",
+        "recorded_at_unix": 1793044494.377194,
+        "stimulus_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+        "reaction": {
+          "kind": "turn_started",
+          "source": "keeper_event_queue",
+          "post_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+          "stimulus_kind": "schedule_due"
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 6
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "reaction",
+        "event_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645:reaction:turn_finished",
+        "keeper_name": "audit-live-deepseek",
+        "recorded_at_unix": 1793044498.989736,
+        "stimulus_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+        "reaction": {
+          "kind": "turn_finished",
+          "source": "keeper_event_queue",
+          "post_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+          "stimulus_kind": "schedule_due",
+          "disposition": "completed"
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 7
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "reaction",
+        "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:1:5bfad98c6e6828a5a1021654c4d1a47cc7f9b4eeb14580ea92d4ab92b1777404:source:0",
+        "keeper_name": "audit-live-deepseek",
+        "recorded_at_unix": 1793044498.989765,
+        "stimulus_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+        "reaction": {
+          "kind": "event_queue_ack",
+          "source": "keeper_event_queue_transition",
+          "post_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+          "stimulus_kind": "schedule_due",
+          "source_index": 0,
+          "source_count": 1,
+          "transition_source": {
+            "stimulus_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+            "post_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+            "stimulus_kind": "schedule_due"
+          },
+          "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:1:5bfad98c6e6828a5a1021654c4d1a47cc7f9b4eeb14580ea92d4ab92b1777404",
+          "transition_receipt": {
+            "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:1:5bfad98c6e6828a5a1021654c4d1a47cc7f9b4eeb14580ea92d4ab92b1777404",
+            "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:1:5bfad98c6e6828a5a1021654c4d1a47cc7f9b4eeb14580ea92d4ab92b1777404",
+            "applied_at_unix": 1793044498.989765,
+            "transition": {
+              "kind": "ack_source_terminal",
+              "source": {
+                "post_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+                "urgency": "normal",
+                "arrived_at_unix": 1793044492.53668,
+                "payload": {
+                  "kind": "schedule_due",
+                  "occurrence_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+                  "schedule_instance_id": "01a179c7-aabb-7000-9c8e-fa7c65385ef4",
+                  "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second",
+                  "due_at_unix": 1793044491.93922,
+                  "payload_digest": "80d8e690ba8472a305f5366e51242ef24853c50a684f93a76ca206ef4699d360",
+                  "title": null,
+                  "message": "Append exactly one durable note to your own schedule_id \"audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second\" with body \"SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_SECOND\" using masc_schedule_note_add, read it back, then finish this job. Do not perform the first scheduled job's remaining steps or write any note on its schedule. Do not create other work, send messages, invoke shell tools, or ask for confirmation.",
+                  "result_delivery": null
+                }
+              },
+              "source_incarnation": 1,
+              "operator_operation_id": "turn-attempt-terminal:1:5bfad98c6e6828a5a1021654c4d1a47cc7f9b4eeb14580ea92d4ab92b1777404",
+              "source_receipt_kind": "turn_completed"
+            }
+          }
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 8
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "reaction",
+        "event_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032:reaction:turn_started",
+        "keeper_name": "audit-live-deepseek",
+        "recorded_at_unix": 1793044498.995156,
+        "stimulus_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+        "reaction": {
+          "kind": "turn_started",
+          "source": "keeper_event_queue",
+          "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+          "stimulus_kind": "schedule_due"
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 9
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "reaction",
+        "event_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032:reaction:turn_finished",
+        "keeper_name": "audit-live-deepseek",
+        "recorded_at_unix": 1793044517.346886,
+        "stimulus_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+        "reaction": {
+          "kind": "turn_finished",
+          "source": "keeper_event_queue",
+          "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+          "stimulus_kind": "schedule_due",
+          "disposition": "completed"
+        }
+      }
+    },
+    {
+      "original": {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-deepseek-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+        "one_based_line": 10
+      },
+      "record": {
+        "schema": "keeper.reaction_ledger.v7",
+        "record_kind": "reaction",
+        "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:0:55a943770c77723c3e1ac6b75c1d9fbbc7abe0e97ecacf805ad49c84faeeeed0:source:0",
+        "keeper_name": "audit-live-deepseek",
+        "recorded_at_unix": 1793044517.346925,
+        "stimulus_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+        "reaction": {
+          "kind": "event_queue_ack",
+          "source": "keeper_event_queue_transition",
+          "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+          "stimulus_kind": "schedule_due",
+          "source_index": 0,
+          "source_count": 1,
+          "transition_source": {
+            "stimulus_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+            "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+            "stimulus_kind": "schedule_due"
+          },
+          "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:0:55a943770c77723c3e1ac6b75c1d9fbbc7abe0e97ecacf805ad49c84faeeeed0",
+          "transition_receipt": {
+            "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:0:55a943770c77723c3e1ac6b75c1d9fbbc7abe0e97ecacf805ad49c84faeeeed0",
+            "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:0:55a943770c77723c3e1ac6b75c1d9fbbc7abe0e97ecacf805ad49c84faeeeed0",
+            "applied_at_unix": 1793044517.346925,
+            "transition": {
+              "kind": "ack_source_terminal",
+              "source": {
+                "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+                "urgency": "normal",
+                "arrived_at_unix": 1793044478.411355,
+                "payload": {
+                  "kind": "schedule_due",
+                  "occurrence_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+                  "schedule_instance_id": "01a179c7-723c-7000-a67d-68227ecd2ccc",
+                  "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+                  "due_at_unix": 1793044477.475823,
+                  "payload_digest": "770020f2139140e636a5c8a98db9dd9c79d6ef8d40a7bef6cfd6a7f6830b89fc",
+                  "title": null,
+                  "message": "This authorized scheduled job has TWO required effects on schedule_id \"audit-real-model-ba22dc383b7246c1b57a73aa007ec19d\". First append exactly one note with body \"SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3\" using masc_schedule_note_add. Then observe schedule_id \"audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second\" with masc_schedule_notes_list until its note with exact body \"SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_SECOND\" and author_id \"audit-live-deepseek\" is available. A missing schedule or missing note means the dependency has not arrived yet, not completion. Only AFTER observing that exact B note, append exactly one note to your original schedule_id \"audit-real-model-ba22dc383b7246c1b57a73aa007ec19d\" with body \"SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_AFTER_B\". Both effects belong to this original job. Do not write B's note yourself, create another schedule, send a message, invoke shell tools, or ask for confirmation. Preserve this unfinished request when another scheduled job arrives. Do not finish this job until both of its required notes have been written and read back.",
+                  "result_delivery": null
+                }
+              },
+              "source_incarnation": 0,
+              "operator_operation_id": "turn-attempt-terminal:0:55a943770c77723c3e1ac6b75c1d9fbbc7abe0e97ecacf805ad49c84faeeeed0",
+              "source_receipt_kind": "turn_completed"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "retained_incarnation": [
+    0
+  ]
+}

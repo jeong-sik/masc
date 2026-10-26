@@ -59,7 +59,7 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 33 | due가 되면 wake를 한 번 접수한다 | R-tick0/7–8, C3/28 | 신호 중복·생산 enqueue·offline 반복 tick single acceptance 실행. 모델 완료와 별개. |
 | 34 | 접수 후 receipt 저장 실패에도 중복 효과를 피한다 | C23–27/30–31/41/54, L5 | acceptance/receipt 장애 뒤 같은 occurrence 재사용 실행. F5 settlement write 실패와 다름. |
 | 35 | 한 예약 실패가 다른 due 예약을 막지 않는다 | R-tick17, C42 | fixture retry 격리와 실제 corrupt ledger의 다른 Keeper dispatch 격리 실행. |
-| 36 | Keeper가 작업 중일 때 도착한 예약을 보존한다 | real-busy-deepseek-1; repair-validation 실제 두 모델 | 과거 F6 반례 유지. product94b2에서 DeepSeek/GLM의 checkpoint 보존·두 note·exact ACK 확인. DeepSeek observer의 overlap FAIL은 유지하며 원장으로 별도 대조. b5c976의 Owner103/3 실패는 보존하고 fixture 수리 ccb000의 Owner106 PASS와 구분. rebased6dedd 실행은 미검증. |
+| 36 | Keeper가 작업 중일 때 도착한 예약을 보존한다 | real-busy-deepseek-1; repair-validation 실제 두 모델; [D9 실제 after-effect](../evidence/2026-10-27-schedule-after-effect-models/README.md) | 과거 F6 반례 유지. product94b2에서 DeepSeek/GLM의 checkpoint 보존·두 note·exact ACK 확인. DeepSeek observer의 overlap FAIL은 유지하며 원장으로 별도 대조. b5c976의 Owner103/3 실패는 보존하고 fixture 수리 ccb000의 Owner106 PASS와 구분. standalone rebased6dedd 실행은 미검증. 조합본D9 DeepSeek는 A1→checkpoint·원 incarnation 보존→B ACK→동일 A 재입장→A2→ACK를 실제 확인했지만, 모델이 잘못된 정정 노트까지 추가해 총4회 썼다. 같은 D9 GLM은 A1 없이 다른 ID를 조회하고 원 요청을 완료·ACK해 B 생성 전 실패했다. 모델 행동 전체 PASS가 아니다. |
 | 37 | paused Keeper에 도착해도 유실하지 않는다 | C11; retarget-cancel-4/restart-expiry-3 | 실제 pause·pending 보존 실행. Resume 후 모델 소비는 미검증. |
 | 38 | owner가 꺼져 있어도 demand를 유지한다 | C28–29 | 등록됐으나 미시작 owner의 deferred/not_running·single acceptance 실행. Boot 후 모델 소비 미검증. |
 | 39 | notice에서 busy/paused/offline 원인과 다음 행동을 안다 | C3/28/32는 backend reason만 | notice의 원인별 Resume/Boot 안내와 실제 사용자 조치는 여전히 공백. |
@@ -110,4 +110,4 @@ ref `fix/schedule-pending-settlement-20261027`, conclusion **success**의 161 PA
 합쳐서 새 시나리오 수로 세지 않는다. 8–10행의 기존 domain 정책과 49행 복구 근거도
 각 실행 head에 한정한다. [동일 candidate 실제 실행](../evidence/2026-10-27-schedule-candidate-runtime/README.md)은
 20행의 제한된 A→B 취소와 2·13·59행의 빈 export/권한 사례를 보강한다.
-[통제된 실제 bootstrap 복구](../evidence/2026-10-27-schedule-native-startup-recovery/README.md)는 c52에 한정해 48–49행을 보강했다. F5 process-local intent 사망 후 보존·busy 모델·TUI·운영 설치는 별도 경계다.
+[통제된 실제 bootstrap 복구](../evidence/2026-10-27-schedule-native-startup-recovery/README.md)는 c52에 한정해 48–49행을 보강했다. [D9 실제 모델 두 사례](../evidence/2026-10-27-schedule-after-effect-models/README.md)는 36행의 기계적 보존·재개와 의미상 정확성을 구분한다. F5 process-local intent 사망 후 보존·임의 모델의 작업 정확성·모델 전환·TUI·운영 설치는 별도 경계다.

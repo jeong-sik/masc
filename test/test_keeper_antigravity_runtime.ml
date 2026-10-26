@@ -2189,7 +2189,9 @@ let test_original_result_survives_a_vendor_session_change () =
                 ~accepts_image_input:false ~runtime_id:"antigravity.gemini" ~keeper_name
                 ~pre_tool_rejects:(ref []) ~base_path ~goal:"Continue from the original result"
                 ~goal_blocks:None ~system_prompt:"Use retained result data without replaying completed effects."
-                ~tools:[tool] ~initial_messages:[] ~model_input_projection:None
+                ~tools:[tool] ~initial_messages:[]
+                ~model_input_projection:(Some (fun messages -> Ok (List.filter
+                  (fun message -> not (Keeper_client_tool_outbox.is_context_message message)) messages)))
                 ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
                 ~on_transmitted_model_input:(fun _ -> ()) ~hooks:None ~context_injector:None
                 ~context:(Some (Agent_core.Context.create ())) ~event_bus:None ~raw_trace:None

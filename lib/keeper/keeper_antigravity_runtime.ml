@@ -543,8 +543,6 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     in
     let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
       |> Result.map_error internal_error in
-    let prepared = {prepared with Host.messages = prepared.messages
-      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
     (* Hooks may replace the system prompt or append an ordinary Nudge. Bind
        the final non-carried composition, and retain the mandatory workspace
        note after a system-prompt override. Hooks run once with the candidate
@@ -646,6 +644,10 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         in
         Ok { prepared with messages }
     in
+    (* Original returned results are not history. A range shrink or caller
+       projection cannot erase them before a completed consumer ACKs them. *)
+    let prepared = {prepared with Host.messages = prepared.messages
+      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
     (* [Host.framed_prompt_for_turn] renders [prepared.system_prompt] as the
        system-instructions section; [Host.prepare_turn] has already refused a
        blank one, so the section is always present on a start (#33165). *)

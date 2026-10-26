@@ -3092,8 +3092,10 @@ let test_original_result_crosses_checkpoint_and_fresh_session () =
        response=`String "ORIGINAL_CROSS_RUNTIME_RESULT"} in
     Keeper_client_tool_outbox.retain ~base_path ~keeper_name receipt |> get;
     let load () = Keeper_client_tool_outbox.load ~base_path ~keeper_name |> get in
+    let project messages = Ok (List.filter
+      (fun message -> not (Keeper_client_tool_outbox.is_context_message message)) messages) in
     write_fixture ~base_path (scenario "stop_before_ack");
-    let stopped = run_turn_with ~base_path ~tool
+    let stopped = run_turn_with ~base_path ~tool ~model_input_projection:project
       ~on_official_client_tool_boundary:(fun () -> Ok (Some
         (Keeper_official_client_host.Terminal_tool_boundary
           {tool_name="masc_probe";outcome=Durable_stimulus_deferred}))) () in
@@ -3108,7 +3110,7 @@ let test_original_result_crosses_checkpoint_and_fresh_session () =
       (List.length (Keeper_client_tool_outbox.receipt_ids (load ())));
     Store.clear_then ~base_path ~keeper_name (fun () -> ()) |> get;
     write_fixture ~base_path [];
-    (match (run_turn_with ~base_path ~tool ()).outcome.result with
+    (match (run_turn_with ~base_path ~tool ~model_input_projection:project ()).outcome.result with
      | Ok {Runtime_agent.stop_reason=Completed _;session_resumed=Some false;_} -> ()
      | Ok _ -> fail "replacement consumer did not complete a fresh session"
      | Error error -> fail (Agent_core.Error.to_string error));

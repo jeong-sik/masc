@@ -852,8 +852,6 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     in
     let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
       |> Result.map_error internal_error in
-    let prepared = {prepared with Host.messages = prepared.messages
-      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
     let prepared = { prepared with
       system_prompt = String.concat "\n\n"
         (prepared.system_prompt :: native_posture_note native_posture
@@ -1029,6 +1027,10 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
       |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+    (* Original returned results survive history projection and range shrinking.
+       Only their completed consumer, after delivery, may acknowledge them. *)
+    let prepared = {prepared with Host.messages = prepared.messages
+      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
     (* The prepared attribution, not transmission evidence: the serve client
        calls this only after the complete [turn/start] line is written. *)
     let report_transmitted_input () =

@@ -1,0 +1,629 @@
+{
+  "status": 200,
+  "response": {
+    "keeper": "audit-live-deepseek",
+    "count": 6,
+    "source": "tool_call_io",
+    "producer": "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp",
+    "durable_store": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-1/workspace/.masc/tool_calls",
+    "dashboard_surface": "/api/v1/keepers/:name/tool-calls",
+    "freshness_slo_s": 300.0,
+    "latest_ts_unix": 1793020679.640097,
+    "latest_ts_iso": "2026-10-26T13:17:59Z",
+    "latest_age_s": 57.84712219238281,
+    "health": "ok",
+    "stale_reason": null,
+    "coverage_gaps": [],
+    "entries": [
+      {
+        "ts": 1793020668.756327,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "keeper_tool_search",
+        "input": {
+          "names": [
+            "masc_schedule_get",
+            "masc_schedule_note_add",
+            "masc_schedule_notes_list"
+          ]
+        },
+        "output": "now callable:\n- masc_schedule_get: Read the current durable scheduled request by schedule_id. A recurring request m...\n- masc_schedule_note_add: Append a durable note to one scheduled request. Notes record why a\n- masc_schedule_notes_list: List the durable notes of one scheduled request, oldest first. Notes are",
+        "duration_ms": 0.06103515625,
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 1,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "microvm",
+          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-1/workspace/.masc/playground/audit-live-deepseek/",
+          "sandbox_roots": [
+            ".masc/playground/audit-live-deepseek/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+        },
+        "action_radius": {
+          "tool_name": "keeper_tool_search",
+          "action_key": "keeper_tool_search",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "microvm",
+          "observed_paths": [],
+          "duration_ms": 0.06103515625,
+          "error": null
+        },
+        "agent_name": "audit-live-deepseek",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "4f1758e15a1cafbb9db7a94c70fda963c6f9eccc51f6e7e5db9336039e78431c",
+        "execution_id": "execution-node-3da404f393d5f7f57b22b7d0d4214857",
+        "tool_observation": {
+          "attribution": {
+            "kind": "pathless"
+          },
+          "turn_ref": "trace-1793020663392-00000#1",
+          "declared_progress": null
+        },
+        "physical_execution_id": "execution-node-3da404f393d5f7f57b22b7d0d4214857",
+        "tool_use_id": "call_8hv1n5cj",
+        "planned_index": 0,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "serial",
+        "wire_outcome": "ok",
+        "trace_id": "trace-1793020663392-00000",
+        "session_id": "trace-1793020663392-00000",
+        "turn": 0,
+        "keeper_turn_id": 1,
+        "sandbox_profile": "microvm",
+        "network_mode": "none",
+        "result_bytes": 312,
+        "input_fingerprint": "c7feae633a59ef1646745afae8502b8d61ab14255e17b08c086e3f0f3c942f5e",
+        "output_fingerprint": "87e0087523c71dea9a716699c810426367ab5fee8a7e5af2422e29778478d591",
+        "definition_source": "tools/keeper_tool_search.toml"
+      },
+      {
+        "ts": 1793020670.403018,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "keeper_tool_search",
+        "input": {
+          "names": [
+            "masc_schedule_list"
+          ]
+        },
+        "output": "now callable:\n- masc_schedule_list: List schedule summary rows; masc_schedule_get reads one in full. Rows follow sch...",
+        "duration_ms": 0.07796287536621094,
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 1,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "microvm",
+          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-1/workspace/.masc/playground/audit-live-deepseek/",
+          "sandbox_roots": [
+            ".masc/playground/audit-live-deepseek/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+        },
+        "action_radius": {
+          "tool_name": "keeper_tool_search",
+          "action_key": "keeper_tool_search",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "microvm",
+          "observed_paths": [],
+          "duration_ms": 0.07796287536621094,
+          "error": null
+        },
+        "agent_name": "audit-live-deepseek",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "4f1758e15a1cafbb9db7a94c70fda963c6f9eccc51f6e7e5db9336039e78431c",
+        "execution_id": "execution-node-a2c0bd33c4046591d6577cc21fc3d859",
+        "tool_observation": {
+          "attribution": {
+            "kind": "pathless"
+          },
+          "turn_ref": "trace-1793020663392-00000#1",
+          "declared_progress": null
+        },
+        "physical_execution_id": "execution-node-a2c0bd33c4046591d6577cc21fc3d859",
+        "tool_use_id": "call_77qi96u9",
+        "planned_index": 0,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "serial",
+        "wire_outcome": "ok",
+        "trace_id": "trace-1793020663392-00000",
+        "session_id": "trace-1793020663392-00000",
+        "turn": 1,
+        "keeper_turn_id": 1,
+        "sandbox_profile": "microvm",
+        "network_mode": "none",
+        "result_bytes": 119,
+        "input_fingerprint": "0c7be2b9df2d11d8ac911099e8b4b6d1802b1f528d04e8831610b03c113f5215",
+        "output_fingerprint": "7574d8bbb6cb1072001d67ffa18fb6990839a7c1ed8c0633abf41ce1af580970",
+        "definition_source": "tools/keeper_tool_search.toml"
+      },
+      {
+        "ts": 1793020672.463856,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "masc_schedule_notes_list",
+        "input": {
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second"
+        },
+        "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"limit\":50,\"notes\":[]}",
+        "duration_ms": 1.5411376953125,
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 2,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "microvm",
+          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-1/workspace/.masc/playground/audit-live-deepseek/",
+          "sandbox_roots": [
+            ".masc/playground/audit-live-deepseek/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+        },
+        "action_radius": {
+          "tool_name": "masc_schedule_notes_list",
+          "action_key": "masc_schedule_notes_list",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "microvm",
+          "observed_paths": [],
+          "duration_ms": 1.5411376953125,
+          "error": null
+        },
+        "route_evidence": {
+          "descriptor_id": "masc.schedule.notes_list",
+          "capability_id": "masc_schedule_notes_list",
+          "keeper_model_projection": "internal_name",
+          "public_name": "masc_schedule_notes_list",
+          "canonical_name": "masc_schedule_notes_list",
+          "description": "List the durable notes of one scheduled request, oldest first. Notes are\nkeyed by the stable schedule_id and survive definition replacements\n(masc_schedule_update) and terminal schedule states. Use them to read why a\nschedule exists and what changed and when. A wake does not carry the notes, so a\nwoken Keeper reads them here when it needs them.",
+          "executor": "in_process",
+          "backend": "ocaml_runtime",
+          "sandbox": "none",
+          "runtime_handler": "tool_masc_schedule_dispatch",
+          "execution": "concurrent",
+          "tool_kind": "atomic",
+          "composable_output": {
+            "kind": "opaque"
+          },
+          "receipt_labels": {
+            "descriptor_id": "masc.schedule.notes_list",
+            "capability_id": "masc_schedule_notes_list",
+            "keeper_model_projection": "internal_name",
+            "public_name": "masc_schedule_notes_list",
+            "canonical_name": "masc_schedule_notes_list",
+            "executor": "in_process",
+            "backend": "ocaml_runtime",
+            "sandbox": "none",
+            "runtime_handler": "tool_masc_schedule_dispatch",
+            "execution": "concurrent",
+            "composable_output": "opaque",
+            "input_schema_source": "canonical_registry"
+          },
+          "eval_tags": [],
+          "readonly": true,
+          "cwd_scope": null,
+          "polling_read": false,
+          "status": "ok",
+          "tool_name": "masc_schedule_notes_list"
+        },
+        "agent_name": "audit-live-deepseek",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "71e4bd63432c27d2d20052e134f13a3439702581df16bd5aa1960134470eb826",
+        "execution_id": "execution-node-d9f70cc4cdc50c31de5f644227bdcce7",
+        "tool_observation": {
+          "attribution": {
+            "kind": "pathless"
+          },
+          "turn_ref": "trace-1793020663392-00000#2",
+          "declared_progress": null
+        },
+        "physical_execution_id": "execution-node-d9f70cc4cdc50c31de5f644227bdcce7",
+        "tool_use_id": "call_mbq6kvw8",
+        "planned_index": 0,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "concurrent",
+        "wire_outcome": "ok",
+        "disposition": "completed",
+        "trace_id": "trace-1793020663392-00000",
+        "session_id": "trace-1793020663392-00000",
+        "turn": 2,
+        "keeper_turn_id": 2,
+        "sandbox_profile": "microvm",
+        "network_mode": "none",
+        "result_bytes": 110,
+        "input_fingerprint": "c5544738fad8a7bdb629736282e343f29e01897599606eb293cc78445b47ef9b",
+        "output_fingerprint": "775d6aa9403486f99cfd983d0add4c5fdaccc6a2cb6f7b8c0c2e8fba75b8131e",
+        "definition_source": "tools/masc_schedule_notes_list.toml"
+      },
+      {
+        "ts": 1793020675.394597,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "masc_schedule_get",
+        "input": {
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second"
+        },
+        "output": "{\"schedule_instance_id\":\"01a1785c-22f2-7000-8c71-3ee04a1a38f2\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"requested_by\":{\"id\":\"schedule-audit-observer\",\"kind\":\"automated_actor\",\"display_name\":null},\"scheduled_by\":{\"id\":\"schedule-audit-observer\",\"kind\":\"automated_actor\",\"display_name\":null},\"requested_at\":1793020666.61034,\"due_at\":1793020668.61034,\"expires_at\":null,\"payload\":{\"kind\":\"masc.keeper_wake\",\"body\":{\"result_delivery\":{\"policy\":\"none\"},\"keeper_name\":\"audit-live-deepseek\",\"message\":\"Scheduled verification: append exactly one durable note to schedule_id \\\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\\\" with body \\\"SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5_SECOND\\\" using masc_schedule_note_add. Read back that same schedule note, then finish. Do not post elsewhere or create work. If another authorized scheduled request arrives, retain both requests and perform each exact note once.\"}},\"status\":\"succeeded\",\"source\":\"operator_request\",\"recurrence\":{\"kind\":\"one_shot\"},\"cancellation\":null,\"due_at_iso\":\"2026-10-26T13:17:48Z\",\"next_due_at\":null,\"next_due_at_iso\":null,\"requested_at_iso\":\"2026-10-26T13:17:46Z\",\"recurrence_kind\":\"one_shot\",\"recurrence_summary\":\"one_shot\",\"payload_digest\":\"36edcbdbed3116ac98076cc004c4714fa186b78a7a07c35f286a04b24b12ddfb\",\"payload_kind\":\"masc.keeper_wake\",\"payload_support\":\"supported\",\"payload_dispatch_tool\":\"masc.keeper_wake\",\"payload_target\":\"keeper:audit-live-deepseek\",\"payload_summary\":\"Scheduled verification: append exactly one durable note to schedule_id \\\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\\\" with body \\\"SCHEDULE_EFFECT_...\",\"last_wake\":{\"schedule_instance_id\":\"01a1785c-22f2-7000-8c71-3ee04a1a38f2\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"started_at\":1793020669.475385,\"finished_at\":1793020669.487687,\"due_at\":1793020668.61034,\"payload_digest\":\"36edcbdbed3116ac98076cc004c4714fa186b78a7a07c35f286a04b24b12ddfb\",\"status\":\"succeeded\",\"detail\":{\"kind\":\"masc.keeper_wake.enqueued\",\"queue\":\"keeper_event_queue\",\"stimulus\":\"schedule_due\",\"stimulus_id\":\"b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be\",\"keeper_name\":\"audit-live-deepseek\",\"schedule_instance_id\":\"01a1785c-22f2-7000-8c71-3ee04a1a38f2\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"urgency\":\"normal\",\"post_id\":\"b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be\",\"result_delivery_policy\":\"none\",\"occurrence_status\":\"awaiting_ack\",\"activation_status\":\"signaled\",\"activation_reason\":null,\"activation_detail\":null,\"reaction_ledger_status\":\"recorded\",\"reaction_ledger_error\":null},\"error\":null}}",
+        "duration_ms": 6.911993026733398,
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 2,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "microvm",
+          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-1/workspace/.masc/playground/audit-live-deepseek/",
+          "sandbox_roots": [
+            ".masc/playground/audit-live-deepseek/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+        },
+        "action_radius": {
+          "tool_name": "masc_schedule_get",
+          "action_key": "masc_schedule_get",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "microvm",
+          "observed_paths": [],
+          "duration_ms": 6.911993026733398,
+          "error": null
+        },
+        "route_evidence": {
+          "descriptor_id": "masc.schedule.get",
+          "capability_id": "masc_schedule_get",
+          "keeper_model_projection": "internal_name",
+          "public_name": "masc_schedule_get",
+          "canonical_name": "masc_schedule_get",
+          "description": "Read the current durable scheduled request by schedule_id. A recurring request may already point at its next occurrence.",
+          "executor": "in_process",
+          "backend": "ocaml_runtime",
+          "sandbox": "none",
+          "runtime_handler": "tool_masc_schedule_dispatch",
+          "execution": "concurrent",
+          "tool_kind": "atomic",
+          "composable_output": {
+            "kind": "opaque"
+          },
+          "receipt_labels": {
+            "descriptor_id": "masc.schedule.get",
+            "capability_id": "masc_schedule_get",
+            "keeper_model_projection": "internal_name",
+            "public_name": "masc_schedule_get",
+            "canonical_name": "masc_schedule_get",
+            "executor": "in_process",
+            "backend": "ocaml_runtime",
+            "sandbox": "none",
+            "runtime_handler": "tool_masc_schedule_dispatch",
+            "execution": "concurrent",
+            "composable_output": "opaque",
+            "input_schema_source": "canonical_registry"
+          },
+          "eval_tags": [],
+          "readonly": true,
+          "cwd_scope": null,
+          "polling_read": false,
+          "status": "succeeded",
+          "tool_name": "masc_schedule_get"
+        },
+        "agent_name": "audit-live-deepseek",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "71e4bd63432c27d2d20052e134f13a3439702581df16bd5aa1960134470eb826",
+        "execution_id": "execution-node-3eed4cb9f678449466ac38b81d85f716",
+        "tool_observation": {
+          "attribution": {
+            "kind": "pathless"
+          },
+          "turn_ref": "trace-1793020663392-00000#2",
+          "declared_progress": null
+        },
+        "physical_execution_id": "execution-node-3eed4cb9f678449466ac38b81d85f716",
+        "tool_use_id": "call_aw8eezi6",
+        "planned_index": 0,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "concurrent",
+        "wire_outcome": "ok",
+        "disposition": "completed",
+        "trace_id": "trace-1793020663392-00000",
+        "session_id": "trace-1793020663392-00000",
+        "turn": 3,
+        "keeper_turn_id": 2,
+        "sandbox_profile": "microvm",
+        "network_mode": "none",
+        "result_bytes": 2673,
+        "input_fingerprint": "c5544738fad8a7bdb629736282e343f29e01897599606eb293cc78445b47ef9b",
+        "output_fingerprint": "1084beaa702389c184858af6e6ba150359b637afb6561678db584ade89a451ec",
+        "definition_source": "tools/masc_schedule_get.toml"
+      },
+      {
+        "ts": 1793020677.660456,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "masc_schedule_note_add",
+        "input": {
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+          "body": "SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5_SECOND"
+        },
+        "output": "{\"status\":\"ok\",\"note\":{\"note_id\":\"10\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"author_id\":\"audit-live-deepseek\",\"author_kind\":\"automated_actor\",\"created_at\":1793020677.656421,\"body\":\"SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5_SECOND\"},\"note_count\":1}",
+        "duration_ms": 2.8100013732910156,
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 2,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "microvm",
+          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-1/workspace/.masc/playground/audit-live-deepseek/",
+          "sandbox_roots": [
+            ".masc/playground/audit-live-deepseek/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+        },
+        "action_radius": {
+          "tool_name": "masc_schedule_note_add",
+          "action_key": "masc_schedule_note_add",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "microvm",
+          "observed_paths": [],
+          "duration_ms": 2.8100013732910156,
+          "error": null
+        },
+        "route_evidence": {
+          "descriptor_id": "masc.schedule.note_add",
+          "capability_id": "masc_schedule_note_add",
+          "keeper_model_projection": "internal_name",
+          "public_name": "masc_schedule_note_add",
+          "canonical_name": "masc_schedule_note_add",
+          "description": "Append a durable note to one scheduled request. Notes record why a\nschedule exists and what changed and when. Wake metadata includes the message,\nschedule identity, timing and an optional title; it does not include notes.\nWhen execution depends on a note, ensure the schedule's message explicitly\ntells the Keeper to call masc_schedule_notes_list with its schedule ID before\nacting. Use masc_schedule_update while the schedule is editable to add that\ninstruction. Adding a note alone neither changes the message nor signals that\nnotes need reading. Notes are keyed by the stable schedule_id, so replacing a\ndefinition does not orphan them. Notes are append-only, with no edit or removal,\nand survive terminal schedule states. You are recorded as the author.",
+          "executor": "in_process",
+          "backend": "ocaml_runtime",
+          "sandbox": "none",
+          "runtime_handler": "tool_masc_schedule_dispatch",
+          "execution": "serial",
+          "tool_kind": "atomic",
+          "composable_output": {
+            "kind": "opaque"
+          },
+          "receipt_labels": {
+            "descriptor_id": "masc.schedule.note_add",
+            "capability_id": "masc_schedule_note_add",
+            "keeper_model_projection": "internal_name",
+            "public_name": "masc_schedule_note_add",
+            "canonical_name": "masc_schedule_note_add",
+            "executor": "in_process",
+            "backend": "ocaml_runtime",
+            "sandbox": "none",
+            "runtime_handler": "tool_masc_schedule_dispatch",
+            "execution": "serial",
+            "composable_output": "opaque",
+            "input_schema_source": "canonical_registry"
+          },
+          "eval_tags": [],
+          "readonly": false,
+          "cwd_scope": null,
+          "polling_read": false,
+          "status": "ok",
+          "tool_name": "masc_schedule_note_add"
+        },
+        "agent_name": "audit-live-deepseek",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "71e4bd63432c27d2d20052e134f13a3439702581df16bd5aa1960134470eb826",
+        "execution_id": "execution-node-fc6efe76d6627020e6b9144edccff10b",
+        "tool_observation": {
+          "attribution": {
+            "kind": "pathless"
+          },
+          "turn_ref": "trace-1793020663392-00000#2",
+          "declared_progress": null
+        },
+        "physical_execution_id": "execution-node-fc6efe76d6627020e6b9144edccff10b",
+        "tool_use_id": "call_gln5bncs",
+        "planned_index": 0,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "serial",
+        "wire_outcome": "ok",
+        "disposition": "completed",
+        "trace_id": "trace-1793020663392-00000",
+        "session_id": "trace-1793020663392-00000",
+        "turn": 4,
+        "keeper_turn_id": 2,
+        "sandbox_profile": "microvm",
+        "network_mode": "none",
+        "result_bytes": 289,
+        "input_fingerprint": "22498a28999fd23f9584b1bfe6a9d2018e8aec5de43dfa6a64fdb580d935d263",
+        "output_fingerprint": "6aa8ac65553308ac4823c8afdf2b1d7282cc724ae1fbb0cda0771ff5c92f1a17",
+        "definition_source": "tools/masc_schedule_note_add.toml"
+      },
+      {
+        "ts": 1793020679.640097,
+        "record_kind": "tool_call",
+        "keeper": "audit-live-deepseek",
+        "tool": "masc_schedule_notes_list",
+        "input": {
+          "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second"
+        },
+        "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"limit\":50,\"notes\":[{\"note_id\":\"10\",\"schedule_id\":\"audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second\",\"author_id\":\"audit-live-deepseek\",\"author_kind\":\"automated_actor\",\"created_at\":1793020677.656421,\"body\":\"SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5_SECOND\"}]}",
+        "duration_ms": 1.0230541229248047,
+        "runtime_contract": {
+          "keeper_name": "audit-live-deepseek",
+          "trace_id": "trace-1793020663392-00000",
+          "session_id": "trace-1793020663392-00000",
+          "keeper_turn_id": 2,
+          "task_id": null,
+          "goal_ids": [],
+          "sandbox_profile": "microvm",
+          "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-busy-deepseek-1/workspace/.masc/playground/audit-live-deepseek/",
+          "sandbox_roots": [
+            ".masc/playground/audit-live-deepseek/"
+          ],
+          "path_resolution": {
+            "read_implicit_cwd": false,
+            "read_explicit_cwd_supported": true,
+            "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+            "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+            "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+            "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+          },
+          "network_mode": "none",
+          "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+        },
+        "action_radius": {
+          "tool_name": "masc_schedule_notes_list",
+          "action_key": "masc_schedule_notes_list",
+          "target_kind": "tool",
+          "target_path": null,
+          "sandbox_target": "microvm",
+          "observed_paths": [],
+          "duration_ms": 1.0230541229248047,
+          "error": null
+        },
+        "route_evidence": {
+          "descriptor_id": "masc.schedule.notes_list",
+          "capability_id": "masc_schedule_notes_list",
+          "keeper_model_projection": "internal_name",
+          "public_name": "masc_schedule_notes_list",
+          "canonical_name": "masc_schedule_notes_list",
+          "description": "List the durable notes of one scheduled request, oldest first. Notes are\nkeyed by the stable schedule_id and survive definition replacements\n(masc_schedule_update) and terminal schedule states. Use them to read why a\nschedule exists and what changed and when. A wake does not carry the notes, so a\nwoken Keeper reads them here when it needs them.",
+          "executor": "in_process",
+          "backend": "ocaml_runtime",
+          "sandbox": "none",
+          "runtime_handler": "tool_masc_schedule_dispatch",
+          "execution": "concurrent",
+          "tool_kind": "atomic",
+          "composable_output": {
+            "kind": "opaque"
+          },
+          "receipt_labels": {
+            "descriptor_id": "masc.schedule.notes_list",
+            "capability_id": "masc_schedule_notes_list",
+            "keeper_model_projection": "internal_name",
+            "public_name": "masc_schedule_notes_list",
+            "canonical_name": "masc_schedule_notes_list",
+            "executor": "in_process",
+            "backend": "ocaml_runtime",
+            "sandbox": "none",
+            "runtime_handler": "tool_masc_schedule_dispatch",
+            "execution": "concurrent",
+            "composable_output": "opaque",
+            "input_schema_source": "canonical_registry"
+          },
+          "eval_tags": [],
+          "readonly": true,
+          "cwd_scope": null,
+          "polling_read": false,
+          "status": "ok",
+          "tool_name": "masc_schedule_notes_list"
+        },
+        "agent_name": "audit-live-deepseek",
+        "model": "runtime",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+        "turn_kind": "autonomous",
+        "lane": "tool_optional",
+        "prompt_fingerprint": "71e4bd63432c27d2d20052e134f13a3439702581df16bd5aa1960134470eb826",
+        "execution_id": "execution-node-7eb07206fc0b101c6eb8664c20a3d36b",
+        "tool_observation": {
+          "attribution": {
+            "kind": "pathless"
+          },
+          "turn_ref": "trace-1793020663392-00000#2",
+          "declared_progress": null
+        },
+        "physical_execution_id": "execution-node-7eb07206fc0b101c6eb8664c20a3d36b",
+        "tool_use_id": "call_2v62rkja",
+        "planned_index": 0,
+        "batch_index": 0,
+        "batch_size": 1,
+        "execution_mode": "concurrent",
+        "wire_outcome": "ok",
+        "disposition": "completed",
+        "trace_id": "trace-1793020663392-00000",
+        "session_id": "trace-1793020663392-00000",
+        "turn": 5,
+        "keeper_turn_id": 2,
+        "sandbox_profile": "microvm",
+        "network_mode": "none",
+        "result_bytes": 361,
+        "input_fingerprint": "c5544738fad8a7bdb629736282e343f29e01897599606eb293cc78445b47ef9b",
+        "output_fingerprint": "772da0f5b38fdbaf43ee05ac8968d3bbc911c1830fc4afdc47904388a2a8cfae",
+        "definition_source": "tools/masc_schedule_notes_list.toml"
+      }
+    ]
+  }
+}

@@ -1,5 +1,9 @@
 # 예약 Job 행동 감사 — 2026-10-26
 
+이 문서는 최초 감사 시점의 기록이다. 후속 API33·targeted CI195·실제 모델 실행과
+busy F6 반례를 포함한 현재 판정은 [59개 행 최신 근거표](2026-10-26-scheduled-job-coverage-update.md)와
+[실제 runtime 보고서](../reports/2026-10-26-scheduled-job-runtime-audit.md)를 따른다.
+
 ## 판정
 
 **예약 Job 전체 행동 PASS 아님.** 기존 스케줄러·durable queue·busy 보존 경로는 이미

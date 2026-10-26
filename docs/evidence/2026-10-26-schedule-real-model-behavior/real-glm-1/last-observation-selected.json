@@ -1,0 +1,235 @@
+{
+  "notes": {
+    "status": "ok",
+    "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+    "limit": 50,
+    "notes": [
+      {
+        "note_id": "6",
+        "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+        "author_id": "audit-live-glm",
+        "author_kind": "automated_actor",
+        "created_at": 1793020376.57737,
+        "body": "SCHEDULE_EFFECT_5999734c698241be919a03b158a3bdb5"
+      }
+    ]
+  },
+  "history": {
+    "schema": "masc.dashboard.scheduled_automation.lookup.v1",
+    "source": "schedule_store",
+    "generated_at": "2026-10-26T13:13:14Z",
+    "status": "found",
+    "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+    "request": {
+      "schedule_instance_id": "01a17856-0f14-7000-9d56-a92fa3dde399",
+      "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+      "status": "succeeded",
+      "source": "operator_request",
+      "requested_by": {
+        "id": "schedule-audit-observer",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "scheduled_by": {
+        "id": "schedule-audit-observer",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "requested_at": 1793020268.307649,
+      "requested_at_iso": "2026-10-26T13:11:08Z",
+      "due_at": 1793020270.307649,
+      "due_at_iso": "2026-10-26T13:11:10Z",
+      "next_due_at": null,
+      "next_due_at_iso": null,
+      "expires_at": null,
+      "expires_at_iso": null,
+      "recurrence": {
+        "kind": "one_shot"
+      },
+      "recurrence_kind": "one_shot",
+      "recurrence_summary": "one_shot",
+      "payload_digest": "e2348a502fa3b8ce0c2f0ba57d39bcdab4eaf4602a6625b06b21620a3cc0653e",
+      "payload": {
+        "kind": "masc.keeper_wake",
+        "body": {
+          "result_delivery": {
+            "policy": "none"
+          },
+          "keeper_name": "audit-live-glm",
+          "message": "This is a one-time scheduled-job verification. Call masc_schedule_note_add exactly once with schedule_id \"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\" and body \"SCHEDULE_EFFECT_5999734c698241be919a03b158a3bdb5\". Do not merely print the marker. Read back the note with masc_schedule_notes_list for this schedule_id, then finish with a brief confirmation. Do not use any other mutating tool or create another schedule."
+        }
+      },
+      "payload_kind": "masc.keeper_wake",
+      "payload_support": "supported",
+      "payload_dispatch_tool": "masc.keeper_wake",
+      "payload_target": "keeper:audit-live-glm",
+      "payload_keeper_name": "audit-live-glm",
+      "payload_summary": "This is a one-time scheduled-job verification. Call masc_schedule_note_add exactly once with schedule_id \"audit-real-model-3e3ecd8020e0456899fba70e35b94d40\" ...",
+      "last_wake": {
+        "schedule_instance_id": "01a17856-0f14-7000-9d56-a92fa3dde399",
+        "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+        "started_at": 1793020271.125142,
+        "finished_at": 1793020271.16523,
+        "due_at": 1793020270.307649,
+        "payload_digest": "e2348a502fa3b8ce0c2f0ba57d39bcdab4eaf4602a6625b06b21620a3cc0653e",
+        "status": "succeeded",
+        "detail": {
+          "kind": "masc.keeper_wake.enqueued",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "stimulus_id": "e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8",
+          "keeper_name": "audit-live-glm",
+          "schedule_instance_id": "01a17856-0f14-7000-9d56-a92fa3dde399",
+          "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+          "urgency": "normal",
+          "post_id": "e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8",
+          "result_delivery_policy": "none",
+          "occurrence_status": "awaiting_ack",
+          "activation_status": "signaled",
+          "activation_reason": null,
+          "activation_detail": null,
+          "reaction_ledger_status": "recorded",
+          "reaction_ledger_error": null
+        },
+        "error": null,
+        "started_at_iso": "2026-10-26T13:11:11Z",
+        "finished_at_iso": "2026-10-26T13:11:11Z"
+      },
+      "dispatch_receipt": {
+        "projection_status": "recognized",
+        "kind": "masc.keeper_wake.enqueued",
+        "queue": "keeper_event_queue",
+        "stimulus": "schedule_due",
+        "stimulus_id": "e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8",
+        "keeper_name": "audit-live-glm",
+        "schedule_instance_id": "01a17856-0f14-7000-9d56-a92fa3dde399",
+        "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+        "urgency": "normal",
+        "post_id": "e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8",
+        "result_delivery_policy": "none",
+        "occurrence_status": "awaiting_ack",
+        "activation_status": "signaled",
+        "activation_reason": null,
+        "activation_detail": null,
+        "reaction_ledger_status": "recorded",
+        "reaction_ledger_error": null
+      },
+      "keeper_queue_evidence": {
+        "projection_status": "matched_terminal_completed",
+        "source": "durable_event_queue_snapshot",
+        "queue": "keeper_event_queue",
+        "stimulus": "schedule_due",
+        "keeper_name": "audit-live-glm",
+        "schedule_instance_id": "01a17856-0f14-7000-9d56-a92fa3dde399",
+        "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+        "post_id": "e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8",
+        "wake_due_at": 1793020270.307649,
+        "wake_due_at_iso": "2026-10-26T13:11:10Z",
+        "wake_payload_digest": "e2348a502fa3b8ce0c2f0ba57d39bcdab4eaf4602a6625b06b21620a3cc0653e",
+        "schedule_status": "succeeded",
+        "pending_count": 0,
+        "read_errors": [],
+        "resolved_owner": "audit-live-glm",
+        "terminal_outcome": "completed",
+        "terminal_reason": null,
+        "matched_bucket": "terminal",
+        "matched_post_id": "e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8",
+        "matched_payload_kind": "schedule_due",
+        "matched_arrived_at": 1793020271.077124,
+        "matched_arrived_at_iso": "2026-10-26T13:11:11Z",
+        "matched_schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+        "matched_schedule_instance_id": "01a17856-0f14-7000-9d56-a92fa3dde399",
+        "matched_due_at": 1793020270.307649,
+        "matched_due_at_iso": "2026-10-26T13:11:10Z",
+        "matched_payload_digest": "e2348a502fa3b8ce0c2f0ba57d39bcdab4eaf4602a6625b06b21620a3cc0653e",
+        "matched_age_seconds": 123.91756296157837
+      },
+      "keeper_reaction_evidence": {
+        "projection_status": "matched_consumed_ack",
+        "source": "keeper_reaction_ledger",
+        "keeper_name": "audit-live-glm",
+        "schedule_instance_id": "01a17856-0f14-7000-9d56-a92fa3dde399",
+        "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+        "post_id": "e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8",
+        "stimulus": "schedule_due",
+        "reaction_kind": "turn_started",
+        "stimulus_kind": "schedule_due",
+        "stimulus_id": "e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8",
+        "stimulus_seen": true,
+        "turn_started_seen": true,
+        "turn_finished_seen": true,
+        "event_queue_ack_seen": true,
+        "event_queue_cancelled_seen": false,
+        "matched_record_count": 4,
+        "quarantined_record_count": 0,
+        "stimulus_recorded_at": 1793020271.16106,
+        "stimulus_recorded_at_iso": "2026-10-26T13:11:11Z",
+        "turn_finished_recorded_at": 1793020393.862741,
+        "turn_finished_recorded_at_iso": "2026-10-26T13:13:13Z",
+        "turn_started_recorded_at": 1793020271.316129,
+        "turn_started_recorded_at_iso": "2026-10-26T13:11:11Z",
+        "event_queue_ack_recorded_at": 1793020393.862791,
+        "event_queue_ack_recorded_at_iso": "2026-10-26T13:13:13Z",
+        "event_queue_cancelled_recorded_at": null,
+        "event_queue_cancelled_recorded_at_iso": null,
+        "latest_recorded_at": 1793020393.862791,
+        "latest_recorded_at_iso": "2026-10-26T13:13:13Z"
+      },
+      "runner_hold": null
+    },
+    "wakes": [
+      {
+        "schedule_instance_id": "01a17856-0f14-7000-9d56-a92fa3dde399",
+        "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+        "started_at": 1793020271.125142,
+        "finished_at": 1793020271.16523,
+        "due_at": 1793020270.307649,
+        "payload_digest": "e2348a502fa3b8ce0c2f0ba57d39bcdab4eaf4602a6625b06b21620a3cc0653e",
+        "status": "succeeded",
+        "detail": {
+          "kind": "masc.keeper_wake.enqueued",
+          "queue": "keeper_event_queue",
+          "stimulus": "schedule_due",
+          "stimulus_id": "e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8",
+          "keeper_name": "audit-live-glm",
+          "schedule_instance_id": "01a17856-0f14-7000-9d56-a92fa3dde399",
+          "schedule_id": "audit-real-model-3e3ecd8020e0456899fba70e35b94d40",
+          "urgency": "normal",
+          "post_id": "e31f33ebe1d9a7403ad11e3f441f31597344a720a49b8c64950bb6ac781060c8",
+          "result_delivery_policy": "none",
+          "occurrence_status": "awaiting_ack",
+          "activation_status": "signaled",
+          "activation_reason": null,
+          "activation_detail": null,
+          "reaction_ledger_status": "recorded",
+          "reaction_ledger_error": null
+        },
+        "error": null,
+        "started_at_iso": "2026-10-26T13:11:11Z",
+        "finished_at_iso": "2026-10-26T13:11:11Z"
+      }
+    ],
+    "wake_count": 1,
+    "wake_retention_per_schedule": 32
+  },
+  "turns": {
+    "schema": "masc.keeper_turns.v1",
+    "keepers": [
+      {
+        "status": "ok",
+        "keeper_name": "audit-live-glm",
+        "turn": null
+      }
+    ]
+  },
+  "owner": {
+    "paused": false,
+    "meta": {
+      "name": "audit-live-glm",
+      "trace_id": "trace-1793020268086-00000",
+      "total_turns": 1,
+      "last_turn_ts": 1793020393.85738,
+      "last_runtime_attempt": null
+    }
+  }
+}

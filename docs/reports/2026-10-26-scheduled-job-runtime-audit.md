@@ -4,13 +4,18 @@
 순차 사용·두 사용자 권한·병렬 메모·페이지 조회는 설치 바이너리에서 실행했다.
 반면 **paused A의 미시작 발생을 B로 retarget한 뒤 취소하면 A의 pending이 남는 F1**을
 실제 서버에서 재현했다. 취소 뒤 실행 재개나 외부 효과 발생까지 시험한 것은 아니다.
+추가 실제 모델 검사에서는 단독 예약 두 건이 성공했지만, **busy 중 후속 예약에 양보한
+원래 작업을 효과 없이 Completed/ACK로 소비하는 F6 P1**도 재현했다.
 
 전체 범위는 [기존 행동별 대조표](../audits/2026-10-26-scheduled-job-behavior-audit.md)와
-같다. 이 보고서는 그 표 중 새 실행으로 판정이 달라진 부분과 남은 검증을 기록한다.
-관련 기존 이슈는 [#25692](https://github.com/jeong-sik/masc/issues/25692)이며,
+같다. [59개 행의 최신 근거표](../audits/2026-10-26-scheduled-job-coverage-update.md)는
+각 요구와 실행 suite/case·실제 runtime 기록·남은 한계를 일대일로 연결한다.
+이 보고서는 그 표 중 새 실행으로 판정이 달라진 부분과 남은 검증을 기록한다.
+관련 기존 이슈는 [#25692](https://github.com/jeong-sik/masc/issues/25692)와
+[#46120](https://github.com/jeong-sik/masc/issues/46120)이며,
 새 misfire 정책이나 임의 backlog/age 제한을 제안하는 보고서가 아니다.
 
-## 실행 대상과 증거
+## 초기 API/F1 실행 대상과 증거
 
 - 실제 실행한 설치 바이너리: `bc3038a22374705db648bebd7f556223b3e84727`, version `0.64.0`.
 - 실행 파일 SHA-256: `833298c99525205f929bab74ee6d45a53601c340bd1b084a2473e183c7663a57`.
@@ -121,14 +126,14 @@ shutdown 성공 수가 아니다. 따라서 이 실행은 guard 종료 뒤의 �
 | 범위 | 현재 증거와 다음 확인 |
 |---|---|
 | recurrence·timezone·cron·윤일 | domain 28개와 위 짧은 interval downtime 실행; 장기 downtime·daily/cron 통합 실행은 미검증 |
-| continuous busy 중 예약 진입 | #46133–#46135 소스 승인·병합 확인. 초기 bc3038a 실행은 그 전 커밋이며, 이후 1ce158d 추가 실행은 paused 시나리오여서 busy/tool-boundary 양보·소비 완료를 검증하지 않음 |
+| continuous busy 중 예약 진입 | 실제 6a2d 실행에서 진입·양보는 관측했으나, 원래 효과 없이 Completed/ACK되는 F6 P1 반례 확인. 아래 참조 |
 | paused/offline → Resume/Boot | paused 보존은 이번에 실행. 재개 후 정확한 발생의 처리·ACK·결과 전달은 미검증 |
 | F2 startup recovery 최초 실패 | 현 소스 후보 유지. 같은 process에서 저장소 회복 후 수렴하는지 주입 실행 필요 |
 | F3 권한 확인과 mutation 사이 경합 | 순차 creator/recipient 검사는 통과. retarget과 취소/수정의 결정적인 경합은 미검증 |
 | F4 due-only 수정과 recurrence 갱신 경합 | 순차 수정과 별개. lock 전 snapshot을 interleave하는 실행 필요 |
 | F5 retry/실패 정산 write 실패 | 현 소스 후보 유지. Running 저장 후 정산 실패·복구·후속 tick 실행 필요 |
-| 실제 모델·계정 전환 | 원 source/outbox를 유지한 checkpoint/failover 및 효과 한 번 보장 미검증 |
-| 결과 목적지 | 실제 model → posting/file tool → 목적지 read-back 미검증 |
+| 실제 모델·계정 전환 | DeepSeek·GLM의 독립 단독 예약은 실제 노트/ACK까지 성공. 원 source/outbox를 유지하는 provider/account failover는 미검증 |
+| 결과 목적지 | 내부 노트 목적지는 실제 모델 도구 호출·Keeper author·되읽기 확인. posting/file 등 외부 목적지는 미검증 |
 | Lane action | 실제 worker/receipt/effect-unknown/redelivery 미검증 |
 | TUI | decoder/선택 결정의 기존 component 근거와 별개로 실제 표시·refresh 동작 미검증 |
 
@@ -169,3 +174,58 @@ scheduled-source transfer와 복구 projection도 취소와 같은 serialization
 취소 직후 다른 owner에서 pending이 다시 생기는 경합을 막을 수 있다. 기존 intake →
 ledger → queue 잠금 순서를 거꾸로 잡는 수리도 피해야 한다. retarget 반례뿐 아니라
 다중 인계·미완료 outbox·읽기 실패·부분 철회 뒤 저장 실패의 실제 회귀를 함께 확인해야 한다.
+
+
+## 실제 모델의 단독 예약과 busy 반례 F6 — P1
+
+[별도 실제 모델 bundle](../evidence/2026-10-26-schedule-real-model-behavior/README.md)은
+동일한 설치 프로그램을 소유한 격리 base에서 실행한 세 기록이다. 각각 `/health?full=1`의
+embedded binary와 hash를 확인했으며 모델 credential 값은 보존하지 않았다.
+
+- `real-deepseek-1`: `ollama_cloud.ollama-cloud-deepseek-v4-1-flash`, 실행 binary
+  `1ce158d50d3eb48648e6deea7f668172f914fea3`. 단독 예약의 고유 본문을
+  Keeper 자신이 `masc_schedule_note_add`로 한 번 저장하고 되읽었다. 같은 exact
+  occurrence의 turn-start/end, durable Completed/ACK와 total_turns=1을 확인했다.
+- `real-glm-1`: `glm-coding.glm-5-3`, 같은 `1ce158d…` binary. 같은 경로가 성공했다.
+  다만 잘못 추측한 schedule ID 세 건의 note 호출은 `schedule not found`로 거절됐다.
+  실제 성공 append는 한 건이고 최종 note_count=1이다. 오류 없는 실행이라고 세지 않는다.
+- `real-busy-deepseek-1`: 실제 binary는 **`6a2d8dd6171e1d732ca15f918fb084e462e4d371`**,
+  SHA `87f8c4afffa1b0b30075f5b2bddfa264edec2d454d972593e68c1068aa5ea548`다.
+  설치 binary가 검사 사이 바뀌었다. 원래 checkpoint된 source의 효과가 없는 채
+  후속 source만 실행되고 두 source가 모두 Completed/ACK로 종결되는 반례가 나왔다.
+
+busy 반례의 실제 순서는 다음과 같다.
+
+1. 첫 one-shot이 실제 모델 turn #1에 들어간 것을 exact reaction과 live Owner로 확인했다.
+2. turn #1이 끝나기 전에 같은 Keeper에 두 번째 예약을 보냈다. `overlap.json`에서
+   같은 turn #1 중 두 exact source가 모두 pending, 두 note는 모두 비어 있었다.
+3. 13:17:50 UTC 첫 모델 실행이 `yielded_to_durable_stimulus(2)`로 checkpoint됐다.
+   실제 도구 호출은 loader 두 번뿐이었다. 첫 노트는 쓰지 않았다.
+4. 원본 reaction ledger는 first의 `turn_finished.disposition=checkpointed` 직후
+   같은 first의 ACK를 기록한다. 이 ACK는 second의 turn-start보다 앞선다.
+5. 다음 실행은 checkpoint를 실제 resume해 second의 get/note/readback을 수행했다.
+   최종 first note 0건, second note 1건인데 둘 다 exact terminal Completed/ACK,
+   live turn=null이다. 이후 recovery·수동 ACK·재실행 요청은 하지 않았다.
+
+직독한 실행 head `6a2d8dd…`의 `keeper_heartbeat_loop.ml:666`은 checkpoint를
+`Batch_ack_attention_only`로 분류하고, `:1427`의 분기는 Connector만 보존하며
+Schedule_due도 `terminalize_completed_selection`에 넘긴다(`:1320`).
+`Keeper_scheduled_turn_handoff` 자체는 우선권 요청이며 ACK 주체가 아니다.
+독립 리뷰도 같은 원본/소스를 대조했다. **checkpoint 파일 유실**이나
+**두 번째 완료를 첫 source로 오인**한 반례라고 설명하지 않는다.
+
+수리는 미완료 예약의 exact durable ownership과 재개 입력을 terminal까지 유지해야 한다.
+또 여러 예약을 한 batch에 넣고 하나만 이행한 뒤 전체를 ACK하는 조합도 검증해야 한다.
+`Schedule_due -> false` 한 줄만으로 완전 수리를 선언할 수 없다.
+첫 효과가 이미 정산된 경우의 비중복, successor 취소/교체, checkpoint 뒤 재시작도 남는다.
+
+원래 busy observer는 “둘 다 terminal + live turn 없음 + 필수 효과 누락”을 실패로
+끝내는 oracle이 빠져 계속 관측했다. 별도 실제 API로 그 상태를 확인한 후 observer만
+SIGINT(exit 130)로 끝냈다. producer는 다시 no-live-turn을 읽고 소유한 서버만 종료했다.
+부모 observer가 이미 끝나 서버 exit code는 수집하지 못했으므로 정상 종료 PASS가 아니다.
+원본 partial checks는 그대로 보존하고, 별도 finding·ledger·tool receipts로 실패를 증명한다.
+
+이 새 실행들은 내부 durable note 목적지의 성공과 busy 결함을 증명한다. 모델 간 인계,
+provider/account failover, 외부 파일·채널 결과, 실제 sandbox Execute, Lane worker나
+TUI까지 검증했다고 확대하지 않는다. API33·상태23·CI195·단독 모델 두 예·busy 반례는
+서로 다른 범위이며 합산해 사용자 시나리오 통과 수로 만들지 않는다.

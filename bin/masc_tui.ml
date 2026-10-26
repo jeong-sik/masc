@@ -21952,7 +21952,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | Some view ->
            let next, read = match view.load with
              | Loading (_, Discover _) -> Browser_lane_view.accept_clients ~generation result view
-             | Idle | No_browser | Loading _ | Failed _ ->
+             | Idle | No_browser
+             | Loading (_, (Read | Open_session | Close_session | Goto _ | Screenshot _)) | Failed _ ->
                (if generation=state.browser_lane_generation
                 then Browser_lane_view.accept_activity result view else view),false in
            let operation = Browser_lane_view.discovery_continuation next in

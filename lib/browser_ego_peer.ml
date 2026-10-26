@@ -1449,7 +1449,9 @@ let manage_tab t ~tab_id operation =
       | Adopt requested,Unmanaged target_id,{label=Some label;target_id=observed;opened_by=Unknown_origin}
         when target_id=observed && (match requested with None -> true | Some requested -> requested=label) -> Ok (Managed label)
       | Release,Managed _,{label=None;target_id;opened_by=Unknown_origin} -> Ok (Unmanaged target_id)
-      | (Adopt _|Release),(Managed _|Unmanaged _),_ -> Error (Live.Outcome_unknown ("invalid native Page management observation; " ^ unknown)) in
+      | (Adopt _|Release),(Managed _|Unmanaged _),
+          {label=(None|Some _);opened_by=(Agent_created|Unknown_origin);_} ->
+        Error (Live.Outcome_unknown ("invalid native Page management observation; " ^ unknown)) in
     t.pages <- List.map (fun (page,id) -> (if id=tab_id then next else page),id) t.pages;
     Ok (obj ["action",str action;"tabId",`Int tab_id;"spaceId",`Int t.space.id;
       "egoPage",Browser_surface.ego_page_to_json provenance])

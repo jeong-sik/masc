@@ -65,9 +65,14 @@ val binding_for_provider_config : Llm_provider.Provider_config.t -> t option
 val provider_id_of_provider_config : Llm_provider.Provider_config.t -> string
 
 (** Project the config-owned capabilities used by completion admission.
-    Selected bindings carry provider facts into the config at construction;
-    this read never re-resolves provider aliases or consults the current
-    registry as a fallback. Frozen absence uses the same conservative wire defaults as request admission. *)
+    {!to_provider_config} carries the selected binding's provider facts into
+    the config; directly calling [Provider_config.make] with a provider id
+    alone does not acquire them. This read never re-resolves provider aliases
+    or consults the current registry as a fallback. Frozen absence follows
+    request admission: anonymous OpenAI-compatible configs retain chat
+    protocol defaults, while explicitly identified OpenAI-compatible providers
+    without policy remain conservative. Native wires retain their protocol
+    defaults and the request admission policy for forced tool choice. *)
 val capabilities_for_provider_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Capabilities.capabilities

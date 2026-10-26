@@ -5,17 +5,21 @@ model/provider facts through `Provider_runtime_binding`'s fallback. Its separate
 wire table and registry lookup also allowed runtime capability projection to
 disagree with actual request admission.
 
-## Candidate
+## Current capability contract
 
 `Provider_config.resolve_request_capabilities` returns one capability record
 and typed source. Explicit overrides and existing catalog/frozen model policy
-answer first. When absent, unknown OpenAI-compatible endpoints acquire no
-capability-dependent options; native wires keep their prior request defaults
-and conservative forcing flags. Tool-choice and other capability-dependent
+answer first. With no model policy, anonymous OpenAI-compatible configs retain
+their chat protocol defaults, including tools, streaming and structured output;
+explicitly identified OpenAI-compatible providers remain conservative. Both
+fallbacks are reported as `Provider_default_capability`, without inventing
+catalog model facts. GLM keeps its protocol defaults. Anthropic, Kimi, Ollama
+and Gemini keep native protocol features with all three forced-tool-choice
+flags false, aligning runtime projection with request admission. Tool-choice and other capability-dependent
 request admission, Common observers and the runtime binding projection consume
 that same authority. The runtime projection no longer reopens a registry or
 performs a second global model lookup. A selected binding still carries its
-explicit provider declaration into the config; a raw provider id alone does
+explicit provider declaration through `to_provider_config`; a raw provider id alone does
 not activate a later provider overlay.
 
 The model/provider catalog parser and registry construction are not globally
@@ -23,7 +27,45 @@ consolidated by this change. Request preparation still owns policy freezing;
 this repair preserves its absent result through readers. Existing binding
 metadata lookup APIs remain live metadata reads, not frozen request policy.
 
-## Actual baseline and review findings
+Pipeline selects native streaming only when the resolved capabilities declare
+it; otherwise a requested stream uses the synchronous transport fallback. The
+existing two controls now have separate Alcotest names, so a failure identifies
+the declared-stream or undeclared-fallback case. Their assertions are unchanged.
+
+The review cleanup combines the resolver's duplicate wire matches without
+changing those policies. Source parsing, independent source review and native
+execution are separate evidence. Run results must identify their own source
+head and selected suites; they do not establish provider HTTP or installed
+runtime behavior.
+
+## Anonymous protocol regression repair
+
+The restored anonymous chat defaults conflicted with older fixtures that
+expected unknown models or recognizable URLs to disable schema and forced
+tool choices. [40291347752](https://github.com/jeong-sik/masc/actions/runs/40291347752)
+checked out `a1e8d00dbf4ba4aa5fcc659e203ddf757ac14242` and reproduced
+**1 failure in 29 runtime-binding cases and 16 failures in 141 provider-config
+cases**. Both selected suites compiled and executed; these were assertion
+failures, not setup failures.
+
+The repaired fixtures check that anonymous requests have no inferred model
+policy, report `Provider_default_capability` and retain chat-schema/forced-tool
+admission. Binding controls also check the actual named and required tool
+choice JSON. Provider-specific rejection controls now declare the intended
+provider identity; an explicit unsupported capability override still rejects
+named tool choice. Schema validation and frozen-policy controls remain in
+place. The corresponding backend inline fixtures use the same distinction.
+
+Candidate execution receipts and independent review verdicts are recorded in
+the PR description with their exact source identities. This baseline does not
+certify the repaired candidate, and standalone suite results do not imply that
+backend inline tests or the full regression suite ran.
+
+## Historical baseline and review findings
+
+The records below predate restoration of anonymous chat protocol defaults.
+Their source identities and observed results remain historical evidence; they
+do not describe the current anonymous fallback or certify a later restack.
 
 - [40218767565](https://github.com/jeong-sik/masc/actions/runs/40218767565)
   checked out322b4a7db4ca6d7ceadb4b0176943a59ee32712a and failed before tests:
@@ -44,7 +86,7 @@ metadata lookup APIs remain live metadata reads, not frozen request policy.
   ANY/named support against `Complete_common.validate_all` across all six wire
   kinds and check unknown-endpoint JsonSchema rejection.
 
-## Verification scope
+## Verification scope and historical requests
 
 `provider_config.ml` → shared request capability resolver → tool-choice/output
 admission + Common observation + runtime binding → `test_provider_runtime_binding`.
@@ -61,7 +103,7 @@ Dune build/typecheck, provider HTTP, installed-runtime, whole-catalog hard cut,
 full regression, formal independent approval, merge or issue completion claimed.
 
 
-## Fixture correction and current request
+## Historical fixture correction and request
 
 Actual intermediate [40218944547](https://github.com/jeong-sik/masc/actions/runs/40218944547)
 checked outcf4b708c48ecea2edf121116e34fd5b27b7f47ae and ran binding27 with
@@ -86,7 +128,19 @@ dispatched for exactly `c891e4aa26830a1622d96d3ca5f7525c6d24300b` and the
 same three explicit suites. Its result is unverified. Intermediate requests
 40219173989 and40219425794 precede one or both fixture corrections; do not
 reuse their outcome as final-fixture acceptance. `corrected-source-sha256.json`
-binds all ten current source/fixture/direct-consumer inputs and preserves the
-original8f manifest as history. No build, HTTP, installation, merge, full
+binds the ten source/fixture/direct-consumer inputs at `c891e4aa26830a1622d96d3ca5f7525c6d24300b`
+and preserves the original8f manifest as history. No build, HTTP, installation, merge, full
 regression or whole-issue completion follows from the source reviews or earlier
 partial execution results.
+
+The two manifests have distinct historical roles:
+
+- `source-sha256.json` pins the initial shared-authority source at
+  `8f2943803e9bc898c9413430299ea4bb0893c6b6`.
+- `corrected-source-sha256.json` pins the corrected fixture request at
+  `c891e4aa26830a1622d96d3ca5f7525c6d24300b`; production inputs were unchanged
+  from the first manifest, while the binding fixture was corrected.
+
+Neither manifest is a claim about the current PR head. Current head/base review
+and any later execution receipts belong to the PR description, with their own
+scope and source identity.

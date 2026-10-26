@@ -802,8 +802,7 @@ let unwrap_raw_trace = function
   | Error error -> Alcotest.fail (Error.to_string error)
 ;;
 
-let test_stream_route_carries_exact_raw_trace_run_id () =
-  List.iter (fun declared_streaming ->
+let test_stream_route_uses_declared_support ~declared_streaming () =
   let trace_path = Filename.temp_file "agent_core-pipeline-capture-id" ".jsonl" in
   Fun.protect
     ~finally:(fun () -> Sys.remove trace_path)
@@ -872,7 +871,7 @@ let test_stream_route_carries_exact_raw_trace_run_id () =
         with
         | Ok (Internal_pipeline.Complete _) -> ()
         | Ok (Internal_pipeline.ToolsExecuted _) ->
-          Alcotest.fail "expected a completed streaming turn"
+          Alcotest.fail "expected a completed turn"
         | Ok (Internal_pipeline.TerminalToolCompleted _) ->
           Alcotest.fail "unexpected terminal tool completion"
         | Error error -> Alcotest.fail (Error.to_string error));
@@ -890,7 +889,7 @@ let test_stream_route_carries_exact_raw_trace_run_id () =
                active
                ~final_text:(Some "done")
                ~stop_reason:(Some "EndTurn")
-               ~error:None)))) [false;true]
+               ~error:None)))
 ;;
 
 let text_tool_intent_response () =
@@ -4729,9 +4728,13 @@ let () =
             `Quick
             test_repeated_validation_error_without_judge_continues_to_provider
         ; Alcotest.test_case
-            "stream route carries exact raw trace run id"
+            "undeclared native stream uses synchronous fallback"
             `Quick
-            test_stream_route_carries_exact_raw_trace_run_id
+            (test_stream_route_uses_declared_support ~declared_streaming:false)
+        ; Alcotest.test_case
+            "declared native stream carries exact raw trace run id"
+            `Quick
+            (test_stream_route_uses_declared_support ~declared_streaming:true)
         ; Alcotest.test_case "extra system context" `Quick test_prepare_turn_extra_context
         ] )
     ; ( "tool_results"

@@ -189,10 +189,17 @@ let recursive_tree_and_progress = run (fun fixture ->
       (fun () -> Eio.Switch.run (fun sw ->
           let parent_path="/sys/fs/cgroup" and name=group_name fixture in
           let group=get_group (G.Group.create ~sw ~parent_path ~name) in
-          let script="/bin/sh -c 'printf descendant-ready; exec /bin/cat' <&0 & wait" in
+          (* POSIX async lists may replace fd0 before redirections. Preserve
+             the actual input on another fd before backgrounding, then prove
+             the descendant received bytes from the parent's still-open pipe. *)
+          let script="exec 9<&0; /bin/sh -c 'IFS= read -r first <&9; printf %s \"$first\"; exec /bin/cat <&9' & wait" in
           let child=get (spawn_group ~sw ~group fixture ~input:reader ~output:output_writer script) in
           Unix.close output_writer; output_open := false;
           get (G.await_ready child); get (G.activate child);
+          let handshake="descendant-ready\n" in
+          let sent=Eio_unix.run_in_systhread (fun () ->
+              Unix.write_substring writer handshake 0 (String.length handshake)) in
+          Alcotest.(check int) "actual pipe handshake written" (String.length handshake) sent;
           Eio_unix.await_readable output_reader;
           let bytes=Bytes.create (String.length "descendant-ready") in
           let read=Eio_unix.run_in_systhread (fun () -> Unix.read output_reader bytes 0 (Bytes.length bytes)) in

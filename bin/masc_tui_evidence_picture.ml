@@ -83,6 +83,7 @@ type picture =
 
 type item =
   | Text_item of Decode.verification_evidence_item
+  | Source_item of { source : Decode.verification_evidence_item; body : string }
   | Binary_item of {
       reference : string;
       bytes : int;
@@ -154,7 +155,8 @@ let drawable ~convert ~slot ~media data =
                       ; key = Digestif.SHA256.(digest_string png |> to_hex)
                       ; pixel_width; pixel_height; slot })))
 
-(* Pictures take slots in the order the evidence lists them. A picture that
+(* Simultaneous pictures take slots in evidence order; individual selections
+   can reuse one slot. A picture that
    does not become drawable leaves its slot for the next one. A terminal that
    draws no pixels gives no slot and runs no converter: the picture is its
    caption. *)
@@ -182,7 +184,27 @@ let draws_pixels = function
   | View.Pixels _ -> true
   | View.Mosaic | View.No_picture -> false
 
-let prepare ~display ~convert = function
+let board_body content =
+  let field name = function `Assoc fields -> List.assoc_opt name fields | _ -> None in
+  let text name json = match field name json with Some (`String text) -> Some text | _ -> None in
+  let entry ~body_field json = match text "author" json, text body_field json with
+    | Some author, Some body -> Some (author ^ "\n" ^ body)
+    | _ -> None in
+  match Yojson.Safe.from_string content with
+  | json ->
+    (match field "source" json, field "post" json, field "comments" json with
+     | Some (`String "board"), Some post, Some (`List comments) ->
+       (match text "title" post, entry ~body_field:"body" post,
+              List.map (entry ~body_field:"content") comments with
+        | Some title, Some post, comments when List.for_all Option.is_some comments ->
+          Some (String.concat "\n\n" (title :: post :: List.filter_map Fun.id comments))
+        | _ -> None)
+     | _ -> None)
+  | exception Yojson.Json_error _ -> None
+
+type layout = Together | One_at_a_time
+
+let prepare ~layout ~display ~convert = function
   | Decode.Evidence_access_unavailable reason -> Access_unavailable reason
   | Decode.Evidence_items items ->
       let draws_pixels = draws_pixels display in
@@ -193,6 +215,9 @@ let prepare ~display ~convert = function
             | Decode.Ev_binary
                 { ev_b_reference; ev_b_bytes; ev_b_sha256; ev_b_format; ev_b_preview } ->
                 let picture, free_slots =
+                  let free_slots = match layout with
+                    | Together -> free_slots
+                    | One_at_a_time -> Masc_tui_graphics.evidence_images in
                   prepare_preview ~draws_pixels ~convert ~free_slots ev_b_preview
                 in
                 ( free_slots
@@ -200,7 +225,11 @@ let prepare ~display ~convert = function
                     { reference = ev_b_reference; bytes = ev_b_bytes; sha256 = ev_b_sha256
                     ; format = ev_b_format; picture }
                   :: acc )
-            | Decode.Ev_collaboration _ | Decode.Ev_note _ | Decode.Ev_artifact _
+            | Decode.Ev_collaboration {ev_content; _} ->
+                free_slots, (match board_body ev_content with
+                  | Some body -> Source_item {source=item;body}
+                  | None -> Text_item item) :: acc
+            | Decode.Ev_note _ | Decode.Ev_artifact _
             | Decode.Ev_artifact_unreadable _ ->
                 free_slots, Text_item item :: acc)
           (Masc_tui_graphics.evidence_images, [])

@@ -2002,7 +2002,7 @@ Verdicts is the ledger of Gate rulings, not a Goal completion proof. `Schedules`
 and `Fusion` keep their own headers but continue the same `v` walk.
 
 Each side carries its own count on the strip: `Goals·2` is goals with the
-completion judge, `Task Review·7` is tasks waiting for an operator.
+completion judge, `Task Review·7` is tasks waiting for a completion verdict.
 
 ```
  MASC Work  ▸Goals·1  Task Review·2  Task Verdicts  10:44:57  [connected]
@@ -2045,16 +2045,56 @@ rejection on the detail, not a local guess.
 
 #### Task Review
 
-Task Review is the queue of Tasks a keeper submitted for a verdict. The title
-keeps it under Planning and the `Planning·N` badge keeps waiting work visible
-from the top-level strip. It does not mean the same thing as a Goal's
-`Verifying` phase: that phase belongs to the Goal proof agent; this queue is a
-human/operator decision on Task evidence.
+Task Review lists Tasks submitted for completion verification. The normal
+reviewer is the automatic completion authority; an operator can also decide a
+submission. A queue entry does not by itself mean human approval is required.
 
-`a` on the row under the cursor arms an approval and the same key again sends
-it. `x` rejects; the reason is required, so `$EDITOR` opens with a one-field
-form. Both use the Task verification API and retain its admin permission
-boundary.
+The Task flow is `Todo → Claimed → InProgress → AwaitingVerification → Done`.
+A rejection returns the Task to `InProgress` for repair and resubmission. Goal
+proof and final human Goal confirmation are separate from Task completion.
+Task Verdicts is a record of automatic Gate rulings, not another approval step.
+
+The list separates submitted evidence count from required evidence count. The
+counts do not measure requirement coverage. The automatic-review column shows
+its last observed attempt: unobserved, running, stopped, or a recorded verdict.
+A recorded verdict is not proof that its Task transition committed. Open a
+stopped row to read the actual failure reason; this reader does not infer or
+schedule retries from error text.
+
+Press Enter to read a submission. Its title and review reason precede one
+selected evidence item. `e` / `E` select the next / previous evidence; `i`
+expands or folds the evidence index. The compact index is the default so moving
+to another item does not require scrolling past every other evidence body.
+`j` / `k` scroll the current detail, and `[` / `]` move between submissions.
+Completion conditions and required evidence remain available below the body.
+Notes, text files, collaboration snapshots and images are identified separately.
+Individual image selections reuse one graphics slot, including later images in
+the same submission; preview availability still follows the server's response.
+Board snapshots show the saved title, author, body and comments as readable
+text; exporting preserves the original JSON snapshot.
+
+`o` downloads the selected retained item and asks a local application to open
+it; `s` saves a private local copy without opening it. The resulting local path
+stays with that evidence item in the detail, including if the viewer cannot
+open. Copies keep their original basename inside a unique private directory in
+the local temporary directory and never replace existing files. A file reference such as `artifact:reports/a.pdf`
+names a producer-workspace source, not a file on the operator's machine. The
+submission metadata names the server's retained verification record; the
+local-copy path distinguishes confirmed saves from interrupted or failed write
+destinations whose completion is unknown.
+
+The export endpoint is the same admin-authenticated evidence GET with a
+zero-based `item_index`, bound to exact `task_id` and `verification_id`. Both
+ends verify downloaded size and SHA-256; binary export uses retained original
+bytes, including PDF/audio/video files without inline image previews. The model
+inline attachment limit does not restrict operator downloads. A missing
+body, incomplete text snapshot or invalid reference yields a reason rather
+than a purported full file. A successful download or opener request is not
+independent verification of the Task's completion claim.
+
+`a` on the row under the cursor arms an operator approval and the same key
+again sends it. `x` rejects with a required reason in `$EDITOR`. Both retain
+the Task verification API's admin permission boundary.
 
 ### Schedules
 

@@ -200,13 +200,13 @@ let binary_item ?(index = 0) preview =
 
 let image_preview ~media data = Decode.Preview_image { ev_media = media; ev_data = data }
 
-let pictures_of ~convert items =
-  match Picture.prepare ~display:kitty ~convert (Decode.Evidence_items items) with
+let pictures_of ?(layout=Picture.Together) ~convert items =
+  match Picture.prepare ~layout ~display:kitty ~convert (Decode.Evidence_items items) with
   | Picture.Items prepared ->
       List.map
         (function
           | Picture.Binary_item { picture; _ } -> picture
-          | Picture.Text_item _ -> Alcotest.fail "a binary item came back as text")
+          | Picture.Text_item _ | Picture.Source_item _ -> Alcotest.fail "a binary item came back as text")
         prepared
   | Picture.Access_unavailable _ -> Alcotest.fail "available evidence came back unavailable"
 
@@ -325,10 +325,26 @@ let test_pictures_beyond_the_slots_are_listed_by_caption () =
   | Picture.Unshown Picture.No_free_slot -> ()
   | _ -> Alcotest.fail "the picture past the last slot was not named"
 
+let test_individual_images_do_not_exhaust_simultaneous_slots () =
+  let count=List.length Masc_tui_graphics.evidence_images + 1 in
+  let images=List.init count (fun index ->
+    binary_item ~index (image_preview ~media:png (png_of ~width:(10+index) ~height:10))) in
+  let pictures=pictures_of ~layout:Picture.One_at_a_time ~convert:never_convert images in
+  Alcotest.(check int) "every selected image remains prepared" count (List.length pictures);
+  List.iteri (fun index -> function
+    | Picture.Drawable pixels ->
+      Alcotest.(check string) "selected original image bytes survive preparation"
+        (png_of ~width:(10+index) ~height:10) pixels.png;
+      Alcotest.(check int) "individual selections reuse the first image slot"
+        (Masc_tui_graphics.image_id (List.hd Masc_tui_graphics.evidence_images))
+        (Masc_tui_graphics.image_id pixels.slot)
+    | Picture.Undrawn_image _ | Binary_only | Unshown _ ->
+      Alcotest.fail "a later individual image exhausted simultaneous slots") pictures
+
 let test_other_previews_and_items_keep_their_meaning () =
   let note = Decode.Ev_note "tests green" in
   match
-    Picture.prepare ~display:kitty ~convert:never_convert
+    Picture.prepare ~layout:Picture.Together ~display:kitty ~convert:never_convert
       (Decode.Evidence_items
          [ note
          ; binary_item ~index:0 (Decode.Preview_withheld Decode.Withheld_not_image_format)
@@ -349,7 +365,7 @@ let test_other_previews_and_items_keep_their_meaning () =
 
 let test_unavailable_access_passes_through () =
   match
-    Picture.prepare ~display:kitty ~convert:never_convert
+    Picture.prepare ~layout:Picture.Together ~display:kitty ~convert:never_convert
       (Decode.Evidence_access_unavailable "no snapshot")
   with
   | Picture.Access_unavailable "no snapshot" -> ()
@@ -669,7 +685,7 @@ let test_a_terminal_without_pixels_converts_nothing_and_holds_no_slot () =
   List.iter
     (fun display ->
       match
-        Picture.prepare ~display
+        Picture.prepare ~layout:Picture.Together ~display
           ~convert:(fun _ -> Alcotest.fail "a converter ran for a terminal that draws no pixels")
           (Decode.Evidence_items items)
       with
@@ -739,6 +755,8 @@ let () =
             test_a_png_without_a_readable_header_is_named
         ; Alcotest.test_case "pictures beyond the slots are listed by caption" `Quick
             test_pictures_beyond_the_slots_are_listed_by_caption
+        ; Alcotest.test_case "individual image selections never exhaust simultaneous slots" `Quick
+            test_individual_images_do_not_exhaust_simultaneous_slots
         ; Alcotest.test_case "other previews and items keep their meaning" `Quick
             test_other_previews_and_items_keep_their_meaning
         ; Alcotest.test_case "unavailable access passes through" `Quick

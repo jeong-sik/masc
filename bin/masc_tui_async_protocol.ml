@@ -631,6 +631,7 @@ type async_msg =
   | Task_history_loaded of
       string Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
   | Task_cancel_done of string * Masc.Tui_decode.server_identity * task_cancel_outcome
+  | Verification_evidence_exported of Masc_tui_types.verification_export_request * (string, string) result
   | Verification_evidence_loaded of
       Masc_tui_types.verification_evidence_request * (Masc_tui_evidence_picture.evidence,
                 Masc_tui_types.Verification_evidence_read.failure) result
@@ -877,7 +878,7 @@ end = struct
 end
 
 let rec workspace_message_is_read = function
-  | Code_draft_saved _ | Board_attachment_saved _ | Resource_exported _ -> false
+  | Code_draft_saved _ | Board_attachment_saved _ | Resource_exported _ | Verification_evidence_exported _ -> false
   | Keeper_logs_loaded _ -> true
   | Chat_search_finished _ -> true
   | Workspace_scoped (_, _, message)
@@ -1190,7 +1191,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Verification_verdict_done _ | Harness_label_done _
     | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
     | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
-    | Verification_evidence_loaded (_, _) | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
+    | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
     | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
     | Keeper_sandbox_logs_loaded (_, _, _) | Exact_activity_read (_, _)
     | Exact_activity_saved (_, _) | Browser_activity_read (_, _)
@@ -1327,7 +1328,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Verification_verdict_done _ | Harness_label_done _
   | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
   | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
-  | Verification_evidence_loaded (_, _) | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
+  | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
   | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
   | Keeper_sandbox_logs_loaded (_, _, _) | Exact_activity_read (_, _)
   | Exact_activity_saved (_, _) | Browser_activity_read (_, _)

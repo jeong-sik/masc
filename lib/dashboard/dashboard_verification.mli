@@ -2,8 +2,9 @@
 
     Requests contain the submit-time completion contract and evidence envelope.
     Task status is the sole source of the pending obligation and terminal
-    outcome; this projection therefore exposes no request-level status, verdict,
-    or authority identity. *)
+    outcome. A page also carries the last observed automatic review attempt,
+    joined by exact submission/Task identity at read time. That observation is
+    neither Task state nor evidence that a recorded verdict was committed. *)
 
 (** Which question the caller asks of the request store. The store has no
     removal path, so reading it as one list answers "what was ever submitted"

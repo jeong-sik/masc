@@ -7938,6 +7938,14 @@ type verification_evidence_request = {
   ver_workspace : Tui_decode.server_identity option;
 }
 
+type verification_export_request = {
+  vex_key : verification_evidence_key;
+  vex_index : int;
+  vex_authority : workspace_authority;
+  vex_reading : unit ref;
+  vex_progress : Masc_tui_evidence_file.progress Atomic.t;
+}
+
 type usage_section = Usage_plan | Usage_trend | Usage_keepers
 let next_usage_section = function
   | Usage_plan -> Usage_trend | Usage_trend -> Usage_keepers | Usage_keepers -> Usage_plan
@@ -8979,6 +8987,9 @@ type state = {
     (verification_evidence_key, Masc_tui_evidence_picture.evidence,
       Verification_evidence_read.failure) Masc_tui_fetched.source;
   mutable verification_evidence_request: verification_evidence_request option;
+  mutable verification_evidence_cursor: int;
+  mutable verification_evidence_index_open: bool;
+  mutable verification_evidence_saved: (verification_evidence_key * int * Masc_tui_evidence_file.progress) list;
   (* One cache is shared by the calls surface and chat full-detail mode. The
      scope and generation are the authority: cursor position is not, because
      palette/Answering can open a chat without moving the roster cursor. *)
@@ -15815,6 +15826,9 @@ let create_state
   task_document_history = initial_task_document_slot;
   verification_evidence = Masc_tui_fetched.initial;
   verification_evidence_request = None;
+  verification_evidence_cursor = 0;
+  verification_evidence_index_open = false;
+  verification_evidence_saved = [];
   keeper_calls = None;
   keeper_calls_error = None;
   keeper_calls_keeper = None;

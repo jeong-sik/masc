@@ -324,7 +324,9 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
     let attached =
       let* first = poll 0. in
       let* () = if Option.is_none first then Ok () else Error "the ego connection received input before attachment" in
-      Browser_addon_owner.attach_live owner ~client_id ~cleanup:(fun () ->
+      Browser_addon_owner.attach_live ~ego_input:{Browser_ego_operator.status=(fun () -> Peer.input_status peer);
+        busy=(fun () -> Peer.input_busy peer);assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation)}
+        owner ~client_id ~cleanup:(fun () ->
         ignore (Eio.Promise.try_resolve stop ());
         Eio.Promise.await stopped) in
     let served = match attached with
@@ -338,7 +340,7 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
             | Some (command : B.issued) ->
               let result =
                 let* verb, args, actor = Live.decode command |> Result.map_error (fun detail -> Live.Before_effect detail) in
-                Peer.dispatch peer ?actor ~verb args in
+                Peer.dispatch ~command_id:command.id peer ?actor ~verb args in
               (* A refused delivery loses this one result. The server stopped
                  waiting for it, and its caller was told the outcome is
                  unknown; a connection that is gone fails the next poll. *)

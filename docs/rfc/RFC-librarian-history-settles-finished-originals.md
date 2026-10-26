@@ -54,7 +54,15 @@ completed-history Librarian 은 `consume_one` 을 돌 때마다 그 Keeper 의 h
 
 체인은 잎부터 옮긴다. original 하나는 history 기록을 먼저 옮기고, 그 execution 의 gate 기록을 뒤에 옮긴다. 순서는 `settle` 이 정한 대로 기록이 먼저, 본문이 나중이다.
 
-날짜는 각 기록 자기 ID 가 만들어진 UTC 날짜다. history 요청 ID 는 마지막 칸의 uuid v7 에서, gate 요청 ID 는 uuid v7 자체에서 구한다. Curator 처럼 root 날짜를 쓰지 않는 까닭은 3.2 에 있다. 기록 하나만 보고도 보관 위치를 알 수 있어야, 끊긴 이동을 마저 끝낼 때 체인 root 를 찾지 않아도 된다.
+날짜는 Curator 와 같이 체인 root 의 history 요청 ID 가 만들어진 UTC 날짜다(ID 마지막 칸의 uuid v7). 체인의 history 기록과 gate 기록이 모두 이 날짜 아래로 가서, 체인 하나가 보관 위치의 한 날짜 안에 모인다.
+
+본문은 자기 요청 ID 를 담는다(history 요청과 gate 요청 모두 `request_id` 필드). 그래서 옮기는 본문을 다른 기록이 가리키지 않는다.
+
+옮겨도 되는 까닭은 이렇다.
+
+- Finished 는 읽기 위치 정리(`settle_positions`)가 끝난 뒤에만 기록된다(`Commit_observed`). 끝난 original 이 없어도 같은 범위를 다시 읽지 않는다.
+- 실행 단계 거절은 읽기 위치를 건드리지 않는다. 다음 pass 가 같은 범위를 새 original 로 다시 잡는다. 거절 보고에는 지난 original 에서 가져오는 근거가 없다(`refusal_report`).
+- wake discovery(`server_librarian_addon_wake.ml`)는 scope 를 읽을 때 같은 scope 잠금을 쓴다. 옮긴 original 에 결과 알림(`Exact_result_delivered`)이 늦게 오면 "no original owner" 경고 한 줄로 끝난다. 끝난 original 은 깨울 필요가 없다.
 
 옮긴 original 은 다음 pass 의 discovery 에 나오지 않는다. 그 gate 기록도 gate scope 에 없다. 그래서 pass 비용은 끝나지 않은 original 수를 따른다.
 
@@ -62,8 +70,8 @@ completed-history Librarian 은 `consume_one` 을 돌 때마다 그 Keeper 의 h
 
 이동은 여러 파일을 하나씩 옮긴다. 그 사이에 프로세스가 멈출 수 있다. 다음 pass 는 검증 전에 두 가지를 본다.
 
-- **체인 중간에서 멈춘 경우.** discovery 에 나온 original 의 확정된 replacement 자식이 목록에 없고, 그 자식이 보관 위치에 있으면(`Owner.settled`), 이 original 과 그 조상을 이어서 옮긴다. 이 original 과 조상은 앞 pass 에서 이미 옮겨도 된다고 판정된 체인이다. 자식이 보관 위치에도 없으면 지금처럼 `validate_lineage` 가 거절한다.
-- **history 기록만 옮기고 gate 기록을 못 옮긴 경우.** gate scope 의 기록 중 execution 이 discovery 에 없고, 그 execution 의 history 기록이 보관 위치에 있으면 그 gate 기록을 옮긴다. 이런 gate 기록은 검증 결과를 바꾸지 않는다. `read_chain` 은 header 만 보고 execution 이 다르면 넘어간다. 그래서 다음 pass 까지 남아 있어도 된다.
+- **체인 중간에서 멈춘 경우.** discovery 에 나온 original 의 확정된 replacement 자식이 목록에 없고, 그 자식이 체인 root 날짜 아래 보관 위치에 있으면(`Owner.settled`), 자식이 남긴 gate 기록을 먼저 옮기고 이 original 과 그 조상을 이어서 옮긴다. 잎부터 옮기므로 root 는 아직 목록에 있고, 날짜는 root 에서 구한다. 이 original 과 조상은 앞 pass 에서 이미 옮겨도 된다고 판정된 체인이다. 자식이 보관 위치에도 없으면 지금처럼 `validate_lineage` 가 거절한다.
+- **root 의 history 기록만 옮기고 gate 기록을 못 옮긴 경우.** gate scope 의 기록 중 execution 이 discovery 에 없고, 그 execution 의 history 기록이 자기 ID 날짜 아래 보관 위치에 있으면 그 gate 기록을 옮긴다. root 가 아닌 original 에서 멈췄다면 부모가 목록에 남아 앞의 경우가 먼저 처리한다. 그래서 여기 남는 gate 기록의 execution 은 체인 root 이고, 자기 날짜가 곧 체인 날짜다. 이런 gate 기록은 검증 결과를 바꾸지 않는다. `read_chain` 은 header 만 보고 execution 이 다르면 넘어가고, `Inventory` 는 execution 별로 고른다. original 이 하나도 없는 pass 는 gate scope 를 읽지 않으므로, 다음 original 이 생긴 pass 가 옮긴다.
 
 execution 이 discovery 에도 보관 위치에도 없는 gate 기록은 지금과 같이 둔다. 이 RFC 는 그런 기록을 옮기거나 지우지 않는다.
 
@@ -100,6 +108,8 @@ gate 요청 모양이 바뀐다. 옛 기록을 읽는 코드는 만들지 않는
 
 pass 마다 `durable Librarian inventory validated: originals=… unfinished=… gate_records=… elapsed_ms=…` 를 남긴다(#46143 위 관측 PR). 3.1 이 들어가면 `originals` 와 `gate_records` 가 끝나지 않은 일 수 근처에 머물러야 한다.
 
+옮긴 pass 는 `durable Librarian settled finished history: chain_records=… orphan_gates=…` 를, 끊긴 이동을 마저 끝낸 pass 는 `durable Librarian finished an interrupted settle: records=…` 를 남긴다.
+
 ## 4. 다른 방법과 비교
 
 | 방법 | pass 비용 | 좋은 점 | 나쁜 점 |
@@ -114,7 +124,7 @@ pass 마다 `durable Librarian inventory validated: originals=… unfinished=…
 
 #46143 위에 관측 PR, 그 위에 스택으로 올린다.
 
-1. 3.1–3.3: 끝난 체인을 옮기고, 끊긴 이동을 마무리한다. `Lane_addon_tool_request_owner` 에 retained 값의 `Record.t` 를 꺼내는 함수가 필요하다. 지금은 `settle` 이 discovery 의 `Record.t` 만 받는다.
+1. 3.1–3.3: 끝난 체인을 옮기고, 끊긴 이동을 마무리한다. `settle` 은 discovery 의 `Record.t` 만 받으므로, retained 값에서 `Record.t` 를 꺼내는 `Lane_addon_tool_request_owner.listed` 를 mli 에 연다.
 2. 3.4: gate 요청에서 `capture` 를 뺀다. 3.5 의 하드컷이 이 층에 붙는다.
 3. 남은 비용에 대한 상수배 개선. 연구 문서 4.3 에서 고른다.
 
@@ -131,7 +141,7 @@ pass 마다 `durable Librarian inventory validated: originals=… unfinished=…
 
 - Finished original 하나가 끝까지 돈 뒤, 다음 pass 에서 그 history 기록·본문과 gate 기록·본문이 보관 위치로 옮겨지고, 다음 discovery 와 gate scope 에 나오지 않는다.
 - 대체 체인(Conflicted 부모 → Finished 자식)은 잎부터 옮겨진다. 자식만 옮기고 멈춘 상태에서 다음 pass 가 부모를 마저 옮기고, `validate_lineage` 가 거절하지 않는다.
-- history 기록만 옮기고 멈춘 상태에서 다음 pass 가 남은 gate 기록을 옮긴다.
+- root 의 history 기록만 옮기고 멈춘 상태에서, original 이 없는 pass 는 gate 기록을 그대로 두고 다음 original 의 pass 가 옮긴다.
 - 끝나지 않은 original, 대체가 필요한 Conflicted original, replacement 게시 대기인 original 은 옮기지 않는다.
 - 옮긴 뒤에도 Memory 읽기 위치와 receipt 는 그대로다. 같은 범위로 새 original 을 만들지 않는다.
 - gate 요청과 `preparation_intended` 에 `capture` 가 없다. 검증·복구·재시도가 지금과 같은 결론을 낸다.

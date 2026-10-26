@@ -1,0 +1,4 @@
+(test
+ (name test_keeper_guest_survival_runtime)
+ (modules test_keeper_guest_survival_runtime)
+ (libraries masc_test_deps exec_ssh_protocol eio_main))

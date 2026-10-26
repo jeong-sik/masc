@@ -311,15 +311,24 @@ let answer_from_publication source ~since = function
 (* One machine frame is the same bytes for every watcher until the worker
    publishes the next observation. Building and compressing those bytes per
    request made each guest's 300 ms poll re-read, re-serialize and gzip the
-   whole 1.2 MB frame JSON; a frame is now parsed once per published blob and
-   encoded once per observation, then shared. *)
-type live_frame = { etag : string; encoded : Http_response_payload.prepared }
+   whole 1.2 MB frame JSON. A frame is now parsed once per published blob,
+   built once per observation by whichever request comes first (the others
+   wait for the same result), and each encoding is made only when a client
+   first asks for it. *)
+type encoded = string * (string * string) list
+
+type live_frame = {
+  etag : string;
+  identity : string;
+  zstd : encoded Eio.Lazy.t;
+  gzip : encoded Eio.Lazy.t;
+}
 
 (* What a live read found, before any HTTP encoding: a small answer, or the
    complete frame of the current observation. *)
 type live_read =
   | Live_answer of Yojson.Safe.t
-  | Live_full of { blob : Lane_addon_types.evidence; screen : Yojson.Safe.t;
+  | Live_full of { blob : Lane_addon_types.evidence; blob_bytes : int; screen : Yojson.Safe.t;
                    fields : (string * Yojson.Safe.t) list; observation_seq : int; refreshing : bool }
 
 let observed_fields fields ~observation_seq ~refreshing =
@@ -327,35 +336,62 @@ let observed_fields fields ~observation_seq ~refreshing =
 
 type frame_cache = {
   blob : Lane_addon_types.evidence;
+  blob_bytes : int;
   screen : Yojson.Safe.t;
-  frame : ((int * bool) * live_frame) option;
+  frame : ((int * bool) * live_frame Eio.Lazy.t) option;
 }
 
-(* At most one entry per machine: only the frame its worker publishes now is
-   worth keeping. Concurrent misses may both prepare; the last one stays. *)
-let frame_caches : (Machine_lane.t * frame_cache) list Atomic.t = Atomic.make []
+(* One entry per workspace and machine: only the frame its worker publishes
+   now is worth keeping. Blobs are content-addressed, so a hit is exactly
+   what a fresh read would give. *)
+let frame_caches : ((string * Machine_lane.t) * frame_cache) list Atomic.t = Atomic.make []
 
-let cached_frame machine = List.assoc_opt machine (Atomic.get frame_caches)
+let cached_frame key = List.assoc_opt key (Atomic.get frame_caches)
 
-let rec remember_frame machine entry =
+(* Keep a newly read blob unless the same blob is already cached, so a racing
+   first read does not drop a frame another request just started building. *)
+let rec remember_screen key ~blob ~blob_bytes ~screen =
   let current = Atomic.get frame_caches in
-  let next = (machine, entry) :: List.remove_assoc machine current in
-  if not (Atomic.compare_and_set frame_caches current next) then remember_frame machine entry
+  match List.assoc_opt key current with
+  | Some cached when cached.blob = blob -> ()
+  | Some _ | None ->
+      let next = (key, { blob; blob_bytes; screen; frame = None }) :: List.remove_assoc key current in
+      if not (Atomic.compare_and_set frame_caches current next) then
+        remember_screen key ~blob ~blob_bytes ~screen
 
-let live_frame ~source ~blob ~screen ~fields ~observation_seq ~refreshing =
-  let key = (observation_seq, refreshing) in
-  let reusable = match cached_frame source with
-    | Some { blob = cached_blob; frame = Some (cached_key, frame); screen = _ }
-      when cached_blob = blob && cached_key = key -> Some frame
-    | Some { frame = Some _; _ } | Some { frame = None; _ } | None -> None in
-  match reusable with
-  | Some frame -> frame
-  | None ->
-      let frame = Domain_pool_ref.submit_cpu_or_inline (fun () ->
-        let body = Yojson.Safe.to_string (`Assoc (observed_fields fields ~observation_seq ~refreshing)) in
-        { etag = Http.Response.weak_etag_value body; encoded = Http_response_payload.prepare body }) in
-      remember_frame source { blob; screen; frame = Some (key, frame) };
-      frame
+let encode_lazily identity encoding =
+  Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Http_response_payload.compress_encoded_body ~level:3 encoding identity))
+
+let build_frame ~fields ~observation_seq ~refreshing =
+  let identity, etag = Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    let identity = Yojson.Safe.to_string (`Assoc (observed_fields fields ~observation_seq ~refreshing)) in
+    identity, Http.Response.weak_etag_value identity) in
+  { etag; identity
+  ; zstd = encode_lazily identity Http_response_payload.Prefer_zstd
+  ; gzip = encode_lazily identity Http_response_payload.Prefer_gzip }
+
+let live_frame key ~blob ~blob_bytes ~screen ~fields ~observation_seq ~refreshing =
+  let wanted = (observation_seq, refreshing) in
+  let rec claim () =
+    let current = Atomic.get frame_caches in
+    match List.assoc_opt key current with
+    | Some { blob = cached_blob; frame = Some (cached_key, frame); _ }
+      when cached_blob = blob && cached_key = wanted -> frame
+    | Some _ | None ->
+        let frame = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+          build_frame ~fields ~observation_seq ~refreshing) in
+        let entry = { blob; blob_bytes; screen; frame = Some (wanted, frame) } in
+        let next = (key, entry) :: List.remove_assoc key current in
+        if Atomic.compare_and_set frame_caches current next then frame else claim () in
+  Eio.Lazy.force (claim ())
+
+let select_live_frame ~accept_encoding frame =
+  match Http_response_payload.negotiate_encoding accept_encoding with
+  | Http_response_payload.Prefer_zstd -> Eio.Lazy.force frame.zstd
+  | Http_response_payload.Prefer_gzip -> Eio.Lazy.force frame.gzip
+  | Http_response_payload.Identity_only -> frame.identity, [ Http_response_payload.vary_accept_encoding ]
 
 let live_read ~config source ~since =
   let name = match source with Machine_lane.Msx -> "masc_msx_screen" | Dos -> "masc_dos_screen" in
@@ -367,18 +403,21 @@ let live_read ~config source ~since =
   | Some snapshot ->
       let references = List.filter_map (fun (row : Lane_addon_types.row) ->
         Option.map (fun value -> row.evidence,value) (List.assoc_opt "machine_live" row.fields)) snapshot.output.rows in
-      let* blob, screen = match references with
+      let cache_key = (Workspace.masc_dir config, source) in
+      let* blob, blob_bytes, screen = match references with
         | [evidence,value] ->
             let* reference = Lane_addon_types.evidence_of_json value in
             let* () = if List.mem reference evidence then Ok () else Error "machine screen is not declared as row evidence" in
-            (match cached_frame source with
-             | Some cached when cached.blob = reference -> Ok (reference, cached.screen)
+            (match cached_frame cache_key with
+             | Some cached when cached.blob = reference && cached.blob_bytes <= snapshot.max_bytes ->
+                 Ok (reference, cached.blob_bytes, cached.screen)
              | Some _ | None ->
                  let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
                  let* bytes = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.read_blob ~max_bytes:snapshot.max_bytes store reference) in
                  let* screen = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
-                 remember_frame source { blob = reference; screen; frame = None };
-                 Ok (reference, screen))
+                 let blob_bytes = String.length bytes in
+                 remember_screen cache_key ~blob:reference ~blob_bytes ~screen;
+                 Ok (reference, blob_bytes, screen))
         | _ -> Error "worker observation does not provide one machine screen reference" in
       (* Blob I/O yields: an installation can detach or publish a newer frame
          before these bytes return. Only publish the still-current observation. *)
@@ -406,7 +445,7 @@ let live_read ~config source ~since =
                        else Machine_live_publication.Stable {count;incarnation} in
                      (match answer_from_publication source ~since publication with
                       | Needs_locked_read ->
-                          Ok (Live_full { blob; screen; fields;
+                          Ok (Live_full { blob; blob_bytes; screen; fields;
                                           observation_seq = snapshot.observation_seq; refreshing })
                       | Answered (`Assoc unchanged) ->
                           Ok (observed (unchanged @ (match List.assoc_opt "activity" fields with
@@ -419,7 +458,7 @@ let live_read ~config source ~since =
 let live_json ~config source ~since =
   Result.map (function
     | Live_answer json -> json
-    | Live_full { fields; observation_seq; refreshing; blob = _; screen = _ } ->
+    | Live_full { fields; observation_seq; refreshing; blob = _; blob_bytes = _; screen = _ } ->
         `Assoc (observed_fields fields ~observation_seq ~refreshing))
     (live_read ~config source ~since)
 
@@ -449,17 +488,16 @@ let live_workspace_precondition ~config fields =
 
 let respond_live_frame request reqd frame =
   let extra_headers = cors_headers (get_origin request) in
-  let client_tag = Httpun.Headers.get request.Httpun.Request.headers "if-none-match" in
   let validator = [ "etag", frame.etag
                   ; "cache-control", Http.Response.json_revalidate_cache_control ] in
-  match client_tag with
+  match Httpun.Headers.get request.Httpun.Request.headers "if-none-match" with
   | Some client_tag when Http.Response.client_tag_matches ~etag:frame.etag ~client_tag ->
-      Http.Response.bytes ~status:`Not_modified ~headers:(extra_headers @ validator)
-        ~content_type:Http.Response.json_content_type "" reqd
+      Http.Response.not_modified
+        ~headers:(extra_headers @ validator @ [ Http_response_payload.vary_accept_encoding ]) reqd
   | Some _ | None ->
-      let body, encoding = Http_response_payload.select_prepared
+      let body, encoding = select_live_frame
         ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
-        frame.encoded in
+        frame in
       Http.Response.bytes ~headers:(extra_headers @ validator @ encoding)
         ~content_type:Http.Response.json_content_type body reqd
 
@@ -475,9 +513,10 @@ let get_live request reqd =
         (match live_read ~config:(Mcp_server.workspace_config state) source ~since with
          | Ok (Live_answer json) -> Http.Response.json_value_on_cpu ~compress:true ~request
              ~extra_headers:(cors_headers (get_origin request)) json reqd
-         | Ok (Live_full { blob; screen; fields; observation_seq; refreshing }) ->
+         | Ok (Live_full { blob; blob_bytes; screen; fields; observation_seq; refreshing }) ->
+             let key = (Workspace.masc_dir (Mcp_server.workspace_config state), source) in
              respond_live_frame request reqd
-               (live_frame ~source ~blob ~screen ~fields ~observation_seq ~refreshing)
+               (live_frame key ~blob ~blob_bytes ~screen ~fields ~observation_seq ~refreshing)
          | Error detail -> respond_json_value_with_cors ~status:`Service_unavailable request reqd
              (Server_refusal.json ~code:"machine_observation_unavailable" detail)))
     request reqd

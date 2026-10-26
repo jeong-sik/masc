@@ -392,7 +392,7 @@ let loopback_request_authority () =
   | Ok authority -> authority
   | Error `Malformed -> fail "failed to construct loopback request authority"
 
-let dispatch_get ?(headers = []) ~sw ~clock ~state ~authorization ~target =
+let dispatch_get ?(headers = []) ~sw ~clock ~state ~authorization target =
   Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
     let router = Routes.add_routes ~sw ~clock (Masc.Http_server_eio.Router.create ()) in
     Server_auth.publish_server_state state;
@@ -528,7 +528,7 @@ let test_live_route () =
         let config = Masc.Workspace.default_config base_path in
         let clock = (Eio.Stdenv.clock env :> float Eio.Time.clock_ty Eio.Resource.t) in
         let get ?(authorization = Some token) ?headers target =
-          dispatch_get ?headers ~sw ~clock ~state ~authorization ~target
+          dispatch_get ?headers ~sw ~clock ~state ~authorization target
         in
         let with_attached machine f =
           let run ~detach =
@@ -762,7 +762,7 @@ let test_player_watches_live_and_reads_nothing_else () =
               ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Masc.Lane_addon_runtime.For_testing.reset ();
               let config = Masc.Workspace.default_config base_path in
-              let get token target = dispatch_get ~sw ~clock ~state ~authorization:(Some token) ~target in
+              let get token target = dispatch_get ~sw ~clock ~state ~authorization:(Some token) target in
               let status token target = status_of_response (get token target) in
               let exercise machine ~detach =
                 let source_kind, tool_name = match machine with

@@ -251,6 +251,11 @@ module Response : sig
       revalidation is answered without producing the body at all. *)
   val request_holds_tag : etag:string -> Httpun.Request.t -> bool
 
+  (** [`Not_modified] carrying the scoped headers and [headers] (validators,
+      CORS, [Vary]) and nothing else: no body, no [content-length] and no
+      [content-type] (RFC 9110 section 15.4.5). *)
+  val not_modified : headers:(string * string) list -> Httpun.Reqd.t -> unit
+
   (** [`Not_modified] with the strong [ETag] ["\"<etag>\""] and the given
       [Cache-Control], and no body: the answer {!bytes_cached} gives a request
       that already holds the tag. *)

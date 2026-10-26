@@ -39,12 +39,14 @@ let load ~base_path id =
         | Ok _ -> Error (Unavailable "project source identity mismatch")
         | Error message -> Error (Unavailable ("invalid project source metadata: " ^ message)))
      | exception Yojson.Json_error message -> Error (Unavailable message))
-let read ~base_path ~id =
+let read_metadata ~base_path ~id =
   if not (valid_id id) then Error (Invalid "invalid project source id")
   else protect (fun () ->
     let* entries = directory ~base_path in
     let* () = match entries with None -> Error Missing | Some _ -> Ok () in
-    let* source = load ~base_path id in
+    load ~base_path id)
+let read ~base_path ~id = protect (fun () ->
+    let* source = read_metadata ~base_path ~id in
     let blobs = Tool_blob_store.create ~base_path in
     let* files = List.fold_left (fun acc (file : stored_file) ->
       let* acc = acc in

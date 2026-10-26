@@ -1,4 +1,10 @@
 (test
+ (name test_artifact_project_build)
+ (modules test_artifact_project_build)
+ (libraries masc masc.masc_core masc.masc_tool_blob_store
+  alcotest base64 digestif eio_main unix yojson))
+
+(test
  (name test_artifact_project_source)
  (modules test_artifact_project_source)
  (libraries masc masc.masc_core masc.masc_tool_blob_store

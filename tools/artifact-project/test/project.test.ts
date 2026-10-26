@@ -39,6 +39,7 @@ test('installs real React/npm packages, compiles TSX and dynamic imports, embeds
   })
   const frozen = structuredClone(value), root = await workspace(), result = await buildProject(value, root)
   assert.ok(result.output.kind === 'html' && result.build.kind === 'browser_modules')
+  assert.equal(result.build.entry_html, value.build.entry_html)
   assert.deepEqual(value, frozen)
   assert.equal(result.install.mode, 'ci'); assert.equal(result.install.lock_source, 'resolved'); assert.equal(result.build.esbuild, '0.28.2')
   assert.equal(result.output.artifact.sha256, createHash('sha256').update(result.output.artifact.content).digest('hex'))

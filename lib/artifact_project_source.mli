@@ -11,6 +11,8 @@ type t =
   ; install_scripts : bool; files : stored_file list }
 
 val valid_id : string -> bool
+val relative_path : string -> (string, string) result
+val build_of_json : Yojson.Safe.t -> (build, string) result
 val build_to_json : build -> Yojson.Safe.t
 val request_of_json : Yojson.Safe.t -> (request, string) result
 val request_to_json : request -> Yojson.Safe.t

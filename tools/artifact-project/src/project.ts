@@ -266,7 +266,7 @@ export async function buildProject(input: unknown, workspace: string) {
     else throw new ProjectError('build', `Unembedded build output: ${file.path}`)
   }
   const html = serialize(page)
-  return await finish({ kind: 'browser_modules' as const, esbuild: esbuildVersion, inputs: [...inputs], warnings, external_resources: [...externalResources] },
+  return await finish({ kind: 'browser_modules' as const, entry_html: request.build.entry_html, esbuild: esbuildVersion, inputs: [...inputs], warnings, external_resources: [...externalResources] },
     { kind: 'html' as const, artifact: { format: 'html' as const, content: html, sha256: digest(html) } })
   } catch (error) {
     const failure = new ProjectError(error instanceof ProjectError ? error.stage : 'build', error instanceof Error ? error.message : String(error), run)

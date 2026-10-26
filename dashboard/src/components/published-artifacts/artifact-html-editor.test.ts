@@ -20,8 +20,8 @@ afterEach(() => {
   cleanup(); owned.splice(0).forEach(dispose => dispose()); vi.restoreAllMocks(); vi.unstubAllGlobals()
   for (const mascRoot of ['/fixture/.masc','/different-root']) {
     const workspace = {basePath:'/fixture',mascRoot}
-    artifactSentenceRecoveries(workspace,`artifact-${'e'.repeat(32)}`).forEach(record => discardArtifactSentence(record.id))
-    artifactDraftRecoveries(workspace,`artifact-${'e'.repeat(32)}`).forEach(record => discardArtifactDraftRecovery(record.id))
+    artifactSentenceRecoveries(workspace,`artifact-${'e'.repeat(32)}`).forEach(discardArtifactSentence)
+    artifactDraftRecoveries(workspace,`artifact-${'e'.repeat(32)}`).forEach(discardArtifactDraftRecovery)
   }
 })
 
@@ -170,11 +170,17 @@ it('retains a durable sentence while quota blocks transfer to a pending CRDT upd
   expect(storage.getItem(key)).toBe(durable)
   f.select()
   fireEvent.input(await screen.findByLabelText('선택한 문장'),{target:{value:'다음 입력'}})
+  const external={...JSON.parse(durable!),revision:crypto.randomUUID(),input:'다른 탭의 새 문장'}
+  const externalKey=`masc.artifact-sentence-recovery.v1:${external.id}:${external.revision}`
+  storage.setItem(externalKey,JSON.stringify(external));window.dispatchEvent(new Event('storage'))
+  await screen.findByText('다른 탭의 새 문장')
   acknowledge()
   await waitFor(()=>expect(f.session.snapshot.pending).toBe(false))
   await waitFor(()=>expect(storage.getItem(key)).toBeNull())
   expect(sharedSource(f.authority)).toContain('저장 전 문장')
   expect(artifactSentenceRecoveries(f.workspace,f.target.artifact_id).some(record=>record.input==='다음 입력')).toBe(true)
+  expect(storage.getItem(externalKey)).not.toBeNull()
+  expect((screen.getByLabelText('선택한 문장') as HTMLTextAreaElement).value).toBe('다음 입력')
 })
 it('recovers anchors that refer to an unacknowledged local source insertion', async () => {
   const f = await fixture()

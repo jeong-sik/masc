@@ -92,7 +92,7 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
   const [visualPending, setVisualPending] = useState(false)
   const [discussionPending, setDiscussionPending] = useState(false)
   const [reveal, setReveal] = useState<SharedSelection | null>(null)
-  const resumed = useRef(new Set<string>())
+  const resumed = useRef(new Map<string,ArtifactDraftRecovery>())
   const [recoveries, setRecoveries] = useState<ArtifactDraftRecovery[]>([])
   const [comparison, setComparison] = useState<{ base: ArtifactDocument; content: string } | null>(null)
   const [publication, setPublication] = useState<{ base: ArtifactDocument; content: string; snapshot: ArtifactDraftSnapshot } | null>(null)
@@ -133,10 +133,16 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
     return () => { active = false; sessionForClose.current = null; opened?.dispose() }
   }, [])
   useEffect(() => {
+    if(!session)return
+    const refresh=()=>setRecoveries(artifactDraftRecoveries(session.workspace,doc.artifact.id))
+    window.addEventListener('storage',refresh)
+    return ()=>window.removeEventListener('storage',refresh)
+  },[session])
+  useEffect(() => {
     if (!session || session.snapshot.pending || resumed.current.size === 0) return
-    const acknowledged = new Set(resumed.current)
+    const acknowledged = new Map(resumed.current)
     acknowledged.forEach(discardArtifactDraftRecovery); resumed.current.clear()
-    setRecoveries(values => values.filter(value => !acknowledged.has(value.id)))
+    setRecoveries(artifactDraftRecoveries(session.workspace,doc.artifact.id))
   }, [session, state?.pending])
   const draft = (content: string) => ({ title: doc.artifact.title, summary: doc.artifact.summary,
     format: doc.artifact.format, content, task_id: doc.artifact.task_id, goal_id: doc.artifact.goal_id })
@@ -162,9 +168,9 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
       recoveryContent(recovery)
       session.recover(draftBytes(recovery.state))
       if (session.snapshot.recoveryPersisted || !session.snapshot.pending) {
-        discardArtifactDraftRecovery(recovery.id)
-        setRecoveries(values => values.filter(value => value.id !== recovery.id))
-      } else resumed.current.add(recovery.id)
+        discardArtifactDraftRecovery(recovery)
+        setRecoveries(values => values.filter(value => value.revision !== recovery.revision))
+      } else resumed.current.set(recovery.revision,recovery)
     } catch (reason) { setError(reason instanceof Error ? reason.message : '복구 원고를 읽지 못했습니다.') }
   }
   const publish = async () => {
@@ -196,7 +202,7 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, draftRetention, isCur
       }}>원본 편집</button>
     </div>` : null}
     ${state?.pending && !state.recoveryPersisted ? html`<p role="alert">브라우저에 복구 원고를 저장하지 못했습니다. 이 탭을 닫기 전에 원고를 다운로드해 주세요.</p>` : null}
-    ${recoveries.map(recovery => html`<details key=${recovery.id} class="border p-3">
+    ${recoveries.map(recovery => html`<details key=${recovery.revision} class="border p-3">
       <summary>복구 원고 · ${new Date(recovery.at).toLocaleString()}</summary>
       <p>이 브라우저에 남아 있는 원고입니다. 내용을 확인한 뒤 합치거나 다운로드해 주세요.</p>
       <button type="button" onClick=${() => { try { downloadArtifactDraft(draft(recoveryContent(recovery))) } catch (reason) { setError(String(reason)) } }}>복구 원고 다운로드</button>

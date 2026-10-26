@@ -10,8 +10,8 @@ let http_error_detail = function
     Http_client.provider_failure_to_string ~kind ~message
 ;;
 
-let get_json ~sw ~net url =
-  match Http_client.get_sync ~sw ~net ~url ~headers:[] () with
+let get_json ?(headers=[]) ~sw ~net url =
+  match Http_client.get_sync ~sw ~net ~url ~headers () with
   | Ok { status; body; _ } when status >= 200 && status < 300 ->
     (try Ok (Yojson.Safe.from_string body) with
      | Yojson.Json_error msg -> Error msg)

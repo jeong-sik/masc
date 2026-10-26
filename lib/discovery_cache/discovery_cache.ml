@@ -82,8 +82,8 @@ let model_of_status (status : endpoint_info) =
        | Some props -> String_util.trim_nonempty props.model
        | None -> None)
 
-let first_ollama_model_id_for_url url =
-  let cached = get_cached_or_refresh () in
+let first_ollama_model_id_for_url ?(headers=[]) url =
+  let cached = (Atomic.get state).cache.endpoints in
   match List.find_map (fun (status : endpoint_info) ->
     if status.url = url then model_of_status status else None) cached with
   | Some _ as model -> model
@@ -96,6 +96,6 @@ let first_ollama_model_id_for_url url =
            ~protocol:Llm_provider.Discovery.Ollama_native
            ~capabilities:Llm_provider.Capabilities.ollama_capabilities url
        in
-       (match Llm_provider.Discovery.discover ~sw:switch ~net ~endpoints:[ declared ] with
+       (match Llm_provider.Discovery.discover ~headers ~sw:switch ~net ~endpoints:[ declared ] with
         | [ status ] -> model_of_status status
         | _ -> None))

@@ -9,7 +9,7 @@ val parse_model_string
   -> ?api_key_env_overrides:(string * string) list
   -> ?keep_alive:string
   -> ?num_ctx:int
-  -> ?discover:(string -> string option)
+  -> ?discover:((string * string) list -> string -> string option)
   -> string
   -> Llm_provider.Provider_config.t option
 (** Resolve a model label to a hot-path provider config. [None] when the
@@ -19,11 +19,10 @@ val parse_model_string
     Classification carries the selected binding into config construction.
 
     [discover] is consulted only for an Ollama [auto] selection without a
-    declared default. It receives that binding's exact base URL, never a
-    different provider's endpoint. A declared default never triggers discovery.
-    The default is {!Discovery_cache.first_ollama_model_id_for_url}, which reuses
-    a healthy cached model or probes only that exact endpoint in the captured
-    Eio environment.
+    declared default. It receives the selected binding's authentication headers
+    and exact base URL, never another provider's endpoint. A declared default
+    never triggers discovery. The default reads the current cache without a
+    global refresh and probes only that exact endpoint with those headers.
 
     A registered label carries the canonical binding provider id into the
     returned config. Its context window uses that config's provider/model

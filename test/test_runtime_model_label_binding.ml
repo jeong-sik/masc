@@ -25,6 +25,13 @@ base_url = "%s"
 request_path = "/api/chat"
 auth = "none"
 capabilities_base = "ollama"
+[[providers]]
+id = "ollama-keyed"
+kind = "ollama"
+base_url = "%s"
+request_path = "/api/chat"
+auth = "api-key"
+capabilities_base = "ollama"
 [[models]]
 model_id = "overlap"
 base = "openai_chat"
@@ -49,7 +56,7 @@ max_context_tokens = 32768
 supports_tools = true
 supports_tool_choice = true
 supports_required_tool_choice = true
-|} endpoint
+|} endpoint endpoint
 
 let catalog endpoint = match Model_catalog.of_toml_string ~source:"label binding fixture"
   (catalog_text_for_endpoint endpoint) with
@@ -282,9 +289,71 @@ let ollama_auto_uses_production_discovery_cache () =
           "qwen-local" config.Provider_config.model_id
       | None -> Alcotest.fail "production discovery cache did not resolve ollama:auto"))
 
+let ollama_auto_sends_resolved_credential () =
+  let authorize req response =
+    match Cohttp.Header.get (Cohttp.Request.headers req) "authorization" with
+    | Some "Bearer test-ollama-secret" -> response ()
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Unauthorized ~body:"missing credential" ()
+  in
+  let handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/health" -> authorize req (fun () -> Cohttp_eio.Server.respond_string ~status:`OK ~body:"ok" ())
+    | "/api/tags" -> authorize req (fun () -> Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"models":[{"name":"qwen-keyed"}]}|} ())
+    | "/v1/models" -> authorize req (fun () -> Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"data":[{"id":"qwen-keyed","owned_by":"ollama"}]}|} ())
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server handler (fun ~sw ~net ~endpoint ->
+    Discovery_cache.set_env ~sw ~net;
+    with_env "MASC_TEST_OLLAMA_KEY" (Some "test-ollama-secret") (fun () ->
+      with_catalog ~endpoint (fun () ->
+        match Runtime_model_string.parse_model_string
+          ~api_key_env_overrides:["ollama-keyed", "MASC_TEST_OLLAMA_KEY"] "ollama-keyed:auto" with
+        | Some config ->
+          Alcotest.(check string) "keyed discovery resolves the authenticated Ollama model"
+            "qwen-keyed" config.Provider_config.model_id
+        | None -> Alcotest.fail "authenticated Ollama discovery was refused")))
+
+let ollama_auto_does_not_refresh_other_endpoints () =
+  let other_hits = ref 0 in
+  let other_handler _conn req body =
+    incr other_hits;
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/health" -> Cohttp_eio.Server.respond_string ~status:`OK ~body:"ok" ()
+    | "/api/tags" -> Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"models":[{"name":"other-model"}]}|} ()
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  let selected_handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/health" -> Cohttp_eio.Server.respond_string ~status:`OK ~body:"ok" ()
+    | "/api/tags" -> Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:{|{"models":[{"name":"qwen-local"}]}|} ()
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server selected_handler (fun ~sw ~net ~endpoint ->
+    Discovery_cache.set_env ~sw ~net;
+    with_mock_server other_handler (fun ~sw:_ ~net:_ ~endpoint:other_endpoint ->
+      let declared = Llm_provider.Discovery.endpoint
+        ~protocol:Llm_provider.Discovery.Ollama_native
+        ~capabilities:Llm_provider.Capabilities.ollama_capabilities other_endpoint in
+      ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared]);
+      other_hits := 0;
+      with_catalog ~endpoint (fun () ->
+        match Runtime_model_string.parse_model_string "ollama:auto" with
+        | Some config ->
+          Alcotest.(check string) "selected endpoint resolves its own model"
+            "qwen-local" config.Provider_config.model_id;
+          Alcotest.(check int) "cold cache does not refresh unrelated endpoints" 0 !other_hits
+        | None -> Alcotest.fail "cold-cache Ollama discovery was refused")))
+
 let ollama_auto_uses_binding_endpoint () = with_catalog (fun () ->
   let calls = ref [] in
-  let discover endpoint = calls := endpoint :: !calls; Some "qwen-local" in
+  let discover ~headers:_ endpoint = calls := endpoint :: !calls; Some "qwen-local" in
   let config = match Runtime_model_string.parse_model_string ~discover "ollama:auto" with
     | Some config -> config | None -> Alcotest.fail "discovered Ollama model was refused" in
   Alcotest.(check string) "auto resolves the model discovered for this binding"
@@ -293,13 +362,13 @@ let ollama_auto_uses_binding_endpoint () = with_catalog (fun () ->
     ["http://127.0.0.1:11434"] !calls)
 let ollama_auto_without_discovered_model_stays_refused () = with_catalog (fun () ->
   let calls = ref [] in
-  let discover endpoint = calls := endpoint :: !calls; None in
+  let discover ~headers:_ endpoint = calls := endpoint :: !calls; None in
   Alcotest.(check bool) "missing discovered model does not invent a config" true
     (Runtime_model_string.parse_model_string ~discover "ollama:auto" = None);
   Alcotest.(check (list string)) "absence is checked only at the selected endpoint"
     ["http://127.0.0.1:11434"] !calls)
 let declared_default_skips_discovery () = with_catalog (fun () ->
-  let discover _ = Alcotest.fail "declared default must not consult discovery" in
+  let discover ~headers:_ _ = Alcotest.fail "declared default must not consult discovery" in
   let config = match Runtime_model_string.parse_model_string ~discover "label-b:auto" with
     | Some config -> config | None -> Alcotest.fail "declared default was refused" in
   Alcotest.(check string) "declared default wins without discovery" "overlap" config.model_id)
@@ -316,4 +385,6 @@ let () = Alcotest.run "runtime model label binding"
    "ollama auto",["production cache",`Quick,ollama_auto_uses_production_discovery_cache;
      "endpoint discovery",`Quick,ollama_auto_uses_binding_endpoint;
      "no discovered model",`Quick,ollama_auto_without_discovered_model_stays_refused;
-     "declared default skips discovery",`Quick,declared_default_skips_discovery]]
+     "declared default skips discovery",`Quick,declared_default_skips_discovery;
+     "authenticated discovery",`Quick,ollama_auto_sends_resolved_credential;
+     "cold cache endpoint isolation",`Quick,ollama_auto_does_not_refresh_other_endpoints]]

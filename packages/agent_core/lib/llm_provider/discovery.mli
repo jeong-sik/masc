@@ -86,7 +86,8 @@ type endpoint_status =
     Does not raise for endpoint failures; all probe errors are captured in the
     corresponding [failures] field. *)
 val discover
-  :  sw:Eio.Switch.t
+  :  ?headers:(string * string) list
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> endpoints:endpoint list
   -> endpoint_status list

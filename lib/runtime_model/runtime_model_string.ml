@@ -71,7 +71,11 @@ let make_binding_config
          | Some _ -> None
          | None ->
            (match binding.kind with
-            | Ollama -> discover binding.base_url
+            | Ollama ->
+              discover
+                ~headers:(Llm_provider.Provider_config.auth_headers_for_kind_and_key
+                  ~kind:binding.kind ~api_key)
+                binding.base_url
             | Anthropic | Kimi | OpenAI_compat | Gemini | Glm -> None)) in
     match Runtime_binding.to_provider_config ?model binding with
     | Error _ -> None

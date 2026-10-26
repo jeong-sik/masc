@@ -19,7 +19,8 @@
     surfaced defensively — discovery hits HTTP endpoints only, so
     CLI-subprocess terminals cannot reach this match. *)
 val get_json
-  :  sw:Eio.Switch.t
+  :  ?headers:(string * string) list
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> string
   -> (Yojson.Safe.t, string) result
@@ -28,7 +29,8 @@ val get_json
     transport failures retain explicit error context for endpoint-local
     observability. *)
 val probe_liveness
-  :  sw:Eio.Switch.t
+  :  ?headers:(string * string) list
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> string
   -> (unit, string) result

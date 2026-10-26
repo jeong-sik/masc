@@ -1,0 +1,98 @@
+(** An endpoint controller's original main-process handle and activation gate.
+
+    Linux clone3 creates the pidfd atomically with the child. Before activation
+    the child resets inherited signals, closes other descriptors, drops to the
+    explicit distinct non-root UID/GID, clears capabilities, applies no-new-privs
+    and waits on its private gate. No OCaml code runs in the cloned child.
+
+    This is a process primitive, not an authenticated async backend. The caller
+    owns the executable/path jail, network/filesystem/namespace policy, original
+    registry rendezvous, process-tree containment and durable output/exit receipt.
+    Root payloads need a measured namespace boundary in that supervisor. *)
+type t
+
+type invalid_input =
+  | Executable | Arguments | Environment | Directory | Payload_uid | Payload_gid
+  | Shared_uid | Controller_not_root
+
+type stage =
+  | Allocate | Duplicate_stdio | Open_directory | Create_gate | Mask_signals | Create_child
+  | Child_descriptors | Child_close_descriptors | Child_session | Child_directory
+  | Child_credentials | Child_capabilities | Child_signals | Child_ready | Child_gate | Child_exec
+  | Control_io | Signal_main | Wait_main | Close_handle | Duplicate_watch
+
+type error =
+  | Unsupported
+  | Invalid_input of invalid_input
+  | Syscall_failed of { stage : stage; error : Unix.error }
+  | Child_rejected of { stage : stage; error : Unix.error }
+  | Protocol_error
+  | Not_ready
+  | Already_decided
+  | Control_lost
+  | Closed
+  | Exit_unavailable
+  | Cleanup_failed of { primary : error option; error : Unix.error }
+
+val error_to_string : error -> string
+exception Release_failed of error
+(** A failed switch cleanup remains visible to its owner. *)
+
+type decision = Undecided | Activate_requested | Abort_requested
+
+type preparation = Pending | Ready | Rejected of { stage : stage; error : Unix.error }
+type control = Open | Ended
+type boundary = { preparation : preparation; decision : decision; control : control }
+(** Ended is descriptor EOF/closure, not proof that exec succeeded. *)
+
+type exit_status = Exited of int | Signaled of int
+(** Signal numbers are actual host numbers, not OCaml's abstract signal codes. *)
+type exit_observation = { status : exit_status; boundary : boundary }
+(** This is the original OS child's physical status. Before activation, or if
+    exec was rejected, it is a bootstrap exit and must not become a payload exit.
+    Neither activation nor control EOF alone proves that a payload ran. *)
+
+val create :
+  sw:Eio.Switch.t -> executable:string -> argv:string array -> env:string array ->
+  cwd:string -> payload_uid:int -> payload_gid:int ->
+  stdin:Unix.file_descr -> stdout:Unix.file_descr -> stderr:Unix.file_descr ->
+  (t, error) result
+(** Eio-only. Creates a paused child in a system thread and registers ownership
+    before cancellation can escape. Environment and stdio are explicit, with no
+    implicit credential/environment inheritance. Stdio descriptors are borrowed.
+    No numeric PID or external handle is accepted or returned.
+
+    [sw] MUST be endpoint-operation owned, not a control-connection/model-turn
+    switch. Its teardown kills/reaps this original MAIN process using the pidfd;
+    it is not a complete process-tree cancellation or output settlement contract.
+    Unsupported kernels/platforms refuse instead of using a numeric PID fallback. *)
+
+val observe_boundary : t -> (boundary, error) result
+(** Nonblocking; consumes/caches private child setup/error observations. *)
+val await_ready : t -> (unit, error) result
+(** Cancellable Eio wait. Cancelling this waiter never cancels the child. *)
+val activate : t -> (unit, error) result
+val abort : t -> (unit, error) result
+(** A single gate decision. Abort can precede readiness. Repeating/changing a
+    decision is refused. A supervisor must commit its original rendezvous or
+    cancellation intent before the corresponding effect. *)
+
+type termination = Terminate | Kill
+type signal_result = Requested | Already_exited
+val signal_main : t -> termination -> (signal_result, error) result
+(** Only the original pidfd is signalled. Requested is not termination proof.
+    Descendants are outside this primitive; no PID/group fallback exists. *)
+val poll_exit : t -> (exit_observation option, error) result
+(** None means the original child has not been reaped by this owner yet.
+    Lost wait authority is an error, never a successful exit or fresh PID lookup. *)
+val await_exit : t -> (exit_observation, error) result
+(** Cancellable Eio wait; the cached original status survives reaping. *)
+val release : t -> (exit_observation, error) result
+(** Explicit endpoint-owner teardown: SIGKILL the original main process, reap
+    through its pidfd and close private descriptors. Idempotent after settlement.
+    It does not claim descendant cleanup, complete output or Task/Goal success. *)
+
+module For_testing : sig
+  val linux_build : bool
+  (** Compilation platform only, never a functioning kernel capability probe. *)
+end

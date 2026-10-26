@@ -1,0 +1,7 @@
+(include_subdirs no)
+(library
+ (name endpoint_process_gate)
+ (public_name masc.endpoint_process_gate)
+ (modules endpoint_process_gate)
+ (libraries eio eio.unix unix threads)
+ (foreign_stubs (language c) (names endpoint_process_gate_stubs)))

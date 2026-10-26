@@ -166,6 +166,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          request. Keep it labeled, including the existing workspace warning. *)
       c.push (coordinator_status_row state ~style status);
       Option.iter (fun (client : Browser_lane_view.client) ->
+        Option.iter (fun row -> c.push_styled ~style:(Theme.recede ()) ("  " ^ row))
+          (Browser_lane_view.space_observation_row client);
         List.iter (fun (work : Browser_lane.interaction_activity) ->
           let phase = match work.phase with
             | Browser_lane.Interaction_queued -> "queued"
@@ -226,10 +228,11 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               else c.push_styled ~style:Ansi.reset line);
           (* One row whatever the choice, so the rows below do not move with
              the cursor. *)
-          c.push_styled ~style:(Theme.recede ())
-            ("  " ^ Option.value ~default:""
-               (if view.advanced_choices then Option.bind (List.nth_opt choices cursor) browser_choice_detail
-                else None));
+          let choice = List.nth_opt choices cursor in
+          let details = List.filter_map Fun.id
+            [Option.bind choice browser_choice_observation;
+             (if view.advanced_choices then Option.bind choice browser_choice_detail else None)] in
+          c.push_styled ~style:(Theme.recede ()) ("  " ^ String.concat " · " details);
           Option.iter (c.push_styled ~style:(Theme.recede ())) empty_line;
           (* A terminal too short for everything loses rows from the end.
              With no host yet, the host's rows only say how one is started:

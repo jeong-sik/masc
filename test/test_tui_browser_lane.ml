@@ -6,9 +6,9 @@ let success = function Ok value -> value | Error detail -> failwith detail
 let tab id title = `Assoc ["id", `Int id; "title", `String title;
                            "url", `String "https://example.org/"; "active", `Bool (id = 2)]
 let firefox = { client_id = "11111111-1111-4111-8111-111111111111"; browser = Firefox;
-                transport = Browser_lane.Web_extension; space = None; interactions = []; last_activities = [] }
+                transport = Browser_lane.Web_extension; space = None; space_observation = None; interactions = []; last_activities = [] }
 let zen = { client_id = "22222222-2222-4222-8222-222222222222"; browser = Zen;
-            transport = Browser_lane.Web_extension; space = None; interactions = []; last_activities = [] }
+            transport = Browser_lane.Web_extension; space = None; space_observation = None; interactions = []; last_activities = [] }
 let pinned () = choose_client firefox { (create ()) with clients = Some [firefox; zen] }
 (* A connection list that came with no word of the BiDi host. *)
 let found listed = { listed; bidi_host = Host_not_reported; automatic = None }
@@ -420,8 +420,9 @@ let test_page_context_decode () =
     ((success (parse_tab value)).ego_page=Some unknown)
 
 let test_clients_decode () =
-  let row ?(transport="web_extension") ?(space=`Null) id browser =
-    `Assoc ["clientId", `String id; "browser", `String browser; "transport", `String transport; "space",space; "interactions", `List []; "lastActivities", `List []] in
+  let row ?(transport="web_extension") ?(space=`Null) ?(observation=`Null) id browser =
+    `Assoc ["clientId", `String id; "browser", `String browser; "transport", `String transport; "space",space;
+      "spaceObservation",observation; "interactions", `List []; "lastActivities", `List []] in
   let envelope rows = `Assoc ["ok", `Bool true; "data", `Assoc ["clients", `List rows]] in
   expect "backend-normalized Zen identity preserved"
     (decode_clients (envelope [row zen.client_id "zen"]) = Ok [zen]);
@@ -434,6 +435,42 @@ let test_clients_decode () =
   expect "Ego inventory preserves the observed Space identity"
     (decode_clients (envelope [row ~transport:"ego_task_space" ~space:(Browser_lane.ego_space_to_json space)
       ego.client_id "ego_lite"]) = Ok [ego]);
+  let observed : Masc.Browser_ego_space_observation.t =
+    {space={space with name="SDK current name"};ownership="future-native-owner";observed_at=1793046401.836675} in
+  let observed_json=Masc.Browser_ego_space_observation.to_json observed in
+  let observed_row observation=row ~transport:"ego_task_space"
+    ~space:(Browser_lane.ego_space_to_json space) ~observation ego.client_id "ego_lite" in
+  expect "native Space metadata and its own timestamp are preserved"
+    (decode_clients (envelope [observed_row observed_json])=Ok [{ego with space_observation=Some observed}]);
+  List.iter (fun observation ->
+    expect "foreign malformed and duplicate native metadata is refused"
+      (Result.is_error (decode_clients (envelope [observed_row observation]))))
+    [Masc.Browser_ego_space_observation.to_json {observed with space={space with id=52}};
+     Masc.Browser_ego_space_observation.to_json {observed with observed_at=infinity};
+     Masc.Browser_ego_space_observation.to_json {observed with ownership=" "};
+     (match observed_json with `Assoc fields -> `Assoc (("ownership",`String "other")::fields) | _ -> assert false)];
+  expect "non Ego transport cannot publish Space control metadata"
+    (Result.is_error (decode_clients (envelope [row ~observation:observed_json firefox.client_id "firefox"])));
+  expect "missing metadata field is not silently treated as unknown"
+    (Result.is_error (decode_clients (envelope [match observed_row observed_json with
+      | `Assoc fields -> `Assoc (List.remove_assoc "spaceObservation" fields) | _ -> assert false])));
+  let original={ (choose_client ego {(create ()) with clients=Some [ego]}) with
+    load=Loading (91,Read_refresh);refresh_pending=Some 91;selected_tab=Some 2;
+    scroll=37;url_draft=Some "https://example.org/draft"} in
+  let observed_client={ego with space_observation=Some observed} in
+  let updated=accept_activity (Ok (found [observed_client])) original in
+  expect "metadata refresh does not change the pending request or connection authority"
+    (updated.selected_client=Some observed_client && same_client ego observed_client
+     && updated.load=original.load && updated.refresh_pending=original.refresh_pending
+     && updated.selected_tab=original.selected_tab && updated.scroll=original.scroll
+     && updated.url_draft=original.url_draft && request_body updated=request_body original);
+  let unavailable=accept_activity (Error "worker unreachable") updated in
+  expect "failed refresh retains dated metadata with the original failure"
+    (unavailable.selected_client=Some observed_client && unavailable.activity_error=Some "worker unreachable");
+  let invalidated=accept_activity (Ok (found [ego])) unavailable in
+  expect "matching null publication clears cached metadata without changing request ownership"
+    (invalidated.selected_client=Some ego && invalidated.load=original.load
+     && request_body invalidated=request_body original && invalidated.activity_error=None);
   let refresh client =
     let waiting={ (choose_client ego {(create ()) with clients=Some [ego]}) with
       load=Loading (91,Discover Read_after_discovery);selected_tab=Some 2} in
@@ -579,7 +616,7 @@ let test_unified_browser_picker () =
 
 let test_bidi_host_discovery () =
   let row id = `Assoc ["clientId", `String id; "browser", `String "firefox";
-                       "interactions", `List []; "lastActivities", `List []; "transport", `String "web_extension";"space",`Null] in
+                       "interactions", `List []; "lastActivities", `List []; "transport", `String "web_extension";"space",`Null;"spaceObservation",`Null] in
   let answer extra =
     `Assoc ["ok", `Bool true; "data", `Assoc (("clients", `List [row firefox.client_id]) :: extra)] in
   let ended = host_report (let ending = host_ending Record.Session_left in
@@ -678,7 +715,7 @@ let test_operation_is_refresh () =
 let automatic_answer ?(listed=[firefox;zen]) browse work =
   let row (client : client) = `Assoc ["clientId",`String client.client_id;
     "browser",`String (Browser_lane.browser_name client.browser);
-    "transport",`String (Browser_lane.live_transport_to_string client.transport);"space",Browser_lane.client_space_to_json client.space;"interactions",`List [];"lastActivities",`List []] in
+    "transport",`String (Browser_lane.live_transport_to_string client.transport);"space",Browser_lane.client_space_to_json client.space;"spaceObservation",`Null;"interactions",`List [];"lastActivities",`List []] in
   `Assoc ["ok",`Bool true;"data",`Assoc ["clients",`List (List.map row listed);
     "automatic",`Assoc ["browse",browse;"work",work]]]
 let recommended lane client reason = `Assoc ["ok",`Bool true;"data",`Assoc [

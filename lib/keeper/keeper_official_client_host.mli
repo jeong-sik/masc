@@ -784,6 +784,11 @@ val dynamic_tools :
     exact terminal evidence already stops the turn. Its errors are recorded in
     [terminal_error] and close the host loop without inventing a checkpoint.
     An existing terminal result takes priority over a callback stop.
+    With [base_path], the original result is durably retained under its own
+    host producer identity before a host stop is returned to the transport.
+    Retention failure records [terminal_error], so the runtime cannot settle
+    that stop as successful consumption. Calls without a host stop do not
+    enter this retention path.
 
     [tool_approval] settles a [pre_tool_use] hook that answers
     [ElicitToolApproval], exactly as it does on AGENT_CORE's own tool loop --

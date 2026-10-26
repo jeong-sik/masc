@@ -3106,8 +3106,11 @@ let test_original_result_crosses_checkpoint_and_fresh_session () =
     check bool "Muse resume receives the original other-runtime result" true
       (String_util.contains_substring (read_text (Filename.concat base_path "resume-prompt.txt"))
          "ORIGINAL_CROSS_RUNTIME_RESULT");
-    check int "host checkpoint does not ACK original result data" 1
+    check int "host checkpoint preserves original and newly returned tool results" 2
       (List.length (Keeper_client_tool_outbox.receipt_ids (load ())));
+    check bool "host checkpoint preserves its own completed tool result" true
+      (String_util.contains_substring
+        (String.concat "\n" (Keeper_client_tool_outbox.developer_context (load ()))) "MASC_TOOL_RESULT");
     Store.clear_then ~base_path ~keeper_name (fun () -> ()) |> get;
     write_fixture ~base_path [];
     (match (run_turn_with ~base_path ~tool ~model_input_projection:project ()).outcome.result with

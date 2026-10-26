@@ -1334,6 +1334,7 @@ let replace_capability_file_with
              ~recovery_phase:Recovery_prepare
              (fun () ->
                 Recovery.prepare
+                  ~publication:Recovery.Replace
                   ~store:recovery
                   ~locator
                   ~permissions:recovery_target.permissions)
@@ -2303,6 +2304,7 @@ module Capability_write_for_testing = struct
              | Ok permissions ->
                (match
                   Recovery.For_testing.prepare_with_operation_id
+                    ~publication:Recovery.Replace
                     ~store
                     ~operation_id:
                       (Recovery.For_testing.operation_id_of_uuid operation_id)

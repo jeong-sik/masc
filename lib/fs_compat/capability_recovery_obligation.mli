@@ -12,7 +12,9 @@
     record. Recovery policy remains outside this module: callers reacquire the
     persisted allowed-root path, inject already-validated capabilities, inspect
     only the exact derived staging leaf, and select an explicit typed forensic
-    outcome. *)
+    outcome. Version 2 requires an explicit typed publication intent. An absent,
+    duplicate or unknown intent or unsupported version is refused without
+    rewriting the original record or inferring an operation from its target. *)
 
 type owner
 type operation_id
@@ -21,6 +23,10 @@ type identity
 type permissions
 
 type locator
+type publication = Replace | Create_exclusive
+(** Original publication intent, retained through Bound and forensic records.
+    This is evidence, not permission to mutate or recover a target. *)
+
 type prepared
 type bound
 type forensic
@@ -264,6 +270,7 @@ val locator_parent_components : locator -> Capability_leaf.t list
 val locator_parent : locator -> identity
 val locator_target_leaf : locator -> Capability_leaf.t
 
+val prepared_publication : prepared -> publication
 val prepared_operation_id : prepared -> operation_id
 val prepared_locator : prepared -> locator
 
@@ -390,6 +397,7 @@ val store_owner : store -> owner
     id and retries without a cap; record existence never drives policy. *)
 val prepare
   :  store:store
+  -> publication:publication
   -> locator:locator
   -> permissions:permissions
   -> (prepared, transition_error) result
@@ -542,6 +550,7 @@ module For_testing : sig
   val prepare_with_operation_id
     :  store:store
     -> operation_id:operation_id
+    -> publication:publication
     -> locator:locator
     -> permissions:permissions
     -> (prepared, transition_error) result

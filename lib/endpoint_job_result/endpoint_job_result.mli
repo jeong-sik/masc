@@ -1,7 +1,8 @@
 (** Read an original immutable terminal observation after its live supervisor
     or endpoint boot is gone. Protected receipts prove historical physical/tree
-    settlement and complete output; they never restore kernel handles or prove
-    that a payload executed, succeeded or performed no effects. *)
+    settlement and complete output. Physical observations leave payload effects
+    uncertain; proven non-starts retain separate gate evidence. Neither restores
+    kernel handles nor establishes payload or Task/Goal success. *)
 module P = Endpoint_job_protocol
 module R = Endpoint_job_registry
 module O = Endpoint_job_output
@@ -25,9 +26,9 @@ type gate = { preparation : preparation; decision : G.decision; control : contro
     short. Rejection and failure diagnostics are display evidence only; never parse them to infer
     exec, non-start, retry, signalling or cleanup permission. *)
 val encode :
-  status:P.response -> launch_id:P.Id.t -> input:input_delivery -> gate:gate ->
+  status:P.response -> physical_exit:P.exit_status -> launch_id:P.Id.t -> input:input_delivery -> gate:gate ->
   (string,error) result
-(** Pure structural encoding of a pending sealed physical observation with a
+(** Pure structural encoding of a pending sealed physical or proven non-start observation with a
     domain-separated payload checksum. This grants no provenance, publication
     or readiness authority; the trusted producer must supply actual evidence. *)
 val load :
@@ -50,6 +51,8 @@ val load :
 val sha256 : t -> P.Sha256.t
 val input_delivery : t -> input_delivery
 val gate : t -> gate
+val physical_exit : t -> P.exit_status
+(** Raw original OS status, including bootstrap exits for proven non-starts. *)
 val inspect : t -> (P.response,error) result
 (** Revalidate retained original receipt and output attachments, refresh only
     legitimate original source progress, then return Result_ready for the exact

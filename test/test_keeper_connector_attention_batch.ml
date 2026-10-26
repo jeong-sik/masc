@@ -1307,6 +1307,14 @@ let test_checkpoint_rotates_whole_connector_conversation_after_boundary () =
   Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
   @@ fun () ->
   with_ctx "checkpoint-conversation-rotation" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    (match Keeper_owner_registry.install_from_store
+        ~sw:ctx.sw ~operation_runner:None ~on_turn_slot_released:None ctx.config with
+     | Ok _ -> ()
+     | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+    (match Keeper_owner_registry.create_meta ~base_path meta with
+     | Ok (Some _) -> ()
+     | Ok None -> fail "conversation rotation fixture metadata disappeared"
+     | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
     let require = function Ok value -> value | Error detail -> fail detail in
     let make channel message arrived_at = connector_attention_stimulus
       ~base_path ~keeper_name ~channel_id:channel ~message_id:message ~arrived_at
@@ -1969,6 +1977,14 @@ let test_running_source_observes_new_completion_after_intake () =
     @@ fun () ->
     with_ctx (Printf.sprintf "successor-frontier-%d" backlog_size)
       (fun ~base_path ~keeper_name ~meta ~ctx ->
+        (match Keeper_owner_registry.install_from_store
+            ~sw:ctx.sw ~operation_runner:None ~on_turn_slot_released:None ctx.config with
+         | Ok _ -> ()
+         | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+        (match Keeper_owner_registry.create_meta ~base_path meta with
+         | Ok (Some _) -> ()
+         | Ok None -> fail "successor frontier fixture metadata disappeared"
+         | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
         let require = function Ok value -> value | Error detail -> fail detail in
         let delegate id terminal : Q.stimulus =
           {post_id=id;urgency=Immediate;arrived_at=1.;

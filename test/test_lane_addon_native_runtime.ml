@@ -305,7 +305,7 @@ def handle(conn):
         if op=="snapshot" and os.path.exists(lose): os.unlink(lose);lost=True
         if op=="snapshot": result={"reply":"receipt"} if lost or a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False},"stagehand":{"activity":"disabled","registered":False,"session":"unknown","locate":False}}}}
         elif op=="poll":
-            client=dict(req["client"]);client["interactions"]=[];clients[client["clientId"]]=client
+            client=dict(req["client"]);client["interactions"]=[];client["lastActivities"]=[];client["spaceObservation"]=None;clients[client["clientId"]]=client
             result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}
         elif op=="disconnect":
             clients.pop(req["clientId"],None);result={"reply":"receipt"}
@@ -668,6 +668,32 @@ hooks = ["validate_input", "validate_output"]
     | Ok (Browser_addon_wire.Poll_result _) -> ()
     | Ok _|Error _ -> fail "fixture client registration failed" in
   register other ego;
+  let metadata=public Browser_capabilities.Tabs ["mode",`String "connections"] in
+  check bool "connection discovery succeeds across two visible workers" true (Tool_result.is_success metadata);
+  let listed=Tool_result.data metadata |> member "clients" |> Yojson.Safe.Util.to_list in
+  check (list string) "connection discovery keeps each worker's observed identity"
+    (List.sort String.compare [Browser_lane.client_id_to_string new_client.client_id;Browser_lane.client_id_to_string ego.client_id])
+    (List.map (text "clientId") listed |> List.sort String.compare);
+  check bool "metadata discovery sends no exported browser command" true
+    (not (Sys.file_exists (issued other_id)) && not (Sys.file_exists (issued replacement)));
+  let metadata_no_goal=Browser_addon_tools.handle ~initial_goal_ids:(fun () -> fail "connection inventory must not read Goal defaults")
+    ~config ~access ~principal:Lane_addon_call_context.Operator ~reserved:[] ~keeper_name:None
+    ~tool:Browser_capabilities.Tabs ~tool_name:"connection-inventory" ~start_time:(Tool_timing.start ())
+    (`Assoc ["mode",`String "connections"]) in
+  check bool "metadata inventory is independent of current Task Goal" true (Tool_result.is_success metadata_no_goal);
+  List.iter (fun extra -> check bool "connection inventory cannot hide a bound operation" true
+    (Tool_result.is_failed (public Browser_capabilities.Tabs ["mode",`String "connections";extra])))
+    ["clientId",`String (Browser_lane.client_id_to_string ego.client_id);"lane",`String "live";
+     "tabId",`Int 1;"requiredActions",`List []];
+  check bool "anonymous callers cannot read private connection metadata" true
+    (Tool_result.is_failed (Browser_addon_tools.handle ~config ~access
+      ~principal:Lane_addon_call_context.Anonymous ~reserved:[] ~keeper_name:None
+      ~tool:Browser_capabilities.Tabs ~tool_name:"connections" ~start_time:(Tool_timing.start ())
+      (`Assoc ["mode",`String "connections"])));
+  let aggregate_view=Browser_addon_view.connection_inventory ~config ~access ~bidi_host in
+  check bool "HTTP inventory projection no longer needs one selected worker" true (Tool_result.is_success aggregate_view);
+  check int "HTTP projection exposes both validated choices" 2
+    (Tool_result.data aggregate_view |> member "clients" |> Yojson.Safe.Util.to_list |> List.length);
   let connect selection=Browser_addon_host.connect ~selection ~config ~access
     ~principal:(Lane_addon_call_context.Keeper "browser-selector") ~reserved:[] in
   check bool "global exported-name ambiguity remains" true
@@ -722,6 +748,12 @@ hooks = ["validate_input", "validate_output"]
     (Result.is_error (connect (Browser_addon_host.Goal_connection binding)));
   register other ego;
   register next ego;
+  let duplicate_inventory=public Browser_capabilities.Tabs ["mode",`String "connections"] in
+  check bool "aggregate reports duplicate identities as incomplete" true
+    (Tool_result.data duplicate_inventory |> member "inventoryComplete" = `Bool false);
+  check (list string) "aggregate never presents either duplicate as a selectable client"
+    [Browser_lane.client_id_to_string new_client.client_id]
+    (Tool_result.data duplicate_inventory |> member "clients" |> Yojson.Safe.Util.to_list |> List.map (text "clientId"));
   check bool "duplicate client identity is not silently assigned" true
     (Result.is_error (connect (Browser_addon_host.Observed_client ego.client_id)));
   ignore (call next (Browser_addon_wire.Disconnect ego.client_id));

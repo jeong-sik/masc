@@ -5933,7 +5933,12 @@ module Browser_lane_view = struct
   (* Automatic resolves only before binding. Once bound, even a disconnected
      connection remains the owner until an explicit browser choice. *)
   type selection = Unbound | Work_unbound | Live_unbound | Bound_automatic | Bound_explicit
-  type discovered = { listed : client list; bidi_host : bidi_host; automatic : automatic option }
+  type inventory_report =
+    | Inventory_not_reported
+    | Inventory_reported of Masc.Browser_connection_inventory.issue list
+    | Inventory_report_unreadable of string
+  type discovered = { listed : client list; bidi_host : bidi_host;
+    inventory_report : inventory_report; automatic : automatic option }
   (* [clients] is what the last discovery answered, and [None] until one has:
      a discovery that failed leaves no list rather than an empty one, so the
      picker cannot tell an operator there is no browser when it could not ask.
@@ -5954,6 +5959,7 @@ module Browser_lane_view = struct
     read_continuation : read_continuation;
     unserved_gesture : unserved_gesture option;
     bidi_host : bidi_host;
+    inventory_report : inventory_report;
     automatic : automatic option; selection : selection; pending_open : bool; advanced_choices : bool;
   }
 
@@ -5976,13 +5982,14 @@ module Browser_lane_view = struct
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
       read_continuation = No_read_continuation; unserved_gesture = None;
-      bidi_host = Host_not_reported; automatic = None; selection = Unbound;
+      bidi_host = Host_not_reported; inventory_report = Inventory_not_reported;
+      automatic = None; selection = Unbound;
       pending_open = false; advanced_choices = false }
   let switch_source source _t = { (create ()) with source;
     selection = (match source with Live -> Live_unbound | Automation | Stagehand -> Bound_explicit) }
   let choose_automatic () = create ()
   let choose_work t = { (create ()) with clients = t.clients; bidi_host = t.bidi_host;
-    automatic = t.automatic; selection = Work_unbound }
+    inventory_report = t.inventory_report; automatic = t.automatic; selection = Work_unbound }
   let prepare_open t =
     match t.selection, t.source with
     | (Bound_automatic | Bound_explicit), (Automation | Stagehand) -> t, Open_session
@@ -6666,7 +6673,8 @@ module Browser_lane_view = struct
     | Live_unbound -> Some (Discover Choose_client)
     | Bound_automatic | Bound_explicit ->
         if browser_choice_selected before choice then None else Some Read
-  let withdraw_discovery t = { t with clients = None; bidi_host = Host_not_reported; automatic = None }
+  let withdraw_discovery t = { t with clients = None; bidi_host = Host_not_reported;
+    inventory_report = Inventory_not_reported; automatic = None }
   let bind_recommendation recommendation t =
     match recommendation.lane, recommendation.client_id with
     | Live, Some id ->
@@ -6695,21 +6703,22 @@ module Browser_lane_view = struct
           (match List.find_opt (same_client original) observed.listed with
            | Some current -> Some current | None -> Some original) in
       {t with clients=Some observed.listed;selected_client;bidi_host=observed.bidi_host;
-        automatic=observed.automatic;activity_error=None}
+        inventory_report=observed.inventory_report;automatic=observed.automatic;activity_error=None}
 
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
          | Error detail ->
-             { t with clients = None; bidi_host = Host_not_reported; automatic = None;
+             { t with clients = None; bidi_host = Host_not_reported;
+               inventory_report = Inventory_not_reported; automatic = None;
                client_picker = Some 0; pending_open = false; load = Failed detail }, false
-         | Ok { listed = clients; bidi_host; automatic } ->
+         | Ok { listed = clients; bidi_host; inventory_report; automatic } ->
              let selected_client = Option.map (fun selected ->
                match List.find_opt (same_client selected) clients with
                | Some current -> current
                | None -> selected) t.selected_client in
-             let next = { t with clients = Some clients; selected_client; bidi_host; automatic;
+             let next = { t with clients = Some clients; selected_client; bidi_host; inventory_report; automatic;
                activity_error=None;load = Idle } in
              if purpose = Choose_client then { next with client_picker = Some 0 }, false
              else match t.selection with
@@ -6878,24 +6887,54 @@ module Browser_lane_view = struct
               | Ok {lane=Live;_} -> Error "work browser recommendation must name an owned session"
               | Ok {lane=(Automation | Stagehand);_} | Error _ -> Ok (Some {browse;work})))
     | _ -> Error "expected object"
+  let decode_inventory_report fields =
+    let issues=match List.filter (fun (key,_) -> key="inventoryIssues") fields with
+    | [] -> Inventory_not_reported
+    | [_,value] ->
+        (match Masc.Browser_connection_inventory.issues_of_json value with
+         | Ok issues -> Inventory_reported issues
+         | Error detail -> Inventory_report_unreadable detail)
+    | _::_::_ -> Inventory_report_unreadable "duplicate inventoryIssues field" in
+    match List.filter (fun (key,_) -> key="inventoryComplete") fields with
+    | [] -> issues
+    | [_,`Bool complete] ->
+        (match complete,issues with
+         | (true,Inventory_reported [] | false,Inventory_reported (_::_)) -> issues
+         | (true|false),Inventory_report_unreadable _ -> issues
+         | (true|false),Inventory_not_reported ->
+             Inventory_report_unreadable "inventoryComplete requires inventoryIssues"
+         | true,Inventory_reported (_::_) ->
+             Inventory_report_unreadable "complete browser inventory reports issues"
+         | false,Inventory_reported [] ->
+             Inventory_report_unreadable "incomplete browser inventory has no issue details")
+    | [_,_] -> Inventory_report_unreadable "invalid inventoryComplete field"
+    | _::_::_ -> Inventory_report_unreadable "duplicate inventoryComplete field"
   let decode_discovery json =
     let* listed = decode_clients json in
     (* The same [data] the connections were read from. A server from before
        the report has no such field. *)
     let* data = field "data" json in
-    let* reported =
+    let* reported,inventory_report =
       match data with
-      | `Assoc fields -> Ok (List.assoc_opt "bidiHost" fields)
+      | `Assoc fields -> Ok (List.assoc_opt "bidiHost" fields,decode_inventory_report fields)
       | _ -> Error "expected object"
     in
     (* Invalid automatic policy refuses automatic work without hiding the
        separately validated inventory used for an explicit browser choice. *)
+    let invalid_automatic message =
+      let refused = Error {kind=Invalid_automatic_response;code="invalid_automatic_response";message} in
+      Some {browse=refused;work=refused} in
     let automatic = match decode_automatic data with
       | Ok automatic -> automatic
-      | Error message ->
-          let refused = Error {kind=Invalid_automatic_response;code="invalid_automatic_response";message} in
-          Some {browse=refused;work=refused} in
-    Ok { listed; bidi_host = decode_bidi_host reported; automatic }
+      | Error message -> invalid_automatic message in
+    let automatic = match inventory_report,automatic with
+      | Inventory_report_unreadable detail,_ -> invalid_automatic detail
+      | Inventory_reported (_::_),Some {browse=Error browse;work=Error work}
+          when not (can_offer_work_browser browse.kind) && not (can_offer_work_browser work.kind) -> automatic
+      | Inventory_reported (_::_),(Some _|None) ->
+          invalid_automatic "Browser inventory is incomplete; choose an observed browser explicitly"
+      | (Inventory_not_reported|Inventory_reported []),(Some _|None) -> automatic in
+    Ok { listed; bidi_host = decode_bidi_host reported; inventory_report; automatic }
   let parse_client_id source json =
     let* value = field "clientId" json in
     match source, value with

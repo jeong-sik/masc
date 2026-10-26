@@ -93,3 +93,13 @@ let clients ~bidi_host host=run (fun () ->
   Ok (`Assoc ["clients",`List published.client_rows;"automatic",`Assoc ["browse",decision B.Tabs_list;
     "work",decision (B.Session_open {headless=Some false})];
     "bidiHost",Browser_bidi_host_status.to_json bidi_host]))
+let connection_inventory ~config ~access ~bidi_host=run (fun () ->
+  let* inventory=Host.connection_inventory ~config ~access |> Result.map_error (function
+    | Host.Snapshot_unavailable detail ->
+        failure ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail
+    | Snapshot_unreadable detail ->
+        failure ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect detail) in
+  match Browser_connection_inventory.to_json inventory with
+  | `Assoc fields -> Ok (`Assoc (("bidiHost",Browser_bidi_host_status.to_json bidi_host)::fields))
+  | _ -> Error (failure ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
+      "browser connection inventory is unreadable"))

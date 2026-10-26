@@ -1,0 +1,4 @@
+### Fixed
+
+- Browser connection discovery lists validated clients across visible workers without dispatching browser commands. Partial observations and duplicate identities remain explicit, and the TUI preserves the selected Page while refusing automatic fallback on incomplete inventory.
+- The native worker test fixture publishes the required activity and Space observation fields, matching the strict snapshot decoder.

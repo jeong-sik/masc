@@ -29,6 +29,11 @@ val selection_snapshot : t -> (Browser_addon_observation.published * Browser_sel
 (** The worker's [Snapshot] reply as the host chooses from it. A worker
     answers only while it serves, so its live lane is on. A lost reply leaves
     the worker serving ({!Browser_addon_wire.changes_nothing}). *)
+val connection_inventory : config:Workspace.config -> access:Lane_addon_sources.access ->
+  (Browser_connection_inventory.t, snapshot_failure) result
+(** Read all caller-visible ready services without selecting an export or
+    issuing a browser command. Preserve worker failures and unready services
+    as inventory issues. No attached service at all is an unavailable result. *)
 type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
 (** The original successful MCP receipt remains available if a caller's

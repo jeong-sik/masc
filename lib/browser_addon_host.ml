@@ -77,6 +77,26 @@ let snapshot t = snapshot_service ~config:t.config ~access:t.access ~service:t.s
 (* A worker answers its snapshot only while it serves (decode_snapshot), so
    the live lane it reports is on. *)
 type snapshot_failure = Snapshot_unavailable of string | Snapshot_unreadable of string
+let connection_inventory ~config ~access =
+  let reading=R.browser_service_reading ~config ~access in
+  match reading.services,reading.unready with
+  | [],[] -> Error (Snapshot_unavailable "no browser Add-on is attached")
+  | (_::_),_|[],(_::_) ->
+    let module I=Browser_connection_inventory in
+    let issues=List.map (fun (unready:Lane_addon_unready.t) ->
+      I.Source_unready {instance_id=unready.instance_id;message=Lane_addon_unready.message unready}) reading.unready in
+    let observations,issues=List.fold_left (fun (observations,issues) (service:R.browser_service) ->
+      match snapshot_service ~config ~access ~service with
+      | Error (Browser_addon_client.Unavailable detail|Outcome_unknown detail) ->
+          Log.Misc.warn "Browser inventory could not read worker %s: %s" service.instance_id detail;
+          observations,I.Source_unavailable {instance_id=service.instance_id;message="worker snapshot could not be read"}::issues
+      | Ok value ->
+        let decoded=let* _=Lane_addon_action.canonical value in Browser_addon_observation.decode_snapshot value in
+        (match decoded with
+         | Error message -> observations,I.Source_unreadable {instance_id=service.instance_id;message}::issues
+         | Ok published -> {I.instance_id=service.instance_id;published}::observations,issues))
+      ([],List.rev issues) reading.services in
+    Ok (I.build ~observations:(List.rev observations) ~issues:(List.rev issues))
 let selection_snapshot t =
   match snapshot t with
   | Error (Browser_addon_client.Unavailable detail|Outcome_unknown detail) -> Error (Snapshot_unavailable detail)

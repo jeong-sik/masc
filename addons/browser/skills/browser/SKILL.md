@@ -15,6 +15,15 @@ without opening or navigating one. Keep `browserSelection.lane` and
 for all work on its tabs/documents. An unavailable selection must not be
 replaced silently.
 
+When browser workers are ambiguous, call `BrowserTabs` with
+`{"mode":"connections"}` alone. This reads worker metadata across the
+installations visible to you, without Page calls or opening a session. Inspect
+`inventoryIssues` and `inventoryComplete`, then name the observed live UUID for
+tab discovery and later work. Duplicate UUIDs are excluded from selectable
+clients. An incomplete list is not evidence that no browser exists. These
+sequential observations do not grant control; later explicit calls revalidate
+the original connection. Do not mix this mode with a lane, tab or requirements.
+
 For initial discovery, give `BrowserTabs`, or `BrowserSession` with
 `action = "open"`, the `requiredActions` the work needs, such as `["hover","pointer_drag"]`. The host
 chooses a compatible available connection or refuses before dispatch; it checks

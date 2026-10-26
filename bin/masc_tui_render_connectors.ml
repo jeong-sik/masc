@@ -53,8 +53,14 @@ let browser_lane_connection_rows (view : Browser_lane_view.t) =
             ^ (match work.tab_id with Some id -> " · tab " ^ string_of_int id | None -> " · space"))
           client.last_activities in
         metadata @ pending @ settled in
+  let inventory = match view.inventory_report with
+    | Browser_lane_view.Inventory_not_reported -> []
+    | Inventory_reported issues -> List.map (fun issue -> Theme.warn (),
+        "  " ^ Terminal_text.single_line (Masc.Browser_connection_inventory.issue_message issue)) issues
+    | Inventory_report_unreadable detail -> [Theme.warn (),
+        "  Inventory report unreadable · " ^ Terminal_text.single_line detail] in
   selected @ Option.to_list (Option.map (fun detail -> Theme.warn (),
-    "  Activity refresh failed · " ^ Terminal_text.single_line detail) view.activity_error)
+    "  Activity refresh failed · " ^ Terminal_text.single_line detail) view.activity_error) @ inventory
 
 let browser_lane_fixed_rows ~connection_rows view =
   (* Status, selection, tab, URL, divider and text position are always drawn.

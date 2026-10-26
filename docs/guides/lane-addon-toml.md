@@ -300,7 +300,9 @@ detach가 확인되면 해당 source는 이후 discovery에서 빠진다. 이미
 
 설치가 내보내는 도구는 Keeper의 Agent Core 실행에서 `keeper_tool_search`로 필요할 때
 로딩한다. 처음에는 검색 목록에 이름이 나타나며, 선택한 도구의 스키마가 같은 실행의 다음
-모델 요청부터 전달된다. Browser 패키지의 `browser_command`도 이 경로를 사용한다.
+모델 요청부터 전달된다. Browser 서비스(`service = "browser"`) 패키지의 export 는
+공개 도구가 아니라서 이 목록에 오르지 않는다. Keeper 는 host 의 `Browser*` 도구를 쓰고,
+host 가 고른 설치의 export 를 그 신원으로 부른다.
 설치별 도구 접근 권한과 Keeper의 `tool_deny`는 검색 전에 적용한다.
 
 공식 클라이언트 연결에도 같은 지연 로딩 계획을 전달한다. Codex에는 `deferLoading`을,

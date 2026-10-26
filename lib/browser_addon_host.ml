@@ -20,10 +20,9 @@ let connect ~config ~access ~principal ~reserved =
         | Some reason -> reason
         | None -> "no browser Add-on is attached"))
     | _::_::_ -> Error (R.Unavailable "multiple visible browser Add-ons are attached") in
-  let* reading=R.tool_export_reading ~config ~access ~reserved |> Result.map_error (fun detail -> R.Unavailable detail) in
   let* export=match List.filter (fun (export:R.tool_export) ->
     export.instance_id=service.instance_id && export.tool.name=Browser_addon_tool.definition.name
-    && Lane_addon_tool_export.equal_owner export.owner service.owner) reading.exports with
+    && Lane_addon_tool_export.equal_owner export.owner service.owner) (R.browser_export_reading ~config ~access) with
     | [export] -> Ok export
     | []|_::_::_ -> Error (R.Unavailable "the original browser Add-on command is unavailable") in
   Ok {config;access;principal;reserved;service;export}

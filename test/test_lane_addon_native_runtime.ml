@@ -403,6 +403,17 @@ hooks = ["validate_input", "validate_output"]
     List.find (fun (service:R.browser_service) -> service.instance_id=id) (services ()) in
   let id=attach "normal" in
   let original=selected id in
+  let installation (export:R.tool_export)=export.instance_id=id in
+  check bool "the browser export is not a public tool" true
+    (match R.tool_export_reading ~config ~access ~reserved:[] with
+     | Ok reading -> not (List.exists installation reading.exports)
+     | Error _ -> false);
+  check bool "nor in the public export snapshot" false
+    (List.exists installation (R.tool_export_snapshot ~config ~access ~reserved:[]).exports);
+  check bool "the browser host reads it by the service's identity" true
+    (List.exists (fun (export:R.tool_export) -> installation export
+      && Lane_addon_tool_export.equal_owner export.owner original.owner)
+      (R.browser_export_reading ~config ~access));
   let environment=In_channel.with_open_bin (Filename.concat root ("environment-"^id)) In_channel.input_all
     |> Yojson.Safe.from_string in
   List.iter (fun process -> List.iter (fun property ->
@@ -417,9 +428,13 @@ hooks = ["validate_input", "validate_output"]
   check bool "anonymous caller cannot acquire host authority" true
     (Result.is_error (Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated
       ~principal:Lane_addon_call_context.Anonymous ~reserved:[]));
-  check bool "public command cannot hide a reserved host name" true
-    (Result.is_error (Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated
+  (* The browser export is not a public name, so a host tool of the same name
+     hides nothing and the public reading does not refuse it. *)
+  check bool "a host tool named like the browser export leaves the browser host connected" true
+    (Result.is_ok (Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated
       ~principal:Lane_addon_call_context.Operator ~reserved:[Browser_addon_tool.definition.name]));
+  check bool "nor makes the public reading collide" true
+    (Result.is_ok (R.tool_export_reading ~config ~access ~reserved:[Browser_addon_tool.definition.name]));
   check bool "public host uses selected input middleware" true
     (match Browser_addon_host.call host ~arguments:(`Assoc ["actor",`String "forged"]) with
      | Error (R.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
@@ -453,6 +468,13 @@ hooks = ["validate_input", "validate_output"]
   write reject_snapshot "reject";
   ignore (dispatch config R.Observe ["instance_id",`String id]);
   wait clock (fun () -> inspect id |> member "phase" |> text "kind"="failed");
+  let failed_installation (unready:Lane_addon_unready.t)=unready.instance_id=id in
+  check bool "a failed browser installation is not named among public tools" false
+    (match R.tool_export_reading ~config ~access ~reserved:[] with
+     | Ok reading -> List.exists failed_installation reading.unready
+     | Error _ -> true);
+  check bool "the browser host still reads why it cannot serve" true
+    (List.exists failed_installation (R.browser_service_reading ~config ~access).unready);
   check bool "temporary observation failure does not retire native client" true
     (match poll client with Error (Browser_addon_ingress.Unavailable _) -> true | _ -> false);
   Unix.unlink reject_snapshot;
@@ -763,6 +785,11 @@ max_reply_bytes = 65536
   check int "nor send it into another observation" browser_seq (seq browser);
   let second=attach manifest [] in
   wait clock (fun () -> ready second);
+  check bool "two browser installations exporting one name leave the public tools readable" true
+    (Result.is_ok (R.tool_export_reading ~config ~access ~reserved:[]));
+  check int "and the browser host reads both exports by identity" 2
+    (List.length (List.filter (fun (export:R.tool_export) -> export.tool.name=Browser_addon_tool.definition.name)
+      (R.browser_export_reading ~config ~access)));
   let second_request=Filename.concat root ("idle-request-"^second) in
   Unix.unlink idle_request;
   observe consumer;

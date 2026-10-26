@@ -37,6 +37,7 @@ let pending () =
          :: ("wake_due_at", `Float 1793002425.)
          :: ("wake_due_at_iso", `String "2026-10-26T08:13:45Z")
          :: ("wake_payload_digest", `String "payload-1")
+         :: ("resolved_owner", `String "reviewer")
          :: ("pending_count", `Int 4) :: identity)
     ; "keeper_reaction_evidence", `Assoc
         (("projection_status", `String "matched_stimulus")
@@ -120,13 +121,59 @@ let test_unavailable_is_not_a_negative () =
   let unknown row = match (decoded row).stage with
     | Observation.Unknown _ -> ()
     | Observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
-    | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
+    | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
     | Settling | Transferring -> Alcotest.fail "unavailable evidence became confirmed progress" in
   unknown (pending () |> nested "keeper_queue_evidence" (replace "projection_status" (`String "read_error")));
   unknown (pending () |> nested "keeper_reaction_evidence" (replace "projection_status" (`String "quarantined")));
   unknown (pending () |> nested "keeper_queue_evidence" (replace "projection_status" (`String "future_value")));
   unknown (pending () |> nested "keeper_reaction_evidence" (replace "event_queue_ack_seen" (`Bool true)));
   stage Observation.Queued (pending () |> replace "keeper_reaction_evidence" `Null)
+
+let test_terminal_contradiction_cannot_become_completed () =
+  let row = pending () |> terminal "completed"
+    |> nested "keeper_reaction_evidence"
+         (replace "projection_status" (`String "conflicting_terminal_evidence")) in
+  let result = (decoded row).stage in
+  Alcotest.(check bool) "contradiction is unconfirmed" true
+    (match result with
+     | Observation.Unknown _ -> true
+     | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
+     | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
+     | Settling | Transferring -> false)
+
+let test_cross_source_terminal_disagreement () =
+  let cancelled_reaction = pending () |> nested "keeper_reaction_evidence"
+    (fun reaction -> reaction
+      |> replace "projection_status" (`String "matched_terminal_cancelled")
+      |> replace "event_queue_cancelled_seen" (`Bool true)) in
+  List.iter (fun outcome ->
+    let result = decoded (terminal outcome cancelled_reaction) in
+    Alcotest.(check bool) "terminal disagreement stays unconfirmed" true
+      (match result.stage with
+       | Observation.Unknown _ -> true
+       | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started
+       | Turn_ended | Consumed | Completed | Failed _ | Cancelled _ | Settling | Transferring -> false))
+    ["completed"; "failed"];
+  let consumed = pending () |> nested "keeper_reaction_evidence"
+    (replace "event_queue_ack_seen" (`Bool true)) in
+  Alcotest.(check bool) "ack does not hide cancellation conflict" false
+    ((decoded (terminal "cancelled" consumed)).stage = Observation.Cancelled (Some "producer evidence"));
+  stage (Observation.Failed (Some "producer evidence")) (terminal "failed" consumed)
+
+let test_queue_absence_is_not_pending_delivery () =
+  let row = pending () |> nested "keeper_queue_evidence"
+      (replace "projection_status" (`String "not_found")) in
+  stage Observation.Missing row
+
+let test_transferred_owner_ack_is_not_recipient_completion () =
+  let transferred = pending ()
+    |> nested "keeper_queue_evidence" (replace "resolved_owner" (`String "recipient"))
+    |> nested "keeper_reaction_evidence"
+      (fun reaction -> reaction
+        |> replace "projection_status" (`String "matched_consumed_ack")
+        |> replace "event_queue_ack_seen" (`Bool true)) in
+  stage (Observation.Queued_at "recipient") transferred;
+  stage (Observation.Cancelled (Some "producer evidence")) (terminal "cancelled" transferred)
 
 let test_dispatch_failure_retains_reason () =
   stage (Observation.Dispatch_failed (Some "queue write failed"))
@@ -152,6 +199,10 @@ let () = Alcotest.run "schedule occurrence observation"
       ; Alcotest.test_case "durable outcomes and unsettled projection" `Quick test_durable_results_and_projection
       ; Alcotest.test_case "exact occurrence isolation" `Quick test_another_occurrence_cannot_supply_progress
       ; Alcotest.test_case "unavailable and contradictory observations" `Quick test_unavailable_is_not_a_negative
+      ; Alcotest.test_case "terminal contradiction remains unconfirmed" `Quick test_terminal_contradiction_cannot_become_completed
+      ; Alcotest.test_case "cross-source terminal disagreement" `Quick test_cross_source_terminal_disagreement
+      ; Alcotest.test_case "exact queue absence is not pending" `Quick test_queue_absence_is_not_pending_delivery
+      ; Alcotest.test_case "transfer ACK belongs to previous owner" `Quick test_transferred_owner_ack_is_not_recipient_completion
       ; Alcotest.test_case "dispatch failure and absent occurrence" `Quick test_dispatch_failure_retains_reason
       ; Alcotest.test_case "malformed wire evidence" `Quick test_malformed_evidence_is_refused
       ] ]

@@ -6,6 +6,8 @@ type stage =
   | Dispatching
   | Dispatch_failed of string option
   | Queued
+  | Queued_at of string
+  | Missing
   | Turn_started
   | Turn_ended
   | Consumed

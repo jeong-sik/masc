@@ -1717,7 +1717,10 @@ does not dispatch, interrupt or acknowledge a wake.
 A delivered one-shot stays visible while queued, even though the schedule
 store calls its dispatch `succeeded`. The notice separates queued delivery,
 turn start, turn end, consumption and the durable occurrence result. A turn
-ending does not prove the work completed. Failure includes its recorded reason;
+ending does not prove the work completed. A durable completed occurrence confirms
+turn processing, not delivery of the requested result to a channel or file.
+Transferred pending work names the recipient; an exact queue miss stays unconfirmed
+instead of appearing queued. Failure includes its recorded reason;
 unknown or conflicting evidence remains unconfirmed. Being busy on another
 request never makes this Job appear started.
 

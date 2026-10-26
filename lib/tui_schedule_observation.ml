@@ -3,6 +3,8 @@ type stage =
   | Dispatching
   | Dispatch_failed of string option
   | Queued
+  | Queued_at of string
+  | Missing
   | Turn_started
   | Turn_ended
   | Consumed
@@ -14,6 +16,16 @@ type stage =
   | Unknown of string
 
 type t = { stage : stage; due_at_iso : string option }
+
+type reaction =
+  | Unobserved
+  | Observed of stage
+  | Terminal_conflict
+
+let reaction_stage = function
+  | Unobserved -> Unknown "예약 수신 미확인"
+  | Observed stage -> stage
+  | Terminal_conflict -> Unknown "예약 소비 증거 충돌"
 
 let ( let* ) = Result.bind
 
@@ -110,14 +122,15 @@ let decode row_json =
                 let* () = same "keeper_name" keeper fields in
                 same "post_id" stimulus fields in
               let* reaction = evidence_fields row "keeper_reaction_evidence" in
-              let* reaction_stage = match reaction with
-                | None -> Ok None
+              let* reaction_observation = match reaction with
+                | None -> Ok Unobserved
                 | Some reaction ->
                     let* projection = text "projection_status" reaction in
                     (match projection with
-                     | "read_error" | "quarantined" | "conflicting_terminal_evidence"
+                     | "conflicting_terminal_evidence" -> Ok Terminal_conflict
+                     | "read_error" | "quarantined"
                      | "invalid_stimulus_id" | "missing_stimulus_id" | "unrecognized_receipt" ->
-                         Ok (Some (Unknown "예약 반응 조회 불가"))
+                         Ok (Observed (Unknown "예약 반응 조회 불가"))
                      | "matched_stimulus" | "matched_turn_started" | "matched_turn_finished"
                      | "matched_consumed_ack" | "matched_terminal_cancelled" | "not_found" ->
                          let* () = check_identity reaction in
@@ -128,16 +141,16 @@ let decode row_json =
                          let* acked = optional_bool "event_queue_ack_seen" reaction in
                          let* cancelled = optional_bool "event_queue_cancelled_seen" reaction in
                          if acked = Some true && cancelled = Some true then
-                           Ok (Some (Unknown "예약 소비 증거 충돌"))
-                         else if cancelled = Some true then Ok (Some (Cancelled None))
-                         else if acked = Some true then Ok (Some Consumed)
-                         else if ended = Some true then Ok (Some Turn_ended)
-                         else if started = Some true then Ok (Some Turn_started)
-                         else if seen = Some true then Ok (Some Queued)
-                         else Ok None
-                     | _ -> Ok (Some (Unknown "예약 반응 상태 미지원"))) in
+                           Ok Terminal_conflict
+                         else if cancelled = Some true then Ok (Observed (Cancelled None))
+                         else if acked = Some true then Ok (Observed Consumed)
+                         else if ended = Some true then Ok (Observed Turn_ended)
+                         else if started = Some true then Ok (Observed Turn_started)
+                         else if seen = Some true then Ok (Observed Queued)
+                         else Ok Unobserved
+                     | _ -> Ok (Observed (Unknown "예약 반응 상태 미지원"))) in
               (match queue with
-               | None -> Ok (Option.value ~default:(Unknown "예약 수신 미확인") reaction_stage)
+               | None -> Ok (reaction_stage reaction_observation)
                | Some queue ->
                    let* projection = text "projection_status" queue in
                    let matched expected =
@@ -151,29 +164,64 @@ let decode row_json =
                    let terminal outcome make =
                      let* reason = optional_text "terminal_reason" queue in
                      let* () = same "terminal_outcome" outcome queue in
-                     matched (make reason) in
-                   match projection with
-                   | "matched_pending" ->
-                       (match reaction_stage with
-                        | Some (Consumed | Cancelled _) -> matched (Unknown "예약 큐와 소비 증거 재확인 필요")
-                        | Some (Unknown _ | Queued | Turn_started | Turn_ended as stage) -> matched stage
-                        | None -> matched Queued
-                        | Some (No_occurrence | Dispatching | Dispatch_failed _ | Completed | Failed _
-                               | Settling | Transferring) -> matched (Unknown "예약 반응 재확인 필요"))
-                   | "matched_terminal_completed" -> terminal "completed" (fun _ -> Completed)
-                   | "matched_terminal_failed" -> terminal "failed" (fun reason -> Failed reason)
-                   | "matched_terminal_cancelled" -> terminal "cancelled" (fun reason -> Cancelled reason)
-                   | "terminal_projection_pending" -> matched Settling
-                   | "transfer_projection_pending" -> matched Transferring
-                   | "not_found" -> matched (Option.value ~default:(Unknown "예약 수신 미확인") reaction_stage)
-                   | "withdrawn_at_cancel" | "retained_terminal_wake" -> matched (Cancelled None)
-                   | "read_error" | "evidence_invalid" | "unrecognized_receipt" ->
-                       Ok (Unknown "예약 큐 조회 불가")
-                   | _ -> Ok (Unknown "예약 큐 상태 미지원"))
+                     let result = make reason in
+                     let* owner = text "resolved_owner" queue in
+                     (* The reaction ledger belongs to the original owner. Its
+                        transfer ACK is not the recipient's completion/cancel. *)
+                     let disagrees = if not (String.equal owner keeper) then false
+                       else match reaction_observation with
+                       | Terminal_conflict -> true
+                       | Unobserved -> false
+                       | Observed (Cancelled _) ->
+                           (match result with
+                            | Completed | Failed _ -> true
+                            | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
+                            | Turn_started | Turn_ended | Consumed | Cancelled _ | Settling
+                            | Transferring | Unknown _ -> false)
+                       | Observed Consumed ->
+                           (match result with
+                            | Cancelled _ -> true
+                            | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
+                            | Turn_started | Turn_ended | Consumed | Completed | Failed _
+                            | Settling | Transferring | Unknown _ -> false)
+                       | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
+                                  | Turn_started | Turn_ended | Completed | Failed _ | Settling
+                                  | Transferring | Unknown _) -> false in
+                     matched (if disagrees then Unknown "예약 종결 증거 충돌" else result) in
+                   match reaction_observation with
+                   | Terminal_conflict -> Ok (Unknown "예약 소비 증거 충돌")
+                   | Unobserved | Observed _ ->
+                     (match projection with
+                      | "matched_pending" ->
+                          let* owner = text "resolved_owner" queue in
+                          if not (String.equal owner keeper) then matched (Queued_at owner)
+                          else (match reaction_observation with
+                           | Observed (Consumed | Cancelled _) -> matched (Unknown "예약 큐와 소비 증거 재확인 필요")
+                           | Observed (Unknown _ | Queued | Turn_started | Turn_ended as stage) -> matched stage
+                           | Unobserved -> matched Queued
+                           | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌")
+                           | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Completed | Failed _
+                                      | Missing | Queued_at _ | Settling | Transferring) -> matched (Unknown "예약 반응 재확인 필요"))
+                      | "matched_terminal_completed" -> terminal "completed" (fun _ -> Completed)
+                      | "matched_terminal_failed" -> terminal "failed" (fun reason -> Failed reason)
+                      | "matched_terminal_cancelled" -> terminal "cancelled" (fun reason -> Cancelled reason)
+                      | "terminal_projection_pending" -> matched Settling
+                      | "transfer_projection_pending" -> matched Transferring
+                      | "not_found" ->
+                          (match reaction_observation with
+                           | Unobserved | Observed Queued -> matched Missing
+                           | Observed ((No_occurrence | Dispatching | Dispatch_failed _ | Completed | Failed _
+                                      | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Cancelled _
+                                      | Settling | Transferring | Unknown _) as stage) -> matched stage
+                           | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌"))
+                      | "withdrawn_at_cancel" | "retained_terminal_wake" -> matched (Cancelled None)
+                      | "read_error" | "evidence_invalid" | "unrecognized_receipt" ->
+                          Ok (Unknown "예약 큐 조회 불가")
+                      | _ -> Ok (Unknown "예약 큐 상태 미지원")))
         | _ -> Ok (Unknown "예약 전달 상태 미지원") in
       Ok { stage; due_at_iso }
 
 let needs_attention = function
-  | Dispatching | Dispatch_failed _ | Queued | Turn_started | Turn_ended
+  | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started | Turn_ended
   | Consumed | Failed _ | Settling | Transferring | Unknown _ -> true
   | No_occurrence | Completed | Cancelled _ -> false

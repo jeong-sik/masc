@@ -55,7 +55,8 @@ let with_definition descriptor operation =
         | Tool_execute | Tool_search_files | Tool_read_file | Tool_edit_file
         | Tool_write_file | Tool_lane_status | Tool_tools_list | Tool_capability_search
         | Tool_context_status | Tool_peer_artifact | Tool_artifact_read | Tool_skill_validate
-        | Tool_artifact_publish | Tool_skill_publish | Tool_workspace_memory_read
+        | Tool_artifact_draft | Tool_artifact_publish | Tool_skill_publish
+        | Tool_workspace_memory_read
         | Tool_memory_search | Tool_memory_select | Tool_memory_retract | Tool_memory_write
         | Tool_constitution_write | Tool_constitution_read | Tool_constitution_remove
         | Tool_wiki_search | Tool_wiki_read | Tool_surface_read | Tool_surface_post

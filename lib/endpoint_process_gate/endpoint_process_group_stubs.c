@@ -18,15 +18,15 @@
 #endif
 
 struct group_handle {
-  int parent, directory, events, watcher;
+  int parent, directory, events;
   dev_t device; ino_t inode;
   char *name;
 };
 #define Group_val(v) (*((struct group_handle **)Data_custom_val(v)))
 static int close_handles(struct group_handle *g) {
-  int fds[4]={g->watcher,g->events,g->directory,g->parent},error=0;
-  g->watcher=-1;g->events=-1;g->directory=-1;g->parent=-1;
-  for(int i=0;i<4;i++) if(fds[i]>=0 && close(fds[i])<0 && !error) error=errno;
+  int fds[3]={g->events,g->directory,g->parent},error=0;
+  g->events=-1;g->directory=-1;g->parent=-1;
+  for(int i=0;i<3;i++) if(fds[i]>=0 && close(fds[i])<0 && !error) error=errno;
   return error;
 }
 static void finalize_group(value raw) {
@@ -35,6 +35,26 @@ static void finalize_group(value raw) {
 }
 static struct custom_operations operations={
   .identifier="masc.endpoint_process_group.v1", .finalize=finalize_group,
+  .compare=custom_compare_default, .hash=custom_hash_default,
+  .serialize=custom_serialize_default, .deserialize=custom_deserialize_default,
+  .compare_ext=custom_compare_ext_default, .fixed_length=custom_fixed_length_default
+};
+/* malloc-backed storage remains stable while a worker releases the runtime
+   lock. Each waiter owns a new open-file cursor, never a dup of group events. */
+struct group_waiter { int events, watcher; };
+#define Waiter_val(v) (*((struct group_waiter **)Data_custom_val(v)))
+static int close_waiter(struct group_waiter *w) {
+  int fds[2]={w->watcher,w->events},error=0;
+  w->watcher=-1;w->events=-1;
+  for(int i=0;i<2;i++) if(fds[i]>=0 && close(fds[i])<0 && !error) error=errno;
+  return error;
+}
+static void finalize_waiter(value raw) {
+  struct group_waiter *w=Waiter_val(raw);
+  if(w){close_waiter(w);free(w);Waiter_val(raw)=NULL;}
+}
+static struct custom_operations waiter_operations={
+  .identifier="masc.endpoint_process_group_waiter.v1", .finalize=finalize_waiter,
   .compare=custom_compare_default, .hash=custom_hash_default,
   .serialize=custom_serialize_default, .deserialize=custom_deserialize_default,
   .compare_ext=custom_compare_ext_default, .fixed_length=custom_fixed_length_default
@@ -96,6 +116,22 @@ static int check_original(struct group_handle *g,int *protection) {
   }
   return 0;
 }
+static int read_events(int events,char **bytes,size_t *length) {
+  if(lseek(events,0,SEEK_SET)<0)return errno;
+  size_t capacity=0;
+  for(;;) {
+    if(*length==capacity){
+      if(capacity>SIZE_MAX/2)return EOVERFLOW;
+      size_t next=capacity?capacity*2:(size_t)getpagesize();
+      char *grown=realloc(*bytes,next);if(!grown)return ENOMEM;
+      *bytes=grown;capacity=next;
+    }
+    ssize_t count=read(events,*bytes+*length,capacity-*length);
+    if(count<0){if(errno==EINTR)continue;return errno;}
+    if(count==0)return 0;
+    *length+=(size_t)count;
+  }
+}
 #endif
 
 CAMLprim value masc_endpoint_group_create(value path,value name) {
@@ -105,7 +141,7 @@ CAMLprim value masc_endpoint_group_create(value path,value name) {
   int stage=1,error=0,protection=0,cleanup=0;
   if(!g) error=ENOMEM;
   else {
-    g->parent=-1;g->directory=-1;g->events=-1;g->watcher=-1;Group_val(raw)=g;
+    g->parent=-1;g->directory=-1;g->events=-1;Group_val(raw)=g;
 #ifdef __linux__
     char *parent_path=copy_string(path);g->name=copy_string(name);int created=0;
     if(!parent_path || !g->name) error=ENOMEM;
@@ -124,11 +160,6 @@ CAMLprim value masc_endpoint_group_create(value path,value name) {
       if(!error && !protection){stage=5;g->events=openat(g->directory,"cgroup.events",O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(g->events<0)error=errno;}
       /* Require the actual tree-kill interface before returning a usable group. */
       if(!error && !protection){stage=8;int fd=openat(g->directory,"cgroup.kill",O_WRONLY|O_CLOEXEC|O_NOFOLLOW);if(fd<0)error=errno;else close(fd);}
-      if(!error && !protection){stage=6;g->watcher=epoll_create1(EPOLL_CLOEXEC);if(g->watcher<0)error=errno;}
-      if(!error && !protection){
-        struct epoll_event event;memset(&event,0,sizeof(event));event.events=EPOLLPRI|EPOLLERR;
-        if(epoll_ctl(g->watcher,EPOLL_CTL_ADD,g->events,&event)<0)error=errno;
-      }
       if(error || protection) {
         if(created && unlinkat(g->parent,g->name,AT_REMOVEDIR)<0)cleanup=errno;
         int close_error=close_handles(g);if(!cleanup)cleanup=close_error;
@@ -152,24 +183,7 @@ CAMLprim value masc_endpoint_group_read(value raw) {
   struct group_handle *g=Group_val(raw);
   caml_enter_blocking_section();
   if(check_original(g,&protection)<0){if(!protection)error=errno;}
-  if(!error && !protection && lseek(g->events,0,SEEK_SET)<0)error=errno;
-  size_t capacity=0;
-  while(!error && !protection) {
-    if(length==capacity){
-      if(capacity>SIZE_MAX/2){error=EOVERFLOW;break;}
-      size_t next=capacity?capacity*2:(size_t)getpagesize();
-      char *grown=realloc(bytes,next);if(!grown){error=ENOMEM;break;}bytes=grown;capacity=next;
-    }
-    ssize_t count=read(g->events,bytes+length,capacity-length);
-    if(count<0){if(errno==EINTR)continue;error=errno;break;}
-    if(count==0)break;
-    length+=(size_t)count;
-  }
-  if(!error && !protection){
-    struct epoll_event event;int rc;
-    do{rc=epoll_wait(g->watcher,&event,1,0);}while(rc<0 && errno==EINTR);
-    if(rc<0)error=errno;
-  }
+  if(!error && !protection)error=read_events(g->events,&bytes,&length);
   caml_leave_blocking_section();
 #else
   (void)raw;error=ENOSYS;
@@ -213,11 +227,64 @@ CAMLprim value masc_endpoint_group_remove(value raw) {
 CAMLprim value masc_endpoint_group_directory(value raw) {
   CAMLparam1(raw);CAMLreturn(Val_int(Group_val(raw)->directory));
 }
-CAMLprim value masc_endpoint_group_watch(value raw) {
-  CAMLparam1(raw);CAMLlocal2(result,err);
-  int fd=fcntl(Group_val(raw)->watcher,F_DUPFD_CLOEXEC,0),error=fd<0?errno:0;
-  err=error_option(error);result=caml_alloc_tuple(2);Field(result,0)=Val_int(fd);Field(result,1)=err;
+CAMLprim value masc_endpoint_group_waiter_create(value raw) {
+  CAMLparam1(raw);CAMLlocal4(waiter,result,err,cleanup_value);
+  waiter=caml_alloc_custom(&waiter_operations,sizeof(struct group_waiter *),0,1);Waiter_val(waiter)=NULL;
+  struct group_waiter *w=malloc(sizeof(*w));
+  int stage=1,error=0,protection=0,cleanup=0;
+  if(!w)error=ENOMEM;
+  else {
+    w->events=-1;w->watcher=-1;Waiter_val(waiter)=w;
+#ifdef __linux__
+    struct group_handle *g=Group_val(raw);
+    caml_enter_blocking_section();
+    if(check_original(g,&protection)<0){if(!protection)error=errno;}
+    if(!error && !protection){stage=5;w->events=openat(g->directory,"cgroup.events",O_RDONLY|O_CLOEXEC|O_NOFOLLOW);if(w->events<0)error=errno;}
+    if(!error && !protection){stage=6;w->watcher=epoll_create1(EPOLL_CLOEXEC);if(w->watcher<0)error=errno;}
+    if(!error && !protection){
+      struct epoll_event event;memset(&event,0,sizeof(event));event.events=EPOLLPRI|EPOLLERR;
+      if(epoll_ctl(w->watcher,EPOLL_CTL_ADD,w->events,&event)<0)error=errno;
+    }
+    if(!error && !protection && check_original(g,&protection)<0){if(!protection)error=errno;}
+    if(error || protection)cleanup=close_waiter(w);
+    caml_leave_blocking_section();
+#else
+    error=ENOSYS;
+#endif
+  }
+  err=error_option(error);cleanup_value=error_option(cleanup);result=caml_alloc_tuple(5);
+  Field(result,0)=Val_int(stage);Field(result,1)=err;Field(result,2)=Val_int(protection);
+  Field(result,3)=cleanup_value;Field(result,4)=waiter;
   CAMLreturn(result);
+}
+CAMLprim value masc_endpoint_group_waiter_read(value raw,value waiter) {
+  CAMLparam2(raw,waiter);CAMLlocal3(result,err,text);
+  int error=0,protection=0;char *bytes=NULL;size_t length=0;
+#ifdef __linux__
+  struct group_handle *g=Group_val(raw);struct group_waiter *w=Waiter_val(waiter);
+  caml_enter_blocking_section();
+  if(check_original(g,&protection)<0){if(!protection)error=errno;}
+  if(!error && !protection)error=read_events(w->events,&bytes,&length);
+  if(!error && !protection){
+    /* Only this cursor acknowledges events. A transition after its read stays
+       level-ready even when this private epoll queue is drained here. */
+    struct epoll_event event;int rc;
+    do{rc=epoll_wait(w->watcher,&event,1,0);}while(rc<0 && errno==EINTR);
+    if(rc<0)error=errno;
+  }
+  caml_leave_blocking_section();
+#else
+  (void)raw;(void)waiter;error=ENOSYS;
+#endif
+  err=error_option(error);text=caml_alloc_initialized_string(length,bytes?bytes:"");free(bytes);
+  result=caml_alloc_tuple(3);Field(result,0)=text;Field(result,1)=err;Field(result,2)=Val_int(protection);
+  CAMLreturn(result);
+}
+CAMLprim value masc_endpoint_group_waiter_fd(value waiter) {
+  CAMLparam1(waiter);CAMLreturn(Val_int(Waiter_val(waiter)->watcher));
+}
+CAMLprim value masc_endpoint_group_waiter_close(value waiter) {
+  CAMLparam1(waiter);CAMLreturn(error_option(close_waiter(Waiter_val(waiter))));
 }
 CAMLprim value masc_endpoint_group_close(value raw) {
   CAMLparam1(raw);int error=close_handles(Group_val(raw));CAMLreturn(error_option(error));

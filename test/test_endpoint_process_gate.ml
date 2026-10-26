@@ -240,6 +240,51 @@ let exclusive_group_and_reused_name = run (fun fixture -> Eio.Switch.run (fun sw
     check "owner removed replacement group"
       (not (Sys.file_exists (Filename.concat "/sys/fs/cgroup" (group_name fixture)))))
 
+let private_group_waiters_keep_their_transition = run (fun fixture -> Eio.Switch.run (fun sw ->
+    let group=get_group (G.Group.create ~sw ~parent_path:"/sys/fs/cgroup"
+        ~name:(group_name fixture ^ "-waiters")) in
+    let child=get (spawn_group ~sw ~group fixture ": > activated") in
+    get (G.await_ready child);
+    let seen_a, saw_a=Eio.Promise.create () and seen_b, saw_b=Eio.Promise.create () in
+    let resume_a, continue_a=Eio.Promise.create () and resume_b, continue_b=Eio.Promise.create () in
+    let done_a, finished_a=Eio.Promise.create () and done_b, finished_b=Eio.Promise.create () in
+    let pause observed resume =
+      let first=ref true in
+      fun populated -> if populated && !first then begin
+        first:=false;Eio.Promise.resolve observed ();Eio.Promise.await resume
+      end in
+    Eio.Fiber.all [
+      (fun () -> get_group (G.For_testing.await_group_empty
+          ~after_populated:(pause saw_a resume_a) group);Eio.Promise.resolve finished_a ());
+      (fun () -> get_group (G.For_testing.await_group_empty
+          ~after_populated:(pause saw_b resume_b) group);Eio.Promise.resolve finished_b ());
+      (fun () ->
+        Eio.Promise.await seen_a;Eio.Promise.await seen_b;
+        get_group (G.Group.kill_tree group);check_exit (-9) (get (G.await_exit child));
+        check "another public reader observes the last transition" (not (get_group (G.Group.populated group)));
+        Eio.Promise.resolve continue_b ();Eio.Promise.await done_b;
+        check "the other waiter settled before A resumed" (Eio.Promise.peek done_a=None);
+        Eio.Promise.resolve continue_a ();Eio.Promise.await done_a)
+    ];
+    check "neither wait permits payload activation" (not (Sys.file_exists fixture.marker));
+    get_group (G.Group.release group)))
+
+let cancel_private_group_waiter_preserves_owner = run (fun fixture -> Eio.Switch.run (fun sw ->
+    let group=get_group (G.Group.create ~sw ~parent_path:"/sys/fs/cgroup"
+        ~name:(group_name fixture ^ "-cancel-wait")) in
+    let child=get (spawn_group ~sw ~group fixture ": > activated") in
+    get (G.await_ready child);
+    let observed, notify=Eio.Promise.create () and hold, _release=Eio.Promise.create () in
+    Eio.Fiber.first
+      (fun () -> get_group (G.For_testing.await_group_empty ~after_populated:(fun populated ->
+          check "private cancellation boundary observes the actual child" populated;
+          Eio.Promise.resolve notify ();Eio.Promise.await hold) group);
+        Alcotest.fail "live child was reported empty")
+      (fun () -> Eio.Promise.await observed);
+    check "cancelling an acquired private waiter leaves the original populated" (get_group (G.Group.populated group));
+    get_group (G.Group.kill_tree group);check_exit (-9) (get (G.await_exit child));
+    get_group (G.Group.await_empty group);get_group (G.Group.release group)))
+
 let invalid_owner = run (fun fixture -> Eio.Switch.run (fun sw ->
     let result = G.create ~sw ~executable:"/bin/sh" ~argv:[|"/bin/sh"|] ~env:[||]
         ~cwd:fixture.work ~payload_uid:0 ~payload_gid:fixture.gid
@@ -307,5 +352,7 @@ let () =
           "source mutation cannot replace validated inputs", frozen_inputs;
           "root payload refusal", invalid_owner;
           "recursive tree cancellation and independent progress", recursive_tree_and_progress;
-          "exclusive group and original handle after name reuse", exclusive_group_and_reused_name] in
+          "exclusive group and original handle after name reuse", exclusive_group_and_reused_name;
+          "private group waiters retain transitions across other reads", private_group_waiters_keep_their_transition;
+          "cancelling an acquired group waiter preserves its owner", cancel_private_group_waiter_preserves_owner] in
   Alcotest.run "Endpoint process gate" ["kernel", List.map (fun (name, test) -> Alcotest.test_case name `Quick test) cases]

@@ -9,7 +9,7 @@ type protection =
 
 type stage =
   | Allocate | Open_parent | Create_group | Open_group | Open_events
-  | Create_watch | Read_events | Kill_tree | Remove_group | Close_group | Duplicate_watch
+  | Create_watch | Read_events | Kill_tree | Remove_group | Close_group | Close_watch
 
 type error =
   | Unsupported | Refused of protection | Syscall_failed of { stage : stage; error : Unix.error }
@@ -31,7 +31,9 @@ val kill_tree : t -> (unit, error) result
 (** Retire admission before requesting cgroup.kill on this original tree.
     Idempotent while retiring; this is a request, not empty/exit/output proof. *)
 val await_empty : t -> (unit, error) result
-(** Cancellable event wait without a blocked system-thread waiter. Waiter
+(** Each call opens its own events cursor and registers its own epoll before
+    reading that cursor. Public observations and other waiters cannot consume
+    its pending transition. Cancellable event wait without a blocked system-thread waiter. Waiter
     cancellation preserves the group and payload. Before retirement, emptiness
     is only an observation and does not prevent future admitted children. *)
 val release : t -> (unit, error) result
@@ -46,4 +48,9 @@ val with_spawn : t -> (Unix.file_descr -> 'a) -> ('a, error) result
     before waiting for payload completion; cancellation/exceptions propagate
     without poisoning cleanup. No caller-supplied existing FD is adopted. *)
 
-module For_testing : sig val linux_build : bool end
+module For_testing : sig
+  val linux_build : bool
+  val await_empty : after_populated:(bool -> unit) -> t -> (unit, error) result
+  (** The hook runs after each private observation, outside the group lock,
+      before waiting when populated. It may perform cancellable Eio effects. *)
+end

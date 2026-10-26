@@ -16,7 +16,7 @@ module Group : sig
     | Not_cgroup_v2 | Group_identity_changed | Group_not_private
   type stage =
     | Allocate | Open_parent | Create_group | Open_group | Open_events
-    | Create_watch | Read_events | Kill_tree | Remove_group | Close_group | Duplicate_watch
+    | Create_watch | Read_events | Kill_tree | Remove_group | Close_group | Close_watch
   type error =
     | Unsupported | Refused of protection | Syscall_failed of { stage : stage; error : Unix.error }
     | Protocol_error | Malformed_events | Retiring | Closed
@@ -31,7 +31,9 @@ module Group : sig
   val kill_tree : t -> (unit, error) result
   (** Retire new admission before cgroup.kill; a request is not termination. *)
   val await_empty : t -> (unit, error) result
-  (** Cancellable event wait. Cancelling a waiter preserves the payload.
+  (** Cancellable event wait with a private events cursor and epoll per call.
+      Other observations/waiters cannot acknowledge its pending transition.
+      Cancelling a waiter preserves the payload.
       Actual recursive emptiness is not output sealing or payload exit proof. *)
   val release : t -> (unit, error) result
   (** Owner teardown requests tree kill, waits for actual recursive emptiness,
@@ -147,6 +149,10 @@ val release : t -> (exit_observation, error) result
     It does not claim descendant cleanup, complete output or Task/Goal success. *)
 
 module For_testing : sig
+  val await_group_empty :
+    after_populated:(bool -> unit) -> Group.t -> (unit, Group.error) result
+  (** Pause after a private population observation and before the event wait.
+      Runs outside the group lock and permits cancellable Eio effects. *)
   val create :
     before_spawn_in_worker:(unit -> unit) ->
     sw:Eio.Switch.t -> executable:string -> argv:string array -> env:string array ->

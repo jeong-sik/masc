@@ -326,6 +326,7 @@ let create_in_group ~group ~sw ~executable ~argv ~env ~cwd ~payload_uid ~payload
   | Error error -> Error (Group_error error)
 
 module For_testing = struct
+  let await_group_empty = Group.For_testing.await_empty
   let linux_build = linux_build ()
   let create = create_with_hook
   let release_with_signal_failure error = release_with (fun _ _ -> Some error)

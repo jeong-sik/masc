@@ -4,7 +4,7 @@ type protection =
 
 type stage =
   | Allocate | Open_parent | Create_group | Open_group | Open_events
-  | Create_watch | Read_events | Kill_tree | Remove_group | Close_group | Duplicate_watch
+  | Create_watch | Read_events | Kill_tree | Remove_group | Close_group | Close_watch
 
 type error =
   | Unsupported | Refused of protection | Syscall_failed of { stage : stage; error : Unix.error }
@@ -21,7 +21,7 @@ let stage_name = function
   | Allocate -> "allocate" | Open_parent -> "open parent" | Create_group -> "create group"
   | Open_group -> "open group" | Open_events -> "open events" | Create_watch -> "create watch"
   | Read_events -> "read events" | Kill_tree -> "kill tree" | Remove_group -> "remove group"
-  | Close_group -> "close group" | Duplicate_watch -> "duplicate watch"
+  | Close_group -> "close group" | Close_watch -> "close watch"
 let rec error_to_string = function
   | Unsupported -> "kernel process tree unsupported"
   | Refused reason -> protection_name reason
@@ -42,8 +42,12 @@ external read_raw : raw -> string * Unix.error option * int = "masc_endpoint_gro
 external kill_raw : raw -> int * Unix.error option * int = "masc_endpoint_group_kill"
 external remove_raw : raw -> int * Unix.error option * int = "masc_endpoint_group_remove"
 external directory_raw : raw -> Unix.file_descr = "masc_endpoint_group_directory"
-external watch_raw : raw -> Unix.file_descr * Unix.error option = "masc_endpoint_group_watch"
 external close_raw : raw -> Unix.error option = "masc_endpoint_group_close"
+type waiter
+external create_waiter_raw : raw -> int * Unix.error option * int * Unix.error option * waiter = "masc_endpoint_group_waiter_create"
+external read_waiter_raw : raw -> waiter -> string * Unix.error option * int = "masc_endpoint_group_waiter_read"
+external waiter_fd_raw : waiter -> Unix.file_descr = "masc_endpoint_group_waiter_fd"
+external close_waiter_raw : waiter -> Unix.error option = "masc_endpoint_group_waiter_close"
 
 type lifecycle = Admitting | Admission_retired | Handles_closed of (unit, error) result
 type t = {
@@ -64,7 +68,7 @@ let stage_of_code = function
   | 1 -> Some Allocate | 2 -> Some Open_parent | 3 -> Some Create_group
   | 4 -> Some Open_group | 5 -> Some Open_events | 6 -> Some Create_watch
   | 7 -> Some Read_events | 8 -> Some Kill_tree | 9 -> Some Remove_group
-  | 10 -> Some Close_group | 11 -> Some Duplicate_watch | _ -> None
+  | 10 -> Some Close_group | 11 -> Some Close_watch | _ -> None
 let protection_of_code = function
   | 1 -> Some Controller_not_root | 2 -> Some Invalid_parent | 3 -> Some Invalid_name
   | 4 -> Some Unsafe_ancestor | 5 -> Some Not_cgroup_v2
@@ -104,37 +108,52 @@ let decode_events bytes =
         | _ -> Error Malformed_events in
   loop None None (String.split_on_char '\n' bytes)
 
-let populated t = serialized t (fun () ->
+let populated_with read t = serialized t (fun () ->
     match t.lifecycle with
     | Handles_closed (Ok ()) -> Ok false
     | Handles_closed (Error error) -> Error error
     | Admitting | Admission_retired ->
-        let bytes, error, protection = Eio_unix.run_in_systhread (fun () -> read_raw t.raw) in
+        let bytes, error, protection = Eio_unix.run_in_systhread (fun () -> read t.raw) in
         let* () = native_status (7, error, protection) in decode_events bytes)
 
-let wait_event t =
-  let* watcher = serialized t (fun () ->
-      match t.lifecycle with
-      | Handles_closed _ -> Error Closed
-      | Admitting | Admission_retired ->
-          let fd, error = watch_raw t.raw in
-          match error with None -> Ok fd
-          | Some error -> Error (Syscall_failed {stage=Duplicate_watch; error})) in
-  Fun.protect ~finally:(fun () -> Unix.close watcher) (fun () ->
-      Eio.Fiber.first
-        (fun () -> Eio_unix.await_readable watcher)
-        (fun () -> Eio.Promise.await t.closed_signal);
-      Ok ())
+let populated t = populated_with read_raw t
 
-let rec await_empty t =
-  let* has_processes = populated t in
-  if not has_processes then Ok () else
-    match wait_event t with
-    | Ok () -> Eio.Fiber.yield (); await_empty t
-    | Error error -> if error=Closed then
-          let* has_processes = populated t in
-          if has_processes then Error Closed else Ok ()
-        else Error error
+let await_empty_with_hook ~after_populated t = Eio.Switch.run (fun sw ->
+    let* waiter = serialized t (fun () ->
+        match t.lifecycle with
+        | Handles_closed result -> Result.map (fun () -> None) result
+        | Admitting | Admission_retired ->
+            let code, error, protection, cleanup, waiter =
+              Eio_unix.run_in_systhread (fun () -> create_waiter_raw t.raw) in
+            let status = native_status (code,error,protection) in
+            let* () = match cleanup with
+              | None -> status
+              | Some error ->
+                  let primary=match status with Ok () -> None | Error error -> Some error in
+                  Error (Cleanup_failed {primary;error}) in
+            (* serialized protects acquisition through registration. The local
+               switch drains wait fibers before closing these private fds. *)
+            Eio.Switch.on_release sw (fun () ->
+                match close_waiter_raw waiter with
+                | None -> ()
+                | Some error -> raise (Release_failed (Syscall_failed {stage=Close_watch;error})));
+            Ok (Some waiter)) in
+    match waiter with
+    | None -> Ok ()
+    | Some waiter ->
+        let rec loop () =
+          let* has_processes = populated_with (fun raw -> read_waiter_raw raw waiter) t in
+          after_populated has_processes;
+          if not has_processes then Ok () else begin
+            Eio.Fiber.first
+              (fun () -> Eio_unix.await_readable (waiter_fd_raw waiter))
+              (fun () -> Eio.Promise.await t.closed_signal);
+            Eio.Fiber.yield ();
+            loop ()
+          end in
+        loop ())
+
+let await_empty t = await_empty_with_hook ~after_populated:(fun _ -> ()) t
 
 let kill_tree t = Eio.Cancel.protect (fun () -> serialized t (fun () ->
     match t.lifecycle with
@@ -205,4 +224,7 @@ let create ~sw ~parent_path ~name =
                 match release t with Ok () -> () | Error error -> raise (Release_failed error));
             Ok t)
 
-module For_testing = struct let linux_build = linux_build () end
+module For_testing = struct
+  let linux_build = linux_build ()
+  let await_empty = await_empty_with_hook
+end

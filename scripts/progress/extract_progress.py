@@ -259,7 +259,7 @@ def main() -> None:
     )
 
     repo = args.repo_root
-    reports_dir = args.reports_dir or os.path.join(repo, "reports")
+    reports_dir = args.reports_dir or os.path.join(repo, "artifacts", "runs")
     matrix_path = os.path.join(
         repo, "docs/design/keeper-feature-state-matrix-2026-08-13.html"
     )

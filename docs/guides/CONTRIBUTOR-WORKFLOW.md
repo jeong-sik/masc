@@ -321,6 +321,10 @@ the existing policy and do not extend execution evidence to unobserved scope.
 
 ## 6. Submit evidence and resume later
 
+Use the [storage guide](WORKSPACE-STORAGE.md): new run output goes in repository
+`artifacts/`; retain selected proof in `docs/evidence/`, investigations in
+`docs/research/` and reports in `docs/reports/`.
+
 For a MASC Task, use `submit_for_verification` with a handoff summary and evidence;
 `done` is not a self-service completion action. Follow the live tool schema and
 [evidence capture contract](../../lib/workspace/workspace_verification_store.mli)

@@ -29,7 +29,7 @@ This is actual component/session code with mocked HTTP boundaries, not a real
 server save or Browser execution. No native source/build files differ from the
 published parent; no native build was needed or run. No browser rerun, full suite,
 CI, live configuration change, push, or deployment was performed. Historical
-browser screenshots/fixtures under dashboard/evidence/2026-10-05-web-browser-activity
+browser screenshots/fixtures under docs/evidence/dashboard/2026-10-05-web-browser-activity
 remain original-author evidence and do not attest this integrated source tree.
 
 The separately advanced #41194 Settings implementation is not part of this

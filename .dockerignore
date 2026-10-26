@@ -31,7 +31,7 @@ memory/
 .claude/
 .gemini/
 .codex/
-reports/
+artifacts/
 test-results/
 planning/
 PLANS/

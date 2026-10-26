@@ -1,7 +1,7 @@
 # Workspace Curator: accepted work and Addon execution
 
 This is the proposed E02 implementation contract under the
-[Addon worklist](../../reports/addon-lane-full-worklist-20261021.md).
+[Addon worklist](../reports/addon-lane-full-worklist-20261021.md).
 It specifies the execution boundary. The [Curator worker](../../addons/workspace-curator/README.md)
 and [shared host semantic port](workspace-curator-semantic-validation.md) are now
 implemented. The original admission consumer now captures actual Runtime

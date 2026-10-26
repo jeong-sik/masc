@@ -292,6 +292,10 @@ Release head는 완료된 전체 CI가 필요합니다. Fork 기여자는 mainta
 
 ## 6. 증거 제출과 재개
 
+[저장 위치 안내](WORKSPACE-STORAGE.md)를 따른다. 새 실행 산출물은 저장소의
+`artifacts/`, 보존할 검증 자료는 `docs/evidence/`, 조사 문서는
+`docs/research/`, 정리된 보고서는 `docs/reports/`에 둔다.
+
 MASC Task는 요약과 증거를 담아 `submit_for_verification`으로 제출합니다. `done`은
 스스로 완료하는 방법이 아닙니다. 현재 도구 스키마와
 [증거 캡처 계약](../../lib/workspace/workspace_verification_store.mli)을 따르세요.

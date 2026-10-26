@@ -23,7 +23,7 @@ Executed checks:
   Run from the checkout with `opam exec --switch=5.5.1 -- python3
   docs/evidence/2026-10-04-exact-lane-activity/check-inventory.py`.
 - Four affected Web suites: 38 tests; TypeScript and changed TS ESLint pass.
-- [Actual Status/inventory browser readout](../../../dashboard/evidence/2026-10-04-exact-lane-activity/):
+- [Actual Status/inventory browser readout](../dashboard/2026-10-04-exact-lane-activity/):
   five synthetic HTTP checks, zero mutations/page errors/unexpected API routes,
   and two screenshots. These are supplied on/off readings, not a configuration
   save or model execution. An initial invocation used the repository directory

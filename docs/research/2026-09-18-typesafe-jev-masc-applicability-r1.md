@@ -1,7 +1,7 @@
 # TypeSafe Jev(System One) 분석과 masc 판단 레인 적용 가능성 (r1)
 
 - 작성: 2026-09-18
-- 근거: [2026-09-18-typesafe-jev-masc-applicability-evidence-record.md](2026-09-18-typesafe-jev-masc-applicability-evidence-record.md)
+- 근거: [2026-09-18-typesafe-jev-masc-applicability-evidence-record.md](../evidence/research/2026-09-18-typesafe-jev-masc-applicability-evidence-record.md)
 - 대상 문서: docs.typesafe.ai (introduction / primitives / confidence / patterns / quickstart), typesafe.ai
 - 방법: 공식 문서 열람 + masc 코드 탐색(lib/, packages/agent_core/, docs/) + board_attention 판정 replay 실험 35호출(고유 후보 27건)
 

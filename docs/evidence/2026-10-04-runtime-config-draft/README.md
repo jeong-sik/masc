@@ -22,7 +22,7 @@ receipt clears a submitted draft. Drafts do not survive quitting the TUI.
   It checks refusal followed by concurrent edits and explicit retry, deliberate
   replacement, and rejection of another config path. It does not compile the TUI.
 - Python AST parsing for the three affected PTY sources; no PTY execution.
-- Web evidence is in [the dashboard evidence directory](../../../dashboard/evidence/2026-10-04-runtime-config-cas/README.md):
+- Web evidence is in [the dashboard evidence directory](../dashboard/2026-10-04-runtime-config-cas/README.md):
   focused Vitest 320/320, TypeScript check, actual Chromium using synthetic HTTP.
   The integration copied those exact source bytes; `web-source-readback.json`
   compares their hashes. These results do not prove the backend or TUI integration.

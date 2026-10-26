@@ -25,7 +25,7 @@ provider and per category. No thresholds and no exit-code gating: this
 is a measuring instrument, and the evidence JSON is the product.
 
 Usage:
-  python3 scripts/bench-web-quality.py -o docs/evidence/web-quality-<date>-rN.json
+  python3 scripts/bench-web-quality.py -o artifacts/web-tools/web-quality-<date>-rN.json
 """
 
 from __future__ import annotations
@@ -260,6 +260,7 @@ def main() -> None:
         "case_count": len(CASES),
         "providers": providers,
     }
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as handle:
         json.dump(evidence, handle, ensure_ascii=False, indent=2)
         handle.write("\n")

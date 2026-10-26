@@ -126,10 +126,11 @@
       "status": "pending semantic review"
     },
     {
-      "path": "dashboard/evidence/2026-10-05-settings-runtime-workspace/retained-write-before-test.ts",
+      "path": "docs/evidence/dashboard/2026-10-05-settings-runtime-workspace/retained-write-before-test.ts",
       "baseline_lines": 2425,
       "kind": "evidence",
-      "status": "pending semantic review"
+      "status": "pending semantic review",
+      "baseline_path": "dashboard/evidence/2026-10-05-settings-runtime-workspace/retained-write-before-test.ts"
     },
     {
       "path": "dashboard/src/api/dashboard-runtime.ts",

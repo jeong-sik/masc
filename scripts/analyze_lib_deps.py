@@ -396,7 +396,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="Analyze dependency edges in the flat masc library."
     )
     parser.add_argument("--json", action="store_true",
-                        help="Write graph JSON to reports/lib-dependency-graph.json.")
+                        help="Write graph JSON to artifacts/dependencies/lib-dependency-graph.json.")
     parser.add_argument("--json-out", type=Path,
                         help="Write graph JSON to this path instead of the default report path.")
     parser.add_argument("--no-write", action="store_true",
@@ -472,7 +472,7 @@ def main() -> None:
 
     if args.json or args.json_out is not None:
         output = graph_json(graph=graph, modules=modules, stats=stats)
-        json_path = args.json_out or ROOT / "reports" / "lib-dependency-graph.json"
+        json_path = args.json_out or ROOT / "artifacts" / "dependencies" / "lib-dependency-graph.json"
         json_path.parent.mkdir(parents=True, exist_ok=True)
         json_path.write_text(json.dumps(output, indent=2))
         print(f"Full graph written to {json_path}")

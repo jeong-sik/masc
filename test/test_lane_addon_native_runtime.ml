@@ -303,7 +303,7 @@ def handle(conn):
         lose=os.path.join(a.root,"lose-snapshot-"+a.incarnation)
         lost=False
         if op=="snapshot" and os.path.exists(lose): os.unlink(lose);lost=True
-        if op=="snapshot": result={"reply":"receipt"} if lost or a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False},"stagehand":{"activity":"disabled","registered":False,"session":"unknown","locate":False}}}}
+        if op=="snapshot": result={"reply":"receipt"} if lost or a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":"invalid" if os.path.exists(os.path.join(a.root,"invalid-inventory-"+a.incarnation)) else list(clients.values()),"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False},"stagehand":{"activity":"disabled","registered":False,"session":"unknown","locate":False}}}}
         elif op=="poll":
             client=dict(req["client"]);client["interactions"]=[];client["lastActivities"]=[];client["spaceObservation"]=None;clients[client["clientId"]]=client
             result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}
@@ -757,9 +757,18 @@ hooks = ["validate_input", "validate_output"]
   check bool "duplicate client identity is not silently assigned" true
     (Result.is_error (connect (Browser_addon_host.Observed_client ego.client_id)));
   ignore (call next (Browser_addon_wire.Disconnect ego.client_id));
-  write (Filename.concat root ("lose-snapshot-"^replacement)) "once";
-  check bool "a failed candidate snapshot cannot establish uniqueness" true
+  (* Disconnect wakes the background observer too. Use persistent semantic
+     invalidity so that observer cannot consume a one-shot transport failure
+     and retire the candidate before the host inspects its inventory. *)
+  let invalid_inventory=Filename.concat root ("invalid-inventory-"^replacement) in
+  write invalid_inventory "invalid";
+  let candidate_is_ready ()=List.exists (fun (service:R.browser_service) -> service.instance_id=replacement)
+    (R.browser_services ~config ~access) in
+  check bool "the unreadable candidate remains a ready service" true (candidate_is_ready ());
+  check bool "an unreadable ready candidate cannot establish uniqueness" true
     (Result.is_error (connect (Browser_addon_host.Observed_client ego.client_id)));
+  check bool "semantic inventory failure does not retire the ready candidate" true (candidate_is_ready ());
+  Unix.unlink invalid_inventory;
   ignore (dispatch config R.Detach ["instance_id",`String other_id]);
   wait clock (fun () -> inspect other_id |> member "phase" |> text "kind"="detached");
   check bool "a missing Goal worker never falls back" true

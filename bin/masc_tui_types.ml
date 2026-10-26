@@ -6931,7 +6931,7 @@ module Browser_lane_view = struct
       | Inventory_report_unreadable detail,_ -> invalid_automatic detail
       | Inventory_reported (_::_),Some {browse=Error browse;work=Error work}
           when not (can_offer_work_browser browse.kind) && not (can_offer_work_browser work.kind) -> automatic
-      | Inventory_reported (_::_),(Some _|None) ->
+      | Inventory_reported (_::_),(Some {browse=(Ok _|Error _);work=(Ok _|Error _)}|None) ->
           invalid_automatic "Browser inventory is incomplete; choose an observed browser explicitly"
       | (Inventory_not_reported|Inventory_reported []),(Some _|None) -> automatic in
     Ok { listed; bidi_host = decode_bidi_host reported; inventory_report; automatic }

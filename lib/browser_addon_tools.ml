@@ -203,6 +203,51 @@ let prepare ~upload_paths tool json =
             Error "live navigation needs the tabId of a tab this connection opened with open_tab"
         | (Automatic|Exact (B.Live_route _|Automation_route|Stagehand_route)),(None|Some _) -> Ok () in
       prepared request Raw (B.Page_goto {url;tab_id=request.tab_id})
+type metadata_request = Bind_goal of {goal_id:string;client_id:B.client_id} | Goal_status of string
+type request = Browser of prepared | Metadata of metadata_request
+let prepare_request ~upload_paths tool json =
+  let* _=Lane_addon_action.canonical json in
+  match tool,json with
+  | C.Session,`Assoc supplied when List.mem (List.assoc_opt "action" supplied)
+      [Some (`String "bind_goal");Some (`String "goal_status")] ->
+      let* goal_id=match List.assoc_opt "goalId" supplied with
+        | Some (`String value) when String.trim value<>"" -> Ok value
+        | None|Some _ -> Error "goalId must be nonblank text" in
+      (match List.assoc_opt "action" supplied with
+       | Some (`String "bind_goal") ->
+         let* fields=fields ["action";"goalId";"lane";"clientId"] json in
+         let* ()=match List.assoc_opt "lane" fields with
+           | Some (`String "live") -> Ok ()
+           | None|Some _ -> Error "bind_goal requires lane=live" in
+         let* request=surface fields in
+         (match request.route with
+          | Browser_selection.Exact (B.Live_route (Some client_id)) ->
+              Ok (Metadata (Bind_goal {goal_id;client_id}))
+          | Automatic|Exact (Live_route None|Automation_route|Stagehand_route) ->
+              Error "bind_goal requires lane=live and an observed Ego clientId")
+       | Some (`String "goal_status") ->
+         let* _=fields ["action";"goalId"] json in
+         Ok (Metadata (Goal_status goal_id))
+       | None|Some _ -> Error "unknown Goal Space operation")
+  | (C.Session|Tabs|Read|Interact|Act|Instruct|Goto),_ ->
+      prepare ~upload_paths tool json |> Result.map (fun value -> Browser value)
+let initial_goal_space initial_goal_ids host request =
+  match request.preference,request.verb with
+  | Browser_selection.Automatic,(B.Tabs_list|Session_open _) ->
+    let* ids=match initial_goal_ids with None -> Ok [] | Some read -> read () in
+    (match List.sort_uniq String.compare ids with
+     | [] -> Ok None
+     | [goal_id] -> Host.goal_space host ~goal_id |> Result.map_error Browser_goal_space.error_message
+     | _::_::_ -> Error "current Task belongs to multiple Goals; choose an explicit browser lane and clientId")
+  | (Automatic|Exact (B.Live_route _|Automation_route|Stagehand_route)),
+    (Tabs_list|Session_open _|Session_close|Session_status|Page_read _|Page_document _|Page_downloads _
+    |Page_console _|Page_network _|Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _
+    |Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _|Page_act _|Page_context _
+    |Page_instruct _|Page_locate _|Page_extract _) -> Ok None
+let annotate_goal binding = function
+  | `Assoc fields -> `Assoc ((match binding with None -> [] | Some value ->
+      ["browserGoal",Browser_goal_space.to_json value]) @ List.remove_assoc "browserGoal" fields)
+  | value -> value
 let restamp ~tool_name ~start_time : Tool_result.result -> Tool_result.result = function
   | Tool_result.Completed data -> Tool_result.Completed {data with tool_name;duration_ms=Tool_timing.elapsed_ms start_time}
   | Deferred data -> Tool_result.Deferred {data with tool_name;duration_ms=Tool_timing.elapsed_ms start_time}
@@ -242,20 +287,40 @@ let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
                    Llm_provider.Types.Image {media_type="image/png";data=image;source_type=Llm_provider.Types.Base64}])
            | Some _|None -> Error "screenshot lacks its image")
       | None,_ -> Error "screenshot must be an object"
-let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool ~tool_name ~start_time json =
+let handle ?initial_goal_ids ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool ~tool_name ~start_time json =
   let started=Mtime_clock.elapsed_ns () in
-  let result=match prepare ~upload_paths tool json with
+  let result=match prepare_request ~upload_paths tool json with
     | Error detail -> Legacy.make_input_err ~tool_name ~start_time detail
     | Ok request ->
         match Host.connect ~config ~access ~principal ~reserved with
         | Error error -> Host.error_result ~start_time error
         | Ok host ->
-            match Host.issue ?upload_paths ~required_actions:request.required_actions host ~preference:request.preference request.verb with
+          let refuse error=Tool_result.make_err ~tool_name ~start_time
+            ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect error in
+          match request with
+          | Metadata (Bind_goal {goal_id;client_id}) ->
+              (match Host.bind_goal_space host ~goal_id ~client_id with
+               | Error error -> refuse (Browser_goal_space.error_message error)
+               | Ok committed -> Tool_result.make_ok ~tool_name ~start_time ~data:(`Assoc [
+                   "browserGoal",Browser_goal_space.to_json committed.binding;
+                   "created",`Bool committed.created;
+                   "mirrorError",(match committed.mirror_error with None -> `Null|Some e -> `String e)]) ())
+          | Metadata (Goal_status goal_id) ->
+              (match Host.goal_space host ~goal_id with
+               | Error error -> refuse (Browser_goal_space.error_message error)
+               | Ok binding -> Tool_result.make_ok ~tool_name ~start_time ~data:(`Assoc [
+                   "goalId",`String goal_id;"browserGoal",(match binding with None -> `Null
+                     | Some value -> Browser_goal_space.to_json value);"observation",`String "stored_binding"]) ())
+          | Browser request ->
+            match initial_goal_space initial_goal_ids host request with
+            | Error error -> refuse error
+            | Ok goal_space ->
+            match Host.issue ?goal_space ?upload_paths ~required_actions:request.required_actions host ~preference:request.preference request.verb with
             | Error result -> result
             | Ok receipt ->
                 (match project ~base_path:config.Workspace.base_path ~keeper_name ~started request receipt with
                  | Ok (data,content_blocks) ->
-                     Tool_result.make_ok ~tool_name ~start_time ~data ?content_blocks ?metadata:receipt.raw_result._meta ()
+                     Tool_result.make_ok ~tool_name ~start_time ~data:(annotate_goal goal_space data) ?content_blocks ?metadata:receipt.raw_result._meta ()
                  | Error detail ->
                      let effect_disposition=match request.projection with
                        | Session -> Tool_result.Effect_outcome_unknown

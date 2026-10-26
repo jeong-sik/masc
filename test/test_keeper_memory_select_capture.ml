@@ -79,7 +79,7 @@ let capture () =
      source_context=None; owned_job_replay=None;
      turn_sandbox_factory=None;sw=Some sw;clock=Some clock;proc_mgr=None;net=Some net;
      mcp_session_id=None;continuation_channel=None;gate_context=None;turn_ref=Some turn_ref;
-     gate_grant=None;tool_use_id=None;trace_id=None;result_projection=None;capability_authority=Compatibility_meta} in
+     gate_grant=None;tool_use_id=None;trace_id=None;result_projection=None;artifact_draft_scope=None; capability_authority=Compatibility_meta} in
   let descriptor=match Dispatch.descriptor_for_internal "keeper_memory_select" with
     | Some descriptor -> descriptor | None -> fail "selection descriptor missing" in
   check bool "actual registered selection handler" true

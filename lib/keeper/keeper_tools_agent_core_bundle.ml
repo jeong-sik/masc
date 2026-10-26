@@ -465,15 +465,19 @@ let make_tool_bundle_for_descriptors_with_policy
              in
              let bridge h =
                Keeper_schema_observation.with_definition descriptor @@ fun () ->
-               Tool_bridge.agent_core_tool_of_masc_with_execution_env
+               let schema =
+                 match Keeper_descriptor_schema.for_descriptor descriptor with
+                 | Ok schema -> schema
+                 | Error detail ->
+                   invalid_arg (Printf.sprintf "tool %S schema invalid: %s" model_name detail)
+               in
+               Tool_bridge.agent_core_tool_of_schema_with_execution_env
                ~base_path:config.base_path
                ~answer_reader:(fun output_text ->
                  Keeper_tool_answer.answer ~tool_name:model_name ~output_text)
                ~model_projection:(model_projection_for_call descriptor)
                ?on_externalization_error
-               ~name:model_name
-               ~description:descriptor.description
-               ~input_schema:descriptor.input_schema
+               ~schema
                (fun execution_env input ->
                  (* The handler is told the projection its result will cross,
                     asked the same way the bridge asks, so a handler that

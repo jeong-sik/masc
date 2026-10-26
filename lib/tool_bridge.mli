@@ -167,6 +167,21 @@ val agent_core_tool_of_masc :
     name or catalog read-only flag. Without a descriptor AGENT_CORE uses its ordinary
     sequential default. *)
 
+val agent_core_tool_of_schema_with_execution_env :
+  ?descriptor:Agent_core.Tool.descriptor ->
+  ?base_path:string ->
+  ?answer_reader:(string -> Yojson.Safe.t option) ->
+  ?model_projection:(unit -> Tool_output.model_projection) ->
+  ?on_externalization_error:(externalization_error -> unit) ->
+  schema:Agent_core.Types.tool_schema ->
+  (Agent_core.Tool.Execution_env.t -> Yojson.Safe.t -> Tool_result.result) ->
+  Agent_core.Tool.t
+(** Wrap an already validated immutable schema in a fresh tool and handler.
+    No schema constructor is invoked or observed here. [model_projection] is
+    resolved on every invocation, and the exact execution environment is
+    forwarded unchanged. Raw name/description/input-schema fields are not
+    accepted alongside the schema. *)
+
 val agent_core_tool_of_masc_with_execution_env :
   ?descriptor:Agent_core.Tool.descriptor ->
   ?base_path:string ->

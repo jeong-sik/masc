@@ -763,14 +763,22 @@ let test_inline_preparation_keeps_original_members ~ready () =
   let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:parent ~turn:2
       ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Serial}
       ~completion:Agent_core.Tool_contract.Continue_after_success in
-  let execute plan = Keeper_tool_plan_executor.execute_keeper ~capability_surface ~plan ~run_id:(Plan.Run_id.fresh ())
-      ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~parent_invocation:invocation
+  let execute plan =
+    let composition_run_id = Plan.Composition_run_id.fresh () in
+    Keeper_tool_plan_executor.execute_keeper ~capability_surface ~plan ~run_id:(Plan.Run_id.fresh ())
+      ~composition_run_id ~parent_invocation:invocation
       ~config ~meta ~publication_recovery:recovery
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"original member scenario")
       ~keeper_turn_id:(fun () -> Some 13) ~source_context:source ?prepared_files ?ready_files ~clock:env#clock
       ~gate_context:(fun () -> Keeper_gate_causal_context.snapshot causal)
       ~record_gate_result:(fun ~operation ~input result -> Keeper_gate_causal_context.record_tool_result causal ~operation ~input result)
-      ~observe_node_result:(fun _ -> Ok ()) () in
+      ~observe_node_result:
+        (Keeper_tool_composition_surface.For_testing.observe_node_result
+           ~composition_tool:Keeper_composition_draft.run_tool_name
+           ~composition_execution:Keeper_tool_composition_catalog.Inline
+           ~composition_tool_kind:Keeper_tool_descriptor.Composition_tool
+           ~composition_run_id ~parent_invocation:invocation ~meta ~turn_context:source)
+      () in
   if ready then begin
     (* Even identical node objects in a newly constructed plan cannot borrow
        the original Ready graph or its file preparation authority. *)

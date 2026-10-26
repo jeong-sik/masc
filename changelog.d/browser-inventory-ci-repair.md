@@ -1,0 +1,3 @@
+### Fixed
+
+- The browser inventory TUI decision match now keeps Result exhaustiveness checks active under strict compiler warnings.

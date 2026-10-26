@@ -11,19 +11,29 @@ open Alcotest
 module Binding = Agent_core.Provider_runtime_binding
 
 let make_binding ~auth ~available () : Binding.t =
-  { id = "keyed-provider"
-  ; aliases = []
-  ; kind = Llm_provider.Provider_config.Anthropic
-  ; base_url = "https://api.example.com"
-  ; request_path = "/v1/messages"
-  ; requires_api_key = true
-  ; auth
-  ; default_model = Some "model-a"
-  ; max_context = None
-  ; capabilities = Llm_provider.Capabilities.default_capabilities
-  ; available
-  ; credential_scope = None
-  }
+  let env = "MASC_TEST_BINDING_AUTH_CAPTURE" in
+  let saved = Sys.getenv_opt env in
+  Fun.protect ~finally:(fun () -> match saved with
+    | Some value -> Unix.putenv env value | None -> Unix.unsetenv env) (fun () ->
+    Unix.putenv env (if available then "fixture-key" else "");
+    let auth = match auth with
+      | Binding.No_auth -> `Assoc ["type",`String "none"]
+      | Api_key -> `Assoc ["type",`String "api_key_env";"env",`String env]
+      | Setup_token -> `Assoc ["type",`String "setup_token_env";"env",`String env] in
+    let json = `Assoc ["schema_version",`Int 1;"providers",`List [`Assoc
+      ["id",`String "keyed-provider";"kind",`String "anthropic";
+       "base_url",`String "https://api.example.com";"request_path",`String "/v1/messages";
+       "auth",auth;"default_model",`String "model-a";
+       "capabilities_base",`String "anthropic"]]] in
+    let providers = match Llm_provider.Provider_catalog.of_json json with
+      | Ok catalog -> catalog | Error error -> fail error in
+    let declarations = match Llm_provider.Provider_declarations.of_catalogs
+        ~models:None ~providers:(Some providers) with
+      | Ok declarations -> declarations
+      | Error error -> fail (Llm_provider.Provider_declarations.error_to_string error) in
+    match Binding.find_in_declarations declarations "keyed-provider" with
+    | Some binding -> binding | None -> fail "missing admitted auth binding")
+
 
 let test_keyed_available_participates () =
   let binding = make_binding ~auth:Binding.Api_key ~available:true () in

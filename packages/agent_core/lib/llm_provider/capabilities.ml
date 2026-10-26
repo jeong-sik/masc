@@ -1085,10 +1085,10 @@ let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
   }
 ;;
 
-let apply_declarative_capability_overrides overrides =
+let apply_declarative_capability_overrides ?(base=default_capabilities) overrides =
   let base =
     match overrides.base_label with
-    | None -> default_capabilities
+    | None -> base
     | Some label ->
       (match capabilities_for_provider_label label with
        | Some c -> c
@@ -1430,7 +1430,7 @@ let provider_base_label ~catalog ~wire provider =
      | None -> provider.capabilities_base)
 ;;
 
-let apply_catalog_entry ~provider_entry ~wire
+let apply_catalog_entry ?base ~provider_entry ~wire
     (entry : Model_catalog.model_entry) : capabilities =
   let overrides = overrides_of_catalog_entry entry in
   let wire_base = Option.bind provider_entry
@@ -1443,7 +1443,7 @@ let apply_catalog_entry ~provider_entry ~wire
     | None, None -> Option.bind provider_entry
         (fun (provider : Model_catalog.provider_entry) -> provider.capabilities_base)
   in
-  apply_declarative_capability_overrides { overrides with base_label }
+  apply_declarative_capability_overrides ?base { overrides with base_label }
 ;;
 
 (** Look up capabilities for [model_id] in the loaded model catalog only.
@@ -1573,6 +1573,31 @@ let resolve_request_policy ~wire ~provider ~model_id =
     | Provider_kind.Gemini | Provider_kind.Glm -> None
   in
   { model_capabilities; anthropic_thinking_control }
+;;
+
+let resolve_bound_request_policy ~catalog ~(provider : Model_catalog.provider_entry)
+    ~capabilities ~model_id =
+  let capabilities = match Option.bind
+      (List.assoc_opt provider.kind provider.capabilities_base_by_identity_kind)
+      capabilities_for_provider_label with
+    | Some capabilities -> capabilities
+    | None -> capabilities in
+  let row = match Model_identifiers.Model_id.of_string model_id with
+    | Error _ -> None
+    | Ok model_id -> Option.bind catalog (fun catalog ->
+        Model_catalog.lookup_model_for_provider_entry catalog ~provider ~model_id) in
+  match row with
+  | None -> {model_capabilities=Some capabilities;anthropic_thinking_control=None}
+  | Some row ->
+    let scoped_provider = match row.Model_catalog.provider_name with
+      | None -> None | Some _ -> Some provider in
+    let model_capabilities = Some (apply_catalog_entry ~base:capabilities
+        ~provider_entry:scoped_provider ~wire:(Some provider.kind) row) in
+    let anthropic_thinking_control = match provider.kind with
+      | Provider_kind.Anthropic -> Option.map anthropic_thinking_control_of_vocab_value
+          row.anthropic_thinking_control
+      | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> None in
+    {model_capabilities;anthropic_thinking_control}
 ;;
 
 let request_policy_capabilities policy = policy.model_capabilities

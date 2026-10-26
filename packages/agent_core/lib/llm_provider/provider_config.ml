@@ -241,14 +241,18 @@ let resolve_request_policy (config : t) =
     ~provider:(provider_reference config) ~model_id:config.model_id
 ;;
 
+let with_request_policy policy (config : t) =
+  { config with request_policy_snapshot = Some
+      { snapshot_kind=config.kind;snapshot_provider_id=config.provider_id
+      ; snapshot_model_id=config.model_id;policy } }
+;;
+
 let freeze_for_request (config : t) =
   match matching_request_policy config with
   | Some _ -> config
   | None ->
     let policy = resolve_request_policy config in
-    { config with request_policy_snapshot = Some
-        { snapshot_kind = config.kind; snapshot_provider_id = config.provider_id
-        ; snapshot_model_id = config.model_id; policy } }
+    with_request_policy policy config
 ;;
 
 let capabilities_for_config_model (config : t) =

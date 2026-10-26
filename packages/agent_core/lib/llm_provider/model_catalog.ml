@@ -991,6 +991,11 @@ let lookup_model_for_provider t ~provider ~model_id =
      | Some _ | None -> None)
 ;;
 
+let lookup_model_for_provider_entry t ~(provider : provider_entry) ~model_id =
+  let selected = { t with providers = [provider] } in
+  lookup_model_for_provider selected ~provider:(Declared_provider provider.id) ~model_id
+;;
+
 let model_entries_for_provider t ~provider =
   let model_entries = t.models in
   let requested = normalize_label (match provider with

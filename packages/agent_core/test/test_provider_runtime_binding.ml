@@ -997,8 +997,6 @@ let test_selected_binding_carries_provider_capabilities () =
     let binding = expect_binding "subscriber-alias" in
     let config = expect_ok (Provider_runtime_binding.to_provider_config
       ~model:"unlisted-local-model" binding) in
-    Alcotest.(check bool) "binding projects its declared capability into config" true
-      (Option.is_some config.model_capabilities_override);
     let config = Llm_provider.Provider_config.freeze_for_request config in
     Llm_provider.Provider_catalog.clear_global ();
     let actual = Provider_runtime_binding.capabilities_for_provider_config config in
@@ -1070,10 +1068,155 @@ let test_anonymous_chat_defaults_do_not_restore_declared_missing_policy () =
       caps.supports_reasoning)
 ;;
 
+let captured_catalog ~reasoning ~bare =
+  let toml = Printf.sprintf {|[[providers]]
+id = "captured-provider"
+aliases = ["captured-alias"]
+kind = "openai_compat"
+base_url = "https://captured.example.invalid"
+request_path = "/v1/chat/completions"
+auth = "none"
+default_model = "captured-model"
+capabilities_base = "openai_chat"
+serves_bare_models = ["bare-model"]
+
+[[models]]
+model_id = %S
+%s
+base = "openai_chat"
+supports_reasoning = %b
+supports_tool_choice = true
+supports_required_tool_choice = %b
+|} (if bare then "bare-model" else "captured-model")
+    (if bare then "" else "provider_name = \"captured-provider\"") reasoning reasoning in
+  match Llm_provider.Model_catalog.of_toml_string ~source:"captured-binding-fixture" toml with
+  | Ok catalog -> catalog | Error error -> Alcotest.fail error
+;;
+
+let captured_binding catalog providers =
+  let declarations = match Llm_provider.Provider_declarations.of_catalogs
+      ~models:(Some catalog) ~providers with
+    | Ok declarations -> declarations
+    | Error error -> Alcotest.fail (Llm_provider.Provider_declarations.error_to_string error) in
+  match Provider_runtime_binding.find_in_declarations declarations "captured-provider" with
+  | Some binding -> binding | None -> Alcotest.fail "missing captured provider"
+;;
+
+let test_selection_survives_model_replacement ~before_construction =
+  let module M = Llm_provider.Model_catalog in
+  let module C = Llm_provider.Provider_config in
+  let original = captured_catalog ~reasoning:false ~bare:false in
+  let replacement = captured_catalog ~reasoning:true ~bare:false in
+  M.set_global original;
+  Fun.protect ~finally:M.clear_global (fun () ->
+    let binding = captured_binding original None in
+    if before_construction then M.set_global replacement;
+    let config = expect_ok (Provider_runtime_binding.to_provider_config binding) in
+    M.set_global replacement;
+    let config = {config with base_url="https://override.example.invalid";
+      tool_choice=Some Llm_provider.Types.Any} in
+    let frozen = C.freeze_for_request config in
+    Alcotest.(check bool) "selected model policy remains the captured declaration" false
+      (Provider_runtime_binding.capabilities_for_provider_config frozen).supports_reasoning;
+    Alcotest.(check bool) "actual forcing admission uses captured prohibition" true
+      (Result.is_error (C.validate_tool_choice_request_typed frozen));
+    Alcotest.(check (option string)) "endpoint override retains canonical identity"
+      (Some "captured-provider") frozen.provider_id)
+;;
+
+let test_overlay_removes_seed_bare_authority () =
+  let original = captured_catalog ~reasoning:true ~bare:true in
+  let overlay = match Llm_provider.Provider_catalog.of_json (Yojson.Safe.from_string
+    {|{"schema_version":1,"providers":[{"id":"captured-provider",
+      "aliases":["new-captured-alias"],"kind":"openai_compat",
+      "base_url":"https://overlay.example.invalid","request_path":"/chat/completions",
+      "auth":{"type":"none"},"default_model":"bare-model",
+      "capabilities_base":"openai_chat","capabilities":{"supports_reasoning":false}}]}|}) with
+    | Ok catalog -> catalog | Error error -> Alcotest.fail error in
+  Llm_provider.Model_catalog.set_global original;
+  Fun.protect ~finally:Llm_provider.Model_catalog.clear_global (fun () ->
+    let binding = captured_binding original (Some overlay) in
+    let config = expect_ok (Provider_runtime_binding.to_provider_config binding) in
+    Alcotest.(check string) "selected replacement endpoint" "https://overlay.example.invalid" config.base_url;
+    Alcotest.(check bool) "replacement does not inherit seed bare-model permission" false
+      (Provider_runtime_binding.capabilities_for_provider_config config).supports_reasoning)
+;;
+
+let test_captured_anthropic_absence () =
+  let catalog control =
+    let toml = Printf.sprintf {|[[providers]]
+id = "captured-provider"
+kind = "anthropic"
+base_url = "https://captured.example.invalid"
+request_path = "/v1/messages"
+auth = "none"
+capabilities_base = "anthropic"
+default_model = "captured-model"
+[[models]]
+model_id = "captured-model"
+provider_name = "captured-provider"
+base = "anthropic"
+%s
+|} control in
+    match Llm_provider.Model_catalog.of_toml_string ~source:"thinking-capture-fixture" toml with
+    | Ok catalog -> catalog | Error error -> Alcotest.fail error in
+  let original = catalog "" in
+  let replacement = catalog "anthropic_thinking_control = \"adaptive_default\"" in
+  let binding = captured_binding original None in
+  Llm_provider.Model_catalog.set_global replacement;
+  Fun.protect ~finally:Llm_provider.Model_catalog.clear_global (fun () ->
+    let config = expect_ok (Provider_runtime_binding.to_provider_config binding) in
+    let frozen = Llm_provider.Provider_config.freeze_for_request config in
+    Alcotest.(check bool) "absent captured thinking control remains absent" true
+      (Llm_provider.Provider_config.anthropic_thinking_control frozen = None))
+;;
+
+let test_selected_wire_base () =
+  let toml = {|[[providers]]
+id = "captured-provider"
+kind = "openai_compat"
+identity_kinds = ["openai_compat"]
+base_url = "https://captured.example.invalid"
+request_path = "/chat/completions"
+auth = "none"
+capabilities_base = "openai_chat"
+capabilities_base_by_identity_kind = { openai_compat = "cohere" }
+default_model = "captured-model"
+[[models]]
+model_id = "captured-model"
+provider_name = "captured-provider"
+base = "openai_chat"
+|} in
+  let catalog = match Llm_provider.Model_catalog.of_toml_string ~source:"wire-capture-fixture" toml with
+    | Ok catalog -> catalog | Error error -> Alcotest.fail error in
+  let check model =
+    let binding = captured_binding catalog None in
+    let config = expect_ok (Provider_runtime_binding.to_provider_config ~model binding) in
+    let config = {config with response_format=Llm_provider.Types.JsonSchema
+      (`Assoc ["type",`String "object"])} in
+    let body = Llm_provider.Backend_openai.build_request ~config
+      ~messages:[Llm_provider.Types.user_msg "Return an object"] ()
+      |> Yojson.Safe.from_string in
+    Alcotest.(check string) "selected wire owns actual schema envelope"
+      "json_object" Yojson.Safe.Util.(body |> member "response_format" |> member "type" |> to_string) in
+  check "captured-model";
+  check "undeclared-model"
+;;
+
 let () =
   Alcotest.run
     "Provider_runtime_binding"
-    [ ( "policy authority",
+    [ ( "selection capture",
+        [ Alcotest.test_case "model replacement before construction" `Quick
+            (fun () -> test_selection_survives_model_replacement ~before_construction:true)
+        ; Alcotest.test_case "model replacement after construction" `Quick
+            (fun () -> test_selection_survives_model_replacement ~before_construction:false)
+        ; Alcotest.test_case "overlay removes seed bare authority" `Quick
+            test_overlay_removes_seed_bare_authority
+        ; Alcotest.test_case "captured Anthropic absence" `Quick test_captured_anthropic_absence
+        ; Alcotest.test_case "selected wire base controls model and provider fallback" `Quick
+            test_selected_wire_base ])
+    ; ( "policy authority",
         [ Alcotest.test_case "anonymous chat versus declared missing policy" `Quick
             test_anonymous_chat_defaults_do_not_restore_declared_missing_policy
         ; Alcotest.test_case "projected options match public admission" `Quick

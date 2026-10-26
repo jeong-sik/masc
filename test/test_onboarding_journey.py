@@ -453,6 +453,32 @@ class Journey(StepByStep):
             SETUP.select_sandbox('/bin/masc', '/workspace')
         self.assertIn('declaration_unreadable: /workspace/.masc/config/keepers/imp.toml: Permission denied', output.getvalue())
 
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_sandbox_catalog_distinguishes_missing_and_broken_declarations(self):
+        with tempfile.TemporaryDirectory() as home:
+            base = Path(home, 'workspace')
+            keepers = base / '.masc/config/keepers'
+            keepers.mkdir(parents=True)
+            declaration = keepers / 'imp.toml'
+            empty_bin = Path(home, 'empty-bin')
+            empty_bin.mkdir()
+            env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home, PATH=str(empty_bin))
+
+            def catalog():
+                result = subprocess.run([BINARY, 'sandbox-catalog', '--base-path', str(base)],
+                                        env=env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return json.loads(result.stdout)
+
+            missing = catalog()
+            self.assertIsNone(missing['configured_selection'])
+            self.assertIsNone(missing['configuration_error'])
+            declaration.write_text('[keeper\nbroken')
+            self.assertEqual(catalog()['configuration_error']['kind'], 'declaration_invalid')
+            declaration.unlink()
+            declaration.symlink_to('missing-target.toml')
+            self.assertEqual(catalog()['configuration_error']['kind'], 'declaration_unreadable')
+
     def test_pdf_tools_use_existing_setup_selection_and_refresh(self):
         catalog = dict(schema='masc.sandbox_readiness.v1', candidates=[dict(
             id='docker', state='service_ready', reason='', advanced=False, recommended=True,

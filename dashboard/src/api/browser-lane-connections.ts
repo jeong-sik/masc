@@ -1,0 +1,38 @@
+import { Either, Schema } from 'effect'
+
+const text = Schema.NonEmptyString.pipe(Schema.filter(value => value.trim().length > 0))
+const id = Schema.Number.pipe(Schema.filter(value => Number.isSafeInteger(value) && value >= 0))
+const work = Schema.Struct({
+  requestId: text, actor: Schema.NullOr(text), action: text, tabId: Schema.NullOr(id),
+  phase: Schema.Literal('queued', 'running'),
+})
+const common = {
+  clientId: text, browser: Schema.Literal('firefox', 'zen', 'ego_lite'),
+  version: text, engineVersion: text,
+  interactions: Schema.Array(work),
+  lastActivities: Schema.Array(Schema.Struct({
+    work, outcome: Schema.Literal('returned', 'refused', 'partial', 'unknown'),
+  })),
+}
+const client = Schema.Union(
+  Schema.Struct({ ...common, transport: Schema.Literal('ego_task_space'), space: Schema.Struct({ id, name: text }) }),
+  Schema.Struct({ ...common, transport: Schema.Literal('web_extension', 'webdriver_bidi'), space: Schema.Null }),
+)
+const connections = Schema.Struct({
+  state: Schema.Literal('serving', 'retired'),
+  clients: Schema.Array(client).pipe(Schema.filter(clients => new Set(clients.map(item => item.clientId)).size === clients.length)),
+  // Backends have their own inventory surface; they are not live connections.
+  owned_backends: Schema.Unknown,
+})
+export type BrowserConnection = Schema.Schema.Type<typeof client>
+export type BrowserInteraction = Schema.Schema.Type<typeof work>
+export type BrowserConnections =
+  | { readonly kind: 'observed'; readonly value: Schema.Schema.Type<typeof connections> }
+  | { readonly kind: 'unreadable' }
+
+/** Mirrors Browser_lane.client_json / Browser_addon_owner.snapshot. Decode at
+ * this display boundary without dropping the generic row or its raw evidence. */
+export function parseBrowserConnections(value: unknown): BrowserConnections {
+  const decoded = Schema.decodeUnknownEither(connections, { onExcessProperty: 'error' })(value)
+  return Either.isRight(decoded) ? { kind: 'observed', value: decoded.right } : { kind: 'unreadable' }
+}

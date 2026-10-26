@@ -20,4 +20,5 @@
   masc.config
   masc_core
   masc_log
+  angstrom
   uri))

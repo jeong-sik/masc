@@ -94,5 +94,75 @@ let policy () = with_catalog (fun () ->
     Alcotest.(check string) "B forcing reaches final Chat body" "required"
       Yojson.Safe.Util.(Yojson.Safe.from_string request.Complete_common.body |> member "tool_choice" |> to_string))
 
+let with_endpoint_env value f =
+  let key = "CUSTOM_LLM_BASE_URL" in
+  let previous = Sys.getenv_opt key in
+  Fun.protect ~finally:(fun () -> match previous with
+    | None -> Unix.unsetenv key | Some previous -> Unix.putenv key previous)
+    (fun () ->
+      (match value with None -> Unix.unsetenv key | Some value -> Unix.putenv key value);
+      f ())
+let missing_endpoint () = with_endpoint_env None (fun () ->
+  Alcotest.(check bool) "custom label cannot borrow discovery endpoint" true
+    (Runtime_model_string.parse_model_string "custom:overlap"=None))
+let ambient_endpoint () = with_endpoint_env (Some "https://ambient.invalid") (fun () ->
+  Alcotest.(check bool) "custom label cannot borrow environment endpoint" true
+    (Runtime_model_string.parse_model_string "custom:overlap"=None);
+  match Provider_kind_resolver.resolve "custom:overlap" with
+  | Unknown _ -> ()
+  | Custom_url _ | Registered _ -> Alcotest.fail "kind resolver invented a custom endpoint")
+let invalid_endpoint () =
+  List.iter (fun spec ->
+    Alcotest.(check bool) "invalid custom endpoint is refused before request construction" true
+      (Runtime_model_string.parse_model_string spec=None))
+    ["custom:overlap@";"custom:@https://explicit.invalid";
+     "custom:overlap@not-an-endpoint";"custom:overlap@ftp://explicit.invalid"]
+let malformed_endpoint () =
+  List.iter (fun endpoint ->
+    Alcotest.(check bool) "custom URL parser must consume the complete endpoint" true
+      (Runtime_model_string.parse_model_string ("custom:overlap@" ^ endpoint)=None))
+    ["https://explicit.invalid:bogus";"https://explicit.invalid/path%ZZ";
+     "https://explicit.invalid/path invalid"]
+let endpoint_authority () =
+  List.iter (fun endpoint ->
+    Alcotest.(check bool) "invalid authority suffix cannot become a path" true
+      (Runtime_model_string.parse_model_string ("custom:overlap@" ^ endpoint)=None))
+    ["https://user@first.invalid@second.invalid";
+     "https://explicit.invalid]garbage";"https://[::1]garbage"]
+let endpoint_ports () =
+  List.iter (fun endpoint ->
+    Alcotest.(check bool) "invalid explicit port cannot become the default port" true
+      (Runtime_model_string.parse_model_string ("custom:overlap@" ^ endpoint)=None))
+    ["https://explicit.invalid:999999999999999999999999999999";
+     "https://explicit.invalid:65536";"https://explicit.invalid:0"];
+  List.iter (fun endpoint ->
+    let config = match Runtime_model_string.parse_model_string ("custom:overlap@" ^ endpoint) with
+      | Some config -> config | None -> Alcotest.fail "valid explicit authority was refused" in
+    Alcotest.(check string) "valid authority and path/query bytes remain explicit"
+      endpoint config.Provider_config.base_url)
+    ["https://explicit.invalid:00443/v1";"http://[::1]:8080/v1";
+     "http://[::1]/v1";"https://user:password@explicit.invalid/v1?q=a%2Fb"]
+let explicit_endpoint () = with_endpoint_env (Some "https://ambient.invalid") (fun () ->
+  let spec = "custom:overlap@https://explicit.invalid/v1" in
+  (match Provider_kind_resolver.resolve spec with
+   | Custom_url {model_id;base_url} ->
+     Alcotest.(check string) "custom classification retains explicit model" "overlap" model_id;
+     Alcotest.(check string) "custom classification retains explicit endpoint"
+       "https://explicit.invalid/v1" base_url
+   | Unknown _ | Registered _ -> Alcotest.fail "explicit custom URL was not classified");
+  let config = match Runtime_model_string.parse_model_string ~max_tokens:128 spec with
+    | Some config -> config | None -> Alcotest.fail "explicit custom URL was refused" in
+  Alcotest.(check string) "custom config retains explicit endpoint" "https://explicit.invalid/v1" config.base_url;
+  match Complete_common.serialize_http_request ~stream:false ~config ~tools:[]
+      ~messages:[Types.make_message ~role:Types.User [Types.Text "Read the receipt"]] with
+  | Error _ -> Alcotest.fail "explicit custom config failed final request serialization"
+  | Ok request ->
+    Alcotest.(check string) "custom wire retains explicitly selected model" "overlap"
+      Yojson.Safe.Util.(Yojson.Safe.from_string request.Complete_common.body |> member "model" |> to_string))
+
 let () = Alcotest.run "runtime model label binding"
-  ["provider authority",["identity",`Quick,identity;"context",`Quick,context;"policy and wire",`Quick,policy]]
+  ["provider authority",["identity",`Quick,identity;"context",`Quick,context;"policy and wire",`Quick,policy];
+   "custom endpoint",["missing",`Quick,missing_endpoint;"ambient",`Quick,ambient_endpoint;
+     "invalid",`Quick,invalid_endpoint;"malformed",`Quick,malformed_endpoint;
+     "ports",`Quick,endpoint_ports;"authority",`Quick,endpoint_authority;
+     "explicit",`Quick,explicit_endpoint]]

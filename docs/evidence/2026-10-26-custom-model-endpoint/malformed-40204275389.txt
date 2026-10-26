@@ -1,0 +1,46 @@
+run: 40204275389
+head: af2f83980fbd56c3c18d4393e259859c2d48241f
+raw_sha256: dc49fe8465876fd43f67f59291013ad16fec8f190dd5d62b652c09a98b9ac8c1
+raw_bytes: 113594
+
+test suite	Checkout	2026-10-25T14:52:50.1137252Z HEAD is now at af2f8398 test(runtime): reject partially parsed custom endpoint URLs
+test suite	Test	2026-10-25T14:54:28.6616133Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T14:54:28.6616910Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T14:54:28.6617868Z ASSERT explicit provider survives label resolution
+test suite	Test	2026-10-25T14:54:28.6618386Z ASSERT resolved endpoint remains owned by provider
+test suite	Test	2026-10-25T14:54:28.6618899Z   [OK]          provider authority          0   identity.
+test suite	Test	2026-10-25T14:54:28.6621286Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T14:54:28.6622012Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T14:54:28.6640816Z ASSERT context excludes unrelated bare model declaration
+test suite	Test	2026-10-25T14:54:28.6641287Z ASSERT config carries the same resolved window
+test suite	Test	2026-10-25T14:54:28.6641653Z   [OK]          provider authority          1   context.
+test suite	Test	2026-10-25T14:54:28.6642151Z ASSERT A rejects forcing despite the bare row allowing it
+test suite	Test	2026-10-25T14:54:28.6642763Z ASSERT B retains its separate forcing declaration
+test suite	Test	2026-10-25T14:54:28.6643593Z ASSERT endpoint override preserves selected provider
+test suite	Test	2026-10-25T14:54:28.6644185Z ASSERT endpoint override cannot borrow B's policy
+test suite	Test	2026-10-25T14:54:28.6644902Z ASSERT A rejects required choice before dispatch
+test suite	Test	2026-10-25T14:54:28.6645424Z ASSERT B admits required choice
+test suite	Test	2026-10-25T14:54:28.6645865Z ASSERT B forcing reaches final Chat body
+test suite	Test	2026-10-25T14:54:28.6646446Z   [OK]          provider authority          2   policy and wire.
+test suite	Test	2026-10-25T14:54:28.6647075Z ASSERT custom label cannot borrow discovery endpoint
+test suite	Test	2026-10-25T14:54:28.6649305Z   [OK]          custom endpoint             0   missing.
+test suite	Test	2026-10-25T14:54:28.6649768Z ASSERT custom label cannot borrow environment endpoint
+test suite	Test	2026-10-25T14:54:28.6650134Z   [OK]          custom endpoint             1   ambient.
+test suite	Test	2026-10-25T14:54:28.6650527Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T14:54:28.6651317Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T14:54:28.6651772Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T14:54:28.6652209Z ASSERT invalid custom endpoint is refused before request construction
+test suite	Test	2026-10-25T14:54:28.6652592Z   [OK]          custom endpoint             2   invalid.
+test suite	Test	2026-10-25T14:54:28.6652949Z ASSERT custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T14:54:28.6653626Z   [FAIL]        custom endpoint             3   malformed.
+test suite	Test	2026-10-25T14:54:28.6653967Z ASSERT custom classification retains explicit model
+test suite	Test	2026-10-25T14:54:28.6654322Z ASSERT custom classification retains explicit endpoint
+test suite	Test	2026-10-25T14:54:28.6654666Z ASSERT custom config retains explicit endpoint
+test suite	Test	2026-10-25T14:54:28.6655000Z ASSERT custom wire retains explicitly selected model
+test suite	Test	2026-10-25T14:54:28.6655340Z   [OK]          custom endpoint             4   explicit.
+test suite	Test	2026-10-25T14:54:28.6656486Z │ [FAIL]        custom endpoint             3   malformed.                     │
+test suite	Test	2026-10-25T14:54:28.6657746Z FAIL custom URL parser must consume the complete endpoint
+test suite	Test	2026-10-25T14:54:28.6658186Z    Expected: `true'
+test suite	Test	2026-10-25T14:54:28.6658391Z    Received: `false'
+test suite	Test	2026-10-25T14:54:28.6665275Z 1 failure! in 0.028s. 8 tests run.
+test suite	Test	2026-10-25T14:54:28.6672733Z [targeted] test/test_runtime_model_label_binding: FAIL exit 1 in 0s

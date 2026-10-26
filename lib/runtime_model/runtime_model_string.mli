@@ -20,4 +20,6 @@ val parse_model_string
     A registered label carries the canonical registry provider id into the
     returned config. Its context window uses that config's provider/model
     capability lookup, so an unrelated bare model row cannot substitute for
-    the selected provider. Request preparation still owns policy freezing. *)
+    the selected provider. Request preparation still owns policy freezing.
+    Custom labels require an explicit absolute HTTP(S) URL; omission or an
+    invalid endpoint returns [None] without environment/discovery fallback. *)

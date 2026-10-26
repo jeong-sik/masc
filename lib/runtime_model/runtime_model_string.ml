@@ -38,10 +38,6 @@ let default_registry () =
         | Some registry -> registry
         | None -> built)
 
-(** Split a ["provider:model_id"] string at the first colon. Delegates to the
-    canonical leaf {!Runtime_model_id_split}. *)
-let split_provider_model = Runtime_model_id_split.split_provider_model
-
 (** Build a config for ["custom:model@url"] specs. *)
 let make_custom_config
   ?temperature
@@ -49,27 +45,23 @@ let make_custom_config
   ?system_prompt
   ?keep_alive
   ?num_ctx
+  ~base_url
   model_id
   =
-  let actual_model, base_url = Runtime_model_resolve.parse_custom_model model_id in
-  if actual_model = ""
-  then None
-  else
-    Some
-      (Llm_provider.Provider_config.make
-         ~kind:OpenAI_compat
-         ~model_id:actual_model
+  Llm_provider.Provider_config.make
+    ~kind:OpenAI_compat
+    ~model_id
+    ~base_url
+    ~request_path:
+      (Binding.normalize_openai_compat_request_path
          ~base_url
-         ~request_path:
-           (Binding.normalize_openai_compat_request_path
-              ~base_url
-              ~request_path:Masc_network_defaults.openai_chat_completions_path)
-         ?temperature
-         ?max_tokens
-         ?system_prompt
-         ?keep_alive
-         ?num_ctx
-         ())
+         ~request_path:Masc_network_defaults.openai_chat_completions_path)
+    ?temperature
+    ?max_tokens
+    ?system_prompt
+    ?keep_alive
+    ?num_ctx
+    ()
 ;;
 
 (** Resolve the effective API-key env var: per-provider override, then
@@ -188,36 +180,19 @@ let parse_model_string
   (s : string)
   : Llm_provider.Provider_config.t option
   =
-  let trimmed = String.trim s in
-  match split_provider_model trimmed with
-  | Some ("custom", model_id) ->
-    make_custom_config
-      ?temperature
-      ?max_tokens
-      ?system_prompt
-      ?keep_alive
-      ?num_ctx
-      model_id
-  | _ ->
-    (match Provider_kind_resolver.resolve s with
-     | Unknown _ -> None
-     | Custom_url _ -> None
-     | Registered { provider_name; model_id; kind = resolved_kind } ->
-       (match Llm_provider.Provider_registry.find (default_registry ()) provider_name with
-        | None -> None
-        | Some entry when not (entry.is_available ()) -> None
-        | Some entry ->
-          if entry.defaults.kind <> resolved_kind
-          then None
-          else
-            make_registry_config
-              ?temperature
-              ?max_tokens
-              ?system_prompt
-              ~api_key_env_overrides
-              ?keep_alive
-              ?num_ctx
-              ~provider_name
-              ~model_id
-              entry))
+  match Provider_kind_resolver.resolve s with
+  | Unknown _ -> None
+  | Custom_url { model_id; base_url } ->
+    Some (make_custom_config
+      ?temperature ?max_tokens ?system_prompt ?keep_alive ?num_ctx
+      ~base_url model_id)
+  | Registered { provider_name; model_id; kind = resolved_kind } ->
+    (match Llm_provider.Provider_registry.find (default_registry ()) provider_name with
+     | None -> None
+     | Some entry when not (entry.is_available ()) -> None
+     | Some entry ->
+       if entry.defaults.kind <> resolved_kind then None
+       else make_registry_config
+         ?temperature ?max_tokens ?system_prompt ~api_key_env_overrides
+         ?keep_alive ?num_ctx ~provider_name ~model_id entry)
 ;;

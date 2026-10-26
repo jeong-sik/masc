@@ -36,6 +36,7 @@ depends: [
   "cohttp-eio" {>= "6.0"}
   "piaf" {= "0.2.0"}
   "eio-ssl" {>= "0.3.0"}
+  "angstrom"
   "uri" {>= "4.4"}
   "tls" {>= "2.1.2"}
   "tls-eio" {>= "2.1.2"}

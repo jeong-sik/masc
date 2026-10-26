@@ -2018,6 +2018,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                let response = `Assoc ["success",`Bool original_result.success;
                  "content",`String original_result.content;"content_blocks",content_blocks] in
                Keeper_client_tool_outbox.retain_host_result producer ~base_path ~keeper_name
+                 ~invocation_index:(Agent_core.Tool_contract.Invocation.planned_index invocation)
                  ~call_id ~tool_name:tool.schema.name ~arguments:input ~response in
              let retained =
                try retain () with

@@ -47,7 +47,7 @@ let validate path json =
     let names = List.map fst fields in
     let names = List.sort String.compare names in
     let vendor = ["arguments"; "call_id"; "response"; "thread_id"; "tool_name"; "turn_id"] in
-    let host = ["arguments"; "call_id"; "host_producer_id"; "host_turn_count";
+    let host = ["arguments"; "call_id"; "host_invocation_index"; "host_producer_id"; "host_turn_count";
       "response"; "runtime_label"; "tool_name"] in
     let strings_valid names = List.for_all (fun name -> match List.assoc_opt name fields with
       | Some (`String value) -> String.trim value <> ""
@@ -63,6 +63,9 @@ let validate path json =
           let* () = match List.assoc_opt "host_producer_id" fields with
             | Some (`String value) -> Random_id.parse_uuid_v7 value |> Result.map (fun _ -> ())
             | Some _ | None -> Error "invalid host tool result producer" in
+          let* () = match List.assoc_opt "host_invocation_index" fields with
+            | Some (`Int value) when value >= 0 -> Ok ()
+            | Some _ | None -> Error "invalid host tool invocation index" in
           (match List.assoc_opt "host_turn_count" fields with
            | Some (`Int value) when value >= 0 -> Ok ()
            | Some _ | None -> Error "invalid host tool result turn count")
@@ -85,8 +88,9 @@ let retain_json ~base_path ~keeper_name json =
 let retain ~base_path ~keeper_name result =
   retain_json ~base_path ~keeper_name (to_json result)
 
-let retain_host_result producer ~base_path ~keeper_name ~call_id ~tool_name ~arguments ~response =
-  let json = `Assoc ["host_producer_id",`String producer.producer_id;
+let retain_host_result producer ~base_path ~keeper_name ~invocation_index ~call_id ~tool_name ~arguments ~response =
+  let json = `Assoc ["host_invocation_index",`Int invocation_index;
+    "host_producer_id",`String producer.producer_id;
     "runtime_label",`String producer.runtime_label;"host_turn_count",`Int producer.turn_count;
     "call_id",`String call_id;"tool_name",`String tool_name;"arguments",arguments;"response",response] in
   retain_json ~base_path ~keeper_name json

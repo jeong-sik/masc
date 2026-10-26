@@ -32,8 +32,11 @@ let run_case ?(host=false) scenario () =
   let config = Workspace.default_config base_path in
   ignore (Workspace.init config ~agent_name:(Some keeper_name));
   let host_producer = get (Outbox.host_producer ~runtime_label:"source-client-fixture" ~turn_count:4) in
+  let next_host_invocation_index = ref 0 in
   let retain turn_id = if host then
-      get (Outbox.retain_host_result host_producer ~base_path ~keeper_name ~call_id:turn_id
+      let invocation_index = !next_host_invocation_index in
+      incr next_host_invocation_index;
+      get (Outbox.retain_host_result host_producer ~base_path ~keeper_name ~invocation_index ~call_id:turn_id
         ~tool_name:"Execute" ~arguments:(`Assoc ["command",`String "already-executed-effect"])
         ~response:(`Assoc ["content",`String marker;"success",`Bool true]))
     else get (Outbox.retain ~base_path ~keeper_name (receipt turn_id)) in

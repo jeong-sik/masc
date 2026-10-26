@@ -98,13 +98,21 @@ exited. In those cases the previous autosave stays. If the write itself fails,
 the result still carries what you asked for, plus
 `autosave: {"saved": false, "reason": ...}`.
 
-After a restart, before anything is loaded, a call that needs a machine
+After a restart the DOS worker resumes `autosave` by itself before the first
+call: the game is where its last autosave left it, nobody holds the
+controller, and whoever moves the machine first takes it. Only `autosave` is
+resumed, never `autosave-prev`, and both files stay as they were. The resumed
+machine goes on writing `autosave` as the machine before the restart did, so
+`autosave-prev` keeps what it held.
+
+With no machine loaded (after an eject, or after a restart with no
+`autosave`, or with one that would not restore), a call that needs a machine
 (`masc_dos_screen`, `masc_dos_peek`) and `masc_dos_load` with no `program` say
 what the two autosave slots hold: `autosave` and `previous_autosave` in the
 result, each with the program, steps, who saved it, when, and a `resume`
 command. A file that is there but cannot be read shows as `unreadable` with the
-reason. Nothing resumes anything for you: read the fields and call
-`masc_dos_restore` yourself when you want a slot back.
+reason. Read the fields and call `masc_dos_restore` yourself when you want a
+slot back.
 
 There are two lane-owned slots. `autosave` is the machine's latest state.
 `autosave-prev` holds the autosave that was current when the running machine

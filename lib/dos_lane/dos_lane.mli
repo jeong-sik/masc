@@ -93,7 +93,9 @@ type held_autosave =
     that slot held; so starting a machine is the act that discards the
     previous autosave, and this is the consent for it. With no previous
     autosave nothing is discarded: the autosave moves into the slot and
-    survives there, and no consent is asked. *)
+    survives there, and no consent is asked. {!resume_autosave} asks for none
+    either: the machine it resumes continues the autosave's own play and
+    leaves [autosave_prev_slot] as it is. *)
 type previous_autosave_consent =
   | Keep_previous_autosave
       (** Refuse with {!error.Would_discard_previous_autosave} when starting
@@ -591,7 +593,9 @@ val checkpoints : dir:string -> (Machine_checkpoint.listed list, error) result
 
 (** {2 Autosave}
 
-    A fixed slot, offered back, never resumed on its own. *)
+    A fixed slot. A worker resumes it as it starts ({!resume_autosave}); with
+    no machine loaded after that, the tool layer offers it back
+    ({!lookup_autosave}). *)
 
 val autosave_slot : Machine_checkpoint.slot
 (** The one name autosave writes to. Parsed once from a literal that always
@@ -605,7 +609,8 @@ val autosave_prev_slot : Machine_checkpoint.slot
     slot held, which is why starting a machine asks for
     {!previous_autosave_consent} when both files exist. Listed and restorable
     like any other slot ({!checkpoints}, {!restore}); nothing offers it back
-    on its own the way {!lookup_autosave} offers {!autosave_slot}. *)
+    on its own the way {!lookup_autosave} offers {!autosave_slot}, and
+    {!resume_autosave} never falls back to it. *)
 
 val lookup_autosave : dir:string -> autosave_lookup
 (** What the autosave slot holds, read through {!Machine_checkpoint}'s header,
@@ -616,6 +621,36 @@ val lookup_autosave : dir:string -> autosave_lookup
 val lookup_previous_autosave : dir:string -> autosave_lookup
 (** {!lookup_autosave} for {!autosave_prev_slot}. After a restart this can be
     all that is left of a campaign. *)
+
+(** What {!resume_autosave} found and did. *)
+type resume =
+  | Nothing_to_resume  (** no file is at {!autosave_slot}; nothing is loaded *)
+  | Machine_loaded  (** a machine is already loaded; it is left as it is *)
+  | Resumed of observation  (** the autosave is the workspace machine; the controller is free *)
+  | Not_resumed of error
+      (** a file is at {!autosave_slot} and did not restore, with the reason.
+          Nothing is loaded, the file is left as it was, and
+          {!autosave_prev_slot} is not tried. *)
+
+val resume_autosave :
+  dir:string -> ledger_dir:string -> saves_dir_of:(string -> string) -> resume
+(** Brings back the machine in {!autosave_slot} when none is loaded: a worker
+    does this once as it starts, so a restart does not leave the shared
+    machine unloaded. [dir], [ledger_dir] and [saves_dir_of] are as in
+    {!restore}.
+
+    The resumed machine continues the play the autosave was written from.
+    Its autosaves replace {!autosave_slot}, as every autosave after the first
+    of an uninterrupted machine does, and {!autosave_prev_slot} stays as it
+    was. Nothing that playing on without the restart would have kept is
+    discarded, so no {!previous_autosave_consent} is asked. A {!restore} of
+    the same slot is different: it starts a new incarnation, whose first
+    autosave copies the autosave into {!autosave_prev_slot}.
+
+    The controller is free, as after {!pass} with [None]: whoever next moves
+    the machine takes it. The resumed machine is a new incarnation and raises
+    the change count. A resume, and a file that did not restore with the
+    reason, each put a line on {!recent_activity}. Nothing is announced. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

@@ -458,12 +458,55 @@ let test_a_handler_exception_does_not_end_the_worker () =
       (`Assoc ["steps", `Int 10]) in
     check bool "and so does a call that moves the machine" false (stepped.is_error = Some true))
 
+(* Prints HI, then polls the BIOS key read: a boot settles and autosaves. *)
+let hello_com = "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$"
+
+(* A worker that replaces another one, after a server restart or an image
+   upgrade, resumes the autosave before its first call. Guests are not left
+   with a no_machine refusal only a controller holder could answer: the screen
+   is the autosave's, nobody holds the controller, and the first caller to
+   move takes it. *)
+let test_a_worker_start_resumes_the_autosave () =
+  let base_path = Filename.temp_dir "dos-addon-worker-resume-" "" in
+  let dos = Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos" in
+  mkdir_p dos;
+  Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+  (* The worker before the restart: it booted a game, and the boot autosaved. *)
+  let booted, _boot =
+    require
+      (Dos_lane.load ~who:"before-restart" ~ledger_dir:dos
+         ~saves_dir:(Filename.concat (Filename.concat dos "saves") "hello.com")
+         ~checkpoint_dir:(Filename.concat dos "checkpoints")
+         ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"hello.com"
+         ~program_bytes:hello_com ~files:[] ~announce:ignore)
+  in
+  require (Dos_lane.eject ~who:"before-restart" ~announce:ignore ());
+  with_worker ~base_path (fun client ->
+    let raw name arguments = unwrap (Client.call_tool client ~name ~arguments ()) in
+    let call ?controller name arguments =
+      raw Lane_addon_call_context.tool_name
+        (Lane_addon_call_context.to_json_with_controller ~companion:None ~controller
+           ~principal:(Lane_addon_call_context.Keeper "fixture") ~tool:name ~arguments) in
+    let snapshot () = member "holder" (raw C.snapshot_tool (`Assoc [])) in
+    let screen = call "masc_dos_screen" (`Assoc ["include_frame", `Bool false]) in
+    check bool "the first call finds a machine" false (screen.is_error = Some true);
+    check bool "the autosave's program" true (member "saves_name" screen = `String "hello.com");
+    check bool "at the autosave's steps" true (member "steps" screen = `Int booted.Dos_lane.steps);
+    check bool "with the controller free" true (member "controller" screen = `Null);
+    check bool "the host's controller snapshot agrees" true (snapshot () = `Null);
+    let stepped = call ~controller:{C.observed_holder=None; release=None; handoff_target=None}
+      "masc_dos_step" (`Assoc ["steps", `Int 10]) in
+    check bool "a host-admitted caller moves it" false (stepped.is_error = Some true);
+    check bool "and takes the free controller" true (snapshot () = `String "fixture"))
+
 let () = run "DOS standalone Add-on worker"
   ["stdio", [test_case "host admission, handoff, recovery and PNG" `Quick test_stdio_controller;
              test_case "a handler exception does not end the worker" `Quick
                test_a_handler_exception_does_not_end_the_worker;
              test_case "a core exception while booting is a completed load" `Quick
-               test_a_core_exception_while_booting_is_a_completed_load];
+               test_a_core_exception_while_booting_is_a_completed_load;
+             test_case "a worker start resumes the autosave" `Quick
+               test_a_worker_start_resumes_the_autosave];
    "edge", [test_case "contained turns an exception into an error result" `Quick
               test_contained_turns_an_exception_into_an_error_result];
    "lane exceptions", [test_case "a raising call gives the pad back" `Quick

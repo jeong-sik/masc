@@ -65,10 +65,16 @@ name that already holds a checkpoint replaces it and reports what it held in
 `replaced`. The names `autosave` and `autosave-prev` belong to the lane and a
 save to either is refused.
 
-After a worker restart nothing is loaded. `masc_dos_screen` and
-`masc_dos_load` with no program say what the two autosave slots hold, under
-`autosave` and `previous_autosave`. Resume with `masc_dos_restore` and `slot`
-set to `autosave`, or to `autosave-prev` when the autosave is gone.
+A worker that starts resumes `autosave` before its first call, with nobody
+holding the controller; whoever moves the machine first takes it. It never
+falls back to `autosave-prev`. The resumed machine goes on writing `autosave`
+the way the machine before the restart did, so `autosave-prev` keeps what it
+held and no consent is asked. With no `autosave`, or with one that does not
+restore, the worker starts with nothing loaded and its activity feed says
+why. `masc_dos_screen` and `masc_dos_load` with no program then say what the
+two autosave slots hold, under `autosave` and `previous_autosave`. Resume with
+`masc_dos_restore` and `slot` set to `autosave`, or to `autosave-prev` when the
+autosave is gone.
 
 A machine started by `masc_dos_load` or `masc_dos_restore` copies the
 `autosave` file to `autosave-prev` with its first autosave, and what

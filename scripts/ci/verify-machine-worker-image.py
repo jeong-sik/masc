@@ -124,13 +124,22 @@ def main():
         finally: worker.close()
         worker=Worker(image,receipt['architecture'],volume,name+'-replacement',root)
         try:
-            assert worker.call(machine,'screen').get('isError') is True
+            key='steps' if machine=='dos' else 'frame'
+            if machine=='dos':
+                # The load's boot wrote the autosave, so the replacement resumes it before
+                # its first call, with nobody holding the controller.
+                resumed=success(worker.call(machine,'screen'))
+                assert resumed[key]==before[key], (resumed[key],before[key])
+                assert resumed['controller'] is None, resumed['controller']
+                result['checks'].append('replacement_resumes_autosave')
+            else:
+                assert worker.call(machine,'screen').get('isError') is True
+                result['checks'].append('replacement_starts_unloaded')
             success(worker.call(machine,'restore',{'slot':'proof'},controlled=machine=='dos'))
             screen=success(worker.call(machine,'screen'))
-            key='steps' if machine=='dos' else 'frame'
             assert screen[key]==before[key], (screen[key],before[key])
             if machine=='dos': assert screen['controller']=='fixture'
-            result['checks'] += ['replacement_starts_unloaded','volume_checkpoint_restore','restored_clock_unchanged']
+            result['checks'] += ['volume_checkpoint_restore','restored_clock_unchanged']
         finally: worker.close()
         (root/'runtime-proof.json').write_text(json.dumps(result,indent=2)+'\n')
     finally:

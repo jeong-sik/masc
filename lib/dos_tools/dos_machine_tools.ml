@@ -270,9 +270,10 @@ let no_machine_message guidance =
       refusal reason previous (describe_held held) consent
 ;;
 
-(* The answer to a call that needs a machine when none is loaded. It is the
-   answer a caller gets right after a restart, so it says what the two
-   autosave slots hold and how to resume. Every other refusal is unaffected. *)
+(* The answer to a call that needs a machine when none is loaded: after an
+   eject, or after a worker start that had no autosave to resume or one that
+   did not restore. It says what the two autosave slots hold and how to
+   resume. Every other refusal is unaffected. *)
 let no_machine ~base_path ~tool_name ~start_time =
   let found = lookup_autosave_slots ~base_path in
   let message = no_machine_message (no_machine_guidance found) in
@@ -786,9 +787,8 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
   match get_string_opt args "program" with
   | None | Some "" ->
     (* No name: the inventory, so the next call can name a program. Named
-       here too: this is the first call a caller makes after a restart, and
-       an autosave from before it is worth resuming rather than starting
-       over. *)
+       here too: this is the first call a caller makes with nothing loaded,
+       and an autosave is worth resuming rather than starting over. *)
     let autosave = autosave_slots_fields (lookup_autosave_slots ~base_path) in
     (match programs_available ~base_path with
      | Ok names ->
@@ -1299,6 +1299,25 @@ let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
     in
     after_announcing
       (of_lane ~base_path ~extra:[ slot_field slot; core_field ] ~tool_name ~start_time restored)
+;;
+
+(* A worker's first act: the machine the autosave holds, back where the last
+   process left it, with the controller free. The lane puts both outcomes
+   with a file there on its activity feed; the log line is for an operator
+   reading the worker's own output. *)
+let resume_autosave ~base_path =
+  let resumed =
+    off_domain (fun () ->
+      Dos_lane.resume_autosave ~dir:(checkpoints_dir ~base_path) ~ledger_dir:(dos_dir ~base_path)
+        ~saves_dir_of:(saves_dir ~base_path))
+  in
+  (match resumed with
+   | Dos_lane.Resumed o ->
+     Log.DosLog.info "masc_dos resumed the autosave at %d steps" o.Dos_lane.steps
+   | Dos_lane.Not_resumed error ->
+     Log.DosLog.warn "masc_dos the autosave was not resumed: %s" (Dos_lane.error_to_string error)
+   | Dos_lane.Nothing_to_resume | Dos_lane.Machine_loaded -> ());
+  resumed
 ;;
 
 let dispatch ~base_path ~agent ~(tool : Machine_controller_contract.dos_tool) ~arguments =

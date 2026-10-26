@@ -1,6 +1,10 @@
 (** Standalone DOS worker. The host owns identity, credential admission and
     Board publication; this process owns machine state and tool execution. *)
 val create : base_path:string -> unit -> Mcp_protocol_eio.Server.t
+(** Builds the worker over [base_path]. With no machine loaded, it first
+    resumes the autosave ({!Dos_lane.resume_autosave}) with the controller
+    free; with no autosave, or one that does not restore, it starts with no
+    machine. *)
 
 val contained :
   tool_name:string ->

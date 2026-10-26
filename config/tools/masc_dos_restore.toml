@@ -5,8 +5,9 @@ Resume a saved DOS machine, or list the saved ones.
 Replaces the current machine with the named checkpoint only after it reads; \
 you then hold the controller. Needs the controller free or yours, like \
 masc_dos_load. The key ledger continues from the checkpoint; the game's \
-saves folder is left as it is. No slot lists checkpoints. After a worker \
-restart nothing is loaded and slot=autosave resumes the last autosave.
+saves folder is left as it is. No slot lists checkpoints. A worker that \
+starts resumes the autosave by itself with the controller free; with no \
+machine loaded, slot=autosave resumes the last autosave.
 
 The resumed machine's first save copies the autosave to autosave-prev, \
 replacing what autosave-prev held. When both are on disk, restoring any slot \

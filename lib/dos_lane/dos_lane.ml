@@ -1435,6 +1435,25 @@ let save ~who ~dir ~slot =
     | Error e -> Error e)
 ;;
 
+(* Which checkpoint a preparation reads, and so what the machine it starts does
+   with the autosave it finds on its first save. *)
+type source =
+  | Chosen_slot of { slot : Machine_checkpoint.slot; consent : previous_autosave_consent }
+      (* A restore a caller asked for: a new incarnation. Its first autosave
+         keeps the autosave it finds by copying it to [autosave_prev_slot],
+         which replaces what that slot held, so the consent is checked. *)
+  | Own_autosave
+      (* The autosave itself, resumed as a worker starts. The machine holds
+         exactly what [autosave_slot] holds, so its first autosave replaces
+         that file with the next state of the same play -- the write every
+         call of an uninterrupted machine makes -- and [autosave_prev_slot]
+         is left as it was. Nothing is discarded, so nothing is asked. *)
+
+let source_slot = function
+  | Chosen_slot { slot; consent = _ } -> slot
+  | Own_autosave -> autosave_slot
+;;
+
 type restore_payload = {
   restore_machine : Dos_machine.t;
   restore_kept : (string, string) Hashtbl.t;
@@ -1444,13 +1463,14 @@ type restore_payload = {
   restore_ledger_path : string;
   restore_saves_dir : string;
   restore_checkpoint_dir : string;
-  restore_slot : Machine_checkpoint.slot;
+  restore_source : source;
   restore_slot_writes : int;
   restore_previous_writes : int;
       (* How many times this lane replaced the previous autosave when the
          consent was checked. A load that lands between preparation and commit
          copies the autosave into that slot, and the restore's own first
-         autosave would then discard what it just kept. *)
+         autosave would then discard what it just kept. Compared only for a
+         [Chosen_slot]: an [Own_autosave] machine never writes that slot. *)
 }
 
 type prepared_restore = restore_payload option Atomic.t
@@ -1477,13 +1497,18 @@ let check_restore_consent ~dir ~slot consent =
     else Ok ()
 ;;
 
-let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
+let prepare_source ~dir ~source ~ledger_dir ~saves_dir_of =
+  let slot = source_slot source in
   let* () = require_activity () in
   let restore_slot_writes, restore_previous_writes =
     locked (fun () ->
       ( checkpoint_write_count (Machine_checkpoint.path ~dir slot)
       , checkpoint_write_count (Machine_checkpoint.path ~dir autosave_prev_slot) )) in
-  let* () = check_restore_consent ~dir ~slot previous_autosave in
+  let* () =
+    match source with
+    | Chosen_slot { slot = _; consent } -> check_restore_consent ~dir ~slot consent
+    | Own_autosave -> Ok ()
+  in
   let* checkpoint = match Machine_checkpoint.read ~dir slot ~machine:Machine_checkpoint.Dos
       ~format:checkpoint_format with
     | Ok checkpoint -> Ok checkpoint
@@ -1518,7 +1543,7 @@ let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
         let prepared = Atomic.make (Some {
           restore_machine=m;restore_kept=kept;restore_meta=meta;restore_entries=entries;
           restore_staged_ledger=temporary;restore_ledger_path=Filename.concat ledger_dir "ledger.jsonl";
-          restore_saves_dir=saves_dir;restore_checkpoint_dir=dir;restore_slot=slot;
+          restore_saves_dir=saves_dir;restore_checkpoint_dir=dir;restore_source=source;
           restore_slot_writes;restore_previous_writes}) in
         transferred := true;
         Ok prepared)
@@ -1526,6 +1551,60 @@ let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
   | Sys_error message -> Error (Unreadable message)
   | Unix.Unix_error (error,operation,path) ->
       Error (Unreadable (operation ^ " " ^ path ^ ": " ^ Unix.error_message error))
+;;
+
+let prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of =
+  prepare_source ~dir ~source:(Chosen_slot { slot; consent = previous_autosave })
+    ~ledger_dir ~saves_dir_of
+;;
+
+(* Whether the previous autosave was replaced since the preparation counted
+   its writes. Only a chosen slot's machine copies into it on its first save. *)
+let previous_changed_since owned =
+  match owned.restore_source with
+  | Chosen_slot _ ->
+    checkpoint_write_count
+      (Machine_checkpoint.path ~dir:owned.restore_checkpoint_dir autosave_prev_slot)
+    <> owned.restore_previous_writes
+  | Own_autosave -> false
+;;
+
+(* Installs a preparation the caller has already taken, under the lock the
+   caller holds after its own activity and admission checks. The staged
+   ledger is this function's from here, so it is removed whatever happens. *)
+let install_restored owned ~controller ~activity_by ~activity ~announce =
+  Fun.protect ~finally:(fun () -> remove_restore_stage owned.restore_staged_ledger)
+    (fun () ->
+      let slot = source_slot owned.restore_source in
+      if checkpoint_write_count (Machine_checkpoint.path ~dir:owned.restore_checkpoint_dir slot)
+         <> owned.restore_slot_writes
+      then
+        Error (Invalid_request (Printf.sprintf
+          "DOS checkpoint %s was saved again during restore preparation; request the restore again"
+          (Machine_checkpoint.slot_to_string slot)))
+      else if previous_changed_since owned then
+        Error (Invalid_request
+          "the previous autosave changed during restore preparation; request the restore again")
+      else
+      let previous_kept =
+        match owned.restore_source with
+        | Chosen_slot _ -> false
+        | Own_autosave -> true
+      in
+      let meta = owned.restore_meta in
+      let st = {m=owned.restore_machine; steps=meta.saved_steps; program=meta.saved_program;
+        ledger_path=owned.restore_ledger_path; entries=owned.restore_entries;
+        saves_dir=owned.restore_saves_dir;checkpoint_dir=owned.restore_checkpoint_dir;
+        kept=owned.restore_kept;controller;
+        incarnation=Random_id.uuid_v7 ();previous_kept} in
+      match Sys.rename owned.restore_staged_ledger owned.restore_ledger_path with
+      | exception Sys_error message -> Error (Unreadable message)
+      | () ->
+        state := Some st;
+        mark_change ();
+        note_activity ~who:activity_by activity;
+        announce ();
+        Ok (observe st))
 ;;
 
 let commit_restore ~who prepared ~announce =
@@ -1538,42 +1617,68 @@ let commit_restore ~who prepared ~announce =
     match Atomic.exchange prepared None with
     | None -> Error (Invalid_request "DOS restore preparation was already consumed or discarded")
     | Some owned ->
-      Fun.protect ~finally:(fun () -> remove_restore_stage owned.restore_staged_ledger)
-        (fun () ->
-          if checkpoint_write_count
-              (Machine_checkpoint.path ~dir:owned.restore_checkpoint_dir owned.restore_slot)
-             <> owned.restore_slot_writes
-          then
-            Error (Invalid_request (Printf.sprintf
-              "DOS checkpoint %s was saved again during restore preparation; request the restore again"
-              (Machine_checkpoint.slot_to_string owned.restore_slot)))
-          else if checkpoint_write_count
-                    (Machine_checkpoint.path ~dir:owned.restore_checkpoint_dir autosave_prev_slot)
-                  <> owned.restore_previous_writes
-          then
-            Error (Invalid_request
-              "the previous autosave changed during restore preparation; request the restore again")
-          else
-          let meta = owned.restore_meta in
-          let st = {m=owned.restore_machine; steps=meta.saved_steps; program=meta.saved_program;
-            ledger_path=owned.restore_ledger_path; entries=owned.restore_entries;
-            saves_dir=owned.restore_saves_dir;checkpoint_dir=owned.restore_checkpoint_dir;
-            kept=owned.restore_kept;controller=Some who;
-            incarnation=Random_id.uuid_v7 ();previous_kept=false} in
-          match Sys.rename owned.restore_staged_ledger owned.restore_ledger_path with
-          | exception Sys_error message -> Error (Unreadable message)
-          | () ->
-            state := Some st;
-            mark_change ();
-            note_activity ~who ("restore " ^ Machine_checkpoint.slot_to_string owned.restore_slot);
-            announce ();
-            Ok (observe st)))
+      install_restored owned ~controller:(Some who) ~activity_by:who
+        ~activity:("restore " ^ Machine_checkpoint.slot_to_string (source_slot owned.restore_source))
+        ~announce)
 ;;
 
 let restore ~who ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of ~announce =
   let* prepared = prepare_restore ~dir ~slot ~previous_autosave ~ledger_dir ~saves_dir_of in
   Fun.protect ~finally:(fun () -> discard_prepared_restore prepared)
     (fun () -> commit_restore ~who prepared ~announce)
+;;
+
+type resume =
+  | Nothing_to_resume
+  | Machine_loaded
+  | Resumed of observation
+  | Not_resumed of error
+
+(* Nobody asked for this machine, so no Keeper's name goes on the feed: the
+   line is about the slot, the way a released holder's line is about them. *)
+let resume_activity_by () = Machine_checkpoint.slot_to_string autosave_slot
+
+let resume_autosave ~dir ~ledger_dir ~saves_dir_of =
+  let resumed =
+    if locked (fun () -> Option.is_some !state) then Machine_loaded
+    else
+      match prepare_source ~dir ~source:Own_autosave ~ledger_dir ~saves_dir_of with
+      | Error (Checkpoint_refused (Machine_checkpoint.No_slot _)) -> Nothing_to_resume
+      | Error
+          (( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _
+           | Unreadable _ | Held_by _ | Guest_fault _ | Unsaveable _
+           | Checkpoint_refused
+               ( Machine_checkpoint.Unreadable _ | Machine_checkpoint.Other_machine _
+               | Machine_checkpoint.Other_format _ | Machine_checkpoint.Corrupt _ )
+           | Other_program _ | Would_discard_previous_autosave _ ) as error) ->
+        Not_resumed error
+      | Ok prepared ->
+        Fun.protect ~finally:(fun () -> discard_prepared_restore prepared) (fun () ->
+          locked (fun () ->
+            match require_activity () with
+            | Error error -> Not_resumed error
+            | Ok () ->
+              (match !state with
+               | Some _ -> Machine_loaded
+               | None ->
+                 (match Atomic.exchange prepared None with
+                  | None ->
+                    Not_resumed
+                      (Invalid_request "DOS autosave preparation was already consumed or discarded")
+                  | Some owned ->
+                    (match
+                       install_restored owned ~controller:None ~activity_by:(resume_activity_by ())
+                         ~activity:"resumed when the worker started" ~announce:ignore
+                     with
+                     | Ok observation -> Resumed observation
+                     | Error error -> Not_resumed error)))))
+  in
+  (match resumed with
+   | Not_resumed error ->
+     note_activity ~who:(resume_activity_by ())
+       ("not resumed when the worker started: " ^ error_to_string error)
+   | Nothing_to_resume | Machine_loaded | Resumed _ -> ());
+  resumed
 ;;
 
 let checkpoints ~dir =

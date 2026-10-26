@@ -468,6 +468,132 @@ let test_a_faulted_boot_installs_the_machine_and_keeps_the_autosave () =
     check int "and the campaign is the autosave" campaign_steps (steps_in fixture "autosave"))
 ;;
 
+(* ---------- a worker's start ----------
+
+   A restart leaves the files on disk and no machine. In one process an eject
+   is that: it writes nothing. *)
+
+let restart () = require (Dos_lane.eject ~who ~announce:ignore ())
+
+let resume fixture =
+  Dos_lane.resume_autosave ~dir:fixture.checkpoints ~ledger_dir:fixture.directory
+    ~saves_dir_of:(fun _ -> fixture.saves)
+;;
+
+let describe_resume = function
+  | Dos_lane.Nothing_to_resume -> "nothing to resume"
+  | Dos_lane.Machine_loaded -> "a machine was already loaded"
+  | Dos_lane.Resumed o -> Printf.sprintf "resumed at %d steps" o.Dos_lane.steps
+  | Dos_lane.Not_resumed error -> "not resumed: " ^ Dos_lane.error_to_string error
+;;
+
+let resumed ~name = function
+  | Dos_lane.Resumed observation -> observation
+  | (Dos_lane.Nothing_to_resume | Dos_lane.Machine_loaded | Dos_lane.Not_resumed _) as other ->
+    failf "%s: %s" name (describe_resume other)
+;;
+
+let loaded () =
+  match Dos_lane.live ~since:None with
+  | Dos_lane.Nothing_loaded -> false
+  | Dos_lane.Unchanged _ | Dos_lane.Changed _ -> true
+;;
+
+let controller () = (require (Dos_lane.screen ())).Dos_lane.controller
+
+let test_a_start_resumes_the_autosave_with_the_controller_free () =
+  with_fixture (fun fixture ->
+    let campaign_steps = play_a_campaign fixture in
+    restart ();
+    let machine = resumed ~name:"a start over the campaign's autosave" (resume fixture) in
+    check int "the machine is where the autosave left it" campaign_steps machine.Dos_lane.steps;
+    check (option string) "nobody holds the controller" None machine.Dos_lane.controller;
+    check (option string) "the screen agrees" None (controller ());
+    (* A free controller goes to whoever moves next (RFC play-link §2.8). *)
+    ignore (require (Dos_lane.step ~who:"guest" ~steps:1_000 ~until_ready:false));
+    check (option string) "the first to move takes it" (Some "guest") (controller ()))
+;;
+
+(* No autosave: nothing comes back, and autosave-prev is not a fallback. *)
+let test_a_start_with_no_autosave_stays_unloaded () =
+  with_fixture (fun fixture ->
+    (match resume fixture with
+     | Dos_lane.Nothing_to_resume -> ()
+     | (Dos_lane.Machine_loaded | Dos_lane.Resumed _ | Dos_lane.Not_resumed _) as other ->
+       failf "an empty directory: %s" (describe_resume other));
+    check bool "an empty directory loads nothing" false (loaded ());
+    ignore (play_a_campaign fixture);
+    restart ();
+    Sys.rename (autosave_path fixture) (prev_path fixture);
+    let previous = Digest.file (prev_path fixture) in
+    (match resume fixture with
+     | Dos_lane.Nothing_to_resume -> ()
+     | (Dos_lane.Machine_loaded | Dos_lane.Resumed _ | Dos_lane.Not_resumed _) as other ->
+       failf "only autosave-prev on disk: %s" (describe_resume other));
+    check bool "only autosave-prev loads nothing" false (loaded ());
+    check string "and autosave-prev is untouched" previous (Digest.file (prev_path fixture)))
+;;
+
+let test_an_unreadable_autosave_is_not_resumed_and_says_why () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    restart ();
+    (* The campaign is the previous autosave; the autosave is damaged. *)
+    Sys.rename (autosave_path fixture) (prev_path fixture);
+    write_file (autosave_path fixture) "damaged";
+    let previous = Digest.file (prev_path fixture) in
+    let reason =
+      match resume fixture with
+      | Dos_lane.Not_resumed error -> Dos_lane.error_to_string error
+      | (Dos_lane.Nothing_to_resume | Dos_lane.Machine_loaded | Dos_lane.Resumed _) as other ->
+        failf "a damaged autosave: %s" (describe_resume other)
+    in
+    check bool "nothing is loaded" false (loaded ());
+    check string "the damaged file is as it was" "damaged"
+      (In_channel.with_open_bin (autosave_path fixture) In_channel.input_all);
+    check string "autosave-prev was neither restored nor replaced" previous
+      (Digest.file (prev_path fixture));
+    match Dos_lane.recent_activity () with
+    | newest :: _ ->
+      check bool "the activity feed carries the reason" true
+        (String.ends_with ~suffix:reason newest.Machine_action_feed.action)
+    | [] -> fail "the failed resume left no line on the activity feed")
+;;
+
+(* The equivalence the resume rests on. An uninterrupted machine's autosaves
+   replace the autosave and leave autosave-prev alone, and so do a resumed
+   machine's. Restoring the autosave instead would move it into autosave-prev
+   on the first save and lose the campaign kept there. *)
+let test_the_first_save_after_a_resume_leaves_autosave_prev_as_play_would () =
+  with_fixture (fun fixture ->
+    ignore (campaign_in_previous fixture);
+    step ();
+    let campaign = Digest.file (prev_path fixture) in
+    step ();
+    check string "uninterrupted play leaves autosave-prev alone" campaign
+      (Digest.file (prev_path fixture));
+    let autosaved = steps_in fixture "autosave" in
+    restart ();
+    let machine = resumed ~name:"a start after the second game" (resume fixture) in
+    check int "the resumed machine is the autosave" autosaved machine.Dos_lane.steps;
+    step ();
+    check bool "its first save replaced the autosave" true (steps_in fixture "autosave" > autosaved);
+    check string "and left autosave-prev as uninterrupted play does" campaign
+      (Digest.file (prev_path fixture)))
+;;
+
+let test_a_start_leaves_a_loaded_machine_alone () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    let before = incarnation () in
+    (match resume fixture with
+     | Dos_lane.Machine_loaded -> ()
+     | (Dos_lane.Nothing_to_resume | Dos_lane.Resumed _ | Dos_lane.Not_resumed _) as other ->
+       failf "a loaded machine: %s" (describe_resume other));
+    check string "the same machine" before (incarnation ());
+    check (option string) "and its holder" (Some who) (controller ()))
+;;
+
 let () =
   run "DOS autosave guard"
     [ ( "start"
@@ -512,6 +638,18 @@ let () =
             test_a_save_over_an_unreadable_file_says_so
         ; test_case "a save leaves only the checkpoint" `Quick
             test_a_save_leaves_only_the_checkpoint
+        ] )
+    ; ( "worker start"
+      , [ test_case "a start resumes the autosave with the controller free" `Quick
+            test_a_start_resumes_the_autosave_with_the_controller_free
+        ; test_case "a start with no autosave stays unloaded" `Quick
+            test_a_start_with_no_autosave_stays_unloaded
+        ; test_case "an unreadable autosave is not resumed and says why" `Quick
+            test_an_unreadable_autosave_is_not_resumed_and_says_why
+        ; test_case "the first save after a resume leaves autosave-prev as play would" `Quick
+            test_the_first_save_after_a_resume_leaves_autosave_prev_as_play_would
+        ; test_case "a start leaves a loaded machine alone" `Quick
+            test_a_start_leaves_a_loaded_machine_alone
         ] )
     ]
 ;;

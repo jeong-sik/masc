@@ -1,6 +1,6 @@
 {
   "schema": "schedule-behavior-component-audit.v1",
-  "base_head": "1f94a288afdfb890f3a4f1e15a031c44261b9c5d",
+  "base_head": "88df3ad213bd6ac290f41032d3362dff606b2ec0",
   "source_state": "Worktree inputs identified by source_sha256; base_head is provenance, not an executed commit.",
   "source_sha256": {
     "lib/crypto_rng/crypto_rng.mli": "531a9b90ebb515b021be8a3dc390137eedbfa4edc752501b275767ba3821466d",
@@ -14,10 +14,10 @@
     "lib/schedule/schedule_domain.ml": "62497b3437f67eb1804934a8563be2d88d662b0bbfe055b1dce8868be8989e1f",
     "lib/time_codec/time_codec.mli": "ed957d4d881e31c9b1b01ca8f6cc503b88e705ba0e81bafab98b9a3da0b627e9",
     "lib/time_codec/time_codec.ml": "c3a8849c2835a1bf94bd1bbf03104ceb7966c0c40a8dcca178fd75dba565f920",
-    "lib/tui_schedule_observation.mli": "5f927663621e0bcf9a1c92d71494f6b02b11c0d46ffdcd22757eb4b23f38d8e7",
-    "lib/tui_schedule_observation.ml": "4f6989b1fb62eef9af3694f0c881a30ace8c9cc686ceee83400f21f5f5ade0a4",
+    "lib/tui_schedule_observation.mli": "8dadc2fbef29dbdb58ebe11579ca87bd3e07260a8ebfc4abc84c05d9443186c3",
+    "lib/tui_schedule_observation.ml": "d1271234992b4195041f06fe2144d1194eca9291a1c595fa5c49f7fdb89b37ac",
     "test/test_schedule_domain.ml": "42b074b4abe399710463a3fa55964e2728b74318902853234dbdeca2cd0a213f",
-    "test/test_tui_schedule_observation.ml": "6730a992abdfe5a9eb22df9f9c99be92cb6c2d6f0a341c3730556981168aad6b",
+    "test/test_tui_schedule_observation.ml": "2edc158170205f9c919eedbed0e35e7799a24c1ac41c92b0b8156574d3480b04",
     "docs/evidence/2026-10-25-schedule-drain-projection/produced-pages.json": "add089963d99cf44cddaa61fa3d55ecc581042429e072fc3f26182ff32111191",
     "bin/masc_tui_types.ml": "8bad505450d275b41dc0cd38388aacc52dc85c9d45211fcd2837540735594ff1",
     "lib/tui_decode.mli": "8d679c704c2057da8778d4fd0ea56ed1daa78c43ab3e4ef16fd72eef1e3a390f",

@@ -189,6 +189,35 @@ let test_cancelled_declaration_does_not_settle_retained_work () =
   Alcotest.(check bool) "retained work still needs observation" true
     (Observation.needs_attention (decoded transferred).stage)
 
+let test_missing_stimulus_receipt_is_unconfirmed () =
+  let unrecognized value = pending ()
+    |> nested "last_wake" (nested "detail" (replace "stimulus_id" value))
+    |> nested "keeper_queue_evidence"
+      (replace "projection_status" (`String "unrecognized_receipt"))
+    |> replace "keeper_reaction_evidence"
+      (`Assoc (("projection_status", `String "missing_stimulus_id") :: identity)) in
+  let row = unrecognized `Null in
+  let unknown row = match (decoded row).stage with
+    | Observation.Unknown _ -> ()
+    | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
+    | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
+    | Settling | Transferring -> Alcotest.fail "missing identity became confirmed progress" in
+  unknown row;
+  unknown (row |> nested "last_wake" (nested "detail"
+    (function `Assoc fields -> `Assoc (List.remove_assoc "stimulus_id" fields)
+     | _ -> assert false)));
+  refused (row |> replace "payload_target" (`String "keeper:another"));
+  refused (row |> replace "schedule_instance_id" (`String "another-instance"));
+  refused (row |> nested "keeper_queue_evidence"
+    (replace "projection_status" (`String "matched_pending")));
+  refused (row |> nested "keeper_reaction_evidence"
+    (replace "turn_started_seen" (`Bool true)));
+  refused (row |> nested "keeper_reaction_evidence"
+    (replace "stimulus_id" (`String "other-stimulus")));
+  refused (row |> nested "keeper_reaction_evidence"
+    (replace "post_id" (`String "other-occurrence")));
+  refused (unrecognized (`Int 1))
+
 let test_dispatch_failure_retains_reason () =
   stage (Observation.Dispatch_failed (Some "queue write failed"))
     (pending () |> nested "last_wake"
@@ -218,6 +247,7 @@ let () = Alcotest.run "schedule occurrence observation"
       ; Alcotest.test_case "exact queue absence is not pending" `Quick test_queue_absence_is_not_pending_delivery
       ; Alcotest.test_case "transfer ACK belongs to previous owner" `Quick test_transferred_owner_ack_is_not_recipient_completion
       ; Alcotest.test_case "cancelled definition retains pending work" `Quick test_cancelled_declaration_does_not_settle_retained_work
+      ; Alcotest.test_case "missing stimulus remains unconfirmed" `Quick test_missing_stimulus_receipt_is_unconfirmed
       ; Alcotest.test_case "dispatch failure and absent occurrence" `Quick test_dispatch_failure_retains_reason
       ; Alcotest.test_case "malformed wire evidence" `Quick test_malformed_evidence_is_refused
       ] ]

@@ -105,3 +105,17 @@ F2의 최초 startup recovery 실패와 진입 지점은 다르다. 실제 재�
 이번 수리 후 component 실행은 domain 28, observation 12, historical producer replay 14,
 selection 결정 8이다. 이들을 합산해 전체 사용자 흐름을 실행했다고 세지 않는다.
 리뷰 완료는 위의 소스 반례와 실제 다중 사용자·모델 실행 공백을 없앴다는 뜻이 아니다.
+
+
+## MASC 후속 리뷰의 P2 대응
+
+원 head 88df3ad213bd6ac290f41032d3362dff606b2ec0에 대해 ocaml-agent-ic이
+[review 5650416953](https://github.com/jeong-sik/masc/pull/46092#pullrequestreview-5650416953)에서
+null stimulus_id receipt의 목록 전체 실패를 지적했다. 이 후속 발견으로 앞선 source PASS를
+전체 무결함 근거로 이월하지 않는다. 지원되는 미확인 receipt만 Unknown으로 보존하도록 수정했고,
+남은 identity와 증거의 부정합은 거절한다. 원 리뷰어의 CR 해소는 별도 재검토 대상이다.
+
+추가 검증: component 새 사례는 수정 전 1/13 실패, 수정 후 13 PASS.
+실제 production 행/목록 decoder source를 실행한 혼합 페이지는 수정 전 3/9 실패,
+수정 후 추가 음성 대조군 포함 13 PASS. 현재 domain 28 / historical replay 14 / selection 8도 통과했다.
+이는 decoder 소비자 증거이며 다중 provider·사용자 runtime이나 설치된 TUI 실행 증거가 아니다.

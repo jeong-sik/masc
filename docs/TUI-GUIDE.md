@@ -1723,7 +1723,9 @@ Transferred pending work names the recipient; an exact queue miss stays unconfir
 instead of appearing queued. Cancelling a declaration does not settle an
 occurrence the server still finds pending, including at a transferred owner.
 Failure includes its recorded reason;
-unknown or conflicting evidence remains unconfirmed. Being busy on another
+unknown or conflicting evidence remains unconfirmed. A retained receipt whose
+exact stimulus is unavailable stays visible as unconfirmed when the server
+reports missing identity, preserving the other Jobs on the page. Being busy on another
 request never makes this Job appear started.
 
 For a repeating Job, the last occurrence and next firing are distinct. A held

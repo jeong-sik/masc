@@ -1,0 +1,25 @@
+{
+  "scope": "actual source-extracted TUI decode_schedule_rows mixed-page decisions",
+  "source_sha256": {
+    "lib/shared_types/json_kind.mli": "d1d066b151a8ecb809e5d2a24388ff60c4c650a4db535b6ceb16d556ea8367e3",
+    "lib/shared_types/json_kind.ml": "da7b24b5e91dca844f1cfcc39ab588c0fc0a7fad864b578352e7bd762a6c1fe9",
+    "lib/schedule/schedule_contract_values.mli": "516a8eea953f479daa2c2e97dcf17381d65e867d6dbaf25ee457d13f3048224f",
+    "lib/schedule/schedule_contract_values.ml": "979abf56c73a992db7a401e401c611f46e351f07ec65bb8fcb0c78c924a947cb",
+    "lib/tui_schedule_observation.mli": "8dadc2fbef29dbdb58ebe11579ca87bd3e07260a8ebfc4abc84c05d9443186c3",
+    "lib/tui_schedule_observation.ml": "d1271234992b4195041f06fe2144d1194eca9291a1c595fa5c49f7fdb89b37ac",
+    "lib/core/json_util.ml": "b1fea064f3da9252986044b2d6087ea95bbb229a944119ed84d38cc1a2f43281",
+    "lib/tui_decode_fields.mli": "1be00bde68838be6052ac0dea472f63e7f005a917e73a60fa30df0938ac23b79",
+    "lib/tui_decode_fields.ml": "dd0d05b7b4ce251cf0c99ba17cc08bd46b76dc72360fe1cf153509344c03045c",
+    "lib/tui_decode.ml": "9a6c0a3e8ac225ef8885d56b750e2cb64a925726772884f0171cf58a4866ec05",
+    "bin/masc_tui_types.ml": "8bad505450d275b41dc0cd38388aacc52dc85c9d45211fcd2837540735594ff1",
+    "bin/masc_tui_schedule_decode.ml": "2c43b87069f8c2be6dc1030d5c96c97f3cba52fdb4d428441aae4bd7fe462e05",
+    "docs/evidence/2026-10-25-schedule-drain-projection/produced-pages.json": "add089963d99cf44cddaa61fa3d55ecc581042429e072fc3f26182ff32111191"
+  },
+  "input_origin": "one historical real producer row plus explicit synthetic mutations",
+  "decisions_passed": 13,
+  "not_proven": [
+    "full TUI/server integration",
+    "current backend execution",
+    "provider/runtime execution"
+  ]
+}

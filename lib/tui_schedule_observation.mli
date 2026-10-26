@@ -27,7 +27,9 @@ val decode : Yojson.Safe.t -> (t, string) result
 (** Decode a dashboard schedule row. Queue/reaction evidence must agree with
     the row's instance, schedule and exact dispatch stimulus. Queue evidence
     also binds the wake's due time and payload digest. Unknown vocabulary
-    becomes [Unknown]; malformed or contradictory identities return [Error].
+    becomes [Unknown]. A supported receipt without an exact stimulus stays
+    [Unknown] after checking the schedule and Keeper target; malformed or
+    contradictory identities still return [Error].
     [due_at_iso] belongs to the last wake, never the next scheduled firing. *)
 
 val needs_attention : stage -> bool

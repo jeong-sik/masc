@@ -143,7 +143,7 @@ recover_running_on_startup을 한 번 호출하고 Error/exception에도 정상 
 [재현 스크립트와 로그](../evidence/2026-10-26-schedule-behavior-audit/README.md):
 
 1. 실제 Schedule_domain 소스와 기존 테스트 **28 PASS**.
-2. 실제 occurrence decoder **12 PASS**. 수정 전 추가한 두 반례는 **2/9 FAIL**이었다.
+2. 실제 occurrence decoder **13 PASS**. 수정 전 추가한 두 반례는 **2/9 FAIL**이었다.
    exact queue miss와 terminal contradiction 수정 후 transfer owner까지 검사했다.
 3. 과거 실제 백엔드가 생성한 변경 없는 **14개 행**을 새 decoder로 재생해 예상 판정 일치.
 4. 실제 production 선언과 chat_schedule_entries 전체를 추출하여 **8개 selection 결정 PASS**.
@@ -165,6 +165,16 @@ Test workflow run `40179723721`의 56개 선택 consumer 검사에서 나온 행
 실패 1/12를 기록한 뒤 기존 pending/owner 해석을 재사용해 수정했다.
 추가로 F3 권한 TOCTOU, F4 omitted recurrence 경합, F5 dispatch 실패 정산 write 후 Running 잔류의
 기존 백엔드 소스 반례를 기록한다. 이들은 실제 다중 사용자/모델 runtime 재현 결과가 아니다.
+
+## MASC 리뷰 대응: 식별자 없는 보존 receipt
+
+[리뷰 5650416953](https://github.com/jeong-sik/masc/pull/46092#pullrequestreview-5650416953)은
+서버가 허용하는 null stimulus_id를 필수 문자열로 읽어 전체 목록을 실패시키는 P2를 지적했다.
+생산자의 queue=unrecognized_receipt / reaction=missing_stimulus_id를 엄격히 대조하고,
+남은 schedule/instance/Keeper/post identity와 진행 증거 부재가 맞으면 Unknown으로 보존한다.
+그 밖의 잘못된 형식·identity 충돌은 기존처럼 거절한다. 모든 오류를 무시하는 fallback은 없다.
+실제 행/목록 consumer를 추출해 수정 전 혼합 페이지 3/9 실패, 수정 후 추가 음성 대조군을 포함한
+13개 결정 통과를 기록했다. 현재 component 상태 검사는 13건이며 상세 출처는 evidence README에 있다.
 
 ## 전체 행동 PASS를 위해 남은 확인
 

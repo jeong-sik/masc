@@ -1,0 +1,18 @@
+$ ocamlfind ocamlc -w +4+32+69 -warn-error +a -package yojson,ppx_enumerate -c json_kind.mli json_kind.ml schedule_contract_values.mli schedule_contract_values.ml tui_schedule_observation.mli tui_schedule_observation.ml json_util.ml tui_decode_fields.mli tui_decode_fields.ml tui_decode.ml masc.ml masc_tui_types.ml masc_tui_schedule_decode.ml
+
+$ ocamlfind ocamlc -w +4+32+69 -warn-error +a -package yojson,ppx_enumerate -linkpkg json_kind.cmo schedule_contract_values.cmo tui_schedule_observation.cmo json_util.cmo tui_decode_fields.cmo tui_decode.cmo masc.cmo masc_tui_types.cmo masc_tui_schedule_decode.cmo probe.ml -o probe
+
+$ /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-receipt-page-w6976vlv/probe
+PASS valid and null-stimulus rows preserved in order
+PASS null-stimulus first does not hide valid neighbor
+PASS absent stimulus stays row-local unknown
+PASS cross-occurrence evidence remains rejected
+PASS malformed summary boolean remains rejected
+PASS duplicate core identity remains rejected
+PASS missing core identity remains rejected
+PASS null stimulus does not bypass Keeper target
+PASS null stimulus does not bypass instance identity
+PASS null stimulus does not admit raw positive progress
+PASS null stimulus cannot match a pending queue
+PASS null stimulus cannot borrow a bound reaction
+PASS null stimulus validates remaining receipt identity

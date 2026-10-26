@@ -6730,7 +6730,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
             let terminal_error = ref None in
             let projected =
               match
-                Masc.Keeper_official_client_host.dynamic_tools
+                Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
                   ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
@@ -6815,7 +6815,7 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
             let terminal_error = ref None in
             let projected =
               match
-                Masc.Keeper_official_client_host.dynamic_tools
+                Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
                   ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
@@ -6919,7 +6919,7 @@ let test_stale_spawn_handles_remain_correction_capable () =
             let terminal_error = ref None in
             let projected =
               match
-                Masc.Keeper_official_client_host.dynamic_tools
+                Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
                   ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
@@ -7516,7 +7516,7 @@ value = {surface="dashboard", content="must not run"}
       Fun.protect ~finally:(fun () -> bundle.cleanup ();
         Masc.Keeper_tool_call_log.reset_for_testing ())
       (fun () ->
-        let projected = match Masc.Keeper_official_client_host.dynamic_tools
+        let projected = match Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
           ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
           ~tool_approval:None ~pre_tool_rejects:(ref []) ~runtime_label:"read-recovery-test"
           ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
@@ -7637,7 +7637,7 @@ id = "second"
       Fun.protect ~finally:(fun () -> bundle.cleanup ();
         Masc.Keeper_tool_call_log.reset_for_testing ())
       (fun () ->
-        let projected = match Masc.Keeper_official_client_host.dynamic_tools
+        let projected = match Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
           ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
           ~tool_approval:None ~pre_tool_rejects:(ref []) ~runtime_label:"node-boundary-test"
           ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
@@ -7697,7 +7697,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
             let terminal_error = ref None in
             let projected =
               match
-                Masc.Keeper_official_client_host.dynamic_tools
+                Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
                   ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
@@ -7818,7 +7818,7 @@ let test_terminal_composition_literal_input_failure_runs_no_node () =
             let terminal_error = ref None in
             let projected =
               match
-                Masc.Keeper_official_client_host.dynamic_tools
+                Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
                   ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
@@ -7990,7 +7990,7 @@ default = "local.sample"
             Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
             let projected =
               match
-                Masc.Keeper_official_client_host.dynamic_tools
+                Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
                   ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
@@ -8116,7 +8116,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
             let terminal_error = ref None in
             let projected =
               match
-                Masc.Keeper_official_client_host.dynamic_tools
+                Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
                   ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
@@ -8295,7 +8295,7 @@ let test_write_then_unchanged_read_completes () =
             let terminal_error = ref None in
             let projected =
               match
-                Masc.Keeper_official_client_host.dynamic_tools
+                Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
                   ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
@@ -10534,7 +10534,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
           ~tools:[Agent_core.Tool.schema_to_json tool] () |> Yojson.Safe.from_string in
       let api_tool = request |> member "tools" |> Yojson.Safe.Util.to_list |> List.hd in
       check_schema "OpenAI request" (api_tool |> member "function" |> member "parameters");
-      let dynamic = Masc.Keeper_official_client_host.dynamic_tools
+      let dynamic = Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
           ~content_transport:Runtime_official_client_tool.Codex
           ~accepts_image_input:true
           ~tool_approval:None ~runtime_label:"schema-fixture" ~keeper_name:meta.name

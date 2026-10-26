@@ -158,6 +158,49 @@ val load_declarative_materialization_defaults :
   base_path:string ->
   string ->
   (declarative_materialization_defaults, keeper_toml_load_error) result
+
+(** The keeper-TOML keys one update call patches. [None] leaves the file's
+    value alone; [Some None] removes the key. *)
+type toml_field_patch =
+  { instructions : string option
+  ; sandbox_profile : sandbox_profile option
+  ; network_mode : network_mode option
+  ; mention_targets : string list option
+  ; board_interests : string list option
+  ; input_policy : Keeper_input_policy.t option
+  ; activation_mode : Keeper_activation_mode.t option
+  ; sandbox_image : string option option
+  ; microvm_backend : Keeper_microvm_backend.t option option
+  ; remote_endpoint_present : bool
+  ; remote_endpoint : string option
+  ; max_context_override_present : bool
+  ; max_context_override : int option
+  ; skill_names_present : bool
+  ; skill_names : string list option
+  ; native_tool_posture_present : bool
+  ; native_tool_posture : Runtime_native_tools.posture option
+  }
+
+(** The staged writer's edits for a patch. Single source of truth shared by
+    the commit path and pre-write assessment, so the two can never disagree
+    on which keys a call touches. *)
+val toml_edits_of_patch :
+  toml_field_patch -> (string * Keeper_toml_loader.toml_edit) list
+
+(** Like {!load_declarative_materialization_defaults}, but a file the strict
+    load refuses is repaired before it is reported: the call's field edits
+    are applied to the current bytes and the merged content is validated
+    with the same strict reader. A merged file that validates proceeds with
+    its defaults; one that does not is refused with the merged error, which
+    names a defect in the proposed end state rather than a stale defect the
+    patch already repairs. When no merged content can be formed (unreadable
+    or uneditable file), the original load error stands. The snapshot always
+    hashes the bytes on disk. *)
+val load_declarative_materialization_defaults_or_merged :
+  base_path:string -> name:string ->
+  toml_edits:(string * Keeper_toml_loader.toml_edit) list ->
+  (declarative_materialization_defaults, keeper_toml_load_error) result
+
 val invalidate_keeper_profile_snapshots : unit -> unit
 (** Drops every held profile snapshot. *)
 

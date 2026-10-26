@@ -339,6 +339,152 @@ let load_declarative_materialization_defaults ~base_path name =
                   }
             }))
 
+(* The keeper-TOML surface one update call patches: exactly the keys the
+   staged writer edits ([Keeper_turn_up_config_persistence.explicit_edits]
+   projects this record), so assessing a patch against the current bytes and
+   writing it can never disagree on which keys a call touches. A [None]
+   patch field leaves the file's value alone; [Some None] removes the key. *)
+type toml_field_patch =
+  { instructions : string option
+  ; sandbox_profile : sandbox_profile option
+  ; network_mode : network_mode option
+  ; mention_targets : string list option
+  ; board_interests : string list option
+  ; input_policy : Keeper_input_policy.t option
+  ; activation_mode : Keeper_activation_mode.t option
+  ; sandbox_image : string option option
+  ; microvm_backend : Keeper_microvm_backend.t option option
+  ; remote_endpoint_present : bool
+  ; remote_endpoint : string option
+  ; max_context_override_present : bool
+  ; max_context_override : int option
+  ; skill_names_present : bool
+  ; skill_names : string list option
+  ; native_tool_posture_present : bool
+  ; native_tool_posture : Runtime_native_tools.posture option
+  }
+
+let toml_edit_set_string value =
+  Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string value)
+
+let toml_edit_set_int value =
+  Keeper_toml_loader.Set (Keeper_toml_loader.Toml_int value)
+
+let toml_edit_set_strings values =
+  Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string_array values)
+
+let toml_edits_append_optional key make value fields =
+  match value with
+  | Some value -> (key, make value) :: fields
+  | None -> fields
+
+let toml_edits_of_patch (patch : toml_field_patch) =
+  []
+  |> toml_edits_append_optional "instructions" toml_edit_set_string patch.instructions
+  |> toml_edits_append_optional
+       "sandbox_profile"
+       toml_edit_set_string
+       (Option.map sandbox_profile_to_string patch.sandbox_profile)
+  |> toml_edits_append_optional
+       "network_mode"
+       toml_edit_set_string
+       (Option.map network_mode_to_string patch.network_mode)
+  |> toml_edits_append_optional "mention_targets" toml_edit_set_strings patch.mention_targets
+  |> toml_edits_append_optional "board_interests" toml_edit_set_strings patch.board_interests
+  |> toml_edits_append_optional
+       "input_policy"
+       toml_edit_set_string
+       (Option.map Keeper_input_policy.to_string patch.input_policy)
+  |> toml_edits_append_optional
+       "activation_mode"
+       toml_edit_set_string
+       (Option.map Keeper_activation_mode.to_string patch.activation_mode)
+  |> fun fields ->
+  let fields =
+    match patch.sandbox_image with
+    | None -> fields
+    | Some image ->
+      ("sandbox_image", match image with
+       | None -> Keeper_toml_loader.Remove
+       | Some image -> toml_edit_set_string image) :: fields
+  in
+  let fields =
+    match patch.microvm_backend with
+    | None -> fields
+    | Some backend ->
+      ("microvm_backend", match backend with
+       | None -> Keeper_toml_loader.Remove
+       | Some backend ->
+         toml_edit_set_string (Keeper_microvm_backend.to_string backend)) :: fields
+  in
+  (if not patch.remote_endpoint_present
+   then fields
+   else
+     ("remote_endpoint", match patch.remote_endpoint with
+      | Some endpoint -> toml_edit_set_string endpoint
+      | None -> Keeper_toml_loader.Remove) :: fields)
+  |> fun fields ->
+  (if not patch.max_context_override_present
+   then fields
+   else
+     ("max_context_override", match patch.max_context_override with
+      | Some value -> toml_edit_set_int value
+      | None -> Keeper_toml_loader.Remove) :: fields)
+  |> fun fields ->
+  (if not patch.skill_names_present
+   then fields
+   else
+     ("skills.names", match patch.skill_names with
+      | Some names -> toml_edit_set_strings names
+      | None -> Keeper_toml_loader.Remove) :: fields)
+  |> fun fields ->
+  (if not patch.native_tool_posture_present
+   then fields
+   else
+     ("tools.native", match patch.native_tool_posture with
+      | Some posture ->
+        toml_edit_set_string (Runtime_native_tools.to_string posture)
+      | None -> Keeper_toml_loader.Remove) :: fields)
+
+(* A configuration the current build refuses must still be repairable through
+   the API that writes it: the refusal is about the file on disk, and the
+   call carries its replacement. When the strict load fails, apply this
+   call's field edits to the current bytes and validate the merged content
+   with the same strict reader -- the write path applies these same edits to
+   these same bytes, so a merged file that validates here is the file the
+   commit writes (a concurrent write still loses the revision check there).
+   A merged file that validates proceeds; one that does not is refused with
+   the merged error, which names a defect in the proposed end state -- the
+   patch's own fault, or a remaining broken field the patch did not touch --
+   never a stale defect the patch already repairs. When no merged content
+   can be formed at all (unreadable file, uneditable content), the original
+   load error stands. The snapshot still hashes the bytes on disk: the
+   merged content exists only in memory until the commit writes it. *)
+let load_declarative_materialization_defaults_or_merged ~base_path ~name ~toml_edits =
+  match load_declarative_materialization_defaults ~base_path name with
+  | Ok _ as ok -> ok
+  | Error load_error ->
+    (match keeper_toml_path_opt_for_base_path ~base_path name with
+     | None -> Error load_error
+     | Some path ->
+       (match Safe_ops.read_file_safe path with
+        | Error _ -> Error load_error
+        | Ok current ->
+          (match Keeper_toml_loader.edit_keeper_fields_in_content current toml_edits with
+           | Error _ -> Error load_error
+           | Ok merged ->
+             (match materialization_defaults_of_content ~path merged with
+              | Error _ as merged_error -> merged_error
+              | Ok profile_defaults ->
+                Ok
+                  { profile_defaults
+                  ; manifest_snapshot =
+                      Declarative_manifest_present
+                        { path
+                        ; sha256 = Digestif.SHA256.(digest_string current |> to_hex)
+                        }
+                  }))))
+
 type keeper_toml_config_error = {
   keeper_name : string;
   keeper_path : string;

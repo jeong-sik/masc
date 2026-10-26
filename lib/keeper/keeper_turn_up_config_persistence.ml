@@ -307,20 +307,6 @@ let current_config_revision ~config ~keeper_name =
   with_current_config_revision ~config ~keeper_name Fun.id
   |> Result.map (fun receipt -> receipt.value)
 
-let set_string value =
-  Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string value)
-
-let set_int value =
-  Keeper_toml_loader.Set (Keeper_toml_loader.Toml_int value)
-
-let set_strings values =
-  Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string_array values)
-
-let append_optional key make value fields =
-  match value with
-  | Some value -> (key, make value) :: fields
-  | None -> fields
-
 let full_fields
       (parsed : Keeper_turn_up_args.parsed_args)
       (meta : keeper_meta)
@@ -422,67 +408,26 @@ let full_fields
   in
   fields
 
-let explicit_edits
-      (parsed : Keeper_turn_up_args.parsed_args)
-  =
-  []
-  |> append_optional "instructions" set_string parsed.instructions_arg
-  |> append_optional "sandbox_profile" set_string (Option.map sandbox_profile_to_string parsed.sandbox_profile_opt)
-  |> append_optional "network_mode" set_string (Option.map network_mode_to_string parsed.network_mode_opt)
-  |> append_optional "mention_targets" set_strings parsed.mention_targets_opt
-  |> append_optional "board_interests" set_strings parsed.board_interests_opt
-  |> append_optional "input_policy" set_string (Option.map Keeper_input_policy.to_string parsed.input_policy_opt)
-  |> append_optional "activation_mode" set_string (Option.map Keeper_activation_mode.to_string parsed.activation_mode_opt)
-  |> fun fields ->
-  let fields = match parsed.sandbox_image_patch with
-    | None -> fields
-    | Some image -> ("sandbox_image", match image with
-        | None -> Keeper_toml_loader.Remove
-        | Some image -> set_string image) :: fields in
-  let fields =
-    match parsed.microvm_backend_patch with
-    | None -> fields
-    | Some backend ->
-      ("microvm_backend", match backend with
-       | None -> Keeper_toml_loader.Remove
-       | Some backend -> set_string (Keeper_microvm_backend.to_string backend)) :: fields
-  in
-  (if not parsed.remote_endpoint_present
-   then fields
-   else
-     ( "remote_endpoint"
-     , match parsed.remote_endpoint_opt with
-       | Some endpoint -> set_string endpoint
-       | None -> Keeper_toml_loader.Remove )
-     :: fields)
-  |> fun fields ->
-  (if not parsed.max_context_override_present
-   then fields
-   else
-     ( "max_context_override"
-     , match parsed.max_context_override_opt with
-       | Some value -> set_int value
-       | None -> Keeper_toml_loader.Remove )
-     :: fields)
-  |> fun fields ->
-  (if not parsed.skill_names_present
-   then fields
-   else
-     ( "skills.names"
-     , match parsed.skill_names_opt with
-       | Some names -> set_strings names
-       | None -> Keeper_toml_loader.Remove )
-     :: fields)
-  |> fun fields ->
-  (if not parsed.native_tool_posture_present
-   then fields
-   else
-     ( "tools.native"
-     , match parsed.native_tool_posture_opt with
-       | Some posture ->
-         set_string (Runtime_native_tools.to_string posture)
-       | None -> Keeper_toml_loader.Remove )
-     :: fields)
+let explicit_edits (parsed : Keeper_turn_up_args.parsed_args) =
+  Keeper_types_profile.toml_edits_of_patch
+    ({ instructions = parsed.instructions_arg
+     ; sandbox_profile = parsed.sandbox_profile_opt
+     ; network_mode = parsed.network_mode_opt
+     ; mention_targets = parsed.mention_targets_opt
+     ; board_interests = parsed.board_interests_opt
+     ; input_policy = parsed.input_policy_opt
+     ; activation_mode = parsed.activation_mode_opt
+     ; sandbox_image = parsed.sandbox_image_patch
+     ; microvm_backend = parsed.microvm_backend_patch
+     ; remote_endpoint_present = parsed.remote_endpoint_present
+     ; remote_endpoint = parsed.remote_endpoint_opt
+     ; max_context_override_present = parsed.max_context_override_present
+     ; max_context_override = parsed.max_context_override_opt
+     ; skill_names_present = parsed.skill_names_present
+     ; skill_names = parsed.skill_names_opt
+     ; native_tool_posture_present = parsed.native_tool_posture_present
+     ; native_tool_posture = parsed.native_tool_posture_opt
+     } : Keeper_types_profile.toml_field_patch)
 
 let strict_write_result = function
   | Ok () -> Ok []

@@ -2772,6 +2772,222 @@ let test_the_schema_does_not_promise_a_default_parse_refuses () =
   | Ok _ -> fail "omitting sandbox_profile must stay an error"
 ;;
 
+let write_keeper_toml (ctx : _ Keeper_types_profile.context) name content =
+  let dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:ctx.config.base_path
+  in
+  Fs_compat.mkdir_p dir;
+  let path = Filename.concat dir (name ^ ".toml") in
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc content);
+  path
+;;
+
+(* #39373: a keeper TOML the current build refuses (here: a pre-hard-cut
+   sandbox_image) must stay repairable through the API. A patch carrying a
+   valid replacement proceeds on the merged file instead of being refused
+   with the current file's defect. The patch states no profile: the merged
+   defaults still carry the file's unpatched fields. *)
+let test_parse_repairs_a_broken_toml_image () =
+  with_test_context @@ fun ctx ->
+  let name = "repair-me" in
+  let _path =
+    write_keeper_toml ctx name
+      {|[keeper]
+name = "repair-me"
+instructions = "fixture instructions"
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:local"
+|}
+  in
+  match
+    Keeper_turn_up_args.parse
+      ~docker_preflight:no_daemon_in_this_suite
+      ctx
+      (`Assoc [ "name", `String name; "sandbox_image", `String "ocaml" ])
+  with
+  | Error result ->
+    failf "repairing patch was refused: %s" (Keeper_types_profile.tool_result_body result)
+  | Ok parsed ->
+    check bool "merged image is the patch" true
+      (parsed.profile_defaults.sandbox_image = Some "ocaml");
+    check bool "merged profile comes from the file" true
+      (parsed.profile_defaults.sandbox_profile = Some Keeper_types_profile_sandbox.Docker);
+    check bool "patch stated no profile" true (parsed.sandbox_profile_opt = None)
+;;
+
+(* The same broken file with a patch that repairs nothing is still refused,
+   naming the file's defect -- recovery changes nothing when the end state
+   is still broken. *)
+let test_parse_still_refuses_an_unrepaired_toml () =
+  with_test_context @@ fun ctx ->
+  let name = "unrepaired" in
+  let _path =
+    write_keeper_toml ctx name
+      {|[keeper]
+name = "unrepaired"
+instructions = "fixture instructions"
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:local"
+|}
+  in
+  match
+    Keeper_turn_up_args.parse
+      ~docker_preflight:no_daemon_in_this_suite
+      ctx
+      (`Assoc [ "name", `String name ])
+  with
+  | Ok _ -> fail "an unrepaired broken TOML must still be refused"
+  | Error result ->
+    check bool "refusal names the file defect" true
+      (contains "sandbox_image" (Keeper_types_profile.tool_result_body result))
+;;
+
+(* A patch that repairs one of two broken fields is refused naming the
+   remaining defect -- never the stale defect it already repairs -- so
+   iterative repair converges instead of repeating the same refusal. *)
+let test_parse_names_the_remaining_defect () =
+  with_test_context @@ fun ctx ->
+  let name = "two-defects" in
+  let _path =
+    write_keeper_toml ctx name
+      {|[keeper]
+name = "two-defects"
+instructions = "fixture instructions"
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:local"
+network_mode = "bogus"
+|}
+  in
+  match
+    Keeper_turn_up_args.parse
+      ~docker_preflight:no_daemon_in_this_suite
+      ctx
+      (`Assoc [ "name", `String name; "sandbox_image", `String "ocaml" ])
+  with
+  | Ok _ -> fail "a still-broken merged file must be refused"
+  | Error result ->
+    let body = Keeper_types_profile.tool_result_body result in
+    check bool "refusal names the remaining defect" true (contains "network_mode" body);
+    check bool "refusal no longer names the repaired image" true
+      (not (contains "masc-keeper-sandbox:local" body))
+;;
+
+(* Unit level: the merged assessment returns repaired defaults while its
+   snapshot still hashes the bytes on disk, and an empty edit list behaves
+   exactly like the strict load. *)
+let test_or_merged_assesses_the_patch () =
+  with_test_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let name = "or-merged" in
+  let current =
+    {|[keeper]
+name = "or-merged"
+instructions = "fixture instructions"
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:local"
+|}
+  in
+  let _path = write_keeper_toml ctx name current in
+  let edits =
+    [ "sandbox_image"
+    , Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string "ocaml")
+    ]
+  in
+  (match
+     Keeper_types_profile.load_declarative_materialization_defaults_or_merged
+       ~base_path
+       ~name
+       ~toml_edits:edits
+   with
+   | Error error ->
+     failf "merged assessment failed: %s"
+       (Keeper_types_profile.keeper_toml_load_error_to_string error)
+   | Ok { profile_defaults; manifest_snapshot } ->
+     check bool "merged image repaired" true
+       (profile_defaults.sandbox_image = Some "ocaml");
+     check bool "merged profile intact" true
+       (profile_defaults.sandbox_profile = Some Keeper_types_profile_sandbox.Docker);
+     (match manifest_snapshot with
+      | Keeper_types_profile.Declarative_manifest_missing ->
+        fail "merged snapshot must record the manifest on disk"
+      | Keeper_types_profile.Declarative_manifest_present { sha256; _ } ->
+        check string "snapshot hashes the disk bytes"
+          Digestif.SHA256.(digest_string current |> to_hex)
+          sha256));
+  match
+    Keeper_types_profile.load_declarative_materialization_defaults_or_merged
+      ~base_path
+      ~name
+      ~toml_edits:[]
+  with
+  | Ok _ -> fail "an empty edit list must not repair a broken file"
+  | Error _ -> ()
+;;
+
+(* End to end: the commit writes the assessed merge -- the repaired bytes on
+   disk pass the same strict load, so assessment and write cannot disagree. *)
+let test_commit_writes_the_assessed_merge () =
+  with_persisting_context @@ fun ctx ->
+  let name = "commit-merge" in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:ctx.config.base_path
+  in
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  Fs_compat.save_file runtime_path
+    (Fs_compat.load_file (Masc_test_deps.source_path "config/runtime.toml"));
+  let path =
+    write_keeper_toml ctx name
+      {|[keeper]
+name = "commit-merge"
+instructions = "fixture instructions"
+sandbox_profile = "docker"
+sandbox_image = "masc-keeper-sandbox:local"
+|}
+  in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "fixture instructions" ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parsed =
+    match
+      Keeper_turn_up_args.parse
+        ~docker_preflight:no_daemon_in_this_suite
+        ctx
+        (`Assoc [ "name", `String name; "sandbox_image", `String "ocaml" ])
+    with
+    | Ok parsed -> parsed
+    | Error result ->
+      failf "repairing patch was refused: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist
+       ~expected_revision:(current_revision_exn ctx.config name)
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ()
+   with
+   | Ok _ -> ()
+   | Error error ->
+     failf "commit: %s" (Keeper_turn_up_config_persistence.error_to_string error));
+  let written = Fs_compat.load_file path in
+  (match Keeper_types_profile.materialization_defaults_of_content ~path written with
+   | Error error ->
+     failf "written file fails strict load: %s"
+       (Keeper_types_profile.keeper_toml_load_error_to_string error)
+   | Ok defaults ->
+     check bool "written image repaired" true
+       (defaults.sandbox_image = Some "ocaml");
+     check bool "written profile intact" true
+       (defaults.sandbox_profile = Some Keeper_types_profile_sandbox.Docker))
+;;
+
 let test_parse_requires_a_sandbox_profile () =
   with_test_context @@ fun ctx ->
   match
@@ -3013,6 +3229,28 @@ let () =
             "board_interests are canonical"
             `Quick
             test_resolve_board_interests_normalizes_explicit_values
+        ] )
+    ; ( "broken_toml_recovery"
+      , [ test_case
+            "a patch repairing a refused TOML proceeds on the merged file"
+            `Quick
+            test_parse_repairs_a_broken_toml_image
+        ; test_case
+            "an unrepaired TOML is still refused"
+            `Quick
+            test_parse_still_refuses_an_unrepaired_toml
+        ; test_case
+            "a partial repair names the remaining defect"
+            `Quick
+            test_parse_names_the_remaining_defect
+        ; test_case
+            "merged assessment snapshots the disk bytes"
+            `Quick
+            test_or_merged_assesses_the_patch
+        ; test_case
+            "commit writes the assessed merge"
+            `Quick
+            test_commit_writes_the_assessed_merge
         ] )
     ; ( "unknown_keys"
       , [ test_case

@@ -76,9 +76,12 @@ val frontier :
     terminal refusal with typed retryable runtimes may retain one successor;
     its complete input and fixed run are staged before the parent intent.
     Restart restores that staged child without calling [new_run] or rendering
-    prompts. Unknown dispatch, missing links and corrupt inventory grant no
-    retry. [None] means no first attempt exists. The host serializes this
-    request under its workspace lease through selection, retention and run. *)
+    prompts. Once the parent has observed a successor, its actual retained
+    record and progress are required; a missing or different child is an error,
+    never a fresh [Captured] replacement or another unknown dispatch.
+    Unknown dispatch, missing links and corrupt inventory grant no retry.
+    [None] means no first attempt exists. The host serializes this request under
+    its workspace lease through selection, retention and run. *)
 
 val request_retry :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->

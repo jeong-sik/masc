@@ -437,6 +437,17 @@ let select_frontier ~automatic ~store ~installation_id ~package_id ~goal_id ~req
   let rec walk parent rest =
     match Progress.phase (progress parent), rest with
     | (Progress.Subdividing (_, successor) | Subdivided (_, successor)), _ ->
+      let* () =
+        match Progress.phase (progress parent), rest with
+        | Subdivided _, [] ->
+          invalid "Goal successor original is missing after parent observed its intent"
+        | Subdivided _, existing::_ when existing.record.request_id <> successor.Progress.request_id ->
+          invalid "Goal successor original differs from its retained intent"
+        | (Subdividing _ | Subdivided _), _ -> Ok ()
+        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+        | Finished _ | Conflicted _ | Rejected _ ->
+          invalid "Goal successor parent changed during restoration"
+      in
       let* child = restore_child parent successor in
       (match rest with
        | [] -> walk child []

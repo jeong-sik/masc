@@ -433,6 +433,59 @@ let test_linked_frontier_and_staged_run_recovery () =
   exercise false;
   exercise true
 
+let test_subdivided_parent_requires_retained_unknown_child () =
+  with_workspace (fun config store _ ->
+    let authority, retained = prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      incr calls;
+      Alcotest.(check string) "unknown child keeps the original prompt" (V.prompt original) prompt;
+      if !calls = 1 then Error (Agent_core.Error.Api (Agent_core.Error.Retry.RateLimited
+        {retry_after=Some 1.; message="definite temporary refusal"}))
+      else Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None;
+        verdict=Some (AR.Approve "checked original")}) (fun () ->
+      let refusal = checked (run store retained authority) in
+      Alcotest.(check bool) "typed refusal retains retry candidate" true
+        (refusal.result.retryable_runtimes <> []);
+      let child = get (V.successor original) in
+      let fixed_run : W.run_identity = {run_id="fixed-unknown-child/" ^ subject.request_id;
+        started_at=Time_compat.now ()} in
+      let staged_store = Lane_addon_store.create
+        ~root:(Filename.concat (Workspace.masc_dir config) "staged-unknown-child") in
+      ignore (checked (W.retain ~store:staged_store ~installation_id ~package_id ~run:fixed_run child));
+      let load_scope store = get (Lane_addon_tool_request_owner.load_scope ~store
+        ~scope:"goal-proof-reviews" |> Result.map_error Lane_addon_tool_request_owner.error_to_string) in
+      let only = function [record] -> record | _ -> Alcotest.fail "fixture needs one actual owner" in
+      let child_record = only (load_scope staged_store) in
+      let parent_record = only (load_scope store) in
+      let successor = get (Lane_addon_tool_request_owner.prepare_successor ~store
+        ~scope:"goal-proof-reviews" ~request_id:child_record.request_id ~request:child_record.request
+        |> Result.map_error Lane_addon_tool_request_owner.error_to_string) in
+      ignore (get (Lane_addon_tool_request_owner.advance ~store ~expected:parent_record
+        ~event:(P.Successor_intended successor)
+        |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string));
+      let parent_after_intent = only (load_scope store) in
+      ignore (get (Lane_addon_tool_request_owner.advance ~store ~expected:parent_after_intent
+        ~event:(P.Successor_observed successor.request_id)
+        |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string));
+      (match P.phase (W.progress (load store original)) with
+       | P.Subdivided _ -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ ->
+         Alcotest.fail "fixture must retain a Subdivided parent without its child");
+      let allocations = ref 0 in
+      (match W.frontier ~store ~installation_id ~package_id
+        ~goal_id:subject.goal_id ~request_id:subject.request_id
+        ~new_run:(fun () -> incr allocations; fixed_run) with
+       | Error (W.Original_invalid _) -> ()
+       | Error _ | Ok _ -> Alcotest.fail "missing unknown child was recreated from staged input");
+      Alcotest.(check int) "only the original review happened" 1 !calls;
+      Alcotest.(check int) "no new run was allocated for a missing unknown child" 0 !allocations))
+
 let test_actual_goal_commit_reply_loss_and_conflict () =
   let exercise conflict = with_workspace (fun config store _ ->
     let authority, retained = prepared config store in
@@ -1182,6 +1235,7 @@ let () = match restart_probe with
   Alcotest.test_case "same-original pre-admission repair" `Quick test_pre_admission_repair_keeps_original;
   Alcotest.test_case "authority destination and strict inventory" `Quick test_destination_authority_and_inventory;
   Alcotest.test_case "linked frontier restores the original staged run" `Quick test_linked_frontier_and_staged_run_recovery;
+  Alcotest.test_case "Subdivided parent requires retained unknown child" `Quick test_subdivided_parent_requires_retained_unknown_child;
   Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict;
   Alcotest.test_case "actual pending Goal survives foreign original body corruption" `Quick
     test_actual_pending_goal_survives_foreign_body_corruption;

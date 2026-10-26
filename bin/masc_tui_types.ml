@@ -5792,7 +5792,8 @@ module Browser_lane_view = struct
   type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
   type browser = Browser_lane.browser = Firefox | Zen | Ego_lite
   type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport;
-    interactions : Browser_lane.interaction_activity list }
+    interactions : Browser_lane.interaction_activity list;
+    last_activities : Browser_lane.settled_activity list }
   type discovery = Read_after_discovery | Choose_client
   type tab = { id : int; title : string; url : string; active : bool }
   type page = {
@@ -5937,6 +5938,7 @@ module Browser_lane_view = struct
      erase it. The operator's next input withdraws it. *)
   type t = {
     clients : client list option; selected_client : client option; client_picker : int option;
+    activity_error : string option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
     scene : scene option; scene_cursor : int; scene_scope : scene_scope_context option;
@@ -5964,7 +5966,7 @@ module Browser_lane_view = struct
     | Live, Some client -> Some (browser_name client.browser)
     | Live, None -> None
   let create () =
-    { clients = None; selected_client = None; client_picker = None;
+    { clients = None; selected_client = None; client_picker = None; activity_error = None;
       source = Live; selected_tab = None; scroll = 0;
       reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
@@ -6654,6 +6656,19 @@ module Browser_lane_view = struct
     | No_available_browser -> true
     | Ambiguous_browsers | Binding_required | Automatic_unavailable
     | Invalid_automatic_response | Unrecognized_selection_error -> false
+  (* Activity refresh updates the original concrete connection only. It never
+     chooses a browser, changes the tab, or consumes the pending page read. *)
+  let accept_activity (result : (discovered, string) result) t = match result with
+    | Error detail -> {t with activity_error=Some detail}
+    | Ok observed ->
+      let selected_client=match t.selected_client with
+        | None -> None
+        | Some original ->
+          (match List.find_opt (same_client original) observed.listed with
+           | Some current -> Some current | None -> Some original) in
+      {t with clients=Some observed.listed;selected_client;bidi_host=observed.bidi_host;
+        automatic=observed.automatic;activity_error=None}
+
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
@@ -6666,7 +6681,8 @@ module Browser_lane_view = struct
                match List.find_opt (same_client selected) clients with
                | Some current -> current
                | None -> selected) t.selected_client in
-             let next = { t with clients = Some clients; selected_client; bidi_host; automatic; load = Idle } in
+             let next = { t with clients = Some clients; selected_client; bidi_host; automatic;
+               activity_error=None;load = Idle } in
              if purpose = Choose_client then { next with client_picker = Some 0 }, false
              else match t.selection with
              | Live_unbound -> {next with client_picker=Some 0;
@@ -6736,7 +6752,14 @@ module Browser_lane_view = struct
             | row::rest -> let* work = Browser_lane.interaction_activity_of_json row in parse (work::acc) rest in
           parse [] rows
         | _ -> Error "expected browser interactions array") "interactions" json in
-      Ok { client_id; browser; transport; interactions }
+      let* last_activities = get (function
+        | `List rows ->
+          let rec parse acc = function
+            | [] -> Ok (List.rev acc)
+            | row::rest -> let* work=Browser_lane.settled_activity_of_json row in parse (work::acc) rest in
+          parse [] rows
+        | _ -> Error "expected settled browser activities array") "lastActivities" json in
+      Ok { client_id; browser; transport; interactions; last_activities }
   let decode_clients json =
     let* ok = get boolean "ok" json in
     if not ok then let* detail = get string "error" json in Error detail

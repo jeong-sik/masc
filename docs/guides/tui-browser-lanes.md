@@ -67,6 +67,20 @@ A failed or pending refresh retains content labeled as a previous read. Switchin
 source clears that content; generation-stamped replies reject earlier requests.
 Reads happen on entry, source or tab selection, navigation, and explicit refresh.
 
+The selected live connection reports queued and running requests, including
+reads, snapshots, waits inside a native workflow, and navigation, with their
+caller and tab or space scope. The reader also shows each caller's last returned,
+refused, partially performed, or unknown result. An operator's read does not erase
+a Keeper's last result. These are observations from the last connection-list
+read, rather than a claim that a completed request is still running. Page cadence
+refreshes the activity list independently of page content, preserving the selected
+connection, tab, scroll, pending read and URL draft. A failed activity refresh keeps
+the previous observation and displays its failure separately.
+
+Ego's native cursor label still identifies pointer actions. This activity list
+does not add a native Ego label for reads or waits; that browser-side visibility
+remains a separate gap.
+
 A live browser is reached over its WebExtension or an attached BiDi connection,
 and the two serve different work
 ([the table](../design/browser-lane.md#what-each-live-connection-serves)). The

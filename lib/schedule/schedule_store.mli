@@ -279,7 +279,12 @@ val reschedule_due_recurring :
 
 type running_attempt
 (** Opaque authority for one persisted identified wake in its originating
-    workspace/backend. Obtained only from a committed start. *)
+    workspace/backend. Obtained only from a committed start. All settlement
+    methods revalidate this authority against the primary ledger under its
+    mutation lock. Recovery mirrors and unidentified historical wakes cannot
+    authorize settlement. Repeating the same typed verdict preserves its
+    original receipt; supersession and unavailable authority remain distinct
+    errors. A replay must preserve the original [now] recurrence anchor. *)
 
 type started_dispatch = private
   { request : Schedule_domain.schedule_request

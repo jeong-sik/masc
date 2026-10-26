@@ -202,6 +202,10 @@ val microvm_shim_dir : base_path:string -> string
     runtime writes beside it; mounted read-only into every guest
     (RFC-0400). *)
 
+val microvm_identity_dir : base_path:string -> backend:string -> string
+(** [<base_path>/.masc/microvm/identity/<backend>/]. The caller supplies the
+    canonical backend spelling; this leaf resolver does not select a runtime. *)
+
 val wiki_dir : base_path:string -> string
 (** [<base_path>/.masc/wiki/]. The wiki's pages with its [index.md] and
     [log.md]. *)

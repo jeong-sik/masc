@@ -510,6 +510,9 @@ let constitution_dir ~base_path =
 let microvm_shim_dir ~base_path =
   Filename.concat (Filename.concat (masc_root ~base_path) "microvm") "shim"
 
+let microvm_identity_dir ~base_path ~backend =
+  Filename.concat (Filename.concat (Filename.concat (masc_root ~base_path) "microvm") "identity") backend
+
 let wiki_dir ~base_path = Filename.concat (masc_root ~base_path) "wiki"
 
 let event_queue_bulk_backups_dir ~base_path =

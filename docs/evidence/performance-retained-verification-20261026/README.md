@@ -11,7 +11,7 @@ site deltas are not a complete attribution. Sampling, report collection and
 the shared host affect the observation.
 
 All seven health observations identify the same source, executable and
-runtime instance, with 24 Keeper fibers. Sampled RSS spans 18,424,840,192 to
+runtime instance, with 25 Keeper fibers. Sampled RSS spans 18,424,840,192 to
 22,770,925,568 bytes, and the rolling scheduler p99 spans about 710 to 815 ms.
 These are operating observations, not a controlled workload or causal join.
 The full health responses remain in the private local packet; the health

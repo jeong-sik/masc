@@ -75,6 +75,8 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
   let subject = Authority.task_review_subject authority in
   let req = V.review_request original in
   let lookup = Authority.task_review_lookup authority in
+  (* The binding covers the host ownership root, route, subject, schemas and
+     submitted evidence. A frozen inventory observation is not lookup authority. *)
   let* () =
     if String.equal subject.id verification_id
       && String.equal subject.task_id req.AR.task_id

@@ -1505,11 +1505,14 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
         ~cause
         ~disposition:
           (let disposition = stall_disposition_of_scheduling ~retry_interval_sec:delay_sec scheduling in
-           match cause,disposition with
-           | Execution_pending _, Verification_protocol.Retry_scheduled {delay} ->
-             Verification_protocol.Original_observation_scheduled {delay}
-           | Execution_repair_required _, _ -> Verification_protocol.Original_repair_required
-           | _ -> disposition))
+           match cause with
+           | Execution_pending _ ->
+             (match disposition with
+              | Verification_protocol.Retry_scheduled {delay} ->
+                Verification_protocol.Original_observation_scheduled {delay}
+              | Original_observation_scheduled _ | Original_repair_required | No_retry_armed -> disposition)
+           | Execution_repair_required _ -> Verification_protocol.Original_repair_required
+           | Infrastructure_unavailable _ | Commit_failed _ | Not_reviewed _ | Raised _ -> disposition))
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"

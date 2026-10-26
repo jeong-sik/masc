@@ -17,7 +17,8 @@ let review_label = function
   | Review_running _ -> "검증 중"
   | Review_waiting_original _ -> "원 실행 확인 대기"
   | Review_stopped {cause=Review_original_repair;_} -> "원 실행 확인 필요"
-  | Review_stopped _ -> "검증 중단"
+  | Review_stopped {cause=(Review_environment | Review_no_judgment | Review_commit_failure
+      | Review_failure | Review_cancelled);_} -> "검증 중단"
   | Review_approved _ -> "승인 판정 기록"
   | Review_rejected _ -> "반려 판정 기록"
   | Review_superseded _ -> "다른 판정 적용"

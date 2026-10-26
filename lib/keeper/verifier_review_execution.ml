@@ -103,7 +103,10 @@ let observe_call ~base_path ~original reference =
   let map_error result = Result.map_error Agent.Execution_projection.error_to_string result in
   let* terminal = Agent.read_execution_terminal projection |> map_error in
   match terminal with
-  | None -> Ok (Call_awaiting)
+  | None ->
+    (* Missing terminal evidence never authorizes replay. Confirmed owner-loss
+       reconciliation is tracked by #46152; elapsed time alone is not that fact. *)
+    Ok (Call_awaiting)
   | Some terminal ->
     (match terminal.disposition.recovery with
      | Agent.Operator_repair_required _ -> Ok (Call_repair "original execution has an unsettled effect")

@@ -273,6 +273,23 @@ class ReleaseSecondApprover(GuardHarness):
 
 
 class SourceReceiptCase(GuardHarness):
+    def test_diff_read_failure_is_unavailable_at_initial_and_final_read(self):
+        self.review(footer_line())
+        for fail_at in (1, 2):
+            with self.subTest(fail_at=fail_at):
+                counter = self.scripts / "review-diff.calls"
+                counter.unlink(missing_ok=True)
+                (self.scripts / "review-diff.py").write_text(
+                    "import pathlib,sys\n"
+                    "p=pathlib.Path(__file__).with_suffix('.calls')\n"
+                    "n=int(p.read_text())+1 if p.exists() else 1\n"
+                    "p.write_text(str(n))\n"
+                    f"sys.exit(1) if n=={fail_at} else print({DIFF!r})\n")
+                result = self.run_guard("--source-receipt")
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("diff unavailable", result.stderr)
+                self.assertEqual(result.stdout, "")
+
     def pin(self, state):
         (self.data / "status.json").write_text(json.dumps({"statuses": [{
             "context": "leader-selected-ci", "state": state,

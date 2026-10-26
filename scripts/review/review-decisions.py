@@ -191,6 +191,10 @@ def parse_record(envelope: dict, *, head: str, ordinal: int,
     if kind is Kind.REVIEW and review_state is None:
         # An unrecognized publication state cannot grant positive authority.
         state = State.UNKNOWN
+    elif review_state is ReviewState.CHANGES_REQUESTED and state is State.PASS:
+        # The published API decision is a refusal. A contradictory first-line
+        # PASS cannot authorize approval or withdraw this actor's older refusal.
+        state = State.INVALID
     actor = actor_login(record)
     if state is State.PASS and (
         record.get("author_association") not in TRUSTED_ASSOCIATIONS

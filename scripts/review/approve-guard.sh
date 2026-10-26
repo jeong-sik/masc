@@ -86,7 +86,9 @@ compute_scope() {
 }
 read_current_pr
 [ "$source_receipt" -eq 0 ] || [ "$review_policy" = source ] || refuse "source receipts cannot admit a release"
-current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || refuse "complete review diff unavailable"
+current_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") || {
+  echo "approve-guard: complete review diff unavailable" >&2; exit 1;
+}
 # Merge admission and release review admission must both establish the
 # policy-specific CI identity before review verdicts are parsed. Release
 # verdicts are bound to this selected run; checking reviews first would leave
@@ -206,7 +208,7 @@ if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
   [ -n "$approvals" ] || refuse "approval changed during merge check"
   check_verdict
   final_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") ||
-    refuse "complete diff unavailable at consumption"
+    { echo "approve-guard: complete diff unavailable at consumption" >&2; exit 1; }
   [ "$current_diff" = "$final_diff" ] || refuse "complete diff moved during consumption"
   read_current_pr
   check_reviews
@@ -252,7 +254,7 @@ check_reviews
 check_verdict
 read_current_pr
 final_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha" --head "$head") ||
-  refuse "complete diff unavailable at approval"
+  { echo "approve-guard: complete diff unavailable at approval" >&2; exit 1; }
 [ "$current_diff" = "$final_diff" ] || refuse "complete diff moved during approval"
 # The compare/fetch above can block while the PR is retargeted. Revalidate the
 # producer identity after all network-dependent diff work, before any POST.

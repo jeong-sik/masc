@@ -66,6 +66,28 @@ class ReviewDecisionCases(unittest.TestCase):
         self.assertEqual(result.selected.state, M.State.PASS)
         self.assertEqual(len(result.decisions), 1)
 
+    def test_pass_formatted_cr_cannot_clear_the_actors_older_fail(self):
+        result = reduce(item("FAIL", kind="review", review_state="CHANGES_REQUESTED"),
+                        item("PASS", at=T2, kind="review", rid=2,
+                             review_state="CHANGES_REQUESTED"))
+        self.assertEqual(result.selected.state, M.State.INVALID)
+        self.assertEqual(result.selected.record_id, 2)
+        self.assertTrue(result.blockers)
+
+    def test_standalone_pass_formatted_cr_is_a_blocking_contradiction(self):
+        result = reduce(item("PASS", kind="review", review_state="CHANGES_REQUESTED"))
+        self.assertEqual(result.selected.state, M.State.INVALID)
+        self.assertTrue(result.blockers)
+
+    def test_correct_approved_replacement_clears_own_cr_and_prior_contradiction(self):
+        result = reduce(item("FAIL", kind="review", review_state="CHANGES_REQUESTED"),
+                        item("PASS", at=T2, kind="review", rid=2,
+                             review_state="CHANGES_REQUESTED"),
+                        item("PASS", at=T3, kind="review", rid=3,
+                             review_state="APPROVED"))
+        self.assertEqual(result.selected.state, M.State.PASS)
+        self.assertFalse(result.blockers)
+
     def test_own_pass_does_not_withdraw_another_actor(self):
         result = reduce(item("FAIL"), item("HOLD", actor="reviewer-b", rid=2),
                         item("PASS", at=T2, rid=3))

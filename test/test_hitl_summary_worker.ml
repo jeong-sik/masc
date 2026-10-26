@@ -2414,6 +2414,138 @@ let test_same_owner_workers_run_in_parallel_with_bound () =
          (F.post_count server))
 ;;
 
+let test_concurrent_owner_recovery_drains_only_completed_owner () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-concurrent-owner-drain" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       with_hitl_concurrency 1 @@ fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let first_arrived, resolve_first_arrived = Eio.Promise.create () in
+       let second_arrived, resolve_second_arrived = Eio.Promise.create () in
+       let release_first, resolve_release_first = Eio.Promise.create () in
+       let release_second, resolve_release_second = Eio.Promise.create () in
+       let response = F.openai_response (judgment_json "approve") in
+       let server =
+         F.start_server ~sw ~net ~clock
+           (F.Reply_with (fun index _body ->
+              (match index with
+               | 0 ->
+                 Eio.Promise.resolve resolve_first_arrived ();
+                 Eio.Promise.await release_first
+               | 1 ->
+                 Eio.Promise.resolve resolve_second_arrived ();
+                 Eio.Promise.await release_second
+               | _ -> ());
+              `OK, response))
+       in
+       publish_lane
+         [ "hitl-concurrent-owner-drain" ]
+         (F.resolver_snapshot
+            ~source:"hitl-concurrent-owner-drain"
+            [ { id = "hitl-concurrent-owner-drain"; base_url = server.base_url } ]);
+       select_auto_judge_mode base_path;
+       let first_a =
+         pending_entry ~keeper_name:"owner-a" ~input_tag:"a-first" ~base_path ()
+       in
+       let next_a =
+         pending_entry ~keeper_name:"owner-a" ~input_tag:"a-next" ~base_path ()
+       in
+       let first_b =
+         pending_entry ~keeper_name:"owner-b" ~input_tag:"b-first" ~base_path ()
+       in
+       let next_b =
+         pending_entry ~keeper_name:"owner-b" ~input_tag:"b-next" ~base_path ()
+       in
+       let start_sweeps, resolve_start_sweeps = Eio.Promise.create () in
+       let launch_sweep () =
+         let ready, resolve_ready = Eio.Promise.create () in
+         let finished, resolve_finished = Eio.Promise.create () in
+         Eio.Fiber.fork ~sw (fun () ->
+           Eio.Promise.resolve resolve_ready ();
+           Eio.Promise.await start_sweeps;
+           Eio.Promise.resolve resolve_finished
+             (Gate.resume_persisted_auto_judges ~base_path));
+         ready, finished
+       in
+       let ready_a, sweep_a = launch_sweep () in
+       let ready_b, sweep_b = launch_sweep () in
+       let await ~failure promise =
+         F.await_within_fixture_budget ~clock ~failure promise
+       in
+       await ~failure:"first recovery fiber did not reach the start barrier" ready_a;
+       await ~failure:"second recovery fiber did not reach the start barrier" ready_b;
+       Eio.Promise.resolve resolve_start_sweeps ();
+       let report_a = await ~failure:"first recovery sweep did not return" sweep_a in
+       let report_b = await ~failure:"second recovery sweep did not return" sweep_b in
+       check (list string)
+         "overlapping production sweeps admit each owner's first entry exactly once"
+         (List.sort String.compare [ first_a.id; first_b.id ])
+         (List.sort String.compare (report_a.started_ids @ report_b.started_ids));
+       check int "concurrent sweeps have no admission failures" 0
+         (List.length report_a.failures + List.length report_b.failures);
+       check bool "concurrent sweeps read the durable queue" true
+         (Option.is_none report_a.queue_error && Option.is_none report_b.queue_error);
+       await ~failure:"first owner did not dispatch" first_arrived;
+       await ~failure:"second owner did not dispatch while first was held" second_arrived;
+       let active (entry : QT.pending_approval) =
+         Gate.For_testing.active_auto_judges_for_owner
+           ~base_path ~keeper_name:entry.keeper_name
+       in
+       let pending (entry : QT.pending_approval) =
+         Q.For_testing.get_pending_entry_unchecked ~id:entry.id
+       in
+       let check_waiting ~label entry =
+         match pending entry with
+         | Some { exact_attempt = QT.Exact_unbound
+                ; summary_status = QT.Summary_pending; _ } -> ()
+         | _ -> failf "%s was dispatched or removed before its owner slot was free" label
+       in
+       check (list string) "owner A has one live worker" [ first_a.id ] (active first_a);
+       check (list string) "owner B has one live worker" [ first_b.id ] (active first_b);
+       check_waiting ~label:"owner A successor" next_a;
+       check_waiting ~label:"owner B successor" next_b;
+       check int "both owners dispatched before either response is released" 2
+         (F.post_count server);
+       let while_held = Gate.resume_persisted_auto_judges ~base_path in
+       check (list string) "a further sweep cannot duplicate either owner" []
+         while_held.started_ids;
+       (* The first HTTP request may belong to either owner. Observe which real
+          completion wins rather than assuming a scheduler or owner order. *)
+       Eio.Promise.resolve resolve_release_first ();
+       let completed first next =
+         Option.is_none (pending first) && Option.is_none (pending next)
+         && active first = []
+       in
+       await_condition ~clock
+         ~failure:"worker completion did not release its slot and drain its successor"
+         (fun () -> completed first_a next_a || completed first_b next_b);
+       let held_first, held_next =
+         if completed first_a next_a then first_b, next_b else first_a, next_a
+       in
+       check (list string) "the other owner remains independently active"
+         [ held_first.id ] (active held_first);
+       check bool "the held owner's first approval is still pending" true
+         (Option.is_some (pending held_first));
+       check_waiting ~label:"held owner successor" held_next;
+       check int "only the completed owner's successor dispatched" 3
+         (F.post_count server);
+       Eio.Promise.resolve resolve_release_second ();
+       await_condition ~clock
+         ~failure:"second owner did not release and drain after its response"
+         (fun () -> completed first_a next_a && completed first_b next_b);
+       check int "all four durable approvals dispatched exactly once" 4
+         (F.post_count server);
+       let after_completion = Gate.resume_persisted_auto_judges ~base_path in
+       check (list string) "completed approvals do not redispatch" []
+         after_completion.started_ids;
+       check int "completed recovery leaves the provider request count unchanged" 4
+         (F.post_count server))
+;;
+
 let test_require_human_head_does_not_stop_owner_drain () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "hitl-require-human-drain" @@ fun base_path ->
@@ -3430,6 +3562,10 @@ let () =
             "same-owner workers run in parallel within the bound"
             `Quick
             test_same_owner_workers_run_in_parallel_with_bound
+        ; test_case
+            "concurrent owner recovery drains only the completed owner"
+            `Quick
+            test_concurrent_owner_recovery_drains_only_completed_owner
         ; test_case
             "Require_human head does not stop owner drain"
             `Quick

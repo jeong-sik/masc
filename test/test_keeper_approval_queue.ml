@@ -1654,8 +1654,9 @@ let test_workspace_drain_isolates_owner_failures () =
 ;;
 
 let test_each_owner_claims_bounded_parallel_workers () =
-  (* Real concurrent proof: fibers race the per-owner claim, exercising both
-     same-owner fan-out and the independent owner boundary under Atomic CAS. *)
+  (* Admission bookkeeping across fibers. Barrier-controlled production sweeps,
+     overlapping HTTP workers and completion-driven successor drain are covered
+     in test_hitl_summary_worker. *)
   let base_path = temp_dir () in
   let suffix = string_of_int (int_of_float (Unix.gettimeofday () *. 1_000_000.0)) in
   Fun.protect

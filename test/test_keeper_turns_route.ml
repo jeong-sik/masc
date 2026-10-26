@@ -231,38 +231,28 @@ let test_waiting_read_errors_stay_public () =
     (match Keeper_meta_store.replace_snapshot config meta with
      | Ok () -> ()
      | Error err -> Alcotest.failf "persist keeper meta: %s" err);
-    let body =
+    let response =
       with_pending_confirm_read_result (Error "public fixture read failure")
-        (fun () -> body_of (turns_response ~state))
+        (fun () -> turns_response ~state)
     in
-    match member "keepers" (Yojson.Safe.from_string body) with
-    | Some (`List [ row ]) ->
-      (match member "waiting" row with
-       | Some (`Assoc _ as waiting) ->
-         (match member "state" waiting with
-          | Some (`String "waiting") -> ()
-          | other ->
-            Alcotest.failf "a fleet read failure became ordinary idle: %s"
-              (match other with Some value -> Yojson.Safe.to_string value | None -> "absent"));
-         (match member "waiting_count" waiting with
-          | Some (`Int count) when count > 0 -> ()
-          | other ->
-            Alcotest.failf "no read failure is visible: %s"
-              (match other with Some value -> Yojson.Safe.to_string value | None -> "absent"));
-         (match member "waiting_on" waiting with
-          | Some (`List items) ->
-            let is_injected_error item =
-              match member "source" item, member "waiting_on" item, member "keeper_name" item with
-              | Some (`String "read_error"), Some (`String "operator_pending_confirm_store"), Some `Null ->
-                true
-              | _ -> false
-            in
-            Alcotest.(check bool) "the injected fleet read error remains public" true
-              (List.exists is_injected_error items)
-          | _ -> Alcotest.fail "waiting_on is missing or mistyped")
-       | _ -> Alcotest.fail "canonical waiting projection is missing")
-    | Some (`List rows) -> Alcotest.failf "expected one Keeper row, got %d" (List.length rows)
-    | _ -> Alcotest.fail "keepers field is missing or mistyped")
+    Alcotest.(check bool) "a fleet read failure is unavailable, not a healthy fleet" true
+      (String_util.contains_substring response "503 Service Unavailable");
+    let json = Yojson.Safe.from_string (body_of response) in
+    (match member "keepers" json with
+     | None -> ()
+     | Some _ -> Alcotest.fail "a failed fleet observation returned healthy per-Keeper state");
+    match member "waiting_errors" json with
+    | Some (`List items) ->
+      let is_injected_error item =
+        match member "source" item, member "waiting_on" item, member "keeper_name" item with
+        | Some (`String "read_error"), Some (`String "operator_pending_confirm_store"), Some `Null ->
+          true
+        | _ -> false
+      in
+      Alcotest.(check bool) "the injected fleet read error remains public" true
+        (List.exists is_injected_error items)
+    | Some _ -> Alcotest.fail "waiting_errors must be an array"
+    | None -> Alcotest.fail "the fleet read error was dropped"
 ;;
 
 let test_interrupt_rejects_invalid_or_conflicting_identity () =

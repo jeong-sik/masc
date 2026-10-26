@@ -1,0 +1,16 @@
+{
+  "schema": "masc.selected-evidence-files.v1",
+  "files": {
+    "README.md": "d98c74f8f2851633e5ff511c4d73314fa4d68364b028ca2476688c5787e80e40",
+    "current-locations.json": "1f4cecf1c5ee30a0bb796f8a16af1a8c32884b5e11b7ba47e8760386da8e968a",
+    "execution.json": "e0467bbebf3e892e69188cc66c275c4c8e1a8e123201247ec0080c25467a9b17",
+    "interpreter.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "measurements.jsonl": "cfe8cdb1bfeb189896ae352a126eac3bb6c114979c05d454e0981e6ff89b7ca9",
+    "plan.json": "5fa06bd0ec1f179f7b03923d0b25715463f2cb79beed999400d66cc24be4463e",
+    "probe.ocaml.txt": "26f0c68cc3a6b0681221c4e7b332f680936a16e08ab1feb8475cb7efb4e0c0bb",
+    "provenance.json": "fdcbd1a69275bba040b1bb623aff402edd7933daf31ed7e6c81c80aff2a662c1",
+    "reproduce.py": "dc1c3fb3eacef86e8436378653d49aea00964a91b500123e1c9752926733659e",
+    "summary.json": "2e95907cafd339a3b7e5229d47ebe84dfec4e8fcf4634e1c09390205f41168c2",
+    "test-response-checks.json": "034d40726b8ac10e4ddda8e3a29e3328ceca6eef1ef863a2d3c543c3d2688d7c"
+  }
+}

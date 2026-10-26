@@ -1,0 +1,24 @@
+{
+  "command": [
+    "/Users/dancer/.opam/5.5.1/bin/ocaml",
+    "-noinit",
+    "-noprompt",
+    "-I",
+    "+unix",
+    "-I",
+    "/Users/dancer/.opam/5.5.1/lib/mtime",
+    "-I",
+    "/Users/dancer/.opam/5.5.1/lib/mtime/clock",
+    "unix.cma",
+    "mtime.cma",
+    "mtime_clock.cma",
+    "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/probe.ml"
+  ],
+  "returncode": 0,
+  "parent_requested_ns": 200473933230791,
+  "parent_returned_ns": 200480447339291,
+  "started_at_utc": "2026-10-26T18:33:44.039717+00:00",
+  "returned_at_utc": "2026-10-26T18:33:50.553703+00:00",
+  "stdout_sha256": "cfe8cdb1bfeb189896ae352a126eac3bb6c114979c05d454e0981e6ff89b7ca9",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

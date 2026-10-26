@@ -75,6 +75,8 @@ completed-history Librarian 은 `consume_one` 을 돌 때마다 그 Keeper 의 h
 
 execution 이 discovery 에도 보관 위치에도 없는 gate 기록은 지금과 같이 둔다. 이 RFC 는 그런 기록을 옮기거나 지우지 않는다.
 
+기록은 옮겼는데 그 본문을 옮기기 전에 멈추면, 본문이 scope 옆에 남는다. 보관 위치로 간 기록은 discovery 에 나오지 않으므로 다시 `settle` 하지 않는다. 그 본문을 가리키는 기록도, 읽는 곳도 없어서 검증 결과는 바뀌지 않는다(Q4).
+
 ### 3.3 이동이 실패하면 그 pass 는 멈춘다
 
 `settle` 이나 `settled` 가 오류를 내면 `consume_one` 은 `Original_publication_blocked` 로 끝난다. 다음 작업을 고르지 않는다. 다음 pass 가 3.2 를 거쳐 다시 시도한다.
@@ -87,6 +89,8 @@ execution 이 discovery 에도 보관 위치에도 없는 gate 기록은 지금�
 - gate 요청의 `version` 을 2로 올린다. 필드 집합을 확인하는 7곳(`parent_execution_id`, `validate_successor_request`, `restore_record`, `read_chain`, `root_preparation`, `Inventory.read` 등)에서 `capture` 를 뺀다.
 - 부모 기록 본문과 메모리의 capture 를 맞춰 보는 비교(`load_parent`, `root_preparation`, `Inventory.validate` 의 `equal parent.request (Capture.to_json capture)`)는 그대로 둔다. gate 요청 필드와 상관없이, 복원한 capture 가 그 부모의 본문인지 확인하는 비교다.
 - history 기록의 `preparation_intended` 는 gate 요청을 담으므로 함께 작아진다. 진행 기록 타입(`Lane_addon_request_progress`)은 바꾸지 않는다.
+- 대체 체인에서 부모의 `Replacement_intended` 가 자식 history 요청 전체를 담는 사본은 남는다. 끊긴 게시를 복구할 때 그 요청으로 같은 자식을 다시 만들기 때문이다.
+- reader 는 필드 검사보다 먼저 `version` 을 본다. 다른 버전이면 "Original gate request is not version 2" 로 거절해서, 3.5 단계를 빠뜨렸을 때 로그가 원인을 가리킨다.
 - admission gate(`keeper_librarian_admission_gate.ml`)도 같은 functor 를 쓴다. 같이 바뀐다.
 
 라이브 기록 하나에서 `capture` 를 64자 문자열로 바꿔 쟀더니 history 기록이 3,370,525 바이트에서 5,604 바이트가 됐고, 파싱이 23.6 ms 에서 0.043 ms 가 됐다(실측 기록 5절).
@@ -100,7 +104,7 @@ gate 요청 모양이 바뀐다. 옛 기록을 읽는 코드는 만들지 않는
 배포 전에 서버를 멈추고, 아래를 `lane-addons/` 밖으로 옮긴다. scope 디렉터리 이름은 scope 문자열의 sha256 이다(`lane_addon_store.ml` 의 `tool_request_owner_path`).
 
 - `tool-request-owners/` 와 `tool-request-bodies/` 의 `keeper-librarian-history-execution-*`, `keeper-librarian-durable-gate/*` scope
-- 같은 두 곳의 `keeper-librarian-execution-*`, `keeper-librarian-admission-gate/*` scope
+- 같은 두 곳의 `keeper-librarian-execution-*`, `keeper-librarian-admission-gate/*`, `keeper-librarian-parts/*`, `keeper-librarian-partitions/*` scope. admission 의 parts 와 partitions 는 admission 실행 기록을 ID 로 가리켜서, 실행 기록만 옮기면 모든 admission discovery 가 "Original parent execution is missing" 으로 멈춘다(`keeper_librarian_admission_parts.ml` 의 `original_capture`). 네 scope 를 함께 옮기면, 다음 admission pass 가 Memory receipt 로 commit 된 후보를 먼저 ACK 하고 남은 후보로 새 root 를 만든다.
 
 보관 위치(`tool-request-owners-settled/`)는 옮기지 않는다. pass 도, 배포 전 저장소 검사도 읽지 않는다.
 
@@ -137,7 +141,7 @@ pass 마다 `durable Librarian inventory validated: originals=… unfinished=…
 - **Q1. 이동 실패 때 멈출지.** 권고: 멈춘다(3.3). 끝나지 않은 일은 그대로 남고, 오류는 기존 "durable Librarian range not consumed" 경고로 보인다.
 - **Q2. admission original.** `keeper-librarian-execution-*` scope 의 explicit admission original(`Keeper_librarian_admission_capture`)도 같은 방식으로 쌓인다(11시간에 45개, 기록 91 MB, 본문 92 MB). 이 RFC 는 3.4 의 형식만 같이 바꾸고, 옮기는 일은 다루지 않는다. 권고: 관측으로 비용을 본 뒤 따로 정한다.
 - **Q3. 보관 위치 정리.** 보관 위치는 계속 커진다. 권고: 이 RFC 에서는 지우지 않는다. Curator 보관 위치를 정리하는 규칙과 같이 정한다.
-- **Q4. 이동이 남긴 본문.** 기록만 옮기고 멈추면 본문이 scope 옆에 남는다. #45320 이 모은다. 이 RFC 는 따로 다루지 않는다.
+- **Q4. 이동이 남긴 본문.** 기록만 옮기고 멈추면 본문이 scope 옆에 남는다(3.2). 중단된 retain 이 남기는 본문과 같고, 이런 본문을 치우는 곳이 없다는 문제는 이슈 #45320 이 추적한다. 이 RFC 는 따로 다루지 않는다.
 
 ## 7. 검증
 

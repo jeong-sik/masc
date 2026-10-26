@@ -39,6 +39,9 @@ documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔
 | method | 필드 |
 |---|---|
 | click, dblclick, hover | selector |
+| dragAndDrop | selector, destination: 관측한 native locator |
+| mouse.click, mouse.move | x, y: 관측한 CSS 픽셀 좌표 |
+| mouse.wheel | x, y: 수평·수직 delta; 같은 호출에서 먼저 관측한 scroll container로 move/click |
 | fill | selector, text |
 | press | selector, key |
 | focus | selector |
@@ -46,22 +49,28 @@ documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔
 | keyboard.type, keyboard.insertText | text |
 | keyboard.paste | text, 선택적 html |
 | keyboard.press | key |
-| selectOption | selector, value 또는 중복 없는 values; []는 선택 해제 |
+| selectOption | selector, selectionJson: string/object/array/null 선택값을 담은 JSON 문자열 |
 | goto | url: 절대 HTTP(S) 주소 |
 | waitForURL | url: SDK의 문자열/glob |
 | waitForSelector | selector, state: attached/detached/visible/hidden |
-| waitForLoadState | state: domcontentloaded/load/networkidle |
+| waitForLoadState | 선택적 state: domcontentloaded/load/networkidle; 생략 시 SDK 기본값 |
 | evaluate | source, 선택적 argumentJson |
-| waitForFunction | source, 선택적 argumentJson·pollingMs |
-| fetch | url: 절대 HTTP(S) 주소, 선택적 fetchOptions |
+| waitForFunction | source, 선택적 argumentJson |
+| fetch | url: HTTP(S) 절대 주소 또는 페이지 상대 주소 |
 
 `selector`는 관측한 native locator를 그대로 쓴다. workflow 메서드 이름은
 단일 조작의 `double_click`·`select_option` 대신 SDK의 `dblclick`·`selectOption`이다.
-각 step의 선택적 `timeoutMs`는 음이 아닌 JavaScript-safe 정수로 SDK에 그대로 전달한다.
-생략하면 SDK 기본 대기를 사용한다. MASC는 별도의 step 개수·누적 실행 시간 제한을 추가하지 않는다.
+각 step의 선택적 `options`는 해당 메서드의 native SDK 이름과 밀리초를 그대로 쓴다.
+예를 들어 fill에는 `options: {clearFirst: false, timeout: 3000}`, waitForFunction에는
+`options: {timeout: 5000, polling: 50}`, goto에는 `options: {waitUntil: "commit"}`이다.
+selectOption의 `selectionJson` 예시는 `"{\"label\":\"Beta\"}"`이며 `{value?,label?,index?}`,
+값 또는 표시 문자열, 그 혼합 배열, null을 표현한다. null과 빈 배열은 선택 해제다.
+생략한 옵션은 SDK 기본값을 쓴다. MASC는 별도의 step 개수·누적 실행 시간 제한을 추가하지 않는다.
 실행은 기존 호스트 권한과 명시적 취소를 따른다.
 
-`keyboard.*`와 `evaluate` 메서드는 `timeoutMs`를 받지 않는다. 현재 포커스가 입력 대상을 정하므로
+`keyboard.type`·`keyboard.press`는 `options.delay`를 받는다. `evaluate`·`keyboard.insertText`·
+`keyboard.paste`는 options를 받지 않는다. `label` 옵션은 포인터 동작에만 넣는다.
+현재 포커스가 입력 대상을 정하므로
 앞에서 관측한 selector로 `focus`를 실행한다. `keyboard.insertText`는 문자열을 직접 넣고,
 `keyboard.paste`는 plain text 또는 `{text, html}`을 native 붙여넣기로 전달한 뒤 SDK가
 운영자 클립보드를 복원한다. 리치 편집기에는 실제 결과를 읽거나 screenshot으로 확인한다.
@@ -74,9 +83,10 @@ documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔
 
 `fetch`는 브라우저 CORS를 따르며 native structured response가 step의 `receipt`로
 돌아온다. HTTP 오류 상태도 반환된 데이터이므로 호출자가 status와 본문을 확인한다.
-`fetchOptions`는 method, 문자열 값의 headers 객체, body, cache, credentials, integrity,
-keepalive, mode, redirect, referrer, referrerPolicy를 받는다. timeout은 step의 `timeoutMs`다.
+fetch의 `options`는 timeout, method, 문자열 값의 headers 객체, body, cache, credentials,
+integrity, keepalive, mode, redirect, referrer, referrerPolicy를 받는다.
 호스트 파일 경로인 `saveAs`는 아직 다운로드 broker 연결이 필요해 받지 않는다.
+전체 메서드별 옵션은 [native workflow 인자](../../../docs/guides/ego-native-workflow.md)를 읽는다.
 전체 SDK의 현재 연결·옵션·미지원 범위는
 [전수 목록](../../../docs/guides/ego-sdk-coverage.md)에 기록한다.
 
@@ -89,6 +99,9 @@ BrowserRead 크기 정책을 따른다. 반환된 url·title·snapshot·truncate
 나누고, 이후 동작에 오래된 ref를 억지로 재사용하지 않는다. 단계 실패 시 뒤 단계는
 실행되지 않고 `completed`와 실패 위치가 남는다. 실패 단계에도 효과가 있었을 수 있으므로
 같은 탭을 다시 읽어 남은 작업을 정하며, workflow 전체를 재실행하지 않는다.
+`inputReleased`는 완료 효과와 별도로 버튼·키 해제 확인을 나타낸다. 클릭·드래그 실패는
+정확한 버튼을 한 번 해제하지만, 키 해제를 추측해서 보내지는 않는다. 해제가 미확인이면
+연결의 추가 입력은 거절된다. 자동 재접속이나 새 Space로 이 경계를 우회하지 않는다.
 
 ## scene/regions의 범위와 변경된 페이지
 

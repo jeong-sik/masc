@@ -784,7 +784,7 @@ let result_readiness_requires_current_original_files stage change = fixture (fun
      | `After ->
        let retained=match change with `Delete_receipt | `Replace_receipt -> receipt ^ ".evidence"
          | `Move_spool | `Truncate_spool | `Delete_seal | `Replace_seal | `Rebind_stream -> receipt in
-       let status=P.response_of_json Yojson.Safe.Util.(Yojson.Safe.from_string (read retained) |> member "status")
+       let status=P.response_of_json Yojson.Safe.Util.(Yojson.Safe.from_string (read retained) |> member "payload" |> member "status")
          |> Result.map_error P.error_to_string |> require in
        (match status with
         | P.Status {result=P.Result_pending;_} -> ()

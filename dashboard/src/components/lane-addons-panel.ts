@@ -11,6 +11,7 @@ import {
 import { isRecord } from './common/normalize'
 import { LaneAddonsTimeline, formatLaneTime } from './lane-addons-timeline'
 import { LaneAddonReadings } from './lane-addon-readings'
+import { BrowserLaneConnections } from './browser-lane-connections'
 import { LaneAddonHostRequests } from './lane-addon-host-requests'
 import { LaneDeclarationEditor } from './lane-declaration-editor'
 import { LanePackageInstaller } from './lane-package-installer'
@@ -520,6 +521,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       <p>${focused.lane_id} · ${formatLaneTime(focused.observed_at)}</p>
       <p>Actor: ${focused.actor ?? 'not recorded'} · Subject: ${focused.subject_id}</p>
       <${LaneAddonReadings} row=${focused} instances=${snapshot?.instances ?? []} />
+      <${BrowserLaneConnections} row=${focused} instances=${snapshot?.instances ?? []} />
       <pre class="whitespace-pre-wrap break-all">${rawFieldsText(focused.fields)}</pre>
       <h4>Original evidence</h4>
       ${focused.evidence.length === 0 ? html`<p>No original evidence recorded.</p>` : focused.evidence.map(evidence => html`<p class="break-all" key=${evidence.uri}>${evidence.uri} · sha256 ${evidence.sha256 ?? 'not recorded'}</p>`)}
@@ -618,6 +620,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       <p>${formatLaneTime(row.observed_at)} · ${row.subject_id} · actor ${row.actor ?? 'unknown'}</p>
       ${row.clock && html`<p>World time: ${row.clock.domain} ${row.clock.value}</p>`}
       <${LaneAddonReadings} row=${row} instances=${snapshot?.instances ?? []} />
+      <${BrowserLaneConnections} row=${row} instances=${snapshot?.instances ?? []} />
       <details><summary>Fields and original evidence · ${row.id}</summary>
         <pre class="whitespace-pre-wrap break-all">${rawFieldsText(row.fields)}</pre>
         ${row.evidence.map(evidence => html`<p key=${evidence.uri} class="break-all">${evidence.uri} · sha256 ${evidence.sha256 ?? 'unknown'}</p>`)}

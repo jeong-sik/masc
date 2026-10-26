@@ -59,6 +59,25 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('optional Lane Add-on surface', () => {
+  it('exposes nested browser callers in the normal observation list and selected event', async () => {
+    const browserRow = { ...row, lane_id: 'instance-1/browser/connections', fields: {
+      state: 'serving', owned_backends: {}, clients: [{ clientId: 'client-original', browser: 'ego_lite',
+        version: '0.6.1.11', engineVersion: 'chromium', transport: 'ego_task_space', space: { id: 32, name: 'Goal Space' },
+        interactions: [{ requestId: 'request-original', actor: 'keeper/research', action: 'page.read', tabId: 0, phase: 'running' }],
+        lastActivities: [] }],
+    } }
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, rows: [browserRow],
+      instances: [{ ...snapshot.instances[0], addon_id: 'browser' }] }))
+    const view = render(html`<${LaneAddonsPanel} />`)
+    const connections = await view.findByLabelText(`Browser connections for ${row.id}`)
+    expect(connections.textContent).toContain('keeper/research · page.read · Tab 0')
+    expect(connections.textContent).toContain('Space 32 · Goal Space')
+    fireEvent.click(view.getByRole('button', { name: `Inspect event: ${row.title} · ${row.id}` }))
+    const focused = await view.findByLabelText('Selected Lane event')
+    expect(within(focused).getByLabelText(`Browser connections for ${row.id}`).textContent).toContain('request-original')
+    expect(api.requestLaneAddonAction).not.toHaveBeenCalled()
+    expect(api.observeLaneAddon).not.toHaveBeenCalled()
+  })
   it('keeps provider waits and delivery failure attached to the original worker after replacement', async () => {
     const original = { ...snapshot.instances[0], runtime_presence: 'retained',
       host_requests: { cycles: 2,

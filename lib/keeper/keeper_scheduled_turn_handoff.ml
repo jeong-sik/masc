@@ -13,6 +13,11 @@ let pending ~base_path ~keeper_name =
     |> Result.map (List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
          is_scheduled selection.source)))
 
+let successors ~excluding ~base_path ~keeper_name =
+  pending ~base_path ~keeper_name
+  |> Result.map (List.filter (fun source ->
+       not (List.exists (Keeper_event_queue_state.equal_pending_selection source) excluding)))
+
 type request_error =
   | Queue_unavailable of string
   | Owner_unavailable of Keeper_owner_registry.command_error
@@ -30,10 +35,8 @@ let request ~excluding ~base_path ~keeper_name =
       |> Result.map_error (fun detail -> Queue_unavailable detail) in
     if not (List.exists is_scheduled (Keeper_event_queue.to_list hint)) then Ok []
     else
-    let* pending = pending ~base_path ~keeper_name
+    let* sources = successors ~excluding ~base_path ~keeper_name
       |> Result.map_error (fun detail -> Queue_unavailable detail) in
-    let sources = List.filter (fun source ->
-      not (List.exists (Keeper_event_queue_state.equal_pending_selection source) excluding)) pending in
     if List.is_empty sources then Ok []
     else
     let* accepted = Keeper_owner_registry.request_scheduled_turn

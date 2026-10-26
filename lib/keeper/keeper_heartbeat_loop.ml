@@ -612,28 +612,38 @@ type batch_disposition =
 
 (* Retention is durable source bookkeeping. It does not prove a reply,
    ignore, or other terminal effect and cannot authorize acknowledging input. *)
-let retain_connector_attention_sources ~base_path ~keeper_name selections =
+let checkpoint_retains_source (selection : Keeper_event_queue_state.pending_selection) =
+  match selection.source.payload with
+  | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Schedule_due _ -> true
+  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Hitl_resolved _ | Keeper_event_queue.Ask_answered _
+  | Keeper_event_queue.Completion_authority_rejected _ | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _ | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _
+  | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+  | Keeper_event_queue.Task_outcome _ -> false
+
+let retain_checkpoint_sources ~base_path ~keeper_name selections =
   List.iter
     (fun (selection : Keeper_event_queue_state.pending_selection) ->
-       match selection.source.payload with
-       | Keeper_event_queue.Connector_attention _ ->
-         (match
-            Keeper_registry_event_queue.note_checkpoint_retention_result
-              ~base_path keeper_name ~selection ()
-          with
-          | Ok _ -> ()
-          | Error detail ->
-            Log.Keeper.error
-              "turn exit: connector attention retention failed event_id=%s keeper=%s: %s"
-              selection.source.post_id keeper_name detail)
-       | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
-       | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
-       | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
-       | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
-       | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-       | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
-       | Keeper_event_queue.Task_outcome _ -> ())
+       if checkpoint_retains_source selection then
+         match Keeper_registry_event_queue.note_checkpoint_retention_result
+                 ~base_path keeper_name ~selection () with
+         | Ok _ -> ()
+         | Error detail ->
+           Log.Keeper.error
+             "turn exit: checkpoint source retention failed post_id=%s keeper=%s: %s"
+             selection.source.post_id keeper_name detail)
     selections
+
+let settle_checkpoint_sources ~base_path ~keeper_name ~acknowledge selections =
+  retain_checkpoint_sources ~base_path ~keeper_name selections;
+  List.fold_left (fun all_acked selection ->
+    (* Retaining an unfinished request never calls the terminal ACK callback,
+       even when recording diagnostic retention failed. *)
+    let acked = not (checkpoint_retains_source selection) && acknowledge selection in
+    all_acked && acked) true selections
 ;;
 
 let batch_disposition_of_cycle_outcome
@@ -691,8 +701,9 @@ let batch_disposition_of_cycle_outcome
        reached the model (edgar.a.poe, 2026-09-02, eight turns on one
        Execute; docs/audits/keeper-fleet-waiting-audit-20260902.md §13.4 in
        #32479). The ACK below still requires the HITL continuation receipt,
-       so an unconsumed grant is retained. Connector attention remains
-       pending until the resumed turn completes. *)
+       so an unconsumed grant is retained. Connector attention and scheduled work remain
+       pending until their owning turn completes. A scheduled occurrence is
+       work, not an attention delivery: its checkpoint cannot certify completion. *)
     Batch_ack_attention_only
   | Some
       ( Cycle.Failed _
@@ -1392,58 +1403,27 @@ let run_keepalive_unified_turn
       (match Keeper_heartbeat_source_batch.selections !source_batch with
        | [] -> ()
        | (_ :: _) as selections ->
-           let remove_completed_selections ~should_ack =
-             let should_ack selection =
-               should_ack selection
-               &&
-               match selection.Keeper_event_queue_state.source.payload with
-               | Keeper_event_queue.Hitl_resolved _ ->
-                 !hitl_continuation_projection_ok
+           let acknowledge selection =
+             let allowed = match selection.Keeper_event_queue_state.source.payload with
+               | Keeper_event_queue.Hitl_resolved _ -> !hitl_continuation_projection_ok
                | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
                | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
                | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
-               | Keeper_event_queue.Ask_answered _
-               | Keeper_event_queue.Completion_authority_rejected _
+               | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
                | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-               | Keeper_event_queue.Delegate_completed _
-               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ | Keeper_event_queue.Task_outcome _ -> true
-             in
-             let selections_to_ack, retained_selections =
-               List.partition should_ack selections
-             in
-             let all_acked =
-               List.fold_left
-                 (fun all_acked selection ->
-                    let acked = terminalize_completed_selection ~selection in
-                    all_acked && acked)
-                 true
-                 selections_to_ack
-             in
-             stimuli_acked := all_acked && List.is_empty retained_selections
+               | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+               | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
+               | Keeper_event_queue.Addon_operation_changed _ | Keeper_event_queue.Task_outcome _ -> true in
+             allowed && terminalize_completed_selection ~selection
            in
            match disposition with
            | Batch_ack_completed ->
-             remove_completed_selections ~should_ack:(fun _ -> true)
+             stimuli_acked := List.fold_left (fun all_acked selection ->
+               let acked = acknowledge selection in all_acked && acked) true selections
            | Batch_ack_attention_only ->
-             retain_connector_attention_sources
-               ~base_path:ctx.config.base_path
-               ~keeper_name:meta_after_triage.name
-               selections;
-             (* Connector sources remain pending until the terminal-receipt
-                path settles them. Already projected non-connector attention
-                still advances through its existing completion path. *)
-             remove_completed_selections
-               ~should_ack:(fun selection ->
-                 match selection.Keeper_event_queue_state.source.payload with
-                 | Keeper_event_queue.Connector_attention _ -> false
-                 | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
-                 | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
-                 | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
-                 | Keeper_event_queue.Ask_answered _
-                 | Keeper_event_queue.Completion_authority_rejected _
-                 | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-                 | Keeper_event_queue.Delegate_completed _
-                 | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ | Keeper_event_queue.Task_outcome _ -> true)
+             stimuli_acked := settle_checkpoint_sources
+               ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name
+               ~acknowledge selections
            | Batch_no_action -> ());
       { meta = meta_after_cycle
       ; cycle_status =
@@ -2034,7 +2014,8 @@ module For_testing = struct
     record_replay_owned_turn_started_reactions
 
   let provider_wait_interrupt = provider_wait_interrupt
-  let retain_connector_attention_sources = retain_connector_attention_sources
+  let retain_checkpoint_sources = retain_checkpoint_sources
+  let settle_checkpoint_sources = settle_checkpoint_sources
   type deferred_lane_slot = Deferred_lane_slot.t
 
   type deferred_lane_now = Deferred_lane_slot.lane_now =

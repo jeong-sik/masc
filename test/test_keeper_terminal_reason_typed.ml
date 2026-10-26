@@ -2424,6 +2424,7 @@ let () =
     ; D.Output_over_inline_budget
         { message = "inline tool output exceeds descriptor budget (9 > 8 bytes)" }
     ; D.Result_delivery_failed { model_tool_name = "keeper_surface_post"; message = "image refused" }
+    ; D.Tool_result_retention_failed { model_tool_name = "keeper_surface_post"; message = "disk full" }
     ; D.Boundary_observation_failed
         { model_tool_name = "keeper_surface_post"
         ; cause =
@@ -2556,11 +2557,12 @@ let () =
     | D.Boundary_observation_failed _ -> 9
     | D.Recovery_proposal_rejected _ -> 10
     | D.Agent_core_terminal_effect _ -> 11
+    | D.Tool_result_retention_failed _ -> 12
   in
   check
     "terminal effect detail samples cover every constructor"
     (List.sort_uniq Int.compare (List.map constructor samples)
-     = List.init 12 Fun.id);
+     = List.init 13 Fun.id);
   List.iter
     (fun detail ->
        let label = D.summary detail in
@@ -2623,6 +2625,12 @@ let () =
         ; "message", `String "boom"
         ; "severity", `String "high"
         ]);
+  List.iter (fun fields -> rejects "retention failure detail has a strict schema" (`Assoc fields))
+    [ ["kind", `String "tool_result_retention_failed"; "model_tool_name", `String "Execute"]
+    ; ["kind", `String "tool_result_retention_failed"; "model_tool_name", `String "Execute";
+       "message", `String "disk full"; "unexpected", `Bool true]
+    ; ["kind", `String "tool_result_retention_failed"; "model_tool_name", `String "Execute";
+       "message", `String "disk full"; "message", `String "replacement"] ];
   rejects
     "terminal effect detail refuses a value that is not an object"
     (`String "tool output artifact storage failed");

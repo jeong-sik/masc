@@ -1847,8 +1847,9 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
               ; content = detail ^ "\n" ^ result.content }, Some detail
           in
           let result = settle result in
+          let producer_effect_state = terminal_effect_state () in
           let terminal_boundary =
-            match terminal_effect_state () with
+            match producer_effect_state with
             | Keeper_tools_agent_core.Terminal_effect_failed
                 ({ effect_disposition =
                      ( Tool_result.Proven_post_effect
@@ -2002,7 +2003,7 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                   as stop) -> { final_result with abort_turn = Some stop }) in
           (match base_path, result_producer, result.abort_turn with
            | Some base_path, Some producer, Some _ ->
-             let retained =
+             let retain () =
                let* content_blocks = Domain_pool_ref.submit_cpu_or_inline (fun () ->
                  match original_result.content_blocks with
                  | None -> Ok `Null
@@ -2018,11 +2019,44 @@ let dynamic_tool_of_agent_core ~base_path ~content_transport ~accepts_image_inpu
                  "content",`String original_result.content;"content_blocks",content_blocks] in
                Keeper_client_tool_outbox.retain_host_result producer ~base_path ~keeper_name
                  ~call_id ~tool_name:tool.schema.name ~arguments:input ~response in
+             let retained =
+               try retain () with
+               | exn -> (* cancel-guard-ok: reserved cancellation must propagate *)
+                 Llm_provider.Reserved_exn.reraise_if_reserved exn;
+                 Error (Printexc.to_string exn)
+             in
              (match retained with
-              | Ok () -> ()
-              | Error detail ->
-                record_terminal_error terminal_error ("original tool result retention failed: " ^ detail));
-             result
+              | Ok () -> result
+              | Error message ->
+                let detail = Keeper_terminal_effect_detail.Tool_result_retention_failed
+                    { model_tool_name = tool.schema.name; message } in
+                let diagnostic = Keeper_terminal_effect_detail.summary detail in
+                record_terminal_error terminal_error diagnostic;
+                Log.emit Log.Error ~module_name:"Keeper"
+                  ~details:(`Assoc ["keeper_name", `String keeper_name;
+                    "detail", Keeper_terminal_effect_detail.to_yojson detail]) diagnostic;
+                match result.abort_turn with
+                | Some (Terminal_tool_boundary { outcome = Terminal_failed _; _ }) ->
+                  (* Preserve the producer's authoritative failure. The separate
+                     diagnostic records that its original result was also lost. *)
+                  result
+                | None | Some (Repeated_tool_call _)
+                | Some (Terminal_tool_boundary
+                    { outcome = Terminal_completed | Durable_stimulus_deferred; _ }) ->
+                  let effect_disposition =
+                    match producer_effect_state with
+                    | Keeper_tools_agent_core.Terminal_effect_completed _ -> Tool_result.Proven_post_effect
+                    | Keeper_tools_agent_core.Terminal_effect_failed failure -> failure.effect_disposition
+                    | Keeper_tools_agent_core.Terminal_effect_open
+                    | Keeper_tools_agent_core.Deferred_tool_result
+                    | Keeper_tools_agent_core.External_effect_deferred -> Tool_result.Effect_outcome_unknown
+                  in
+                  { result with success = false
+                  ; abort_turn = Some (Terminal_tool_boundary
+                      { tool_name = tool.schema.name
+                      ; outcome = Terminal_failed
+                          { failure_class = Tool_result.Runtime_failure; effect_disposition; detail }
+                      }) })
            | None, _, _ | _, None, _ | _, _, None -> result)
         | exception exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm ends by re-throwing with the original backtrace nine lines down. The site is correct; the marker exists only because the guard reads eight lines. *)
           let backtrace = Printexc.get_raw_backtrace () in

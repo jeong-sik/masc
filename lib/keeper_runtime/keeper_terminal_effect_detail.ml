@@ -66,6 +66,10 @@ type t =
       { model_tool_name : string
       ; message : string
       }
+  | Tool_result_retention_failed of
+      { model_tool_name : string
+      ; message : string
+      }
   | Boundary_observation_failed of
       { model_tool_name : string
       ; cause : Keeper_request_failure_core.t
@@ -194,6 +198,8 @@ let summary = function
     Printf.sprintf "tool output exceeded its inline budget: %s" (one_line message)
   | Result_delivery_failed { model_tool_name; message } ->
     Printf.sprintf "%s result was not delivered: %s" model_tool_name (one_line message)
+  | Tool_result_retention_failed { model_tool_name; message } ->
+    Printf.sprintf "%s original result was not retained: %s" model_tool_name (one_line message)
   | Boundary_observation_failed { model_tool_name; cause } ->
     Printf.sprintf
       "%s tool boundary observation failed: %s"
@@ -283,6 +289,12 @@ let to_yojson = function
   | Result_delivery_failed { model_tool_name; message } ->
     `Assoc
       [ "kind", `String "result_delivery_failed"
+      ; "model_tool_name", `String model_tool_name
+      ; "message", `String message
+      ]
+  | Tool_result_retention_failed { model_tool_name; message } ->
+    `Assoc
+      [ "kind", `String "tool_result_retention_failed"
       ; "model_tool_name", `String model_tool_name
       ; "message", `String message
       ]
@@ -448,6 +460,11 @@ let of_yojson json =
     let* model_tool_name = string_field ~context fields "model_tool_name" in
     let* message = string_field ~context fields "message" in
     Ok (Result_delivery_failed { model_tool_name; message })
+  | "tool_result_retention_failed" ->
+    let* fields = with_fields [ "model_tool_name"; "message" ] in
+    let* model_tool_name = string_field ~context fields "model_tool_name" in
+    let* message = string_field ~context fields "message" in
+    Ok (Tool_result_retention_failed { model_tool_name; message })
   | "boundary_observation_failed" ->
     let* fields = with_fields [ "model_tool_name"; "cause" ] in
     let* model_tool_name = string_field ~context fields "model_tool_name" in

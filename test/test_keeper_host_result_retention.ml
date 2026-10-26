@@ -14,7 +14,8 @@ let with_workspace f =
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
   f base_path
 
-let project ~base_path ~stop ~terminal_error handler =
+let project ?(effect_state = Keeper_tools_agent_core.Terminal_effect_open)
+    ~base_path ~stop ~terminal_error handler =
   let tool = Agent_core.Tool.create ~name:"CompleteEffect" ~description:"Complete an effect once"
       ~parameters:[{Agent_core.Types.name="input";description="original call data";
         param_type=String;required=false}] handler in
@@ -23,7 +24,7 @@ let project ~base_path ~stop ~terminal_error handler =
     ~keeper_name ~turn_count:7 ~tools:[tool] ~loading_plan:Host.All_on_demand
     ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
     ~context:(Some (Agent_core.Context.create_sync ()))
-    ~terminal_effect_state:(fun () -> Keeper_tools_agent_core.Terminal_effect_open)
+    ~terminal_effect_state:(fun () -> effect_state)
     ~terminal_error ~pre_tool_rejects:(ref []) ~on_tool_boundary:(fun () -> Ok stop)
     ~raw_trace_run:None () with
   | Ok [tool] -> tool
@@ -81,12 +82,65 @@ let test_retention_failure_cannot_claim_safe_consumption () = with_workspace (fu
   let tool = project ~base_path ~stop:(Some stop) ~terminal_error
       (fun _ -> incr effects; returned ()) in
   let result = tool.call ~call_id:"failed-retention-call" (`Assoc []) in
-  check bool "the transport is still stopped" true (result.abort_turn=Some stop);
-  check bool "runtime receives authoritative retention failure" true (Option.is_some !terminal_error);
+  let stop = match result.abort_turn with
+    | Some (Host.Terminal_tool_boundary
+        {outcome=Terminal_failed {failure_class=Tool_result.Runtime_failure;
+          effect_disposition=Tool_result.Effect_outcome_unknown;
+          detail=Keeper_terminal_effect_detail.Tool_result_retention_failed {model_tool_name;message}};_} as stop) ->
+      check string "failed original belongs to the executed tool" "CompleteEffect" model_tool_name;
+      check bool "storage diagnosis is preserved" true (message <> "");
+      stop
+    | Some _ | None -> fail "retention refusal must replace a safe scheduling stop with typed failure" in
+  (match Host.host_stop_result ~runtime_id:"fixture" ~model:"fixture" ~session_id:"session"
+      ~turn_id:"turn" ~provider_turn_ordinal:0 ~turns_used:1 ~latency_ms:None ~request_context:None stop with
+   | Error error ->
+     (match Keeper_internal_error.classify_masc_internal_error error with
+      | Some (Keeper_internal_error.Terminal_effect_failed
+          {detail=Keeper_terminal_effect_detail.Tool_result_retention_failed _;_}) -> ()
+      | Some _ | None -> fail "host lost its typed retention failure")
+   | Ok _ -> fail "host settlement cannot yield or complete after original retention failed");
+  check bool "runtime receives additional diagnostic" true (Option.is_some !terminal_error);
   check string "actual returned content is not invented or discarded" marker result.content;
   check int "storage refusal does not replay completed effect" 1 !effects;
   match Outbox.load ~base_path ~keeper_name with
   | Error _ -> () | Ok _ -> fail "unavailable original store became empty success")
+
+let test_retention_failure_keeps_proven_effect () = with_workspace (fun base_path ->
+  let session_path = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
+  Fs_compat.mkdir_p (Filename.dirname session_path);
+  Fs_compat.save_file (Filename.concat (Filename.dirname session_path) "undelivered-tools") "blocked";
+  let effect_state = Keeper_tools_agent_core.Terminal_effect_completed
+      (Keeper_tool_execution.Surface_post_completed
+        (Keeper_surface_post.To_discord {channel_id="fixture-destination"})) in
+  let tool = project ~effect_state ~base_path ~stop:(Some stop) ~terminal_error:(ref None)
+      (fun _ -> returned ()) in
+  match (tool.call ~call_id:"proven-effect-retention-failure" (`Assoc [])).abort_turn with
+  | Some (Host.Terminal_tool_boundary {outcome=Terminal_failed
+      {effect_disposition=Tool_result.Proven_post_effect;
+       detail=Keeper_terminal_effect_detail.Tool_result_retention_failed _;_};_}) -> ()
+  | Some _ | None -> fail "retention refusal lost the producer's committed-effect proof")
+
+let test_retention_failure_preserves_authoritative_failure () = with_workspace (fun base_path ->
+  let session_path = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
+  Fs_compat.mkdir_p (Filename.dirname session_path);
+  Fs_compat.save_file (Filename.concat (Filename.dirname session_path) "undelivered-tools") "blocked";
+  let terminal_error = ref None in
+  let failure : Keeper_tools_agent_core.terminal_effect_failure =
+    {failure_class=Tool_result.Workflow_rejection;effect_disposition=Tool_result.Proven_post_effect;
+     detail=Keeper_terminal_effect_detail.Tool_failed {internal_tool_name="effect";message="original failure"}} in
+  let tool = project ~effect_state:(Keeper_tools_agent_core.Terminal_effect_failed failure)
+      ~base_path ~stop:(Some stop) ~terminal_error (fun _ -> returned ()) in
+  let result = tool.call ~call_id:"failed-effect-and-retention" (`Assoc []) in
+  (match result.abort_turn with
+   | Some (Host.Terminal_tool_boundary {outcome=Terminal_failed original;_}) ->
+     check bool "producer failure remains authoritative" true
+       (original.failure_class=failure.failure_class && original.effect_disposition=failure.effect_disposition
+        && original.detail=failure.detail)
+   | Some _ | None -> fail "authoritative effect failure disappeared");
+  check bool "secondary original-result retention failure is recorded" true
+    (match !terminal_error with
+     | Some message -> String_util.contains_substring message "original result was not retained"
+     | None -> false))
 
 let test_producer_identity_and_vendor_coexistence () = with_workspace (fun base_path ->
   let first = get (Outbox.host_producer ~runtime_label:"Claude" ~turn_count:1)
@@ -108,4 +162,6 @@ let () = run "Original official-client host result retention"
     test_case "typed stop retains original before transport continuation" `Quick test_stop_retains_before_transport_return;
     test_case "ordinary call stays in the current provider turn" `Quick test_ordinary_tool_does_not_create_a_continuation;
     test_case "retention failure prevents safe consumption claim" `Quick test_retention_failure_cannot_claim_safe_consumption;
+    test_case "retention failure keeps the proven committed effect" `Quick test_retention_failure_keeps_proven_effect;
+    test_case "retention failure preserves authoritative effect failure" `Quick test_retention_failure_preserves_authoritative_failure;
     test_case "source identity deduplicates exact originals across mixed producers" `Quick test_producer_identity_and_vendor_coexistence]]

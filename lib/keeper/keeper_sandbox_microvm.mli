@@ -349,7 +349,9 @@ val apple_turn_start_argv :
 
 val apple_guest_facts : container_name:string -> string -> Keeper_microvm_boot_plan.reading
 (** Strictly reads one Apple inspect row. Missing/duplicate security fields,
-    unknown mount types and malformed values are [Unreadable], never absence. *)
+    unknown mount types and malformed values are [Unreadable], never absence.
+    Retains the image descriptor and exact platform for a separate authoritative
+    image-entrypoint observation; initProcess is the complete effective command. *)
 
 val work_volume_mount_args : volume_name:string -> string list
 

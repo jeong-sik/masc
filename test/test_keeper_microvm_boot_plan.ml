@@ -3,6 +3,7 @@ module Plan = Masc.Keeper_microvm_boot_plan
 module Sandbox = Masc.Keeper_sandbox_microvm
 module Backend = Masc.Keeper_microvm_backend
 module Size = Keeper_microvm_guest_size
+module Image_command = Masc.Keeper_microvm_image_command
 
 let value = function Ok value -> value | Error detail -> fail detail
 
@@ -25,7 +26,8 @@ let plan : Plan.t =
 let inspect ?(memory = `Int 2_147_483_648) ?(mount_kind = "volume") ?(extra = []) () =
   let config =
     [ "id", `String "fixture"
-    ; "image", `Assoc ["reference", `String "fixture:image"]
+    ; "image", `Assoc ["reference", `String "fixture:image"; "descriptor", `Assoc ["digest", `String "sha256:fixture-image"]]
+    ; "platform", `Assoc ["architecture", `String "arm64"; "os", `String "linux"]
     ; "resources", `Assoc ["cpus", `Int 4; "memoryInBytes", memory]
     ; "initProcess", `Assoc
         [ "user", `Assoc ["raw", `Assoc ["userString", `String "502:20"]]
@@ -52,6 +54,23 @@ let facts () = match reading (inspect ()) with
   | Plan.Facts facts -> facts
   | Plan.Unreadable detail -> fail detail
 
+let image_command_for entrypoint =
+  let identity : Image_command.identity =
+    {descriptor_digest="sha256:fixture-image"; platform={architecture="arm64"; os="linux"; variant=None}} in
+  let config = `Assoc ["Entrypoint", `List (List.map (fun v -> `String v) entrypoint);
+    "Cmd", `List [`String "/bin/bash"]] in
+  let raw = Yojson.Safe.to_string (`List [`Assoc [
+    "id", `String "fixture-image";
+    "configuration", `Assoc ["name", `String plan.image;
+      "descriptor", `Assoc ["digest", `String identity.descriptor_digest]];
+    "variants", `List [`Assoc [
+      "platform", `Assoc ["architecture", `String "arm64"; "os", `String "linux"];
+      "config", `Assoc ["architecture", `String "arm64"; "os", `String "linux"; "config", config]]]]]) in
+  match Image_command.of_apple_inspect ~reference:plan.image ~identity raw with
+  | Ok value -> value | Error error -> fail (Image_command.error_message error)
+
+let image_command = image_command_for []
+
 let test_requested_security_changes_digest () =
   let changes =
     [ {plan with image = "other:image"}
@@ -74,19 +93,19 @@ let test_requested_security_changes_digest () =
 
 let test_label_separates_change_from_runtime_disagreement () =
   check bool "complete runtime facts match" true
-    (Plan.assess ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] (reading (inspect ())) = Plan.Matches_plan);
+    (Plan.assess ~image_command:(Ok image_command) ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] (reading (inspect ())) = Plan.Matches_plan);
   let changed = reading (inspect ~memory:(`Int 4_294_967_296) ()) in
-  List.iter (fun _ -> match Plan.assess ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] changed with
+  List.iter (fun _ -> match Plan.assess ~image_command:(Ok image_command) ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] changed with
     | Plan.Refuse (Plan.Runtime_reports_other_than_asked [Plan.Resources]) -> ()
     | _ -> fail "same plan with different runtime memory must preserve/refuse, repeatedly") [(); ()];
   let facts = facts () in
-  match Plan.assess ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[]
+  match Plan.assess ~image_command:(Ok image_command) ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[]
     (Plan.Facts {facts with plan_label = None; memory_bytes = 4_294_967_296L}) with
   | Plan.Replace [Plan.Plan_label; Plan.Resources] -> ()
   | _ -> fail "an unknown requested plan permits replacement and reports observed differences"
 
 let test_identity_refusal_priority () =
-  let assess = Plan.assess ~plan ~policy_environment:[] ~identity_reading:Plan.Identity_unreadable in
+  let assess = Plan.assess ~image_command:(Ok image_command) ~plan ~policy_environment:[] ~identity_reading:Plan.Identity_unreadable in
   (match assess (Plan.Unreadable "missing runtime facts") with
    | Plan.Refuse (Plan.Guest_facts_unreadable _) -> ()
    | _ -> fail "unreadable facts cannot authorize replacement");
@@ -97,7 +116,7 @@ let test_identity_refusal_priority () =
    | Plan.Replace [Plan.Identity_snapshot] -> ()
    | _ -> fail "unreadable snapshot precedes same-label disagreement refusal");
   let policy = {plan with network=Plan.Network_policy {name="fixture-policy"}} in
-  (match Plan.assess ~plan:policy ~policy_environment:[]
+  (match Plan.assess ~image_command:(Ok image_command) ~plan:policy ~policy_environment:[]
       ~identity_reading:Plan.Identity_unreadable
       (Plan.Facts {(facts ()) with plan_label=Some (Plan.digest policy)}) with
    | Plan.Replace [Plan.Policy_route] -> ()
@@ -110,7 +129,7 @@ let test_unreadable_is_not_replacement () =
     ; inspect ~memory:(`Float 2_147_483_648.) ()
     ; "[]"; "{}"; "not-json" ] in
   List.iter (fun raw ->
-    match Plan.assess ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] (reading raw) with
+    match Plan.assess ~image_command:(Ok image_command) ~identity_reading:Plan.Identity_readable ~plan ~policy_environment:[] (reading raw) with
     | Plan.Refuse (Plan.Guest_facts_unreadable _) -> ()
     | _ -> fail "unreadable facts cannot authorize replacement") malformed;
   match Sandbox.apple_guest_facts ~container_name:"another-guest" (inspect ()) with
@@ -123,7 +142,7 @@ let test_all_runtime_security_disagreements_are_named () =
     cap_add = ["CAP_SYS_ADMIN"]; networks = ["default"];
     environment = []; labels = []} in
   check bool "all differing security axes are retained" true
-    (Plan.differences plan changed = [Plan.User; Plan.Working_directory; Plan.Command;
+    (Plan.differences ~image_command plan changed = [Plan.User; Plan.Working_directory; Plan.Command;
       Plan.Mounts; Plan.Root_filesystem; Plan.Capabilities; Plan.Network; Plan.Environment; Plan.Labels])
 
 let flag_value flag argv =
@@ -170,13 +189,13 @@ let test_ephemeral_routes_do_not_change_plan_identity () =
     (first <> second && List.mem label first && List.mem label second);
   let facts = { (facts ()) with plan_label = Some (Plan.digest policy_plan);
     networks = ["fixture-policy"] } in
-  (match Plan.assess ~identity_reading:Plan.Identity_readable ~plan:policy_plan ~policy_environment:["HTTPS_PROXY", "http://192.0.2.1:32102"]
+  (match Plan.assess ~image_command:(Ok image_command) ~identity_reading:Plan.Identity_readable ~plan:policy_plan ~policy_environment:["HTTPS_PROXY", "http://192.0.2.1:32102"]
     (Plan.Facts facts) with
   | Plan.Replace [Plan.Policy_route] -> ()
   | _ -> fail "stable policy plan still replaces a stale execution route");
   (* Approved RFC 4.1 step 3 precedes step 5: stale policy replacement is
      intentional even when another runtime fact also disagrees. *)
-  match Plan.assess ~identity_reading:Plan.Identity_readable ~plan:policy_plan ~policy_environment:["HTTPS_PROXY", "http://192.0.2.1:32102"]
+  match Plan.assess ~image_command:(Ok image_command) ~identity_reading:Plan.Identity_readable ~plan:policy_plan ~policy_environment:["HTTPS_PROXY", "http://192.0.2.1:32102"]
     (Plan.Facts {facts with read_only = false}) with
   | Plan.Replace [Plan.Policy_route] -> ()
   | _ -> fail "the documented stale-route decision must keep its priority"
@@ -200,7 +219,7 @@ let test_renderer_rejects_order_sensitive_duplicates () =
     let order values = if reverse then List.rev values else values in
     List.iter (fun (expected, invalid) ->
       require_invalid_boot expected invalid ~lifecycle_labels:[] ~policy_proxy:None;
-      match Plan.assess ~identity_reading:Plan.Identity_readable ~plan:invalid ~policy_environment:[] (Plan.Facts (facts ())) with
+      match Plan.assess ~image_command:(Ok image_command) ~identity_reading:Plan.Identity_readable ~plan:invalid ~policy_environment:[] (Plan.Facts (facts ())) with
       | Plan.Refuse (Plan.Invalid_requested_plan errors) ->
         check bool "invalid request is no comparison authority" true (List.mem expected errors)
       | _ -> fail "invalid requested plan must not authorize adoption or replacement")
@@ -237,8 +256,30 @@ let test_valid_plan_keeps_command_order_semantic () =
   check bool "command order remains significant" false
     (Plan.digest plan = Plan.digest {plan with command = List.rev plan.command})
 
+let test_image_entrypoint_composes_without_relabelling () =
+  let wrapped = image_command_for ["opam"; "exec"; "--"] in
+  let facts = { (facts ()) with command=["opam"; "exec"; "--"; "tail"; "-f"; "/dev/null"] } in
+  let assess = Plan.assess ~plan ~policy_environment:[] ~identity_reading:Plan.Identity_readable in
+  check bool "same originally labelled plan adopts its image entrypoint" true
+    (assess ~image_command:(Ok wrapped) (Plan.Facts facts) = Plan.Matches_plan);
+  check bool "canonical guest reference with the same queried image content is an alias" true
+    (assess ~image_command:(Ok wrapped)
+      (Plan.Facts {facts with image="registry.example.test/library/fixture:image"}) = Plan.Matches_plan);
+  (match assess ~image_command:(Ok wrapped)
+      (Plan.Facts {facts with command=["opam"; "exec"; "--"; "sh"]}) with
+   | Plan.Refuse (Plan.Runtime_reports_other_than_asked [Plan.Command]) -> ()
+   | _ -> fail "a matching image prefix cannot authorize another command");
+  (match assess ~image_command:(Error "configuration unavailable") (Plan.Facts facts) with
+   | Plan.Refuse (Plan.Image_command_unavailable _) -> ()
+   | _ -> fail "missing image metadata preserves and refuses a same-label guest");
+  let foreign = {facts with image_identity={facts.image_identity with descriptor_digest="sha256:foreign"}} in
+  match assess ~image_command:(Ok wrapped) (Plan.Facts foreign) with
+  | Plan.Refuse (Plan.Image_command_unavailable _) -> ()
+  | _ -> fail "another guest image cannot borrow an image command observation"
+
 let () = run "Keeper Apple boot plan"
-  [ "authority", [test_case "requested security changes identity" `Quick test_requested_security_changes_digest
+  [ "authority", [test_case "image entrypoint keeps unchanged plan and exact command" `Quick test_image_entrypoint_composes_without_relabelling
+                 ; test_case "requested security changes identity" `Quick test_requested_security_changes_digest
                  ; test_case "same plan disagrees with runtime" `Quick test_label_separates_change_from_runtime_disagreement
                  ; test_case "identity and runtime refusal order" `Quick test_identity_refusal_priority
                  ; test_case "unreadable facts preserve guest" `Quick test_unreadable_is_not_replacement

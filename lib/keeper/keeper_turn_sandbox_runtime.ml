@@ -1372,6 +1372,8 @@ let microvm_start_failure_message failure =
         "invalid requested plan: " ^ String.concat "; "
           (List.map Keeper_microvm_boot_plan.invalid_plan_message errors)
       | Keeper_microvm_boot_plan.Guest_facts_unreadable _ -> "runtime guest facts are unreadable; guest preserved"
+      | Keeper_microvm_boot_plan.Image_command_unavailable detail ->
+        "runtime image command unavailable; guest preserved: " ^ detail
       | Keeper_microvm_boot_plan.Runtime_reports_other_than_asked _ -> "runtime guest facts disagree with the requested plan; guest preserved" in
     failed detail
   | Backend_unresolved detail
@@ -1992,6 +1994,24 @@ let read_apple_guest ~timeout_sec ~container_name =
   | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
     unanswered "runtime inspect did not complete successfully"
 
+(* OCI Entrypoint belongs to the actual image configuration, not the caller's
+   requested command or a prefix guessed from the guest's init process. Keep
+   this read-only observation separate from the stable requested-plan digest. *)
+let read_apple_image_command ~timeout_sec ~(plan : Keeper_microvm_boot_plan.t) reading =
+  match reading with
+  | Keeper_microvm_boot_plan.Unreadable detail -> Error detail
+  | Keeper_microvm_boot_plan.Facts facts ->
+    match Keeper_microvm_cli_output.read ~timeout_sec
+        ~argv:(Keeper_sandbox_microvm.image_inspect_argv_for Keeper_microvm_backend.Apple_container
+          ~image:plan.image) with
+    | Error error -> Error (Keeper_microvm_cli_output.error_message error)
+    | Ok (Unix.WEXITED 0, raw) ->
+      Keeper_microvm_image_command.of_apple_inspect ~reference:plan.image
+        ~identity:facts.image_identity raw
+      |> Result.map_error Keeper_microvm_image_command.error_message
+    | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+      Error "image inspect did not complete successfully"
+
 (* A guest's environment is observed data, never the expected route. Read
    the current policy network without creating or repairing it at adoption. *)
 let apple_policy_environment ~timeout_sec (t : t) =
@@ -2117,7 +2137,8 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
         | Plan.Unreadable _ -> Ok []
         | Plan.Facts facts when facts.plan_label <> Some (Plan.digest plan) -> Ok []
         | Plan.Facts _ -> apple_policy_environment ~timeout_sec t in
-      match Plan.assess ~plan ~policy_environment ~identity_reading reading with
+      let image_command = read_apple_image_command ~timeout_sec ~plan reading in
+      match Plan.assess ~plan ~policy_environment ~identity_reading ~image_command reading with
       | Plan.Refuse refusal -> Error (Guest_facts_refused refusal)
       | Plan.Replace _ -> Ok `Boot
       | Plan.Matches_plan -> Ok `Adopt in
@@ -2203,7 +2224,8 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
           | None -> []
           | Some {gateway; port} -> Egress_proxy_decision.client_env
               ~proxy_url:(Printf.sprintf "http://%s:%d" gateway port) in
-        (match Plan.assess ~plan ~policy_environment ~identity_reading:Plan.Identity_readable reading with
+        let image_command = read_apple_image_command ~timeout_sec ~plan reading in
+        (match Plan.assess ~plan ~policy_environment ~identity_reading:Plan.Identity_readable ~image_command reading with
          | Plan.Matches_plan -> adopt snapshot
          | Plan.Refuse refusal -> Error (Guest_facts_refused refusal)
          | Plan.Replace _ -> Error (Guest_facts_refused

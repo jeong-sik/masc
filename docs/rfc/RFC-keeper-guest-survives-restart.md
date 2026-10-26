@@ -38,7 +38,8 @@ related: ["keeper-boot-runs-no-one-shot-container", "keeper-build-output-returns
 
 ## 1. 결정
 
-- D1. 게스트를 띄울 때 부팅 계획(§4.1)의 SHA-256 을 label `masc.mcp.boot_plan` 으로 붙인다. 떠 있는 게스트를 adopt 할지는 이 label 과, start 가 이미 부르는 `container inspect` 의 출력으로 정한다. CLI 호출은 늘지 않는다.
+- D1. 게스트를 띄울 때 부팅 계획(§4.1)의 SHA-256 을 label `masc.mcp.boot_plan` 으로 붙인다. 떠 있는 게스트를 adopt 할지는 이 label 과, start 가 이미 부르는 `container inspect` 의 출력으로 정한다.
+  - 구현 정정(2026-10-26): OCaml 이미지의 `ENTRYPOINT ["opam", "exec", "--"]`가 요청한 `tail -f /dev/null` 앞에 합성된다. guest inspect만으로는 이 prefix가 이미지에서 온 것인지 판별할 수 없다. 따라서 비교 단계는 요청 이미지의 `container image inspect`를 읽기 전용으로 한 번 관찰한다. guest가 보고한 이미지 descriptor와 정확한 platform에 결속된 유일한 config의 entrypoint만 요청 명령 앞에 붙이며, 명시한 명령이 있으므로 이미지 Cmd는 붙이지 않는다. 정보가 없거나 충돌하면 guest를 보존하고 거부한다. 이는 CLI가 늘지 않는다는 초기 가정을 고친 것이며, 요청 plan/digest/실제 Boot argv와 label→policy→identity 판정 순서는 유지한다. 볼륨·네트워크 생성이나 guest 변경은 하지 않는다.
   - label 이 없거나 지금 계획의 digest 와 다르면: 교체한다.
   - label 이 같고 런타임의 보고가 계획과 같으면: adopt 한다.
   - label 이 같은데 런타임의 보고가 계획과 다르거나 읽을 수 없으면: start 를 거절하고 게스트는 그대로 둔다.

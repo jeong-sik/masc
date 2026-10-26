@@ -75,6 +75,12 @@ the requested plan and validating its immutable credential snapshot under
 `<base-path>/.masc/microvm/identity/apple_container/`. Unreadable facts
 or disagreement with the same plan refuse reuse and preserve the guest.
 
+Command comparison includes the image's OCI entrypoint. A read-only image
+inspection must match the guest's image descriptor and exact platform before
+its entrypoint is composed with the requested command. Missing or ambiguous
+image metadata refuses reuse; it never authorizes guest replacement. This
+keeps an unchanged guest reusable without changing its plan label.
+
 The shared exec shim configuration is initialized before endpoint admission.
 A missing or invalid installation is reported; repair it and restart the server
 if startup initialization failed. Attached file reads validate the mounted

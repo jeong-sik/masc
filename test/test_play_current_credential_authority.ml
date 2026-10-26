@@ -200,9 +200,14 @@ let test_unknown_current_binding unknown = with_workspace @@ fun base_path state
    | Dangling -> Unix.unlink named; Unix.symlink (named ^ ".absent") named
    | Foreign -> Auth.save_private_text_file named {|{"redirect_to":"operator.json"}|});
   check bool "unknown current authority is an Auth error" true (Result.is_error (Auth.list_current_credentials base_path));
+  let roster = dispatch ~state ~token:operator ~meth:"GET"
+      ~target:Server_routes_http_routes_play_page.participants_path ~body:"" in
+  check int "unknown seats are not an empty successful list" 503 (status roster);
+  (* The seat reads only the caller and the holder, so another credential's
+     unknown binding does not take it down. *)
   let seat = dispatch ~state ~token:operator ~meth:"GET"
       ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in
-  check int "unknown seats are not an empty successful list" 503 (status seat);
+  check int "the operator's own seat stays readable" 200 (status seat);
   let invites = dispatch ~state ~token:operator ~meth:"GET"
       ~target:Server_routes_http_routes_play.invites_path ~body:"" in
   check int "unknown invites are unavailable" 503 (status invites);

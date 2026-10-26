@@ -1270,14 +1270,24 @@ let inventory_rows snapshot =
   @ snapshot.global_rows
 ;;
 
+let keeper_json_by_name_snapshot snapshot =
+  List.map
+    (fun (keeper_name, busy, rows) ->
+      keeper_name, keeper_json ~base_path:snapshot.base_path keeper_name ~busy rows)
+    snapshot.per_keeper
+;;
+
+let keeper_json_by_name config =
+  read_inventory_snapshot
+    ~read_pending:Keeper_approval_queue.list_pending_entries_with_read_errors_for_workspace
+    config
+  |> keeper_json_by_name_snapshot
+;;
+
 let dashboard_json_of_snapshot snapshot =
   let per_keeper = snapshot.per_keeper in
   let global_rows = snapshot.global_rows in
-  let keeper_json_rows =
-    per_keeper
-    |> List.map (fun (keeper_name, busy, rows) ->
-      keeper_json ~base_path:snapshot.base_path keeper_name ~busy rows)
-  in
+  let keeper_json_rows = keeper_json_by_name_snapshot snapshot |> List.map snd in
   let all_keeper_rows =
     List.flatten
       (List.map

@@ -1,0 +1,250 @@
+type layout = Compact | Detailed | Grouped
+type sort = Priority | Recent | Name
+type attention = Needs_you | Active | Waiting | Inactive
+
+type keeper_waiting_state = Masc.Tui_decode.keeper_waiting_state =
+  | Keeper_waiting_idle
+  | Keeper_waiting_busy
+  | Keeper_waiting_blocked
+  | Keeper_waiting_deferred
+
+type waiting_source = Masc.Tui_decode.waiting_source =
+  | Waiting_source_event_queue_pending
+  | Waiting_source_chat_operation_queued
+  | Waiting_source_chat_operation_running
+  | Waiting_source_hitl_pending
+  | Waiting_source_fusion_running
+  | Waiting_source_schedule_waiting
+  | Waiting_source_owner_shutdown
+  | Waiting_source_operator_pending_confirm
+  | Waiting_source_read_error
+
+type wake_producer = Masc.Tui_decode.wake_producer =
+  | Wake_board_dispatch
+  | Wake_board_attention_judge
+  | Wake_keeper_owner_actor
+  | Wake_keeper_supervisor
+  | Wake_fusion_sink
+  | Wake_connector_attention_hook
+  | Wake_hitl_resolution_hook
+  | Wake_keeper_ask_answer
+  | Wake_schedule_store
+  | Wake_schedule_runner
+  | Wake_operator_pending_confirm_store
+  | Wake_completion_authority
+  | Wake_keeper_task_cancellation
+  | Wake_keeper_workspace_message
+  | Wake_keeper_delegate
+  | Wake_keeper_composition
+  | Wake_keeper_job
+  | Wake_keeper_addon
+  | Wake_read_model_reader
+
+type activity =
+  | Held_call
+  | Question
+  | Confirmation
+  | Failure
+  | Preparing
+  | Streaming
+  | Running
+  | Async_working of int
+  | Deferred
+  | Tool_waiting
+  | Model_waiting
+  | Delegating
+  | Verifying
+  | External_waiting
+  | Idle
+  | Paused
+  | Offline
+  | Unknown
+
+type badge =
+  | Badge_read_error
+  | Badge_async of { running : int; ownership_unknown : int }
+  | Badge_async_queued of int
+  | Badge_async_cancelling of int
+  | Badge_delegate
+  | Badge_verification
+  | Badge_schedule
+
+type row = {
+  keeper : Masc.Tui_decode.keeper;
+  reading : Masc_tui_keeper_control.reading;
+  turn : Masc.Tui_decode.keeper_turn_state option;
+  waiting : Masc.Tui_decode.keeper_waiting_row option;
+  approval : Masc.Tui_decode.keeper_tool_approval option;
+  task : Masc.Tui_decode.task option;
+  open_questions : int;
+  async_requests : Masc.Tui_decode.async_request_row list;
+  last_activity_at : float option;
+}
+
+let next_layout = function
+  | Compact -> Detailed
+  | Detailed -> Grouped
+  | Grouped -> Compact
+
+let next_sort = function
+  | Priority -> Recent
+  | Recent -> Name
+  | Name -> Priority
+
+let layout_label = function
+  | Compact -> "compact"
+  | Detailed -> "detailed"
+  | Grouped -> "grouped"
+
+let sort_label = function
+  | Priority -> "priority"
+  | Recent -> "recent"
+  | Name -> "name"
+
+let waiting_items row =
+  match row.waiting with
+  | None -> []
+  | Some waiting -> waiting.Masc.Tui_decode.kwr_waiting_on
+
+let waiting_state row =
+  Option.map (fun waiting -> waiting.Masc.Tui_decode.kwr_state) row.waiting
+
+let waiting_has_source source items =
+  List.exists (fun item -> item.Masc.Tui_decode.kwi_source = source) items
+
+let waiting_has_producer producer items =
+  List.exists (fun item -> item.Masc.Tui_decode.kwi_wake_producer = producer) items
+
+let turn_activity row =
+  Option.map Masc.Tui_decode.keeper_current_activity_of_turn row.turn
+
+let health_reading row =
+  Option.map Masc.Tui_decode.keeper_health_reading
+    (Masc_tui_keeper_control.health row.reading)
+
+let has_awaiting_verification row =
+  match row.task with
+  | Some { Masc.Tui_decode.status = Masc_domain.AwaitingVerification _; _ } -> true
+  | Some { status = Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+           | Masc_domain.Done _ | Masc_domain.Cancelled _; _ }
+  | None -> false
+
+let async_counts requests =
+  List.fold_left
+    (fun (running, ownership_unknown, queued, cancelling) request ->
+      match request.Masc.Tui_decode.ar_phase with
+      | Masc.Tui_decode.Async_running ->
+          let ownership_unknown =
+            match request.ar_ownership with
+            | Masc.Tui_decode.Async_ownership_unknown -> ownership_unknown + 1
+            | Masc.Tui_decode.Async_runtime_owned -> ownership_unknown
+          in
+          running + 1, ownership_unknown, queued, cancelling
+      | Masc.Tui_decode.Async_queued -> running, ownership_unknown, queued + 1, cancelling
+      | Masc.Tui_decode.Async_cancelling -> running, ownership_unknown, queued, cancelling + 1)
+    (0, 0, 0, 0) requests
+
+let primary_activity_of_row row =
+  let items = waiting_items row in
+  let activity = turn_activity row in
+  let health = health_reading row in
+  let running, _, queued, cancelling = async_counts row.async_requests in
+  let failed =
+    health = Some Masc.Tui_decode.Health_failing
+    || activity = Some Masc.Tui_decode.Keeper_activity_attempt_failed
+    || waiting_has_source Waiting_source_read_error items
+  in
+  if Option.is_some row.approval || waiting_has_source Waiting_source_hitl_pending items then
+    Held_call
+  else if row.open_questions > 0 then Question
+  else if waiting_has_source Waiting_source_operator_pending_confirm items then Confirmation
+  else if failed then Failure
+  else if row.reading.Masc_tui_keeper_control.paused then Paused
+  else if health = Some Masc.Tui_decode.Health_offline then Offline
+  else
+    match activity with
+    | Some Masc.Tui_decode.Keeper_activity_preparing -> Preparing
+    | Some Masc.Tui_decode.Keeper_activity_streaming -> Streaming
+    | Some Masc.Tui_decode.Keeper_activity_running -> Running
+    | Some Masc.Tui_decode.Keeper_activity_tool -> Tool_waiting
+    | Some Masc.Tui_decode.Keeper_activity_waiting -> Model_waiting
+    | Some (Masc.Tui_decode.Keeper_activity_idle | Masc.Tui_decode.Keeper_activity_unknown)
+    | None -> (
+      if running > 0 then Async_working running
+      else if waiting_state row = Some Keeper_waiting_deferred then Deferred
+      else if waiting_state row = Some Keeper_waiting_busy then Running
+      else if waiting_has_producer Wake_keeper_delegate items then Delegating
+      else if waiting_has_producer Wake_completion_authority items || has_awaiting_verification row then
+        Verifying
+      else if queued > 0 || cancelling > 0 then External_waiting
+      else if waiting_state row = Some Keeper_waiting_blocked then External_waiting
+      else
+        match activity, waiting_state row with
+        | Some Masc.Tui_decode.Keeper_activity_idle, _ -> Idle
+        | _, Some Keeper_waiting_idle -> Idle
+        | (Some (Masc.Tui_decode.Keeper_activity_idle | Masc.Tui_decode.Keeper_activity_unknown)
+          | None), _ -> Unknown
+        | _, Some (Keeper_waiting_busy | Keeper_waiting_blocked | Keeper_waiting_deferred) ->
+            External_waiting)
+    | Some Masc.Tui_decode.Keeper_activity_attempt_failed -> Failure
+
+let badges_of_row row =
+  let items = waiting_items row in
+  let running, ownership_unknown, queued, cancelling = async_counts row.async_requests in
+  [ (if waiting_has_source Waiting_source_read_error items then Some Badge_read_error else None)
+  ; (if running > 0 then Some (Badge_async { running; ownership_unknown }) else None)
+  ; (if queued > 0 then Some (Badge_async_queued queued) else None)
+  ; (if cancelling > 0 then Some (Badge_async_cancelling cancelling) else None)
+  ; (if waiting_has_producer Wake_keeper_delegate items then Some Badge_delegate else None)
+  ; (if waiting_has_producer Wake_completion_authority items || has_awaiting_verification row then
+       Some Badge_verification
+     else None)
+  ; (if waiting_has_source Waiting_source_schedule_waiting items then Some Badge_schedule else None)
+  ]
+  |> List.filter_map Fun.id
+
+let group_of_row row =
+  match primary_activity_of_row row with
+  | Held_call | Question | Confirmation | Failure -> Needs_you
+  | Preparing | Streaming | Running | Async_working _ | Deferred -> Active
+  | Tool_waiting | Model_waiting | Delegating | Verifying | External_waiting -> Waiting
+  | Idle | Paused | Offline | Unknown -> Inactive
+
+let attention_rank = function
+  | Needs_you -> 0
+  | Active -> 1
+  | Waiting -> 2
+  | Inactive -> 3
+
+let compare_name left right =
+  String.compare left.keeper.Masc.Tui_decode.k_name right.keeper.Masc.Tui_decode.k_name
+
+let compare_recent left right =
+  match left.last_activity_at, right.last_activity_at with
+  | Some left_at, Some right_at ->
+      let order = Float.compare right_at left_at in
+      if order = 0 then compare_name left right else order
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> compare_name left right
+
+let order_rows ~sort rows =
+  List.stable_sort
+    (fun left right ->
+      match sort with
+      | Name -> compare_name left right
+      | Recent -> compare_recent left right
+      | Priority ->
+          let order = compare (attention_rank (group_of_row left)) (attention_rank (group_of_row right)) in
+          if order = 0 then compare_recent left right else order)
+    rows
+
+let group_counts rows =
+  List.fold_left
+    (fun (needs_you, active, waiting, inactive) row ->
+      match group_of_row row with
+      | Needs_you -> needs_you + 1, active, waiting, inactive
+      | Active -> needs_you, active + 1, waiting, inactive
+      | Waiting -> needs_you, active, waiting + 1, inactive
+      | Inactive -> needs_you, active, waiting, inactive + 1)
+    (0, 0, 0, 0) rows

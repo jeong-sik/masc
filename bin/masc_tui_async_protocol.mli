@@ -513,7 +513,7 @@ type async_msg =
           never a location. [image_url] is what was fetched; [page_url] is the
           link the operator chose, and the one a browser gets when drawing
           fails (see [Masc_tui_browser.browser_url]). *)
-  | Keeper_turns_loaded of (string * int) list * (Masc.Tui_decode.keeper_turn_row list, string) result
+  | Keeper_turns_loaded of (string * int) list * (Masc.Tui_decode.keeper_turns_projection, string) result
   | Keeper_chat_control_received of string * int * string
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)

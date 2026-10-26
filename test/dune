@@ -4114,6 +4114,11 @@
   yojson))
 
 (test
+ (name test_tui_keeper_list_model)
+ (modules test_tui_keeper_list_model)
+ (libraries alcotest masc masc_tui_keeper_list_model masc_tui_keeper_control))
+
+(test
  (name test_tui_editor)
  (modules test_tui_editor)
  (libraries alcotest unix masc_tui_editor))

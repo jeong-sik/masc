@@ -8598,6 +8598,99 @@ let test_decode_keeper_turns_rejects_unknown_schema () =
       Alcotest.(check string) "cause without the source"
         "unknown schema \"masc.keeper_turns.v2\"" detail
 
+let keeper_turns_waiting_json =
+  `Assoc
+    [ ("schema", `String "masc.keeper_turns.v1")
+    ; ( "keepers"
+      , `List
+          [ `Assoc
+              [ ("keeper_name", `String "echo")
+              ; ("status", `String "ok")
+              ; ("turn", `Null)
+              ; ( "waiting"
+                , `Assoc
+                    [ ("keeper_name", `String "echo")
+                    ; ("paused", `Bool false)
+                    ; ("state", `String "waiting")
+                    ; ("waiting_count", `Int 1)
+                    ; ("since", `Float 10.)
+                    ; ("since_iso", `String "1970-01-01T00:00:10Z")
+                    ; ("due_at", `Null)
+                    ; ("due_at_iso", `Null)
+                    ; ("sources", `Assoc [ "event_queue_pending", `Int 1 ])
+                    ; ( "source_next_actions"
+                      , `Assoc [ "event_queue_pending", `List [ `String "resume_on_delegate_completed" ] ] )
+                    ; ("current_execution", `Null)
+                    ; ( "waiting_on"
+                      , `List
+                          [ `Assoc
+                              [ ("source", `String "event_queue_pending")
+                              ; ("waiting_on", `String "keeper-delegate:op-1")
+                              ; ("what", `String "Delegated answer from crystal")
+                              ; ("wake_producer", `String "keeper_delegate")
+                              ; ("since", `Float 10.)
+                              ; ("since_iso", `String "1970-01-01T00:00:10Z")
+                              ; ("due_at", `Null)
+                              ; ("due_at_iso", `Null)
+                              ; ("next_action", `String "resume_on_delegate_completed")
+                              ; ("detail", `Assoc [ "delegate_operation_id", `String "op-1" ])
+                              ] )
+                      ] )
+              ] )
+      ] )
+
+let test_decode_keeper_turns_projection_reads_waiting () =
+  match Tui_decode.decode_keeper_turns_projection keeper_turns_waiting_json with
+  | Error detail -> Alcotest.fail detail
+  | Ok { rows = [ idle ]; waiting = [ waiting ] } ->
+      Alcotest.(check bool) "turn remains independently readable" true
+        (idle.Tui_decode.ktr_state = Tui_decode.Keeper_turn_idle);
+      Alcotest.(check string) "waiting owner" "echo" waiting.Tui_decode.kwr_keeper_name;
+      Alcotest.(check bool) "canonical waiting state" true
+        (waiting.kwr_state = Tui_decode.Keeper_waiting_blocked);
+      Alcotest.(check int) "waiting count" 1 waiting.kwr_waiting_count;
+      (match waiting.kwr_waiting_on with
+       | [ item ] ->
+           Alcotest.(check bool) "queue source" true
+             (item.Tui_decode.kwi_source = Tui_decode.Waiting_source_event_queue_pending);
+           Alcotest.(check bool) "delegate producer" true
+             (item.kwi_wake_producer = Tui_decode.Wake_keeper_delegate);
+           Alcotest.(check string) "operator sentence" "Delegated answer from crystal" item.kwi_what;
+           Alcotest.(check string) "wait identity" "keeper-delegate:op-1" item.kwi_waiting_on;
+           Alcotest.(check (float 0.001)) "wait began" 10. (Option.get item.kwi_since)
+       | items -> Alcotest.failf "expected one waiting item, got %d" (List.length items))
+  | Ok { rows; waiting } ->
+      Alcotest.failf "expected one turn and one waiting row, got %d and %d"
+        (List.length rows) (List.length waiting)
+
+let test_decode_keeper_turns_projection_keeps_waiting_unobserved () =
+  match Tui_decode.decode_keeper_turns_projection keeper_turns_json with
+  | Error detail -> Alcotest.fail detail
+  | Ok { rows; waiting = [] } ->
+      Alcotest.(check int) "older server still supplies turn rows" 3 (List.length rows)
+  | Ok { waiting = _ :: _; _ } -> Alcotest.fail "an older server invented a waiting observation"
+
+let test_decode_keeper_turns_projection_rejects_unknown_waiting_vocabulary () =
+  let rec replace key replacement = function
+    | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (name, value) ->
+               name, if String.equal name key then replacement else replace key replacement value)
+             fields)
+    | `List values -> `List (List.map (replace key replacement) values)
+    | value -> value
+  in
+  List.iter
+    (fun (key, value) ->
+      Alcotest.(check bool) "unknown waiting vocabulary is rejected" true
+        (Result.is_error
+           (Tui_decode.decode_keeper_turns_projection (replace key value keeper_turns_waiting_json))))
+    [ "state", `String "napping"
+    ; "source", `String "mystery"
+    ; "wake_producer", `String "someone"
+    ]
+
 (* GET /api/v1/runtime/resolved, the picker's comprehensive shared document. *)
 let picker_default_runtime =
   `Assoc
@@ -13613,6 +13706,12 @@ let () =
           test_decode_keeper_turns_rejects_unknown_lane
       ; Alcotest.test_case "rejects an unknown schema" `Quick
           test_decode_keeper_turns_rejects_unknown_schema
+      ; Alcotest.test_case "projection reads canonical waiting" `Quick
+          test_decode_keeper_turns_projection_reads_waiting
+      ; Alcotest.test_case "projection keeps waiting unobserved" `Quick
+          test_decode_keeper_turns_projection_keeps_waiting_unobserved
+      ; Alcotest.test_case "projection rejects unknown waiting vocabulary" `Quick
+          test_decode_keeper_turns_projection_rejects_unknown_waiting_vocabulary
       ] );
     ( "decode_tools",
       [

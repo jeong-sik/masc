@@ -188,7 +188,19 @@ let test_installed_keeper_rides_as_an_idle_row () =
          | Some value ->
            Alcotest.failf "expected no running turn, got %s"
              (Yojson.Safe.to_string value)
-         | None -> Alcotest.fail "row carries no turn field")
+         | None -> Alcotest.fail "row carries no turn field");
+        (match member "waiting" row with
+         | Some (`Assoc _ as waiting) ->
+           (match member "state" waiting with
+            | Some (`String "idle") -> ()
+            | other -> Alcotest.failf "unexpected waiting state: %s"
+                (match other with Some value -> Yojson.Safe.to_string value | None -> "absent"));
+           (match member "waiting_count" waiting with
+            | Some (`Int 0) -> ()
+            | other -> Alcotest.failf "unexpected waiting count: %s"
+                (match other with Some value -> Yojson.Safe.to_string value | None -> "absent"))
+         | Some value -> Alcotest.failf "waiting must be an object, got %s" (Yojson.Safe.to_string value)
+         | None -> Alcotest.fail "row carries no canonical waiting projection")
       | Some (`List rows) ->
         Alcotest.failf "expected one row, got %d" (List.length rows)
       | _ -> Alcotest.fail "keepers field absent or mistyped")

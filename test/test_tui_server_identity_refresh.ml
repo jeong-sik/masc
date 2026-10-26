@@ -4536,6 +4536,135 @@ let test_keeper_initial_page_is_not_an_explicit_older_demand () =
   Alcotest.(check bool) "other sources remain outstanding" true (Read.pending initial)
 ;;
 
+let running_keeper_turn name : Tui_decode.keeper_turn_row =
+  { ktr_keeper_name = name
+  ; ktr_chat_control_token = None
+  ; ktr_state = Tui_decode.Keeper_turn_running
+      { lane = Tui_decode.Turn_lane_autonomous
+      ; started_at_unix = 1.
+      ; interrupt_token = "token-" ^ name
+      ; turn_ref = None
+      ; preview = None
+      }
+  }
+
+let ordered_keeper_fixture () =
+  let open Masc_tui_types in
+  let state, keeper = live_context_fixture () in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity state.local_base_path);
+  let other = { keeper with k_name = "beta" } in
+  state.keepers <- [other; keeper];
+  state.view <- Keepers Keeper_list;
+  state.keeper_turns <- [running_keeper_turn keeper.k_name];
+  keeper_list_select_name state "beta";
+  state, keeper, other
+
+let test_settings_and_live_context_use_ordered_selection () =
+  let open Masc_tui_types in
+  let state, _, other = ordered_keeper_fixture () in
+  Alcotest.(check (option string)) "settings key names the selected Keeper" (Some "beta")
+    (Option.map (fun target -> target.ksk_keeper) (keeper_settings_target state));
+  Alcotest.(check bool) "live context reads the selected Keeper" true
+    (live_context_keeper state = Some other)
+
+let test_waiting_since_does_not_replace_a_fresher_turn () =
+  let _, keeper, _ = ordered_keeper_fixture () in
+  let finished =
+    { keeper with
+      k_activity = Some
+        { k_current_task_id = None
+        ; k_total_turns = 1
+        ; k_total_tokens = 0
+        ; k_total_cost_usd = Keeper_cost_coverage.empty
+        ; k_last_turn_ts = "1970-01-01T00:01:40Z"
+        ; k_last_proactive_outcome = None
+        }
+    }
+  in
+  let waiting since : Tui_decode.keeper_waiting_row =
+    { kwr_keeper_name = keeper.k_name
+    ; kwr_state = Tui_decode.Keeper_waiting_idle
+    ; kwr_waiting_count = 0
+    ; kwr_since = Some since
+    ; kwr_due_at = None
+    ; kwr_waiting_on = []
+    }
+  in
+  let open Masc_tui_types in
+  Alcotest.(check (option (float 0.001))) "finished turn is newer" (Some 100.)
+    (keeper_activity_at ~turn:(Some Tui_decode.Keeper_turn_idle)
+       ~waiting:(Some (waiting 10.)) finished);
+  Alcotest.(check (option (float 0.001))) "newer waiting still wins" (Some 120.)
+    (keeper_activity_at ~turn:(Some Tui_decode.Keeper_turn_idle)
+       ~waiting:(Some (waiting 120.)) finished)
+
+let empty_async_observation =
+  Tui_decode.Async_ready
+    { summary =
+        { ars_active = 0; ars_runtime_owned = 0; ars_ownership_unknown = 0; ars_record_errors = 0 }
+    ; requests = []
+    ; recovery = None
+    }
+
+let test_async_observation_has_an_independent_generation () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
+  let first = Option.get (begin_tools_async_observation_read state) in
+  Alcotest.(check int) "the first async read owns its generation" 1 first;
+  Alcotest.(check bool) "the first read is in flight" true state.tools_async_observation_inflight;
+  Alcotest.(check (option int)) "a second read does not replace the in-flight owner" None
+    (begin_tools_async_observation_read state);
+  Alcotest.(check bool) "the first result settles its owner" true
+    (apply_tools_async_observation_result state ~generation:first (Ok empty_async_observation));
+  Alcotest.(check bool) "completion releases the read" false state.tools_async_observation_inflight;
+  let second = Option.get (begin_tools_async_observation_read state) in
+  Alcotest.(check int) "the next read owns a new generation" 2 second;
+  Alcotest.(check bool) "an authorization failure settles only that generation" true
+    (apply_tools_async_observation_result state ~generation:second (Error "HTTP 403"));
+  Alcotest.(check bool) "a refusal releases the read" false state.tools_async_observation_inflight;
+  Alcotest.(check bool) "a refusal retains the last good observation" true
+    (state.tools_async_observation = Some empty_async_observation);
+  Alcotest.(check (option string)) "a refusal stays visible" (Some "HTTP 403")
+    state.tools_async_observation_error;
+  Alcotest.(check bool) "a stale completion cannot clear the current reading" false
+    (apply_tools_async_observation_result state ~generation:(second + 1) (Ok empty_async_observation));
+  Alcotest.(check (option string)) "the stale completion does not erase the error" (Some "HTTP 403")
+    state.tools_async_observation_error
+
+let test_turn_observation_replaces_and_refuses_atomically () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
+  let turn name : Tui_decode.keeper_turn_row =
+    { ktr_keeper_name = name; ktr_chat_control_token = None; ktr_state = Tui_decode.Keeper_turn_idle }
+  in
+  let waiting name : Tui_decode.keeper_waiting_row =
+    { kwr_keeper_name = name
+    ; kwr_state = Tui_decode.Keeper_waiting_idle
+    ; kwr_waiting_count = 0
+    ; kwr_since = None
+    ; kwr_due_at = None
+    ; kwr_waiting_on = []
+    }
+  in
+  state.keeper_turns <- [ turn "old" ];
+  state.keeper_waiting <- [ waiting "old" ];
+  accept_keeper_turn_observation state ~rows:[ turn "new" ] ~waiting:[ waiting "new" ] ~observed_at:20.;
+  Alcotest.(check int) "accepted rows replace the old observation" 1 (List.length state.keeper_turns);
+  Alcotest.(check string) "accepted waiting replaces the old observation" "new"
+    (List.hd state.keeper_waiting).Tui_decode.kwr_keeper_name;
+  Alcotest.(check (option (float 0.001))) "accepted observation carries its clock" (Some 20.)
+    state.keeper_turns_observed_at;
+  Alcotest.(check (option string)) "accepted observation clears the old error" None state.keeper_turns_error;
+  refuse_keeper_turn_observation state "HTTP 503";
+  Alcotest.(check string) "a failed read keeps the accepted turn" "new"
+    (List.hd state.keeper_turns).Tui_decode.ktr_keeper_name;
+  Alcotest.(check string) "a failed read keeps the accepted waiting" "new"
+    (List.hd state.keeper_waiting).Tui_decode.kwr_keeper_name;
+  Alcotest.(check (option (float 0.001))) "a failed read keeps the accepted clock" (Some 20.)
+    state.keeper_turns_observed_at;
+  Alcotest.(check (option string)) "a failed read is visible" (Some "HTTP 503") state.keeper_turns_error
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
@@ -4777,5 +4906,13 @@ let () =
             test_uncertain_identity_retires_reads_not_admitted_operations
         ; Alcotest.test_case "suspension folds a queued lanes reread into resume" `Quick
             test_suspension_folds_queued_lanes_reread_into_resume
+        ; Alcotest.test_case "async observation owns an independent generation" `Quick
+            test_async_observation_has_an_independent_generation
+        ; Alcotest.test_case "turn observations replace and refuse atomically" `Quick
+            test_turn_observation_replaces_and_refuses_atomically
+        ; Alcotest.test_case "settings and live context use ordered selection" `Quick
+            test_settings_and_live_context_use_ordered_selection
+        ; Alcotest.test_case "waiting since does not replace a fresher turn" `Quick
+            test_waiting_since_does_not_replace_a_fresher_turn
         ] )
     ]

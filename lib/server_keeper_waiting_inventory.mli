@@ -19,6 +19,12 @@ val dashboard_json_for_keeper :
 (** The same typed projection narrowed to one keeper for latency-sensitive
     detail surfaces. It does not overwrite fleet-wide waiting metrics. *)
 
+val keeper_json_by_name : Workspace.config -> (string * Yojson.Safe.t) list
+(** One fleet snapshot's public per-Keeper projections, keyed by Keeper name.
+    The rows have the same shape as [dashboard_json]'s [keepers] entries and
+    the per-Keeper endpoint, so another public-read projection can join them
+    without recomputing the inventory or inventing a second wire contract. *)
+
 type waiting_source =
   | Event_queue_pending
   | Chat_operation_queued

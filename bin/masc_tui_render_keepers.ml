@@ -23,6 +23,7 @@ module Keeper_activity = Masc_tui_keeper_activity
 module Render_schedule = Masc_tui_render_schedule
 module Layout = Masc_tui_layout
 module Keeper_control = Masc_tui_keeper_control
+module Keeper_list_model = Masc_tui_keeper_list_model
 module Item_account = Masc_tui_keeper_items
 
 let format_context_tokens = Masc_tui_types.format_context_tokens
@@ -32,13 +33,9 @@ let schedule_requested_clock_cells = Masc_tui_render_work.schedule_requested_clo
 let schedule_outcome_word = Masc_tui_render_work.schedule_outcome_word
 let schedule_status_is_terminal = Masc_tui_render_work.schedule_status_is_terminal
 
-(* The table's variant: the normal state is silent. On a healthy fleet every
-   row said "healthy" while the heading counted "11 healthy" and the summary
-   said "fleet ok" — the same fact four times, and the glyph beside the word
-   already carries the health colour. Only a deviation earns a word, so the
-   one deviating row is the only row with text in the column. The single-keeper
-   chat header keeps {!keeper_health_word}: alone, the word is identity, not
-   repetition. *)
+(* Healthy keepers stay quiet beside their NOW activity. A health deviation
+   remains available to the secondary detail row instead of repeating a
+   separate health word in every compact row. *)
 let keeper_health_deviation_word (health : Tui_decode.keeper_health option) =
   match health with
   | None -> "unread"
@@ -149,140 +146,176 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
       in
       Mark.activation_letter row.kr_activation_mode ^ " " ^ sandbox
 
-(* Column header labels line up with the cell budgets
-   [Render_schedule.allocate_keeper_columns] hands out, so the arithmetic lives
-   in one tested place instead of once here and once in the row. *)
+let keeper_activity_word (activity : Keeper_list_model.activity) =
+  match activity with
+  | Held_call -> "held call"
+  | Question -> "question"
+  | Confirmation -> "confirm"
+  | Failure -> "failure"
+  | Preparing -> "preparing"
+  | Streaming -> "streaming"
+  | Running -> "running"
+  | Async_working count -> Printf.sprintf "async %d" count
+  | Deferred -> "deferred"
+  | Tool_waiting -> "tool wait"
+  | Model_waiting -> "model wait"
+  | Delegating -> "delegating"
+  | Verifying -> "verify"
+  | External_waiting -> "external"
+  | Idle -> "idle"
+  | Paused -> "paused"
+  | Offline -> "offline"
+  | Unknown -> "unknown"
+
+let keeper_activity_style (activity : Keeper_list_model.activity) =
+  match activity with
+  | Held_call | Failure -> Theme.bad ()
+  | Question | Confirmation | Offline -> Theme.warn ()
+  | Preparing | Streaming | Running | Async_working _ | Deferred -> Theme.info ()
+  | Tool_waiting | Model_waiting | Delegating | Verifying | External_waiting
+  | Idle | Paused | Unknown -> Theme.recede ()
+
+let keeper_badge_text (badge : Keeper_list_model.badge) =
+  let glyph = Masc_tui_keeper_mark.badge_glyph badge in
+  match badge with
+  | Badge_read_error -> glyph ^ " read error"
+  | Badge_async { running; ownership_unknown } ->
+      Printf.sprintf "%s async %d%s" glyph running
+        (if ownership_unknown > 0 then Printf.sprintf " (%d owner?)" ownership_unknown else "")
+  | Badge_async_queued count -> Printf.sprintf "%s queued %d" glyph count
+  | Badge_async_cancelling count -> Printf.sprintf "%s cancelling %d" glyph count
+  | Badge_delegate -> glyph ^ " delegate"
+  | Badge_verification -> glyph ^ " verify"
+  | Badge_schedule -> glyph ^ " schedule"
+
+let keeper_task_detail (row : Keeper_list_model.row) =
+  match row.task with
+  | Some task ->
+      let id = Terminal_text.single_line task.Tui_decode.id in
+      let title = Terminal_text.single_line task.Tui_decode.title in
+      Some ("task " ^ id ^ if String.equal title "" then "" else " · " ^ title)
+  | None -> (
+      match row.keeper.Tui_decode.k_activity with
+      | Some activity -> Option.map (fun id -> "task " ^ Terminal_text.single_line id)
+          activity.Tui_decode.k_current_task_id
+      | None -> Some "task not observed")
+
+let keeper_waiting_detail (row : Keeper_list_model.row) =
+  match row.waiting with
+  | Some { Tui_decode.kwr_waiting_on = item :: rest; _ } ->
+      let detail =
+        if not (String.equal (String.trim item.Tui_decode.kwi_what) "") then item.kwi_what
+        else if not (String.equal (String.trim item.kwi_next_action) "") then item.kwi_next_action
+        else item.kwi_waiting_on
+      in
+      Some (Terminal_text.single_line detail
+        ^ (match rest with [] -> "" | _ -> Printf.sprintf " (+%d more)" (List.length rest)))
+  | Some { kwr_waiting_on = []; _ } | None -> None
+
+let keeper_detail_text (row : Keeper_list_model.row) =
+  let approval =
+    Option.map
+      (fun (approval : Tui_decode.keeper_tool_approval) ->
+        "hold " ^ Terminal_text.single_line approval.kta_tool
+        ^ " · " ^ Terminal_text.single_line approval.kta_question)
+      row.approval
+  in
+  let questions =
+    if row.open_questions > 0 then
+      Some (Masc_tui_message_layout.count_noun row.open_questions "question" ^ " awaiting you")
+    else None
+  in
+  let health =
+    match keeper_health_deviation_word (Keeper_control.health row.reading) with
+    | "" -> None
+    | word -> Some ("health " ^ word)
+  in
+  List.filter_map Fun.id
+    [ approval; questions; keeper_waiting_detail row; keeper_task_detail row; health ]
+  @ List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
+  |> String.concat " · "
+
 let keeper_column_header (columns : Render_schedule.keeper_columns) =
   String.concat ""
     [ String.make Render_schedule.keeper_marker_width ' '
-    ; Printf.sprintf "%-*s" columns.kcol_name "KEEPER"
+    ; Message_layout.fit_width "KEEPER" columns.kcol_name
     ; " "
-    ; Printf.sprintf "%-*s" Render_schedule.keeper_status_width "HEALTH"
+    ; Message_layout.fit_width "NOW" Render_schedule.keeper_status_width
     ; (if columns.kcol_show_flags then
-         " " ^ Printf.sprintf "%-*s" Render_schedule.keeper_flags_width "Mode S"
+         " " ^ Message_layout.fit_width "Mode S" Render_schedule.keeper_flags_width
        else "")
-    ; (* TURN, not LAST: where the runtime column is hidden this heading and
-         TASK sit one cell apart, and "LAST TASK" read as one column over the
-         two cells under it. *)
-      " " ^ Message_layout.pad_left "TURN" Render_schedule.keeper_last_turn_width
+    ; " " ^ Message_layout.pad_left "AGE" Render_schedule.keeper_last_turn_width
     ; (if columns.kcol_show_runtime then
          " " ^ fit_width "LIFECYCLE / RUNTIME" columns.kcol_runtime
        else "")
     ; " "
-    ; "TASK"
+    ; Message_layout.fit_width "DETAIL" columns.kcol_task
     ]
 
-(* Each cell is fitted as plain text and styled afterwards, so a long keeper
-   name cannot push the columns to its right out of the frame and the style
-   bytes never count toward the width. *)
 let keeper_row_content ~(columns : Render_schedule.keeper_columns)
-    ~now ~frame ~yolo ~paused ~health ~turn ~next_action ~keeper ~runtime =
-  let status_color = keeper_action_color next_action in
-  (* A keeper with an open turn draws the turn's mark in the HEALTH cell. The
-     mark moves while the turn is being worked: it is the one thing on the
-     screen that is changing as the reader looks at it.
-
-     The word beside the mark is the health word on every row, open turn or
-     not: a healthy keeper says nothing, a failing one says "failing". How
-     long the turn has run belongs to TURN (see [Masc_tui_keeper_mark.turn_clock]), on
-     every row alike. A failing keeper's row keeps its health word, so a
-     clock drawn here was left out of exactly that row, and the TURN cell's
-     last recorded turn -- the failure -- was the only age beside a moving
-     mark: "failing 7m45s" read as the work in progress, under a turn that
-     had run for half a minute (code-reviewer, 2026-09-24).
-
-     A failing keeper's mark keeps moving in its next-action colour: its
-     keepalive is running the next attempt. A turn whose keeper the health
-     reading calls offline was never closed and nothing works it: the mark
-     stops and takes the failure colour. *)
-  let health_word = keeper_health_deviation_word health in
-  let glyph, status_color =
-    match (turn : Tui_decode.keeper_turn_state option) with
-    | Some (Tui_decode.Keeper_turn_running _) -> (
-        match
-          Masc_tui_keeper_mark.open_turn
-            (Option.map Tui_decode.keeper_health_reading health)
-        with
-        | Masc_tui_keeper_mark.Worked ->
-            (Masc_tui_answering.running_glyph ~frame, Theme.info ())
-        | Masc_tui_keeper_mark.Worked_while_failing ->
-            (Masc_tui_answering.running_glyph ~frame, status_color)
-        | Masc_tui_keeper_mark.Left_open ->
-            (Masc_tui_answering.running_glyph ~frame:(-1), Theme.bad ()))
-    | Some Tui_decode.Keeper_turn_idle
-    | Some (Tui_decode.Keeper_turn_unavailable _)
-    | None ->
-      (keeper_state_glyph ~paused ~health, status_color)
+    ~now ~frame ~yolo ~selected (row : Keeper_list_model.row) =
+  let keeper = row.keeper in
+  let activity = Keeper_list_model.primary_activity_of_row row in
+  let status_color = keeper_activity_style activity in
+  let glyph =
+    match activity with
+    | Preparing | Running -> Masc_tui_answering.running_glyph ~frame
+    | Held_call | Question | Confirmation | Failure | Streaming | Async_working _
+    | Deferred | Tool_waiting | Model_waiting | Delegating | Verifying | External_waiting
+    | Idle | Paused | Offline | Unknown -> Masc_tui_keeper_mark.activity_glyph activity
   in
-  (* Selection is the full-row band the caller draws (box_line_selected over
-     a strip_sgr'd copy of this row), so the row itself carries no marker.
-     The caret's three gutter cells stay as spaces so columns do not shift
-     between the selected row and its neighbours. *)
-  (* Names, not prose: the Keepers table is where two keepers sharing a prefix
-     have to be told apart, and the tail is what does it. See
-     [Message_layout.fit_middle]. *)
   let name =
     Message_layout.fit_middle columns.kcol_name
-      (Terminal_text.single_line keeper.k_name)
+      (Terminal_text.single_line keeper.Tui_decode.k_name)
+  in
+  let health = Keeper_control.health row.reading in
+  let runtime =
+    match row.reading.Keeper_control.liveness with
+    | Keeper_control.Present runtime -> Some runtime
+    | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
   in
   let failure_context =
     Option.map (keeper_failure_context ~now)
-      (Tui_decode.keeper_failure_status_of_readings ~health ~turn ~runtime)
+      (Tui_decode.keeper_failure_status_of_readings ~health ~turn:row.turn ~runtime)
   in
-  let task =
-    fit_width
-      (match keeper.k_activity with
-       | None -> "not observed"
-       | Some activity ->
-         Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
-           activity.k_current_task_id)
-      columns.kcol_task
+  let age =
+    match row.last_activity_at with
+    | Some since -> Option.value (Message_layout.age_text ~now ~since)
+        ~default:Masc_tui_theme.Glyph.no_value
+    | None -> Masc_tui_theme.Glyph.no_value
   in
+  let marker = if selected then "\xe2\x80\xba  " (* › *) else "   " in
   String.concat ""
-    [ "   "
-    ; (* A keeper whose gate runs every call unasked wears its name in
-         red: the stance has no column of its own, and the name is what
-         the eye finds first. On the selected row the band folds this red
-         with every other cell colour. *)
-      (if yolo then (Theme.bad ()) ^ name ^ Ansi.reset else name)
+    [ marker
+    ; (if yolo then Theme.bad () ^ name ^ Ansi.reset else name)
     ; " "
     ; status_color ^ glyph ^ " "
-      ^ fit_width health_word (Render_schedule.keeper_status_width - 2)
+      ^ Message_layout.fit_width (keeper_activity_word activity)
+          (Render_schedule.keeper_status_width - 2)
       ^ Ansi.reset
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
-    ; (* The lifetime turn count said nothing an operator acts on; how long
-         this keeper has been at its turn, or since it last turned, does. An
-         open turn is what the keeper is doing now, so it wins, and it is
-         drawn in the mark's colour; a finished turn is past and stays dim.
-         A keeper that never turned, or one whose last turn reads from the
-         future, draws the dash every unknown draws. The count itself still
-         lives on the detail pane. *)
-      (let dash = Masc_tui_theme.Glyph.no_value in
-       let turn_color, turn_age =
-         match
-           Masc_tui_keeper_mark.turn_clock ~turn
-             ~last_turn_at:(Option.bind keeper.k_activity (fun activity ->
-               Masc_domain.parse_iso8601_opt activity.k_last_turn_ts))
-         with
-         | Masc_tui_keeper_mark.Open_turn_started started_at ->
-             (status_color, Masc_tui_answering.elapsed_text ~now started_at)
-         | Masc_tui_keeper_mark.Last_turn_recorded since -> (
-             match Message_layout.age_text ~now ~since with
-             | Some text -> (Ansi.dim, text)
-             | None -> (Ansi.dim, dash))
-         | Masc_tui_keeper_mark.No_turn_recorded -> (Ansi.dim, dash)
-       in
-       Printf.sprintf " %s%s%s" turn_color
-         (Message_layout.pad_left turn_age Render_schedule.keeper_last_turn_width)
-         Ansi.reset)
+    ; " " ^ Theme.recede ()
+      ^ Message_layout.pad_left age Render_schedule.keeper_last_turn_width
+      ^ Ansi.reset
     ; (if columns.kcol_show_runtime then
-         " " ^ (Theme.recede ())
+         " " ^ Theme.recede ()
          ^ keeper_runtime_cell ~width:columns.kcol_runtime ?failure_context runtime
          ^ Ansi.reset
        else "")
     ; " "
-    ; Ansi.dim ^ task ^ Ansi.reset
+    ; Theme.recede () ^ fit_width (keeper_detail_text row) columns.kcol_task ^ Ansi.reset
     ]
+
+let keeper_secondary_row_content ~inner (row : Keeper_list_model.row) =
+  let indent_cells = Render_schedule.keeper_marker_width + 2 in
+  let detail =
+    match keeper_detail_text row with
+    | "" -> Masc_tui_theme.Glyph.no_value
+    | text -> text
+  in
+  String.make indent_cells ' ' ^ Theme.recede ()
+  ^ fit_width detail (max 0 (inner - indent_cells))
+  ^ Ansi.reset
 
 (* The subtractions over the fleet's name lists. They answer different
    questions and only one of them is about being stopped: a keeper the fleet
@@ -418,6 +451,58 @@ let keeper_operations_fields (state : state) ~keeper_name =
       ^ Ansi.reset) :: fields
   else fields
 
+type keeper_display_entry =
+  | Keeper_group_heading of Keeper_list_model.attention * int
+  | Keeper_display_row of int * Keeper_list_model.row
+
+let keeper_display_entries rows layout =
+  let entries =
+    List.mapi (fun position (row : Keeper_list_model.row) -> position, row) rows
+  in
+  match layout with
+  | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
+      List.map (fun (position, row) -> Keeper_display_row (position, row)) entries
+  | Keeper_list_model.Grouped ->
+      let needs_you, active, waiting, inactive = Keeper_list_model.group_counts rows in
+      [ Keeper_list_model.Needs_you, needs_you
+      ; Keeper_list_model.Active, active
+      ; Keeper_list_model.Waiting, waiting
+      ; Keeper_list_model.Inactive, inactive
+      ]
+      |> List.concat_map (fun (group, count) ->
+        let matching =
+          List.filter (fun (_, row) -> Keeper_list_model.group_of_row row = group) entries
+        in
+        match matching with
+        | [] -> []
+        | _ ->
+            Keeper_group_heading (group, count)
+            :: List.map (fun (position, row) -> Keeper_display_row (position, row)) matching)
+
+let keeper_group_heading_text group count =
+  let glyph, label =
+    match group with
+    | Keeper_list_model.Needs_you -> "!", "NEEDS YOU"
+    | Keeper_list_model.Active -> "\xe2\x96\xb6", "ACTIVE" (* ▶ *)
+    | Keeper_list_model.Waiting -> "\xe2\x97\x8c", "WAITING" (* ◌ *)
+    | Keeper_list_model.Inactive -> "\xe2\x97\x8b", "INACTIVE" (* ○ *)
+  in
+  Printf.sprintf "%s %s %d" glyph label count
+
+let keeper_group_heading_style = function
+  | Keeper_list_model.Needs_you -> Theme.bad ()
+  | Keeper_list_model.Active -> Theme.info ()
+  | Keeper_list_model.Waiting | Keeper_list_model.Inactive -> Theme.recede ()
+
+let keeper_view_summary rows layout sort =
+  let mode = Keeper_list_model.layout_label layout ^ " · " ^ Keeper_list_model.sort_label sort in
+  match layout with
+  | Keeper_list_model.Grouped -> "  " ^ mode
+  | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
+      let needs_you, active, waiting, inactive = Keeper_list_model.group_counts rows in
+      Printf.sprintf "  %s   ! %d needs you   \xe2\x96\xb6 %d active   \xe2\x97\x8c %d waiting   \xe2\x97\x8b %d inactive"
+        mode needs_you active waiting inactive
+
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -426,6 +511,7 @@ let render_keeper_list (state : state) =
   let buf = Buffer.create 4096 in
   let inner = max 1 (framed_inner_width cols) in
   let readings = List.map (keeper_reading state) state.keepers in
+  let model_rows = keeper_list_rows state in
   let selected_reading =
     Option.map (keeper_reading state) (selected_keeper state)
   in
@@ -458,7 +544,10 @@ let render_keeper_list (state : state) =
        - Message_layout.display_width badge)
   in
   box_line buf cols (heading ^ String.make gap ' ' ^ badge);
-  box_empty buf cols;
+  box_line buf cols
+    (Theme.recede ()
+     ^ keeper_view_summary model_rows state.keeper_list_layout state.keeper_list_sort
+     ^ Ansi.reset);
 
   (match (state.fleet_safety, state.fleet_safety_error) with
    | _, Some err ->
@@ -592,41 +681,137 @@ let render_keeper_list (state : state) =
   (match keepers_error with
    | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
    | None -> ());
+  (match state.keeper_turns_error with
+   | Some err ->
+       box_line buf cols
+         (Theme.warn () ^ "  turn/waiting observation: "
+          ^ Terminal_text.single_line err ^ Ansi.reset)
+   | None -> ());
+  (match state.tools_async_observation_error with
+   | Some err ->
+       box_line buf cols
+         (Theme.warn () ^ "  async observation: "
+          ^ Terminal_text.single_line err ^ Ansi.reset)
+   | None -> ());
 
   Option.iter (fun note -> box_line buf cols (Theme.recede () ^ note ^ Ansi.reset))
     (local_source_pending_note state Local_keepers);
 
-  (* Counted rather than recomputed: the chrome above varies with the fleet
-     reading, the roster's health and the metadata error, so a second
-     arithmetic copy of its height would drift from what was just emitted and
-     scroll the frame. *)
   let chrome_rows = count_frame_lines buf in
   let footer_rows = 2 in
-  let list_rows = max 0 (rows - chrome_rows - footer_rows) in
-  let keeper_count = List.length state.keepers in
-  (* A roster with more keepers than rows says which of them these are, the
-     way every other scrolled list on this screen does. The line costs one of
-     the rows it describes, so it is drawn only where there is something to
-     say, and only where there is a row to spend on it: with no rows left the
-     roster draws nothing and the line would push the frame past its budget. *)
-  let overflowing = list_rows > 0 && keeper_count > list_rows in
-  let keeper_rows = if overflowing then max 0 (list_rows - 1) else list_rows in
-  (* The window stays where the last frame drew it while the cursor is on it,
-     and moves only as far as the cursor needs. *)
+  let keeper_count = List.length model_rows in
+  let cursor = max 0 (min state.keeper_cursor (keeper_count - 1)) in
+  let entry_height =
+    match state.keeper_list_layout with
+    | Keeper_list_model.Detailed -> 2
+    | Keeper_list_model.Compact | Keeper_list_model.Grouped -> 1
+  in
+  let entries = keeper_display_entries model_rows state.keeper_list_layout in
+  let portrait_candidate =
+    match state.keeper_list_layout, selected_reading with
+    | Keeper_list_model.Detailed, Some reading -> (
+        match reading.Keeper_control.liveness with
+        | Keeper_control.Present runtime -> (
+            match runtime.Tui_decode.kr_portrait with
+            | Tui_decode.Ready equipment ->
+                Option.map (fun portrait -> reading.Keeper_control.name, portrait)
+                  (Masc_tui_chat_portrait.shown ~name:reading.Keeper_control.name
+                     ~portrait:(Keeper_portrait_equipment.Ready equipment)
+                     ~rows ~cols)
+            | Tui_decode.Unavailable _ -> None)
+        | Keeper_control.Unobserved | Keeper_control.Absent
+        | Keeper_control.Invalid _ -> None)
+    | Keeper_list_model.Detailed, None
+    | (Keeper_list_model.Compact | Keeper_list_model.Grouped), _ -> None
+  in
+  let portrait_list_rows =
+    let target = min 4 keeper_count in
+    target * 2 + if keeper_count > target then 1 else 0
+  in
+  let portrait =
+    match portrait_candidate with
+    | Some (_, portrait) as candidate
+      when portrait.Masc_tui_chat_portrait.roster_rows - chrome_rows - footer_rows
+           >= portrait_list_rows -> candidate
+    | Some _ | None -> None
+  in
+  let roster_rows =
+    match portrait with
+    | None -> rows
+    | Some (_, portrait) -> portrait.Masc_tui_chat_portrait.roster_rows
+  in
+  let content_rows = max 0 (roster_rows - chrome_rows - footer_rows) in
+  Option.iter
+    (fun (name, portrait) ->
+      box_line buf cols
+        (Theme.recede () ^ "  selected · " ^ Terminal_text.single_line name ^ Ansi.reset);
+      let picture_row = count_frame_lines buf in
+      List.iter (box_line buf cols) portrait.Masc_tui_chat_portrait.picture_lines;
+      box_line buf cols "";
+      Option.iter
+        (fun (placement : Masc_tui_portrait_view.placement) ->
+          Masc_tui_portrait_view.request
+            { placement with row = picture_row + strip_rows })
+        portrait.Masc_tui_chat_portrait.placement)
+    portrait;
+
+  let total_entry_lines = List.length entries * entry_height in
+  let overflowing = content_rows > 0 && total_entry_lines > content_rows in
+  let entry_rows = if overflowing then max 0 (content_rows - 1) else content_rows in
+  let entry_capacity = entry_rows / entry_height in
+  let selected_entry =
+    match
+      List.find_index
+        (function
+          | Keeper_display_row (position, _) -> position = cursor
+          | Keeper_group_heading _ -> false)
+        entries
+    with
+    | Some index -> index
+    | None -> 0
+  in
   let scroll_offset =
-    if keeper_rows > 0 then
+    if entry_capacity > 0 then
       min
-        (max 0 (keeper_count - keeper_rows))
-        (Masc_tui_scroll.ensure_visible ~cursor:state.keeper_cursor
-           ~height:keeper_rows state.keeper_list_scroll)
+        (max 0 (List.length entries - entry_capacity))
+        (Masc_tui_scroll.ensure_visible ~cursor:selected_entry
+           ~height:entry_capacity state.keeper_list_scroll)
     else 0
   in
-  let keepers_window = Rows.of_list ~first:scroll_offset ~height:keeper_rows state.keepers in
-  let readings_window = Rows.of_list ~first:scroll_offset ~height:keeper_rows readings in
-  if keeper_count = 0 then begin
-    (* A roster that was never read is as empty as one that holds no files;
-       only the second is "no keeper metadata". *)
-    let note =
+  let entries_window = List.take entry_capacity (List.drop scroll_offset entries) in
+  List.iter
+    (function
+      | Keeper_group_heading (group, count) ->
+          box_line buf cols
+            (keeper_group_heading_style group ^ "  "
+             ^ keeper_group_heading_text group count ^ Ansi.reset)
+      | Keeper_display_row (position, row) ->
+          let selected = position = cursor in
+          let primary =
+            keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame
+              ~yolo:(List.mem row.Keeper_list_model.keeper.Tui_decode.k_name
+                       state.keeper_yolo_names)
+              ~selected row
+          in
+          let secondary = keeper_secondary_row_content ~inner row in
+          let press text =
+            pressable (Press_keeper_row row.Keeper_list_model.keeper.Tui_decode.k_name)
+              (fit_width text inner)
+          in
+          let emit text =
+            if selected then
+              box_line_selected buf cols (press (Masc_tui_theme.strip_sgr text))
+            else box_line buf cols (press text)
+          in
+          emit primary;
+          (match state.keeper_list_layout with
+           | Keeper_list_model.Detailed -> emit secondary
+           | Keeper_list_model.Compact | Keeper_list_model.Grouped -> ()))
+    entries_window;
+
+  let note =
+    if keeper_count > 0 then None
+    else
       match keeper_rows_page state ~error:keepers_error with
       | Page_empty -> Some (match state.workspace_identity with
           | Workspace_identity_mismatch _ -> "   server Keeper roster is empty"
@@ -635,66 +820,36 @@ let render_keeper_list (state : state) =
             "   no keeper metadata under .masc/keepers/")
       | Page_unread -> Some page_unread_note
       | Page_failed -> None
+  in
+  Option.iter
+    (fun text ->
+      if entry_rows > 0 then box_line buf cols (Theme.recede () ^ text ^ Ansi.reset))
+    note;
+  let note_rows = match note with Some _ when entry_rows > 0 -> 1 | Some _ | None -> 0 in
+  let drawn_rows = List.length entries_window * entry_height + note_rows in
+  for _ = 1 to max 0 (entry_rows - drawn_rows) do
+    box_empty buf cols
+  done;
+
+  if overflowing then begin
+    let count_keepers entries =
+      List.fold_left
+        (fun count entry ->
+          match entry with
+          | Keeper_display_row _ -> count + 1
+          | Keeper_group_heading _ -> count)
+        0 entries
     in
-    Option.iter
-      (fun note ->
-        if keeper_rows > 0 then box_line buf cols (Ansi.dim ^ note ^ Ansi.reset))
-      note;
-    let filled = if Option.is_some note then 1 else 0 in
-    for _ = 1 to max 0 (keeper_rows - filled) do
-      box_empty buf cols
-    done
-  end
-  else
-    for index = 0 to keeper_rows - 1 do
-      let position = index + scroll_offset in
-      match
-        (Rows.at keepers_window position, Rows.at readings_window position)
-      with
-      | Some keeper, Some reading ->
-          let runtime =
-            match reading.Keeper_control.liveness with
-            | Keeper_control.Present row -> Some row
-            | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
-          in
-          let turn =
-            List.find_map
-              (fun (row : Tui_decode.keeper_turn_row) ->
-                if String.equal row.ktr_keeper_name keeper.k_name then
-                  Some row.ktr_state
-                else None)
-              state.keeper_turns
-          in
-          let row =
-            keeper_row_content ~columns
-              ~now:now_unix
-              ~frame:state.activity_frame
-              ~yolo:(List.mem keeper.k_name state.keeper_yolo_names)
-              ~paused:reading.Keeper_control.paused
-              ~health:(Keeper_control.health reading)
-              ~turn
-              ~next_action:(Keeper_control.next_action reading)
-              ~keeper ~runtime
-          in
-          (* Fitted before it is marked: a cut that fell after the mark
-             would drop its close, and the row's press would run on into
-             the Activity pane drawn beside it. *)
-          let press text =
-            pressable (Press_keeper_row keeper.k_name) (fit_width text inner)
-          in
-          if position = state.keeper_cursor then
-            box_line_selected buf cols (press (Masc_tui_theme.strip_sgr row))
-          else box_line buf cols (press row)
-      | Some _, None | None, Some _ | None, None -> box_empty buf cols
-    done;
-
-  if overflowing then
+    let before = count_keepers (List.take scroll_offset entries) in
+    let visible = count_keepers entries_window in
+    let range =
+      if visible = 0 then "0/" ^ string_of_int keeper_count
+      else Printf.sprintf "%d–%d/%d" (before + 1) (before + visible) keeper_count
+    in
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [keepers %s]"
-         (Masc_tui_scroll.window_text ~scroll:scroll_offset ~height:keeper_rows
-            keeper_count));
+      (Printf.sprintf "  [keepers %s]" range)
+  end;
 
-  (* One quiet boundary between the roster and its actions. *)
   box_divider buf cols;
   Buffer.add_string buf
     (footer_line state

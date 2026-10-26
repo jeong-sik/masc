@@ -4532,6 +4532,156 @@ type keeper_turn_row = {
   ktr_state : keeper_turn_state;
 }
 
+type keeper_waiting_state =
+  | Keeper_waiting_idle
+  | Keeper_waiting_busy
+  | Keeper_waiting_blocked
+  | Keeper_waiting_deferred
+
+type waiting_source =
+  | Waiting_source_event_queue_pending
+  | Waiting_source_chat_operation_queued
+  | Waiting_source_chat_operation_running
+  | Waiting_source_hitl_pending
+  | Waiting_source_fusion_running
+  | Waiting_source_schedule_waiting
+  | Waiting_source_owner_shutdown
+  | Waiting_source_operator_pending_confirm
+  | Waiting_source_read_error
+
+type wake_producer =
+  | Wake_board_dispatch
+  | Wake_board_attention_judge
+  | Wake_keeper_owner_actor
+  | Wake_keeper_supervisor
+  | Wake_fusion_sink
+  | Wake_connector_attention_hook
+  | Wake_hitl_resolution_hook
+  | Wake_keeper_ask_answer
+  | Wake_schedule_store
+  | Wake_schedule_runner
+  | Wake_operator_pending_confirm_store
+  | Wake_completion_authority
+  | Wake_keeper_task_cancellation
+  | Wake_keeper_workspace_message
+  | Wake_keeper_delegate
+  | Wake_keeper_composition
+  | Wake_keeper_job
+  | Wake_keeper_addon
+  | Wake_read_model_reader
+
+type waiting_item = {
+  kwi_source : waiting_source;
+  kwi_waiting_on : string;
+  kwi_what : string;
+  kwi_wake_producer : wake_producer;
+  kwi_since : float option;
+  kwi_due_at : float option;
+  kwi_next_action : string;
+}
+
+type keeper_waiting_row = {
+  kwr_keeper_name : string;
+  kwr_state : keeper_waiting_state;
+  kwr_waiting_count : int;
+  kwr_since : float option;
+  kwr_due_at : float option;
+  kwr_waiting_on : waiting_item list;
+}
+
+type keeper_turns_projection = {
+  rows : keeper_turn_row list;
+  waiting : keeper_waiting_row list;
+}
+
+let decode_named_vocabulary ~kind table raw =
+  match List.assoc_opt raw table with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "unknown %s %S" kind raw)
+
+let keeper_waiting_state_of_string raw =
+  decode_named_vocabulary ~kind:"keeper waiting state" raw
+    [ "idle", Keeper_waiting_idle
+    ; "busy", Keeper_waiting_busy
+    ; "waiting", Keeper_waiting_blocked
+    ; "deferred", Keeper_waiting_deferred
+    ]
+
+let waiting_source_of_string raw =
+  decode_named_vocabulary ~kind:"keeper waiting source" raw
+    [ "event_queue_pending", Waiting_source_event_queue_pending
+    ; "chat_operation_queued", Waiting_source_chat_operation_queued
+    ; "chat_operation_running", Waiting_source_chat_operation_running
+    ; "hitl_pending", Waiting_source_hitl_pending
+    ; "fusion_running", Waiting_source_fusion_running
+    ; "schedule_waiting", Waiting_source_schedule_waiting
+    ; "owner_shutdown", Waiting_source_owner_shutdown
+    ; "operator_pending_confirm", Waiting_source_operator_pending_confirm
+    ; "read_error", Waiting_source_read_error
+    ]
+
+let wake_producer_of_string raw =
+  decode_named_vocabulary ~kind:"keeper wake producer" raw
+    [ "board_dispatch", Wake_board_dispatch
+    ; "board_attention_judge", Wake_board_attention_judge
+    ; "keeper_owner_actor", Wake_keeper_owner_actor
+    ; "keeper_supervisor", Wake_keeper_supervisor
+    ; "fusion_sink", Wake_fusion_sink
+    ; "connector_attention_hook", Wake_connector_attention_hook
+    ; "hitl_resolution_hook", Wake_hitl_resolution_hook
+    ; "keeper_ask_answer", Wake_keeper_ask_answer
+    ; "schedule_store", Wake_schedule_store
+    ; "schedule_runner", Wake_schedule_runner
+    ; "operator_pending_confirm_store", Wake_operator_pending_confirm_store
+    ; "completion_authority", Wake_completion_authority
+    ; "keeper_task_cancellation", Wake_keeper_task_cancellation
+    ; "keeper_workspace_message", Wake_keeper_workspace_message
+    ; "keeper_delegate", Wake_keeper_delegate
+    ; "keeper_composition", Wake_keeper_composition
+    ; "keeper_job", Wake_keeper_job
+    ; "keeper_addon", Wake_keeper_addon
+    ; "read_model_reader", Wake_read_model_reader
+    ]
+
+let decode_waiting_item json =
+  let* source_raw = required_string_field json "source" in
+  let* kwi_source = waiting_source_of_string source_raw in
+  let* kwi_waiting_on = required_string_field json "waiting_on" in
+  let* kwi_what = required_string_field json "what" in
+  let* producer_raw = required_string_field json "wake_producer" in
+  let* kwi_wake_producer = wake_producer_of_string producer_raw in
+  let* kwi_since = required_nullable_float_field json "since" in
+  let* kwi_due_at = required_nullable_float_field json "due_at" in
+  let* kwi_next_action = required_string_field json "next_action" in
+  Ok { kwi_source; kwi_waiting_on; kwi_what; kwi_wake_producer; kwi_since; kwi_due_at; kwi_next_action }
+
+let decode_waiting_items json =
+  let* items = required_list_field json "waiting_on" in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+        let* decoded = decode_waiting_item item in
+        loop (decoded :: acc) rest
+  in
+  loop [] items
+
+let decode_keeper_waiting_row json =
+  let* kwr_keeper_name = required_string_field json "keeper_name" in
+  let* state_raw = required_string_field json "state" in
+  let* kwr_state = keeper_waiting_state_of_string state_raw in
+  let* kwr_waiting_count = required_int_field json "waiting_count" in
+  let* kwr_since = required_nullable_float_field json "since" in
+  let* kwr_due_at = required_nullable_float_field json "due_at" in
+  let* kwr_waiting_on = decode_waiting_items json in
+  Ok { kwr_keeper_name; kwr_state; kwr_waiting_count; kwr_since; kwr_due_at; kwr_waiting_on }
+
+let decode_optional_keeper_waiting json =
+  match Json_util.assoc_member_opt "waiting" json with
+  | None | Some `Null -> Ok None
+  | Some (`Assoc _ as waiting) ->
+      decode_keeper_waiting_row waiting |> Result.map Option.some
+  | Some other -> field_type_error "keeper waiting" "object or null" other
+
 type keeper_current_activity =
   | Keeper_activity_idle
   | Keeper_activity_waiting
@@ -4693,7 +4843,7 @@ let decode_keeper_turn_row json =
                (Json_util.kind_name other)))
   | value -> Error (Printf.sprintf "unknown keeper turn row status %S" value)
 
-let decode_keeper_turns json =
+let decode_keeper_turn_rows json =
   let* schema = required_string_field json "schema" in
   let* () =
     if String.equal schema "masc.keeper_turns.v1" then Ok ()
@@ -4707,6 +4857,21 @@ let decode_keeper_turns json =
         loop (decoded :: acc) rest
   in
   loop [] items
+
+let decode_keeper_turns = decode_keeper_turn_rows
+
+let decode_keeper_turns_projection json =
+  let* rows = decode_keeper_turn_rows json in
+  let* items = required_list_field json "keepers" in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+        let* waiting = decode_optional_keeper_waiting item in
+        let acc = match waiting with None -> acc | Some row -> row :: acc in
+        loop acc rest
+  in
+  let* waiting = loop [] items in
+  Ok { rows; waiting }
 
 type runtime_assignment_source =
   | Default_runtime

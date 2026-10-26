@@ -852,6 +852,143 @@ let test_keepers_jump_uses_one_binding_for_dispatch_and_help () =
   Alcotest.(check bool) "2 is not an Overview-only binding" false
     (List.mem "2" overview_keys)
 
+let roster_keeper name : Tui_decode.keeper =
+  { k_origin = Tui_decode.Persisted_keeper
+  ; k_name = name
+  ; k_paused = false
+  ; k_identity = Ok { k_trace_id = "trace-" ^ name; k_created_at = "2026-01-01T00:00:00Z"; k_updated_at = "2026-01-01T00:00:00Z" }
+  ; k_activity = None
+  }
+
+let roster_turn name : Tui_decode.keeper_turn_row =
+  { ktr_keeper_name = name
+  ; ktr_chat_control_token = None
+  ; ktr_state = Tui_decode.Keeper_turn_running
+      { lane = Tui_decode.Turn_lane_autonomous
+      ; started_at_unix = 1.
+      ; interrupt_token = "token-" ^ name
+      ; turn_ref = None
+      ; preview = Some
+          { ktp_text_position = { kpp_generation = 0; kpp_start_byte = 0 }
+          ; ktp_status_text = "streaming"
+          ; ktp_activity = Some Masc.Keeper_turn_preview.Receiving_response
+          ; ktp_updated_at_unix = 2.
+          ; ktp_text_tail = ""
+          ; ktp_last_tool = None
+          ; ktp_preparation = None
+          ; ktp_preparation_timeline = None
+          ; ktp_execution_scope = None
+          }
+      }
+  }
+
+let selected_roster_name state =
+  Option.map (fun keeper -> keeper.Tui_decode.k_name) (selected_keeper state)
+
+let test_keeper_list_view_and_order_keys () =
+  let keys = List.map (fun (binding : Masc_tui_keys.binding) -> binding.key)
+      (Masc_tui_keys.for_surface (Keepers Keeper_list))
+  in
+  List.iter (fun key -> Alcotest.(check int) (key ^ " is declared once") 1
+      (List.length (List.filter (String.equal key) keys))) ["v"; "o"; "s"; "f"];
+  let metric_keys = List.map (fun (binding : Masc_tui_keys.binding) -> binding.key)
+      (Masc_tui_keys.for_surface Metrics)
+  in
+  Alcotest.(check int) "Metrics keeps its own v" 1
+    (List.length (List.filter (String.equal "v") metric_keys))
+
+let test_keeper_list_cycles_preserve_selected_name () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Keepers Keeper_list;
+  state.keepers <- List.map roster_keeper ["alpha"; "beta"; "gamma"];
+  state.keeper_list_sort <- Masc_tui_keeper_list_model.Name;
+  state.keeper_cursor <- 1;
+  Alcotest.(check (option string)) "initial selection" (Some "beta") (selected_roster_name state);
+  cycle_keeper_list_layout state;
+  Alcotest.(check bool) "layout cycles" true
+    (state.keeper_list_layout = Masc_tui_keeper_list_model.Detailed);
+  Alcotest.(check (option string)) "layout preserves the name" (Some "beta") (selected_roster_name state);
+  state.keeper_turns <- [roster_turn "alpha"; roster_turn "gamma"];
+  cycle_keeper_list_sort state;
+  Alcotest.(check bool) "sort cycles" true
+    (state.keeper_list_sort = Masc_tui_keeper_list_model.Priority);
+  Alcotest.(check (option string)) "sort preserves the name" (Some "beta") (selected_roster_name state);
+  Alcotest.(check (option int)) "the new ordered index is used" (Some 2)
+    (keeper_index state "beta")
+
+let test_keeper_list_detail_transition_preserves_selected_name () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Keepers Keeper_list;
+  state.keepers <- List.map roster_keeper ["beta"; "alpha"; "gamma"];
+  state.keeper_turns <- [roster_turn "alpha"; roster_turn "gamma"];
+  keeper_list_select_name state "beta";
+  Alcotest.(check (option string)) "list selection" (Some "beta") (selected_roster_name state);
+  transition_keeper_view state (Keepers Keeper_detail);
+  Alcotest.(check (option string)) "detail keeps the name" (Some "beta") (selected_roster_name state);
+  transition_keeper_view state (Keepers Keeper_list);
+  Alcotest.(check (option string)) "return keeps the name" (Some "beta") (selected_roster_name state);
+  transition_keeper_view state Changes;
+  Alcotest.(check (option string)) "files keeps the name" (Some "beta") (selected_roster_name state);
+  transition_keeper_view state (Keepers Keeper_list);
+  Alcotest.(check (option string)) "files return keeps the name" (Some "beta") (selected_roster_name state)
+
+let test_keeper_list_search_and_mouse_share_order () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Keepers Keeper_list;
+  state.keepers <- List.map roster_keeper ["beta"; "alpha"; "gamma"];
+  state.keeper_list_sort <- Masc_tui_keeper_list_model.Name;
+  state.keeper_turns <- [roster_turn "alpha"; roster_turn "gamma"];
+  cycle_keeper_list_sort state;
+  let expected = ["alpha"; "gamma"; "beta"] in
+  Alcotest.(check (list string)) "the projection orders active names first" expected
+    (List.map (fun keeper -> keeper.Tui_decode.k_name) (ordered_keepers state));
+  Alcotest.(check (option (list string))) "search reads the same order" (Some expected)
+    (Masc_tui_surface_search.surface_row_texts ~cols:80 state (Keepers Keeper_list));
+  Alcotest.(check (option int)) "mouse selection reads the same index" (Some 2)
+    (keeper_index state "beta");
+  keeper_list_select_name state "beta";
+  Alcotest.(check (option string)) "mouse selects the intended name" (Some "beta")
+    (selected_roster_name state);
+  state.keepers <- List.filter (fun keeper -> keeper.Tui_decode.k_name <> "beta") state.keepers;
+  keeper_list_select_name state "beta";
+  Alcotest.(check bool) "a removed name clamps inside the remaining rows" true
+    (state.keeper_cursor >= 0 && state.keeper_cursor < 2)
+
+let test_observation_updates_preserve_selected_name () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Keepers Keeper_list;
+  state.keepers <- List.map roster_keeper ["beta"; "alpha"; "gamma"];
+  keeper_list_select_name state "beta";
+  let turns = [roster_turn "alpha"; roster_turn "gamma"] in
+  accept_keeper_turn_observation state ~rows:turns ~waiting:[] ~observed_at:2.;
+  Alcotest.(check (option string)) "turn reorder keeps the name" (Some "beta")
+    (selected_roster_name state);
+  accept_keeper_turn_observation state ~rows:[] ~waiting:[] ~observed_at:3.;
+  Alcotest.(check (option string)) "clearing turns keeps the name" (Some "beta")
+    (selected_roster_name state);
+  let async_request name : Tui_decode.async_request_row =
+    { ar_request_id = "request-" ^ name
+    ; ar_submitted_by = "test"
+    ; ar_keeper_name = name
+    ; ar_phase = Tui_decode.Async_running
+    ; ar_elapsed_sec = Some 1.
+    ; ar_ownership = Tui_decode.Async_runtime_owned
+    }
+  in
+  let observation =
+    Tui_decode.Async_ready
+      { summary =
+          { ars_active = 2; ars_runtime_owned = 2; ars_ownership_unknown = 0; ars_record_errors = 0 }
+      ; requests = [async_request "alpha"; async_request "gamma"]
+      ; recovery = None
+      }
+  in
+  let generation = Option.get (begin_tools_async_observation_read state) in
+  Alcotest.(check bool) "async observation accepted" true
+    (apply_tools_async_observation_result state ~generation (Ok observation));
+  Alcotest.(check (option string)) "async reorder keeps the name" (Some "beta")
+    (selected_roster_name state)
+
 let standalone_lane ~(lane : Standalone_lane.t) ~label : Tui_decode.standalone_lane =
   { Tui_decode.sl_lane = lane
   ; sl_label = label
@@ -1603,6 +1740,16 @@ let () =
             test_chat_quiet_leave_respects_the_draft
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick
             test_keepers_jump_uses_one_binding_for_dispatch_and_help
+        ; Alcotest.test_case "Keepers list has view and order keys" `Quick
+            test_keeper_list_view_and_order_keys
+        ; Alcotest.test_case "Keepers view and sort preserve the selected name" `Quick
+            test_keeper_list_cycles_preserve_selected_name
+        ; Alcotest.test_case "Keepers detail transition preserves the selected name" `Quick
+            test_keeper_list_detail_transition_preserves_selected_name
+        ; Alcotest.test_case "Keepers search and mouse share the ordered projection" `Quick
+            test_keeper_list_search_and_mouse_share_order
+        ; Alcotest.test_case "Keepers observation updates preserve the selected name" `Quick
+            test_observation_updates_preserve_selected_name
         ;] )
     ; ( "board and planning rows"
       , [ Alcotest.test_case "Board searches the post list" `Quick

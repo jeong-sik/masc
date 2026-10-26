@@ -4283,11 +4283,17 @@ and surface_needs_of_surface : surface -> surface_needs = function
      the one that was missed. It loaded its history when it opened and never
      again, so a message that arrived while it was on screen only appeared
      after leaving and coming back. *)
-  | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls)
+  | Keepers Keeper_list ->
+      { nothing with
+        needs_keeper_roster = true
+      ; needs_fleet_safety = true
+      ; needs_operator_approvals = true
+      ; needs_asks = true
+      }
   (* The picker keeps the roster fresh for the same reason the list does: the
      keeper it is choosing for can leave the roster while it is open. Its
      catalogue has its own loader, fetched when the picker opens. *)
-  | Keepers Keeper_runtime_pick ->
+  | Keepers (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick) ->
       { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
   | Keepers Keeper_message ->
       { nothing with
@@ -8981,6 +8987,8 @@ type state = {
      screen showing it would be state nobody can see. *)
   mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
+  mutable keeper_list_layout: Masc_tui_keeper_list_model.layout;
+  mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   (* Roster row to return to when the Keeper message view closes. Kept by name
      so an empty roster read, which clamps [keeper_cursor], does not lose it. *)
   mutable keeper_message_return: string option;
@@ -9111,6 +9119,9 @@ type state = {
      "answering now" badge is drawn from every surface, so it cannot wait
      for the operator to open the keeper list. *)
   mutable keeper_turns: Tui_decode.keeper_turn_row list;
+  (* Canonical waiting rows accepted by the same turns response. A missing
+     field stays absent here; neither it nor a failed refresh means idle. *)
+  mutable keeper_waiting: Tui_decode.keeper_waiting_row list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
   mutable msg_preparation_details: Masc_tui_preparation_details.t;
@@ -9387,6 +9398,10 @@ type state = {
   mutable tools_evidence_reference: Skill_reference.t option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
+  (* CanAdmin async reads have their own owner, independent of both the
+     inventory/catalog generation and the public Keeper turns response. *)
+  mutable tools_async_request_generation: int;
+  mutable tools_async_observation_inflight: bool;
   mutable tools_async_selection: Masc.Tui_decode_async_request.target option;
   mutable tools_async_detail_open: bool;
   mutable tools_async_detail: (Masc.Tui_decode_async_request.target, Masc.Tui_decode_async_request.reading) Masc_tui_fetched.t;
@@ -10621,6 +10636,169 @@ let take_keeper_log_read state request result =
         clear_keeper_logs state;
         None
 
+(** One keeper as the Keepers surface reads it: durable pause from the
+    metadata row, live runtime from the roster. *)
+let keeper_reading (state : state) (keeper : keeper) :
+    Masc_tui_keeper_control.reading =
+  { name = keeper.k_name
+  ; paused = keeper.k_paused
+  ; liveness =
+      (match keeper.k_origin with
+       | Tui_decode.Declared_keeper _ -> Masc_tui_keeper_control.Absent
+       | Persisted_keeper | Remote_keeper ->
+         Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name)
+  }
+
+let keeper_open_question_count state keeper_name =
+  match state.asks_snapshot with
+  | None -> 0
+  | Some snapshot ->
+      List.fold_left
+        (fun count row ->
+          match row.Masc.Tui_decode_asks.ar_asker with
+          | Masc.Tui_decode_asks.Ask_keeper name when String.equal name keeper_name -> count + 1
+          | Masc.Tui_decode_asks.Ask_keeper _ | Masc.Tui_decode_asks.Ask_installation _ -> count)
+        0 snapshot.Masc.Tui_decode_asks.asn_rows
+
+let keeper_last_turn_at (keeper : keeper) =
+  Option.bind keeper.k_activity (fun activity ->
+    Masc_domain.parse_iso8601_opt activity.Tui_decode.k_last_turn_ts)
+
+let latest_timestamp left right =
+  match left, right with
+  | Some left, Some right -> Some (if left >= right then left else right)
+  | Some _, None -> left
+  | None, Some _ -> right
+  | None, None -> None
+
+let keeper_activity_at ~turn ~waiting (keeper : keeper) =
+  match turn with
+  | Some (Tui_decode.Keeper_turn_running { preview = Some preview; _ }) ->
+      Some preview.Tui_decode.ktp_updated_at_unix
+  | Some (Tui_decode.Keeper_turn_running { started_at_unix; _ }) -> Some started_at_unix
+  | Some (Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _)
+  | None ->
+      latest_timestamp (keeper_last_turn_at keeper)
+        (match waiting with
+         | Some { Tui_decode.kwr_since; _ } -> kwr_since
+         | None -> None)
+
+let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
+  List.map
+    (fun (keeper : keeper) ->
+      let name = keeper.k_name in
+      let turn =
+        List.find_map
+          (fun (row : Tui_decode.keeper_turn_row) ->
+            if String.equal row.ktr_keeper_name name then Some row.ktr_state else None)
+          state.keeper_turns
+      in
+      let waiting =
+        List.find_opt
+          (fun (row : Tui_decode.keeper_waiting_row) -> String.equal row.kwr_keeper_name name)
+          state.keeper_waiting
+      in
+      let approval =
+        List.find_opt
+          (fun (row : Tui_decode.keeper_tool_approval) -> String.equal row.kta_keeper name)
+          state.keeper_tool_approvals
+      in
+      let task =
+        Option.bind keeper.k_activity (fun activity -> activity.Tui_decode.k_current_task_id)
+        |> Option.bind (fun task_id ->
+          List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id task_id) state.tasks)
+      in
+      let async_requests =
+        match state.tools_async_observation with
+        | Some (Tui_decode.Async_ready { requests; _ }) ->
+            List.filter
+              (fun (row : Tui_decode.async_request_row) -> String.equal row.ar_keeper_name name)
+              requests
+        | Some (Tui_decode.Async_unavailable _) | None -> []
+      in
+      { Masc_tui_keeper_list_model.keeper
+      ; reading = keeper_reading state keeper
+      ; turn
+      ; waiting
+      ; approval
+      ; task
+      ; open_questions = keeper_open_question_count state name
+      ; async_requests
+      ; last_activity_at = keeper_activity_at ~turn ~waiting keeper
+      })
+    state.keepers
+  |> Masc_tui_keeper_list_model.order_rows ~sort:state.keeper_list_sort
+
+let ordered_keepers state =
+  List.map (fun row -> row.Masc_tui_keeper_list_model.keeper) (keeper_list_rows state)
+
+let keepers_for_selection state =
+  match state.view with
+  | Keepers Keeper_list -> ordered_keepers state
+  | Keepers (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals | Planning
+  | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+  | Runtime | Config | Resources | Tools | System_logs -> state.keepers
+
+let keeper_index state keeper_name =
+  List.find_index
+    (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+    (ordered_keepers state)
+
+let select_keeper_name_with keepers state keeper_name =
+  match List.find_index (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name) keepers with
+  | Some index -> state.keeper_cursor <- index
+  | None ->
+      state.keeper_cursor <- max 0 (min state.keeper_cursor (List.length keepers - 1))
+
+let select_keeper_name state keeper_name =
+  select_keeper_name_with (keepers_for_selection state) state keeper_name
+
+let keeper_list_select_name state keeper_name =
+  select_keeper_name_with (ordered_keepers state) state keeper_name
+
+let selected_keeper (state : state) =
+  List.nth_opt (keepers_for_selection state) state.keeper_cursor
+
+let transition_keeper_view state view =
+  let selected = Option.map (fun keeper -> keeper.k_name) (selected_keeper state) in
+  state.view <- view;
+  Option.iter (select_keeper_name state) selected
+
+let cycle_keeper_list_layout state =
+  let selected = Option.map (fun keeper -> keeper.k_name) (selected_keeper state) in
+  state.keeper_list_layout <- Masc_tui_keeper_list_model.next_layout state.keeper_list_layout;
+  Option.iter (keeper_list_select_name state) selected
+
+let cycle_keeper_list_sort state =
+  let selected = Option.map (fun keeper -> keeper.k_name) (selected_keeper state) in
+  state.keeper_list_sort <- Masc_tui_keeper_list_model.next_sort state.keeper_list_sort;
+  Option.iter (keeper_list_select_name state) selected
+
+(* Ordering inputs arrive through several independent reads. Preserve identity
+   across their shared application boundary rather than freezing a numeric
+   index into the previous order. *)
+let preserve_keeper_list_selection state update =
+  let selected =
+    if state.view = Keepers Keeper_list then
+      Option.map (fun keeper -> keeper.k_name) (selected_keeper state)
+    else None
+  in
+  let result = update () in
+  if state.view = Keepers Keeper_list then
+    Option.iter (keeper_list_select_name state) selected;
+  result
+
+let accept_keeper_turn_observation state ~rows ~waiting ~observed_at =
+  preserve_keeper_list_selection state (fun () ->
+    state.keeper_turns <- rows;
+    state.keeper_waiting <- waiting;
+    state.keeper_turns_observed_at <- Some observed_at;
+    state.keeper_turns_error <- None)
+
+let refuse_keeper_turn_observation state detail =
+  state.keeper_turns_error <- Some detail
+
 let supersede_live_context_read (state : state) cancel =
   let previous = state.live_context_cancel in
   state.live_context_cancel <- cancel;
@@ -10635,7 +10813,7 @@ let live_context_keeper (state : state) =
         Option.bind state.msg_target_keeper_name (fun name ->
             List.find_opt (fun (keeper : keeper) -> String.equal name keeper.k_name) state.keepers)
     | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls | Keeper_runtime_pick) ->
-        List.nth_opt state.keepers state.keeper_cursor
+        selected_keeper state
     | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
     | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
     | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> None
@@ -11266,7 +11444,7 @@ let keeper_settings_target state =
         ksk_masc_root=Canonical_path.to_string expected.sid_masc_root;
         ksk_keeper=keeper.k_name;ksk_surface=surface;
         ksk_tab=(if surface=Keepers Keeper_detail then Some state.detail_tab else None)
-      }) (List.nth_opt state.keepers state.keeper_cursor)
+      }) (selected_keeper state)
   | (Overview | Acting | Metrics | Keepers (Keeper_list | Keeper_detail | Keeper_logs
       | Keeper_calls | Keeper_message | Keeper_runtime_pick) | Memory | Lanes | Clients
       | Board | Approvals | Planning | Schedules | Verification | Harness | Fusion
@@ -11829,6 +12007,30 @@ let tools_async_targets state = match state.tools_async_observation with
 let sync_tools_async_selection state =
   if Option.is_none state.tools_async_selection then
     state.tools_async_selection <- List.nth_opt (tools_async_targets state) 0
+
+let begin_tools_async_observation_read state =
+  if state.tools_async_observation_inflight then None
+  else begin
+    state.tools_async_observation_inflight <- true;
+    state.tools_async_request_generation <- state.tools_async_request_generation + 1;
+    Some state.tools_async_request_generation
+  end
+
+let apply_tools_async_observation_result state ~generation result =
+  if generation <> state.tools_async_request_generation then false
+  else
+    preserve_keeper_list_selection state (fun () ->
+      state.tools_async_observation_inflight <- false;
+      (match result with
+       | Ok (Tui_decode.Async_ready _ as observation) ->
+           state.tools_async_observation <- Some observation;
+           state.tools_async_observation_error <- None;
+           sync_tools_async_selection state
+       | Ok (Tui_decode.Async_unavailable { kind; reason }) ->
+           state.tools_async_observation_error <-
+             Some (kind ^ Option.fold ~none:"" ~some:(fun value -> ": " ^ value) reason)
+       | Error detail -> state.tools_async_observation_error <- Some detail);
+      true)
 
 let move_tools_async_selection state delta =
   let targets = tools_async_targets state in
@@ -14044,19 +14246,6 @@ let send_disposition state ~keeper_name : send_disposition =
            item.Masc_tui_keeper_chat_queue.request)
          (Masc_tui_keeper_chat_queue.join_target state.msg_queued ~keeper_name))
 
-(** One keeper as the Keepers surface reads it: durable pause from the
-    metadata row, live runtime from the roster. *)
-let keeper_reading (state : state) (keeper : keeper) :
-    Masc_tui_keeper_control.reading =
-  { name = keeper.k_name
-  ; paused = keeper.k_paused
-  ; liveness =
-      (match keeper.k_origin with
-       | Tui_decode.Declared_keeper _ -> Masc_tui_keeper_control.Absent
-       | Persisted_keeper | Remote_keeper ->
-         Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name)
-  }
-
 let acting_flat_entries state =
   List.filter
     (fun entry -> Masc_tui_acting.visible state.acting_filter entry.Masc_tui_acting.ae_event)
@@ -14166,9 +14355,6 @@ let detail_read_waiting state ~tab ~keeper =
       && match state.keeper_sandbox_logs_inflight with
          | Some request -> String.equal request.slr_keeper keeper
          | None -> false)
-
-let selected_keeper (state : state) =
-  List.nth_opt state.keepers state.keeper_cursor
 
 let selected_item_account state =
   match selected_keeper state, state.item_account with
@@ -15837,6 +16023,8 @@ let create_state
   opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
+  keeper_list_layout = Masc_tui_keeper_list_model.Compact;
+  keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_message_return = None;
   keeper_list_scroll = 0;
   runtime_pick_keeper = None;
@@ -15914,6 +16102,7 @@ let create_state
   keeper_tool_approvals_observed = false;
   keeper_tool_approvals_read = Snapshot_read.idle;
   keeper_turns = [];
+  keeper_waiting = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
   msg_preparation_details = Masc_tui_preparation_details.empty;
@@ -16062,6 +16251,8 @@ let create_state
   tools_evidence_reference = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
+  tools_async_request_generation = 0;
+  tools_async_observation_inflight = false;
   tools_async_selection = None;
   tools_async_detail_open = false;
   tools_async_detail = Masc_tui_fetched.initial;

@@ -9,6 +9,14 @@
 val glyph : paused:bool -> Masc.Tui_decode.keeper_health_reading option -> string
 (** [None] is a roster that was not read -- not a health nothing could name. *)
 
+val activity_glyph : Masc_tui_keeper_list_model.activity -> string
+(** The compact list's activity mark. The renderer adds the activity word and
+    substitutes its existing animated mark for preparing/running turns. *)
+
+val badge_glyph : Masc_tui_keeper_list_model.badge -> string
+(** The mark beside a secondary activity badge; the badge always keeps its
+    own text label and count where applicable. *)
+
 (** How a roster row's HEALTH mark reads while its keeper has a turn open.
     The word beside the mark is the health word in every case, the one the
     roster header counts; how long the turn has run is {!turn_clock}'s. *)

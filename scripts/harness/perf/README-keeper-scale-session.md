@@ -39,7 +39,11 @@ its actual owner. Admission and terminal identities use `(Keeper, operation
 ID)` pairs; two inputs cannot silently collapse to one operation. Closed
 backups are reopened read-only, checked with `PRAGMA integrity_check` and
 compared across all operation columns using their Python SQLite value types.
-Provider handlers must drain and the owned process must be reaped.
+Provider handlers must drain and the owned process must be reaped. The original
+base remains under `OUTPUT/owned-base` on success and failure, including SQLite
+WAL files and runtime logs. Cleanup stops owned processes and listeners; it
+does not delete evidence. A failed backup or integrity check must preserve its
+source for diagnosis.
 
 One admin producer encounters the existing server rate limiter. Only explicit
 pre-dispatch HTTP 429 mutations are retried. Retry-After is honored; when it is
@@ -55,8 +59,8 @@ keep the packet local rather than committing it. `owned-process.json` and
 `workload-phases.jsonl` support a separate read-only profiler. Such observers
 add overhead and their success/failure is independent of workload completion.
 
-New packets declare `masc.keeper-scale-evidence.v2`. Validate the evidence
-boundary without launching MASC, or independently audit a completed v2 packet:
+New packets declare `masc.keeper-scale-evidence.v3`. Validate the evidence
+boundary without launching MASC, or independently audit a completed v3 packet:
 
 ```sh
 python3 scripts/harness/perf/keeper_scale_fault_probe.py \
@@ -64,10 +68,22 @@ python3 scripts/harness/perf/keeper_scale_fault_probe.py \
 python3 scripts/harness/perf/keeper_scale_packet_audit.py /tmp/keeper-session-new
 ```
 
-The fault probe covers duplicate identities/inputs, ownership, missing replies
-and corrupt or changed backups. The independent reader writes derived audit
+Before provider release, a single SQLite read transaction per Keeper records
+all operation columns and batch membership together. Original source/input
+bytes and admission/execution/member digests are checked against the exact
+submitted text and the isolated dashboard principal. The canonical byte check
+is restricted to this ASCII, null, object and list fixture, with no floats; it
+is not a general Python/Yojson equivalence claim. Merged batch leaders and
+cleared terminal inputs follow their distinct producer rules. The independent
+reader reconstructs inputs from the workload and raw successful RPC requests,
+then reopens both the retained original and backup databases. This additional
+held observation cost belongs to the experiment, not released throughput.
+
+The fault probe covers duplicate identities/inputs, ownership, missing replies,
+corrupt or changed backups, original payload/digest/batch drift and failure
+preservation of original DB/WAL/log bytes. The independent reader writes derived audit
 reports while preserving raw receipts and the original workload verdict. It
-accepts v2 only; older packets retain their frozen original readers and results.
+accepts v3 only; older packets retain their frozen original readers and results.
 
 Report held, released and settled phases separately. Creation-to-completion
 includes deliberate provider hold, admission pacing, queueing and runtime

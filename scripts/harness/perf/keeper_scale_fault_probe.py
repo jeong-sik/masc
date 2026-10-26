@@ -63,6 +63,66 @@ def main():
     reject("duplicate durable rows do not collapse into a set", lambda: harness.validate_durable_operations(
         [a, b], ["owner-a", "owner-b"], duplicate_rows, terminal, "fixture"))
 
+    originals = [operation("owner-a", sequence, "op-" + str(sequence)) for sequence in (1, 2, 3)]
+    snapshot = {"operations": {"columns": [], "rows": []},
+                "operation_batch_members": {"columns": [], "rows": []}}
+    public_held = {}
+    for sequence, op in enumerate(originals):
+        op["original"] = harness.original_payload(op["keeper"], "fixture-" + str(op["sequence"]))
+        payload = op["original"]
+        snapshot["operations"]["rows"].append({"operation_id": op["operation_id"], "sequence": sequence,
+            "created_at": 0.0, "state": "queued", "source_json": harness.canonical_payload(payload["source"]),
+            "input_json": harness.canonical_payload(payload["input"]),
+            "admission_digest": harness.payload_digest(payload), "execution_digest": harness.payload_digest(payload["input"])})
+    # A running batch leader has a merged execution input while every member
+    # retains its original admission digest. A third operation is unbatched.
+    merged = {**originals[0]["original"]["input"], "message": "fixture-1\n\nfixture-2",
+        "user_blocks": [{"type": "text", "text": "fixture-1"}, {"type": "text", "text": "fixture-2"}]}
+    snapshot["operations"]["rows"][0].update(state="running", input_json=harness.canonical_payload(merged),
+        execution_digest=harness.payload_digest(merged))
+    for position, op in enumerate(originals[:2]):
+        snapshot["operation_batch_members"]["rows"].append({"operation_id": op["operation_id"],
+            "execution_id": "op-1", "position": position,
+            "admitted_digest": harness.payload_digest(op["original"]["input"]),
+            "admitted_input_json": harness.canonical_payload(op["original"]["input"])})
+    for op, stored in zip(originals, snapshot["operations"]["rows"]):
+        status = {"operation_id": op["operation_id"], "source": op["original"]["source"],
+            "input": json.loads(stored["input_json"]), "sequence": str(stored["sequence"]),
+            "created_at": stored["created_at"], "state": stored["state"].capitalize(),
+            "admission_digest": stored["admission_digest"], "execution_digest": stored["execution_digest"]}
+        if op in originals[:2]:
+            status.update(state="Running", batch_execution_id="op-1",
+                batch_input_digest=harness.payload_digest(op["original"]["input"]))
+        public_held[harness.operation_key(op)] = status
+    snapshots = [{"keeper": "owner-a", "snapshot": snapshot}]
+    harness.validate_original_payloads(originals, snapshots, public_held, terminal=False)
+    cases.append({"case": "held original payloads with merged leader and independent member digests", "result": "accepted"})
+    wrong_projection = copy.deepcopy(public_held)
+    wrong_projection[harness.operation_key(originals[1])]["state"] = "Queued"
+    reject("batch follower public state must project its Running leader", lambda: harness.validate_original_payloads(
+        originals, snapshots, wrong_projection, terminal=False))
+    for label, change in [
+        ("source route drift", lambda data: data[0]["snapshot"]["operations"]["rows"][0].update(source_json='{}')),
+        ("admission digest drift", lambda data: data[0]["snapshot"]["operations"]["rows"][0].update(admission_digest="0" * 64)),
+        ("leader digest incorrectly replaced by original digest", lambda data: data[0]["snapshot"]["operations"]["rows"][0].update(
+            execution_digest=harness.payload_digest(originals[0]["original"]["input"]))),
+        ("member original input drift", lambda data: data[0]["snapshot"]["operation_batch_members"]["rows"][1].update(admitted_input_json='{}')),
+        ("member position drift", lambda data: data[0]["snapshot"]["operation_batch_members"]["rows"][1].update(position=0))]:
+        damaged = copy.deepcopy(snapshots)
+        change(damaged)
+        reject(label, lambda: harness.validate_original_payloads(originals, damaged, public_held, terminal=False))
+    terminal_snapshot, public_terminal = copy.deepcopy(snapshots), copy.deepcopy(public_held)
+    for stored in terminal_snapshot[0]["snapshot"]["operations"]["rows"]:
+        stored.update(state="succeeded", input_json=None)
+    for member in terminal_snapshot[0]["snapshot"]["operation_batch_members"]["rows"]:
+        member["admitted_input_json"] = None
+    for status in public_terminal.values():
+        status.update(state="Succeeded", input=None)
+    harness.validate_original_payloads(originals, terminal_snapshot, public_terminal, terminal=True)
+    cases.append({"case": "terminal cleared inputs preserve original admission and member digests", "result": "accepted"})
+    reject("canonicalizer refuses non-ASCII extensions", lambda: harness.canonical_payload({"text": "한글"}))
+    reject("canonicalizer refuses float encoding assumptions", lambda: harness.canonical_payload({"value": 1.0}))
+
     with tempfile.TemporaryDirectory(prefix="keeper-scale-evidence-fault-") as directory:
         base = Path(directory)
         source, backup = base / "source.sqlite3", base / "backup.sqlite3"
@@ -148,6 +208,31 @@ def main():
                           "result": "accepted"})
         else:
             raise AssertionError("missing --binary was accepted")
+
+        failed_out = base / "owned-database-failure"
+        evidence = {"chat-operations.sqlite3": b"damaged database", "chat-operations.sqlite3-wal": b"wal bytes",
+                    "runtime.log": b"original runtime evidence"}
+
+        def damaged_store_run(args, owner):
+            args.output.mkdir()
+            owner["output"] = args.output
+            owned_base = args.output / "owned-base"
+            owned_base.mkdir()
+            owner["base"] = owned_base
+            for name, content in evidence.items():
+                (owned_base / name).write_bytes(content)
+            raise sqlite3.DatabaseError("injected integrity/copy failure")
+
+        with mock.patch.object(harness, "run", damaged_store_run):
+            try:
+                run_main_with_argv(failed_out)
+            except sqlite3.DatabaseError:
+                assert {p.name: p.read_bytes() for p in (failed_out / "owned-base").iterdir()} == evidence
+                assert json.loads((failed_out / "cleanup.json").read_text())["base_retained"] is True
+                assert json.loads((failed_out / "failure.json").read_text())["type"] == "DatabaseError"
+                cases.append({"case": "fallback on database failure preserves original DB/WAL/log bytes", "result": "preserved"})
+            else:
+                raise AssertionError("database failure was swallowed")
 
     report = {"schema": harness.EVIDENCE_SCHEMA, "harness_sha256": harness.digest(Path(harness.__file__)),
               "fault_probe_sha256": harness.digest(Path(__file__)), "masc_processes_started": 0, "cases": cases, "passed": True}

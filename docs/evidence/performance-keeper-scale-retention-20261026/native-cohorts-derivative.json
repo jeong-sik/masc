@@ -1,0 +1,753 @@
+{
+  "schema": "masc.keeper-scale-public-derivative.v1",
+  "scope": "Selected numeric derivative of private v3 runtime packets. Raw requests, original/backup databases, ephemeral credentials and copied binaries remain local. These copied numbers are not a replacement for the retained raw packets.",
+  "experiment": "Sequential candidate-only fresh owned runtimes, one run per population, shared host; no causal speedup estimate. Single admin producer; 10ms scripted reply delay plus first-provider hold; no guest/Add-on/peer business tools/TUI/real model throughput proof.",
+  "source_review_current_full_diff_sha256": "d40158cb9438fab13b8ce23776ec05421f6129bb032a763134a796654abce584",
+  "cohorts": [
+    {
+      "keepers": 2,
+      "local_packet": "artifacts/runs/extreme-perf-20261026/owned-concurrent-c3cb371-2-v3",
+      "source": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "binary_sha256": "06ee93c99b31a6fca6786c2c6a676c8023b62b0fc854da6616518c21202ad3a8",
+      "harness_sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284",
+      "auditor_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+      "original_run_verdict": "PASS",
+      "post_run_workload_validation": "PASS",
+      "succeeded_original_operations": 4,
+      "actual_scripted_provider_calls": 4,
+      "peak_provider_requests_in_flight": 2,
+      "health_live_samples": 6,
+      "valid_health_live_samples": 6,
+      "health_live_wire_ms_by_phase": {
+        "submitting_model_held": {
+          "samples": 2,
+          "valid": 2,
+          "failures": 0,
+          "p50_ms": 0.476958,
+          "p95_ms": 0.583167,
+          "max_ms": 0.583167
+        },
+        "running_model_released": {
+          "samples": 3,
+          "valid": 3,
+          "failures": 0,
+          "p50_ms": 0.629458,
+          "p95_ms": 0.750875,
+          "max_ms": 0.750875
+        },
+        "settled": {
+          "samples": 1,
+          "valid": 1,
+          "failures": 0,
+          "p50_ms": 0.613125,
+          "p95_ms": 0.613125,
+          "max_ms": 0.613125
+        }
+      },
+      "mcp_attempts_by_request_phase": {
+        "initialize": {
+          "attempts": 1,
+          "status_counts": {
+            "200": 1
+          },
+          "successful_wire_ms": {
+            "count": 1,
+            "p50": 2.455917,
+            "p95": 2.455917,
+            "p99": 2.455917,
+            "max": 2.455917
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 0,
+            "max": null
+          }
+        },
+        "create": {
+          "attempts": 2,
+          "status_counts": {
+            "200": 2
+          },
+          "successful_wire_ms": {
+            "count": 2,
+            "p50": 24.383875,
+            "p95": 62.141375,
+            "p99": 62.141375,
+            "max": 62.141375
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 0,
+            "max": null
+          }
+        },
+        "enqueue": {
+          "attempts": 4,
+          "status_counts": {
+            "200": 4
+          },
+          "successful_wire_ms": {
+            "count": 4,
+            "p50": 8.477708,
+            "p95": 38.586584,
+            "p99": 38.586584,
+            "max": 38.586584
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 0,
+            "max": null
+          }
+        },
+        "queue-held": {
+          "attempts": 4,
+          "status_counts": {
+            "200": 4
+          },
+          "successful_wire_ms": {
+            "count": 4,
+            "p50": 2.444583,
+            "p95": 3.259541,
+            "p99": 3.259541,
+            "max": 3.259541
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 0,
+            "max": null
+          }
+        },
+        "settlement": {
+          "attempts": 10,
+          "status_counts": {
+            "200": 10
+          },
+          "successful_wire_ms": {
+            "count": 10,
+            "p50": 3.367709,
+            "p95": 26.3995,
+            "p99": 26.3995,
+            "max": 26.3995
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 0,
+            "max": null
+          }
+        }
+      },
+      "operation_wall_clock_ms": {
+        "created_to_completed_ms": {
+          "count": 4,
+          "p50": 307.3458671569824,
+          "p95": 387.39991188049316,
+          "p99": 387.39991188049316,
+          "max": 387.39991188049316
+        },
+        "created_to_started_ms": {
+          "count": 4,
+          "p50": 1.3010501861572266,
+          "p95": 282.1629047393799,
+          "p99": 282.1629047393799,
+          "max": 282.1629047393799
+        },
+        "started_to_completed_ms": {
+          "count": 4,
+          "p50": 129.9879550933838,
+          "p95": 306.2300682067871,
+          "p99": 306.2300682067871,
+          "max": 306.2300682067871
+        },
+        "admission_success_wire_ms": {
+          "count": 4,
+          "p50": 8.477708,
+          "p95": 38.586584,
+          "p99": 38.586584,
+          "max": 38.586584
+        },
+        "admission_first_attempt_to_accepted_ms": {
+          "count": 4,
+          "p50": 8.651209,
+          "p95": 38.805458,
+          "p99": 38.805458,
+          "max": 38.805458
+        }
+      },
+      "phase_windows": [
+        {
+          "phase": "submitting_model_held",
+          "start_ns": 186446067863291,
+          "end_ns": 186446239044000,
+          "duration_ms": 171.180709
+        },
+        {
+          "phase": "model_held_queue_observation",
+          "start_ns": 186446239044000,
+          "end_ns": 186446261065041,
+          "duration_ms": 22.021041
+        },
+        {
+          "phase": "running_model_released",
+          "start_ns": 186446261065041,
+          "end_ns": 186446539397958,
+          "duration_ms": 278.332917
+        }
+      ],
+      "rate_limit_wait_s": 0,
+      "http_429": 0,
+      "denied_inventory_attempts": 2,
+      "unexpected_guest_command_attempts": 0,
+      "rss_after_bytes": 306724864,
+      "rss_held_bytes": 239599616,
+      "scheduler_after": {
+        "pool_domains": 14,
+        "probe": "running",
+        "interval_ms": 100.0,
+        "window_s": 60.0,
+        "stall_threshold_ms": 1000.0,
+        "lag": {
+          "samples": 7,
+          "p50_ms": 0.25862499999999844,
+          "p95_ms": 1.0295830000000006,
+          "p99_ms": 1.0295830000000006,
+          "max_ms": 1.0295830000000006,
+          "mean_ms": 0.4204462857142805,
+          "stalls": 0,
+          "over_50ms_count": 0,
+          "over_200ms_count": 0
+        }
+      },
+      "cleanup": {
+        "server_returncode": 0,
+        "server_reaped": true,
+        "forced_kill": false,
+        "sampler_stopped": true,
+        "model_server_stopped": true,
+        "base_retained": true,
+        "provider_requests_drained": true,
+        "active_provider_requests": 0,
+        "provider_handler_threads": 0
+      },
+      "raw_receipt_sha256": {
+        "identity.json": "aa168daee08a72738423b6ee73e585823b3d6ea2054844c8b2384a028e0ebc80",
+        "workload.json": "d171997e5bc49fd1a0809450c91fa1e6798776cb8fcd6ba4f7ede436a37c315a",
+        "operations-admitted.json": "fac72d15e3343b81099c6a6529dc735b00d32875efea5d370f365c008097ef9b",
+        "queue-held.json": "62ab07ade7f54e03412a1497da6abab26628c0d2786f112cb411b0a45a8b54c4",
+        "admission-snapshots.json": "524eae0c0e51753667d9c4923df5f2663a40bb4b933aa1b17193fc988ba3dc3a",
+        "terminal.json": "a1e849c575c12888eafa61c741539963ca970405904a8175d73273ec533e61fd",
+        "durable-operations.json": "a26f9f562f983fa05a0e42eed81c957e78c7923bcbc2886812c07369a28dd07b",
+        "model-requests.jsonl": "6a8908c6937af2d879ba810c025c5590a0776c6e7fb07e5f646f4188c1b12eed",
+        "model-outcomes.jsonl": "45d2e174b2839264d7c22dae8bdc0efca70950fa9367583a517be9a3ca206522",
+        "requests.jsonl": "219542c02790ab0bb3e82602138a2999470d30a6794652f0dd501de880e57b25",
+        "latency-samples.json": "e5ee77e7c397fb6c42ac9f46bb8cbb27f5cdf32c287de79ba2d9eb0d7e8b89bc",
+        "cleanup.json": "958d14bf76ad3855e22fda04438c82ccccd401c328c39bc2d36629b95c106a3a",
+        "summary.json": "a60c1ca4631f1f9c2cca0f446e6a4d784563814374818513ba29c4bb93748f31",
+        "post-run-audit.json": "787185759d49e5cfc0cb523e9a376bdc20b3000c936ed1402262eff0d188be0d"
+      }
+    },
+    {
+      "keepers": 30,
+      "local_packet": "artifacts/runs/extreme-perf-20261026/owned-concurrent-c3cb371-30-v3",
+      "source": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "binary_sha256": "06ee93c99b31a6fca6786c2c6a676c8023b62b0fc854da6616518c21202ad3a8",
+      "harness_sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284",
+      "auditor_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+      "original_run_verdict": "PASS",
+      "post_run_workload_validation": "PASS",
+      "succeeded_original_operations": 60,
+      "actual_scripted_provider_calls": 60,
+      "peak_provider_requests_in_flight": 30,
+      "health_live_samples": 71,
+      "valid_health_live_samples": 71,
+      "health_live_wire_ms_by_phase": {
+        "submitting_model_held": {
+          "samples": 19,
+          "valid": 19,
+          "failures": 0,
+          "p50_ms": 1.0595,
+          "p95_ms": 7.114833,
+          "max_ms": 7.114833
+        },
+        "model_held_queue_observation": {
+          "samples": 22,
+          "valid": 22,
+          "failures": 0,
+          "p50_ms": 0.9915,
+          "p95_ms": 1.596833,
+          "max_ms": 1.661875
+        },
+        "running_model_released": {
+          "samples": 30,
+          "valid": 30,
+          "failures": 0,
+          "p50_ms": 1.144542,
+          "p95_ms": 6.383875,
+          "max_ms": 8.265709
+        }
+      },
+      "mcp_attempts_by_request_phase": {
+        "initialize": {
+          "attempts": 1,
+          "status_counts": {
+            "200": 1
+          },
+          "successful_wire_ms": {
+            "count": 1,
+            "p50": 3.785917,
+            "p95": 3.785917,
+            "p99": 3.785917,
+            "max": 3.785917
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 0,
+            "max": null
+          }
+        },
+        "create": {
+          "attempts": 30,
+          "status_counts": {
+            "200": 30
+          },
+          "successful_wire_ms": {
+            "count": 30,
+            "p50": 21.533958,
+            "p95": 42.180625,
+            "p99": 63.762125,
+            "max": 63.762125
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 0,
+            "max": null
+          }
+        },
+        "enqueue": {
+          "attempts": 61,
+          "status_counts": {
+            "200": 60,
+            "429": 1
+          },
+          "successful_wire_ms": {
+            "count": 60,
+            "p50": 15.728667,
+            "p95": 30.871541,
+            "p99": 40.731875,
+            "max": 40.731875
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 1,
+            "p50": 0.344417,
+            "p95": 0.344417,
+            "p99": 0.344417,
+            "max": 0.344417
+          }
+        },
+        "queue-held": {
+          "attempts": 62,
+          "status_counts": {
+            "200": 60,
+            "429": 2
+          },
+          "successful_wire_ms": {
+            "count": 60,
+            "p50": 3.191709,
+            "p95": 7.092916,
+            "p99": 14.406625,
+            "max": 14.406625
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 2,
+            "p50": 0.400625,
+            "p95": 0.402333,
+            "p99": 0.402333,
+            "max": 0.402333
+          }
+        },
+        "settlement": {
+          "attempts": 66,
+          "status_counts": {
+            "200": 64,
+            "429": 2
+          },
+          "successful_wire_ms": {
+            "count": 64,
+            "p50": 3.575833,
+            "p95": 98.724667,
+            "p99": 275.316917,
+            "max": 275.316917
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 2,
+            "p50": 0.32425,
+            "p95": 0.337958,
+            "p99": 0.337958,
+            "max": 0.337958
+          }
+        }
+      },
+      "operation_wall_clock_ms": {
+        "created_to_completed_ms": {
+          "count": 60,
+          "p50": 5065.079927444458,
+          "p95": 5685.564994812012,
+          "p99": 6288.287162780762,
+          "max": 6288.287162780762
+        },
+        "created_to_started_ms": {
+          "count": 60,
+          "p50": 14.951229095458984,
+          "p95": 4948.783874511719,
+          "p99": 5856.667041778564,
+          "max": 5856.667041778564
+        },
+        "started_to_completed_ms": {
+          "count": 60,
+          "p50": 1498.6310005187988,
+          "p95": 5496.515989303589,
+          "p99": 6286.715030670166,
+          "max": 6286.715030670166
+        },
+        "admission_success_wire_ms": {
+          "count": 60,
+          "p50": 15.728667,
+          "p95": 30.871541,
+          "p99": 40.731875,
+          "max": 40.731875
+        },
+        "admission_first_attempt_to_accepted_ms": {
+          "count": 60,
+          "p50": 16.27725,
+          "p95": 31.851625,
+          "p99": 1018.017167,
+          "max": 1018.017167
+        }
+      },
+      "phase_windows": [
+        {
+          "phase": "submitting_model_held",
+          "start_ns": 186515568345583,
+          "end_ns": 186517549882583,
+          "duration_ms": 1981.537
+        },
+        {
+          "phase": "model_held_queue_observation",
+          "start_ns": 186517549882583,
+          "end_ns": 186519867381458,
+          "duration_ms": 2317.498875
+        },
+        {
+          "phase": "running_model_released",
+          "start_ns": 186519867381458,
+          "end_ns": 186523135576708,
+          "duration_ms": 3268.19525
+        }
+      ],
+      "rate_limit_wait_s": 5.033589668,
+      "http_429": 5,
+      "denied_inventory_attempts": 2,
+      "unexpected_guest_command_attempts": 0,
+      "rss_after_bytes": 795951104,
+      "rss_held_bytes": 577912832,
+      "scheduler_after": {
+        "pool_domains": 14,
+        "probe": "running",
+        "interval_ms": 100.0,
+        "window_s": 60.0,
+        "stall_threshold_ms": 1000.0,
+        "lag": {
+          "samples": 83,
+          "p50_ms": 0.8661249999999954,
+          "p95_ms": 2.8352499999999976,
+          "p99_ms": 3.357958999999994,
+          "max_ms": 3.357958999999994,
+          "mean_ms": 1.1065899156626458,
+          "stalls": 0,
+          "over_50ms_count": 0,
+          "over_200ms_count": 0
+        }
+      },
+      "cleanup": {
+        "server_returncode": 0,
+        "server_reaped": true,
+        "forced_kill": false,
+        "sampler_stopped": true,
+        "model_server_stopped": true,
+        "base_retained": true,
+        "provider_requests_drained": true,
+        "active_provider_requests": 0,
+        "provider_handler_threads": 0
+      },
+      "raw_receipt_sha256": {
+        "identity.json": "07a052ee84b58a55ab869fa78608499a983b6501698e9cca4f48b2a4f7eee55f",
+        "workload.json": "a3c511f3856d2815c403a6785fbeb6cbd78177d59c1ba670692999161ef3b162",
+        "operations-admitted.json": "4f247452a2959e77c2683bebdd51d5afbad1b56aea9da56c709d1b41306dfeb1",
+        "queue-held.json": "1b8c4784c0f5df5a6a8532c94c4275c7fbbddbfcd26c9eff32b8028bf1ca6b30",
+        "admission-snapshots.json": "ab744678e5fa49d03ea45db4ba92710ae0eb1f9ab3d40b898be9a9aee857e59a",
+        "terminal.json": "87ff5c8ef74f4fece635064a2d3192f1bf0a39f0a2ef73384f495abf0e257f25",
+        "durable-operations.json": "c7bdb33c8e7d71faa74a46a2b186765b7dffdd9dd49f6408b8916908c88d847a",
+        "model-requests.jsonl": "1b94cd6d783a3b1376f2f9139f084a38c7204566040173e801a4aec37f3de0c3",
+        "model-outcomes.jsonl": "9d2eec699def7602d0ee9d6e0e6b1fdfef797b90590803a130d8b3bfe6df5d83",
+        "requests.jsonl": "fd0d932d5cf15cbda2035152f1c744fbafe5c68a4a73f43d6120123102a6f66d",
+        "latency-samples.json": "55294293b3cc59ca4bf032bcf52d39f448a5558ca9d2f925f6d8bd3bf93e553e",
+        "cleanup.json": "f461082f7296949d18ef5fd34dad5e4b8f75cfefb8c7472b68d9971139e49035",
+        "summary.json": "dcb541ce24a6b441e799061b51b7ef6171dfc8f8b50b9a489c888c319bcef1ea",
+        "post-run-audit.json": "e76c3349edb8d9843ee743a61012bbd2bc50a9901f3713f60e0dc47917220edd"
+      }
+    },
+    {
+      "keepers": 300,
+      "local_packet": "artifacts/runs/extreme-perf-20261026/owned-concurrent-c3cb371-300-v3",
+      "source": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "binary_sha256": "06ee93c99b31a6fca6786c2c6a676c8023b62b0fc854da6616518c21202ad3a8",
+      "harness_sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284",
+      "auditor_sha256": "be6b0a62cf36d7174f43d2ff282285e8eb151fe8fe25583ee41c8c35c5976f9b",
+      "original_run_verdict": "PASS",
+      "post_run_workload_validation": "PASS",
+      "succeeded_original_operations": 600,
+      "actual_scripted_provider_calls": 600,
+      "peak_provider_requests_in_flight": 300,
+      "health_live_samples": 1041,
+      "valid_health_live_samples": 1041,
+      "health_live_wire_ms_by_phase": {
+        "submitting_model_held": {
+          "samples": 270,
+          "valid": 270,
+          "failures": 0,
+          "p50_ms": 1.522042,
+          "p95_ms": 6.121375,
+          "max_ms": 55.909833
+        },
+        "model_held_queue_observation": {
+          "samples": 284,
+          "valid": 284,
+          "failures": 0,
+          "p50_ms": 1.253167,
+          "p95_ms": 3.178708,
+          "max_ms": 14.2155
+        },
+        "running_model_released": {
+          "samples": 485,
+          "valid": 485,
+          "failures": 0,
+          "p50_ms": 0.9575,
+          "p95_ms": 7.548458,
+          "max_ms": 3599.31575
+        },
+        "settled": {
+          "samples": 2,
+          "valid": 2,
+          "failures": 0,
+          "p50_ms": 0.434208,
+          "p95_ms": 0.540958,
+          "max_ms": 0.540958
+        }
+      },
+      "mcp_attempts_by_request_phase": {
+        "initialize": {
+          "attempts": 1,
+          "status_counts": {
+            "200": 1
+          },
+          "successful_wire_ms": {
+            "count": 1,
+            "p50": 1.492375,
+            "p95": 1.492375,
+            "p99": 1.492375,
+            "max": 1.492375
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 0,
+            "max": null
+          }
+        },
+        "create": {
+          "attempts": 308,
+          "status_counts": {
+            "200": 300,
+            "429": 8
+          },
+          "successful_wire_ms": {
+            "count": 300,
+            "p50": 14.492875,
+            "p95": 32.566167,
+            "p99": 52.14925,
+            "max": 67.0865
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 8,
+            "p50": 0.568583,
+            "p95": 0.78375,
+            "p99": 0.78375,
+            "max": 0.78375
+          }
+        },
+        "enqueue": {
+          "attempts": 614,
+          "status_counts": {
+            "200": 600,
+            "429": 14
+          },
+          "successful_wire_ms": {
+            "count": 600,
+            "p50": 22.22875,
+            "p95": 47.264458,
+            "p99": 91.448542,
+            "max": 205.383083
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 14,
+            "p50": 1.292083,
+            "p95": 7.833542,
+            "p99": 7.833542,
+            "max": 7.833542
+          }
+        },
+        "queue-held": {
+          "attempts": 624,
+          "status_counts": {
+            "200": 600,
+            "429": 24
+          },
+          "successful_wire_ms": {
+            "count": 600,
+            "p50": 8.7195,
+            "p95": 14.958208,
+            "p99": 22.87,
+            "max": 49.846625
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 24,
+            "p50": 0.819041,
+            "p95": 1.140417,
+            "p99": 1.210334,
+            "max": 1.210334
+          }
+        },
+        "settlement": {
+          "attempts": 633,
+          "status_counts": {
+            "200": 609,
+            "429": 24
+          },
+          "successful_wire_ms": {
+            "count": 609,
+            "p50": 4.461959,
+            "p95": 11.47425,
+            "p99": 785.99,
+            "max": 13209.662667
+          },
+          "failed_attempt_elapsed_ms": {
+            "count": 24,
+            "p50": 0.303166,
+            "p95": 0.398084,
+            "p99": 0.438709,
+            "max": 0.438709
+          }
+        }
+      },
+      "operation_wall_clock_ms": {
+        "created_to_completed_ms": {
+          "count": 600,
+          "p50": 66578.33409309387,
+          "p95": 81424.84307289124,
+          "p99": 84133.85009765625,
+          "max": 87191.73884391785
+        },
+        "created_to_started_ms": {
+          "count": 600,
+          "p50": 55.79805374145508,
+          "p95": 66416.46099090576,
+          "p99": 68661.63206100464,
+          "max": 72100.29101371765
+        },
+        "started_to_completed_ms": {
+          "count": 600,
+          "p50": 20083.49895477295,
+          "p95": 81420.75109481812,
+          "p99": 84130.70106506348,
+          "max": 87189.6779537201
+        },
+        "admission_success_wire_ms": {
+          "count": 600,
+          "p50": 22.22875,
+          "p95": 47.264458,
+          "p99": 91.448542,
+          "max": 205.383083
+        },
+        "admission_first_attempt_to_accepted_ms": {
+          "count": 600,
+          "p50": 22.69325,
+          "p95": 60.590125,
+          "p99": 1034.908583,
+          "max": 1065.925625
+        }
+      },
+      "phase_windows": [
+        {
+          "phase": "submitting_model_held",
+          "start_ns": 186577401274166,
+          "end_ns": 186606396226250,
+          "duration_ms": 28994.952084
+        },
+        {
+          "phase": "model_held_queue_observation",
+          "start_ns": 186606396226250,
+          "end_ns": 186636892842583,
+          "duration_ms": 30496.616333
+        },
+        {
+          "phase": "running_model_released",
+          "start_ns": 186636892842583,
+          "end_ns": 186693925762875,
+          "duration_ms": 57032.920292
+        }
+      ],
+      "rate_limit_wait_s": 70.389767666,
+      "http_429": 70,
+      "denied_inventory_attempts": 602,
+      "unexpected_guest_command_attempts": 0,
+      "rss_after_bytes": 2097364992,
+      "rss_held_bytes": 1198866432,
+      "scheduler_after": {
+        "pool_domains": 14,
+        "probe": "running",
+        "interval_ms": 100.0,
+        "window_s": 60.0,
+        "stall_threshold_ms": 1000.0,
+        "lag": {
+          "samples": 600,
+          "p50_ms": 0.9085419999999983,
+          "p95_ms": 4.390624999999996,
+          "p99_ms": 114.004084,
+          "max_ms": 1158.108,
+          "mean_ms": 8.233349704999988,
+          "stalls": 1,
+          "over_50ms_count": 8,
+          "over_200ms_count": 5
+        }
+      },
+      "cleanup": {
+        "server_returncode": 0,
+        "server_reaped": true,
+        "forced_kill": false,
+        "sampler_stopped": true,
+        "model_server_stopped": true,
+        "base_retained": true,
+        "provider_requests_drained": true,
+        "active_provider_requests": 0,
+        "provider_handler_threads": 0
+      },
+      "raw_receipt_sha256": {
+        "identity.json": "6f21db8e43f483aba7b2e513b5696354064731a619db54dbeed13e0a0c1452ff",
+        "workload.json": "f5acdc5141bc4790f70b5bc64633f01d76fc883f913acfa3342d2bc13f105e96",
+        "operations-admitted.json": "e961ba7e2427168394b9c3cc36ec6e5ad90adefb0ffd07dbeecd8224e679510e",
+        "queue-held.json": "8a585cc7e074e0dc82c0fd9123fe79b139a3521862a84ad89d5ffa833033d774",
+        "admission-snapshots.json": "a6d04b2ce311ed49218b543c9836e567ff65f081d3fa15d07478747c18a0afb0",
+        "terminal.json": "eb2120d81d9827466cf8be281ba3b932130057784ccc491328107a47973a23d8",
+        "durable-operations.json": "88ec96495fb2f0ece58c7a059a2c961fe92b15f20611f56d027327dfd242330f",
+        "model-requests.jsonl": "af32eab527c8965c5c7ddfaa018174faf56f5e3674797dfcc9b99031a89b1afc",
+        "model-outcomes.jsonl": "fc40e970de7da9996a34b5a70dc2503f49493e772fa7afc9f20fe9abd1b1d947",
+        "requests.jsonl": "9d19e2615d3a1ab4550289412f45f5ce4532ce320ef8af4afebfd9c71daa9940",
+        "latency-samples.json": "fe548b24429bc6b456c02c16352bbbcbe00e2d25a9eef5cf8ef0e0c1cfff7e37",
+        "cleanup.json": "30e0695bdd522d94b43f35169b1a9e8b66fb6185fd8f4fcbea75eb0b61da1daf",
+        "summary.json": "08f08575bad745fad779c1d002e89b6c77f2b2c3f4c37bbf65ae3255fee6b7b2",
+        "post-run-audit.json": "9d44e05a16364ac6e8aec974ab9718eb0f96193b2d5f6c1575d731e908170073"
+      }
+    }
+  ],
+  "goal_0_1_ms_achieved": false
+}

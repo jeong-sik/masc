@@ -1,0 +1,16 @@
+{
+  "README.md": "0dfedf6595e93020e0b0fd436174e7023bfd9417d350585c130460d25177c593",
+  "canonical-evidence-audit.json": "96776d95082f3590bba3b7aea9986d96ee78bc8900b8fe4f0529a0d3ee2e3dbb",
+  "fault-probe-execution.json": "ecb90b555213164fe459638c7b2abfc98329da4f6b045757c4c2cf5aaf942f85",
+  "fault-probe.json": "b9529d628a8e01da7ec29dfcf4aac2c34b51dd5c822f6741ab296400d79a0673",
+  "fault-probe.stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "fault-probe.stdout.txt": "b9529d628a8e01da7ec29dfcf4aac2c34b51dd5c822f6741ab296400d79a0673",
+  "projection-fault-probe.py": "a3098f11812797c5219681cc2c74e024f9da2d7e1f5a15f7e49f810195dafa63",
+  "projection-fault-result.json": "7e0740a0805b67ab067188107d4a88478c6c0cc29a8a9c6ab3f9e2a5cd8d1d54",
+  "projection-packet/principal.json": "41593a87b667ced2f86c309dc2a7c988c222ce1d2131733ca13fdd2809baa0e4",
+  "projection-packet/requests.jsonl": "b5b3c3fb8f3058dc0f3afb387a90afd7da61229ab22f537558d5bfe1ad034b3c",
+  "projection-packet/workload.json": "a0b55422530576c2fd2d99cb3b1a9123ec3823232260704654b3e38df19860d6",
+  "reviewed.diff": "edbc65cd679a6a5c3d57da12136635a0b42cec832ee5d0d51c046f46f1b0ddeb",
+  "source-manifest.json": "4213cb168e8ab5d96442c8b4f78a686b8623babcd6887440f619013b83b894ff",
+  "verdict.json": "08f72778a4922f43c75f66c3f2945b9e8bf575f31d6ee0de0f34eb9afb7085f6"
+}

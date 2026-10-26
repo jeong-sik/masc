@@ -1,0 +1,41 @@
+{
+  "schema": "masc.retained-evidence-copy.v1",
+  "scope": "Selected synthetic fault/canonical and native artifact identity evidence. No private runtime packet or executable included. Source reviews and native workload evidence are added separately when complete.",
+  "files": [
+    {
+      "path": "canonical-subset/inputs.json",
+      "sha256": "31f1e01032bbf7dd8f7dab52db052e5da1c479ef07a32a0bdb74ac51c7b555d3",
+      "bytes": 5335
+    },
+    {
+      "path": "canonical-subset/probe.ml",
+      "sha256": "d8267d88c2a692ca50ca1411d805c3369375a94667ca0b4f1897aa315d6b3940",
+      "bytes": 1490
+    },
+    {
+      "path": "canonical-subset/receipt.json",
+      "sha256": "a7404aae164a0ccf7a7a03d8e44e63a902c0dc4ec8783d620d97e2f847ea012c",
+      "bytes": 1468
+    },
+    {
+      "path": "canonical-subset/stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "canonical-subset/stdout.txt",
+      "sha256": "9d3895489d1e330c4cf2b499f1889eef4ae25d225bb597eb4245a942e53856b7",
+      "bytes": 5073
+    },
+    {
+      "path": "faults.json",
+      "sha256": "ae0b562f2d7bf2f3156b717338b085b9a929e8b309ac99641cf4b523d091165a",
+      "bytes": 5618
+    },
+    {
+      "path": "qualified-native-pair.json",
+      "sha256": "dd462bd785f3b8c202f4ea710f43da4e8b8a7aab6be929ee7fe5a39658ef6ad7",
+      "bytes": 4109
+    }
+  ]
+}

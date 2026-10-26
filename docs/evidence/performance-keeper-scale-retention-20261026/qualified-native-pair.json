@@ -1,0 +1,112 @@
+{
+  "schema": "masc.native-comparison-qualification.v1",
+  "roles": {
+    "baseline": {
+      "application_source": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+      "workflow_source": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+      "receipt_sha256": "662ec19743c1b209d37a25263b857d03124af5dba2e51e959c9ebdc4d6a69d9b",
+      "server_sha256": "e5e30b8ffd632910eb8b8ed023fddb3a8e10742720c26d4b7f0a3561ede5820c",
+      "tui_sha256": "1811d5e657306ff3c21552a32687e69ae7608228b740c651ecfc514c6c1e501a",
+      "identity_commands": [
+        {
+          "executable": "masc",
+          "args": [
+            "build-commit"
+          ],
+          "returncode": 0,
+          "stdout": "1ce158d50d3eb48648e6deea7f668172f914fea3\n",
+          "stderr": "[2026-10-26 23:33:23] [INFO] [MCP] Tag registry initialized: 182 tools registered\n",
+          "sha256": "e5e30b8ffd632910eb8b8ed023fddb3a8e10742720c26d4b7f0a3561ede5820c"
+        },
+        {
+          "executable": "masc-tui",
+          "args": [
+            "--build-commit"
+          ],
+          "returncode": 0,
+          "stdout": "1ce158d50d3eb48648e6deea7f668172f914fea3\n",
+          "stderr": "",
+          "sha256": "1811d5e657306ff3c21552a32687e69ae7608228b740c651ecfc514c6c1e501a"
+        }
+      ],
+      "native_tests": [
+        {
+          "suite": "test_tui_published_reports",
+          "suite_exit_code": 0,
+          "log_exit_code": 0
+        },
+        {
+          "suite": "test_tui_resource_document_search",
+          "suite_exit_code": 0,
+          "log_exit_code": 0
+        },
+        {
+          "suite": "test_tui_resource_image_admission",
+          "suite_exit_code": 0,
+          "log_exit_code": 0
+        },
+        {
+          "suite": "test_tui_resource_images",
+          "suite_exit_code": 0,
+          "log_exit_code": 0
+        }
+      ],
+      "scope": "Artifact byte and finite isolated identity qualification. Shared install and visible UI not verified."
+    },
+    "candidate": {
+      "application_source": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+      "workflow_source": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+      "receipt_sha256": "c2280625e4dfec83f87adccfa4f7a4826da0c469739bd133a544a8886db3e674",
+      "server_sha256": "06ee93c99b31a6fca6786c2c6a676c8023b62b0fc854da6616518c21202ad3a8",
+      "tui_sha256": "4541bb731d235e000388d8fdfac503d50777da70126869da128cca1be181c9ea",
+      "identity_commands": [
+        {
+          "executable": "masc",
+          "args": [
+            "build-commit"
+          ],
+          "returncode": 0,
+          "stdout": "c3cb3715e3a36b56ae17c23820b6b7c83914a602\n",
+          "stderr": "[2026-10-26 22:52:25] [INFO] [MCP] Tag registry initialized: 182 tools registered\n",
+          "sha256": "06ee93c99b31a6fca6786c2c6a676c8023b62b0fc854da6616518c21202ad3a8"
+        },
+        {
+          "executable": "masc-tui",
+          "args": [
+            "--build-commit"
+          ],
+          "returncode": 0,
+          "stdout": "c3cb3715e3a36b56ae17c23820b6b7c83914a602\n",
+          "stderr": "",
+          "sha256": "4541bb731d235e000388d8fdfac503d50777da70126869da128cca1be181c9ea"
+        }
+      ],
+      "native_tests": [
+        {
+          "suite": "test_tui_published_reports",
+          "suite_exit_code": 0,
+          "log_exit_code": 0
+        },
+        {
+          "suite": "test_tui_resource_document_search",
+          "suite_exit_code": 0,
+          "log_exit_code": 0
+        },
+        {
+          "suite": "test_tui_resource_image_admission",
+          "suite_exit_code": 0,
+          "log_exit_code": 0
+        },
+        {
+          "suite": "test_tui_resource_images",
+          "suite_exit_code": 0,
+          "log_exit_code": 0
+        }
+      ],
+      "scope": "Artifact byte and finite isolated identity qualification. Shared install and visible UI not verified."
+    }
+  },
+  "comparison_executed": false,
+  "production_diff": "Only lane_addon_store.ml/.mli plus one large-record discovery test, changelog and retained evidence between 1ce158 and c3cb371; same builder/workflow revision.",
+  "shared_runtime_replaced_by_this_work": false
+}

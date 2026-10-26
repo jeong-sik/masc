@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit evidence v2 only; never rewrites original workload receipts/verdicts."""
+"""Audit evidence v3 only; never rewrites original workload receipts/verdicts."""
 import collections
 from contextlib import closing
 import datetime
@@ -11,7 +11,7 @@ import sqlite3
 import sys
 
 
-EVIDENCE_SCHEMA = "masc.keeper-scale-evidence.v2"
+EVIDENCE_SCHEMA = "masc.keeper-scale-evidence.v3"
 
 
 def read(path):
@@ -58,9 +58,134 @@ def objects(value):
                 yield from objects(child)
 
 
+def rpc_result(request):
+    body = request["body_utf8"]
+    try:
+        documents = [json.loads(body)]
+    except ValueError:
+        documents = [json.loads("\n".join(line[5:].lstrip() for line in block.splitlines()
+            if line.startswith("data:"))) for block in body.replace("\r\n", "\n").split("\n\n")
+            if any(line.startswith("data:") for line in block.splitlines())]
+    matches = [item for item in documents if item.get("id") == request["payload"]["id"]]
+    assert len(matches) == 1 and "error" not in matches[0]
+    assert matches[0]["result"].get("isError", False) is False
+    return matches[0]["result"]
+
+
+def audit_original_payloads(packet, admitted, snapshots, public, terminal):
+    workload = read(packet / "workload.json")
+    assert read(packet / "principal.json") == {"actor": "dashboard", "role": "admin"}
+    originals = {}
+    requests = lines(packet / "requests.jsonl")
+    enqueues = [item for item in requests
+                if item.get("phase") == "enqueue" and item.get("status") == 200]
+    assert len(enqueues) == len(admitted)
+    for op, request in zip(admitted, enqueues):
+        name, sequence = op["keeper"], op["sequence"]
+        message = json.dumps({"schema": "masc.keeper-scale-input.v1", "marker": workload["marker"],
+                              "keeper": name, "sequence": sequence}, sort_keys=True)
+        assert request["payload"]["params"] == {"name": "masc_keeper_msg", "arguments": {"name": name, "message": message}}
+        acceptances = [item for item in objects(rpc_result(request))
+                       if set(item) == {"operation_id", "state", "queued_count", "existing"}]
+        assert acceptances and all(item["operation_id"] == op["operation_id"] and item["existing"] is False
+                                   for item in acceptances)
+        thread = "keeper:" + name
+        source = {"schema": "masc.keeper_chat_operation.source.v2", "submitted_by": "dashboard",
+            "thread_id": thread, "continuation_channel": {"kind": "dashboard", "thread_id": thread},
+            "surface": {"kind": "agent"}, "channel": "agent", "channel_user_id": "",
+            "channel_user_name": "", "channel_workspace_id": "", "conversation_id": None,
+            "external_message_id": None, "workspace_id": None, "extra_mentions": [],
+            "sender_keeper": None, "user_row_origin": "needs_append"}
+        input_ = {"schema": "masc.keeper_chat_operation.input.v1", "message": message,
+                  "user_blocks": [], "attachments": [], "turn_instructions": None, "surface_context": None}
+        originals[(name, op["operation_id"])] = {"source": source, "input": input_}
+        assert op["original"] == originals[(name, op["operation_id"])]
+    observations = collections.defaultdict(list)
+    for request in requests:
+        if request.get("phase") != ("settlement" if terminal else "queue-held") or request.get("status") != 200:
+            continue
+        arguments = request["payload"]["params"]["arguments"]
+        assert request["payload"]["params"]["name"] == "masc_keeper_delegate_status"
+        key = arguments["target"]["name"], arguments["operation_id"]
+        observations[key].extend(item for item in objects(rpc_result(request))
+            if item.get("schema") == "masc.keeper_chat_operation.v1")
+    assert all(status in observations[key] for key, status in public.items())
+
+    def encoded(value):
+        # Only independently reconstructed ASCII/null/list/object fixture
+        # values are encoded here; this is not a general Yojson codec.
+        result = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        assert result.isascii()
+        return result
+
+    def hashed(value):
+        return hashlib.sha256(encoded(value).encode()).hexdigest()
+
+    seen = set()
+    for entry in snapshots:
+        name = entry["keeper"]
+        tables = entry["snapshot"]
+        if terminal:
+            # Resolve the actual recorded owner path within the retained base.
+            assert pathlib.Path(entry["source_path"]).is_relative_to(packet / "owned-base" / ".masc")
+            retained = pathlib.Path(entry["source_path"])
+            assert retained.parent.name == name
+            for database in [retained, packet / "durable" / name / "chat-operations.sqlite3"]:
+                with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as conn:
+                    assert conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+                    conn.row_factory = sqlite3.Row
+                    conn.execute("BEGIN")
+                    for table, order in [("operations", "sequence"), ("operation_batch_members", "execution_id,position")]:
+                        cursor = conn.execute("SELECT * FROM " + table + " ORDER BY " + order)
+                        columns = [item[0] for item in cursor.description]
+                        rows = [dict(row) for row in cursor]
+                        assert columns == tables[table]["columns"]
+                        assert full_typed_digest(columns, rows) == full_typed_digest(columns, tables[table]["rows"])
+                    conn.rollback()
+        rows = {row["operation_id"]: row for row in tables["operations"]["rows"]}
+        assert len(rows) == len(tables["operations"]["rows"])
+        owned = {key[1]: value for key, value in originals.items() if key[0] == name}
+        assert set(rows) == set(owned)
+        membership, groups = {}, collections.defaultdict(list)
+        for member in tables["operation_batch_members"]["rows"]:
+            opid = member["operation_id"]
+            assert opid in rows and opid not in membership and member["execution_id"] in rows
+            membership[opid] = member
+            groups[member["execution_id"]].append(member)
+            assert member["admitted_digest"] == hashed(owned[opid]["input"])
+            assert member["admitted_input_json"] == (None if terminal else encoded(owned[opid]["input"]))
+        executions = {opid: original["input"] for opid, original in owned.items()}
+        for leader, group in groups.items():
+            group.sort(key=lambda item: item["position"])
+            assert len(group) >= 2 and group[0]["operation_id"] == leader
+            assert [item["position"] for item in group] == list(range(len(group)))
+            sequence = [rows[item["operation_id"]]["sequence"] for item in group]
+            assert sequence == list(range(sequence[0], sequence[0] + len(group)))
+            inputs = [owned[item["operation_id"]]["input"] for item in group]
+            executions[leader] = {**inputs[0], "message": "\n\n".join(item["message"] for item in inputs),
+                "user_blocks": [{"type": "text", "text": item["message"]} for item in inputs]}
+        for opid, row in rows.items():
+            key = name, opid
+            assert key not in seen
+            seen.add(key)
+            original, status = owned[opid], public[key]
+            member = membership.get(opid)
+            projected_state = rows[member["execution_id"]]["state"] if member else row["state"]
+            assert row["source_json"] == encoded(original["source"])
+            assert row["admission_digest"] == hashed(original)
+            assert row["execution_digest"] == hashed(executions[opid])
+            assert row["input_json"] == (None if terminal else encoded(executions[opid]))
+            assert status["source"] == original["source"] and status["input"] == (None if terminal else executions[opid])
+            assert all(status[field] == row[field] for field in ["admission_digest", "execution_digest", "created_at"])
+            assert status["sequence"] == str(row["sequence"]) and status["state"].lower() == projected_state
+            assert status.get("batch_execution_id") == (None if member is None else member["execution_id"])
+            assert status.get("batch_input_digest") == (None if member is None else member["admitted_digest"])
+    assert seen == set(originals)
+
+
 def audit(packet):
     identity = read(packet / "identity.json")
-    assert identity["evidence_schema"] == EVIDENCE_SCHEMA, "reader requires explicitly versioned v2 evidence"
+    assert identity["evidence_schema"] == EVIDENCE_SCHEMA, "reader requires explicitly versioned v3 evidence"
     assert sha(packet / "masc-installed-copy") == identity["sha256"]
     assert sha(packet / "keeper_scale_session.py") == identity["runner_sha256"]
     workload = read(packet / "workload.json")
@@ -167,8 +292,15 @@ def audit(packet):
     assert not unclassified, unclassified
     cleanup = read(packet / "cleanup.json")
     assert cleanup == {"server_returncode": 0, "server_reaped": True, "forced_kill": False,
-        "sampler_stopped": True, "model_server_stopped": True, "base_removed": True,
+        "sampler_stopped": True, "model_server_stopped": True, "base_retained": True,
+        "base_path": str(packet / "owned-base"),
         "provider_requests_drained": True, "active_provider_requests": 0, "provider_handler_threads": 0}
+    assert pathlib.Path(identity["base"]) == packet / "owned-base"
+    assert (packet / "owned-base").is_dir()
+    audit_original_payloads(packet, admitted, read(packet / "admission-snapshots.json"),
+        {(item["keeper"], item["status"]["operation_id"]): item["status"]
+         for item in read(packet / "queue-held.json")}, terminal=False)
+    audit_original_payloads(packet, admitted, durable, terminal, terminal=True)
     requests = lines(packet / "requests.jsonl")
     waits = lines(packet / "rate-limit-waits.jsonl")
     intervals = lines(packet / "rpc-intervals.jsonl")
@@ -236,6 +368,7 @@ def audit(packet):
                 "caveat": "Cross-clock alignment uses adjacent wall/perf phase anchor, no exact synchronization guarantee."})
         (packet / "slow-status-completion-alignment.json").write_text(json.dumps(aligned, indent=2)+"\n")
     report = {"evidence_schema": EVIDENCE_SCHEMA, "packet": packet.name, "source": identity["source"], "binary_sha256": identity["sha256"],
+        "packet_auditor_sha256": sha(pathlib.Path(__file__)),
         "runner_sha256": identity["runner_sha256"], "original_run_failure_preserved": original_failure,
         "post_run_workload_validation": "PASS", "overall_original_run_verdict": "FAIL" if original_failure else "PASS",
         "keepers": len(names), "public_and_exact_owner_durable_succeeded_operations": len(operations),
@@ -272,6 +405,6 @@ def audit(packet):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        raise SystemExit("usage: keeper_scale_packet_audit.py EVIDENCE_V2_PACKET [PACKET ...]")
+        raise SystemExit("usage: keeper_scale_packet_audit.py EVIDENCE_V3_PACKET [PACKET ...]")
     for name in sys.argv[1:]:
         audit(pathlib.Path(name).resolve())

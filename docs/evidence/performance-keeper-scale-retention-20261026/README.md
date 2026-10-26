@@ -36,6 +36,7 @@ The production binary is unchanged by this harness layer. The parent is
   downloaded bytes and isolated embedded commit commands matched. The four
   selected native resource tests passed for each artifact. This does not prove
   shared-runtime installation or visible TUI behavior.
+  This frozen pair receipt predates the native population experiments below.
 
 ## Candidate native observations
 
@@ -49,6 +50,12 @@ runner, independent reader and raw receipt hashes for three separate runs.
 | 300 | 600 | 300 | 1041/1041 | 70 | 70.390 s |
 
 All three workload runs and their independent packet-reader checks passed.
+The [independent candidate evidence audit](evidence-audits/v1/README.md) checked
+the raw 2/30/300 packets; [the additional audit](evidence-audits/v2/README.md)
+checked baseline/batch packets and all four numeric/document derivatives.
+These are offline evidence audits, not formal GitHub approvals or new native
+runs. Selected audit summaries are retained here; their full local receipts
+and original packets remain under the recorded artifact paths.
 Owned servers exited 0 without forced kill; samplers, provider listeners and
 handlers stopped. Original bases and SQLite backups remain local. These are
 real native Keeper owners and durable queued operations against one scripted
@@ -65,8 +72,36 @@ overlap is not causal attribution. The 0.1 ms goal is **not achieved**.
 Exact-status settlement RPC maximum was **13209.663 ms**, which is distinct
 from durable turn completion. These three native cohorts had no batch members;
 the batch projection evidence above is source and synthetic Python execution.
+Full health reported `degraded` with `keeper_memory_execution:addon_unattached`
+and `operator_action_required=true`; valid health/live samples do not prove
+full product readiness or attached Add-on Lanes.
 
-Runs occurred sequentially on a shared host, once per population. This is
+[A separate native batch qualification](native-batch-qualification.json) used
+2 Keepers with 3 messages each: all 6 operations passed through 4 model calls,
+and terminal SQLite contained 4 batch members. Original/member/merged leader
+digests and complete reply coverage passed. Its held snapshot had no members,
+so the held Running follower projection remains source/Python evidence.
+
+## Same-builder baseline observations
+
+Baseline application `1ce158d50d3eb48648e6deea7f668172f914fea3` also passed
+separate 2/30/300 runs, including all 600 original operations and peak 300 held
+requests at the largest population. The baseline uses the exact same release
+runtime fixture bytes from the c3cb support checkout. The application sources,
+artifact hashes and support fixture provenance remain separate identities.
+
+[All six population observations](native-cohort-before-after-observations.json)
+retain favorable and unfavorable values. At 300 owners, baseline/candidate
+admission wire p50 was 22.478/22.229 ms, exact-status maximum 9582.334/13209.663
+ms and released health/live maximum 2546.932/3599.316 ms. GC-counter-derived
+process allocation was 67.548/67.545 GB. There is **no established native
+performance gain**: one sequential run per source/population on a shared host
+cannot isolate a stable effect, and this workload does not prove execution of
+the changed large retained Lane read path. The earlier extracted-helper
+allocation result is a separate evidence layer.
+
+Population runs occurred sequentially on a shared host, once per source and
+population; the native batch qualification is separate. This is
 capacity and evidence qualification, not an attributable performance gain.
 Latency includes hold, pacing, queue, runtime work, client and OS overhead.
 The full private packets remain under

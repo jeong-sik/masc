@@ -1,0 +1,112 @@
+diff --git a/lib/lane_addon/lane_addon_store.ml b/lib/lane_addon/lane_addon_store.ml
+index dc89d418a81..508973b21e7 100644
+--- a/lib/lane_addon/lane_addon_store.ml
++++ b/lib/lane_addon/lane_addon_store.ml
+@@ -505,7 +505,38 @@ let with_record_fd path fn =
+     Printexc.raise_with_backtrace exn backtrace
+ let verify_record_bytes path fd stat bytes =
+   let _offset=Unix.lseek fd 0 Unix.SEEK_SET in
+-  let* verified=record_bytes fd stat.Unix.st_size in
++  let size=stat.Unix.st_size in
++  let* verified=
++    if size <= 2 * Sys.io_buffer_size then record_bytes fd size
++    else
++      (* Two reusable I/O buffers replace the second file-sized allocation.
++         Keep the direct read when it needs no more memory than this pair.
++         Neither scratch buffer aliases the immutable first observation. *)
++      let observed=Bytes.create Sys.io_buffer_size in
++      let expected=Bytes.create Sys.io_buffer_size in
++      let rec fill offset length =
++        if offset=length then Ok () else
++        match Unix.read fd observed offset (length-offset) with
++        | 0 -> Error "retained file shrank during read"
++        | count -> fill (offset+count) length
++        | exception Unix.Unix_error (Unix.EINTR,_,_) -> fill offset length in
++      let eof=Bytes.create 1 in
++      let rec finish unchanged =
++        match Unix.read fd eof 0 1 with
++        | 0 -> if unchanged then Ok bytes else Error "retained file changed during sync"
++        | _ -> Error "retained file grew during read"
++        | exception Unix.Unix_error (Unix.EINTR,_,_) -> finish unchanged in
++      let rec compare offset unchanged =
++        if offset=size then finish unchanged else
++        let count=min (Bytes.length observed) (size-offset) in
++        let* ()=fill 0 count in
++        Bytes.blit_string bytes offset expected 0 count;
++        (* A short final chunk leaves equal tails from the preceding full
++           comparison whenever [unchanged] is true. A prior mismatch stays
++           false; still read through EOF to retain shrink/growth failures. *)
++        let unchanged=unchanged && Bytes.equal observed expected in
++        compare (offset+count) unchanged in
++      compare 0 true in
+   if verified<>bytes then Error "retained file changed during sync"
+   else if same_file stat (Unix.stat path) then Ok (Confirmed bytes)
+   else Ok Republished
+diff --git a/lib/lane_addon/lane_addon_store.mli b/lib/lane_addon/lane_addon_store.mli
+index c47d840368e..20d8b6036e5 100644
+--- a/lib/lane_addon/lane_addon_store.mli
++++ b/lib/lane_addon/lane_addon_store.mli
+@@ -120,7 +120,9 @@ val load_tool_request_owner : t -> scope:string -> request_id:string -> (Yojson.
+     unsafe parent authority is an error. Reads use the same no-follow file and
+     parent descriptors for content, fsync and final verification. The same
+     original-scope serializer as publication excludes cooperative replacements
+-    throughout these checks; external changes still refuse. *)
++    throughout these checks; external changes still refuse. Large records are
++    reread in bounded chunks against the complete first observation, including
++    the final partial chunk and EOF, without another file-sized allocation. *)
+ val tool_request_body_path : scope:string -> request_digest:string -> string
+ (** One original request body, relative to {!root}: beside the scope's
+     records, not inside their directory, which holds only records. *)
+diff --git a/test/test_lane_addon_request_discovery.ml b/test/test_lane_addon_request_discovery.ml
+index 2e3cffebf04..861b7d7b762 100644
+--- a/test/test_lane_addon_request_discovery.ml
++++ b/test/test_lane_addon_request_discovery.ml
+@@ -166,6 +166,39 @@ let test_sync_failure_and_actual_replacement_preserve_original_read_boundary ()
+       let moved = directory ^ "-original" in
+       Unix.rename directory moved;Unix.symlink moved directory)))
+ 
++let test_large_original_reverification_checks_every_chunk_and_eof () =
++  with_store (fun root store ->
++    let payload=String.init (5 * Sys.io_buffer_size + 17)
++      (fun index -> Char.chr (Char.code 'A' + index / Sys.io_buffer_size)) in
++    owned (Owner.retain ~store ~scope ~request_id:"large-original"
++      ~installation_id:"original-installation" ~package_id:"curator" ~tool:"classify"
++      ~summary:(`String payload) ~request);
++    let original_path=path root "large-original" in
++    let bytes=Fs_compat.load_file original_path in
++    let expected=get (inventory store) in
++    let payload_offset=String.index bytes 'A' in
++    List.iter (fun offset ->
++      save original_path bytes;
++      fail_inventory (inventory store ~sync_file:(fun fd ->
++        Unix.fsync fd;
++        let writing=Unix.openfile original_path [Unix.O_WRONLY;Unix.O_CLOEXEC] 0 in
++        Fun.protect ~finally:(fun () -> Unix.close writing) (fun () ->
++          ignore (Unix.lseek writing offset Unix.SEEK_SET);
++          Alcotest.(check int) "changed one still-valid JSON string byte" 1
++            (Unix.write_substring writing "Z" 0 1)))))
++      [payload_offset; payload_offset + Sys.io_buffer_size; payload_offset + String.length payload - 1];
++    save original_path bytes;
++    fail_inventory (inventory store ~sync_file:(fun fd ->
++      Unix.fsync fd; Unix.truncate original_path (String.length bytes - 1)));
++    save original_path bytes;
++    fail_inventory (inventory store ~sync_file:(fun fd ->
++      Unix.fsync fd;
++      Out_channel.with_open_gen [Open_wronly;Open_append;Open_binary] 0o600 original_path
++        (fun channel -> output_char channel ' ')));
++    save original_path bytes;
++    Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string json))
++      "large complete original survives a fresh verified read" expected (get (inventory store)))
++
+ let test_fresh_ancestor_and_file_permissions_are_checked_after_io () =
+   with_store (fun root store -> retain store "original";
+     fail_inventory (inventory store ~sync_file:(fun fd -> Unix.fsync fd;Unix.chmod root 0o777)));
+@@ -406,6 +439,8 @@ let () = Alcotest.run "Original Add-on request discovery" ["inventory",[
+   Alcotest.test_case "symlink hardlink nonregular and writable bodies" `Quick
+     test_symlink_hardlink_nonregular_and_writable_bodies_are_refused;
+   Alcotest.test_case "sync failure and replacement through actual descriptors" `Quick test_sync_failure_and_actual_replacement_preserve_original_read_boundary;
++  Alcotest.test_case "large originals verify every chunk and EOF" `Quick
++    test_large_original_reverification_checks_every_chunk_and_eof;
+   Alcotest.test_case "fresh ownership and permissions after I/O" `Quick test_fresh_ancestor_and_file_permissions_are_checked_after_io;
+   Alcotest.test_case "actual held read serializes aliased publication without blocking other scopes" `Quick
+     test_original_publication_waits_for_actual_read_across_store_aliases];

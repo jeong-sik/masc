@@ -120,7 +120,9 @@ val load_tool_request_owner : t -> scope:string -> request_id:string -> (Yojson.
     unsafe parent authority is an error. Reads use the same no-follow file and
     parent descriptors for content, fsync and final verification. The same
     original-scope serializer as publication excludes cooperative replacements
-    throughout these checks; external changes still refuse. *)
+    throughout these checks; external changes still refuse. Large records are
+    reread in bounded chunks against the complete first observation, including
+    the final partial chunk and EOF, without another file-sized allocation. *)
 val tool_request_body_path : scope:string -> request_digest:string -> string
 (** One original request body, relative to {!root}: beside the scope's
     records, not inside their directory, which holds only records. *)

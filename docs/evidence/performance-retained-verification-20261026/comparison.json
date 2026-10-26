@@ -1,0 +1,176 @@
+[
+  {
+    "size_bytes": 64,
+    "read_count": 300,
+    "batches_per_role": 2,
+    "baseline": [
+      {
+        "elapsed_ms": 10.822417,
+        "allocated_bytes": 609848.0
+      },
+      {
+        "elapsed_ms": 12.968583,
+        "allocated_bytes": 609848.0
+      }
+    ],
+    "candidate": [
+      {
+        "elapsed_ms": 12.098042,
+        "allocated_bytes": 609848.0
+      },
+      {
+        "elapsed_ms": 11.893166,
+        "allocated_bytes": 609848.0
+      }
+    ],
+    "baseline_elapsed_median_ms": 11.8955,
+    "candidate_elapsed_median_ms": 11.995604,
+    "elapsed_median_change_percent": 0.8415283090244197,
+    "allocation_change_percent": 0.0
+  },
+  {
+    "size_bytes": 65536,
+    "read_count": 300,
+    "batches_per_role": 2,
+    "baseline": [
+      {
+        "elapsed_ms": 38.91525,
+        "allocated_bytes": 39893048.0
+      },
+      {
+        "elapsed_ms": 57.153541,
+        "allocated_bytes": 39893048.0
+      }
+    ],
+    "candidate": [
+      {
+        "elapsed_ms": 47.731,
+        "allocated_bytes": 39893048.0
+      },
+      {
+        "elapsed_ms": 64.815125,
+        "allocated_bytes": 39893048.0
+      }
+    ],
+    "baseline_elapsed_median_ms": 48.0343955,
+    "candidate_elapsed_median_ms": 56.273062499999995,
+    "elapsed_median_change_percent": 17.151599211860578,
+    "allocation_change_percent": 0.0
+  },
+  {
+    "size_bytes": 131072,
+    "read_count": 300,
+    "batches_per_role": 2,
+    "baseline": [
+      {
+        "elapsed_ms": 264.733917,
+        "allocated_bytes": 79214648.0
+      },
+      {
+        "elapsed_ms": 108.571708,
+        "allocated_bytes": 79214648.0
+      }
+    ],
+    "candidate": [
+      {
+        "elapsed_ms": 93.800917,
+        "allocated_bytes": 79214648.0
+      },
+      {
+        "elapsed_ms": 91.820583,
+        "allocated_bytes": 79214648.0
+      }
+    ],
+    "baseline_elapsed_median_ms": 186.6528125,
+    "candidate_elapsed_median_ms": 92.81075,
+    "elapsed_median_change_percent": -50.27626492368016,
+    "allocation_change_percent": 0.0
+  },
+  {
+    "size_bytes": 1048576,
+    "read_count": 30,
+    "batches_per_role": 2,
+    "baseline": [
+      {
+        "elapsed_ms": 52.832458,
+        "allocated_bytes": 62971928.0
+      },
+      {
+        "elapsed_ms": 63.640125,
+        "allocated_bytes": 62971928.0
+      }
+    ],
+    "candidate": [
+      {
+        "elapsed_ms": 37.223542,
+        "allocated_bytes": 35486888.0
+      },
+      {
+        "elapsed_ms": 46.983833,
+        "allocated_bytes": 35486888.0
+      }
+    ],
+    "baseline_elapsed_median_ms": 58.2362915,
+    "candidate_elapsed_median_ms": 42.1036875,
+    "elapsed_median_change_percent": -27.701976867809307,
+    "allocation_change_percent": -43.646495943398776
+  },
+  {
+    "size_bytes": 1048576,
+    "read_count": 300,
+    "batches_per_role": 2,
+    "baseline": [
+      {
+        "elapsed_ms": 938.058916,
+        "allocated_bytes": 629717048.0
+      },
+      {
+        "elapsed_ms": 704.527292,
+        "allocated_bytes": 629717048.0
+      }
+    ],
+    "candidate": [
+      {
+        "elapsed_ms": 598.996625,
+        "allocated_bytes": 354866648.0
+      },
+      {
+        "elapsed_ms": 628.537875,
+        "allocated_bytes": 354866648.0
+      }
+    ],
+    "baseline_elapsed_median_ms": 821.293104,
+    "candidate_elapsed_median_ms": 613.76725,
+    "elapsed_median_change_percent": -25.268184158526672,
+    "allocation_change_percent": -43.646650646180376
+  },
+  {
+    "size_bytes": 4194321,
+    "read_count": 30,
+    "batches_per_role": 2,
+    "baseline": [
+      {
+        "elapsed_ms": 198.741791,
+        "allocated_bytes": 251716568.0
+      },
+      {
+        "elapsed_ms": 147.273833,
+        "allocated_bytes": 251716568.0
+      }
+    ],
+    "candidate": [
+      {
+        "elapsed_ms": 107.072458,
+        "allocated_bytes": 129976808.0
+      },
+      {
+        "elapsed_ms": 99.959041,
+        "allocated_bytes": 129976808.0
+      }
+    ],
+    "baseline_elapsed_median_ms": 173.007812,
+    "candidate_elapsed_median_ms": 103.5157495,
+    "elapsed_median_change_percent": -40.16700847011463,
+    "allocation_change_percent": -48.36382482379944
+  }
+]

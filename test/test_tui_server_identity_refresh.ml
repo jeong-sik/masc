@@ -3918,7 +3918,7 @@ let runtime_document_fixture () =
   state,workspace,session
 
 let runtime_document_receipt durability : Masc_tui_runtime_config_receipt.t =
-  {source_revision="saved"; order="operation-1"; durability; lock_warnings=[];
+  {source_revision="saved"; order="operation-1"; durability; lock_warnings=[]; ignored_legacy_keys=[];
    application={operation="runtime-config"; routing_status=Routing_active;
      routing_requires_restart=false; routing_applied_at=Not_applied;
      keeper_status=Keeper_not_configured; keeper_requires_restart=false;

@@ -6,7 +6,7 @@ module Receipt = Masc_tui_runtime_config_receipt
 
 let committed_receipt =
   { Receipt.source_revision = "source-7"; order = "7"; durability = Receipt.Durable;
-    lock_warnings = [];
+    lock_warnings = []; ignored_legacy_keys = [];
     application =
       { Receipt.operation = "routing"; routing_status = Receipt.Routing_applied;
         routing_requires_restart = false; routing_applied_at = Receipt.Applied_at_int 7;

@@ -801,7 +801,7 @@ let test_config_declares_the_given_tools_eager () =
 
 let test_independent_tool_can_complete_while_another_is_blocked () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
-  Eio.Time.with_timeout env#clock 10.0 (fun () ->
+  Eio.Time.with_timeout_exn env#clock 10.0 (fun () ->
     let started, signal_started = Eio.Promise.create () in
     let release, finish = Eio.Promise.create () in
     let first_done, signal_first_done = Eio.Promise.create () in
@@ -838,7 +838,7 @@ let test_independent_tool_can_complete_while_another_is_blocked () =
 
 let test_serial_boundary_waits_for_predecessors_and_fences_followers ~fail_serial () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
-  Eio.Time.with_timeout env#clock 10.0 (fun () ->
+  Eio.Time.with_timeout_exn env#clock 10.0 (fun () ->
     let first_started, signal_first_started = Eio.Promise.create () in
     let serial_reserved, signal_serial_reserved = Eio.Promise.create () in
     let follower_reserved, signal_follower_reserved = Eio.Promise.create () in
@@ -913,13 +913,16 @@ let test_absent_producer_contract_cannot_execute_a_tool () =
   let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
   let refused = request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization
     (json_request 30 "tools/call" (`Assoc ["name",`String "unregistered";"arguments",`Assoc []])) in
-  check int "an unknown frozen producer contract is a protocol refusal" 400 refused.status;
+  check int "an unknown frozen producer contract returns a JSON-RPC error over HTTP" 200 refused.status;
+  let json = Yojson.Safe.from_string refused.body in
+  check int "the parsed JSON-RPC error reports an unknown tool" (-32602)
+    Yojson.Safe.Util.(json |> member "error" |> member "code" |> to_int);
   check bool "the effect-capable handler is never entered" false !executed
 ;;
 
 let test_host_stop_drains_admitted_peers_and_refuses_late_execution ~peer_fails () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
-  Eio.Time.with_timeout env#clock 10.0 (fun () ->
+  Eio.Time.with_timeout_exn env#clock 10.0 (fun () ->
     let peer_started, signal_peer_started = Eio.Promise.create () in
     let release_peer, finish_peer = Eio.Promise.create () in
     let peer_done, signal_peer_done = Eio.Promise.create () in
@@ -1006,6 +1009,20 @@ let () =
     ; ( "response delivery"
       , [ test_case "reused string ID keeps physical delivery and substitution separate"
             `Quick test_physical_response_observer_with_reused_string_id ] )
+    ; ( "tool scheduling"
+      , [ test_case "independent HTTP tool completes while a peer is blocked" `Quick
+            test_independent_tool_can_complete_while_another_is_blocked
+        ; test_case "Serial success waits for predecessors and fences followers" `Quick
+            (test_serial_boundary_waits_for_predecessors_and_fences_followers ~fail_serial:false)
+        ; test_case "Serial failure waits for predecessors and releases followers" `Quick
+            (test_serial_boundary_waits_for_predecessors_and_fences_followers ~fail_serial:true)
+        ; test_case "absent producer contract cannot execute a tool" `Quick
+            test_absent_producer_contract_cannot_execute_a_tool
+        ; test_case "host stop drains admitted peer and refuses late execution" `Quick
+            (test_host_stop_drains_admitted_peers_and_refuses_late_execution ~peer_fails:false)
+        ; test_case "later peer failure outranks host stop after admitted drain" `Quick
+            (test_host_stop_drains_admitted_peers_and_refuses_late_execution ~peer_fails:true)
+        ] )
     ; ( "effect boundary"
       , [ test_case "turn cancellation reaches active callback without poisoning dispatch" `Quick
             test_turn_cancel_reaches_active_tool_and_releases_dispatch

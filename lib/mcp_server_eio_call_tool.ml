@@ -17,7 +17,6 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
    modules; [Mcp_server_eio_execute] already delegates the same way). The
    severity is derived from the exception class — see
    [Mcp_server_eio_helpers.mcp_exn_level_and_tag]. *)
-let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 
 (* A result's model-visible blocks when it has them. [None] is a text-only
    result, whose message is the whole content. *)
@@ -299,7 +298,7 @@ let record_runtime_mcp_trajectory_coverage_gap
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | gap_exn ->
-      log_mcp_exn
+      Mcp_server_eio_helpers.log_mcp_exn
         ~label:"runtime MCP trajectory coverage gap append failed"
         gap_exn
 
@@ -500,7 +499,7 @@ let record_runtime_mcp_keeper_tool_trace
        ~arguments
        ~message)
    with Eio.Cancel.Cancelled _ as exn -> raise exn | exn ->
-     log_mcp_exn ~label:"runtime MCP post-commit telemetry failed" exn)
+     Mcp_server_eio_helpers.log_mcp_exn ~label:"runtime MCP post-commit telemetry failed" exn)
 
 (** Resolve managed agent tool call to canonical operation *)
 (* The protocol layer answers this with Invalid_params rather than a generic
@@ -690,7 +689,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             ~execution_id
             ~duration_ms
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn;
+          Mcp_server_eio_helpers.log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn;
           if Tool_result.retained_artifacts result <> [] then raise exn)
    | Some _, None | None, _ -> ());
   Audit_log.log_tool_call config
@@ -761,7 +760,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                 ?error_message:error_detail
                 ()
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            log_mcp_exn ~label:"telemetry tracking failed" exn)
+            Mcp_server_eio_helpers.log_mcp_exn ~label:"telemetry tracking failed" exn)
      | None -> ());
 
   (* Otel_metric_store: record errors for failed tool calls *)
@@ -837,7 +836,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ~tags:(if success then ["tool"; "success"] else ["tool"; "failure"])
       ())
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    log_mcp_exn ~label:"activity graph emit failed" exn);
+    Mcp_server_eio_helpers.log_mcp_exn ~label:"activity graph emit failed" exn);
 
   let trace_id =
     match otel_trace_id with

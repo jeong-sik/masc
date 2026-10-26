@@ -337,6 +337,9 @@ module Ring = struct
      extended deliberately. The wire shape (field set + key order) is the
      [LogEntryRawSchema] contract in [dashboard/src/api/schemas/logs.ts]. *)
   let entry_to_json e =
+    (* The dashboard schema requires a non-empty keeper_name string, so
+       [None] encodes as "system". The decoder maps "system" back to
+       [None]: no specific keeper either way. *)
     let keeper_name_json = match e.keeper_name with
       | Some s -> `String s
       | None -> `String "system"
@@ -529,6 +532,7 @@ module Ring = struct
         let message = require_string "message" in
         let keeper_name =
           match Yojson.Safe.Util.member "keeper_name" json with
+          | `String "system" -> None
           | `String s -> Some s
           | `Null -> None
           | other ->
@@ -1068,7 +1072,6 @@ module Make (M : sig val name : string end) = struct
   let debug ?keeper_name ?turn_id ?category fmt = log_module Debug ?keeper_name ?turn_id ?category fmt
   let info ?keeper_name ?turn_id ?category fmt = log_module Info ?keeper_name ?turn_id ?category fmt
   let warn ?keeper_name ?turn_id ?category fmt = log_module Warn ?keeper_name ?turn_id ?category fmt
-  let warning = warn
   let error ?keeper_name ?turn_id ?category fmt = log_module Error ?keeper_name ?turn_id ?category fmt
 end
 
@@ -1106,6 +1109,7 @@ module TaskState = Make(struct let name = "TaskState" end)
 module KeeperExec = Make(struct let name = "KeeperExec" end)
 module LocalWorker = Make(struct let name = "LocalWorker" end)
 module Harness = Make(struct let name = "Harness" end)
+module Candle = Make(struct let name = "Candle" end)
 
 (* Logging-consistency migration (refactor/logging-consistency-harness):
    modules added so that former top-level [Log.info ~ctx:"<name>"] call sites

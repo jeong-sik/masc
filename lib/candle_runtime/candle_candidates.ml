@@ -146,12 +146,12 @@ let prepare ~sources ~now ~base_path events (waiting : Candle_payout.waiting) =
 
 let report = function
   | Wrote_candidates { goal_id } ->
-    Log.Misc.info "candle: candidates written goal_id=%s" goal_id
+    Log.Candle.info "candidates written goal_id=%s" goal_id
   | Wrote_unattributed { goal_id } ->
-    Log.Misc.info "candle: no keeper to pay, payout closed goal_id=%s" goal_id
+    Log.Candle.info "no keeper to pay, payout closed goal_id=%s" goal_id
   | Already_prepared _ | Superseded _ -> ()
   | Retry_later { goal_id; detail } ->
-    Log.Misc.warn "candle: payout not prepared, will retry goal_id=%s: %s" goal_id detail
+    Log.Candle.warn "payout not prepared, will retry goal_id=%s: %s" goal_id detail
 ;;
 
 let drain_with ~sources ~now ~base_path =

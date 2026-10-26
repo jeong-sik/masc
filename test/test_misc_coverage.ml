@@ -86,6 +86,13 @@ let test_log_routine_tagged_entry () =
   if routine_disabled then
     check bool "routine disabled by env" true true
   else begin
+    (* Routine entries take MASC_LOG_ROUTINE_LEVEL when set; expect what the
+       implementation resolves, not a hardcoded DEBUG. *)
+    let expected_routine_level =
+      match Sys.getenv_opt "MASC_LOG_ROUTINE_LEVEL" with
+      | None -> Log.Debug
+      | Some s -> Option.value (Log.level_of_string_opt s) ~default:Log.Debug
+    in
     Log.set_level Log.Debug;
     Log.Keeper.routine ~details:(`Assoc [ ("sample", `String "yes") ])
       "routine-test-%d" 42;
@@ -94,7 +101,9 @@ let test_log_routine_tagged_entry () =
     | [] -> fail "expected routine entry"
     | entry :: _ ->
         check string "module" "Keeper" entry.Log.Ring.module_name;
-        check string "level" "DEBUG" (Log.level_to_string entry.Log.Ring.level);
+        check string "level"
+          (Log.level_to_string expected_routine_level)
+          (Log.level_to_string entry.Log.Ring.level);
         check string "message" "routine-test-42" entry.Log.Ring.message;
         let has_routine_class =
           match entry.Log.Ring.details with

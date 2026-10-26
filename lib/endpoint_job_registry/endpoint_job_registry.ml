@@ -67,6 +67,9 @@ type t =
   ; route : P.route; owner : P.owner; recovery : Fs_compat.Publication_recovery.registry }
 
 type record = { registry : t; claim : claim; spec : P.spec }
+type storage = { record : record; directory : Eio.Fs.dir_ty Eio.Path.t }
+let storage_record (storage : storage) = storage.record
+let storage_path (storage : storage) = storage.directory
 type launch_intent = { original : record; launch_id : P.Id.t; spent : bool Atomic.t }
 type launch_state = Not_requested | Requested of P.Id.t
 let binding record = record.claim.binding
@@ -448,6 +451,12 @@ let same_original (original : record) (current : record) =
   && same_execution_progress original.claim.state current.claim.state
   && original.spec=current.spec
 
+let refresh (original : record) =
+  let registry=original.registry and binding=original.claim.binding in
+  locked registry binding (fun () ->
+    let* current=read_record registry binding in
+    if same_original original current then Ok current else Error Stale_record)
+
 let resync_cancel ~before_parent_sync (current : record) =
   let registry=current.registry and binding=current.claim.binding in
   let* relative=Fs_compat.owned_relative_path [claim_leaf binding]
@@ -503,23 +512,32 @@ let commit_launch_with_hook ~after_publication (original : record) ~confirmed_ad
       let* ()=if committed.claim=claim then Ok () else Error Stale_record in
       Ok {original=committed;launch_id;spent=Atomic.make false})
 
-let launch_storage ~sw (current : record) =
+let original_storage ~sw (current : record) =
   Eio.Switch.check sw;
   let registry=current.registry and binding=current.claim.binding in
   let* expected=match current.claim.state with
-    | Launch_requested {job;_} -> Ok job
-    | Preparing | Ready _ | Cancel_requested _ -> Error Stale_record in
+    | Ready job | Launch_requested {job;_} | Cancel_requested {job;_} -> Ok job
+    | Preparing -> Error Admission_incomplete in
   let* storage=io (fun () ->
     (Eio.Path.open_dir ~sw Eio.Path.(registry.root_cap / job_leaf binding)
       :> Eio.Fs.dir_ty Eio.Path.t)) in
   let* stat=io (fun () -> Eio.Path.stat ~follow:true storage) in
   let* ()=if stat.kind=`Directory && stat.uid=Int64.of_int registry.controller_uid
       && stat.perm land 0o7777=0o700 && identity_of_stat stat=expected
-    then Ok () else corrupt "launch storage authority" in
+    then Ok () else corrupt "original storage authority" in
   let* after=inspect_job registry binding in
   let* ()=if after=Some expected then validate_root registry else Error Stale_record in
   Eio.Switch.check sw;
   Ok storage
+
+let open_storage ~sw (original : record) =
+  Eio.Switch.check sw;
+  let registry=original.registry and binding=original.claim.binding in
+  locked registry binding (fun () ->
+    let* current=read_record registry binding in
+    let* ()=if same_original original current then Ok () else Error Stale_record in
+    let* directory=original_storage ~sw current in
+    Ok {record=current;directory})
 
 let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
   Eio.Switch.check sw;
@@ -539,7 +557,7 @@ let with_launch_with_hook ~after_original ~sw (intent : launch_intent) perform =
       if not (Atomic.compare_and_set intent.spent false true) then Error Launch_intent_spent
       else (
         after_original ();
-        let* storage=launch_storage ~sw current in
+        let* storage=original_storage ~sw current in
         Ok (perform {binding;spec=current.spec;admission_id=current.claim.admission_id;
           launch_id=intent.launch_id;payload_uid=current.claim.payload_uid;original_record=current} ~storage))) in
     match attempt with

@@ -15,6 +15,7 @@ module P = Endpoint_job_protocol
 type t
 type record
 type launch_intent
+type storage
 
 type protection_refusal =
   | Payload_is_controller
@@ -95,6 +96,22 @@ val specification : record -> P.spec
 val admission_id : record -> P.Id.t
 val revision : record -> int64
 val payload_uid : record -> int
+
+val refresh : record -> (record, error) result
+(** Read only this opaque record's original registry/job and known launch.
+    Legitimate cancellation progress is visible; a replaced registry, job,
+    admission, payload or already-known launch never substitutes another one.
+    This read grants no launch/signal permission and permits old-boot inspection. *)
+
+val open_storage : sw:Eio.Switch.t -> record -> (storage, error) result
+val storage_record : storage -> record
+val storage_path : storage -> Eio.Fs.dir_ty Eio.Path.t
+(** Open the refreshed original private directory under its own nonwaiting
+    lock, pin its physical identity, then release the lock before returning.
+    The capability belongs to [sw]; immutable result reads/hashing can proceed
+    outside the lock and revalidate [storage_record] afterward. No launch
+    permit is created or reconstructed. Old-boot terminal data remains readable
+    without adopting kernel handles or authorizing effects. *)
 
 type launch_state = Not_requested | Requested of P.Id.t
 val launch_state : record -> launch_state

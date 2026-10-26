@@ -521,6 +521,88 @@ let test_cancelled_job_scope_never_enters_launch () = fixture (fun ~env:_ ~sw ~r
   check string "pre-entry cancellation did not consume the original permit" "original"
     (R.with_launch ~sw permit (fun _ ~storage:_ -> "original") |> completed))
 
+let test_original_storage_read_survives_boot_without_launch () = fixture (fun ~env:_ ~sw ~root:_ ~registry ~open_root ->
+  let b=binding (id "05") in let first=admitted registry b in
+  let rebooted=open_root ~route:{route with boot_id=id "08"} () |> get in
+  let original=R.load rebooted ~binding:b |> get in
+  let storage=R.open_storage ~sw original |> get in
+  let stored=Eio.Path.load Eio.Path.(R.storage_path storage / "original.json") in
+  let request=P.request_of_json (Yojson.Safe.from_string stored) |> Result.map_error P.error_to_string |> require in
+  check bool "old boot reads the exact immutable original through its owned capability" true
+    (request=P.Start {binding=b;spec});
+  check bool "storage read never promotes registration into a launch" true
+    (R.launch_state (R.storage_record storage)=R.Not_requested && R.revision first=1L);
+  let refreshed=R.refresh (R.storage_record storage) |> get in
+  check bool "refresh retains its original admission and boot" true
+    (R.binding refreshed=b && R.admission_id refreshed=id "04");
+  check bool "old boot read does not restore an effect permit" true
+    (R.commit_launch refreshed ~confirmed_admission_id:(id "04") ~launch_id:(id "06")=Error R.Endpoint_replaced))
+
+let test_open_storage_pins_actual_registry_and_rejects_rebound_job () = fixture (fun ~env ~sw ~root ~registry ~open_root:_ ->
+  let b=binding (id "05") in let original=admitted registry b in
+  let other_root=Filename.concat root "alternate" in Unix.mkdir other_root 0o700;
+  let other=R.open_registry ~sw ~fs:env#fs ~root_path:other_root ~route ~owner ~payload_uid:(chosen_payload_uid ()) |> get in
+  let alternate=admitted other b in
+  check bool "alternate registry deliberately has identical public coordinates" true
+    (R.binding original=R.binding alternate && R.admission_id original=R.admission_id alternate
+      && R.specification original=R.specification alternate && R.revision original=R.revision alternate);
+  let write_marker job text=Out_channel.with_open_bin (Filename.concat job "marker") (fun oc -> output_string oc text) in
+  let job=job_path root b in
+  write_marker job "actual original";write_marker (job_path other_root b) "matching alternate";
+  let storage=R.open_storage ~sw original |> get in
+  check string "source record selects its actual registry, not a matching one" "actual original"
+    (Eio.Path.load Eio.Path.(R.storage_path storage / "marker"));
+  Unix.rename job (job ^ ".evidence");Unix.mkdir job 0o700;
+  List.iter (fun name ->
+    let content=In_channel.with_open_bin (Filename.concat (job ^ ".evidence") name) In_channel.input_all in
+    let path=Filename.concat job name in Out_channel.with_open_bin path (fun oc -> output_string oc content);
+    Unix.chmod path (if name="lease" then 0o600 else 0o400)) ["admission_id";"original.json";"lease"];
+  write_marker job "replacement";
+  let claim=claim_path root b in
+  let fields=match Yojson.Safe.from_file claim with `Assoc fields -> fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "claim object missing" in
+  let stat=Unix.lstat job in
+  let fields=List.map (fun (key,value) -> key,match key with
+    | "job_device" -> `String (string_of_int stat.st_dev)
+    | "job_inode" -> `String (string_of_int stat.st_ino)
+    | _ -> value) fields in
+  Unix.chmod claim 0o600;Yojson.Safe.to_file claim (`Assoc fields);Unix.chmod claim 0o400;
+  ignore (R.load registry ~binding:b |> get);
+  check bool "opaque original rejects a self-consistent replacement job" true (R.refresh original=Error R.Stale_record);
+  check bool "reopening does not adopt the replacement job" true (R.open_storage ~sw original=Error R.Stale_record);
+  check string "already opened capability still reads the original inode" "actual original"
+    (Eio.Path.load Eio.Path.(R.storage_path storage / "marker")))
+
+let test_storage_contention_and_known_launch_revalidation () = fixture (fun ~env ~sw ~root ~registry ~open_root:_ ->
+  Eio.Time.with_timeout_exn env#clock 10. (fun () ->
+    let b=binding (id "05") in let original=admitted registry b in let permit=commit original in
+    let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+    let done_,finish=Eio.Promise.create () in
+    let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+    Fun.protect ~finally:unblock (fun () ->
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve finish
+        (R.with_launch ~sw permit (fun _ ~storage:_ -> Eio.Promise.resolve signal ();Eio.Promise.await resume)));
+      Eio.Promise.await entered;
+      check bool "original storage reports startup busy without waiting" true (R.open_storage ~sw original=Error R.Busy);
+      let next=admitted registry (binding (id "07")) in
+      ignore (R.open_storage ~sw next |> get);
+      check bool "another original storage opened before the first startup released" true (Eio.Promise.peek done_=None);
+      unblock ();ignore (Eio.Promise.await done_ |> completed));
+    let storage=R.open_storage ~sw original |> get in let known=R.storage_record storage in
+    check bool "read capability captures the actual already-issued launch" true (R.launch_state known=R.Requested (id "06"));
+    let cancelled=R.request_cancel known ~confirmed_admission_id:(id "04") |> get in
+    let refreshed=R.refresh known |> get in
+    check bool "refresh observes legitimate durable cancellation of the same launch" true
+      (R.cancellation_state refreshed=R.Cancellation_requested && R.revision refreshed=R.revision cancelled);
+    let path=claim_path root b in
+    let fields=match Yojson.Safe.from_file path with `Assoc fields -> fields
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "claim object missing" in
+    let fields=List.map (fun (key,value) -> key,(if key="launch_id" then `String (P.Id.to_string (id "09")) else value)) fields in
+    Unix.chmod path 0o600;Yojson.Safe.to_file path (`Assoc fields);Unix.chmod path 0o400;
+    ignore (R.load registry ~binding:b |> get);
+    check bool "refresh never adopts another known launch with matching admission" true (R.refresh known=Error R.Stale_record);
+    check bool "storage open never adopts another known launch" true (R.open_storage ~sw known=Error R.Stale_record)))
+
 let ()=run "endpoint job registry" ["original durable admission",[
   test_case "original admission is idempotent and survives reopen" `Quick test_original_admission_survives_reopen;
   test_case "base Inspect outer v1 is rejected before original decoding" `Quick
@@ -544,4 +626,7 @@ let ()=run "endpoint job registry" ["original durable admission",[
   test_case "cancel rejects rebound job and known launch coordinates" `Quick test_cancel_rejects_rebound_job_and_known_launch_coordinates;
   test_case "launch storage pins original publication and per-job lifetime" `Quick test_launch_storage_is_original_and_job_owned;
   test_case "storage replacement before effect spends permission without launch" `Quick test_launch_rejects_storage_swap_before_effect;
-  test_case "cancelled supervisor scope cannot enter launch" `Quick test_cancelled_job_scope_never_enters_launch]]
+  test_case "cancelled supervisor scope cannot enter launch" `Quick test_cancelled_job_scope_never_enters_launch;
+  test_case "old boot can read original storage without restoring a launch" `Quick test_original_storage_read_survives_boot_without_launch;
+  test_case "storage pins its actual registry and rejects a rebound job" `Quick test_open_storage_pins_actual_registry_and_rejects_rebound_job;
+  test_case "storage contention preserves progress and known launch authority" `Quick test_storage_contention_and_known_launch_revalidation]]

@@ -97,7 +97,7 @@ F2의 최초 startup recovery 실패와 진입 지점은 다르다. 실제 재�
 | 상반된 terminal 증거 | Unknown | decoder 실행 |
 | 권한 없는 다른 caller의 순차 변경 | 거절 | 기존 테스트 소스 확인, 이번 실행 없음 |
 | 권한 확인 사이 operator retarget | 이전 owner 변경 거절 | F3 소스 반례, 실제 동시 재현 미실행 |
-| 두 호출의 retime/recurrence 변경 | 생략된 필드가 경쟁 호출의 새 값을 보존 | F4 소스 반례, 실제 동시 재현 미실행 |
+| 두 호출의 retime/recurrence 변경 | 생략된 recurrence가 경쟁 호출의 새 값을 보존 | F4 소스 반례, 실제 동시 재현 미실행 |
 | 일시 저장 실패 후 정상화 | Running 정산을 계속함 | F2/F5 소스 반례, 실제 fault injection 미실행 |
 | Keeper/workspace 변경 중 늦은 조회 도착 | 현재 scope에 다른 결과를 적용하지 않음 | 기존 generation/workspace admission 소스 확인; 전체 TUI 미실행 |
 | 결과 채널 전달 | 모델이 도구를 호출한 효과를 목적지에서 확인 | 실행하지 않음; occurrence 완료만으로 보장 불가 |

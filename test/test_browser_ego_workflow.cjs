@@ -66,20 +66,6 @@ test('native action, navigation, mouse and selection options survive unchanged',
  assert.equal(drag[2],'#target');assert.equal(drag[3].button,'right');assert.equal(drag[3].timeout,9000);
  assert.deepEqual(drag[3].sourcePosition,{x:1,y:2});
 });
-test('failed native drag releases its exact button once and never runs the following step',async()=>{
- for (const releaseFails of [false,true]) {
-  const f=fixture({fail:'dragAndDrop'});const releases=[];
-  f.page.mouse={up:async(options)=>{releases.push(options);if(releaseFails)throw Error('release lost');}};
-  const result=await run(f.page,request([
-   {method:'dragAndDrop',selector:'#source',destination:'#target',options:{button:'right'}},
-   {method:'click',selector:'#submit'},
-  ]));
-  assert.equal(releases.length,1);assert.equal(releases[0].button,'right');
-  assert.equal(result.inputReleased,!releaseFails);
-  assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,false);
-  assert.equal(result.failure.index,0);assert.equal(f.calls.some(call=>call[0]==='click'),false);
- }
-});
 test('a drag interrupted by a dialog preserves uncertain input ownership',async()=>{
  const f=fixture();let later=0;
  f.page.dragAndDrop=async()=>({dialog:{type:'alert',message:'hold'}});
@@ -92,30 +78,30 @@ test('a drag interrupted by a dialog preserves uncertain input ownership',async(
  assert.equal(result.completed.length,1);assert.equal(result.failure.dialog.type,'alert');
  assert.equal(later,0,'a blocking dialog is handed back before further input');
 });
-test('failed pointer clicks release once, retain uncertainty on loss, and never replay',async()=>{
- for (const method of ['click','dblclick','mouse.click']) for (const releaseFails of [false,true]) {
+test('lost pointer input never treats SDK cleanup void as a release acknowledgement',async()=>{
+ for (const method of ['click','dblclick','mouse.click','dragAndDrop']) {
   const f=fixture();let down=false,releases=0,later=0;
   const click=async()=>{down=true;throw Error('lost click response');};
   f.page.mouse={click,up:async options=>{
    releases++;assert.equal(options.button,'right');
-   if(releaseFails)throw Error('release response lost');down=false;
+   // The actual SDK can return void after a dialog interrupted this release.
   }};
   if(method!=='mouse.click')f.page[method]=click;
   f.page.fill=async()=>{later++;};
   const result=await run(f.page,request([
-   {method,selector:'#source',x:20,y:30,options:{button:'right',delay:25}},
+   {method,selector:'#source',destination:'#target',x:20,y:30,options:{button:'right',delay:25}},
    {method:'fill',selector:'#editor',text:'never'},
   ]));
-  assert.equal(releases,1);assert.equal(down,releaseFails);assert.equal(later,0);
-  assert.equal(result.inputReleased,!releaseFails);assert.equal(result.completed.length,0);
+  assert.equal(releases,0);assert.equal(down,true);assert.equal(later,0);
+  assert.equal(result.inputReleased,false);assert.equal(result.completed.length,0);
   assert.equal(result.failure.index,0);
  }
 });
 test('lost key input preserves unconfirmed release without guessing which keys to send',async()=>{
- for (const method of ['press','keyboard.press','keyboard.type']) {
+ for (const method of ['press','keyboard.press','keyboard.type','keyboard.paste']) {
   const f=fixture();let entries=0,releases=0,later=0;
   const input=async()=>{entries++;throw Error('lost key input response');};
-  f.page.keyboard={press:input,type:input,up:async()=>{releases++;}};
+  f.page.keyboard={press:input,type:input,paste:input,up:async()=>{releases++;}};
   f.page.press=input;f.page.mouse={up:async()=>{releases++;}};
   f.page.fill=async()=>{later++;};
   const result=await run(f.page,request([
@@ -127,10 +113,10 @@ test('lost key input preserves unconfirmed release without guessing which keys t
  }
 });
 test('receipt-less holding input keeps release uncertain on dialog or failed observation',async()=>{
- for (const method of ['keyboard.type','keyboard.press','press','click','dblclick','mouse.click','dragAndDrop']) {
+ for (const method of ['keyboard.type','keyboard.press','keyboard.paste','press','click','dblclick','mouse.click','dragAndDrop']) {
   for (const observationFails of [false,true]) {
    const f=fixture();const input=async()=>{};
-   f.page.keyboard={type:input,press:input};f.page.mouse={click:input};
+   f.page.keyboard={type:input,press:input,paste:input};f.page.mouse={click:input};
    if(!method.includes('.'))f.page[method]=input;
    f.page.info=async()=>{if(observationFails)throw Error('lost observation');return {dialog:{type:'alert',message:'hold'}};};
    const result=await run(f.page,request([{method,selector:'#editor',destination:'#target',key:'Enter',text:'x',x:20,y:30}]));

@@ -5,7 +5,7 @@ let script = {js|async function nativeWorkflow(page, args) {
   const pageExpression = step => step.argumentJson === undefined ? step.source
     : '(' + step.source + ')(JSON.parse(' + JSON.stringify(step.argumentJson) + '))';
   let effectStarted = false, completedEffect = false;
-  let inputReleased = true, heldButton = null;
+  let inputReleased = true;
   const failure = (index, method, error, extra = {}) => ({
     completed, effectStarted, completedEffect, inputReleased,
     failure: {index, method, message: String(error?.message ?? error), ...extra}
@@ -19,23 +19,22 @@ let script = {js|async function nativeWorkflow(page, args) {
     const step = args.steps[index];
     const options = step.options ?? {};
     const pointerOptions = {...options, label: args.cursor + (options.label ? ' · ' + options.label : '')};
-    heldButton = null;
     let receipt = null, effect = false, pageResult = false, holdingInput = false;
     try {
       switch (step.method) {
         case 'click':
-          holdingInput = effect = effectStarted = true; inputReleased = false; heldButton = options.button ?? 'left';
+          holdingInput = effect = effectStarted = true; inputReleased = false;
           receipt = await page.click(step.selector, pointerOptions); inputReleased = !receipt?.dialog; break;
         case 'dblclick':
-          holdingInput = effect = effectStarted = true; inputReleased = false; heldButton = options.button ?? 'left';
+          holdingInput = effect = effectStarted = true; inputReleased = false;
           receipt = await page.dblclick(step.selector, pointerOptions); inputReleased = !receipt?.dialog; break;
         case 'hover': effect = effectStarted = true; receipt = await page.hover(step.selector, pointerOptions); break;
         case 'dragAndDrop':
-          holdingInput = effect = effectStarted = true; inputReleased = false; heldButton = options.button ?? 'left';
+          holdingInput = effect = effectStarted = true; inputReleased = false;
           receipt = await page.dragAndDrop(step.selector, step.destination, pointerOptions);
           inputReleased = !receipt?.dialog; break;
         case 'mouse.click':
-          holdingInput = effect = effectStarted = true; inputReleased = false; heldButton = options.button ?? 'left';
+          holdingInput = effect = effectStarted = true; inputReleased = false;
           receipt = await page.mouse.click(step.x, step.y, pointerOptions); inputReleased = !receipt?.dialog; break;
         case 'mouse.move': effect = effectStarted = true; receipt = await page.mouse.move(step.x, step.y, pointerOptions); break;
         case 'mouse.wheel': effect = effectStarted = true; receipt = await page.mouse.wheel(step.x, step.y, pointerOptions); break;
@@ -57,8 +56,9 @@ let script = {js|async function nativeWorkflow(page, args) {
           receipt = await page.keyboard.type(step.text, options); inputReleased = !receipt?.dialog; break;
         case 'keyboard.insertText': effect = effectStarted = true; receipt = await page.keyboard.insertText(step.text); break;
         case 'keyboard.paste':
-          effect = effectStarted = true;
-          receipt = await page.keyboard.paste(step.html === undefined ? step.text : {text: step.text, html: step.html}); break;
+          holdingInput = effect = effectStarted = true; inputReleased = false;
+          receipt = await page.keyboard.paste(step.html === undefined ? step.text : {text: step.text, html: step.html});
+          inputReleased = !receipt?.dialog; break;
         case 'keyboard.press':
           holdingInput = effect = effectStarted = true; inputReleased = false;
           receipt = await page.keyboard.press(step.key, options); inputReleased = !receipt?.dialog; break;
@@ -87,11 +87,9 @@ let script = {js|async function nativeWorkflow(page, args) {
         default: return failure(index, step.method, 'unsupported native Page method');
       }
     } catch (error) {
-      if (!inputReleased && heldButton !== null) {
-        try { await page.mouse.up({button:heldButton}); inputReleased = true; }
-        catch (releaseError) { return failure(index, step.method,
-          String(error?.message ?? error) + '; input release unconfirmed: ' + String(releaseError?.message ?? releaseError)); }
-      }
+      // The SDK's mouse.up can swallow a dialog interruption as normal void.
+      // It also lacks the original selector click's coordinates on this Page
+      // handle. Do not synthesize cleanup or treat that void as release proof.
       return failure(index, step.method, error);
     }
     completedEffect ||= effect;
@@ -122,8 +120,7 @@ let script = {js|async function nativeWorkflow(page, args) {
 
 type outcome = Completed of Yojson.Safe.t
   | Stopped of { receipt : Yojson.Safe.t; message : string;
-      effect_started : bool; completed_effect : bool; input_released : bool;
-      pending_pointer_release : Browser_lane.Native_workflow.pointer_button option }
+      effect_started : bool; completed_effect : bool; input_released : bool }
 let ( let* ) = Result.bind
 let object_fields allowed = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields
@@ -199,11 +196,5 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
         else if index+1=count && List.mem_assoc "dialog" failed then Ok has_effect
         else Error "workflow failure index does not match progress" in
     let* ()=if started=expected_started then Ok () else Error "workflow failed-step effect flag disagrees" in
-    let pending_pointer_release =
-      if input_released || index+1<>count then None
-      else match List.assoc_opt "dialog" failed, List.nth_opt request.steps index with
-        | Some (`Assoc _), Some step -> Browser_lane.Native_workflow.pointer_button step
-        | (None|Some (`Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _)), _
-        | Some (`Assoc _), None -> None in
-    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input_released;pending_pointer_release})
+    Ok (Stopped {receipt;message;effect_started=started;completed_effect;input_released})
   | _ -> Error "workflow failure must be null or an object"

@@ -127,7 +127,7 @@ type controller_observation =
 
 let current_controller ~config =
   match Machine_addon_host.call_shared ~config ~principal:Lane_addon_call_context.Anonymous
-      ~name:"masc_dos_screen" ~arguments:(`Assoc []) with
+      ~name:"masc_dos_screen" ~arguments:(`Assoc ["include_frame", `Bool false]) with
   | Ok result when result.Mcp_protocol.Mcp_types.is_error <> Some true ->
       (match result.structured_content with
        | Some (`Assoc fields) -> (match List.assoc_opt "controller" fields with

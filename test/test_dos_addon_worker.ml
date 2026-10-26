@@ -111,6 +111,13 @@ let test_stdio_controller () =
                 (List.exists (function S.ImageContent {mime_type="image/png";data;_} ->
                   String.starts_with ~prefix:"\137PNG\r\n\026\n" (Base64.decode_exn data)
                   | _ -> false) screen.content);
+              let state_only = call ~principal:Lane_addon_call_context.Anonymous "masc_dos_screen"
+                (`Assoc ["include_frame", `Bool false]) in
+              check bool "a state-only read carries no image" false
+                (List.exists (function S.ImageContent _ -> true | _ -> false) state_only.content);
+              check bool "and keeps the seat facts" true
+                (member "saves_name" state_only = `String "hello.com"
+                 && member "controller" state_only = `String "fixture");
               let input_history = Yojson.Safe.Util.(data observed |> member "rows" |> to_list |> List.hd
                 |> member "fields" |> member "input_history") in
               let count = Yojson.Safe.Util.(input_history |> member "entry_count" |> to_int) in
@@ -176,6 +183,10 @@ let test_stdio_controller () =
                   (Tool_result.Workflow_rejection, Tool_result.Proven_pre_effect));
               check bool "screen preserves explicit no-machine status for HTTP" true
                 (C.screen_error_of_meta empty_screen._meta = Some C.Screen_no_machine);
+              check bool "a state-only read reports no machine the same way" true
+                (C.screen_error_of_meta
+                   (call "masc_dos_screen" (`Assoc ["include_frame", `Bool false]))._meta
+                 = Some C.Screen_no_machine);
               let observed = raw "lane_observe" (`Assoc ["binding", `Assoc []; "sources", `List []]) in
               check bool "eject removes context" true (Yojson.Safe.Util.(live_observation observed |> member "state") = `String "no_machine"))))))
 

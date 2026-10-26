@@ -24,7 +24,7 @@ type loaded =
 let current_layout ~config =
   let failure status code message = Refused (status, Server_refusal.json ~code message) in
   match Machine_addon_host.call_shared ~config ~principal:Lane_addon_call_context.Anonymous
-      ~name:"masc_dos_screen" ~arguments:(`Assoc ["include_pad", `Bool true]) with
+      ~name:"masc_dos_screen" ~arguments:(`Assoc ["include_pad", `Bool true; "include_frame", `Bool false]) with
   | Error (Lane_addon_runtime.Unavailable message | Lane_addon_runtime.Outcome_unknown message
       | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message)) ->
       failure `Service_unavailable "machine_unavailable" message

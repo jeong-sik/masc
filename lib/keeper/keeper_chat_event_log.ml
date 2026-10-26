@@ -258,6 +258,9 @@ let keeper_chat_event_to_json event =
     type_tag "model_content_activity" ["activity", model_content_activity_to_json activity]
   | Agent_core_content_block_stop { index } ->
     type_tag "agent_core_content_block_stop" [ "index", `Int index ]
+  | Agent_core_thinking_snapshot {index;snapshot;response} ->
+    type_tag "agent_core_thinking_snapshot" (["index",`Int index;"snapshot",`String snapshot
+       ;"response",response_identity_to_json response])
   | Agent_core_thinking_delta { index; delta; response } ->
     type_tag "agent_core_thinking_delta" ([ "index", `Int index; "delta", `String delta ]
       @ json_opt "response" (Option.map response_identity_to_json response))
@@ -533,6 +536,11 @@ let keeper_chat_event_of_json json =
       Ok (Model_content_activity activity)
     | "agent_core_content_block_stop" ->
       Ok (Agent_core_content_block_stop { index = json |> member "index" |> to_int })
+    | "agent_core_thinking_snapshot" ->
+      let* response=optional_response_identity_of_fields(json |> to_assoc) in
+      let* response=match response with Some owner->Ok owner | None->Error "thinking snapshot requires response identity" in
+      Ok(Agent_core_thinking_snapshot {response;index=json |> member "index" |> to_int
+        ;snapshot=json |> member "snapshot" |> to_string})
     | "agent_core_thinking_delta" ->
       let* response = optional_response_identity_of_fields (json |> to_assoc) in
       Ok
@@ -808,7 +816,7 @@ let current_journaled_envelope_of_json json =
     | Agent_core_content_block_start _
     | Agent_core_content_block_stop _
     | Model_content_activity _
-    | Agent_core_thinking_delta _
+    | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
     | Agent_core_thinking_signature_delta _
     | Agent_core_media_delta _
     | Agent_core_stream_protocol_error _
@@ -939,7 +947,7 @@ let event_floats_are_finite = function
   | Agent_core_content_block_start _
   | Agent_core_content_block_stop _
   | Model_content_activity _
-  | Agent_core_thinking_delta _
+  | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
   | Agent_core_thinking_signature_delta _
   | Agent_core_media_delta _
   | Agent_core_stream_protocol_error _
@@ -1162,7 +1170,7 @@ let sequence_after_complete_rows ~allow_torn_tail ~require_existing journal =
                  | Agent_core_content_block_start _
                  | Agent_core_content_block_stop _
                  | Model_content_activity _
-                 | Agent_core_thinking_delta _
+                 | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
                  | Agent_core_thinking_signature_delta _
                  | Agent_core_media_delta _
                  | Agent_core_stream_protocol_error _
@@ -1233,7 +1241,7 @@ let existing_operation_terminal settlement = function
             | Agent_core_content_block_start _
             | Agent_core_content_block_stop _
             | Model_content_activity _
-            | Agent_core_thinking_delta _
+            | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
             | Agent_core_thinking_signature_delta _
             | Agent_core_media_delta _
             | Agent_core_stream_protocol_error _
@@ -1311,7 +1319,7 @@ let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
             | Agent_core_content_block_start _
             | Agent_core_content_block_stop _
             | Model_content_activity _
-            | Agent_core_thinking_delta _
+            | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
             | Agent_core_thinking_signature_delta _
             | Agent_core_media_delta _
             | Agent_core_stream_protocol_error _

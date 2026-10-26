@@ -89,7 +89,7 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
   | Agent_core.Types.ContentBlockDelta
       {
         delta =
-          ( Agent_core.Types.ThinkingDelta _
+          ( (Agent_core.Types.ThinkingDelta _ | Agent_core.Types.ThinkingSnapshot _)
           | Agent_core.Types.ReasoningDetailsDelta _ );
         _;
       }
@@ -111,7 +111,7 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
         delta =
           ( Agent_core.Types.TextDelta _
           | Agent_core.Types.TextSnapshot _
-          | Agent_core.Types.ThinkingDelta _
+          | (Agent_core.Types.ThinkingDelta _ | Agent_core.Types.ThinkingSnapshot _)
           | Agent_core.Types.ThinkingSignatureDelta _
           | Agent_core.Types.RedactedThinkingSnapshot _
           | Agent_core.Types.ReasoningDetailsDelta _

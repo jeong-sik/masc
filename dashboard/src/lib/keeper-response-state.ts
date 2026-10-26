@@ -217,6 +217,7 @@ export function keeperResponseEventOf(event: KeeperChatStreamEvent): KeeperRespo
           }
         case 'KEEPER_STREAM_MESSAGE_STOP':
           return { kind: 'stop', owner: event.value }
+        case 'KEEPER_THINKING_SNAPSHOT':
         case 'KEEPER_THINKING_DELTA':
           return { kind: 'observe', source: 'body', scope: null, owner: event.value.response ?? null }
         case 'KEEPER_MODEL_CONTENT_ACTIVITY':

@@ -1217,6 +1217,10 @@ type content_delta =
           an equal/older replay. Producers must never label an ordinary
           incremental chunk as a snapshot. *)
   | ThinkingDelta of string
+  | ThinkingSnapshot of string
+  (** Complete unsigned plaintext after provider-native channel reconciliation.
+      Replaces previous thinking text, including a superseded summary; never
+      an incremental fragment or permission to rewrite signed reasoning. *)
   | ThinkingSignatureDelta of string
   | RedactedThinkingSnapshot of string
   (** Provider-authorized final opaque reasoning carrier replacing an open,

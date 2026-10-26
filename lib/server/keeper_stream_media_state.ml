@@ -222,7 +222,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
       { delta =
           ( Agent_core.Types.TextDelta _
           | Agent_core.Types.TextSnapshot _
-          | Agent_core.Types.ThinkingDelta _
+          | (Agent_core.Types.ThinkingDelta _ | Agent_core.Types.ThinkingSnapshot _)
           | Agent_core.Types.ThinkingSignatureDelta _
           | Agent_core.Types.RedactedThinkingSnapshot _
           | Agent_core.Types.ReasoningDetailsDelta _

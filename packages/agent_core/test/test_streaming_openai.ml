@@ -1006,7 +1006,7 @@ let test_events_reasoning_delta_index_multi_chunk () =
      Alcotest.(check string) "thinking type" "thinking" content_type
    | _ -> Alcotest.fail "expected ContentBlockStart thinking");
   (match List.nth r1 1 with
-   | ContentBlockDelta { index; delta = ThinkingDelta _ } ->
+   | ContentBlockDelta { index; delta = (ThinkingDelta _ | ThinkingSnapshot _) } ->
      Alcotest.(check int) "thinking delta index matches start" 0 index
    | _ -> Alcotest.fail "expected ThinkingDelta");
   (* Second reasoning chunk: must still use the same block index *)

@@ -780,10 +780,28 @@ let test_long_later_content_waits_without_loss () =
   Alcotest.(check string) "all deferred lines follow the earlier text exactly once"
     ("first" ^ String.concat "" lines) (forwarded_text released)
 
+let test_thinking_snapshot_keeps_split_secret_private () =
+  with_exact_secret ~keeper_name:"thinking-snapshot" "snapshot-secret-7788" @@ fun redaction ->
+  let events=feed(Stream_text.create redaction)
+    [delta 0(Agent_core.Types.ThinkingDelta "condensed summary\n")
+    ;delta 0(Agent_core.Types.ThinkingSnapshot "replacement snapshot-")
+    ;delta 0(Agent_core.Types.ThinkingDelta "secret-7788 complete\n")
+    ;Agent_core.Types.MessageStop] in
+  let final=List.fold_left(fun text->function
+    | Agent_core.Types.ContentBlockDelta{delta=ThinkingSnapshot value;_}->value
+    | ContentBlockDelta{delta=ThinkingDelta value;_}->text^value
+    | _->text) "" events in
+  Alcotest.(check string) "replacement supersedes summary and redacts across its boundary"
+    "replacement [REDACTED] complete\n" final;
+  List.iter(function
+    | Agent_core.Types.ContentBlockDelta{delta=ThinkingSnapshot text|ThinkingDelta text;_}->
+      not_contains "no public event leaks secret" text "snapshot-secret-7788"
+    | _->())events
+
 let () =
   Alcotest.run
     "keeper secret redaction"
-    [ ( "snapshot",
+    [ ("thinking replacement",[Alcotest.test_case "split secret" `Quick test_thinking_snapshot_keeps_split_secret_private]); ( "snapshot",
         [ Alcotest.test_case "redacts env and file exact values" `Quick
             test_snapshot_redacts_env_and_file_values;
           Alcotest.test_case "does not exact-redact short values" `Quick

@@ -119,6 +119,13 @@ type delta =
           None preserves unbound bytes without granting response ownership.
           Deltas of one block continue one reasoning stretch; a different
           [index] or response starts another. *)
+  | Thinking_snapshot of
+      { text : string
+      ; index : int
+      ; response : Masc.Keeper_chat_events.response_identity
+      }
+      (** Replace this exact response/block. A replacement requires the
+          producer's response identity; unbound bytes cannot replace history. *)
   | Media of Masc.Keeper_chat_events.generated_media
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }

@@ -254,7 +254,7 @@ let activity_of_event preview (event : Agent_core.Types.sse_event) =
   | ContentBlockDelta { delta = TextSnapshot text; _ }
     when not (String.equal (String.trim text) "") ->
     Some { preview with activity = Receiving_response }
-  | MessageStart _ | ContentBlockDelta { delta = ThinkingDelta _ | ReasoningDetailsDelta _; _ } ->
+  | MessageStart _ | ContentBlockDelta { delta = (ThinkingDelta _ | ThinkingSnapshot _) | ReasoningDetailsDelta _; _ } ->
     Some { preview with activity = Receiving_response }
   | Agent_core.Types.ContentBlockDelta { delta = (Agent_core.Types.ThinkingSignatureDelta _ | (Agent_core.Types.RedactedThinkingSnapshot _ | (Agent_core.Types.InputJsonDelta _ | (Agent_core.Types.InputJsonSnapshot _ | Agent_core.Types.MediaDelta _))));_}
   | Agent_core.Types.ContentBlockStart { tool_name = None;_} | Agent_core.Types.MessageStop
@@ -274,7 +274,7 @@ let released_text entry events =
       | ContentBlockDelta {delta=TextDelta text; _} -> false, Some text
       | ContentBlockDelta {delta=TextSnapshot text; _} ->
           true, Some (String.trim text)
-      | Agent_core.Types.ContentBlockDelta { delta = (Agent_core.Types.ThinkingDelta _ | (Agent_core.Types.ThinkingSignatureDelta _ | (Agent_core.Types.RedactedThinkingSnapshot _ | (Agent_core.Types.ReasoningDetailsDelta _ | (Agent_core.Types.InputJsonDelta _ | (Agent_core.Types.InputJsonSnapshot _ | Agent_core.Types.MediaDelta _))))));_}
+      | Agent_core.Types.ContentBlockDelta { delta = ((Agent_core.Types.ThinkingDelta _ | Agent_core.Types.ThinkingSnapshot _) | (Agent_core.Types.ThinkingSignatureDelta _ | (Agent_core.Types.RedactedThinkingSnapshot _ | (Agent_core.Types.ReasoningDetailsDelta _ | (Agent_core.Types.InputJsonDelta _ | (Agent_core.Types.InputJsonSnapshot _ | Agent_core.Types.MediaDelta _))))));_}
       | Agent_core.Types.MessageStop | Agent_core.Types.InlineContentReplay _ | Agent_core.Types.ResponsesOutputItems _ | Agent_core.Types.Ping | Agent_core.Types.Connected
       | Agent_core.Types.MessageStart _ | Agent_core.Types.ContentBlockStart _
       | Agent_core.Types.ContentBlockStop _ | Agent_core.Types.MessageDelta _

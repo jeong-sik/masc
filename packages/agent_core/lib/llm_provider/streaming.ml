@@ -198,7 +198,7 @@ let sse_event_is_first_token_signal (e : sse_event) : bool =
   let non_empty s = String.length s > 0 in
   match e with
   | ContentBlockDelta { delta = TextDelta s | TextSnapshot s; _ } -> non_empty s
-  | ContentBlockDelta { delta = ThinkingDelta s; _ } -> non_empty s
+  | ContentBlockDelta { delta = ThinkingDelta s | ThinkingSnapshot s; _ } -> non_empty s
   | ContentBlockDelta { delta = ReasoningDetailsDelta { reasoning_content; details }; _ }
     ->
     (match reasoning_content with
@@ -241,7 +241,7 @@ let sse_event_is_deliverable_progress_signal (e : sse_event) : bool =
   | ContentBlockStart { content_type = "tool_use"; _ } -> true
   | ContentBlockDelta { delta = ThinkingSignatureDelta _; _ }
   | ContentBlockDelta { delta = RedactedThinkingSnapshot _; _ }
-  | ContentBlockDelta { delta = ThinkingDelta _; _ }
+  | ContentBlockDelta { delta = (ThinkingDelta _ | ThinkingSnapshot _); _ }
   | ContentBlockDelta { delta = ReasoningDetailsDelta _; _ }
   | MessageStart _
   | ContentBlockStart _
@@ -909,7 +909,7 @@ type openai_stream_state =
         the sole identity authority for an open tool block. *)
   ; responses_text_blocks : ((int * int), int) Hashtbl.t
   ; responses_thinking_blocks : (int, int) Hashtbl.t
-  ; responses_redacted_items : (int, Yojson.Safe.t) Hashtbl.t
+  ; responses_reasoning : (int, Responses_reasoning_stream.t) Hashtbl.t
   ; responses_output_ids : (int, string) Hashtbl.t
   ; responses_output_kinds : (int, Response_replay.kind) Hashtbl.t
   ; responses_output_groups : (int, Response_replay.kind * int list) Hashtbl.t
@@ -951,7 +951,7 @@ let create_openai_stream_state
   ; tool_block_identities = Hashtbl.create 4
   ; responses_text_blocks = Hashtbl.create 4
   ; responses_thinking_blocks = Hashtbl.create 4
-  ; responses_redacted_items = Hashtbl.create 4
+  ; responses_reasoning = Hashtbl.create 4
   ; responses_output_ids = Hashtbl.create 4
   ; responses_output_kinds = Hashtbl.create 4
   ; responses_output_groups = Hashtbl.create 4
@@ -1630,7 +1630,7 @@ let[@warning "-32"] test_input_json_delta = function
       { delta =
           ( TextDelta _
           | TextSnapshot _
-          | ThinkingDelta _
+          | (ThinkingDelta _ | ThinkingSnapshot _)
           | ThinkingSignatureDelta _
           | RedactedThinkingSnapshot _
           | ReasoningDetailsDelta _
@@ -1695,7 +1695,7 @@ let%test
 
 (* Inline-test-only helpers for the inline-reasoning split. *)
 let[@warning "-32"] test_thinking_text = function
-  | ContentBlockDelta { delta = ThinkingDelta s; _ } -> Some s
+  | ContentBlockDelta { delta = ThinkingDelta s | ThinkingSnapshot s; _ } -> Some s
   | ContentBlockDelta { delta = (TextDelta _ | (TextSnapshot _ | (ThinkingSignatureDelta _ | (RedactedThinkingSnapshot _ | (ReasoningDetailsDelta _ | (InputJsonDelta _ | (InputJsonSnapshot _ | MediaDelta _)))))));_}
   | MessageStop | InlineContentReplay _ | ResponsesOutputItems _ | Ping | Connected | MessageStart _ | ContentBlockStart _ | ContentBlockStop _
   | MessageDelta _ | SSEError _ | NDJSONError _ | SSEParseFailed _ | NDJSONParseFailed _
@@ -1705,7 +1705,7 @@ let[@warning "-32"] test_thinking_text = function
 
 let[@warning "-32"] test_reply_text = function
   | ContentBlockDelta { delta = TextDelta s; _ } -> Some s
-  | ContentBlockDelta { delta = (TextSnapshot _ | (ThinkingDelta _ | (ThinkingSignatureDelta _ | (RedactedThinkingSnapshot _ | (ReasoningDetailsDelta _ | (InputJsonDelta _ | (InputJsonSnapshot _ | MediaDelta _)))))));_}
+  | ContentBlockDelta { delta = (TextSnapshot _ | ((ThinkingDelta _ | ThinkingSnapshot _) | (ThinkingSignatureDelta _ | (RedactedThinkingSnapshot _ | (ReasoningDetailsDelta _ | (InputJsonDelta _ | (InputJsonSnapshot _ | MediaDelta _)))))));_}
   | MessageStop | InlineContentReplay _ | ResponsesOutputItems _ | Ping | Connected | MessageStart _ | ContentBlockStart _ | ContentBlockStop _
   | MessageDelta _ | SSEError _ | NDJSONError _ | SSEParseFailed _ | NDJSONParseFailed _
   | SSEUnknownEventType _ | SSEUnsupportedPart _ | SSEUnsupportedResponse _ | Timeout _
@@ -1921,7 +1921,7 @@ let%test
             { delta =
                 ( TextDelta _
                 | TextSnapshot _
-                | ThinkingDelta _
+                | (ThinkingDelta _ | ThinkingSnapshot _)
                 | ThinkingSignatureDelta _
                 | RedactedThinkingSnapshot _
                 | ReasoningDetailsDelta _
@@ -1990,7 +1990,7 @@ let%test "openai_chunk_to_events: id-less continuation on ambiguous index fails 
           { delta =
               ( TextDelta _
               | TextSnapshot _
-              | ThinkingDelta _
+              | (ThinkingDelta _ | ThinkingSnapshot _)
               | ThinkingSignatureDelta _
               | RedactedThinkingSnapshot _
               | ReasoningDetailsDelta _
@@ -2194,12 +2194,7 @@ let responses_ensure_tool_block state emit ~output_index ~tool_id ~tool_name =
     None
 ;;
 
-let responses_capture_output_item ?(drop_function_call=false) state emit ~output_index item =
-  let open Yojson.Safe.Util in
-  let capture kind indices =
-    Hashtbl.replace state.responses_output_groups output_index (kind, indices)
-  in
-  let assert_kind incoming =
+let responses_assert_output_kind state emit output_index incoming =
     let effective = match Hashtbl.find_opt state.responses_output_kinds output_index, incoming with
       | None, (Response_replay.Message _ | Reasoning | Function_call as kind) -> Some kind
       | Some (Response_replay.Message previous), Response_replay.Message phase ->
@@ -2214,15 +2209,53 @@ let responses_capture_output_item ?(drop_function_call=false) state emit ~output
     match effective with
     | Some kind -> Hashtbl.replace state.responses_output_kinds output_index kind; Some kind
     | None -> emit(SSEParseFailed{raw="";reason="responses_replay:conflicting_item_kind_or_phase"});None
+;;
+
+let responses_accept_output_identity state emit output_index = function
+  | None | Some "" -> true
+  | Some id ->
+    (match Hashtbl.find_opt state.responses_output_ids output_index with
+     | None -> Hashtbl.add state.responses_output_ids output_index id;true
+     | Some previous when String.equal previous id -> true
+     | Some _ -> emit(SSEParseFailed{raw="";reason="responses_replay:conflicting_output_item_identity"});false)
+;;
+
+let responses_reasoning_update state emit ~output_index apply =
+  let previous=Hashtbl.find_opt state.responses_reasoning output_index
+    |> Option.value ~default:Responses_reasoning_stream.empty in
+  match apply previous with
+  | Error reason -> emit(SSEParseFailed{raw="";reason})
+  | Ok(next,update) ->
+    Hashtbl.replace state.responses_reasoning output_index next;
+    (match update with
+     | Responses_reasoning_stream.Unchanged -> ()
+     | Append text ->
+       let index=responses_ensure_thinking_block state emit ~output_index in
+       emit(ContentBlockDelta{index;delta=ThinkingDelta text})
+     | Replace text ->
+       let index=responses_ensure_thinking_block state emit ~output_index in
+       emit(ContentBlockDelta{index;delta=ThinkingSnapshot text})
+     | Redact raw ->
+       (match Hashtbl.find_opt state.responses_thinking_blocks output_index with
+        | Some index -> emit(ContentBlockDelta{index;delta=RedactedThinkingSnapshot raw})
+        | None ->
+          let index=responses_fresh_block state in
+          Hashtbl.add state.responses_thinking_blocks output_index index;
+          emit(ContentBlockStart{index;content_type="redacted_thinking";tool_id=Some raw;tool_name=None})));
+    Option.iter(fun index->Hashtbl.replace state.responses_output_groups output_index
+      (Response_replay.Reasoning,[index]))
+      (Hashtbl.find_opt state.responses_thinking_blocks output_index)
+;;
+
+let responses_capture_output_item ?(drop_function_call=false) state emit ~output_index item =
+  let open Yojson.Safe.Util in
+  let capture kind indices =
+    Hashtbl.replace state.responses_output_groups output_index (kind, indices)
   in
-  let identity_matches = match responses_member_string_opt "id" item with
-    | None | Some "" -> true
-    | Some id ->
-      (match Hashtbl.find_opt state.responses_output_ids output_index with
-       | None -> Hashtbl.add state.responses_output_ids output_index id;true
-       | Some previous -> String.equal previous id) in
-  if not identity_matches then
-    emit(SSEParseFailed{raw="";reason="responses_replay:conflicting_output_item_identity"})
+  let assert_kind incoming = responses_assert_output_kind state emit output_index incoming in
+  let identity_matches=responses_accept_output_identity state emit output_index
+    (responses_member_string_opt "id" item) in
+  if not identity_matches then ()
   else match responses_member_string_opt "type" item with
   | Some "message" ->
     let phase = match item with
@@ -2252,26 +2285,11 @@ let responses_capture_output_item ?(drop_function_call=false) state emit ~output
     (match assert_kind Response_replay.Reasoning with
      | None -> ()
      | Some kind ->
-    let index = match item |> member "encrypted_content" |> to_string_option with
-      | Some encrypted when String.trim encrypted <> "" ->
-        let raw = Yojson.Safe.to_string item in
-        (match Hashtbl.find_opt state.responses_redacted_items output_index with
-         | Some previous ->
-           if not (Yojson.Safe.equal previous item) then
-             emit(SSEParseFailed {raw="";reason="responses_replay:conflicting_reasoning_item"});
-           Hashtbl.find_opt state.responses_thinking_blocks output_index
-         | None ->
-           (* Compare objects without giving JSON member order authority. The
-              first opaque replay artifact emitted below stays unchanged. *)
-           Hashtbl.add state.responses_redacted_items output_index item;
-           (match Hashtbl.find_opt state.responses_thinking_blocks output_index with
-            | Some index -> emit(ContentBlockDelta {index;delta=RedactedThinkingSnapshot raw});Some index
-            | None ->
-              let index=responses_fresh_block state in
-              Hashtbl.add state.responses_thinking_blocks output_index index;
-              emit(ContentBlockStart {index;content_type="redacted_thinking";tool_id=Some raw;tool_name=None});Some index))
-      | Some _ | None -> Hashtbl.find_opt state.responses_thinking_blocks output_index in
-    capture kind (Option.to_list index))
+    (match Responses_reasoning.decode item with
+     | Error reason -> emit(SSEParseFailed{raw="";reason})
+     | Ok incoming -> responses_reasoning_update state emit ~output_index
+         (fun previous->Responses_reasoning_stream.item previous incoming));
+    capture kind (Option.to_list(Hashtbl.find_opt state.responses_thinking_blocks output_index)))
   | Some "function_call" ->
     (match assert_kind Response_replay.Function_call with
      | None -> ()
@@ -2327,7 +2345,10 @@ let responses_capture_terminal_outputs state emit response =
      List.iteri (fun output_index item ->
        responses_capture_output_item ~drop_function_call state emit ~output_index item) items
    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> ());
-  if Hashtbl.length state.responses_output_groups > 0 then
+  let explicit_output=match response |> member "output" with `List _->true
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> false in
+  if Hashtbl.length state.responses_output_groups > 0
+     || (explicit_output && Hashtbl.length state.responses_thinking_blocks > 0) then
     emit (ResponsesOutputItems
       (Hashtbl.fold (fun index group acc -> (index,group)::acc) state.responses_output_groups []
        |> List.sort (fun (left,_) (right,_) -> Int.compare left right)
@@ -2395,23 +2416,26 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
             let index=responses_ensure_text_block state emit ~output_index ~content_index in
             emit(ContentBlockDelta {index;delta=TextSnapshot text})
           | None -> ())
-       | "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" ->
-         (match responses_member_string_opt "delta" json with
-          | Some delta when delta <> "" ->
-            let output_index = responses_member_int_default "output_index" json in
-            let index = responses_ensure_thinking_block state emit ~output_index in
-            emit (ContentBlockDelta { index; delta = ThinkingDelta delta })
-          | Some _ | None -> ())
-       | "response.reasoning_summary_text.done" | "response.reasoning_text.done" ->
-         let output_index = responses_member_int_default "output_index" json in
-         if not (Hashtbl.mem state.responses_thinking_blocks output_index)
-         then (
-           match responses_member_string_opt "text" json with
-           | Some text when text <> "" ->
-             let output_index = responses_member_int_default "output_index" json in
-             let index = responses_ensure_thinking_block state emit ~output_index in
-             emit (ContentBlockDelta { index; delta = ThinkingDelta text })
-           | Some _ | None -> ())
+       | ("response.reasoning_summary_text.delta" | "response.reasoning_text.delta"
+         | "response.reasoning_summary_text.done" | "response.reasoning_text.done") as event ->
+         let channel,part_field,is_delta=match event with
+           | "response.reasoning_text.delta" -> Responses_reasoning.Full,"content_index",true
+           | "response.reasoning_text.done" -> Full,"content_index",false
+           | "response.reasoning_summary_text.delta" -> Summary,"summary_index",true
+           | _ -> Summary,"summary_index",false in
+         let output_index=responses_member_int_default "output_index" json in
+         if responses_accept_output_identity state emit output_index
+             (responses_member_string_opt "item_id" json) then
+           (match responses_assert_output_kind state emit output_index Response_replay.Reasoning with
+            | None -> ()
+            | Some _ ->
+              match responses_member_string_opt (if is_delta then "delta" else "text") json with
+              | None -> ()
+              | Some text ->
+                let part=responses_member_int_default part_field json in
+                responses_reasoning_update state emit ~output_index (fun previous->
+                  if is_delta then Responses_reasoning_stream.delta previous ~channel ~part text
+                  else Responses_reasoning_stream.part_done previous ~channel ~part text))
        | "response.output_item.added" ->
          let output_index = responses_member_int_default "output_index" json in
          let item = json |> member "item" in
@@ -3996,7 +4020,7 @@ let%test "ollama_chunk_to_events: content delta emits Start+Delta" =
           { delta =
               ( TextDelta _
               | TextSnapshot _
-              | ThinkingDelta _
+              | (ThinkingDelta _ | ThinkingSnapshot _)
               | ThinkingSignatureDelta _
               | RedactedThinkingSnapshot _
               | ReasoningDetailsDelta _
@@ -4066,7 +4090,7 @@ let%test "ollama_chunk_to_events: subsequent content delta reuses block" =
           { delta =
               ( TextDelta _
               | TextSnapshot _
-              | ThinkingDelta _
+              | (ThinkingDelta _ | ThinkingSnapshot _)
               | ThinkingSignatureDelta _
               | RedactedThinkingSnapshot _
               | ReasoningDetailsDelta _
@@ -4142,7 +4166,7 @@ let%test "ollama_chunk_to_events: done with stop_reason emits MessageDelta" =
           { delta =
               ( TextDelta _
               | TextSnapshot _
-              | ThinkingDelta _
+              | (ThinkingDelta _ | ThinkingSnapshot _)
               | ThinkingSignatureDelta _
               | RedactedThinkingSnapshot _
               | ReasoningDetailsDelta _
@@ -4276,7 +4300,7 @@ let%test "ollama_chunk_to_events: tool_calls emit Start+InputJsonSnapshot" =
           { delta =
               ( TextDelta _
               | TextSnapshot _
-              | ThinkingDelta _
+              | (ThinkingDelta _ | ThinkingSnapshot _)
               | ThinkingSignatureDelta _
               | RedactedThinkingSnapshot _
               | ReasoningDetailsDelta _
@@ -4346,7 +4370,7 @@ let%test "ollama_chunk_to_events: thinking delta emits thinking block first" =
           { delta =
               ( TextDelta _
               | TextSnapshot _
-              | ThinkingDelta _
+              | (ThinkingDelta _ | ThinkingSnapshot _)
               | ThinkingSignatureDelta _
               | RedactedThinkingSnapshot _
               | ReasoningDetailsDelta _
@@ -4573,14 +4597,14 @@ let[@warning "-32"] test_is_parse_failed : sse_event -> bool = function
 ;;
 
 let[@warning "-32"] test_thinking_text : content_delta -> string option = function
-  | ThinkingDelta text -> Some text
+  | ThinkingDelta text | ThinkingSnapshot text -> Some text
   | TextDelta _ | TextSnapshot _ | ThinkingSignatureDelta _ | RedactedThinkingSnapshot _
   | ReasoningDetailsDelta _ | InputJsonDelta _ | InputJsonSnapshot _ | MediaDelta _ -> None
 ;;
 
 let[@warning "-32"] test_visible_text : content_delta -> string option = function
   | TextDelta text -> Some text
-  | TextSnapshot _ | ThinkingDelta _ | ThinkingSignatureDelta _ | RedactedThinkingSnapshot _
+  | TextSnapshot _ | (ThinkingDelta _ | ThinkingSnapshot _) | ThinkingSignatureDelta _ | RedactedThinkingSnapshot _
   | ReasoningDetailsDelta _ | InputJsonDelta _ | InputJsonSnapshot _ | MediaDelta _ -> None
 ;;
 

@@ -79,7 +79,7 @@ let is_terminal_event = function
   | Keeper_chat_events.Agent_core_stream_message_stop _
   | Keeper_chat_events.Agent_core_content_block_start _
   | Keeper_chat_events.Agent_core_content_block_stop _ | Keeper_chat_events.Model_content_activity _
-  | Keeper_chat_events.Agent_core_thinking_delta _
+  | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
   | Keeper_chat_events.Agent_core_thinking_signature_delta _
   | Keeper_chat_events.Agent_core_media_delta _
   | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _
@@ -121,7 +121,7 @@ let last_reply_details entries =
        | Keeper_chat_events.Agent_core_content_block_start _
        | Keeper_chat_events.Agent_core_content_block_stop _
        | Keeper_chat_events.Model_content_activity _
-       | Keeper_chat_events.Agent_core_thinking_delta _
+       | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
        | Keeper_chat_events.Agent_core_thinking_signature_delta _
        | Keeper_chat_events.Agent_core_media_delta _
        | Keeper_chat_events.Agent_core_stream_protocol_error _
@@ -225,7 +225,7 @@ let terminal_outcome_mismatch ~terminal_event rows =
   | Keeper_chat_events.Agent_core_stream_message_stop _
   | Keeper_chat_events.Agent_core_content_block_start _
   | Keeper_chat_events.Agent_core_content_block_stop _ | Keeper_chat_events.Model_content_activity _
-  | Keeper_chat_events.Agent_core_thinking_delta _
+  | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
   | Keeper_chat_events.Agent_core_thinking_signature_delta _
   | Keeper_chat_events.Agent_core_media_delta _
   | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _
@@ -302,7 +302,7 @@ let tool_rows_mismatch entries rows =
          | Keeper_chat_events.Agent_core_content_block_start _
          | Keeper_chat_events.Agent_core_content_block_stop _
          | Keeper_chat_events.Model_content_activity _
-         | Keeper_chat_events.Agent_core_thinking_delta _
+         | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
          | Keeper_chat_events.Agent_core_thinking_signature_delta _
          | Keeper_chat_events.Agent_core_media_delta _
          | Keeper_chat_events.Agent_core_stream_protocol_error _

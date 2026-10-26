@@ -1,0 +1,15 @@
+Raw workflow log SHA256: 783a0c96971c287858e72d08637d8bccf47e51a37fdd00ac1c30df7651080a12
+Source: https://github.com/jeong-sik/masc/actions/runs/40194866371
+
+test suite	Checkout	2026-10-25T12:50:18.4525992Z HEAD is now at ac826936 fix(responses): reconcile indexed reasoning channels through persisted stream delivery
+test suite	Checkout	2026-10-25T12:50:18.4648544Z [command]/usr/bin/git log -1 --format=%H
+test suite	Test	2026-10-25T12:52:16.7121909Z 498 |      | Some {header=Announced{kind=Thinking_block;_};lifecycle=Open;signature_chunks_rev=[];_} ->
+test suite	Test	2026-10-25T12:52:16.7123640Z 501 |          {reason="thinking_snapshot_requires_unsigned_open_block";raw=""}))
+test suite	Test	2026-10-25T12:52:16.7124309Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T12:52:16.7127810Z 498 |      | Some {header=Announced{kind=Thinking_block;_};lifecycle=Open;signature_chunks_rev=[];_} ->
+test suite	Test	2026-10-25T12:52:16.7129424Z 501 |          {reason="thinking_snapshot_requires_unsigned_open_block";raw=""}))
+test suite	Test	2026-10-25T12:52:16.7130266Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T12:52:16.7133123Z 498 |      | Some {header=Announced{kind=Thinking_block;_};lifecycle=Open;signature_chunks_rev=[];_} ->
+test suite	Test	2026-10-25T12:52:16.7134968Z 501 |          {reason="thinking_snapshot_requires_unsigned_open_block";raw=""}))
+test suite	Test	2026-10-25T12:52:16.7135611Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+test suite	Test	2026-10-25T12:52:59.0377427Z ##[error]Process completed with exit code 1.

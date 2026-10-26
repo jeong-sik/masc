@@ -322,9 +322,13 @@ function enqueueThinkingDelta(
   }
   if (!pending) {
     const entry = (keeperThreads.value[keeperName] ?? []).find(candidate => candidate.id === assistantEntryId)
-    const last = entry?.traceSteps?.at(-1)
-    const prefix = last?.kind === 'think' && sameKeeperResponseOwner(last.responseOwner, meta.responseOwner)
-      && sameAgentCoreBlockIndex(last.agentCoreBlockIndex, meta.agentCoreBlockIndex) ? last.text : ''
+    const previous = meta.responseOwner !== undefined && meta.agentCoreBlockIndex !== undefined
+      ? entry?.traceSteps?.find(step => step.kind === 'think'
+        && sameKeeperResponseOwner(step.responseOwner, meta.responseOwner)
+        && sameAgentCoreBlockIndex(step.agentCoreBlockIndex, meta.agentCoreBlockIndex))
+      : entry?.traceSteps?.at(-1)
+    const prefix = previous?.kind === 'think' && sameKeeperResponseOwner(previous.responseOwner, meta.responseOwner)
+      && sameAgentCoreBlockIndex(previous.agentCoreBlockIndex, meta.agentCoreBlockIndex) ? previous.text : ''
     const text = `${prefix}${delta}`
     pending = {
       responseOwner: meta.responseOwner,
@@ -1419,6 +1423,19 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_CONTENT_BLOCK_STOP') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
+        return null
+      }
+      if (event.name === 'KEEPER_THINKING_SNAPSHOT') {
+        const response = admitStreamEvent(keeperName, assistantEntryId, event)
+        if (!response.accepted) return null
+        // Commit old buffered deltas before replacing their exact block.
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
+        setAssistantThinkingSnapshot(keeperName, assistantEntryId, event.value.snapshot, {
+          agentCoreBlockIndex: event.value.index,
+          responseOwner: event.value.response && response.state.kind === 'known'
+            ? response.state.current ?? undefined : undefined,
+        })
+        persistActiveAssistantDraft(keeperName, assistantEntryId)
         return null
       }
       if (event.name === 'KEEPER_THINKING_DELTA') {

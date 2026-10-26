@@ -1340,7 +1340,7 @@ let test_gemini_stream_thinking_delta_index () =
      (* ContentBlockStart at index 0, ContentBlockDelta at index 0 *)
      (match events with
       | [ ContentBlockStart { index = start_idx; content_type = "thinking"; _ }
-        ; ContentBlockDelta { index = delta_idx; delta = ThinkingDelta _; _ }
+        ; ContentBlockDelta { index = delta_idx; delta = (ThinkingDelta _ | ThinkingSnapshot _); _ }
         ] ->
         check int "start index" 0 start_idx;
         check int "delta index matches start" start_idx delta_idx
@@ -1361,7 +1361,7 @@ let test_gemini_stream_thinking_delta_index () =
    | Some chunk ->
      let events, _tel = gemini_events state chunk in
      (match events with
-      | [ ContentBlockDelta { index; delta = ThinkingDelta _; _ } ] ->
+      | [ ContentBlockDelta { index; delta = (ThinkingDelta _ | ThinkingSnapshot _); _ } ] ->
         check int "subsequent thinking index" 0 index
       | _ -> fail "expected [ContentBlockDelta] only")
    | None -> fail "expected Some chunk");

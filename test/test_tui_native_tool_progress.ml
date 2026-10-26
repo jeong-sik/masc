@@ -373,7 +373,7 @@ let test_split_secret_held_across_native_side_events () =
               (Astring.String.is_infix ~affix:secret serialized);
             let order = List.filter_map (function
               | E.Native_tool_progress _ | E.Native_tool_end _ -> Some "native-observation"
-              | E.Text_delta _ | E.Agent_core_thinking_delta _ -> Some "safe-content"
+              | E.Text_delta _ | (E.Agent_core_thinking_delta _ | E.Agent_core_thinking_snapshot _) -> Some "safe-content"
               | _ -> None) events in
             check bool "native observations remain visible before safely released content" true
               (match order with
@@ -413,7 +413,7 @@ let test_held_content_reserves_its_index_before_native_headers () =
         check bool "a withheld model index cannot become a native tool row" false
           (List.exists (function E.Native_tool_start _ -> true | _ -> false) events);
         check bool "the model prefix stays undisclosed" false
-          (List.exists (function E.Text_delta _ | E.Agent_core_thinking_delta _ -> true | _ -> false) events))
+          (List.exists (function E.Text_delta _ | (E.Agent_core_thinking_delta _ | E.Agent_core_thinking_snapshot _) -> true | _ -> false) events))
         [F.events direct; journal];
       Stream.finish stream Stream.Cancelled))) [false;true]
 

@@ -3560,7 +3560,7 @@
 (test
  (name test_tui_keeper_chat_transcript)
  (modules test_tui_keeper_chat_transcript)
- (libraries masc.runtime
+ (libraries masc.runtime masc.masc_types masc.fs_compat eio_main unix
   alcotest
   agent_core
   fmt

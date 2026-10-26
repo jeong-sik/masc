@@ -25767,7 +25767,12 @@ and is loaded on demand through keeper_skill.
            Add-ons screens typing into a draft, a form or the installer.
            Shift does not survive the input method ([ㅓ] is both [j] and [J]),
            so an uppercase shortcut stays out of reach in Korean mode -- a
-           limit of every terminal program, not a spelling this can add. *)
+           limit of every terminal program, not a spelling this can add.
+           A compact viewport is not special here: the compact fallback
+           further down owns every key the quit check leaves, so a
+           translated letter lands where the English one lands, and an arm
+           placed above that fallback has to guard a hidden field for
+           English letters exactly as for translated ones. *)
         let command_reading =
           Option.is_none text_target
           && not state.composer_focused

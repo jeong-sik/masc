@@ -34,6 +34,38 @@ let tests = [
     Live.publish ~base_path:"/test" ~draft:(make 1 "old-writer") ~content:"old";
     Alcotest.(check string) "new snapshot retained" "new" (field "content" (field "document" (json session)) |> Yojson.Safe.Util.to_string);
     Alcotest.(check int) "author is not a live peer" 1 (List.length (peers session))));
+  "each observer receives documents once independently of presence", `Quick, (fun () -> with_session (fun first ->
+    Alcotest.(check bool) "no snapshot yet" true (field "document" (json first) = `Null);
+    let draft = match Draft.create ~target ~base_revision:1 ~base_sha256:(String.make 64 'a') ~state:"AAA=" ~actor:"writer" ~at:"2026-10-25T13:00:00Z" with
+      | Ok draft -> draft | Error message -> Alcotest.fail message in
+    let _, before_publish = Option.get (Live.observe first) in
+    Live.publish ~base_path:"/test" ~draft ~content:"initial";
+    Alcotest.(check bool) "captured pulse wakes" true (Eio.Promise.is_resolved before_publish);
+    let document session = field "document" (json session) in
+    Alcotest.(check string) "first available snapshot" "initial" (field "content" (document first) |> Yojson.Safe.Util.to_string);
+    let second = Live.join ~base_path:"/test" ~actor:"other" ~target in
+    Fun.protect ~finally:(fun () -> Live.leave second) (fun () ->
+      Alcotest.(check bool) "join is presence only for existing observer" true (document first = `Null);
+      Alcotest.(check string) "new observer has its own snapshot" "initial" (field "content" (document second) |> Yojson.Safe.Util.to_string);
+      let _, before_position = Option.get (Live.observe first) in
+      let position = Some { Artifact_document_engine.anchor = [1]; head = [2] } in
+      ignore (Live.position second position);
+      Alcotest.(check bool) "cursor wakes stream" true (Eio.Promise.is_resolved before_position);
+      Alcotest.(check bool) "cursor does not resend state" true (document first = `Null && document second = `Null);
+      let _, unchanged = Option.get (Live.observe first) in
+      ignore (Live.position second position);
+      Alcotest.(check bool) "identical cursor does not wake" false (Eio.Promise.is_resolved unchanged);
+      let newer = match Draft.advance draft ~state:"AAA=" ~actor:"writer" ~at:"2026-10-25T13:00:01Z" with
+        | Ok draft -> draft | Error message -> Alcotest.fail message in
+      Live.publish ~base_path:"/test" ~draft:newer ~content:"newer";
+      List.iter (fun session ->
+        Alcotest.(check string) "each peer receives newer sequence" "newer" (field "content" (document session) |> Yojson.Safe.Util.to_string);
+        Alcotest.(check bool) "same sequence suppressed" true (document session = `Null)) [first; second];
+      Live.publish ~base_path:"/test" ~draft ~content:"stale";
+      Alcotest.(check bool) "stale read cannot reannounce" true (document first = `Null);
+      Live.leave second;
+      with_session ~actor:"other" (fun reconnected ->
+        Alcotest.(check string) "fresh session receives current snapshot" "newer" (field "content" (document reconnected) |> Yojson.Safe.Util.to_string)))));
   "last connection destroys ephemeral room", `Quick, (fun () ->
     let session = Live.join ~base_path:"/test" ~actor:"human" ~target in
     ignore (Live.position session (Some { Artifact_document_engine.anchor = [1]; head = [2] }));

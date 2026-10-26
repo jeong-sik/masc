@@ -66,6 +66,36 @@ describe('live shared drafts', () => {
     a.dispose(); sessions = []
     expect(vi.mocked(sendArtifactPresence).mock.lastCall?.[3]).toEqual({ action: 'leave' })
   })
+  it('coalesces in-flight cursor changes and skips an acknowledged identical position', async () => {
+    const a = open()
+    await vi.waitFor(() => expect(sendArtifactPresence).toHaveBeenCalledTimes(1))
+    await Promise.resolve(); vi.mocked(sendArtifactPresence).mockClear()
+    const releases: (() => void)[] = []
+    vi.mocked(sendArtifactPresence).mockImplementation(async () => { await new Promise<void>(resolve => releases.push(resolve)) })
+    a.select({ anchor: 0, head: 1 }); a.select({ anchor: 1, head: 2 }); a.select({ anchor: 2, head: 3 })
+    expect(sendArtifactPresence).toHaveBeenCalledTimes(1)
+    releases.shift()!()
+    await vi.waitFor(() => expect(sendArtifactPresence).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(sendArtifactPresence).mock.lastCall?.[3]).toEqual({ action: 'position', position: selectSharedSource(a.doc, { anchor: 2, head: 3 }) })
+    releases.shift()!(); await Promise.resolve(); await Promise.resolve()
+    a.select({ anchor: 2, head: 3 }); a.select({ anchor: 2, head: 3 })
+    expect(sendArtifactPresence).toHaveBeenCalledTimes(2)
+  })
+  it('drains the fresh connection after an old in-flight cursor and does not borrow its acknowledgement', async () => {
+    const a = open()
+    await vi.waitFor(() => expect(sendArtifactPresence).toHaveBeenCalledTimes(1))
+    await Promise.resolve(); vi.mocked(sendArtifactPresence).mockClear()
+    let release!: () => void
+    vi.mocked(sendArtifactPresence).mockImplementationOnce(async () => { await new Promise<void>(resolve => { release = resolve }) }).mockResolvedValue()
+    a.select({ anchor: 0, head: 1 })
+    void a.connect()
+    const fresh = { ...frame(1), document: null }
+    receivers[1]!(fresh)
+    expect(a.snapshot.connection).toBe('connected'); expect(a.content).toBe(initial)
+    release()
+    await vi.waitFor(() => expect(vi.mocked(sendArtifactPresence).mock.calls.filter(call => call[1] === 'session-1' && call[3].action === 'position')).toHaveLength(1))
+    expect(vi.mocked(sendArtifactPresence).mock.lastCall?.[3]).toEqual({ action: 'position', position: selectSharedSource(a.doc, { anchor: 0, head: 1 }) })
+  })
   it('keeps local changes without sending under a changed workspace or credential', () => {
     let current = true; const a = open(() => current); current = false
     a.doc.getText('content').insert(0, 'local ')

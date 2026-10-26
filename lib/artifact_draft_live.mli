@@ -9,3 +9,9 @@ val find : base_path:string -> actor:string -> target:Artifact_draft.target -> s
 val position : session -> Artifact_document_engine.selection option -> (unit, error) result
 val publish : base_path:string -> draft:Artifact_draft.t -> content:string -> unit
 val observe : session -> (Yojson.Safe.t * unit Eio.Promise.t) option
+(** A session belongs to one connection's observing loop. Its first available
+    document and each newer document sequence are included once; presence-only
+    frames contain [document = null]. A new connection joins a fresh session,
+    so its first available document is never borrowed from another observer.
+    [None] means the session is closed, not that the document is unchanged.
+    The returned pulse is captured with the frame under the room mutex. *)

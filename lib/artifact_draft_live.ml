@@ -3,7 +3,9 @@ module Engine = Artifact_document_engine
 module Rooms = Map.Make (struct type t = string * string * string let compare = Stdlib.compare end)
 module Peers = Map.Make (String)
 type session = { id : string; base_path : string; actor : string; target : Draft.target }
-type peer = { session : session; position : Engine.selection option; observed_at : string }
+type peer =
+  { session : session; position : Engine.selection option; observed_at : string
+  ; announced_sequence : int option }
 type room =
   { mutable document : (Draft.t * string) option; mutable peers : peer Peers.t
   ; mutable pulse : unit Eio.Promise.t; mutable wake : unit Eio.Promise.u }
@@ -23,7 +25,8 @@ let join ~base_path ~actor ~target = Mutex.protect mutex (fun () ->
     | None -> let pulse, wake = Eio.Promise.create () in
       let room = { document = None; peers = Peers.empty; pulse; wake } in
       rooms := Rooms.add (key session) room !rooms; room in
-  room.peers <- Peers.add session.id { session; position = None; observed_at = Types_core.now_iso () } room.peers;
+  room.peers <- Peers.add session.id
+    { session; position = None; observed_at = Types_core.now_iso (); announced_sequence = None } room.peers;
   notify room; session)
 let leave session = Mutex.protect mutex (fun () ->
   match Rooms.find_opt (key session) !rooms with
@@ -59,13 +62,22 @@ let publish ~base_path ~draft ~content = Mutex.protect mutex (fun () ->
 let observe session = Mutex.protect mutex (fun () ->
   match Rooms.find_opt (key session) !rooms with
   | None -> None
-  | Some room when not (Peers.mem session.id room.peers) -> None
   | Some room ->
+    match Peers.find_opt session.id room.peers with
+    | None -> None
+    | Some peer ->
+    let document = match room.document with
+      | None -> `Null
+      | Some (draft, _) when Option.fold ~none:false
+          ~some:(fun sequence -> sequence >= draft.sequence) peer.announced_sequence -> `Null
+      | Some (draft, content) ->
+        room.peers <- Peers.add session.id
+          { peer with announced_sequence = Some draft.sequence } room.peers;
+        `Assoc ["draft", Draft.to_json draft; "content", `String content; "selection", `Null] in
     let peers = Peers.bindings room.peers |> List.map (fun (_, peer) -> `Assoc
       ["session_id", `String peer.session.id; "actor", `String peer.session.actor;
        "position", Option.fold ~none:`Null ~some:Engine.selection_to_json peer.position;
        "observed_at", `String peer.observed_at]) in
     Some (`Assoc ["schema", `String "masc.artifact_draft_live.v1"; "session_id", `String session.id;
       "target", Draft.target_to_json session.target; "peers", `List peers;
-      "document", (match room.document with None -> `Null | Some (draft, content) ->
-        `Assoc ["draft", Draft.to_json draft; "content", `String content; "selection", `Null])], room.pulse))
+      "document", document], room.pulse))

@@ -8,6 +8,12 @@ import { restoreSharedDocument, sharedSource, selectSharedSource, type SourceSel
 export function draftBytes(text: string): Uint8Array { return Uint8Array.from(atob(text), char => char.charCodeAt(0)) }
 export function draftBase64(bytes: Uint8Array): string { return btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join('')) }
 const remote = Symbol('authenticated draft state')
+function samePosition(a: ArtifactDraftPosition | null, b: ArtifactDraftPosition | null): boolean {
+  if (!a || !b) return a === b
+  return a.anchor.length === b.anchor.length && a.head.length === b.head.length
+    && a.anchor.every((value, index) => value === b.anchor[index])
+    && a.head.every((value, index) => value === b.head[index])
+}
 export type ArtifactLiveState = {
   connection: 'connecting' | 'connected' | 'disconnected'; saving: boolean; pending: boolean;
   message: string; recoveryPersisted: boolean; peers: readonly ArtifactDraftPeer[]; sessionId: string | null; view: ArtifactDraftView;
@@ -22,6 +28,7 @@ export class ArtifactLiveSession {
   private sending = false
   private positionSending = false
   private position: ArtifactDraftPosition | null = null
+  private announcedPosition: { sessionId: string; position: ArtifactDraftPosition | null } | null = null
   private positionDirty = false
   private connection: AbortController | null = null
   private disposed = false
@@ -81,6 +88,7 @@ export class ArtifactLiveSession {
     // this cursor. A broken transport also triggers server-side cleanup.
     if (sessionId) void sendArtifactPresence(this.state.view.draft.target, sessionId, this.workspace, { action: 'leave' }).catch(() => {})
     this.connection?.abort(); this.connection = null
+    this.announcedPosition = null
     this.emit({ peers: [], sessionId: null, connection: 'disconnected' })
   }
   private async flush(): Promise<void> {
@@ -111,9 +119,12 @@ export class ArtifactLiveSession {
     if (this.disposed || this.positionSending || this.sending || this.pending || !this.positionDirty
       || this.state.connection !== 'connected' || !this.state.sessionId || !this.isCurrent()) return
     const sessionId = this.state.sessionId, position = this.position
-    this.positionDirty = false; this.positionSending = true
+    this.positionDirty = false
+    if (this.announcedPosition?.sessionId === sessionId && samePosition(this.announcedPosition.position, position)) return
+    this.positionSending = true
     try {
       await sendArtifactPresence(this.state.view.draft.target, sessionId, this.workspace, { action: 'position', position })
+      if (this.state.sessionId === sessionId) this.announcedPosition = { sessionId, position }
     } catch (error) {
       // A refused/uncertain position is no longer advertised as current.
       if (this.state.sessionId === sessionId) {
@@ -122,7 +133,7 @@ export class ArtifactLiveSession {
       }
     } finally {
       this.positionSending = false
-      if (this.state.sessionId === sessionId) void this.flushPosition()
+      void this.flushPosition()
     }
   }
   dispose(): void {

@@ -95,6 +95,8 @@ execution 이 discovery 에도 보관 위치에도 없는 gate 기록은 지금�
 
 gate 요청 모양이 바뀐다. 옛 기록을 읽는 코드는 만들지 않는다. 옛 gate 기록은 필드 검사에서 거절되고, 옛 gate 요청을 담은 history 기록의 `preparation_intended` 는 새 `gate_request` 와 같지 않아 거절된다.
 
+3.1 이 먼저 배포돼 끝난 체인과 그 gate 기록이 보관 위치로 옮겨진 뒤에 배포한다. 그러면 옮길 것은 끝나지 않은 history original 과 admission original 뿐이다.
+
 배포 전에 서버를 멈추고, 아래를 `lane-addons/` 밖으로 옮긴다. scope 디렉터리 이름은 scope 문자열의 sha256 이다(`lane_addon_store.ml` 의 `tool_request_owner_path`).
 
 - `tool-request-owners/` 와 `tool-request-bodies/` 의 `keeper-librarian-history-execution-*`, `keeper-librarian-durable-gate/*` scope
@@ -122,11 +124,13 @@ pass 마다 `durable Librarian inventory validated: originals=… unfinished=…
 
 ## 5. 나눠 올리는 순서
 
-#46143 위에 관측 PR, 그 위에 스택으로 올린다.
+#46143 은 무관한 #46139 위에 쌓여 있어서, 같은 코드를 main 위로 옮긴 #46242 위에 올린다(스택 #46245).
 
-1. 3.1–3.3: 끝난 체인을 옮기고, 끊긴 이동을 마무리한다. `settle` 은 discovery 의 `Record.t` 만 받으므로, retained 값에서 `Record.t` 를 꺼내는 `Lane_addon_tool_request_owner.listed` 를 mli 에 연다.
-2. 3.4: gate 요청에서 `capture` 를 뺀다. 3.5 의 하드컷이 이 층에 붙는다.
-3. 남은 비용에 대한 상수배 개선. 연구 문서 4.3 에서 고른다.
+1. #46242: pass 하나가 gate scope 를 한 번 읽는다(#46143 과 같은 코드).
+2. #46243: 3.6 의 관측 로그.
+3. #46244 — 3.1–3.3: 끝난 체인을 옮기고, 끊긴 이동을 마무리한다. `settle` 은 discovery 의 `Record.t` 만 받으므로, retained 값에서 `Record.t` 를 꺼내는 `Lane_addon_tool_request_owner.listed` 를 mli 에 연다.
+4. #46247 — 3.4·3.5: gate 요청에서 `capture` 를 뺀다. 스택 #46245 와 따로 둔다. 둘을 함께 배포하면 옛 gate 기록이 남은 scope 를 `Inventory.read` 가 settle 전에 거절해서, 끝난 기록이 옮겨지지 않은 Keeper 가 모두 멈춘다. #46244 가 배포되고 끝난 기록이 옮겨진 뒤에 배포한다.
+5. 남은 비용에 대한 상수배 개선. #46243 로그로 끝나지 않은 original 하나의 pass 비용을 잰 뒤 연구 문서 4.3 에서 고른다. 그 경로의 두 번째 전체 읽기는 #46175 가 다룬다.
 
 ## 6. 정할 것
 

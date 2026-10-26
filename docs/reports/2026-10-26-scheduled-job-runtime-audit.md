@@ -240,7 +240,7 @@ F4 수리 [#46193](https://github.com/jeong-sik/masc/pull/46193)는 같은 nativ
 F1 all-owner 취소 수리 [#46211](https://github.com/jeong-sik/masc/pull/46211)는 같은 스택의
 세 번째 층이며 head `08da4d99f1b2a58cae5f87f3a71ce4556c83cfe8`다. Test40343103111,
 ref `fix/schedule-cancel-all-owners-20261026`, conclusion **success**에서 지정 세 suite가
-통과했다(명시 64+12 cases, queue executable은 별도 case 수를 출력하지 않음).
+통과했다(명시 64+12=76 cases, queue executable은 별도 case 수를 출력하지 않음).
 
 [수리 증거 묶음](../evidence/2026-10-26-schedule-repair-validation/README.md)은 별도
 native Test40339887803의 definition `117dc31e1ca8f71f47bbbe91fa2adab5befb5761`,

@@ -43,7 +43,7 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 17 | 동시 수정·retime가 저장 결과를 잃지 않는다 | W10 | 양쪽 timing 생략 content edit의 결정적 concurrent retime 보존 실행. 전 조합 보장 아님. |
 | 18 | 권한 확인 사이 target이 바뀌면 이전 recipient 변경을 거절한다 | F3 소스 반례; 수리 PR46182 | locked current-row 권한 수리 PR46182의 새 Test124 통과. 공개 update interleaving/locked cancel 거절 포함; 실제 HTTP cancel race·새 binary는 미검증. |
 | 19 | due만 바꿀 때 다른 호출이 갱신한 recurrence를 보존한다 | F4 소스 반례; 수리 PR46193 | 최신 recurrence 보존 수리와 공개 interleaving 2건 포함 Test40332170687의 115 cases 통과. 실제 HTTP race/새 binary 재현은 미검증. |
-| 20 | A에 이미 대기 중인 반복 예약을 B로 바꾸고 취소한다 | retarget-cancel-4; 수리 PR46211 | 실제 F1 반례는 유지. all-owner 철회·transfer fencing 수리의 Test40343103111에서 3 suites 통과(명시 76 cases + queue executable). 새 binary 반례 재검증·강제 concurrent transfer는 미검증. |
+| 20 | A에 이미 대기 중인 반복 예약을 B로 바꾸고 취소한다 | retarget-cancel-4; 수리 PR46211 | 실제 F1 반례는 유지. all-owner 철회·transfer fencing 수리의 Test40343103111에서 3 suites 통과(명시 64+12=76 cases + queue executable). 새 binary 반례 재검증·강제 concurrent transfer는 미검증. |
 | 21 | 아직 dispatch되지 않은 Scheduled/Due를 취소한다 | W3, S-lifecycle1, C10–11; API33 | 정의 및 current-target pending 취소 실행. 이전 target/instance 조합은 F1 실패. |
 | 22 | 전달됐지만 아직 턴이 시작되지 않은 단발을 취소한다 | W34 | accepted one-shot Succeeded 뒤 cancel의 typed refusal 실행. 현행 기능 한계 유지. |
 | 23 | 이미 시작한 작업·완료된 effect를 되돌린다 | S-lifecycle2, C12/14–15 | Running 거절·직접 turn-start/terminal 주입 경계 실행. 실제 effect rollback 보장 없음. |

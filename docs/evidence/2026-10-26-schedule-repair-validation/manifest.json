@@ -14,7 +14,7 @@
   ],
   "files": {
     "README-core.md": "5032662785103ce52aa29914f6e922a194b2eb67dd24c604962ccccf5c1e729b",
-    "README.md": "d652a96abb671797a6297bae5a3ba8757e7dd1b318e78d71aa727aa9b19cf130",
+    "README.md": "42ec291711984e81decfca13b8a64814a7e69891bd1a7d47ed07fb4c1203fe6a",
     "f1-ci/README.md": "5ac957fb00575d2e66399bcb04d310e75953f723431d657ea56cbc5e5cce4e1b",
     "f1-ci/artifact-metadata.json": "8063a7614349685a571638dd701eecba3f33b8698ddf8c2720f3abfd568f7cf9",
     "f1-ci/artifacts.json": "a378679553354a1afcc78e98bf0aa1a1de38d13d9d6198215dbf61316d66f74a",
@@ -59,6 +59,7 @@
     "real-after-effect-deepseek-fixed-1/selected-reactions.json": "739d2ac5f1d61f68f9232629fc96953f7f3b70086c790224537dcab3a4e8a2ca",
     "real-after-effect-deepseek-fixed-1/selected-server-log.json": "7f9ede3cebb25bc3775e29f939972b0bc4b102317a3d6b3c7113c42a78d846a8",
     "real-after-effect-deepseek-fixed-1/timeline.json": "8054ce09d45477c7ec9942e8a4ba8dc7b0feb5a77a343d10d98324eebdc4b062",
+    "real-after-effect-deepseek-fixed-2/README.md": "ba0864d88375d154c244794e1e875a2c10e9bf18dc204922ee7dff76417f617b",
     "real-after-effect-deepseek-fixed-2/created.json": "a51187cc82d3c491f921df13b2d65fa59a25314f9f47e03617a17cf10c0feb9f",
     "real-after-effect-deepseek-fixed-2/observer-checks.json": "beebcf530468574f3ce4128e168abbbe6d27cc52db838406a0980bc7f6244839",
     "real-after-effect-deepseek-fixed-2/process-ended.json": "e9c6312f79344a5db65002c44f2347c609338e9cdce0c617a4d11343c39f1f86",

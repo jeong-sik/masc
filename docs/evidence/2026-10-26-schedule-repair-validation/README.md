@@ -9,12 +9,17 @@ is `94b2df25abcdfe20c658322f4156ad63f5546c34`. The locally verified server SHA-2
 is `a0bd5c3903ef6425024e47b9dc92a7615f4efbb941357ea36e74ac5a18284668`.
 No production executable was replaced.
 
+`manifest.json` records a snapshot of the retained files, rather than enforcing
+future edits. Its `captured_at` identifies the original bundle capture; each
+subsequent change to a retained file requires refreshing its `files` hash. The
+individual run timestamps and original digests remain historical records.
+
 | Isolated run | Actual observations | Limits |
 |---|---|---|
 | [DeepSeek busy](real-busy-deepseek-fixed-1/README.md) | First checkpoint has no premature ACK; successor completes; first source is admitted again and completes; both exact notes exist once | Original observer remains 9 PASS/1 FAIL, exit 1: it missed the short HTTP overlap window. The original durable ledger independently establishes the overlap. Both notes were written during turn 2, before first-source readmission. Producer exit code unavailable. |
 | [GLM busy](real-busy-glm-fixed-1/README.md) | Checkpoint → second note/completion/ACK → first readmission → first note/completion/ACK; 11 observer checks PASS; server exit 0 | One owned Keeper and two internal note effects. No account/provider failover or crash recovery. |
 | [DeepSeek after first effect](real-after-effect-deepseek-fixed-1/README.md) | First note → successor arrival while first turn remains unfinished → normal first completion → second completion; each note once; 11 checks PASS; server exit 0 | No checkpoint/readmission occurred. An attempted `Execute` was refused before any observed shim receipt; this is not an all-tools-success or guest-execution result. |
-| [Second after-effect attempt](real-after-effect-deepseek-fixed-2/selection.json) | Same two exact effects and terminal readback, 11 checks PASS, server exit 0, successor delay reduced to the tool's legal one-second minimum | Still normal sequential completion, with no checkpoint/readmission. Root inspected this capture; the independent reports cover the other three runs. |
+| [Second after-effect attempt](real-after-effect-deepseek-fixed-2/README.md) | Same two exact effects and terminal readback, 11 checks PASS, server exit 0, successor delay reduced to the tool's legal one-second minimum | Still normal sequential completion, with no checkpoint/readmission. Root inspected this capture; the independent reports cover the other three runs. |
 
 The first three reports directly compare original raw ledger rows, tool receipts,
 note timestamps and exact schedule-instance/occurrence identities. Repeated event
@@ -48,7 +53,8 @@ The corrected fixture then passed **Test
 `ccb0007e95ead82676a58d0dcc17d740dfe94f30`, ref
 `fix/schedule-work-continuation-20261026`, conclusion **success**:
 [106 Owner cases PASS, FAIL/SKIP 0](f6-owner-ci/README.md), including all three
-previously failing cases. That source precedes the subsequent rebase onto main
+previously failing cases. This run selected only the Owner alias; it was not a
+full regression run. That source precedes the subsequent rebase onto main
 and is not an execution result for `6dedd652df1273c9476a04643b445601e30181ad`.
 The native product source and these real-provider runs are also not current-head
 CI or installed-runtime evidence. After-effect checkpoint/restart,

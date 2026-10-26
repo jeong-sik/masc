@@ -1983,32 +1983,40 @@ let read_apple_guest ~timeout_sec ~container_name =
       ~argv:(Keeper_sandbox_microvm.inspect_argv_for backend ~container_name) with
   | Error error -> unanswered (Keeper_microvm_cli_output.error_message error)
   | Ok (Unix.WEXITED 0, stdout) ->
-    let module Inventory = Keeper_microvm_inventory_json in
-    let ( let* ) = Result.bind in
-    let* inventory = Inventory.of_apple_json stdout
-      |> Result.map_error (fun error -> Guest_state_unreadable (Inventory.invalid_inventory_message error)) in
-    let* () = match Inventory.presence ~guest_name:container_name inventory with
-      | Ok Inventory.Present -> Ok ()
-      | Ok Inventory.Absent | Error Inventory.Invalid_guest_name ->
-        Error (Guest_state_unreadable "runtime inspect did not identify the requested guest") in
-    (match Keeper_sandbox_microvm.running_of_inspect_json_for backend stdout with
-     | Ok false -> Ok Apple_stopped
-     | Ok true -> Ok (Apple_running (Keeper_sandbox_microvm.apple_guest_facts ~container_name stdout))
-     | Error _ -> Error (Guest_state_unreadable "runtime inspect did not report a valid guest state"))
+    (match Keeper_sandbox_microvm.apple_guest_facts ~container_name stdout with
+     | Keeper_microvm_boot_plan.Unreadable detail ->
+       Error (Guest_state_unreadable detail)
+     | Keeper_microvm_boot_plan.Facts _ as reading ->
+       match Keeper_sandbox_microvm.running_of_inspect_json_for backend stdout with
+       | Ok false -> Ok Apple_stopped
+       | Ok true -> Ok (Apple_running reading)
+       | Error _ -> Error (Guest_state_unreadable "runtime inspect did not report a valid guest state"))
   | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
     unanswered "runtime inspect did not complete successfully"
 
-let apple_policy_environment (t : t) (facts : Keeper_microvm_boot_plan.facts) =
+(* A guest's environment is observed data, never the expected route. Read
+   the current policy network without creating or repairing it at adoption. *)
+let apple_policy_environment ~timeout_sec (t : t) =
+  let ( let* ) = Result.bind in
   match t.network_mode with
-  | Keeper_types_profile_sandbox.Network_none | Keeper_types_profile_sandbox.Network_inherit -> []
+  | Keeper_types_profile_sandbox.Network_none | Keeper_types_profile_sandbox.Network_inherit -> Ok []
   | Keeper_types_profile_sandbox.Network_policy ->
-    (match List.assoc_opt "HTTPS_PROXY" facts.environment, bound_egress_proxy_port t with
-     | Some proxy_url, Some bound_port ->
-       let uri = Uri.of_string proxy_url in
-       if Uri.scheme uri = Some "http" && Option.is_some (Uri.host uri)
-          && Uri.port uri = Some bound_port
-       then Egress_proxy_decision.client_env ~proxy_url else []
-     | Some _, None | None, _ -> [])
+    match bound_egress_proxy_port t with
+    | None -> Ok []
+    | Some port ->
+      let* argv = Keeper_sandbox_microvm.policy_network_inspect_argv_for
+          Keeper_microvm_backend.Apple_container ~keeper_name:t.meta.name
+        |> Result.map_error (fun detail -> Policy_network_unavailable detail) in
+      let* status, stdout = Keeper_microvm_cli_output.read ~timeout_sec ~argv
+        |> Result.map_error (fun error -> Policy_network_unavailable
+            (Keeper_microvm_cli_output.error_message error)) in
+      match status with
+      | Unix.WEXITED 0 ->
+        let* gateway = Keeper_sandbox_microvm.policy_network_gateway ~inspect:stdout
+          |> Result.map_error (fun detail -> Policy_network_unavailable detail) in
+        Ok (Egress_proxy_decision.client_env ~proxy_url:(Printf.sprintf "http://%s:%d" gateway port))
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+        Error (Policy_network_unavailable "policy network inspect did not complete successfully")
 
 let with_apple_lifecycle_scope ~keeper_name ~unavailable callback =
   match Fs_compat.execution_context (), Fs_compat.get_fs_opt () with
@@ -2107,9 +2115,10 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
   let decision = match observation with
     | Apple_absent | Apple_stopped -> Ok `Boot
     | Apple_running reading ->
-      let policy_environment = match reading with
-        | Plan.Unreadable _ -> []
-        | Plan.Facts facts -> apple_policy_environment t facts in
+      let* policy_environment = match reading with
+        | Plan.Unreadable _ -> Ok []
+        | Plan.Facts facts when facts.plan_label <> Some (Plan.digest plan) -> Ok []
+        | Plan.Facts _ -> apple_policy_environment ~timeout_sec t in
       match Plan.assess ~plan ~policy_environment ~identity_reading reading with
       | Plan.Refuse refusal -> Error (Guest_facts_refused refusal)
       | Plan.Replace _ -> Ok `Boot
@@ -2728,7 +2737,7 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
 (* Endpoint admission reads the mounted identity and verifies the shared shim.
    It never starts a guest or prepares build output on behalf of attached reads. *)
 let microvm_remote_endpoint_of_running_fields
-      ~(config : Workspace.config) ~(meta : keeper_meta) ~container_root
+      ~(config : Workspace.config) ~(meta : keeper_meta) ~network_mode ~container_root
       ~uid ~gid ~container_name =
   let ( let* ) = Result.bind in
   let* () = microvm_profile_check meta in
@@ -2747,7 +2756,7 @@ let microvm_remote_endpoint_of_running_fields
       ~unavailable:(microvm_start_failure_message Runtime_context_unavailable)
       (fun ~fs ~scope ->
         let* snapshot = Keeper_microvm_github_identity.load ~fs ~coordinator:microvm_lifecycle ~scope
-            ~base_path:config.base_path ~keeper_name:meta.name ~backend ~network_mode:meta.network_mode
+            ~base_path:config.base_path ~keeper_name:meta.name ~backend ~network_mode
           |> Result.map_error Keeper_microvm_github_identity.error_message in
         match snapshot with
         | None -> Error "microvm mounted credential snapshot is missing"
@@ -2761,6 +2770,7 @@ let microvm_remote_endpoint_of_running (t : t) ~container_name =
   microvm_remote_endpoint_of_running_fields
     ~config:t.config
     ~meta:t.meta
+    ~network_mode:t.network_mode
     ~container_root:t.container_root
     ~uid:t.uid
     ~gid:t.gid
@@ -2815,6 +2825,7 @@ let microvm_attached_endpoint ~(config : Workspace.config) ~(meta : keeper_meta)
   microvm_remote_endpoint_of_running_fields
     ~config
     ~meta
+    ~network_mode:meta.network_mode
     ~container_root:(container_root_of_meta meta)
     ~uid:(Unix.getuid ())
     ~gid:(Unix.getgid ())

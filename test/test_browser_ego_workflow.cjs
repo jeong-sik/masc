@@ -12,7 +12,7 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
   async info(){return {};},
   async snapshot(options){
    calls.push(['snapshot',options]);
-   if(options!==undefined&&!['full_page','only_within_viewport','subtree'].includes(options.scope))
+   if(options?.scope!==undefined&&!['full_page','only_within_viewport','subtree'].includes(options.scope))
     throw Error('page.snapshot scope must be one of full_page, only_within_viewport, subtree');
    return snapshot;
   },
@@ -27,6 +27,56 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
  return {page,calls};
 }
 const request=steps=>({expectedUrl:initial,steps,snapshotScope:'viewport',maxChars:100,cursor:'MASC · fixture · workflow'});
+test('native Page observations, snapshot options and explicit waits retain values',async()=>{
+ const f=fixture();let events=[{method:'Page.loadEventFired',params:{timestamp:1}}];
+ f.page.info=async()=>({url:initial,title:'Fixture',w:800,h:600});
+ f.page.events=async()=>{const result=events;events=[];return result;};
+ f.page.waitForTimeout=async milliseconds=>f.calls.push(['waitForTimeout',milliseconds]);
+ const options={scope:'subtree',root:'@21',includeActionMarks:false,includeStableLocator:true};
+ const result=await run(f.page,request([
+  {method:'url'},{method:'title'},{method:'info'},
+  {method:'snapshot',options},{method:'waitForTimeout',milliseconds:0.5},
+  {method:'events'},{method:'events'},
+ ]));
+ assert.equal(result.failure,null);
+ assert.equal(result.completed[0].receipt,initial);
+ assert.equal(result.completed[1].receipt,'Fixture');
+ assert.equal(result.completed[2].receipt.w,800);
+ assert.equal(result.completed[3].receipt,'native result');
+ assert.equal(result.completed[4].receipt,null);
+ assert.equal(result.completed[5].receipt[0].method,'Page.loadEventFired');
+ assert.equal(result.completed[6].receipt.length,0);
+ assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,true);
+ assert.deepEqual(f.calls.find(call=>call[0]==='snapshot')[1],options);
+ assert.deepEqual(f.calls.find(call=>call[0]==='waitForTimeout'),['waitForTimeout',0.5]);
+});
+test('a lost event drain stays uncertain and stops following input',async()=>{
+ const f=fixture();let drains=0;
+ f.page.events=async()=>{drains++;throw Error('lost after drain');};
+ const result=await run(f.page,request([{method:'events'},{method:'click',selector:'#next'}]));
+ assert.equal(drains,1);assert.equal(result.effectStarted,true);assert.equal(result.completedEffect,false);
+ assert.equal(result.failure.method,'events');assert.equal(result.completed.length,0);
+ assert.equal(f.calls.some(call=>call[0]==='click'),false);
+});
+test('pure native observations stay read-only and stop on a dialog',async()=>{
+ const f=fixture();
+ const pure=await run(f.page,request([{method:'url'},{method:'title'},{method:'info'},{method:'snapshot'}]));
+ assert.equal(pure.failure,null);assert.equal(pure.effectStarted,false);assert.equal(pure.completedEffect,false);
+ f.page.info=async()=>({dialog:{type:'prompt',message:'answer me'}});
+ const blocked=await run(f.page,request([{method:'info'},{method:'click',selector:'#next'}]));
+ assert.equal(blocked.failure.dialog.type,'prompt');assert.equal(blocked.effectStarted,false);
+ assert.equal(blocked.completed.length,1);assert.equal(f.calls.some(call=>call[0]==='click'),false);
+});
+test('malformed native observation values stop before following input',async()=>{
+ for(const [method,bad] of [['url',null],['title',42],['info',[]],['snapshot',{}],['events',null]]){
+  const f=fixture();let reads=0;
+  f.page[method]=async()=>method==='url'&&reads++===0?initial:bad;
+  const result=await run(f.page,request([{method},{method:'click',selector:'#next'}]));
+  assert.equal(result.failure.method,method);assert.equal(result.completed.length,0);
+  assert.equal(result.effectStarted,method==='events');
+  assert.equal(f.calls.some(call=>call[0]==='click'),false);
+ }
+});
 test('native action, navigation, mouse and selection options survive unchanged',async()=>{
  const f=fixture();const native=[];
  f.page.mouse={};

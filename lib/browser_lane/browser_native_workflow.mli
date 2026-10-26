@@ -28,6 +28,9 @@ type action =
   | Evaluate of page_code
   | Wait_for_function of page_code
   | Fetch of string
+  | Url | Title | Info | Snapshot
+  | Events
+  | Wait_for_timeout of float
 type step = { action : action; options : native_options option }
 type snapshot_scope = Viewport | Full_page
 type t = private { tab_id : int; expected_url : string; steps : step list;
@@ -47,6 +50,13 @@ type t = private { tab_id : int; expected_url : string; steps : step list;
     evaluated by Node or the host. Page code and fetch count as possible effects,
     including state-wait predicates. Fetch forwards validated browser options;
     [saveAs] requires a download-broker path and is refused here.
+    [snapshot] forwards all SDK snapshot options, including subtree root and
+    action-mark/stable-locator choices; the workflow still ends with its usual
+    final snapshot. [url], [title], [info] and [snapshot] return their native
+    values as step receipts. [events] reads and clears this SDK process's Page
+    event buffer, so it is an effect and a lost result must not be replayed.
+    It is not a cross-process event history. [waitForTimeout] takes finite,
+    nonnegative milliseconds; elapsed time is not evidence of page readiness.
     There is no MASC step-count or cumulative execution-time limit. *)
 val of_json : Yojson.Safe.t -> (t, string) result
 val to_json : t -> Yojson.Safe.t

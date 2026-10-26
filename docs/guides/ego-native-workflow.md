@@ -43,8 +43,10 @@ selection; MASC preserves the requested selection forms.
 | `waitForLoadState` | timeout, idleMs |
 | `waitForFunction` | timeout, polling |
 | `fetch` | timeout, method, headers, body, cache, credentials, integrity, keepalive, mode, redirect, referrer, referrerPolicy |
+| `snapshot` | scope, root, includeActionMarks, includeStableLocator |
 
-`evaluate`, `keyboard.insertText`, and `keyboard.paste` accept no options.
+`evaluate`, `keyboard.insertText`, `keyboard.paste`, `url`, `title`, `info`,
+`events`, and `waitForTimeout` accept no options.
 `keyboard.paste` accepts step `text` and optional `html`. Only pointer actions
 accept an option `label`; MASC prefixes it with the actor's identity.
 `waitForSelector` takes step `state`. `waitForLoadState` has an optional step
@@ -83,6 +85,21 @@ the current receipt contains only popup and dialog information. See the
 [pointer implementation](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/driver/page-actions.ts#L1183)
 and [keyboard implementation](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/driver/page-keyboard.ts#L115).
 
+`url`, `title`, `info` and `snapshot` return the SDK's native value in that
+step's `receipt`. `snapshot` supports `scope: "full_page"`,
+`"only_within_viewport"` or `"subtree"`; subtree requires a current `root` ref
+from the same Page. Root is rejected outside subtree scope. The two inclusion
+flags preserve explicit `false` values. The workflow still ends with its usual
+final snapshot, controlled by top-level `snapshotScope` and `maxChars`.
+
+`events` reads **and clears** the SDK process's buffer for this Page. It counts
+as an effect: a lost or failed drain is not permission to replay it. This is
+not a persistent event history across SDK process restarts. `waitForTimeout`
+takes nonnegative finite `milliseconds`, including zero. Use `waitForSelector`,
+`waitForURL`, `waitForLoadState` or `waitForFunction` for readiness; elapsed time
+alone proves no app state. A dialog returned by `info` stops following steps.
+Observation result types are validated before accepting a workflow receipt.
+
 For login, 2FA or captcha, hand the same live client to the operator with
 `BrowserAct action=hand_off`. Its receipt names `spaceId` and `spaceName` from
 that TaskSpace before handoff; no Page operation follows the handoff. Use those
@@ -103,8 +120,10 @@ browser inherits the page's HTTP(S) scheme and uses the specified host, with
 its normal credentials policy and CORS checks.
 `saveAs` requires a brokered download path and is not exposed here.
 
-These options are integrated in source with standalone codec and forwarding
-checks. An owned real Ego fixture in replacement Space 32 executed 22 option
+These methods are integrated in source with standalone codec and forwarding
+checks. The new Page observations, event drain, timeout and step-snapshot
+options have no real SDK or installed Keeper execution proof yet. An earlier
+owned real Ego fixture in replacement Space 32 executed 22 input/navigation option
 and selection steps plus five mouse/state-wait steps. Its
 [receipts](../evidence/2026-10-26-ego-options/README.md) are SDK evidence with
 explicit routing and UI limits. Installed MASC, Keeper dispatch and visible UI

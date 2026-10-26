@@ -6,6 +6,7 @@ module Session_store = Keeper_official_client_session_store
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; settled_session : Keeper_official_client_session_store.t option
+  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   }
 
@@ -376,7 +377,7 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
     }
 ;;
 
-let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
@@ -389,6 +390,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
     ~observe_effect_attempted
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
     ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.antigravity_cli) =
+  on_results_ready None;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -1253,13 +1255,10 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
     in
     let turn_result =
       let* result = turn_result in
-      let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox ~stop_reason:result.stop_reason
-        |> Result.map_error internal_error in
-      let* () = match !natural_completion, !produced_results with
-        | true, Some delivered ->
-          Keeper_client_tool_outbox.settle_after_turn delivered ~stop_reason:result.stop_reason
-          |> Result.map_error internal_error
-        | false, _ | true, None -> Ok () in
+      let produced = match !natural_completion with
+        | true -> Option.to_list !produced_results
+        | false -> [] in
+      on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption (tool_outbox :: produced)));
       Ok result
     in
     let turn_result =
@@ -1302,6 +1301,8 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
     ?on_tool_execution
     ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
+  let pending_result_receipts = Atomic.make None in
+  let on_results_ready value = Atomic.set pending_result_receipts value in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
@@ -1312,7 +1313,7 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
   let result =
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~official_client_continuation
+      run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
         ~required_native_posture
         ~runtime_id
         ~keeper_name
@@ -1344,7 +1345,13 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
         ~observe_effect_attempted
         ~config))
   in
-  { result; settled_session = Atomic.get settled_session; effect_disposition = Atomic.get effect_disposition }
+  { result
+  ; settled_session = Atomic.get settled_session
+  ; pending_result_receipts = (match result with
+      | Ok _ -> Atomic.get pending_result_receipts
+      | Error _ -> None)
+  ; effect_disposition = Atomic.get effect_disposition
+  }
 ;;
 
 module For_testing = struct

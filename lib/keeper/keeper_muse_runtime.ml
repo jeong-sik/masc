@@ -9,6 +9,7 @@ module Mcp_http = Runtime_official_client_mcp_http
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; settled_session : Keeper_official_client_session_store.t option
+  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
   ; effect_disposition : Keeper_provider_attempt_effect.t
   }
 
@@ -749,7 +750,7 @@ let phase_name : Session_store.phase -> string = function
   | Session_store.Settled _ -> "Settled"
 ;;
 
-let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled
+let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
@@ -759,6 +760,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
     ~observe_effect_attempted ~observe_transport_uncertain ~on_official_client_tool_boundary
     ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_usage_report ~on_tool_execution
     ~(config : Serve.config) =
+  on_results_ready None;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -1713,13 +1715,10 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
     in
     let turn_result =
       let* result = turn_result in
-      let* () = Keeper_client_tool_outbox.settle_after_turn tool_outbox ~stop_reason:result.stop_reason
-        |> Result.map_error internal_error in
-      let* () = match !natural_completion, !produced_results with
-        | true, Some delivered ->
-          Keeper_client_tool_outbox.settle_after_turn delivered ~stop_reason:result.stop_reason
-          |> Result.map_error internal_error
-        | false, _ | true, None -> Ok () in
+      let produced = match !natural_completion with
+        | true -> Option.to_list !produced_results
+        | false -> [] in
+      on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption (tool_outbox :: produced)));
       Ok result
     in
     match turn_result with
@@ -1760,6 +1759,8 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action ?on_native_tool_completion ?on_usage_report ?on_tool_execution ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
+  let pending_result_receipts = Atomic.make None in
+  let on_results_ready value = Atomic.set pending_result_receipts value in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition = Atomic.make Keeper_provider_attempt_effect.No_effect_observed in
   let observe_effect_attempted () =
@@ -1784,7 +1785,7 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
         ~official_task_reference
         ~composed_context
         ~accepts_image_input
-        ~on_session_settled
+        ~on_session_settled ~on_results_ready
         ~required_native_posture
         ~official_client_continuation
         ~runtime_id
@@ -1826,6 +1827,9 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
   in
   { result
   ; settled_session = Atomic.get settled_session
+  ; pending_result_receipts = (match result with
+      | Ok _ -> Atomic.get pending_result_receipts
+      | Error _ -> None)
   ; effect_disposition = Atomic.get effect_disposition
   }
 ;;

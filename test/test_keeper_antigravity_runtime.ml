@@ -2197,7 +2197,12 @@ let test_original_result_survives_a_vendor_session_change () =
                 ~context:(Some (Agent_core.Context.create ())) ~event_bus:None ~raw_trace:None
                 ~on_event:None ~config () in
               match attempt.result with
-              | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error) in
+              | Ok result ->
+                (match attempt.pending_result_receipts with
+                 | None -> ()
+                 | Some pending -> Keeper_client_tool_outbox.settle_consumption pending
+                     ~stop_reason:result.Runtime_agent.stop_reason |> get)
+              | Error error -> fail (Agent_core.Error.to_string error) in
             let retain turn_id value = Keeper_client_tool_outbox.retain ~base_path ~keeper_name
               {thread_id="original-codex-session";turn_id;call_id="original-call";
                tool_name="Execute";arguments=`String "original-effect-no-replay";response=`String value}

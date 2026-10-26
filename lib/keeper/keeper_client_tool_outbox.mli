@@ -91,3 +91,13 @@ val settle_after_turn :
 (** Only [Completed] acknowledges the loaded receipts. Every checkpoint,
     scheduling handoff and input wait preserves their original content across
     vendor session replacement. Provider failures never call this function. *)
+
+type consumption
+val pending_consumption : snapshot list -> consumption
+(** Immutable exact receipt snapshots, returned without acknowledgement by a
+    settled adapter. Producing this token does not accept a model response. *)
+val settle_consumption :
+  consumption -> stop_reason:Runtime_agent_context.stop_reason -> (unit, string) result
+(** The caller invokes this only after its actual response acceptance succeeds,
+    using the accepted result's final stop reason. Non-completion preserves all
+    receipts; failures are returned without executing any tool again. *)

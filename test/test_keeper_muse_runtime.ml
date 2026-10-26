@@ -979,6 +979,22 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
       ~config
       ()
   in
+  (* This direct adapter fixture is its caller: accept the returned result
+     before consuming the opaque durable result set. The routed Keeper test
+     separately exercises a rejecting caller predicate. *)
+  let result = Result.bind outcome.result (fun result ->
+    Result.bind
+      (Keeper_turn_driver.For_testing.apply_official_client_accept ~runtime_id
+        ~accept:(fun _ -> true)
+        ~terminal_effect_state:(fun () -> Keeper_tools_agent_core.Terminal_effect_open) result)
+      (fun result ->
+        let settled = match outcome.pending_result_receipts with
+          | None -> Ok ()
+          | Some pending -> Keeper_client_tool_outbox.settle_consumption pending
+              ~stop_reason:result.Runtime_agent.stop_reason in
+        match settled with
+        | Ok () -> Ok result | Error detail -> Error (Agent_core.Error.Internal detail))) in
+  let outcome = {outcome with result} in
   { outcome
   ; events = List.rev !events
   ; reports = List.rev !reports

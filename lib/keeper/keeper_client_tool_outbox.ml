@@ -245,3 +245,10 @@ let settle_after_turn snapshot ~(stop_reason : Runtime_agent_context.stop_reason
   | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
   | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _
   | InputRequired _ -> Ok ()
+
+type consumption = Consumption of snapshot list
+let pending_consumption snapshots = Consumption snapshots
+let settle_consumption (Consumption snapshots) ~stop_reason =
+  List.fold_left (fun outcome snapshot ->
+    let* () = outcome in
+    settle_after_turn snapshot ~stop_reason) (Ok ()) snapshots

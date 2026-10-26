@@ -187,7 +187,11 @@ let read_requests path = In_channel.with_open_bin path In_channel.input_lines
   |> List.map Yojson.Safe.from_string
 
 let successful attempt = match attempt.Keeper_codex_runtime.result with
-  | Ok _ -> ()
+  | Ok result ->
+    (match attempt.pending_result_receipts with
+     | None -> ()
+     | Some pending -> Keeper_client_tool_outbox.settle_consumption pending
+         ~stop_reason:result.Runtime_agent.stop_reason |> require)
   | Error error -> fail (Agent_core.Error.to_string error)
 
 let test_captured_context_window_survives_catalog_reload () =

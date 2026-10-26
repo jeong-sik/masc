@@ -7,6 +7,10 @@ type successful_tool_completion =
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; settled_session : Keeper_official_client_session_store.t option
+  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
+      (** [Some] names exact receipt snapshots of a durably settled candidate,
+          not acceptance. [None] carries no authority on failed/prevalidation
+          results. The caller accepts first, then settles with its final stop reason. *)
   ; effect_disposition : Keeper_provider_attempt_effect.t
   ; successful_tool_completion : successful_tool_completion
   }

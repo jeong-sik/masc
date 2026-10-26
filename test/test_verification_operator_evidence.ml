@@ -497,7 +497,7 @@ let test_export_uses_local_registry_not_shared_temp () =
 let http_get_evidence ~router ?token target =
   let output=Buffer.create 1024 in
   let connection=Httpun.Server_connection.create (fun reqd ->
-    Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+    Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
   let auth=match token with None -> "" | Some token -> "Authorization: Bearer " ^ token ^ "\r\n" in
   let wire="GET " ^ target ^ " HTTP/1.1\r\nHost: localhost\r\n" ^ auth ^ "\r\n" in
   let input=Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in

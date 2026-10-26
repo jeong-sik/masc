@@ -10,7 +10,7 @@ let read path = In_channel.with_open_bin path In_channel.input_all
 (* An actual owned child and native guardian, with a scripted BiDi endpoint.
    This exercises identity/lifetime boundaries, not a real Firefox UI. *)
 let firefox = {|#!/usr/bin/env python3
-import base64,hashlib,http.server,json,os,pathlib,struct,sys
+import base64,hashlib,http.server,json,os,pathlib,struct,sys,time
 profile=pathlib.Path(sys.argv[sys.argv.index('--profile')+1])
 port=int(sys.argv[sys.argv.index('--remote-debugging-port')+1])
 root=profile.parent
@@ -56,6 +56,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     result={'subscription':'dialog-events'}
                 elif method=='browsingContext.getTree':
                     if mode=='lost':os._exit(3)
+                    if mode=='late' and not (root/'late-answered').exists():
+                        time.sleep(1);(root/'late-answered').write_text('late')
                     result={'contexts':[]}
                 elif method not in ['browser.close','session.end']:
                     self.send_frame({'type':'error','id':request['id'],'error':'unsupported operation','message':'fixture command unavailable'});continue
@@ -150,6 +152,26 @@ let scenario mode =
               Eio.Fiber.await_cancel ()))
           else if mode="lost" then (
             ignore (issue ());Eio.Fiber.await_cancel ())
+          else if mode="late" then (
+            (* The caller stops waiting before Firefox answers. The result
+               then has nobody to go to, which says nothing about the
+               connection: the next command is still served on it. *)
+            check bool "a caller that stops waiting is told the command timed out" true
+              (match dispatch (W.Issue {route=B.Live_route (Some client.client_id);verb=B.Tabs_list;
+                  actor=Some "keeper/live-fixture";timeout_sec=0.2;only_if_idle=false}) with
+               | W.Issue_result (Ok B.Timed_out) -> true
+               | Issue_result (Ok (B.Answered _|Lane_absent|Refused _|Rejected_before_effect _))
+               | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+               | Poll_result _|Receipt|Service_refusal _ -> false);
+            check bool "the next command is answered on the same connection after the late result" true
+              (match issue () with W.Issue_result (Ok (B.Answered _)) -> true
+               | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
+               | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+               | Poll_result _|Receipt|Service_refusal _ -> false);
+            check bool "and the late result was answered before it" true
+              (Sys.file_exists (Filename.concat root "late-answered"));
+            check bool "retirement after a late result joins the original guardian and peer" true
+              (dispatch W.Retire=W.Receipt))
           else (
             check bool "actual owned queue answers on its original connection" true
               (match issue () with W.Issue_result (Ok (B.Answered _)) -> true
@@ -165,10 +187,10 @@ let scenario mode =
         let failure=try Live.For_testing.run ~before_command_validation:(fun () ->
           ignore (Eio.Promise.try_resolve validating ())) ~env ~owner ~directory:allocation work;None with
           | Invalid_argument detail | Sys_error detail -> Some detail in
-        if mode="normal" then check (option string) "normal retirement returns" None failure
+        if mode="normal" || mode="late" then check (option string) "normal retirement returns" None failure
         else check bool "failed startup/lost peer does not continue serving" true (Option.is_some failure);
         check bool "owner input is fenced at termination" true (Owner.is_retired owner));
-      check bool "only verified metadata admits caller work" (mode="normal" || mode="lost" || mode="gate") !entered;
+      check bool "only verified metadata admits caller work" (mode="normal" || mode="lost" || mode="gate" || mode="late") !entered;
       if mode="gate" then check bool "blocked validation retirement remains unknown after original stop" true
         (match !retirement with Some (W.Service_refusal {disposition=W.Outcome_unknown;_}) -> true
          | None | Some (Service_refusal {disposition=Not_started;_}|Snapshot_result _|Model_reply _|Extension_reply _
@@ -209,7 +231,7 @@ let scenario mode =
         if mode="wrong-pid" || mode="wrong-profile" then (
           check bool "identity mismatch executes no page command" false (List.mem "browsingContext.getTree" calls);
           check bool "unverified endpoint never receives browser.close" false (List.mem "browser.close" calls))
-        else if mode="normal" then check int "original browser is closed once" 1
+        else if mode="normal" || mode="late" then check int "original browser is closed once" 1
           (List.length (List.filter (String.equal "browser.close") calls))
         else if mode="gate" then (
           check bool "no delayed input follows gate release" false (List.mem "browsingContext.getTree" calls);
@@ -231,4 +253,5 @@ let () =
       test_case "wrong profile refuses before page input" `Quick (child "wrong-profile");
       test_case "original client retires once without replacement" `Quick (child "normal");
       test_case "native gate cannot hold the original process alive during retirement" `Quick (child "gate");
-      test_case "unexpected peer loss fences the worker" `Quick (child "lost")]])
+      test_case "unexpected peer loss fences the worker" `Quick (child "lost");
+      test_case "a result whose caller stopped waiting keeps the connection" `Quick (child "late")]])

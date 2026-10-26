@@ -13,8 +13,9 @@ type unavailable_output =
 type error =
   { reason : unavailable_output
   ; status : Unix.process_status option
-      (** [Some] only after actual child termination was observed. It is
-          diagnostic state, never evidence that stdout was complete. *)
+      (** [Some] after the runner returned a status, including its synthesized
+          setup-failure status. It proves neither child creation nor complete
+          stdout; it is diagnostic state only. *)
   }
 
 val read : timeout_sec:float -> argv:string list -> (Unix.process_status * string, error) result

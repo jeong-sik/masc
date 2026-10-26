@@ -909,13 +909,14 @@ reasoning-effort = "low"
 [codex_subscription.codex-gpt-5-6]
 wizard-default = true
 
-# Codex CLI model cache, fetched 2026-09-30: a 272000-token default
-# context and text+image input. GPT-6.1 Sol, GPT-6 Astra/Sol and GPT-5.6
-# Sol/Terra advertise low..ultra; Luna variants advertise low..max and
-# GPT-5.5 low..xhigh. Each profile is bound below for fresh installations.
+# Codex CLI model cache, fetched 2026-09-30 and refreshed 2026-10-27:
+# the GPT-6.1 family now carries a 500000-token context and text+image
+# input; earlier tiers keep 272000. GPT-6.1 Sol/Terra, GPT-6 Astra/Sol and
+# GPT-5.6 Sol/Terra advertise low..ultra; Luna variants advertise low..max
+# and GPT-5.5 low..xhigh. Each profile is bound below for fresh installations.
 [models.codex-gpt-6-1-sol-low]
 api-name = "gpt-6.1-sol"
-max-context = 272000
+max-context = 500000
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -925,7 +926,7 @@ supports-image-input = true
 
 [models.codex-gpt-6-1-sol-medium]
 api-name = "gpt-6.1-sol"
-max-context = 272000
+max-context = 500000
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -935,7 +936,7 @@ supports-image-input = true
 
 [models.codex-gpt-6-1-sol-high]
 api-name = "gpt-6.1-sol"
-max-context = 272000
+max-context = 500000
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -945,7 +946,7 @@ supports-image-input = true
 
 [models.codex-gpt-6-1-sol-xhigh]
 api-name = "gpt-6.1-sol"
-max-context = 272000
+max-context = 500000
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -955,7 +956,7 @@ supports-image-input = true
 
 [models.codex-gpt-6-1-sol-max]
 api-name = "gpt-6.1-sol"
-max-context = 272000
+max-context = 500000
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -965,13 +966,73 @@ supports-image-input = true
 
 [models.codex-gpt-6-1-sol-ultra]
 api-name = "gpt-6.1-sol"
-max-context = 272000
+max-context = 500000
 tools-support = true
 streaming = true
 reasoning-effort = "ultra"
 [models.codex-gpt-6-1-sol-ultra.capabilities]
 supports-image-input = true
 [codex_subscription.codex-gpt-6-1-sol-ultra]
+
+[models.codex-gpt-6-1-terra-low]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+[models.codex-gpt-6-1-terra-low.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-low]
+
+[models.codex-gpt-6-1-terra-medium]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+[models.codex-gpt-6-1-terra-medium.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-medium]
+
+[models.codex-gpt-6-1-terra-high]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+[models.codex-gpt-6-1-terra-high.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-high]
+
+[models.codex-gpt-6-1-terra-xhigh]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+[models.codex-gpt-6-1-terra-xhigh.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-xhigh]
+
+[models.codex-gpt-6-1-terra-max]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+[models.codex-gpt-6-1-terra-max.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-max]
+
+[models.codex-gpt-6-1-terra-ultra]
+api-name = "gpt-6.1-terra"
+max-context = 500000
+tools-support = true
+streaming = true
+reasoning-effort = "ultra"
+[models.codex-gpt-6-1-terra-ultra.capabilities]
+supports-image-input = true
+[codex_subscription.codex-gpt-6-1-terra-ultra]
 
 [models.codex-gpt-6-astra-ultra]
 api-name = "gpt-6-astra"

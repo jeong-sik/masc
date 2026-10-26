@@ -112,6 +112,17 @@
       }
     },
     {
+      "publisher": "openai",
+      "model_id": "gpt-6.1-terra",
+      "release": {
+        "status": "official_release",
+        "released_on": "2026-10-27",
+        "kind": "general_availability",
+        "source_url": "https://openai.com/products/release-notes/",
+        "checked_on": "2026-10-27"
+      }
+    },
+    {
       "publisher": "zai",
       "model_id": "glm-5.3",
       "release": {

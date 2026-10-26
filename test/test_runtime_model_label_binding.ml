@@ -569,24 +569,33 @@ let ollama_auto_probe_uses_declared_deadline () =
        | Ok None -> ()
        | Ok (Some _) -> Alcotest.fail "an unanswered probe invented a model"
        | Error `Timeout -> Alcotest.fail "the Ollama probe escaped its declared deadline");
+      Alcotest.(check (float 0.001)) "Ollama probe expires at its declared four seconds"
+        1004.0 (Eio.Time.now clock);
       Alcotest.(check int) "the bounded discovery attempt really reached the endpoint"
         1 !tag_requests))
 
 let ollama_cloud_auto_uses_declared_discovery () =
+  let deadlines = ref [] in
   with_env "MASC_TEST_OLLAMA_KEY" (Some "cloud-test-secret") (fun () ->
-    let discover ~headers:_ ~timeout_s:_ _ = Some "cloud-model" in
+    let discover ~headers:_ ~timeout_s _ =
+      deadlines := timeout_s :: !deadlines;
+      Some "cloud-model" in
     match Runtime_model_string.parse_model_string ~discover
       ~api_key_env_overrides:["ollama_cloud", "MASC_TEST_OLLAMA_KEY"] "ollama_cloud:auto" with
     | Some config ->
       Alcotest.(check string) "cloud auto keeps its discovered model"
         "cloud-model" config.Provider_config.model_id;
       Alcotest.(check (option string)) "cloud auto preserves its provider"
-        (Some "ollama_cloud") config.Provider_config.provider_id
+        (Some "ollama_cloud") config.Provider_config.provider_id;
+      Alcotest.(check (list (float 0.0))) "cloud auto uses its declared full deadline"
+        [600.0] !deadlines
     | None -> Alcotest.fail "cloud auto was disabled by a missing discovery deadline")
 
 let expect_timeout clock request =
   match Eio.Time.with_timeout clock 5. (fun () -> Ok (request ())) with
-  | Ok (Error (Http_client.TimeoutError _)) -> ()
+  | Ok (Error (Http_client.TimeoutError _)) ->
+    Alcotest.(check (float 0.001)) "timeout fires at the declared four seconds"
+      1004.0 (Eio.Time.now clock)
   | Ok (Error _) -> Alcotest.fail "the request failed before its declared deadline"
   | Ok (Ok _) -> Alcotest.fail "the request succeeded without observing its deadline"
   | Error `Timeout -> Alcotest.fail "the request escaped its declared deadline"

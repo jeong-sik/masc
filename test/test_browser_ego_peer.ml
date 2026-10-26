@@ -1464,9 +1464,12 @@ let test_dialog_scripts_in_node () =
   let prompt = ego_dialog ~default:"def" "prompt" "name?" and alert = ego_dialog "alert" "saved" in
   scenario := (prompt, `Null, "");
   (match dispatch peer Live.Tabs_list (obj []) with
-   | Ok rows -> check string "listed with its dialog"
-       {|[{"id":1,"index":0,"url":"https://app.slack.com/","title":"Slack","active":true,"dialog":{"type":"prompt","message":"name?","defaultValue":"def"}}]|}
-       (Yojson.Safe.to_string rows)
+   | Ok rows ->
+     let row=match Yojson.Safe.Util.to_list rows with [row] -> row | _ -> fail "expected one listed page" in
+     check bool "listed with its dialog" true
+       (field "dialog" row=obj ["type",str "prompt";"message",str "name?";"defaultValue",str "def"]);
+     check bool "dialog inventory retains its native Page provenance" true
+       (field "egoPage" row=obj ["label",str "p1";"targetId",str "T1";"openedBy",str "agent"])
    | Error _ -> fail "the listing failed");
   (match act (Lane.Action.Accept_dialog (Some "Vincent")) with
    | Ok receipt -> check string "the answer"

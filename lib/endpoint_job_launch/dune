@@ -1,0 +1,6 @@
+(include_subdirs no)
+(library
+ (name endpoint_job_launch)
+ (public_name masc.endpoint_job_launch)
+ (modules endpoint_job_launch)
+ (libraries endpoint_job_registry endpoint_job_protocol endpoint_process_gate exec_ssh_protocol fs_compat masc_core eio unix yojson base64))

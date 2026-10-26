@@ -146,8 +146,10 @@ type autosave_slots =
 
 (* An unreadable slot is static: without this gate every No_machine refusal
    and every program-less load would warn again for the same file. Warn once
-   per base path, slot and reason; a changed file warns again. *)
-let last_unreadable_warn : (string * string * string) option ref = ref None
+   per base path, slot and reason; a changed file warns again. The set only
+   holds slot keys, so it stays tiny. *)
+let unreadable_warned : (string * string * string, unit) Hashtbl.t = Hashtbl.create 8
+let unreadable_warned_lock = Mutex.create ()
 
 (* Reads both slots on a system thread: each read decompresses and checksums a
    whole machine body, work that does not belong on the event loop. *)
@@ -162,10 +164,12 @@ let lookup_autosave_slots ~base_path =
   let warn which = function
     | Dos_lane.Autosave_unreadable reason ->
       let key = (base_path, which, reason) in
-      if !last_unreadable_warn <> Some key then begin
-        last_unreadable_warn := Some key;
-        Log.DosLog.warn "masc_dos %s: %s" which reason
-      end
+      let fresh =
+        Mutex.protect unreadable_warned_lock (fun () ->
+          if Hashtbl.mem unreadable_warned key then false
+          else (Hashtbl.add unreadable_warned key (); true))
+      in
+      if fresh then Log.DosLog.warn "masc_dos %s: %s" which reason
     | Dos_lane.No_autosave | Dos_lane.Autosave _ -> ()
   in
   warn "autosave" found.current;

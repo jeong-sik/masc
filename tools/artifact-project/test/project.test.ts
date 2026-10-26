@@ -109,6 +109,20 @@ test('literal fragment/query characters in entry directories resolve local asset
   assert.ok(result.artifact.content.includes('data:image/png;base64,'))
 })
 
+test('preserves distinct SVG fragment identifiers across HTML attributes and inline CSS URLs', async () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><view id="icon-a" viewBox="0 0 10 10"/><view id="icon-b" viewBox="10 0 10 10"/></svg>'
+  const value = request({
+    'package.json': '{}',
+    'index.html': '<img id="a" src="sprite.svg#icon-a"><img id="b" src="sprite.svg#icon-b"><div id="bg" style="background-image:url(sprite.svg#icon-b)"></div>',
+    'sprite.svg': svg,
+  })
+  const result = await buildProject(value, await workspace())
+  const encoded = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`
+  assert.ok(result.artifact.content.includes(`id="a" src="${encoded}#icon-a"`))
+  assert.ok(result.artifact.content.includes(`id="b" src="${encoded}#icon-b"`))
+  assert.ok(result.artifact.content.includes(`${encoded}#icon-b`))
+})
+
 
 test('refuses multiple HTML module entries instead of changing their timing or external import order', async () => {
   await assert.rejects(buildProject(request({ 'package.json': '{}', 'index.html': '<script type="module">globalThis.first=true</script><script type="module" src="https://cdn.example/second.js"></script>' }), await workspace()), /Multiple HTML module entries/)

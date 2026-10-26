@@ -144,7 +144,9 @@ export async function buildProject(input: unknown, workspace: string) {
     if (!target) return url
     const contentType = mime[posix.extname(target).toLowerCase()]
     if (!contentType) throw new ProjectError('build', `Unsupported HTML asset type: ${url}`)
-    return `data:${contentType};base64,${(await readFile(target)).toString('base64')}`
+    const hash = url.indexOf('#')
+    const fragment = hash >= 0 ? url.slice(hash) : ''
+    return `data:${contentType};base64,${(await readFile(target)).toString('base64')}${fragment}`
   }
   let moduleEntrySeen = false
   const moduleTypes = new Set(['module'])

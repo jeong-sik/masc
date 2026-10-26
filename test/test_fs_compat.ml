@@ -54,6 +54,22 @@ let test_optional_read_non_directory_parent () =
   check_optional_read_error (Filename.concat path "child")
 ;;
 
+let test_optional_read_directory_leaf () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "snapshot" in
+  let alias = Filename.concat base "alias" in
+  Unix.mkdir path 0o700;
+  Unix.symlink path alias;
+  check_optional_read_error path;
+  check_optional_read_error alias;
+  Unix.rmdir path;
+  Fs_compat.save_file path "restored snapshot";
+  check (option string) "the same name is readable after the directory is removed"
+    (Some "restored snapshot") (Fs_compat.load_file_opt path);
+  check (option string) "the alias observes the restored file"
+    (Some "restored snapshot") (Fs_compat.load_file_opt alias)
+;;
+
 let with_optional_read_permission path mode test =
   let previous = (Unix.stat path).Unix.st_perm in
   Unix.chmod path mode;
@@ -145,6 +161,7 @@ let test_optional_read_cancellation_joins_reader ~fs () =
 let optional_read_cases =
   [ "absence, empty content and aliases", test_optional_read_absence_and_content
   ; "non-directory parent is an error", test_optional_read_non_directory_parent
+  ; "directory leaf and its alias are errors", test_optional_read_directory_leaf
   ; "parent permission failure is an error", test_optional_read_parent_permission
   ; "leaf permission failure is an error", test_optional_read_leaf_permission
   ; "opened replacement retains original bytes", test_optional_read_opened_replacement

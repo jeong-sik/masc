@@ -1653,6 +1653,11 @@ let load_file_opt_unix ~before_read (path : string) : string option =
       | exception exn ->
         let bt = Printexc.get_raw_backtrace () in
         (try Unix.close fd with Unix.Unix_error _ -> ());
+        let exn = match exn with
+          | Unix.Unix_error (error, _, _) ->
+            Sys_error (Printf.sprintf "%s: %s" path (Unix.error_message error))
+          | exn -> exn
+        in
         Printexc.raise_with_backtrace exn bt
     in
     Some (read_channel_and_close ~before_read path ic)

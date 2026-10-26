@@ -472,7 +472,16 @@ let handle_memory_retract_with_outcome
 (* Browser calls retain the installation's advertised tool and verified owner.
    Scene retention and result manifests stay with this producer. *)
 let browser_tool ?upload_paths ~(config:Workspace.config) ~(meta:keeper_meta) ~tool ~tool_name args =
-  Browser_addon_tools.handle ?upload_paths ~config ~access:(Lane_addon_sources.Keeper meta.name)
+  let initial_goal_ids () =
+    let ( let* ) = Result.bind in
+    let* task_id=Keeper_current_task_reconcile.owned_active_task_id_result_for_meta ~config ~meta in
+    match task_id with
+    | None -> Ok []
+    | Some task_id ->
+      let* links=Workspace_goal_index.read_goal_task_links_authoritative_r config in
+      Ok (List.filter_map (fun (goal_id,tasks) ->
+        if List.mem (Keeper_id.Task_id.to_string task_id) tasks then Some goal_id else None) links) in
+  Browser_addon_tools.handle ~initial_goal_ids ?upload_paths ~config ~access:(Lane_addon_sources.Keeper meta.name)
     ~principal:(Lane_addon_call_context.Keeper meta.name)
     ~reserved:(List.map (fun (schema:Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas)
     ~keeper_name:(Some meta.name) ~tool ~tool_name ~start_time:(Tool_timing.start ()) args

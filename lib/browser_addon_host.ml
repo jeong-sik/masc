@@ -60,6 +60,19 @@ let selection_snapshot t =
         automation=published.automation;stagehand=published.stagehand})
 type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
+let goal_space t ~goal_id = Browser_goal_space.find t.config ~goal_id
+let bind_goal_space t ~goal_id ~client_id =
+  let* published,_ = selection_snapshot t |> Result.map_error (function
+    | Snapshot_unavailable detail -> Browser_goal_space.Unavailable detail
+    | Snapshot_unreadable detail -> Browser_goal_space.Invalid detail) in
+  match List.find_opt (fun (client:Browser_lane.client_info) -> client.client_id=client_id) published.clients with
+  | Some {transport=Browser_lane.Ego_task_space;space=Some space;_} ->
+      Browser_goal_space.bind t.config ~goal_id ~addon_instance_id:t.service.instance_id
+        ~space ~actor:(Lane_addon_call_context.actor_label t.principal)
+  | None -> Error (Browser_goal_space.Unavailable "clientId is not an observed browser connection")
+  | Some {transport=Ego_task_space;space=None;_}
+  | Some {transport=(Web_extension|Webdriver_bidi);_} ->
+      Error (Browser_goal_space.Invalid "Goal Space binding requires an observed Ego Space connection")
 let route_arguments = function
   | Browser_lane.Live_route client -> ["lane",`String "live"] @
       (match client with None -> []|Some id -> ["clientId",`String (Browser_lane.client_id_to_string id)])
@@ -79,7 +92,7 @@ let selection_detail ~clients error = `Assoc ["error",Browser_selection.error_to
 (* Choose from the worker's snapshot, then run the command once on the chosen
    route. A refusal after the snapshot is returned as the worker gave it; the
    host never sends the command to another browser. *)
-let dispatch ?upload_id ~required_actions t ~preference verb ~start_time =
+let dispatch ?goal_space ?upload_id ~required_actions t ~preference verb ~start_time =
   let fail ?metadata ?(data=`Null) ~class_ ~effect_disposition message =
     Error (Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time
       ?metadata ~data ~class_ ~effect_disposition message) in
@@ -124,6 +137,15 @@ let dispatch ?upload_id ~required_actions t ~preference verb ~start_time =
         | Error (Snapshot_unreadable detail) -> fail ~class_:Tool_result.Runtime_failure
             ~effect_disposition:Tool_result.Proven_pre_effect
             ("browser snapshot is unreadable; no browser command was dispatched: " ^ detail) in
+      let* preference=match goal_space with
+        | None -> Ok preference
+        | Some binding ->
+          Browser_goal_space.resolve binding ~addon_instance_id:t.service.instance_id published.clients
+          |> Result.map (fun client_id -> Browser_selection.Exact (Browser_lane.Live_route (Some client_id)))
+          |> Result.map_error (fun error -> Tool_result.make_err
+              ~tool_name:Browser_addon_tool.definition.name ~start_time
+              ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
+              (Browser_goal_space.error_message error)) in
       let* selected=Browser_selection.choose ~required_actions ~verb ~bound:(Browser_selection.bound verb) ~snapshot preference
         |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
       let* browser=Browser_selection.target ~verb ~snapshot selected.route
@@ -171,11 +193,16 @@ let command t ~arguments =
       ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect detail)
   | Ok (preference,verb,required_actions,upload_id) ->
       dispatch ?upload_id ~required_actions t ~preference verb ~start_time |> Result.map snd
-let issue ?upload_paths ?(required_actions=[]) t ~preference verb =
+let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
   let start_time=Tool_timing.start () in
   let fail ?metadata ?(data=`Null) ~class_ ~effect_disposition message =
     Error (Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time
       ?metadata ~data ~class_ ~effect_disposition message) in
+  let* ()=match goal_space,preference,verb with
+    | None,_,_ | Some _,Browser_selection.Automatic,(Browser_lane.Tabs_list|Session_open _) -> Ok ()
+    | Some _,_,_ -> fail ~class_:Tool_result.Workflow_rejection
+        ~effect_disposition:Tool_result.Proven_pre_effect
+        "Goal Space defaults apply only to initial automatic discovery or open" in
   let upload=match verb with
     | Browser_lane.Page_act (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) -> Some paths
     | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
@@ -210,7 +237,7 @@ let issue ?upload_paths ?(required_actions=[]) t ~preference verb =
           "worker upload staging was refused; no browser command was dispatched"
       | Error error -> fail ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect
           (match error with Browser_addon_client.Unavailable detail|Outcome_unknown detail -> detail) in
-  let* binding,result=dispatch ?upload_id:(Option.map fst upload_id) ~required_actions t ~preference verb ~start_time in
+  let* binding,result=dispatch ?goal_space ?upload_id:(Option.map fst upload_id) ~required_actions t ~preference verb ~start_time in
   let raw=Mcp_protocol.Mcp_types.tool_result_to_yojson result in
   if result.is_error=Some true then
     let class_,effect_disposition=Lane_addon_tool_result.failure result in

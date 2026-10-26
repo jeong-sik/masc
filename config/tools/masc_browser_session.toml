@@ -1,20 +1,30 @@
 name = "masc_browser_session"
 description = """
-Open or manage a work browser. For initial action=open, optional requiredActions chooses a work browser implementing all requested operations; unsupported combinations fail before opening. Omit lane to reuse a single open work session, or start the configured Chrome backend before the Gecko backend when no session is open. Multiple open work sessions require a choice. Visible by default. The receipt reports browserSelection; retain its lane for later work. lane=automation: Gecko (configure [browser.automation] geckodriver, optional binary e.g. Zen). lane=stagehand: Chromium with the Stagehand runtime (configure [browser.stagehand]). Each backend's enabled flag controls new requests; status and close remain available while off. The server starts and stops it; operator live sessions are not managed. After open, use BrowserGoto/masc_browser_goto with the same lane."""
+Manage a browser or explicitly bind an observed Ego Space to a shared Goal. action=bind_goal requires goalId, lane=live and the observed Ego clientId; it stores metadata without browser input or taking control. action=goal_status with goalId reads only the stored binding. The same binding is idempotent; reassignment or sharing a Space across distinct Goals is refused. Keeper initial automatic discovery/open consults its current Task Goal binding; retain the resulting lane/clientId for subsequent calls. A bound Ego Space is already open: use BrowserTabs to discover its pages, rather than opening a managed session. A missing bound connection does not select another browser. Open or manage a work browser. For initial action=open, optional requiredActions chooses a work browser implementing all requested operations; unsupported combinations fail before opening. Omit lane to reuse a single open work session, or start the configured Chrome backend before the Gecko backend when no session is open. Multiple open work sessions require a choice. Visible by default. The receipt reports browserSelection; retain its lane for later work. lane=automation: Gecko (configure [browser.automation] geckodriver, optional binary e.g. Zen). lane=stagehand: Chromium with the Stagehand runtime (configure [browser.stagehand]). Each backend's enabled flag controls new requests; status and close remain available while off. The server starts and stops it; operator live sessions are not managed. After open, use BrowserGoto/masc_browser_goto with the same lane."""
 additional_properties = false
 
 [[params]]
 name = "action"
 type = "string"
-enum = ["open", "close", "status"]
+enum = ["open", "close", "status", "bind_goal", "goal_status"]
 required = true
-description = "open launches; close stops; status observes the session. With none open, status adds driver.ready (true: open can start one now; false: driver.message says why, e.g. \"Session already started\") or driver.error (the driver did not answer)."
+description = "bind_goal stores an observed Ego Space for goalId (lane=live and clientId required). goal_status reads the stored binding only (goalId required; no other options). open launches; close stops; status observes the session. With none open, status adds driver.ready (true: open can start one now; false: driver.message says why, e.g. \"Session already started\") or driver.error (the driver did not answer)."
 
 [[params]]
 name = "lane"
 type = "string"
-enum = ["automation", "stagehand"]
+enum = ["live", "automation", "stagehand"]
 description = "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
+
+[[params]]
+name = "clientId"
+type = "string"
+description = "Exact observed live connection UUID. Required for bind_goal; it is never a numeric Space ID."
+
+[[params]]
+name = "goalId"
+type = "string"
+description = "Existing shared workspace Goal ID; accepted only for bind_goal and goal_status."
 
 [[params]]
 name = "headless"

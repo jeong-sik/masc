@@ -87,11 +87,12 @@ let first_ollama_model_id_for_url ?(headers=[]) url =
   let cache = snapshot.cache in
   let fresh = Time_compat.now () -. cache.updated_at <= cache_ttl in
   let cached =
-    if fresh then
+    match fresh, headers with
+    | true, [] ->
       List.find_map (fun (status : endpoint_info) ->
         if status.url = url && status.protocol = Llm_provider.Discovery.Ollama_native
         then model_of_status status else None) cache.endpoints
-    else None
+    | _ -> None
   in
   match cached with
   | Some _ as model -> model

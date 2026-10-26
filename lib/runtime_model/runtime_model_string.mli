@@ -21,8 +21,9 @@ val parse_model_string
     [discover] is consulted only for an Ollama [auto] selection without a
     declared default. It receives the selected binding's authentication headers
     and exact base URL, never another provider's endpoint. A declared default
-    never triggers discovery. The default reads the current cache without a
-    global refresh and probes only that exact endpoint with those headers.
+    never triggers discovery. The default reuses a fresh cache only for an
+    unauthenticated request. An authenticated request probes only that exact
+    endpoint with its selected headers, never a cache from another credential.
 
     A registered label carries the canonical binding provider id into the
     returned config. Its context window uses that config's provider/model

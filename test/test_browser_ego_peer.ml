@@ -17,11 +17,13 @@ let sent_of ~window_s script =
   let trailing text suffix =
     if String.ends_with ~suffix text then String.sub text 0 (String.length text - String.length suffix)
     else failf "%S does not end with %S" text suffix in
-  { step = find "// masc-ego: ";
-    args = (match Yojson.Safe.from_string (trailing (find "const args = JSON.parse(") ");") with
+  let step=find "// masc-ego: " in
+  let args=match Yojson.Safe.from_string (trailing (find "const args = JSON.parse(") ");") with
       | `String encoded -> Yojson.Safe.from_string encoded
-      | _ -> failwith "the production args envelope must contain a JSON string");
-    space = Yojson.Safe.from_string (trailing (find "const task = await taskSpace(") ");"); window_s }
+      | _ -> failwith "the production args envelope must contain a JSON string" in
+  { step;args;
+    space = (if step="space.status" then Yojson.Safe.Util.member "spaceId" args
+      else Yojson.Safe.from_string (trailing (find "const task = await taskSpace(") ");")); window_s }
 
 (* ego writes other lines too, such as its update notice; only the marked line is the answer. *)
 let answered value = Ok ("[ego-browser:notice] an update is available\n" ^ Peer.result_marker
@@ -2300,10 +2302,8 @@ process.on('exit',()=>console.log('seen '+JSON.stringify(seen)));
 const forbidden=name=>{seen.push(name);throw new Error('unexpected '+name);};
 const takeOverTaskSpace=async()=>forbidden('takeOver');
 const claimTaskSpace=async()=>forbidden('claim');
-const taskSpace=async id=>{seen.push(['taskSpace',id]);return {
-  spaceId:%d,name:'Renamed native Space',ownership:%s,
-  page:()=>forbidden('page'),tabs:async()=>forbidden('tabs'),
-  handOff:async()=>forbidden('handOff'),finish:async()=>forbidden('finish')};};
+const taskSpace=async()=>forbidden('taskSpace');
+const listTaskSpaces=async()=>{seen.push('listTaskSpaces');return [{id:%d,name:'Renamed native Space',ownership:%s}];};
 |js} (if !invalid then 52 else 51) (Yojson.Safe.to_string (str !ownership)) in
       output:=in_node (shim ^ script);Ok !output
     | "space.hand_off" -> answered (obj ["spaceId",`Int 51;"spaceName",str "SDK Space"])
@@ -2321,7 +2321,7 @@ const taskSpace=async id=>{seen.push(['taskSpace',id]);return {
   check (float 0.) "metadata receipt is dated" (now ()) (Yojson.Safe.Util.to_float (field "observedAt" value));
   check string "connection attachment identity remains separate" "SDK Space" (Peer.space peer).name;
   check bool "query uses only task metadata" true
-    (contains !output "seen [[\"taskSpace\",51]]");
+    (contains !output "seen [\"listTaskSpaces\"]");
   let module Operator=Masc.Browser_ego_operator in
   let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
     status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);

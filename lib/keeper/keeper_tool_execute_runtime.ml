@@ -30,9 +30,9 @@ let elapsed_duration_ms ~start_time ~end_time =
   | FP_normal | FP_subnormal | FP_zero when elapsed_ms < 1. -> 1
   | FP_normal | FP_subnormal | FP_zero -> int_of_float elapsed_ms
 
-let model_execute_location_fields ~config ~meta ~args ~cwd =
+let model_execute_location_fields ~remote_workspace_root ~config ~meta ~args ~cwd =
   let execution_location =
-    Keeper_sandbox_repo_path.execution_location_json ~config ~meta ~args ~cwd
+    Keeper_sandbox_repo_path.execution_location_json ~remote_workspace_root ~config ~meta ~args ~cwd
   in
   let response_cwd =
     match execution_location with
@@ -102,7 +102,7 @@ let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
     private_message;
   let fields =
     [ "typed", `Bool true; "code", `String code ]
-    @ model_execute_location_fields ~config ~meta ~args ~cwd
+    @ model_execute_location_fields ~remote_workspace_root:None ~config ~meta ~args ~cwd
   in
   let message =
     match meta.sandbox_profile with
@@ -111,7 +111,7 @@ let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
     | Micro_vm | Remote_ssh -> private_message
   in
   Keeper_tool_execution.failure
-    ~class_:Tool_result.Policy_rejection
+    ~class_:(Keeper_tool_execute_path.execute_cwd_resolution_error_class error)
     ~effect_disposition:Tool_result.Proven_pre_effect
     (error_json ~fields message)
 
@@ -301,8 +301,21 @@ let handle_tool_execute_typed
       ()
   =
   let inline_ceiling_bytes = Tool_output.inline_ceiling_bytes result_projection in
+  let endpoint = match meta.sandbox_profile with
+    | Remote_ssh -> Keeper_sandbox_ssh.resolve_endpoint
+        ~base_path:config.base_path ~keeper_name:meta.name |> Result.map Option.some
+    | Docker | Micro_vm -> Ok None in
+  match endpoint with
+  | Error detail -> Keeper_tool_execution.failure
+      ~class_:Tool_result.Dependency_unavailable
+      ~effect_disposition:Tool_result.Proven_pre_effect (error_json detail)
+  | Ok endpoint ->
+  let remote_workspace_root = Option.map (fun (endpoint : Exec_ssh_endpoint.t) ->
+    Keeper_sandbox_remote.keeper_root ~remote_root:endpoint.remote_root
+      ~keeper_name:meta.name) endpoint in
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
+      ~remote_workspace_root
       ~config
       ~meta
       (* Keep all keepers on the shared execute-worktree root. The exact
@@ -322,7 +335,7 @@ let handle_tool_execute_typed
       model_execute_cwd_resolution_error ~config ~meta ~args ~cwd e
     | Ok cwd ->
         let model_location_fields =
-          model_execute_location_fields ~config ~meta ~args ~cwd
+          model_execute_location_fields ~remote_workspace_root:None ~config ~meta ~args ~cwd
       in
       let typed_args = assoc_upsert "cwd" (`String cwd) args in
       match Keeper_tool_execute_typed_input.of_json typed_args with
@@ -401,14 +414,17 @@ let handle_tool_execute_typed
           | Ok `Remote_ssh ->
             (* Host identity projection is deliberately absent: the remote
                shim synthesizes its own minimal environment. *)
-            (match
-               Keeper_sandbox_shell_ir_target.ssh_target
+            (let target = match endpoint with
+              | None -> Error (Keeper_sandbox_shell_ir_target.target_error
+                  ~class_:Tool_result.Dependency_unavailable "remote_ssh_endpoint_unavailable")
+              | Some endpoint -> Keeper_sandbox_shell_ir_target.ssh_target
+                 ~endpoint
                  ~on_receipt
                  ~base_path:config.base_path
                  ~meta
                  ~timeout_sec
                  ()
-             with
+             in match target with
              | Error error -> Error error
              | Ok dispatch ->
                let endpoint_fields =
@@ -489,7 +505,12 @@ let handle_tool_execute_typed
              exist. *)
           match dispatch_sandbox with
           | Masc_exec.Sandbox_target.Host
-          | Docker _ | Micro_vm _ | Ssh _ -> model_location_fields
+          | Docker _ | Micro_vm _ -> model_location_fields
+          | Ssh { endpoint; _ } ->
+            let root = Keeper_sandbox_remote.keeper_root
+              ~remote_root:endpoint.remote_root ~keeper_name:meta.name in
+            model_execute_location_fields ~remote_workspace_root:(Some root)
+              ~config ~meta ~args ~cwd
           | Masc_exec.Sandbox_target.Delegated _ ->
             (* Unreachable from a profile-built target today (no profile
                builds one); a delegated stage is labelled where the

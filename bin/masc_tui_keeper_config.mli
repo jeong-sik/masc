@@ -58,6 +58,25 @@ val reopen_edit_on_current : before:Yojson.Safe.t -> edited:string -> current:Yo
     revision and context-shrink confirmation behind. The caller opens an editor
     for review; this does not authorize or dispatch a save. *)
 
+type system_prompt_unavailable_reason =
+  | Constitution_unreadable of { path : string }
+  | Workspace_unavailable
+  | Prompt_unrenderable
+(** The typed refusal reason a turn's system prompt carries. [Workspace_unavailable]
+    names the endpoint workspace the server could not resolve, with no path field. *)
+
+type system_prompt_view =
+  | System_prompt_available of { effective : string }
+  | System_prompt_unavailable of
+      { reason : system_prompt_unavailable_reason
+      ; detail : string
+      }
+  | System_prompt_undecodable of string
+
+val system_prompt_view_of_json : Yojson.Safe.t option -> system_prompt_view
+(** Decode the prompt.system_prompt member. A shape this reader does not know
+    is [System_prompt_undecodable], never mistaken for a not-declared prompt. *)
+
 val sandbox_patch : profile:Keeper_sandbox_config.sandbox_profile -> Yojson.Safe.t -> (Yojson.Safe.t option, string) result
 (** Prepare the Sandbox selection using this snapshot's composite revision.
     SSH keeps an explicitly selected registered endpoint or selects the sole

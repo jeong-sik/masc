@@ -14,8 +14,15 @@ type execute_cwd_resolution_error =
   | Cwd_not_directory of { cwd : string }
   | Cwd_rejected of Keeper_path_rejection.keeper_path_rejection
   | Cwd_root_verification_failed of { detail : string }
+  | Cwd_namespace_unavailable of string
+
+let execute_cwd_resolution_error_class = function
+  | Cwd_namespace_unavailable _ -> Tool_result.Dependency_unavailable
+  | Cwd_missing _ | Cwd_not_directory _ | Cwd_rejected _
+  | Cwd_root_verification_failed _ -> Tool_result.Policy_rejection
 
 let execute_cwd_resolution_error_code = function
+  | Cwd_namespace_unavailable _ -> "remote_ssh_endpoint_unavailable"
   | Cwd_missing _ -> "cwd_missing"
   | Cwd_not_directory _ -> "cwd_not_directory"
   | Cwd_rejected (Outside_sandbox _) -> "cwd_outside_sandbox"
@@ -28,6 +35,7 @@ let execute_cwd_resolution_error_code = function
     "cwd_invalid"
 
 let execute_cwd_resolution_error_public_message = function
+  | Cwd_namespace_unavailable detail -> detail
   | Cwd_missing _ -> "Requested cwd does not exist in the Keeper-visible workspace."
   | Cwd_not_directory _ -> "Requested cwd is not a directory."
   | Cwd_rejected (Outside_sandbox _) -> "Requested cwd is outside the Keeper sandbox."
@@ -41,6 +49,7 @@ let execute_cwd_resolution_error_public_message = function
     "Requested cwd is invalid."
 
 let execute_cwd_resolution_error_private_message = function
+  | Cwd_namespace_unavailable detail -> detail
   | Cwd_missing { cwd } ->
     Printf.sprintf "cwd_not_directory: %s (directory does not exist)" cwd
   | Cwd_not_directory { cwd } ->
@@ -89,11 +98,24 @@ let requested_tool_execute_cwd ~config ~meta ~write_enabled ~args =
    confined lexically above, the remote lane maps it lexically
    ([Keeper_remote_path.host_to_remote]), and the endpoint's shim chdirs
    into it inside its own jail and answers ENOENT itself. *)
-let resolve_tool_execute_cwd_typed ~config ~meta ~write_enabled ~args =
+let resolve_tool_execute_cwd_typed ~remote_workspace_root ~config ~meta ~write_enabled ~args =
+  let ( let* ) = Result.bind in
+  let caller_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
   let raw_path =
     requested_tool_execute_cwd ~config ~meta ~write_enabled ~args
     |> keeper_observation_host_path_of_visible_path ~config ~meta
   in
+  let* raw_path = match remote_workspace_root with
+    | Some remote_workspace_root ->
+      (* Omitted and relative cwd have already become internal coordinates.
+         Only an absolute caller value belongs to the endpoint namespace. *)
+      if caller_cwd = "" || Filename.is_relative caller_cwd then Ok raw_path
+      else Ok (Keeper_workspace_namespace.project_input
+        ~remote_workspace_root ~config ~meta raw_path)
+    | None ->
+      (match meta.sandbox_profile with
+       | Remote_ssh -> Error (Cwd_namespace_unavailable "remote_ssh_namespace_unresolved")
+       | Docker | Micro_vm -> Ok raw_path) in
   (* Execute returns the container-visible cwd. A caller may use that exact
      directory again; project it through the admitted Keeper's own mount
      before applying the same confinement and root-identity checks. *)
@@ -110,8 +132,8 @@ let resolve_tool_execute_cwd_typed ~config ~meta ~write_enabled ~args =
      | Host_missing -> Error (Cwd_missing { cwd })
      | Host_file -> Error (Cwd_not_directory { cwd }))
 
-let resolve_tool_execute_cwd ~config ~meta ~write_enabled ~args =
-  resolve_tool_execute_cwd_typed ~config ~meta ~write_enabled ~args
+let resolve_tool_execute_cwd ~remote_workspace_root ~config ~meta ~write_enabled ~args =
+  resolve_tool_execute_cwd_typed ~remote_workspace_root ~config ~meta ~write_enabled ~args
   |> Result.map_error execute_cwd_resolution_error_private_message
 
 let resolve_tool_read_path

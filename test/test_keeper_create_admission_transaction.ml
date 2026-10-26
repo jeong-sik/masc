@@ -260,6 +260,72 @@ let test_unreadable_constitution_refuses_create_before_any_write () =
   check bool "the refusal is counted" true (rejections () > before)
 ;;
 
+let test_first_ssh_create_uses_the_explicit_endpoint_in_its_initial_prompt () =
+  with_workspace @@ fun ~env ~sw ~config ~keepers_dir ~runtime_path ->
+  let keeper_name = "first-ssh-create" in
+  let previous_preflight = Sys.getenv_opt "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" previous_preflight;
+      Masc.Keeper_keepalive.stop_keepalive keeper_name)
+    (fun () ->
+      Unix.putenv "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false";
+      write_file runtime_path
+        (runtime_toml ^ {|
+[exec.ssh.endpoints.first]
+host = "fixture.invalid"
+user = "masc"
+remote_root = "/srv/first-create"
+|});
+      let toml_path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
+      check bool "first create has no keeper TOML" false (Sys.file_exists toml_path);
+      let ctx : _ Profile.context =
+        { config; agent_name = "test-agent"; sw; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider }
+      in
+      let result = Turn_up.handle_keeper_up ctx
+        (`Assoc [ "name", `String keeper_name
+                ; "instructions", `String "Use the declared remote workspace"
+                ; "sandbox_profile", `String "remote_ssh"
+                ; "remote_endpoint", `String "first"
+                ; "network_mode", `String "inherit"
+                ; "activation_mode", `String "manual" ])
+      in
+      check bool ("first SSH create succeeds: " ^ Profile.tool_result_body result) true
+        (Profile.tool_result_success result);
+      let defaults =
+        match Profile.load_keeper_profile_defaults_result_for_base_path
+            ~base_path:config.base_path keeper_name with
+        | Ok defaults -> defaults
+        | Error error -> fail (Profile.keeper_toml_load_error_to_string error)
+      in
+      check (option string) "the same explicit endpoint is persisted" (Some "first")
+        defaults.remote_endpoint;
+      let meta = match Store.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "successful first create has no metadata"
+        | Error detail -> fail detail
+      in
+      let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+      let checkpoint =
+        match Masc.Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id with
+        | Ok checkpoint -> checkpoint
+        | Error _ -> fail "successful first create has no canonical initial checkpoint"
+      in
+      let prompt = match checkpoint.system_prompt with
+        | Some prompt -> prompt
+        | None -> fail "initial checkpoint has no system prompt"
+      in
+      check bool "initial prompt uses the CLI endpoint workspace" true
+        (String_util.string_contains_substring
+          ~needle:("/srv/first-create/" ^ keeper_name) prompt);
+      check bool "initial SSH prompt does not expose host bookkeeping paths" false
+        (String_util.string_contains_substring ~needle:config.base_path prompt))
+;;
+
 let test_create_wins_intake_fence_overlap_through_production_handoff () =
   with_workspace @@ fun ~env ~sw ~config ~keepers_dir ~runtime_path:_ ->
   let keeper_name = "admission-handoff-probe" in
@@ -574,6 +640,10 @@ let () =
             "shutdown rejection precedes session config runtime and owner writes"
             `Quick
             test_shutdown_rejection_precedes_all_creation_writes
+        ; test_case
+            "first SSH create uses its CLI endpoint in the initial checkpoint"
+            `Quick
+            test_first_ssh_create_uses_the_explicit_endpoint_in_its_initial_prompt
         ; test_case
     "production create keeps create-wins intake admission through lane fork"
     `Quick

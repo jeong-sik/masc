@@ -662,7 +662,7 @@ let test_echoes_name_the_host_bundle () =
   Alcotest.(check string) "cwd echo is the host bundle" host_root
     (Masc.Keeper_cwd_response.keeper_visible response);
   let location =
-    Masc.Keeper_sandbox_repo_path.execution_location_json
+    Masc.Keeper_sandbox_repo_path.execution_location_json ~remote_workspace_root:None
       ~config ~meta ~args:(`Assoc []) ~cwd:host_root
   in
   (match Yojson.Safe.Util.member "cwd" location with

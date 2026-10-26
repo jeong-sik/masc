@@ -197,16 +197,27 @@ let create_keeper ~expected_config_revision (ctx : _ context)
       keeper_id = Some (Keeper_input_birth.keeper_uid creation);
       agent_core_env = p.profile_defaults.agent_core_env;
       } in
+      let prompt_profile_defaults =
+        { p.profile_defaults with
+          remote_endpoint =
+            if p.remote_endpoint_present
+            then p.remote_endpoint_opt
+            else p.profile_defaults.remote_endpoint
+        }
+      in
       match
         Keeper_run_context.build_base_system_prompt
           ~config:ctx.config
-          ~profile_defaults:p.profile_defaults
+          ~profile_defaults:prompt_profile_defaults
           ~meta
       with
       (* #38354: the initial checkpoint is not saved with a prompt that lacks
          the world's articles. Nothing has been written yet, so creating the
          keeper again once the ledger reads is a clean retry. *)
-      | Error error ->
+      | Error (Keeper_run_context.Workspace_unavailable detail) ->
+        Progress.stop_tracking task_id;
+        tool_result_error ~class_:Tool_result.Dependency_unavailable detail
+      | Error (Keeper_run_context.Constitution_unreadable error) ->
         let detail = World_constitution_store.read_error_to_string error in
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string LifecycleDispatchRejections)
@@ -227,7 +238,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         Log.Keeper.error "create_keeper failed for name=%s: %s" p.name detail;
         Progress.stop_tracking task_id;
         tool_result_error ~class_:Tool_result.Runtime_failure detail
-      | Ok system_prompt ->
+      | Ok (_, system_prompt) ->
       Progress.Tracker.step tracker ~message:"Writing declarative keeper configuration" ();
       (match
          Keeper_turn_up_config_persistence.commit_configuration

@@ -191,7 +191,47 @@ operator command. Its hash and the imported harness hash are in the receipt.
 The existing path interface intentionally exposes logical host bookkeeping
 paths. This experiment establishes that such an output cannot be reused as an
 OS path inside opaque remote Python code. It does not establish that the public
-Execute `cwd` field or every absolute tool argument fails. No repair is claimed;
+Execute `cwd` field or every absolute tool argument fails. That negative run
+does not execute the repair;
 the [endpoint namespace proposal](../../superpowers/specs/2026-10-25-remote-ssh-endpoint-namespace.md)
 records the required implementation boundary. An earlier attempt stopped at
 workspace provisioning and is excluded from this reproduction.
+
+## Reported cwd reuse after the namespace repair
+
+The isolated candidate built from `cc9b7661cc6d7b5970ccef4007d2faa1544bdf93`
+passed the same previous-output-to-Python-literal scenario. Its executable SHA256
+is `94d6a318d47aec870c6435da16dbe5aeaba91f3b88f5b1fd57f9148b06d50006`;
+artifact 12594891354 comes from workflow run 40181914023. All artifact checksums,
+the executable build commit, and each server's full health identity were checked
+before accepting the result.
+
+The returned absolute cwd `/srv/masc/playground/ssh-proof-20261025-g` was copied
+unchanged into the next Execute's `cwd` and opaque Python program. The program
+read the first command's fresh JSON marker at that literal path; base64 of the
+actual process cwd decoded to the same directory. Execute metadata agreed with
+the endpoint path. Subsequent Write, Read, Edit and Grep used endpoint-absolute
+file arguments and returned that same endpoint file name.
+
+The run completed nine actual Keeper tool calls and eleven scripted model
+requests, then explicitly resumed the same manual Keeper after restarting the
+server. Independent pinned SSH readback verified edited bytes after shutdown.
+The two runtime instance IDs are retained in the receipt. This is a scripted
+model on an owned Linux SSH endpoint with the separately identified existing
+shim; it is not real-model sustained use, an exact-source rebuilt shim,
+production installation or proof of overlapping host/endpoint namespaces.
+
+Retained files, copied from the completed run without rewriting their contents:
+
+- `cwd-reuse-receipt.json`: result, source/binary identity and driver/harness hashes.
+- `cwd-reuse-observation.json`: copied cwd, process cwd and matching fresh marker.
+- `cwd-reuse-tool-results.json`: all nine model-facing tool results.
+- `cwd-reuse-tool-ledger.json`: their nine canonical execution records and actual inputs.
+- `cwd-reuse-endpoint-after-stop.json`: independent endpoint byte readback.
+- `cwd-reuse-driver.py`: the exact executed extension to the existing proof harness.
+
+The earlier f04 candidate failed at first Keeper creation, before any tool call:
+the CLI endpoint override had not reached initial prompt construction. cc9
+repairs that path, and this run exercises first creation successfully. Later
+test-only compilation repairs do not change the cc9 runtime source; this receipt
+still identifies cc9 rather than claiming execution of an unbuilt PR head.

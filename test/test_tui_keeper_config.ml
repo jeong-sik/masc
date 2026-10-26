@@ -346,6 +346,31 @@ let test_runtime_picker_refuses_unavailable_revision () =
     Alcotest.failf "picker accepted an unavailable revision: %s"
       (Yojson.Safe.to_string revision)
 
+let test_system_prompt_decodes_workspace_unavailable () =
+  (* The server refuses a turn with reason=workspace_unavailable and no path
+     field when the endpoint workspace cannot be resolved
+     (dashboard_http_keeper_snapshot.ml system_prompt_json). The reader must
+     name that reason, not fall into the unknown-shape decode failure. *)
+  let value =
+    `Assoc
+      [ "state", `String "unavailable"
+      ; "reason", `String "workspace_unavailable"
+      ; "detail", `String "remote_endpoint not configured"
+      ]
+  in
+  match Masc_tui_keeper_config.system_prompt_view_of_json (Some value) with
+  | Masc_tui_keeper_config.System_prompt_unavailable
+      { reason = Masc_tui_keeper_config.Workspace_unavailable; detail } ->
+    Alcotest.(check string)
+      "detail is carried through" "remote_endpoint not configured" detail
+  | other ->
+    Alcotest.failf
+      "workspace_unavailable must decode as its own reason, got: %s"
+      (match other with
+       | Masc_tui_keeper_config.System_prompt_available _ -> "available"
+       | Masc_tui_keeper_config.System_prompt_unavailable _ -> "other unavailable reason"
+       | Masc_tui_keeper_config.System_prompt_undecodable d -> "undecodable: " ^ d)
+
 let changed_proactive =
   `Assoc [ "activation_mode", `String "on_demand" ]
 
@@ -613,6 +638,8 @@ let () =
             test_invalid_mode_text_is_sanitized_at_the_row_boundary
         ; Alcotest.test_case "runtime picker refuses an unavailable revision" `Quick
             test_runtime_picker_refuses_unavailable_revision
+        ; Alcotest.test_case "system prompt names workspace_unavailable" `Quick
+            test_system_prompt_decodes_workspace_unavailable
         ; Alcotest.test_case "strict composite revision" `Quick
             test_strict_config_revision_decoder
         ; Alcotest.test_case "strict runtime picker revision" `Quick

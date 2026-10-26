@@ -71,6 +71,7 @@ let keeper_config_revision_json = function
    there is no text to preview, only the typed reason. *)
 type system_prompt_preview_error =
   | Constitution_unreadable of { path : string; detail : string }
+  | Workspace_unavailable of string
   | Prompt_unrenderable of string
 
 (* The system prompt a turn would send, as one closed union on the wire.
@@ -91,6 +92,9 @@ let system_prompt_json ~world_state
       ; "path", `String path
       ; "detail", `String detail
       ]
+  | Error (Workspace_unavailable detail) ->
+    `Assoc [ "state", `String "unavailable"
+           ; "reason", `String "workspace_unavailable"; "detail", `String detail ]
   | Error (Prompt_unrenderable detail) ->
     `Assoc
       [ "state", `String "unavailable"
@@ -169,9 +173,13 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
             ~config
             ~profile_defaults:defaults
             ~meta:m
+          |> Result.map snd
           |> Result.map_error
-               (fun (World_constitution_store.Unreadable { path; detail }) ->
-                 Constitution_unreadable { path; detail })
+               (function
+                | Keeper_run_context.Constitution_unreadable
+                    (World_constitution_store.Unreadable { path; detail }) ->
+                  Constitution_unreadable { path; detail }
+                | Keeper_run_context.Workspace_unavailable detail -> Workspace_unavailable detail)
         with Invalid_argument detail -> Error (Prompt_unrenderable detail)
       in
       (* Preview the unified prompt shape a keeper turn uses.

@@ -126,21 +126,6 @@ val host_path_of_visible_path :
   string ->
   string
 
-(** [keeper_visible_root_abs_of_meta ~config meta] is the absolute
-    sandbox root the keeper LLM should treat as its working root,
-    derived directly from [meta] without building the full record.
-    For Docker keepers this is the in-container path
-    ({!container_root}); for a keeper whose tree the endpoint owns
-    (microvm, remote_ssh) this is the host bookkeeping path
-    ({!host_root_abs_of_meta}). Use this in runtime_contract and
-    other LLM-facing surfaces; surfacing a host-absolute workspace
-    path to a Docker keeper makes the LLM emit host paths inside the
-    container, which fails because those paths do not exist there. *)
-val keeper_visible_root_abs_of_meta :
-  config:Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  string
-
 (** {1 Construction} *)
 
 (** [of_meta ~config ~meta] derives the full sandbox record from a

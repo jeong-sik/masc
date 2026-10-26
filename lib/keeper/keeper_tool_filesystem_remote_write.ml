@@ -262,8 +262,11 @@ let handle_content_with_endpoint
         | Append | Patch -> Keeper_alerting_path.Follow_referent
       in
       let keeper_tree =
+        let projected_path = Keeper_workspace_namespace.project_input
+          ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
+          ~config ~meta path in
         match
-          resolve_keeper_confined_write_path ~config ~meta ~endpoint:confined_endpoint ~raw_path:path
+          resolve_keeper_confined_write_path ~config ~meta ~endpoint:confined_endpoint ~raw_path:projected_path
         with
         | Error (refusal : Keeper_alerting_path.path_refusal) ->
           Error
@@ -319,6 +322,11 @@ let handle_content_with_endpoint
            | Keeper_tree_target { target; remote_path } -> target, remote_path
            | Declared_root_target { endpoint_path; _ } -> endpoint_path, endpoint_path
          in
+         let response_target =
+           match Keeper_sandbox_remote.transport endpoint with
+           | Keeper_sandbox_remote.Openssh _ -> remote_path
+           | Keeper_sandbox_remote.Container_exec _ | Keeper_sandbox_remote.Docker_exec _ -> target
+         in
          let keeper_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
          (* [extra_fields] carries the patch operation fields the Edit output
             schema advertises — the endpoint lane emits them from the same
@@ -355,7 +363,7 @@ let handle_content_with_endpoint
                  meta.name target mode_label (String.length body);
                let execution =
                  Keeper_tool_execution.success_data
-                   (success_payload ~target ~meta
+                   (success_payload ~target:response_target ~meta
                       ([ "mode", `String mode_label
                        ; "bytes_written", `Int (String.length body)
                        ]
@@ -445,7 +453,7 @@ let handle_content_with_endpoint
                        failure ~class_:Tool_result.Workflow_rejection ~target message
                      | Ok application when String.equal current application.updated ->
                        Keeper_tool_execution.success_data
-                         (success_payload ~target ~meta
+                         (success_payload ~target:response_target ~meta
                             [ "mode", `String "patch"; "changed", `Bool false
                             ; "occurrences", `Int application.occurrence_count
                             ; "replace_all", `Bool replace_all

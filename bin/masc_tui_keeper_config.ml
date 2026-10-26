@@ -615,6 +615,7 @@ let counted = function
    prompt that is simply not declared. *)
 type system_prompt_unavailable_reason =
   | Constitution_unreadable of { path : string }
+  | Workspace_unavailable
   | Prompt_unrenderable
 
 type system_prompt_view =
@@ -642,6 +643,8 @@ let system_prompt_view_of_json value =
        (match field fields "reason", field fields "path", field fields "detail" with
         | Some (`String "constitution_unreadable"), Some (`String path), Some (`String detail) ->
           System_prompt_unavailable { reason = Constitution_unreadable { path }; detail }
+        | Some (`String "workspace_unavailable"), None, Some (`String detail) ->
+          System_prompt_unavailable { reason = Workspace_unavailable; detail }
         | Some (`String "prompt_unrenderable"), None, Some (`String detail) ->
           System_prompt_unavailable { reason = Prompt_unrenderable; detail }
         | reason, path, detail ->
@@ -660,6 +663,10 @@ let system_prompt_reason_lines ~sanitize = function
     [ "   unavailable: the world constitution ledger could not be read"
     ; "   no turn runs until it reads again"
     ; "   path: " ^ sanitize path
+    ]
+  | Workspace_unavailable ->
+    [ "   unavailable: the endpoint workspace could not be resolved"
+    ; "   no turn runs until the endpoint workspace reads again"
     ]
   | Prompt_unrenderable ->
     [ "   unavailable: a prompt is empty or cannot render"

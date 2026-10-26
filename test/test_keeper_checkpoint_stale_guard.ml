@@ -332,8 +332,8 @@ let test_run_context_binds_generation_before_agent_core_checkpoint () =
     | Ok context -> context
     | Error (Keeper_run_context.Checkpoint_unread error) ->
       fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
-    | Error (Keeper_run_context.Constitution_unreadable error) ->
-      fail (World_constitution_store.read_error_to_string error)
+    | Error (Keeper_run_context.Base_prompt_unavailable error) ->
+      fail (Keeper_run_context.base_prompt_error_to_string error)
     | Error (Keeper_run_context.Prompt_unrenderable detail) ->
       fail ("unexpected prompt failure: " ^ detail)
   in
@@ -541,8 +541,8 @@ let with_run_checkpoint f =
 let prepare_error_to_string = function
   | Keeper_run_context.Checkpoint_unread error ->
     Keeper_checkpoint_store.checkpoint_load_error_to_string error
-  | Keeper_run_context.Constitution_unreadable error ->
-    World_constitution_store.read_error_to_string error
+  | Keeper_run_context.Base_prompt_unavailable error ->
+    Keeper_run_context.base_prompt_error_to_string error
   | Keeper_run_context.Prompt_unrenderable detail -> detail
 ;;
 

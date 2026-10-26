@@ -315,7 +315,7 @@ let test_shim_error () =
     (String.starts_with ~prefix:"remote_ssh_path_jail_violation:" stderr)
 ;;
 
-let test_remote_paths_rewritten_in_streams () =
+let test_remote_paths_preserved_in_streams () =
   with_eio @@ fun ~clock:_ ->
   let base_path = temp_dir () in
   let ssh_bin, _ = make_stub ~dir:base_path ~mode:"path-output" in
@@ -327,14 +327,10 @@ let test_remote_paths_rewritten_in_streams () =
       ~on_stderr_chunk:(Buffer.add_string stderr_chunks)
       ()
   in
-  let host =
-    Filename.concat
-      (Keeper_alerting_path.normalize_path_for_check base_path)
-      ".masc/playground/keeper-a/src/main.ml"
-  in
+  let remote = "/srv/masc/playground/keeper-a/src/main.ml" in
   check status_testable "exit" (Unix.WEXITED 0) status;
-  check string "captured stdout" ("out=" ^ host) stdout;
-  check string "captured stderr" ("err=" ^ host) stderr;
+  check string "captured stdout" ("out=" ^ remote) stdout;
+  check string "captured stderr" ("err=" ^ remote) stderr;
   check string "streamed stdout" stdout (Buffer.contents stdout_chunks);
   check string "streamed stderr" stderr (Buffer.contents stderr_chunks)
 ;;
@@ -418,7 +414,7 @@ remote_endpoint = "build-box"
       }
   in
   match
-    Keeper_sandbox_shell_ir_target.ssh_target ~base_path ~meta ~timeout_sec:2.0
+    Keeper_sandbox_shell_ir_target.ssh_target ~endpoint ~base_path ~meta ~timeout_sec:2.0
       ~ssh_bin ()
   with
   | Error error -> fail error.message
@@ -431,20 +427,100 @@ remote_endpoint = "build-box"
     fail "expected SSH target"
 ;;
 
+let test_endpoint_namespace_roundtrip () =
+  with_eio @@ fun ~clock:_ ->
+  let base_path = temp_dir () in
+  let config = Workspace.default_config base_path in
+  let keepers = Filename.concat base_path ".masc/config/keepers" in
+  Fs_compat.mkdir_p keepers;
+  save (Filename.concat base_path ".masc/config/runtime.toml")
+    (Exec_ssh_endpoint.to_toml endpoint);
+  save (Filename.concat keepers "keeper-a.toml")
+    "[keeper]\nsandbox_profile = \"remote_ssh\"\nremote_endpoint = \"build-box\"\n";
+  let meta = match Masc_test_deps.meta_of_json_fixture
+    (`Assoc [ "name", `String "keeper-a" ]) with
+    | Error error -> fail error
+    | Ok meta -> { meta with Keeper_meta_contract.sandbox_profile =
+        Keeper_types_profile_sandbox.Remote_ssh } in
+  let profile_defaults = { Keeper_types_profile_defaults.empty_keeper_profile_defaults with
+    remote_endpoint = Some endpoint.name } in
+  let root = match Keeper_workspace_namespace.resolve ~config ~meta ~profile_defaults with
+    | Ok root -> root | Error error -> fail error in
+  check string "model root belongs to the endpoint"
+    "/srv/masc/playground/keeper-a" root;
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Keeper_alerting_path.normalize_path_for_check_stripped in
+  let cwd = match Keeper_tool_execute_path.resolve_tool_execute_cwd ~remote_workspace_root:(Some root) ~config ~meta
+    ~write_enabled:false ~args:(`Assoc [ "cwd", `String root ]) with
+    | Ok cwd -> cwd | Error error -> fail error in
+  check string "returned absolute cwd resolves through containment" host_root cwd;
+  let overlap_root = Filename.concat base_path "keeper-a" in
+  let overlap_config = Workspace.default_config (Filename.concat overlap_root "workspace") in
+  let overlap_host = Keeper_sandbox.host_root_abs_of_meta ~config:overlap_config meta
+    |> Keeper_alerting_path.normalize_path_for_check_stripped in
+  List.iter (fun (label, args, expected) ->
+    match Keeper_tool_execute_path.resolve_tool_execute_cwd
+      ~remote_workspace_root:(Some overlap_root) ~config:overlap_config ~meta
+      ~write_enabled:false ~args with
+    | Ok actual -> check string label expected
+        (Keeper_alerting_path.normalize_path_for_check_stripped actual)
+    | Error error -> fail error)
+    [ "omitted cwd is not projected twice", `Assoc [], overlap_host
+    ; "relative cwd is not projected twice", `Assoc [ "cwd", `String "subdir" ],
+      Filename.concat overlap_host "subdir" ];
+  let location = Keeper_sandbox_repo_path.execution_location_json
+    ~remote_workspace_root:(Some root) ~config ~meta ~args:(`Assoc []) ~cwd in
+  check string "metadata and process use the same namespace" root
+    Yojson.Safe.Util.(member "cwd" location |> to_string);
+  let remote_file = Filename.concat root "notes.txt" in
+  let host_file = Filename.concat host_root "notes.txt" in
+  check string "projection uses the captured namespace" host_file
+    (Keeper_workspace_namespace.project_input ~remote_workspace_root:root ~config ~meta remote_file);
+  save (Filename.concat base_path ".masc/config/runtime.toml")
+    (Exec_ssh_endpoint.to_toml { endpoint with remote_root = "/srv/replaced" });
+  check string "registry replacement cannot retarget a captured path" host_file
+    (Keeper_workspace_namespace.project_input ~remote_workspace_root:root ~config ~meta remote_file);
+  let other_path = "/srv/replaced/keeper-a/notes.txt" in
+  check string "a different endpoint's absolute name is not borrowed" other_path
+    (Keeper_workspace_namespace.project_input ~remote_workspace_root:root ~config ~meta other_path);
+  (match Keeper_tool_shared_runtime.resolve_keeper_read_path
+    ~config ~meta ~raw_path:host_file with
+   | Ok path -> check string "absolute Read reuses the endpoint path" host_file path
+   | Error refusal -> fail refusal.message);
+  (match Keeper_tool_shared_runtime.resolve_keeper_confined_write_path
+    ~config ~meta ~endpoint:Keeper_alerting_path.Lexical_entry ~raw_path:host_file with
+   | Ok path -> check string "absolute Write reuses the endpoint path" host_file
+       (Keeper_alerting_path.confined_host_path path)
+   | Error refusal -> fail refusal.message);
+  check bool "sibling endpoint tree remains refused" true
+    (Result.is_error (Keeper_tool_shared_runtime.resolve_keeper_read_path
+      ~config ~meta ~raw_path:"/srv/masc/playground/keeper-b/notes.txt"));
+  let missing = { profile_defaults with remote_endpoint = Some "absent" } in
+  check bool "unknown endpoint cannot invent a prompt root" true
+    (Result.is_error (Keeper_workspace_namespace.resolve ~config ~meta ~profile_defaults:missing));
+  (match Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
+    ~remote_workspace_root:None ~config ~meta ~write_enabled:false ~args:(`Assoc []) with
+   | Ok _ -> fail "unresolved SSH namespace was admitted"
+   | Error error -> check bool "namespace failures belong to the dependency" true
+       (Keeper_tool_execute_path.execute_cwd_resolution_error_class error
+        = Tool_result.Dependency_unavailable))
+;;
+
 let () =
   if Array.length Sys.argv > 1 && String.equal Sys.argv.(1) "--ssh-stub"
   then stub_main ()
   else
     run "keeper_sandbox_ssh"
       [ ( "runner"
-        , [ test_case "pinned argv + framed streams" `Quick test_argv_frame_stream_and_exit
+        , [ test_case "endpoint namespace roundtrip" `Quick test_endpoint_namespace_roundtrip
+          ; test_case "pinned argv + framed streams" `Quick test_argv_frame_stream_and_exit
           ; test_case "signal + remote timeout" `Quick test_signal_and_remote_timeout
           ; test_case "transport failures" `Quick test_transport_failures
           ; test_case "nonallowlisted env fails before spawn" `Quick
               test_nonallowlisted_env_fails_before_spawn
           ; test_case "shim error" `Quick test_shim_error
-          ; test_case "remote paths rewritten in streams" `Quick
-              test_remote_paths_rewritten_in_streams
+          ; test_case "remote paths preserved in streams" `Quick
+              test_remote_paths_preserved_in_streams
           ; test_case "cancellation reaps local ssh" `Quick
               test_cancellation_kills_local_ssh
           ; test_case "Shell IR target resolves endpoint" `Quick

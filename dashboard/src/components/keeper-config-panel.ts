@@ -1561,6 +1561,12 @@ function renderSystemPromptPreview(preview: KeeperSystemPromptPreview) {
     case 'available':
       return html`<${LongText} text=${preview.assembled} truncateAt=${null} />`
     case 'unavailable':
+      if (preview.reason === 'workspace_unavailable') {
+        return html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-system-prompt-unavailable">
+          작업 공간을 준비할 수 없어 시스템 프롬프트를 만들 수 없어요. 작업 공간 설정과 접근 권한을 확인해 주세요.
+          <div class="font-mono">${preview.detail}</div>
+        </div>`
+      }
       if (preview.reason === 'prompt_unrenderable') {
         return html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-system-prompt-unavailable">
           프롬프트가 비어 있거나 렌더링할 수 없어 턴을 시작할 수 없어요. 프롬프트 설정을 수정해 주세요.

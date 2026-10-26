@@ -223,6 +223,7 @@ let prepare_agent_setup
       ?observation_token
       ?(answer_source_ids = [])
       ~(config : Workspace.config)
+      ~workspace_root
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(publication_recovery :
@@ -844,7 +845,8 @@ let prepare_agent_setup
   in
 
   let ctx : Keeper_run_tools_hooks.ctx =
-    { identity_tool_index = Keeper_identity_tool_index.of_tools
+    { workspace_root
+    ; identity_tool_index = Keeper_identity_tool_index.of_tools
         identity_allow.Keeper_identity_tool_allow.kept
     ; acc
     ; agent_cell

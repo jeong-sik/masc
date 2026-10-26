@@ -7,6 +7,7 @@ val resolve_tool_read_cwd :
   (string, Keeper_alerting_path.path_refusal) result
 
 val resolve_tool_execute_cwd :
+  remote_workspace_root:string option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   write_enabled:bool ->
@@ -26,6 +27,7 @@ val resolve_tool_execute_cwd :
 type execute_cwd_resolution_error
 
 val resolve_tool_execute_cwd_typed :
+  remote_workspace_root:string option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   write_enabled:bool ->
@@ -33,6 +35,7 @@ val resolve_tool_execute_cwd_typed :
   (string, execute_cwd_resolution_error) result
 
 val execute_cwd_resolution_error_code : execute_cwd_resolution_error -> string
+val execute_cwd_resolution_error_class : execute_cwd_resolution_error -> Tool_result.tool_failure_class
 val execute_cwd_resolution_error_public_message : execute_cwd_resolution_error -> string
 val execute_cwd_resolution_error_private_message : execute_cwd_resolution_error -> string
 

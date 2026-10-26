@@ -5599,6 +5599,116 @@ let test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes
                     (Keeper_runtime.boot_meta_failure_for ~base_path ~name)))))
 ;;
 
+let test_owner_projection_replacement_and_root_isolation () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let other_root = Filename.concat base_path "other-root" in
+    Unix.mkdir other_root 0o755;
+    let initial = make_meta "projection-replacement" in
+    let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
+    let first =
+      owner_ok (start_owner ~sw ~store ~keeper_name:initial.name ~initial_meta:(Some initial))
+    in
+    let second =
+      owner_ok (start_owner ~sw ~store ~keeper_name:initial.name ~initial_meta:(Some initial))
+    in
+    let install root owner =
+      Keeper_owner_projection.install ~base_path:root ~keeper_name:initial.name owner
+    in
+    let remove root owner =
+      Keeper_owner_projection.remove ~base_path:root ~keeper_name:initial.name owner
+    in
+    let meta_at root =
+      match Keeper_owner_projection.lookup ~base_path:root ~keeper_name:initial.name with
+      | Owner_absent -> fail "projection owner disappeared"
+      | Owner_projection { meta = None; _ } -> fail "projection metadata disappeared"
+      | Owner_projection { meta = Some meta; _ } -> meta
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        List.iter (fun root -> remove root first; remove root second) [base_path; other_root])
+      (fun () ->
+        install base_path first;
+        install other_root first;
+        check bool "replacement has a distinct Owner handle" false (first == second);
+        install (base_path ^ "/./") second;
+        remove base_path first;
+        check int "late cleanup preserves the initially identical replacement" 0
+          (meta_at base_path).runtime.usage.total_turns;
+        ignore (owner_ok (Owner.apply_meta second (usage_commit initial)));
+        check int "lookup reads the Owner's latest projection" 1
+          (meta_at (base_path ^ "/./")).runtime.usage.total_turns;
+        check int "same name in another root retains its own Owner" 0
+          (meta_at other_root).runtime.usage.total_turns;
+        let digest = Keeper_meta_json.Snapshot_digest.of_meta (meta_at base_path) in
+        ignore (owner_ok (Owner.apply_meta second (Reducer.Delete_if_snapshot digest)));
+        (match Keeper_owner_projection.lookup ~base_path ~keeper_name:initial.name with
+         | Owner_projection { meta = None; _ } -> ()
+         | Owner_projection { meta = Some _; _ } -> fail "lookup retained deleted metadata"
+         | Owner_absent -> fail "metadata deletion lost the installed Owner handle");
+        remove base_path second;
+        (match Keeper_owner_projection.lookup ~base_path ~keeper_name:initial.name with
+         | Owner_absent -> ()
+         | Owner_projection _ -> fail "removed Owner remains in the projection index");
+        remove other_root second;
+        check int "removal preserves a different root and Owner" 0
+          (meta_at other_root).runtime.usage.total_turns))
+;;
+
+let test_owner_projection_concurrent_writers_preserve_other_keys () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let store = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
+    let start name =
+      owner_ok (start_owner ~sw ~store ~keeper_name:name ~initial_meta:(Some (make_meta name)))
+    in
+    let first_name = "projection-writer-first" in
+    let second_name = "projection-writer-second" in
+    let first = start first_name in
+    let second = start second_name in
+    let install name owner =
+      Keeper_owner_projection.install ~base_path ~keeper_name:name owner
+    in
+    let remove name owner =
+      Keeper_owner_projection.remove ~base_path ~keeper_name:name owner
+    in
+    let check_name name =
+      match Keeper_owner_projection.lookup ~base_path ~keeper_name:name with
+      | Owner_absent -> fail "concurrent writer lost a projection key"
+      | Owner_projection { meta = None; _ } -> fail "concurrent lookup lost metadata"
+      | Owner_projection { meta = Some meta; _ } ->
+          check string "concurrent lookup retains the named Owner" name meta.name
+    in
+    let writer name owner stale =
+      Domain.spawn (fun () ->
+        for _ = 1 to 300 do
+          install name owner;
+          remove name stale
+        done)
+    in
+    Fun.protect
+      ~finally:(fun () -> remove first_name first; remove second_name second)
+      (fun () ->
+        install first_name first;
+        install second_name second;
+        let first_writer = writer first_name first second in
+        Fun.protect ~finally:(fun () -> Domain.join first_writer) (fun () ->
+          let second_writer = writer second_name second first in
+          Fun.protect ~finally:(fun () -> Domain.join second_writer) (fun () ->
+            for _ = 1 to 300 do
+              check_name first_name;
+              check_name second_name
+            done));
+        check_name first_name;
+        check_name second_name))
+;;
+
 let test_registry_reads_owner_atomic_projection () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -6389,6 +6499,14 @@ let () =
             "root inventory reads an undecodable meta as absent and boot re-materialises it"
             `Quick
             test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes
+        ; test_case
+            "projection replacement preserves identity and root isolation"
+            `Quick
+            test_owner_projection_replacement_and_root_isolation
+        ; test_case
+            "projection concurrent writers preserve other keys"
+            `Quick
+            test_owner_projection_concurrent_writers_preserve_other_keys
         ; test_case
             "registry reads owner Atomic projection"
             `Quick

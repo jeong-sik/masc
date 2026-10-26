@@ -21,3 +21,11 @@ val sync_directory_capability
   :  before_stage:(Fs_compat.capability_write_stage -> unit)
   -> _ Eio.Path.t
   -> (unit, Fs_compat.capability_directory_sync_error) result
+
+val create_capability_directory_exclusive
+  :  before_stage:(Fs_compat.capability_write_stage -> unit)
+  -> recovery:Fs_compat.Publication_recovery.t
+  -> parent:Eio.Fs.dir_ty Eio.Path.t
+  -> target:Fs_compat.capability_publication_target
+  -> Fs_compat.directory_payload
+  -> (unit, Fs_compat.capability_write_error) result

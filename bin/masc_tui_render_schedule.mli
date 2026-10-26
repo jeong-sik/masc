@@ -221,6 +221,7 @@ type verification_row_values = {
   vrow_task : string;
   vrow_submitted_by : string;
   vrow_evidence : string;
+  vrow_review : string;
   vrow_title : string;
 }
 

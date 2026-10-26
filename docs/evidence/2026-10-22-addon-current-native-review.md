@@ -8,7 +8,7 @@ No remaining P0–P2 recording/scope error was found in the inspected baseline. 
 
 Worktree: `/tmp/masc-addon-evidence-retained-20261022`; branch `docs/addon-current-native-lifecycle-proof-20261022`; HEAD/base at inspection `d06fc9229f2d46597933526d06863e0473c87874`.
 
-Scope is the working-tree content of the two evidence directories and `reports/addon-lane-full-worklist-20261021.md`, including its latest A06 follow-up. The index was being prepared concurrently; the worklist had a staged earlier version plus its final working-tree delta. This verdict binds the actual files below, not an invented committed head or only `git diff --cached`.
+Scope is the working-tree content of the two evidence directories and `docs/reports/addon-lane-full-worklist-20261021.md`, including its latest A06 follow-up. The index was being prepared concurrently; the worklist had a staged earlier version plus its final working-tree delta. This verdict binds the actual files below, not an invented committed head or only `git diff --cached`.
 
 - Native directory:125 manifest entries plus manifest; manifest SHA-256 `e188844443de77ccd28d87b6560ef6ef32c69939cbf1dc99dfe06b83f2c30e74`.
 - Candle directory:23 manifest entries plus manifest; manifest SHA-256 `254c65de875ec2a9c802c200c7db4ec2269876cb3666df8d0c8b0a24d44dbe6e`.

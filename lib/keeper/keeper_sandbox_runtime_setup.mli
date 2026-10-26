@@ -107,6 +107,10 @@ val docker_label_args :
   base_path:string ->
   keeper_name:string ->
   container_kind:string -> network_label:string -> unit -> string list
+val stable_labels :
+  base_path:string -> keeper_name:string -> container_kind:string ->
+  network_label:string -> (string * string) list
+val lifecycle_labels : unit -> (string * string) list
 val docker_network_args :
   Keeper_types_profile_sandbox.network_mode -> (string list * string, string) result
 (** [Network_policy] is refused here: the Docker egress boundary has not been
@@ -125,6 +129,8 @@ val trim_env_opt : string -> string option
 val docker_config_host_root : base_path:string -> string
 val docker_config_mount_args :
   base_path:string -> container_root:'a -> string list
+val config_mount :
+  base_path:string -> container_root:'a -> (string * string) option
 type workspace_state_mount_kind = Workspace_state_file | Workspace_state_dir
 
 (** Why a path is allowed inside a keeper container: the store it belongs to.

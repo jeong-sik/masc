@@ -1,0 +1,144 @@
+{
+  "result": "PASS",
+  "scope": "direct framed OpenSSH config compatibility; not a Keeper or bootstrap run",
+  "fixture": {
+    "container": "masc-ssh-bootstrap-proof-20261025",
+    "container_id": "7c0b77a2fd787f9fae757dcdf6a4bd6d18f26922b1ff8530458a9a61de739f72",
+    "image": "sha256:4912ad8314963342d28a92719a9bddf0d7b161d5bc463959249b96b0c170ee9c",
+    "host": "127.0.0.1",
+    "port": 65479,
+    "fingerprint": "SHA256:MlAet0f4elnlFVGg4/vxQqtfvzMkecAITbrQUI8Z8yo",
+    "out_of_band": "Docker-owned fixture host public key matched against ssh-keyscan",
+    "shim_sha256": "ad79352d398d00eb48eebdf0bc29faacd3b4de633349e377ed81d560dc379183",
+    "shim_source": "preexisting separately identified fixture binary; not source rebuilt",
+    "remote_root": "/srv/masc/bootstrap-ready",
+    "base": "/tmp/mssh-bootstrap-native-20261025/workspace",
+    "shim": "/tmp/mssh-bootstrap-native-20261025/preexisting-shim-linux-arm64"
+  },
+  "source": "327fd90f7fec1a07f4ca7e5836d5cad3e8e39c15",
+  "binary_sha256": "a53e5b79eda98a5a4a97c13e772b7b6c0fe724640078690c0445c848b6c88861",
+  "phases": [
+    {
+      "phase": "old-shim",
+      "argv": [
+        "ssh",
+        "-F",
+        "/dev/null",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "UserKnownHostsFile=/tmp/mssh-bootstrap-native-20261025/workspace/.masc/ssh/known_hosts",
+        "-o",
+        "GlobalKnownHostsFile=none",
+        "-o",
+        "ControlMaster=no",
+        "-o",
+        "ControlPath=none",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "IdentityAgent=none",
+        "-o",
+        "IdentityFile=none",
+        "-o",
+        "ConnectTimeout=10",
+        "-i",
+        "/tmp/mssh-bootstrap-native-20261025/workspace/.masc/ssh/bootstrap.key",
+        "-p",
+        "65479",
+        "masc@127.0.0.1",
+        "/usr/local/bin/masc-exec-shim"
+      ],
+      "exit_code": 1,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "754d79f2a1066de42c7f76e1dcf806201410a79ddfd055207d6bcb7d48a2cad6"
+    },
+    {
+      "phase": "exact-shim",
+      "argv": [
+        "ssh",
+        "-F",
+        "/dev/null",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "UserKnownHostsFile=/tmp/mssh-bootstrap-native-20261025/workspace/.masc/ssh/known_hosts",
+        "-o",
+        "GlobalKnownHostsFile=none",
+        "-o",
+        "ControlMaster=no",
+        "-o",
+        "ControlPath=none",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "IdentityAgent=none",
+        "-o",
+        "IdentityFile=none",
+        "-o",
+        "ConnectTimeout=10",
+        "-i",
+        "/tmp/mssh-bootstrap-native-20261025/workspace/.masc/ssh/bootstrap.key",
+        "-p",
+        "65479",
+        "masc@127.0.0.1",
+        "/tmp/masc-shim-transport-proof-327fd90f7fec1a07f4ca7e5836d5cad3e8e39c15"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "0cacc170f72e1e6c1e611625e46226cb83fc23f82dad0432c0ffec68a4227f88",
+      "stderr_sha256": "bab6f8177ce80788de873756d1c0370061500b7a4965fbdf6f3ffd43ece5b60b"
+    }
+  ],
+  "before": {
+    "entries": [
+      "retained file.bin"
+    ],
+    "retained_sha256": "6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21",
+    "config_sha256": "291a7af34eaec767948b24b26ff5843f2b8def4f8f4cea4a8db7e953356da6ee",
+    "installed_shim_sha256": "ad79352d398d00eb48eebdf0bc29faacd3b4de633349e377ed81d560dc379183"
+  },
+  "old_refusal": {
+    "v": 3,
+    "exit": null,
+    "signal": null,
+    "timed_out": false,
+    "shim_error": "remote_ssh_shim_config_error: unknown key \"env_file\""
+  },
+  "observation": {
+    "cwd": "/srv/masc/bootstrap-ready/native-bootstrap-keeper",
+    "uid": 1000,
+    "env": "bootstrap-environment-preserved",
+    "tool": "bootstrap-tool-preserved",
+    "retained_sha256": "6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21"
+  },
+  "trailer": {
+    "v": 3,
+    "exit": 0,
+    "signal": null,
+    "timed_out": false,
+    "shim_error": null,
+    "execution_receipt": {
+      "mode": "effect",
+      "plan": "unrestricted",
+      "boundary": "sandbox_applied"
+    }
+  },
+  "after": {
+    "entries": [
+      "retained file.bin"
+    ],
+    "retained_sha256": "6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21",
+    "config_sha256": "291a7af34eaec767948b24b26ff5843f2b8def4f8f4cea4a8db7e953356da6ee",
+    "installed_shim_sha256": "ad79352d398d00eb48eebdf0bc29faacd3b4de633349e377ed81d560dc379183"
+  },
+  "uploaded_shim_sha256": "a53e5b79eda98a5a4a97c13e772b7b6c0fe724640078690c0445c848b6c88861",
+  "bootstrap_exercised": false,
+  "keeper_exercised": false,
+  "real_model": false,
+  "production": false,
+  "driver_sha256": "5f81d65129a0612215d25ce867dbcac5f82817e6f55b59f4f782a37ba7338a02"
+}

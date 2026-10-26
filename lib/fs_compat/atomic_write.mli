@@ -1,4 +1,4 @@
-(** Capability-relative file publication and durable recovery obligations.
+(** Capability-relative file and directory publication with durable recovery obligations.
 
     This module owns capability publication, mutation leases, staging cleanup
     and their typed recovery evidence. Ordinary path-based atomic replacement
@@ -7,6 +7,27 @@
 
 type capability_publication_target
 type capability_publication_target_error
+
+type directory_file =
+  { leaf : string
+  ; content : string
+  ; permissions : int
+  }
+
+type directory_payload
+
+type directory_payload_error =
+  | Invalid_directory_leaf of string
+  | Duplicate_directory_leaf of string
+  | Invalid_directory_file_permissions of { leaf : string; permissions : int }
+
+(** Capture a flat, immutable payload. Leaves must be unique single components
+    without NUL bytes; file permissions use the publication target's permission
+    validation. Empty payloads are valid. No filesystem effects occur here. *)
+val directory_payload
+  : directory_file list -> (directory_payload, directory_payload_error) result
+
+val directory_payload_error_to_string : directory_payload_error -> string
 
 type publication_recovery_record_area =
   | Publication_recovery_active
@@ -218,6 +239,30 @@ val create_capability_file_exclusive
   -> string
   -> (unit, capability_write_error) result
 
+(** Publish a complete flat directory with the same transaction, no-replace
+    rename and durable recovery protocol as exclusive file publication. The
+    target permissions are the final directory mode; each captured file has
+    its own mode. Files and the directory are synced before publication.
+
+    The canonical operation stage directory is itself the directory payload;
+    file publication retains its nested [stage/payload] layout. Publishing the
+    sealed directory renames its stage leaf within the same parent, avoiding
+    the write permission required to change a directory's parent. Prepared and
+    Bound records already identify that exact stage and final target, so the
+    durable recovery format is shared unchanged. No caller-selected partial
+    prefix is accepted. Failure cleanup only removes identity-verified
+    entries created by this operation, reopening permissions through its held
+    directory descriptor when necessary. Unknown entries or identity changes
+    retain the stage and recovery evidence. A published target is never removed.
+    [Target_created] records a completed rename even if subsequent fsync fails;
+    an error or cancellation is not a durable-publication success receipt. *)
+val create_capability_directory_exclusive
+  :  recovery:Publication_recovery_access.t
+  -> parent:Eio.Fs.dir_ty Eio.Path.t
+  -> target:capability_publication_target
+  -> directory_payload
+  -> (unit, capability_write_error) result
+
 val capability_write_error_to_string : capability_write_error -> string
 val capability_write_operation_to_string : capability_write_operation -> string
 val capability_write_stage_to_string : capability_write_stage -> string
@@ -361,6 +406,14 @@ module Capability_write_for_testing : sig
     -> parent:Eio.Fs.dir_ty Eio.Path.t
     -> target:capability_publication_target
     -> string
+    -> (unit, capability_write_error) result
+
+  val create_capability_directory_exclusive
+    :  before_stage:(capability_write_stage -> unit)
+    -> recovery:Publication_recovery_access.t
+    -> parent:Eio.Fs.dir_ty Eio.Path.t
+    -> target:capability_publication_target
+    -> directory_payload
     -> (unit, capability_write_error) result
 
   val seed_prepared_publication_recovery

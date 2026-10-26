@@ -11,3 +11,7 @@ let create_capability_file_exclusive =
 let sync_directory_capability =
   Atomic_write.Capability_write_for_testing.sync_directory_capability
 ;;
+
+let create_capability_directory_exclusive =
+  Atomic_write.Capability_write_for_testing.create_capability_directory_exclusive
+;;

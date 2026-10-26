@@ -363,6 +363,7 @@ type tool_identity_state =
 
 type docker_tool_projection =
   { args : string list
+  ; environment : (string * string) list
   ; identity_state : tool_identity_state
   ; host_snapshot_dir : string
   ; revision : string
@@ -821,20 +822,26 @@ let refresh_git_credential_config ~config ~keeper_name =
 ;;
 
 let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
-  let author_args = git_author_docker_args ~keeper_name in
+  let author_env = Exec_ssh_protocol.keeper_git_author_env ~keeper_name in
+  let project ~snapshot ~container_dir ~git_wiring =
+    let environment = author_env @ ["GH_CONFIG_DIR", container_dir]
+      @ git_credential_config_env ~has_git_wiring:git_wiring ~config_dir:container_dir in
+    let args =
+      (author_env @ ["GH_CONFIG_DIR", container_dir]
+       |> List.concat_map (fun (key, value) -> ["--env"; key ^ "=" ^ value]))
+      @ ["-v"; snapshot ^ ":" ^ container_dir ^ ":ro"]
+      @ git_credential_docker_args ~has_git_wiring:git_wiring ~config_dir:container_dir in
+    args, environment
+  in
   match existing_config_dir ~config ~keeper_name with
   | Error _ as error -> error
   | Ok None ->
     let snapshot, cleanup = empty_local_tool_config_snapshot () in
     let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
+    let args, environment = project ~snapshot ~container_dir ~git_wiring:false in
     Ok
-      { args =
-          author_args
-          @ [ "--env"
-            ; "GH_CONFIG_DIR=" ^ container_dir
-            ; "-v"
-            ; snapshot ^ ":" ^ container_dir ^ ":ro"
-            ]
+      { args
+      ; environment
       ; identity_state = Unconfigured
       ; host_snapshot_dir = snapshot
       ; revision = unconfigured_tool_identity_revision
@@ -857,18 +864,10 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
              let container_dir =
                container_config_dir ~container_masc_dir ~keeper_name
              in
-             let git_wiring_args =
-               git_credential_docker_args ~has_git_wiring ~config_dir:container_dir
-             in
+             let args, environment = project ~snapshot ~container_dir ~git_wiring:has_git_wiring in
              Ok
-               { args =
-                   author_args
-                   @ [ "--env"
-                     ; "GH_CONFIG_DIR=" ^ container_dir
-                     ; "-v"
-                     ; snapshot ^ ":" ^ container_dir ^ ":ro"
-                     ]
-                   @ git_wiring_args
+               { args
+               ; environment
                ; identity_state = Configured host_dir
                ; host_snapshot_dir = snapshot
                ; revision

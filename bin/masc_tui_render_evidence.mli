@@ -11,6 +11,7 @@ val wrap_rows : width:int -> (string * string) list -> (string * string) list
     as they are, so field alignment survives. *)
 
 val section :
+  selection:int option ->
   evidence:(Masc_tui_evidence_picture.evidence,
     Masc_tui_types.Verification_evidence_read.failure) Masc_tui_fetched.observation ->
   in_flight:bool ->

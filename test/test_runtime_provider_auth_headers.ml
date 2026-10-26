@@ -2649,6 +2649,239 @@ let test_runtime_agent_resume_enforces_native_context_fit () =
   in
   check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
 
+(* Capture the native HTTP body after runtime admission and serialization.
+   Both observed failover targets use Chat Completions, including the
+   OpenAI-compatible Kimi runtime. These fixtures prove local wire behavior;
+   they do not claim acceptance by a remote provider. *)
+let with_native_source_change_server f =
+  let module Json = Yojson.Safe.Util in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = fresh_loopback_port () in
+  let requests = ref [] in
+  let handler _conn request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all)
+      |> Yojson.Safe.from_string in
+    let path = Cohttp.Request.uri request |> Uri.path in
+    if not (String.equal path "/v1/chat/completions") then
+      Cohttp_eio.Server.respond_string ~status:`Not_found
+        ~body:{|{"error":"unexpected source-change fixture path"}|} ()
+    else
+      let tool_turn = List.is_empty !requests in
+      requests := (path, body) :: !requests;
+      let model = Json.member "model" body in
+      let stop = if tool_turn then "tool_calls" else "stop" in
+      let content = if tool_turn then "target-visible-answer" else "continued" in
+      let call_fields = if tool_turn then
+          [ "reasoning_content", `String "target-private-reasoning"
+          ; "tool_calls", `List [ `Assoc
+              [ "id", `String "fresh-call"; "type", `String "function"
+              ; "function", `Assoc
+                  [ "name", `String "inspect"; "arguments", `String "{}" ] ] ] ]
+        else [] in
+      let fields =
+        [ "role", `String "assistant"; "content", `String content ] @ call_fields in
+      if Json.member "stream" body = `Bool true then
+        let frame delta finish_reason =
+          "data: " ^ Yojson.Safe.to_string (`Assoc
+            [ "id", `String "source-change"; "model", model
+            ; "object", `String "chat.completion.chunk"
+            ; "choices", `List [ `Assoc
+                [ "index", `Int 0; "delta", `Assoc delta
+                ; "finish_reason", finish_reason ] ] ]) ^ "\n\n" in
+        let delta = List.map (function
+          | "tool_calls", `List calls ->
+            "tool_calls", `List (List.map (function
+              | `Assoc fields -> `Assoc (("index", `Int 0) :: fields)
+              | value -> value) calls)
+          | field -> field) fields in
+        Cohttp_eio.Server.respond_string ~status:`OK
+          ~headers:(Cohttp.Header.of_list [ "content-type", "text/event-stream" ])
+          ~body:(frame delta `Null ^ frame [] (`String stop) ^ "data: [DONE]\n\n") ()
+      else
+        Cohttp_eio.Server.respond_string ~status:`OK
+          ~headers:(Cohttp.Header.of_list [ "content-type", "application/json" ])
+          ~body:(Yojson.Safe.to_string (`Assoc
+            [ "id", `String "source-change"; "model", model
+            ; "object", `String "chat.completion"
+            ; "choices", `List [ `Assoc
+                [ "index", `Int 0; "message", `Assoc fields
+                ; "finish_reason", `String stop ] ] ])) ()
+  in
+  let socket = Eio.Net.listen net ~sw ~backlog:4 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  let result = f ~sw ~net ~base_url in
+  result, List.rev !requests
+
+let test_runtime_source_change_preserves_history () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let net = Eio.Stdenv.net env in
+    let original = Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.Glm
+        ~model_id:"glm-5.3-flash" ~base_url:"https://old-provider.example" () in
+    let source = Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config original
+        |> Result.get_ok in
+    let foreign = { (Agent_core.Types.assistant_msg "foreign-visible-answer") with
+      content=[Agent_core.Types.Thinking {content="foreign-private-reasoning";signature=None};
+        Agent_core.Types.Text "foreign-visible-answer"];
+      metadata=Llm_provider.Types.Reasoning_source.metadata source } in
+    let checkpoint = { (context_fit_checkpoint ()) with model=original.model_id;
+      provider_binding=Some source;
+      messages=[Agent_core.Types.user_msg "persisted question";foreign] } in
+    let before = Agent_core.Checkpoint.to_json checkpoint in
+    let caps = Llm_provider.Capabilities.{openai_compat_chat_capabilities with
+      supports_reasoning=true;reasoning_replay_override=Force_latest_user_turn_tool_calls} in
+    let target = Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.OpenAI_compat
+        ~model_id:"deepseek-v4.1-flash" ~base_url:"https://target.example"
+        ~model_capabilities_override:caps ~max_tokens:64 () in
+    let config = { (Runtime_agent.default_config ~name:"source-change" ~provider_cfg:target
+        ~system_prompt:"continue" ~tools:[]) with initial_messages=checkpoint.messages } in
+    List.iter (fun resume ->
+      let calls = ref 0 in
+      let response : Agent_core.Types.api_response =
+        {id="continued";model=target.model_id;stop_reason=Agent_core.Types.EndTurn;
+         content=[Agent_core.Types.Text "continued"];usage=None;telemetry=None} in
+      let transport = Llm_provider.Llm_transport.custom {
+        complete_sync=(fun _ -> incr calls;{response=Ok response;latency_ms=None});
+        complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> incr calls;Ok response)} in
+      let agent = if resume then
+          let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+          (match Agent_core.Agent.resume ~net ~checkpoint:prepared.patched_checkpoint
+              ~config:prepared.agent_config ~options:{prepared.options with transport=Some transport} () with
+           | Ok agent -> agent | Error error -> fail (Agent_core.Agent_checkpoint.resume_error_to_string error))
+        else match Runtime_agent_context.builder ~net ~config ~transport () |> Agent_core.Builder.build_safe with
+          | Ok agent -> agent | Error error -> fail (Agent_core.Error.to_string error) in
+      Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
+        (match Agent_core.Agent.run ~sw agent "new query" with
+         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+        check int "runtime source change reaches one completion" 1 !calls;
+        check bool "canonical foreign reasoning retained" true
+          (List.mem foreign (Agent_core.Agent.state agent).messages));
+      check bool "original checkpoint unmodified" true
+        (before=Agent_core.Checkpoint.to_json checkpoint)
+    ) [false;true]))
+
+let test_runtime_trimmed_reasoning_boundary () =
+  let module Types = Agent_core.Types in
+  let module Provider = Llm_provider.Provider_config in
+  let module Caps = Llm_provider.Capabilities in
+  let module Window = Runtime_model_input_tail_window in
+  let source_for config =
+    match Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config config with
+    | Ok source -> source
+    | Error detail -> fail detail in
+  List.iter (fun (foreign_source, no_replay, new_query) ->
+    List.iter (fun resume ->
+      List.iter (fun stream ->
+        let blocked = foreign_source && not no_replay && not new_query in
+        let (), requests = with_native_source_change_server
+          @@ fun ~sw ~net ~base_url ->
+          let caps =
+            { Caps.openai_compat_chat_capabilities with supports_reasoning = true
+            ; reasoning_streaming_format = Delta_reasoning_field "reasoning_content"
+            ; reasoning_replay_override =
+                if no_replay then Force_no_replay else Force_latest_user_turn_tool_calls } in
+          let target = Provider.make ~kind:Provider.OpenAI_compat
+              ~model_id:"trimmed-target" ~base_url ~request_path:"/v1/chat/completions"
+              ~model_capabilities_override:caps ~max_tokens:64 () in
+          let original = if foreign_source then
+              Provider.make ~kind:Provider.Glm ~model_id:"glm-5.3-flash"
+                ~base_url:(base_url ^ "/source") ()
+            else target in
+          let source = source_for original in
+          let retained =
+            { (Types.assistant_msg "retained-answer") with
+              content =
+                [ Types.Thinking { content = "retained-reasoning"; signature = None }
+                ; Types.Text "retained-answer"
+                ; Types.ToolUse { id = "settled-call"; name = "inspect"; input = `Assoc [] } ]
+            ; metadata = Types.Reasoning_source.metadata source } in
+          let settled = Types.tool_result_msg ~tool_use_id:"settled-call"
+              ~content:"settled-result" () in
+          let checkpoint =
+            { (context_fit_checkpoint ()) with model = original.model_id
+            ; provider_binding = Some source
+            ; messages = [ Types.user_msg "original caller"; retained; settled ] } in
+          let before = Agent_core.Checkpoint.to_json checkpoint in
+          let projection_calls = ref 0 in
+          let project messages =
+            incr projection_calls;
+            let projection, _ = Window.project_from_atom ~first_atom:1
+                ~measure_message_bytes:(fun message ->
+                  Agent_core.Checkpoint.message_to_json message
+                  |> Yojson.Safe.to_string |> String.length) messages in
+            check bool "actual tail window inserts only a control preamble" true
+              (match projection.messages with
+               | preamble :: _ -> Window.is_synthetic_preamble preamble
+               | [] -> false);
+            check bool "retained call/result atom survives the actual cut" true
+              (List.mem retained projection.messages && List.mem settled projection.messages);
+            check bool "only a genuine new query supplies caller-boundary evidence" new_query
+              (List.exists (fun (message : Types.message) ->
+                message.role = Types.User && message.origin = Types.Conversation)
+                projection.messages);
+            Ok projection.messages in
+          let effects = ref 0 in
+          let tool = Agent_core.Tool.create ~name:"inspect" ~description:"Inspect"
+              ~parameters:[] (fun _ ->
+                incr effects;
+                Ok { Types.content = "fresh-result"; content_blocks = None; _meta = None }) in
+          let config =
+            { (Runtime_agent.default_config ~name:"trimmed-source-change" ~provider_cfg:target
+                 ~system_prompt:"continue" ~tools:[tool]) with
+              initial_messages = checkpoint.messages; model_input_projection = Some project } in
+          let agent = match
+            (if resume then Runtime_agent.resume_from_checkpoint ~sw ~net ~config ~checkpoint
+             else Runtime_agent.build ~sw ~net ~config) with
+            | Ok agent -> agent
+            | Error error -> fail (Agent_core.Error.to_string error) in
+          Fun.protect ~finally:(fun () -> Agent_core.Agent.close agent) (fun () ->
+            let api_strategy = if stream then
+                Agent_core.Agent.Stream {on_event=ignore; on_telemetry=None}
+              else Agent_core.Agent.Sync in
+            let result = if new_query then
+                Agent_core.Agent.Advanced.run_blocks ~sw ~api_strategy
+                  ~on_tool_boundary:(fun _ -> Agent_core.Agent.Advanced.Continue)
+                  agent [Types.Text "new caller query"]
+              else Agent_core.Agent.Advanced.continue ~sw ~api_strategy
+                ~on_tool_boundary:(fun _ -> Agent_core.Agent.Advanced.Continue) agent in
+            (match blocked, result with
+             | true, Error (Agent_core.Error.Config
+                 (Agent_core.Error.InvalidConfig {field="reasoning_replay";_})) -> ()
+             | false, Ok (Agent_core.Agent.Advanced.Completed _) -> ()
+             | _, Error error -> fail (Agent_core.Error.to_string error)
+             | _, Ok (Agent_core.Agent.Advanced.Completed _
+                     | Agent_core.Agent.Advanced.Yielded _
+                     | Agent_core.Agent.Advanced.Terminal_tool_completed _) ->
+               fail "unexpected trimmed-history continuation outcome");
+            check int "actual projection runs before every admitted dispatch"
+              (if blocked then 1 else 2) !projection_calls;
+            check int "historical effects never rerun; only an admitted fresh tool executes"
+              (if blocked then 0 else 1) !effects;
+            check bool "canonical history preserves its original caller and exact exchange" true
+              (List.take (List.length checkpoint.messages)
+                (Agent_core.Agent.state agent).messages = checkpoint.messages));
+          check bool "source checkpoint survives projected continuation unchanged" true
+            (before = Agent_core.Checkpoint.to_json checkpoint)
+        in
+        check int "foreign mandatory replay is refused before native HTTP"
+          (if blocked then 0 else 2) (List.length requests);
+        match requests with
+        | [] -> ()
+        | (_, first) :: _ ->
+          let open Yojson.Safe.Util in
+          check bool "compatible retained tool reasoning survives the cut on native wire"
+            (not foreign_source && not no_replay && not new_query)
+            (first |> member "messages" |> to_list |> List.exists (fun message ->
+              member "reasoning_content" message = `String "retained-reasoning"))
+      ) [false;true]
+    ) [false;true]
+  ) [true,false,false; false,false,false; true,true,false; true,false,true]
+
 let projection_messages marker messages =
   let project_block = function
     | Agent_core.Types.Text _ -> Agent_core.Types.Text marker
@@ -3367,6 +3600,14 @@ let () =
             "runtime resume enforces native context fit"
             `Quick
             test_runtime_agent_resume_enforces_native_context_fit
+        ; test_case
+            "fresh and resumed source changes preserve canonical history"
+            `Quick
+            test_runtime_source_change_preserves_history
+        ; test_case
+            "trimmed caller boundaries protect resumed and fresh tool exchanges"
+            `Quick
+            test_runtime_trimmed_reasoning_boundary
         ; test_case
             "fresh projection precedes measurement and dispatch"
             `Quick

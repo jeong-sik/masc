@@ -471,23 +471,24 @@ let resolve_request_capabilities (config : t) =
   match capabilities_for_config_model config with
   | Some caps -> caps, Model_capability
   | None ->
+    (* These native wires keep protocol features, but absent model policy
+       does not declare support for forced tool choice. Admission and runtime
+       projection use the same restricted record. *)
+    let without_forced_tool_choice (caps : Capabilities.capabilities) =
+      { caps with supports_tool_choice = false
+                ; supports_required_tool_choice = false
+                ; supports_named_tool_choice = false }
+    in
     let caps = match config.kind with
       | Glm -> Capabilities.glm_capabilities
-      | Anthropic -> Capabilities.anthropic_capabilities
-      | Kimi -> Capabilities.kimi_capabilities
-      | Ollama -> Capabilities.ollama_capabilities
-      | Gemini -> Capabilities.gemini_capabilities
+      | Anthropic -> without_forced_tool_choice Capabilities.anthropic_capabilities
+      | Kimi -> without_forced_tool_choice Capabilities.kimi_capabilities
+      | Ollama -> without_forced_tool_choice Capabilities.ollama_capabilities
+      | Gemini -> without_forced_tool_choice Capabilities.gemini_capabilities
       | OpenAI_compat ->
         (match config.provider_id with
          | None -> Capabilities.openai_compat_chat_capabilities
          | Some _ -> Capabilities.default_capabilities) in
-    (* A native wire declares its protocol, not an unknown model's forced-tool
-       support. Preserve the existing admission policy in the shared record. *)
-    let caps = match config.kind with
-      | Glm | OpenAI_compat -> caps
-      | Anthropic | Kimi | Ollama | Gemini ->
-        {caps with supports_tool_choice=false; supports_required_tool_choice=false;
-          supports_named_tool_choice=false} in
     caps, Provider_default_capability
 ;;
 

@@ -10442,10 +10442,26 @@ let test_peer_artifact_materializes_exact_binary () =
         ~turn_sandbox_factory:None ~write ~args:(validate_input "keeper_artifact_transfer"
           (`Assoc ["action", `String "materialize"; "path", `String path;
                    "artifact", Masc.Keeper_peer_artifact_ref.to_json reference])) in
-    let result = invoke "received.png" in
-    check bool "write completed" true (result.disposition = Tool_result.Completed ());
+    let recipient_bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+        ~config ~meta:peer ~publication_recovery:recovery ~ctx_snapshot:ctx_work () in
+    Fun.protect ~finally:recipient_bundle.cleanup @@ fun () ->
+    let recipient_transfer = List.find (fun (tool : Agent_core.Tool.t) ->
+        String.equal tool.schema.name "keeper_artifact_transfer") recipient_bundle.tools in
+    let receive () = Agent_core.Tool.execute
+        ~invocation:(composition_invocation ~completion:Agent_core.Tool_contract.Continue_after_success)
+        recipient_transfer (`Assoc ["action", `String "materialize"; "path", `String "received.png";
+          "artifact", exported_json]) in
+    (match receive () with
+     | Ok _ -> () | Error error -> fail error.Agent_core.Types.message);
     let path = Filename.concat (Masc.Keeper_sandbox.host_root_abs_of_meta ~config peer) "received.png" in
     check string "binary exact" bytes (Fs_compat.load_file path);
+    let repeat = match receive () with
+      | Ok output -> structured_tool_output_exn ~base_path:config.base_path output.content
+      | Error error -> fail error.Agent_core.Types.message in
+    check bool "repeat is verified through actual model bridge" true (repeat |> member "verified" |> to_bool);
+    check bool "repeat does not invoke writer" false (repeat |> member "write_attempted" |> to_bool);
+    check bool "repeat manifest keeps the delegated artifact" true (Yojson.Safe.equal (member "artifact" repeat) exported_json);
+    check string "recipient still has exact bytes" bytes (Fs_compat.load_file path);
     check bool "escape refused" true ((invoke "../outside.png").disposition <> Tool_result.Completed ());
     (* Block only the already-known manifest destination. The binary export
        still succeeds, so its post-effect error must preserve the exact handle. *)

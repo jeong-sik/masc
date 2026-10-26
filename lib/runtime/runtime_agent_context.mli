@@ -206,5 +206,7 @@ val set_agent_core_tracer : Agent_core.Tracing.t -> unit
 val prepare_resume :
   config:config -> checkpoint:Agent_core.Checkpoint.t -> prepared_resume
 (** [prepare_resume ~config ~checkpoint] computes the patched checkpoint,
-    agent config, and options for an [Agent.resume] call. Pure — no side
-    effects. *)
+    agent config, and options for an [Agent.resume] call. Runtime resumes
+    provisionally admit source changes; dispatch excludes only foreign reasoning
+    outside the target's replay selection. The checkpoint message spine and
+    provenance are retained; malformed provenance is still rejected by Agent Core. Pure — no side effects. *)

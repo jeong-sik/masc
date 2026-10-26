@@ -116,12 +116,20 @@ check_reviews() {
   # A read failure must leave one named line, not a bare exit 1 swallowed by
   # set -e into an unreadable evidence_read_failed (run 39404586810).
   rows=$(review_rows) || { echo "approve-guard: review rows read failed: repos/$repo/pulls/$pr/reviews" >&2; return 1; }
-  approvals=""; replaced=""; own_approval=""; refusal_detail=""; refused_scope_reviews=""
+  approvals=""; replaced=""; own_approval=""; refusal_detail=""; refused_scope_reviews=""; pending_requests=""
   while IFS=$'\t' read -r who rid state; do
     [ -n "$who" ] || continue
     if [ "$state" = CHANGES_REQUESTED ]; then
-      if [ "$merge_check" -eq 0 ] && [ "$who" = "$me" ] && [ "$rid" = "$replace_cr" ]; then replaced="$rid"
-      else refuse "open CHANGES_REQUESTED from $who (review $rid)"; fi
+      if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
+        refuse "open CHANGES_REQUESTED from $who (review $rid)"
+      elif [ "$who" = "$me" ]; then
+        [ "$rid" = "$replace_cr" ] || refuse "open CHANGES_REQUESTED from $who (review $rid); use --replace-own-cr $rid after rereview"
+        replaced="$rid"
+      else
+        # Recording one independent review must not wait for every other
+        # reviewer to withdraw theirs. Consumption still refuses above.
+        pending_requests="$pending_requests $who:$rid"
+      fi
     fi
     if [ "$state" = APPROVED ] && [ "$who" != "$pr_author" ]; then
       review_json=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$rid" '.') || { echo "approve-guard: review read failed: repos/$repo/pulls/$pr/reviews/$rid" >&2; return 1; }
@@ -153,13 +161,14 @@ $(printf '%s\n' "$bound" | sed 's/^/    - /')
   [ -z "$replace_cr" ] || [ "$replaced" = "$replace_cr" ] || refuse "--replace-own-cr does not name this account's open request"
 }
 check_verdict() {
-  local value state cited by exclude_review=""
+  local value state cited by exclude_review="" approval_reviewer=""
   # Only check_reviews can supply the authenticated caller's current open CR.
   # Merge admission and source receipts never consume a replacement exception.
   if [ "$merge_check" -eq 0 ] && [ "$source_receipt" -eq 0 ]; then
     exclude_review="$replaced"
+    approval_reviewer="$me"
   fi
-  value=$(verdict_for "$pr" "$head" "$exclude_review") || { echo "approve-guard: verdict read failed before parsing: PR $pr head $head" >&2; return 1; }
+  value=$(verdict_for "$pr" "$head" "$exclude_review" "$approval_reviewer") || { echo "approve-guard: verdict read failed before parsing: PR $pr head $head" >&2; return 1; }
   read -r state cited by <<<"$value"
   if [ -n "$state" ] && [ "$state" != PASS ]; then
     [ -n "$approvals" ] || emit_refusal_detail
@@ -236,6 +245,9 @@ final_diff=$(python3 "$here/review-diff.py" --repo "$repo" --base "$pr_base_sha"
 read_current_pr
 check_reviews
 check_verdict
+if [ -n "$pending_requests" ]; then
+  echo "APPROVAL ONLY #$pr: other CHANGES_REQUESTED remain merge blockers:$pending_requests" >&2
+fi
 if [ "$check_only" -eq 1 ]; then echo "WOULD APPROVE #$pr head $head policy $review_policy"; exit 0; fi
 # Bind the reviewed base and native stack position to the approval itself.
 # Main may advance later when the reviewed diff base remains identical.

@@ -6,7 +6,9 @@ Baseline: `559c028cc22bc79c320de58d0a004abb1547eaa2`.
 This campaign covers tracked code files with at least 2,000 lines. The initial
 inventory contains 171 candidates: 75 production source/style/interface files,
 90 tests, 3 tooling files and 3 evidence scripts. `inventory.json` records each
-baseline path and its current audit state. A line count selects candidates; it
+audit navigation path and its audit state. A renamed entry retains its original
+`baseline_path` at `baseline_sha`; its `baseline_lines` measurement is not rerun
+or reassigned to the new location. A line count selects candidates; it
 is not a defect verdict or a new build gate. Forty-six production candidates received
 bounded changes; their other responsibilities remain pending. The other 29
 production candidates still require semantic review. All 171 candidates remain

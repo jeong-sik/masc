@@ -6,14 +6,16 @@
   _build_codex_trpg
   ; Ad hoc refutation probes are operator scratch, never project source.
   refute_tmp
-  ; Reports are evidence and operator output, never project source.
-  reports
   ; The running server writes here and deletes as it rotates, so a scan that
   ; includes it races the process it is building: dune reads a proof file
   ; into the source tree, the server drops it, and the build stops with
   ; "File unavailable: logs/masc-runtime-health-proof.<pid>.v2". Nothing in
   ; the tree builds from logs/ and git does not track it.
   logs))
+
+; Generated evidence may contain incomplete source snapshots and dune files.
+; Keep those files available as data without evaluating their build stanzas.
+(data_only_dirs artifacts)
 
 ; Warning 32 (unused value declaration) is set here, once, for the whole
 ; tree. It used to be decided per library: of 121 stanzas under lib/, 84

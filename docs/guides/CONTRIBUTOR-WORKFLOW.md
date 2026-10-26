@@ -40,6 +40,9 @@ flowchart LR
   conflicts per stack, not per bottom PR.
 - Keep concurrent changes in separate worktrees. Task claims coordinate who is
   doing the work; they do not lock files or authorize editing another checkout.
+- Put generated evidence and copied source snapshots under `artifacts/`. The root
+  Dune file treats that directory as data, preserving files without evaluating
+  copied build stanzas. `.gitignore` alone does not stop Dune source discovery.
 - For GitHub Native Stacks, inspect REST `stack` metadata and follow [Native GitHub Stacks](NATIVE-GITHUB-STACKS.md). Merge the top PR so the whole stack lands at once; a non-main direct base is not a parent-merge blocker. Review every PR in the stack.
 - Document the feature where readers look for it. README introduces the product,
   CONTRIBUTING starts development, manuals explain use, specs define interfaces,
@@ -258,6 +261,12 @@ Update the PR description when scope, evidence or remaining risks change.
 A push creates a new head, so earlier review does not certify new changes.
 Reviewers clear their own REQUEST_CHANGES when the corrected code resolves their
 findings. A green CI run alone does not resolve a finding.
+After rereview, use `approve-guard.sh --replace-own-cr REVIEW_ID` to replace
+your own latest open request with a current-head approval. Other reviewers'
+open change requests do not prevent recording that independent approval, but
+still block merge admission and source receipts until those reviewers resolve
+them. The guard never dismisses another account's request. Separate comment
+verdicts and all head, diff, identity and Release CI checks continue to apply.
 
 The ordinary source-review verdict uses actual values:
 
@@ -317,6 +326,10 @@ interfaces or consumers have changed. Keep ordinary and Release assessments unde
 the existing policy and do not extend execution evidence to unobserved scope.
 
 ## 6. Submit evidence and resume later
+
+Use the [storage guide](WORKSPACE-STORAGE.md): new run output goes in repository
+`artifacts/`; retain selected proof in `docs/evidence/`, investigations in
+`docs/research/` and reports in `docs/reports/`.
 
 For a MASC Task, use `submit_for_verification` with a handoff summary and evidence;
 `done` is not a self-service completion action. Follow the live tool schema and

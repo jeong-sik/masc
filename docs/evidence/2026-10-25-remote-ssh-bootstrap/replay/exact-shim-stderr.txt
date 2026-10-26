@@ -1,0 +1,1 @@
+{"masc_exec_result":{"v":3,"exit":0,"signal":null,"timed_out":false,"shim_error":null,"execution_receipt":{"mode":"effect","plan":"unrestricted","boundary":"sandbox_applied"}}}

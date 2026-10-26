@@ -15,7 +15,7 @@ ESLint passed. The OCaml parser accepted 21 changed ML/MLI files and Python AST
 parsing accepted five changed PTY fixture files. Parser checks do not typecheck
 the native backend or execute a terminal scenario.
 
-[Chromium artifacts](../../../dashboard/evidence/2026-10-04-package-lane-enabled/)
+[Chromium artifacts](../dashboard/2026-10-04-package-lane-enabled/)
 exercise the actual component and wire decoder against synthetic HTTP responses.
 The first harness intercepted a source module under `/dashboard/src/api/`; its
 routing failure is retained separately. After restricting interception to actual

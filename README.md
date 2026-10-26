@@ -383,6 +383,7 @@ Keeper, use its lifecycle controls in the Keepers view before closing the UI.
 | Ask typed questions with a decision model | [`masc_decide` guide](docs/guides/masc-decide.md) |
 | Understand runtime settings and prompts | [Configuration](docs/spec/14-configuration.md) · [Environment](docs/ENV-CONTRACT.md) · [Prompt map](docs/PROMPT-MAP.md) |
 | Understand the design and next steps | [Specifications](docs/spec/SPEC-INDEX.md) · [Roadmap](ROADMAP.md) |
+| Find research, evidence, reports and run output | [Storage guide](docs/guides/WORKSPACE-STORAGE.md) |
 | Contribute a change | [Contributing](CONTRIBUTING.md) · [Contributor workflow](docs/guides/CONTRIBUTOR-WORKFLOW.md) · [Agent instructions](AGENTS.md) |
 
 ## License

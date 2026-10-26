@@ -14,7 +14,7 @@ let wrap_rows ~width lines =
        else Message_layout.wrap_words ~max_cells:(max 1 width) text
             |> List.map (fun row -> style, row)) lines
 
-let section ~evidence ~in_flight ~workspace_confirmed ~width ~content_height ~display =
+let section ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~content_height ~display =
   let wrap ~prefix text =
     Message_layout.wrap_body ~max_cells:(max 1 (width - 6))
       ~sanitize:Keeper_chat.terminal_safe_text text
@@ -86,11 +86,16 @@ let section ~evidence ~in_flight ~workspace_confirmed ~width ~content_height ~di
   let contents = function
         | Picture.Items [] -> message [ Ansi.dim, "    (no inspectable evidence)" ]
         | Picture.Items items ->
+            let items = match selection with
+              | None -> items
+              | Some index -> (match List.nth_opt items index with None -> [] | Some item -> [item]) in
             let _offset, rev_rows, rev_pictures =
               List.fold_left
                 (fun (offset, rev_rows, rev_pictures) item ->
                    let item_rows, picture =
                      match item with
+                     | Picture.Source_item {source; body} ->
+                         wrap_rows ~width (wrap ~prefix:"    " body @ link_rows source), None
                      | Picture.Text_item text ->
                          wrap_rows ~width (text_item_rows text), None
                      | Picture.Binary_item { reference; bytes; sha256; format; picture } ->
@@ -138,7 +143,7 @@ let section ~evidence ~in_flight ~workspace_confirmed ~width ~content_height ~di
       notes @ rows,List.map (fun ((slot : Picture.slot),pixels) ->
         {slot with first=List.length notes+slot.first},pixels) pictures
   in
-  let heading = wrap_rows ~width [ (Ansi.dim, ""); (Ansi.bold, "  EVIDENCE CONTENT") ] in
+  let heading = wrap_rows ~width [ (Ansi.dim, ""); (Ansi.bold, "  증거 내용 · 제출 시 저장한 사본") ] in
   let heading_rows = List.length heading in
   ( heading @ rows
   , List.map

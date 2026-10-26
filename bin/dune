@@ -248,7 +248,7 @@
  (modules masc_exec_ssh_bootstrap)
  (public_name masc-exec-ssh-bootstrap)
  (package masc)
- (libraries masc masc.runtime masc_workspace fs_compat exec_shim cmdliner unix))
+ (libraries masc masc.runtime masc_workspace masc.masc_process fs_compat exec_shim cmdliner unix eio eio_main))
 
 ;; RFC-0374 capability probe runner.  Answers "can runtime R reach tool T"
 ;; without writing to the keeper's chat, checkpoint, or memory, which is what
@@ -1726,7 +1726,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_pele masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_images masc_tui_resource_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_system_logs masc.build_version masc_tui_observation_origin masc_tui_original_task_read masc_tui_task_dispatch masc.keeper_cost_coverage masc_tui_chat_visit masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
+ (libraries masc_tui_evidence_file masc_tui_pele masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_images masc_tui_resource_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_system_logs masc.build_version masc_tui_observation_origin masc_tui_original_task_read masc_tui_task_dispatch masc.keeper_cost_coverage masc_tui_chat_visit masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
    masc_tui_markdown
   masc_tui_chat_call_reader
   masc_tui_board_reader
@@ -2356,7 +2356,7 @@
  (name masc_tui_loader)
  (wrapped false)
  (modules masc_tui_loader masc_tui_http masc_tui_schedule_decode)
- (libraries masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
+ (libraries masc_tui_evidence_file masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
   masc_tui_chat_call_reader
   masc_tui_task_payloads
   masc
@@ -2553,6 +2553,7 @@
   masc_tui_portrait_view
   masc_tui_evidence_picture
   masc_tui_evidence_link
+  masc_tui_evidence_file
   masc_tui_render_evidence
   masc_tui_hit
   masc_tui_pane_selection
@@ -2918,7 +2919,7 @@
  (name masc_tui_evidence_picture)
  (wrapped false)
  (modules masc_tui_evidence_picture)
- (libraries masc masc_tui_graphics masc_tui_portrait_view digestif))
+ (libraries masc masc_tui_graphics masc_tui_portrait_view digestif yojson))
 
 ;; The links an operator evidence item carries, parsed into a closed variant.
 (library
@@ -2926,6 +2927,12 @@
  (wrapped false)
  (modules masc_tui_evidence_link)
  (libraries masc masc_workspace masc_tui_link masc_tui_message_layout uri yojson))
+
+(library
+ (name masc_tui_evidence_file)
+ (wrapped false)
+ (modules masc_tui_evidence_file)
+ (libraries masc.fs_compat masc.masc_random_id base64 digestif yojson eio unix))
 
 ;; The "EVIDENCE CONTENT" rows of the awaiting-verification task detail, with
 ;; the area a picture reserves among them. Apart from the pane so the row

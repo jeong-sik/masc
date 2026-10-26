@@ -20,7 +20,7 @@ login was supplied.
 
 Three normal bootstrap invocations returned success: first preparation, repeat
 with an existing 39-byte file, and a normal invocation after a refused symlink
-workspace. The file includes NUL/CRLF bytes; its SHA256, owner and directory mode
+workspace. The file includes NUL/CRLF bytes; its SHA256 and the workspace directory's owner and mode
 remained identical. The symlink invocation returned nonzero with
 `remote_ssh_directory_prepare_failed`; the outside target's owner, mode and
 marker hash remained identical. Its exit code 124 is retained verbatim; this

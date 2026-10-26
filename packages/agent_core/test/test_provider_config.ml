@@ -243,6 +243,22 @@ let test_make_json_mode () =
   check_bool "json mode" true (cfg.response_format = Types.JsonMode)
 ;;
 
+let check_anonymous_chat_schema_defaults cfg =
+  check_bool
+    "anonymous wire does not acquire model capability facts"
+    true
+    (Option.is_none (Provider_config.capabilities_for_config_model cfg));
+  let _, source = Provider_config.resolve_request_capabilities cfg in
+  check_bool
+    "capability source remains the protocol default"
+    true
+    (source = Provider_config.Provider_default_capability);
+  check_bool
+    "anonymous chat protocol admits json_schema"
+    true
+    (Result.is_ok (Provider_config.validate_output_schema_request cfg))
+;;
+
 let test_validate_output_schema_openai_explicit_capability () =
   let cfg =
     Provider_config.make
@@ -259,7 +275,7 @@ let test_validate_output_schema_openai_explicit_capability () =
     (Result.is_ok (Provider_config.validate_output_schema_request cfg))
 ;;
 
-let test_validate_output_schema_openai_bare_model_rejected () =
+let test_validate_output_schema_openai_bare_model_not_inferred () =
   let cfg =
     Provider_config.make
       ~kind:OpenAI_compat
@@ -268,10 +284,7 @@ let test_validate_output_schema_openai_bare_model_rejected () =
       ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
       ()
   in
-  check_bool
-    "bare OpenAI model does not select an unscoped catalog row"
-    true
-    (Result.is_error (Provider_config.validate_output_schema_request cfg))
+  check_anonymous_chat_schema_defaults cfg
 ;;
 
 let test_validate_output_schema_explicit_model_capability_is_host_independent () =
@@ -290,17 +303,18 @@ let test_validate_output_schema_explicit_model_capability_is_host_independent ()
     (Result.is_ok (Provider_config.validate_output_schema_request cfg))
 ;;
 
-let test_validate_output_schema_unknown_openai_compat_rejected () =
+let test_validate_output_schema_unknown_openai_compat_provider_rejected () =
   let cfg =
     Provider_config.make
       ~kind:OpenAI_compat
+      ~provider_id:"unknown-compatible"
       ~model_id:"generic"
       ~base_url:"https://openai-compatible.example.com/v1"
       ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
       ()
   in
   check_bool
-    "unknown OpenAI-compatible host rejected"
+    "unknown declared OpenAI-compatible provider has no schema policy"
     true
     (Result.is_error (Provider_config.validate_output_schema_request cfg))
 ;;
@@ -309,6 +323,7 @@ let test_validate_output_schema_ollama_cloud_minimax_rejected () =
   let cfg =
     Provider_config.make
       ~kind:OpenAI_compat
+      ~provider_id:"ollama_cloud"
       ~model_id:"minimax-m3"
       ~base_url:"https://ollama.com/v1"
       ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
@@ -318,7 +333,8 @@ let test_validate_output_schema_ollama_cloud_minimax_rejected () =
   | Error msg ->
     check_string
       "rejection"
-      "model minimax-m3 does not advertise native structured output"
+      "model minimax-m3 advertises JSON mode (json_object) only; native json_schema \
+       output is not supported by its declared capability"
       msg
   | Ok () -> Alcotest.fail "expected Ollama Cloud minimax-m3 capability rejection"
 ;;
@@ -327,6 +343,7 @@ let test_validate_output_schema_ollama_cloud_mistral_rejected () =
   let cfg =
     Provider_config.make
       ~kind:OpenAI_compat
+      ~provider_id:"ollama_cloud"
       ~model_id:"mistral-large-3:675b"
       ~base_url:"https://ollama.com/v1"
       ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
@@ -380,6 +397,7 @@ let test_validate_output_schema_ollama_cloud_minimax_output_schema_rejected () =
   let cfg =
     Provider_config.make
       ~kind:OpenAI_compat
+      ~provider_id:"ollama_cloud"
       ~model_id:"minimax-m3"
       ~base_url:"https://ollama.com/v1"
       ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
@@ -389,7 +407,8 @@ let test_validate_output_schema_ollama_cloud_minimax_output_schema_rejected () =
   | Error msg ->
     check_string
       "rejection"
-      "model minimax-m3 does not advertise native structured output"
+      "model minimax-m3 advertises JSON mode (json_object) only; native json_schema \
+       output is not supported by its declared capability"
       msg
   | Ok () -> Alcotest.fail "expected Ollama Cloud minimax-m3 capability rejection"
 ;;
@@ -398,6 +417,7 @@ let test_validate_output_schema_ollama_cloud_rejects_unverified_model () =
   let cfg =
     Provider_config.make
       ~kind:OpenAI_compat
+      ~provider_id:"ollama_cloud"
       ~model_id:"mistral-large-3:675b"
       ~base_url:"https://ollama.com/v1"
       ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
@@ -435,13 +455,14 @@ let test_validate_output_schema_unknown_model_is_rejected () =
   let cfg =
     Provider_config.make
       ~kind:OpenAI_compat
+      ~provider_id:"openai"
       ~model_id:"unknown-model-without-schema-capability"
       ~base_url:"https://schema-capable.example.test/v1"
       ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
       ()
   in
   check_bool
-    "unknown model has no structured-output capability"
+    "unknown model on a declared provider has no structured-output capability"
     true
     (Result.is_error (Provider_config.validate_output_schema_request cfg))
 ;;
@@ -516,6 +537,10 @@ let test_validate_output_schema_direct_response_format_record () =
          ~kind:OpenAI_compat
          ~model_id:"unknown-model-without-schema-capability"
          ~base_url:"https://openrouter.ai/api/v1"
+         ~model_capabilities_override:
+           { Capabilities.openai_compat_chat_capabilities with
+             supports_structured_output = false
+           }
          ())
       with
       response_format = Types.JsonSchema schema
@@ -648,6 +673,7 @@ let test_validate_output_schema_capability_rejected () =
   let cfg =
     Provider_config.make
       ~kind:OpenAI_compat
+      ~provider_id:"openai"
       ~model_id:"unknown-model-without-schema-capability"
       ~base_url:"https://api.openai.com/v1"
       ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
@@ -1656,20 +1682,30 @@ let test_openai_chat_catalog_wire model_id () =
       [ false; true ])
 ;;
 
+let test_openai_chat_catalog_anonymous_uses_protocol_defaults () =
+  with_repository_model_catalog (fun () ->
+    List.iter (fun base_url ->
+      let config = openai_chat_catalog_config "gpt-5.5" base_url in
+      check_anonymous_chat_schema_defaults config;
+      check_bool "anonymous Chat named tool uses protocol defaults" true
+        (Result.is_ok (Provider_config.validate_tool_choice_request config)))
+      [ "https://api.openai.com/v1"
+      ; "https://unknown-openai-compatible.example/v1"
+      ])
+;;
+
 let test_openai_chat_catalog_binding_is_explicit () =
   with_repository_model_catalog (fun () ->
     List.iter (fun (provider_id, model_id, base_url) ->
-      let config = openai_chat_catalog_config ?provider_id model_id base_url in
+      let config = openai_chat_catalog_config ~provider_id model_id base_url in
       check_bool "host or model text does not grant a scoped capability" true
         (Option.is_none (Provider_config.capabilities_for_config_model config));
       check_bool "undeclared schema is refused before dispatch" true
         (Result.is_error (Provider_config.validate_output_schema_request config)))
-      [ None, "gpt-5.5", "https://api.openai.com/v1"
-      ; None, "gpt-5.5", "https://unknown-openai-compatible.example/v1"
-      ; Some "unknown", "gpt-5.5", "https://api.openai.com/v1"
-      ; Some "openai", "gpt-5.5-undeclared-snapshot", "https://api.openai.com/v1"
-      ; Some "openai", "gpt-5.5-pro", "https://api.openai.com/v1"
-      ; Some "openai", "gpt-4o-2024-05-13", "https://api.openai.com/v1"
+      [ "unknown", "gpt-5.5", "https://api.openai.com/v1"
+      ; "openai", "gpt-5.5-undeclared-snapshot", "https://api.openai.com/v1"
+      ; "openai", "gpt-5.5-pro", "https://api.openai.com/v1"
+      ; "openai", "gpt-4o-2024-05-13", "https://api.openai.com/v1"
       ])
 ;;
 
@@ -1789,10 +1825,7 @@ let test_validate_output_schema_openai_unscoped_catalog_not_inferred () =
         ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
         ()
     in
-    check_bool
-      "official endpoint does not promote an unscoped OpenAI catalog row"
-      true
-      (Result.is_error (Provider_config.validate_output_schema_request cfg)))
+    check_anonymous_chat_schema_defaults cfg)
 ;;
 
 let test_validate_output_schema_ollama_cloud_catalog_minimax_rejected () =
@@ -1800,6 +1833,7 @@ let test_validate_output_schema_ollama_cloud_catalog_minimax_rejected () =
     let cfg =
       Provider_config.make
         ~kind:OpenAI_compat
+        ~provider_id:"ollama_cloud"
         ~model_id:"minimax-m3"
         ~base_url:"https://ollama.com/v1"
         ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
@@ -1809,7 +1843,8 @@ let test_validate_output_schema_ollama_cloud_catalog_minimax_rejected () =
     | Error msg ->
       check_string
         "rejection reason"
-        "model minimax-m3 does not advertise native structured output"
+        "model minimax-m3 advertises JSON mode (json_object) only; native json_schema \
+         output is not supported by its declared capability"
         msg
     | Ok () -> Alcotest.fail "expected Ollama Cloud minimax-m3 capability rejection")
 ;;
@@ -1862,6 +1897,7 @@ let test_validate_output_schema_ollama_cloud_catalog_rejects_model_without_so ()
     let cfg =
       Provider_config.make
         ~kind:OpenAI_compat
+        ~provider_id:"ollama_cloud"
         ~model_id:"mistral-large-3:675b"
         ~base_url:"https://ollama.com/v1"
         ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
@@ -1896,17 +1932,18 @@ let test_validate_output_schema_native_ollama_catalog_rejects_model_without_so (
     | Ok () -> Alcotest.fail "expected native Ollama model capability rejection")
 ;;
 
-let test_validate_output_schema_unknown_openai_compat_host_rejected () =
+let test_validate_output_schema_unknown_provider_not_inferred_from_host () =
   let cfg =
     Provider_config.make
       ~kind:OpenAI_compat
+      ~provider_id:"unknown-compatible"
       ~model_id:"generic"
       ~base_url:"https://openai-compatible.example.com/v1"
       ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
       ()
   in
   check_bool
-    "unknown OpenAI-compatible host rejects json_schema"
+    "endpoint host does not supply an unknown declared provider's schema policy"
     true
     (Result.is_error (Provider_config.validate_output_schema_request cfg))
 ;;
@@ -1916,6 +1953,7 @@ let test_validate_output_schema_mimo_json_schema_rejected () =
     let cfg =
       Provider_config.make
         ~kind:OpenAI_compat
+        ~provider_id:"mimo"
         ~model_id:"mimo-v2.5-pro"
         ~base_url:"https://token-plan-sgp.xiaomimimo.com/v1"
         ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
@@ -1925,7 +1963,8 @@ let test_validate_output_schema_mimo_json_schema_rejected () =
     | Error msg ->
       check_string
         "rejection reason"
-        "model mimo-v2.5-pro does not advertise native structured output"
+        "model mimo-v2.5-pro advertises JSON mode (json_object) only; native json_schema \
+         output is not supported by its declared capability"
         msg
     | Ok () -> Alcotest.fail "expected MiMo json_schema request to fail closed")
 ;;
@@ -1940,10 +1979,7 @@ let test_validate_output_schema_endpoint_identity_does_not_establish_capability 
         ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
         ()
     in
-    check_bool
-      "endpoint and recognizable model text do not establish a capability"
-      true
-      (Result.is_error (Provider_config.validate_output_schema_request cfg)))
+    check_anonymous_chat_schema_defaults cfg)
 ;;
 
 let test_connect_timeout_s_default_none () =
@@ -2989,9 +3025,9 @@ let () =
             `Quick
             test_validate_output_schema_openai_explicit_capability
         ; Alcotest.test_case
-            "bare openai model rejected"
+            "bare openai model does not infer catalog policy"
             `Quick
-            test_validate_output_schema_openai_bare_model_rejected
+            test_validate_output_schema_openai_bare_model_not_inferred
         ; Alcotest.test_case
             "unscoped openai catalog is not inferred"
             `Quick
@@ -3001,9 +3037,9 @@ let () =
             `Quick
             test_validate_output_schema_explicit_model_capability_is_host_independent
         ; Alcotest.test_case
-            "unknown compat rejected"
+            "unknown declared compat provider rejected"
             `Quick
-            test_validate_output_schema_unknown_openai_compat_rejected
+            test_validate_output_schema_unknown_openai_compat_provider_rejected
         ; Alcotest.test_case
             "ollama cloud minimax rejected"
             `Quick
@@ -3089,9 +3125,9 @@ let () =
             `Quick
             test_validate_output_schema_native_ollama_catalog_rejects_model_without_so
         ; Alcotest.test_case
-            "unknown openai compat host rejected"
+            "unknown provider policy is not inferred from host"
             `Quick
-            test_validate_output_schema_unknown_openai_compat_host_rejected
+            test_validate_output_schema_unknown_provider_not_inferred_from_host
         ; Alcotest.test_case
             "mimo json_schema rejected"
             `Quick
@@ -3310,6 +3346,8 @@ let () =
         ; Alcotest.test_case "gpt-5.4 Chat schema and tools" `Quick (test_openai_chat_catalog_wire "gpt-5.4")
         ; Alcotest.test_case "gpt-4o Chat schema and tools" `Quick (test_openai_chat_catalog_wire "gpt-4o")
         ; Alcotest.test_case "gpt-4o-mini Chat schema and tools" `Quick (test_openai_chat_catalog_wire "gpt-4o-mini")
+        ; Alcotest.test_case "anonymous chat uses protocol defaults" `Quick
+            test_openai_chat_catalog_anonymous_uses_protocol_defaults
         ; Alcotest.test_case "explicit binding and exact model identity" `Quick test_openai_chat_catalog_binding_is_explicit
         ; Alcotest.test_case "reasoning ladder and output budget wire" `Quick test_openai_chat_catalog_reasoning_and_output_field
         ; Alcotest.test_case "endpoint identities stay distinct" `Quick test_openai_chat_catalog_endpoint_identity

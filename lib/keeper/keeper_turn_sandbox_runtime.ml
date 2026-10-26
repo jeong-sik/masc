@@ -8,6 +8,7 @@ type state =
 
 type github_identity_snapshot =
   { args : string list
+  ; environment : (string * string) list
   ; host_dir : string
   ; revision : string
   ; cleanup : unit -> unit
@@ -1369,6 +1370,7 @@ type microvm_start_failure =
   | Github_identity_invalid of string
   | Policy_network_unavailable of string
   | Network_unexpressible of string
+  | Invalid_boot_plan of Keeper_microvm_boot_plan.invalid_plan list
   | Constraints_unexpressible of
       { backend : Keeper_microvm_backend.t
       ; refusals : Keeper_sandbox_microvm.constraint_refusal list
@@ -1414,6 +1416,9 @@ let microvm_start_failure_message failure =
   | Github_identity_invalid detail -> failed ("github_identity_invalid: " ^ detail)
   | Constraints_unexpressible { backend; refusals } ->
     failed (Keeper_sandbox_microvm.constraint_refusals_message backend refusals)
+  | Invalid_boot_plan errors ->
+    failed ("invalid boot plan: " ^ String.concat "; "
+      (List.map Keeper_microvm_boot_plan.invalid_plan_message errors))
   | Booted_guest_unusable { check; container_name; detail } ->
     failed
       (Printf.sprintf
@@ -1621,6 +1626,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                  | Ok projection ->
                    let snapshot =
                      { args = projection.args
+                     ; environment = projection.environment
                      ; host_dir = projection.host_snapshot_dir
                      ; revision = projection.revision
                      ; cleanup = projection.cleanup
@@ -1682,6 +1688,56 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
             Error (Network_unexpressible detail)
           | Ok network_args ->
          let argv_result =
+           match backend with
+           | Keeper_microvm_backend.Apple_container ->
+             let module Plan = Keeper_microvm_boot_plan in
+             let container_masc_dir =
+               Keeper_sandbox_runtime_setup.container_masc_dir ~container_root:t.container_root in
+             let identity_destination = Keeper_github_identity.container_config_dir
+               ~container_masc_dir ~keeper_name:t.meta.name in
+             let config_mount = match Keeper_sandbox_runtime_setup.config_mount
+               ~base_path:t.config.base_path ~container_root:t.container_root with
+               | None -> []
+               | Some (source, destination) -> [Plan.Host_dir {source; destination; read_only = true}] in
+             let network = match t.network_mode with
+               | Keeper_types_profile_sandbox.Network_none -> Plan.Network_none
+               | Keeper_types_profile_sandbox.Network_inherit -> Plan.Network_inherit
+               | Keeper_types_profile_sandbox.Network_policy ->
+                 Plan.Network_policy {name = Keeper_sandbox_microvm.policy_network_name ~keeper_name:t.meta.name} in
+             let plan : Plan.t =
+               { image; guest_size; user = Printf.sprintf "%d:%d" t.uid t.gid
+               ; working_directory = Keeper_sandbox_microvm.work_volume_guest_root
+               ; command = ["tail"; "-f"; "/dev/null"]
+               ; mounts = config_mount
+                   @ [Plan.Host_dir {source = github_identity.host_dir; destination = identity_destination; read_only = true}
+                     ; Plan.Named_volume {name = provisions.work_volume_name;
+                         destination = Keeper_sandbox_microvm.work_volume_guest_root}]
+                   @ (match provisions.build_volume_name with
+                      | Some name -> [Plan.Named_volume {name; destination = Keeper_sandbox_microvm.build_volume_guest_root}]
+                      | None -> [])
+                   @ [Plan.Host_dir {source = provisions.shim_host_dir;
+                       destination = Keeper_sandbox_microvm.shim_guest_dir; read_only = true}]
+               ; isolation = Keeper_microvm_backend.all_guest_constraints
+               ; network; environment = github_identity.environment
+               ; labels = Keeper_sandbox_runtime_setup.stable_labels
+                   ~base_path:t.config.base_path ~keeper_name:t.meta.name
+                   ~container_kind:Keeper_sandbox_microvm.keeper_vm_container_kind
+                   ~network_label:(Keeper_types_profile_sandbox.network_mode_to_string t.network_mode)
+                   @ [Keeper_sandbox_microvm.microvm_backend_label_key,
+                       Keeper_microvm_backend.to_string backend]
+               } in
+             (* Foundation only: the same plan labels and renders this Boot.
+                Existing adoption/snapshot/sweep authority remains in force
+                until durable guest identity and endpoint checks land. *)
+             Keeper_sandbox_microvm.apple_turn_start_argv
+               ~container_name ~plan ~lifecycle_labels:(Keeper_sandbox_runtime_setup.lifecycle_labels ())
+               ~dns:(Option.map Ipaddr.to_string nameserver) ~policy_proxy
+             |> Result.map_error (function
+               | Keeper_sandbox_microvm.Apple_invalid_boot_plan errors -> Invalid_boot_plan errors
+               | Keeper_sandbox_microvm.Apple_network_unavailable detail -> Network_unexpressible detail
+               | Keeper_sandbox_microvm.Apple_constraints_unexpressible refusals ->
+                 Constraints_unexpressible {backend; refusals})
+           | Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox ->
            Keeper_sandbox_microvm.turn_start_argv_for
              backend
              ~container_name
@@ -1737,11 +1793,12 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                 refuses the boot instead of running a keeper on a weaker
                 sandbox than the profile it declared. *)
              ~constraints:Keeper_microvm_backend.all_guest_constraints
+           |> Result.map_error (fun refusals -> Constraints_unexpressible {backend; refusals})
          in
          (match argv_result with
-          | Error refusals ->
+          | Error failure ->
             release_unmounted_identity ();
-            Error (Constraints_unexpressible { backend; refusals })
+            Error failure
           | Ok argv ->
          let booted =
            { policy_port =

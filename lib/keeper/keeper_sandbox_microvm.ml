@@ -179,23 +179,20 @@ type policy_proxy =
   ; port : int
   }
 
-let network_args_for
-      backend
-      ~dns
-      ~keeper_name
-      ~(policy_proxy : policy_proxy option)
-      (mode : Keeper_types_profile_sandbox.network_mode)
-  =
-  match (backend : Backend.t) with
-  | Backend.Apple_container ->
-    (match mode with
-     | Keeper_types_profile_sandbox.Network_none -> Ok [ "--network"; "none" ]
-     | Keeper_types_profile_sandbox.Network_inherit ->
+let apple_policy_environment {gateway; port} =
+  Egress_proxy_decision.client_env ~proxy_url:(Printf.sprintf "http://%s:%d" gateway port)
+;;
+
+let apple_network_args ~dns ~(policy_proxy : policy_proxy option)
+      (network : Keeper_microvm_boot_plan.network) =
+  (match network with
+     | Keeper_microvm_boot_plan.Network_none -> Ok [ "--network"; "none" ]
+     | Keeper_microvm_boot_plan.Network_inherit ->
        Ok
          (match dns with
           | Some server when String.trim server <> "" -> [ "--dns"; String.trim server ]
           | Some _ | None -> [])
-     | Keeper_types_profile_sandbox.Network_policy ->
+     | Keeper_microvm_boot_plan.Network_policy {name} ->
        (match policy_proxy with
         | None ->
           (* A guest on this network has one route, and it is this proxy. A
@@ -231,14 +228,28 @@ let network_args_for
              them the guest is merely stuck, which is how this lane shipped
              and did not work. *)
           Ok
-            ([ "--network"; policy_network_name ~keeper_name; "--no-dns" ]
+            ([ "--network"; name; "--no-dns" ]
              @ List.concat_map
                  (fun (name, value) -> [ "-e"; name ^ "=" ^ value ])
-                 (Egress_proxy_decision.client_env
-                    ~proxy_url:
-                      (* An address rather than a name: the lane passes
-                         --no-dns, so the guest resolves nothing. *)
-                      (Printf.sprintf "http://%s:%d" gateway port)))))
+                 (apple_policy_environment {gateway; port}))))
+;;
+
+let network_args_for
+      backend
+      ~dns
+      ~keeper_name
+      ~(policy_proxy : policy_proxy option)
+      (mode : Keeper_types_profile_sandbox.network_mode)
+  =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    let network = match mode with
+      | Keeper_types_profile_sandbox.Network_none -> Keeper_microvm_boot_plan.Network_none
+      | Keeper_types_profile_sandbox.Network_inherit -> Keeper_microvm_boot_plan.Network_inherit
+      | Keeper_types_profile_sandbox.Network_policy ->
+        Keeper_microvm_boot_plan.Network_policy {name = policy_network_name ~keeper_name}
+    in
+    apple_network_args ~dns ~policy_proxy network
   | Backend.Nerdctl_kata ->
     (match mode with
      | Keeper_types_profile_sandbox.Network_none -> Ok [ "--network"; "none" ]
@@ -752,17 +763,19 @@ let constraint_refusals_message backend refusals =
           refusals))
 ;;
 
-let turn_start_argv_for
+let render_turn_start_argv_for
       backend
       ~container_name
       ~label_args
-      ~uid
-      ~gid
+      ~backend_label_args
+      ~user
       ~(guest_size : Keeper_microvm_guest_size.t)
       ~network_args
       ~mount_args
       ~image
       ~constraints
+      ~working_directory
+      ~command
   =
   let expressed, refused, dropped =
     List.fold_left
@@ -797,7 +810,7 @@ let turn_start_argv_for
       (command_argv_for backend
        @ [ "run"; "-d"; "--name"; container_name ]
        @ label_args
-       @ [ "--label"; microvm_backend_label_key ^ "=" ^ Backend.to_string backend ]
+       @ backend_label_args
        @ dropped_label_args
        (* msb [run] has no [--user] (0.6.16); its guest runs as root and the
           per-mount [uid=,gid=] option on the work volume maps writes back to the
@@ -806,7 +819,7 @@ let turn_start_argv_for
        @ (match backend with
           | Backend.Microsandbox -> []
           | Backend.Apple_container | Backend.Nerdctl_kata ->
-            [ "--user"; Printf.sprintf "%d:%d" uid gid ])
+            [ "--user"; user ])
        @ expressed
        (* Always both. Leaving [--cpus] off took the CLI's own default, which
           is a size nobody configured and the status surface could not show. *)
@@ -819,10 +832,57 @@ let turn_start_argv_for
          ]
        @ Backend.run_runtime_args backend
        @ mount_args
-       @ [ "--workdir"; work_volume_guest_root ]
+       @ [ "--workdir"; working_directory ]
        @ network_args
        @ Backend.command_separator backend
-       @ [ image; "tail"; "-f"; "/dev/null" ])
+       @ [ image ] @ command)
+;;
+
+let turn_start_argv_for backend ~container_name ~label_args ~uid ~gid
+      ~guest_size ~network_args ~mount_args ~image ~constraints =
+  render_turn_start_argv_for backend ~container_name ~label_args
+    ~backend_label_args:["--label"; microvm_backend_label_key ^ "=" ^ Backend.to_string backend]
+    ~user:(Printf.sprintf "%d:%d" uid gid) ~guest_size ~network_args ~mount_args
+    ~image ~constraints ~working_directory:work_volume_guest_root
+    ~command:["tail"; "-f"; "/dev/null"]
+;;
+
+type apple_boot_failure =
+  | Apple_invalid_boot_plan of Keeper_microvm_boot_plan.invalid_plan list
+  | Apple_network_unavailable of string
+  | Apple_constraints_unexpressible of constraint_refusal list
+
+let apple_turn_start_argv ~container_name ~(plan : Keeper_microvm_boot_plan.t)
+      ~lifecycle_labels ~dns ~policy_proxy =
+  let module Plan = Keeper_microvm_boot_plan in
+  let ( let* ) = Result.bind in
+  let execution_environment = match plan.network with
+    | Plan.Network_none | Plan.Network_inherit -> []
+    | Plan.Network_policy _ ->
+      (match policy_proxy with None -> [] | Some proxy -> apple_policy_environment proxy) in
+  let* () = Plan.validate_boot ~plan ~lifecycle_labels ~execution_environment
+    |> Result.map_error (fun errors -> Apple_invalid_boot_plan errors) in
+  let network_args = apple_network_args ~dns ~policy_proxy plan.network
+    |> Result.map_error (fun detail -> Apple_network_unavailable detail) in
+  Result.bind network_args (fun network_args ->
+    let mount_args = List.concat_map (function
+      | Plan.Tmpfs {destination} -> ["--tmpfs"; destination]
+      | Plan.Host_dir {source; destination; read_only} ->
+        ["-v"; source ^ ":" ^ destination ^ (if read_only then ":ro" else "")]
+      | Plan.Named_volume {name; destination} -> ["--volume"; name ^ ":" ^ destination])
+      plan.mounts in
+    let environment_args = List.concat_map
+      (fun (key, value) -> ["--env"; key ^ "=" ^ value]) plan.environment in
+    let label_args = List.concat_map
+      (fun (key, value) -> ["--label"; key ^ "=" ^ value])
+      (plan.labels @ lifecycle_labels @ [Plan.label_key, Plan.digest plan]) in
+    render_turn_start_argv_for Backend.Apple_container ~container_name ~label_args
+      ~backend_label_args:[]
+      ~user:plan.user ~guest_size:plan.guest_size ~network_args
+      ~mount_args:(environment_args @ mount_args) ~image:plan.image
+      ~constraints:plan.isolation ~working_directory:plan.working_directory
+      ~command:plan.command
+    |> Result.map_error (fun refusals -> Apple_constraints_unexpressible refusals))
 ;;
 
 (* [--user uid:gid] is a value [container exec] and [nerdctl exec] document
@@ -2211,6 +2271,113 @@ let running_of_apple_inspect_json raw =
   | _ -> Error "container inspect: unparseable JSON"
   | exception Yojson.Json_error _ ->
     Error "container inspect: unparseable JSON"
+;;
+
+(* Apple 1.3.1 inspect configuration. Unknown metadata is left alone;
+   every identity/isolation field below is mandatory and duplicate-free. *)
+let apple_guest_facts ~container_name raw =
+  let module Plan = Keeper_microvm_boot_plan in
+  let ( let* ) = Result.bind in
+  let ( >>= ) = Result.bind in
+  let invalid field = Error ("container inspect: invalid or missing " ^ field) in
+  let object_fields field = function
+    | `Assoc fields ->
+      let keys = List.map fst fields in
+      if List.length keys = List.length (List.sort_uniq String.compare keys)
+      then Ok fields else invalid (field ^ " (duplicate keys)")
+    | _ -> invalid field in
+  let member field fields = match List.assoc_opt field fields with
+    | Some value -> Ok value | None -> invalid field in
+  let string field = function `String value -> Ok value | _ -> invalid field in
+  let boolean field = function `Bool value -> Ok value | _ -> invalid field in
+  let list field parse = function
+    | `List values ->
+      let* reversed = List.fold_left (fun result value ->
+        let* values = result in let* value = parse value in Ok (value :: values))
+        (Ok []) values in
+      Ok (List.rev reversed)
+    | _ -> invalid field in
+  let positive_integer field value =
+    let parsed = match value with
+      | `Int value -> Some (Int64.of_int value)
+      | `Intlit value -> Int64.of_string_opt value
+      | _ -> None in
+    match parsed with Some value when value > 0L -> Ok value | Some _ | None -> invalid field in
+  let string_member field fields = member field fields >>= string field in
+  let strings_member field fields = member field fields >>= list field (string field) in
+  let object_member field fields = member field fields >>= object_fields field in
+  let string_pairs field fields =
+    let* fields = object_fields field fields in
+    List.fold_left (fun result (key, value) ->
+      let* pairs = result in let* value = string field value in Ok ((key, value) :: pairs))
+      (Ok []) fields in
+  let environment value =
+    let* entries = list "environment" (string "environment") value in
+    let* pairs = List.fold_left (fun result entry ->
+      let* pairs = result in
+      match String.index_opt entry '=' with
+      | None -> invalid "environment entry"
+      | Some index ->
+        let key = String.sub entry 0 index in
+        if key = "" || List.mem_assoc key pairs then invalid "environment name"
+        else Ok ((key, String.sub entry (index + 1) (String.length entry - index - 1)) :: pairs))
+      (Ok []) entries in
+    Ok (List.rev pairs) in
+  let mount value =
+    let* fields = object_fields "mount" value in
+    let* destination = string_member "destination" fields in
+    let* source = string_member "source" fields in
+    let* options = strings_member "options" fields in
+    let* kind = object_member "type" fields in
+    match kind with
+    | ["tmpfs", `Assoc []] ->
+      if options = [] then Ok (Plan.Tmpfs {destination}) else invalid "tmpfs options"
+    | ["virtiofs", `Assoc []] ->
+      if options = [] || options = ["ro"] then
+        Ok (Plan.Host_dir {source; destination; read_only = options = ["ro"]})
+      else invalid "virtiofs options"
+    | ["volume", detail] ->
+      let* detail = object_fields "volume" detail in
+      let* name = string_member "name" detail in
+      if options = [] then Ok (Plan.Named_volume {name; destination})
+      else invalid "volume options"
+    | _ -> invalid "mount type" in
+  let decode json =
+    let* row = match json with `List [row] -> object_fields "row" row | _ -> invalid "row count" in
+    let* id = string_member "id" row in
+    let* config = object_member "configuration" row in
+    let* configured_id = string_member "id" config in
+    let* () = if id = container_name && configured_id = container_name then Ok () else invalid "guest identity" in
+    let* image = object_member "image" config >>= string_member "reference" in
+    let* resources = object_member "resources" config in
+    let* cpus = member "cpus" resources >>= positive_integer "cpus" in
+    let* cpus = if cpus <= Int64.of_int max_int then Ok (Int64.to_int cpus) else invalid "cpus" in
+    let* memory_bytes = member "memoryInBytes" resources >>= positive_integer "memoryInBytes" in
+    let* init = object_member "initProcess" config in
+    let* user = object_member "user" init >>= object_member "raw" >>= string_member "userString" in
+    let* working_directory = string_member "workingDirectory" init in
+    let* executable = string_member "executable" init in
+    let* arguments = strings_member "arguments" init in
+    let* mounts = member "mounts" config >>= list "mounts" mount in
+    let destinations = List.map (function
+      | Plan.Tmpfs {destination} | Plan.Host_dir {destination; _}
+      | Plan.Named_volume {destination; _} -> destination) mounts in
+    let* () = if List.length destinations = List.length (List.sort_uniq String.compare destinations)
+      then Ok () else invalid "duplicate mount destination" in
+    let* read_only = member "readOnly" config >>= boolean "readOnly" in
+    let* cap_drop = strings_member "capDrop" config in
+    let* cap_add = strings_member "capAdd" config in
+    let* networks = member "networks" config >>= list "networks" (fun value ->
+      object_fields "network" value >>= string_member "network") in
+    let* environment = member "environment" init >>= environment in
+    let* labels = member "labels" config >>= string_pairs "labels" in
+    Ok {Plan.plan_label = List.assoc_opt Plan.label_key labels; image; cpus; memory_bytes;
+        user; working_directory; command = executable :: arguments; mounts;
+        read_only; cap_drop; cap_add; networks; environment; labels}
+  in
+  match Yojson.Safe.from_string raw with
+  | json -> (match decode json with Ok facts -> Plan.Facts facts | Error detail -> Plan.Unreadable detail)
+  | exception Yojson.Json_error _ -> Plan.Unreadable "container inspect: unparseable JSON"
 ;;
 
 let running_of_inspect_json_for backend raw =

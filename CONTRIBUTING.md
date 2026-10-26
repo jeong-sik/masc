@@ -86,6 +86,9 @@ when these hooks are active.
 
 ## Where things are
 
+Use the [storage guide](docs/guides/WORKSPACE-STORAGE.md) for research, evidence,
+reports and generated run output.
+
 ```text
 bin/
 ├── main_eio.ml                  server, CLI subcommands, and the hand-over to the TUI

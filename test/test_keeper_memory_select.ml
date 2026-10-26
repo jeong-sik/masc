@@ -73,7 +73,7 @@ let with_fixture ?(enabled=true) ?(excluded=false) test =
      turn_sandbox_factory=None;sw=Some sw;clock=Some clock;proc_mgr=None;net=Some net;
      mcp_session_id=None;continuation_channel=None;gate_context=None;
      turn_ref=Some (Ids.Turn_ref.make ~trace_id:"selection-tool-fixture" ~absolute_turn:1);
-     gate_grant=None;tool_use_id=None;trace_id=None;result_projection=None;capability_authority=Compatibility_meta} in
+     gate_grant=None;tool_use_id=None;trace_id=None;result_projection=None;artifact_draft_scope=None; capability_authority=Compatibility_meta} in
   let dispatch ?limit () =
     let descriptor=match Dispatch.descriptor_for_internal "keeper_memory_select" with
       | Some descriptor -> descriptor | None -> fail "registered selection descriptor missing" in
@@ -309,7 +309,7 @@ let test_stalled_endpoint_ends_at_the_turn_clock () =
      clock=Some (clock :> float Eio.Time.clock_ty Eio.Resource.t);proc_mgr=None;net=Some net;
      mcp_session_id=None;continuation_channel=None;gate_context=None;
      turn_ref=Some (Ids.Turn_ref.make ~trace_id:"selection-stalled-fixture" ~absolute_turn:1);
-     gate_grant=None;tool_use_id=None;trace_id=None;result_projection=None;capability_authority=Compatibility_meta} in
+     gate_grant=None;tool_use_id=None;trace_id=None;result_projection=None;artifact_draft_scope=None; capability_authority=Compatibility_meta} in
   let descriptor=match Dispatch.descriptor_for_internal "keeper_memory_select" with
     | Some descriptor -> descriptor | None -> fail "registered selection descriptor missing" in
   let args=`Assoc ["purpose",`String "Distinguish E17 and E18 approval policy scopes."] in

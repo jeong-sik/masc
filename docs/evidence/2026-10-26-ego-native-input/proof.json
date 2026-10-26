@@ -1,0 +1,251 @@
+{
+  "spaceId": 24,
+  "finished": false,
+  "inputRequest": {
+    "tabId": 1,
+    "expectedUrl": "http://localhost:64181/start",
+    "steps": [
+      {
+        "method": "reload"
+      },
+      {
+        "method": "focus",
+        "selector": "loc=css:#editor"
+      },
+      {
+        "method": "keyboard.type",
+        "text": "typed"
+      },
+      {
+        "method": "keyboard.press",
+        "key": "ControlOrMeta+A"
+      },
+      {
+        "method": "keyboard.insertText",
+        "text": "한글 😀"
+      },
+      {
+        "method": "focus",
+        "selector": "loc=css:#rich"
+      },
+      {
+        "method": "keyboard.paste",
+        "text": "Name\tStatus",
+        "html": "<table><tr><td>Name</td><td>Status</td></tr></table>"
+      }
+    ],
+    "snapshotScope": "full_page",
+    "maxChars": 10000
+  },
+  "inputResult": {
+    "completed": [
+      {
+        "index": 0,
+        "method": "reload",
+        "receipt": {}
+      },
+      {
+        "index": 1,
+        "method": "focus",
+        "receipt": {}
+      },
+      {
+        "index": 2,
+        "method": "keyboard.type",
+        "receipt": null
+      },
+      {
+        "index": 3,
+        "method": "keyboard.press",
+        "receipt": {}
+      },
+      {
+        "index": 4,
+        "method": "keyboard.insertText",
+        "receipt": null
+      },
+      {
+        "index": 5,
+        "method": "focus",
+        "receipt": {}
+      },
+      {
+        "index": 6,
+        "method": "keyboard.paste",
+        "receipt": {}
+      }
+    ],
+    "effectStarted": true,
+    "completedEffect": true,
+    "failure": null,
+    "urlBefore": "http://localhost:64181/start",
+    "url": "http://localhost:64181/start",
+    "title": "Native workflow start",
+    "snapshot": "[p1 \"Native workflow start\" | space \"MASC Ego native full support 20261026\"(24): 1 managed, 0 untracked — p1* \"Native workflow start\"]\nroot\n  container\n    text \"Editor\"\n    textbox [ref=5]\n      text \"한글 😀\"\n  textfield \"Rich editor\" [ref=6]\n    table\n      table_row\n        table_cell\n          text \"Name\"\n        table_cell\n          text \"Status\"\n  combobox [ref=7]\n    text \"A\"\n  button [ref=8]\n    text \"Continue\"\n",
+    "truncated": false,
+    "chars": 422
+  },
+  "inputState": {
+    "text": "한글 😀",
+    "rich": "<table><tbody><tr><td>Name</td><td>Status</td></tr></tbody></table>",
+    "pastes": [
+      {
+        "trusted": true,
+        "html": "<table><tr><td>Name</td><td>Status</td></tr></table>"
+      }
+    ],
+    "navigation": "reload"
+  },
+  "dialogRequest": {
+    "tabId": 1,
+    "expectedUrl": "http://localhost:64181/start",
+    "steps": [
+      {
+        "method": "focus",
+        "selector": "loc=css:#editor"
+      },
+      {
+        "method": "keyboard.insertText",
+        "text": "dialog input"
+      },
+      {
+        "method": "click",
+        "selector": "loc=css:#submit"
+      }
+    ],
+    "snapshotScope": "full_page",
+    "maxChars": 10000
+  },
+  "dialogResult": {
+    "completed": [
+      {
+        "index": 0,
+        "method": "focus",
+        "receipt": {}
+      },
+      {
+        "index": 1,
+        "method": "keyboard.insertText",
+        "receipt": null
+      }
+    ],
+    "effectStarted": true,
+    "completedEffect": true,
+    "failure": {
+      "index": 1,
+      "method": "keyboard.insertText",
+      "message": "answer the JavaScript dialog before continuing",
+      "dialog": {
+        "url": "http://localhost:64181/start",
+        "frameId": "6C9B2244719E06F039C1DFC031007C73",
+        "message": "Keyboard input dialog",
+        "type": "alert",
+        "hasBrowserHandler": true,
+        "defaultPrompt": ""
+      }
+    }
+  },
+  "request": {
+    "tabId": 1,
+    "expectedUrl": "http://localhost:64181/start",
+    "steps": [
+      {
+        "method": "fill",
+        "selector": "loc=css:#editor",
+        "text": "native workflow"
+      },
+      {
+        "method": "selectOption",
+        "selector": "loc=css:#choice",
+        "value": "b"
+      },
+      {
+        "method": "click",
+        "selector": "loc=css:#submit"
+      },
+      {
+        "method": "waitForURL",
+        "url": "http://localhost:64181/done?value=native%20workflow&choice=b"
+      },
+      {
+        "method": "waitForSelector",
+        "selector": "loc=css:#done",
+        "state": "visible"
+      }
+    ],
+    "snapshotScope": "full_page",
+    "maxChars": 10000
+  },
+  "result": {
+    "completed": [
+      {
+        "index": 0,
+        "method": "fill",
+        "receipt": {}
+      },
+      {
+        "index": 1,
+        "method": "selectOption",
+        "receipt": [
+          "b"
+        ]
+      },
+      {
+        "index": 2,
+        "method": "click",
+        "receipt": {}
+      },
+      {
+        "index": 3,
+        "method": "waitForURL",
+        "receipt": null
+      },
+      {
+        "index": 4,
+        "method": "waitForSelector",
+        "receipt": null
+      }
+    ],
+    "effectStarted": true,
+    "completedEffect": true,
+    "failure": null,
+    "urlBefore": "http://localhost:64181/start",
+    "url": "http://localhost:64181/done?value=native%20workflow&choice=b",
+    "title": "Native workflow done",
+    "snapshot": "[p1 \"Native workflow done\" | space \"MASC Ego native full support 20261026\"(24): 1 managed, 0 untracked — p1* \"Native workflow done\"]\nroot\n  heading\n    text \"Completed native workflow\"\n  text \"{\"value\":\"native workflow\",\"choice\":\"b\"}\"\n",
+    "truncated": false,
+    "chars": 235
+  },
+  "refused": {
+    "completed": [],
+    "effectStarted": false,
+    "completedEffect": false,
+    "failure": {
+      "index": 0,
+      "method": "initialUrl",
+      "message": "the tab is at http://localhost:64181/done?value=native%20workflow&choice=b, not at expectedUrl; read it again"
+    }
+  },
+  "stopped": {
+    "completed": [
+      {
+        "index": 0,
+        "method": "hover",
+        "receipt": {}
+      }
+    ],
+    "effectStarted": true,
+    "completedEffect": true,
+    "failure": {
+      "index": 1,
+      "method": "waitForSelector",
+      "message": "page.waitForSelector timed out after 1ms: loc=css:#never"
+    }
+  },
+  "state": {
+    "value": "native workflow",
+    "choice": "b"
+  },
+  "script_sha256": "7639beb89af41de4e4681b2ac7b91e6521ca0c8d5e8805ff467d5807c8cb530d",
+  "scope": "Production workflow JS on installed Ego plus owned local fixture; not OCaml host/Keeper dispatch or installed MASC proof."
+}

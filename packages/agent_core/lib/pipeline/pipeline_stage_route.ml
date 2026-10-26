@@ -23,10 +23,14 @@ let binding_identity_error ?on_provider_failure detail =
   detailed.error
 ;;
 
-let validate_replay_continuity ?on_provider_failure ~provider_config messages =
+let validate_replay_continuity ?on_provider_failure ~source_change_policy ~tools_present ~provider_config messages =
   match Llm_provider.Reasoning_history_projection.validate_replay_continuity_for_provider_config
-      provider_config messages with
-  | Ok _ -> Ok ()
+      ~source_change_policy ~boundary:(Provider_dispatch {tools_present}) provider_config messages with
+  | Ok {disposition=Source_change_admitted drops;_} ->
+    Llm_provider.Diag.info "pipeline_stage_route"
+      "reasoning source change admitted: boundary=provider_dispatch excluded_message_count=%d" (List.length drops);
+    Ok ()
+  | Ok {disposition=(Preserve_reasoning | Caller_excluded_reasoning);_} -> Ok ()
   | Error refusal ->
     let error = Error.Config (InvalidConfig
       {field="reasoning_replay";
@@ -253,6 +257,8 @@ let dispatch_sync
     |> Result.map_error (binding_identity_error ?on_provider_failure)
   in
   let* () = validate_replay_continuity ?on_provider_failure ~provider_config
+    ~tools_present:(Llm_provider.Complete_common.request_tools_present ~config:provider_config ~tools)
+    ~source_change_policy:agent.options.reasoning_source_change
     prep.Agent_turn.effective_messages in
   let* () = admit_provider_attempt before_provider_attempt binding in
   (* Provider label for mapped transport errors: without it every timeout
@@ -406,6 +412,8 @@ let dispatch_stream
     |> Result.map_error (binding_identity_error ?on_provider_failure)
   in
   let* () = validate_replay_continuity ?on_provider_failure ~provider_config
+    ~tools_present:(Llm_provider.Complete_common.request_tools_present ~config:provider_config ~tools)
+    ~source_change_policy:agent.options.reasoning_source_change
     prep.Agent_turn.effective_messages in
   let* () = admit_provider_attempt before_provider_attempt binding in
   (* Provider label for mapped transport errors: without it every timeout

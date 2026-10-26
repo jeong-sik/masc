@@ -98,6 +98,6 @@ refusal. This is not Docker cleanup, live provider, installed UI or deployment
 proof. Parser/source checks and any selected compiled execution are recorded
 separately; the previous injected 34-case suite does not certify this new owner.
 
-See the [54-task worklist](../../reports/addon-lane-full-worklist-20261021.md),
+See the [54-task worklist](../reports/addon-lane-full-worklist-20261021.md),
 [original execution contract](workspace-curator-addon-execution.md) and
 [typed observer receipts](workspace-curator-observer-receipts.md).

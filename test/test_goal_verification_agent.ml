@@ -1700,7 +1700,7 @@ let test_daemon_drains_healthy_goal_after_four_damaged_originals () =
       let reason = "three actual services verified after the failed candidates" in
       on_tool_result ~input:(`Assoc ["verdict", `String "APPROVE"; "reason", `String reason])
         (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:(Tool_timing.start ()) "recorded");
-      Ok {AR.selected_runtime_id=evaluator_runtime; verdict=Some (AR.Approve reason)} in
+      Ok {AR.selected_runtime_id=evaluator_runtime; evaluator_execution = None; verdict=Some (AR.Approve reason)} in
   let registry = Registry.global () in
   let published, publish = Eio.Promise.create () in
   let previous_observer = Atomic.get Registry.change_observer_fn in

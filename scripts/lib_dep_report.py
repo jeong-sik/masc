@@ -14,8 +14,8 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_GRAPH = ROOT / "reports" / "lib-dependency-graph.json"
-DEFAULT_OUTPUT = ROOT / "reports" / "lib-dependency-summary.md"
+DEFAULT_GRAPH = ROOT / "artifacts" / "dependencies" / "lib-dependency-graph.json"
+DEFAULT_OUTPUT = ROOT / "artifacts" / "dependencies" / "lib-dependency-summary.md"
 WORKSPACE_STATE_MODULES = (
     "Workspace",
     "Workspace_state",
@@ -447,8 +447,8 @@ def render_markdown(report: Json) -> str:
         "",
         "```sh",
         "python3 scripts/analyze_lib_deps.py --json",
-        "python3 scripts/lib_dep_report.py --graph reports/lib-dependency-graph.json --output reports/lib-dependency-summary.md",
-        "python3 scripts/lib_dep_report.py --graph reports/lib-dependency-graph.json --baseline reports/lib-dependency-graph.baseline.json --format json",
+        "python3 scripts/lib_dep_report.py --graph artifacts/dependencies/lib-dependency-graph.json --output artifacts/dependencies/lib-dependency-summary.md",
+        "python3 scripts/lib_dep_report.py --graph artifacts/dependencies/lib-dependency-graph.json --baseline artifacts/dependencies/lib-dependency-graph.baseline.json --format json",
         "```",
         "",
     ]

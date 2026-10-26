@@ -77,6 +77,9 @@ type picture =
 type item =
   | Text_item of Masc.Tui_decode.verification_evidence_item
       (** a note, source, text artifact or unreadable artifact *)
+  | Source_item of { source : Masc.Tui_decode.verification_evidence_item; body : string }
+      (** Readable Board body prepared off the render loop. [source] remains
+          the original immutable snapshot, including its links and digest. *)
   | Binary_item of {
       reference : string;
       bytes : int;
@@ -89,7 +92,12 @@ type evidence =
   | Items of item list
   | Access_unavailable of string
 
+type layout = Together | One_at_a_time
+(** Simultaneous images need distinct slots. A reader showing one selected
+    item reuses the first slot for each prepared image. *)
+
 val prepare :
+  layout:layout ->
   display:Masc_tui_portrait_view.display ->
   convert:(string -> (string, string) result) ->
   Masc.Tui_decode.verification_evidence ->
@@ -97,9 +105,10 @@ val prepare :
 (** [convert bytes] is a PNG file made from image bytes, or the converter's
     one-line failure. It is called only for an image that is not already a
     PNG, and blocks on external programs, so call [prepare] off the render
-    loop. Pictures take {!Masc_tui_graphics.evidence_images} slots in the
+    loop. [Together] takes {!Masc_tui_graphics.evidence_images} slots in the
     order the evidence lists them; one past the last slot is
-    [Unshown No_free_slot]. Dimensions are read before any conversion where
+    [Unshown No_free_slot]. [One_at_a_time] gives every drawable image the first
+    slot, so later selections remain available. Dimensions are read before any conversion where
     the format allows it, so a picture over {!max_picture_pixels} is never
     handed to a converter. When [display] does not draw pixels no picture is
     converted or given a slot: every image is {!Undrawn_image}. *)

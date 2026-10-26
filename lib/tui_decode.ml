@@ -1780,12 +1780,26 @@ type harness_snapshot = {
   hs_overview : harness_overview option;
 }
 
+type verification_review_stop =
+  | Review_environment | Review_no_judgment | Review_commit_failure
+  | Review_failure | Review_cancelled
+
+type verification_review =
+  | Review_unobserved
+  | Review_running of string
+  | Review_stopped of { cause : verification_review_stop; detail : string; actor : string }
+  | Review_approved of string
+  | Review_rejected of string
+  | Review_superseded of string
+
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
   vr_submitted_by : string;
   vr_created_at : string;
+  vr_completion_contract : string list;
+  vr_review : verification_review;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
   vr_evidence_error : string option;
@@ -2362,12 +2376,34 @@ let decode_harness_snapshot json =
     ; hs_overview = decode_harness_overview json
     }
 
+let decode_verification_review json =
+  let* state = required_string_field json "state" in
+  let* detail = required_string_field json "detail" in
+  let* actor = required_string_field json "actor" in
+  let stopped cause = Ok (Review_stopped {cause; detail; actor}) in
+  match state with
+  | "unobserved" -> Ok Review_unobserved
+  | "running" -> Ok (Review_running actor)
+  | "approved" -> Ok (Review_approved detail)
+  | "rejected" -> Ok (Review_rejected detail)
+  | "superseded" -> Ok (Review_superseded detail)
+  | "unavailable" -> stopped Review_environment
+  | "not_reviewed" -> stopped Review_no_judgment
+  | "commit_failed" -> stopped Review_commit_failure
+  | "failed" -> stopped Review_failure
+  | "cancelled" -> stopped Review_cancelled
+  | other -> Error ("unknown review observation: " ^ other)
+
 let decode_verification_request json =
   let* vr_request_id = required_string_field json "request_id" in
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
   let* vr_created_at = required_string_field json "created_at" in
+  let* vr_completion_contract = decode_string_name_list json "completion_contract" in
+  let* vr_review = match Yojson.Safe.Util.member "review_observation" json with
+    | `Null -> Ok Review_unobserved
+    | observation -> decode_verification_review observation in
   let* vr_required_artifacts =
     decode_string_name_list json "required_artifacts"
   in
@@ -2383,6 +2419,8 @@ let decode_verification_request json =
     ; vr_task_title
     ; vr_submitted_by
     ; vr_created_at
+    ; vr_completion_contract
+    ; vr_review
     ; vr_required_artifacts
     ; vr_submitted_evidence
     ; vr_evidence_error

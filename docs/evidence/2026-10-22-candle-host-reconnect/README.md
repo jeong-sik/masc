@@ -1,6 +1,6 @@
 # Candle: real host reconnect and original payout
 
-Measured 2026-10-21 16:51–17:28 UTC in one isolated owned workspace. This is E01 progress in the [54-item worklist](../../../reports/addon-lane-full-worklist-20261021.md), not completion of that whole goal or operator deployment.
+Measured 2026-10-21 16:51–17:28 UTC in one isolated owned workspace. This is E01 progress in the [54-item worklist](../../reports/addon-lane-full-worklist-20261021.md), not completion of that whole goal or operator deployment.
 
 ## Source and execution identity
 

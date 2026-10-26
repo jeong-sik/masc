@@ -116,8 +116,11 @@ space = "masc"
 
 The picker then lists it as `ego lite · ego`. It reads and captures the pages
 of that one task space. It opens, moves and closes the pages an agent opened
-there, and clicks, scrolls and types on them; it does not drag, touch or act
-inside a frame
+there, and uses Ego's native snapshots, selectors and input, including hover,
+double-click, drag and option selection. Snapshot refs also address iframe
+content; explicit `framePath` and touch input are not supported. Keeper workflows
+can focus an editor, type or insert text, paste text/HTML through Ego's native
+clipboard restoration, and wait for the result before returning a final snapshot
 ([what it serves](../design/browser-lane.md#what-each-live-connection-serves)).
 
 | The host | First row |

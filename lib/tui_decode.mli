@@ -579,6 +579,19 @@ type harness_snapshot = {
   hs_overview : harness_overview option;
 }
 
+type verification_review_stop =
+  | Review_environment | Review_no_judgment | Review_commit_failure
+  | Review_failure | Review_cancelled
+
+type verification_review =
+  | Review_unobserved
+  | Review_running of string
+  | Review_stopped of { cause : verification_review_stop; detail : string; actor : string }
+  | Review_approved of string
+  | Review_rejected of string
+  | Review_superseded of string
+(** Last observed attempt, never a substitute for Task state or retry authority. *)
+
 (** One task waiting on a verdict, as the verification surface lists it. *)
 type verification_request = {
   vr_request_id : string;
@@ -587,6 +600,8 @@ type verification_request = {
       (** What would move it forward, when the server can say. *)
   vr_submitted_by : string;
   vr_created_at : string;
+  vr_completion_contract : string list;
+  vr_review : verification_review;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
   vr_evidence_error : string option;

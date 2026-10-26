@@ -38,6 +38,9 @@ flowchart LR
   아래층만 고쳐 따로 push하지 않습니다. 충돌은 맨 아래 PR이 아니라 스택 단위로 보고합니다.
 - 동시 작업은 별도 worktree로 격리합니다. Task claim은 담당을 조율하며 파일을 잠그거나
   다른 체크아웃을 수정할 권한을 주지는 않습니다.
+- 생성한 증거와 소스 사본은 `artifacts/` 아래에 둡니다. 루트 Dune 설정은 이 디렉터리를
+  데이터로 취급하여 파일을 보존하면서 복사된 빌드 설정은 평가하지 않습니다.
+  `.gitignore`만으로는 Dune의 소스 탐색을 막을 수 없습니다.
 - GitHub Native Stack은 REST `stack`을 먼저 읽고 [전용 절차](NATIVE-GITHUB-STACKS.md)를 따릅니다.
   맨 위 PR을 병합하여 스택 전체를 한 번에 반영하며, non-main 직접 base만으로 부모 선행 병합이나 수동 retarget을 요구하지 않습니다. 스택의 모든 PR을 검토합니다.
 - README는 제품 소개, CONTRIBUTING은 개발 시작, 매뉴얼은 사용법, 명세는 인터페이스,
@@ -236,6 +239,11 @@ PR 본문도 갱신합니다.
 Push하면 head가 바뀌므로 이전 리뷰가 새 변경을 증명하지 않습니다. REQUEST_CHANGES를
 남긴 리뷰어는 수정된 코드가 자신의 지적을 해결했으면 변경 요청을 해제합니다. CI 통과만으로
 리뷰 지적이 해결되지는 않습니다.
+재검토 후 `approve-guard.sh --replace-own-cr REVIEW_ID`로 자기 계정의 최신 열린 변경
+요청을 현재 head의 승인으로 바꿉니다. 다른 리뷰어의 변경 요청이 열려 있어도 독립 승인을
+기록할 수 있지만, 그 요청이 해결될 때까지 병합 판정과 source receipt는 계속 거절됩니다.
+가드는 다른 계정의 요청을 dismiss하지 않습니다. 별도 댓글 판정과 head·diff·신원·Release CI
+검사는 그대로 적용됩니다.
 
 일반 소스 리뷰 판정에는 실제 값을 적습니다.
 
@@ -288,6 +296,10 @@ Release head는 완료된 전체 CI가 필요합니다. Fork 기여자는 mainta
 기존 일반/Release 정책을 따르며 새 실행 결과를 읽지 않은 범위의 성공으로 확대하지 않습니다.
 
 ## 6. 증거 제출과 재개
+
+[저장 위치 안내](WORKSPACE-STORAGE.ko.md)를 따른다. 새 실행 산출물은 저장소의
+`artifacts/`, 보존할 검증 자료는 `docs/evidence/`, 조사 문서는
+`docs/research/`, 정리된 보고서는 `docs/reports/`에 둔다.
 
 MASC Task는 요약과 증거를 담아 `submit_for_verification`으로 제출합니다. `done`은
 스스로 완료하는 방법이 아닙니다. 현재 도구 스키마와

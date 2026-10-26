@@ -11,9 +11,9 @@ def sha256(path):
 
 
 repo = Path(__file__).resolve().parents[1]
-directory = repo / "docs/evidence/fusion-report-20260930"
+directory = repo / "artifacts/fusion-report-preview"
 composition = directory / "composition.json"
-preview = repo / "docs/design/fusion-report-preview.html"
+preview = directory / "fusion-report-preview.html"
 capture = json.loads(composition.read_text())
 report = next(row for row in capture["report_output"]["rows"] if row["lane_id"] == "fusion/report")
 context = next(row for row in capture["report_output"]["rows"] if row["id"] in report["related_ids"])

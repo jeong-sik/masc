@@ -1218,6 +1218,28 @@ let test_the_unresolved_list_is_bounded_by_the_page () =
 
 (* ── Registration ───────────────────────────────────── *)
 
+let test_review_observation_refreshes_without_changing_the_submission () =
+  with_temp_base_path (fun base_path ->
+    let request=create_pending_request ~base_path ~task_id:"task-observed" ~worker:"w" ~criteria:[] ~evidence:[] in
+    let registry=Masc.Verification_run_registry.global () in
+    let observation () =
+      let json=D.requests_json ~base_path () in
+      match member "requests" json with
+      | `List [row] -> member "review_observation" row
+      | _ -> Alcotest.fail "request missing" in
+    let state () = Yojson.Safe.Util.(member "state" (observation ()) |> to_string) in
+    Alcotest.(check string) "no attempt observed" "unobserved" (state ());
+    Masc.Verification_run_registry.register_running registry ~verification_id:request.id
+      ~task_id:request.task_id ~producer:request.worker ~authority_kind:"system_llm_agent"
+      ~authority_actor:"verifier_exact" ~started_at:1.;
+    Alcotest.(check string) "fresh running observation" "running" (state ());
+    Masc.Verification_run_registry.mark_completed registry ~verification_id:request.id
+      ~outcome:(Masc.Verification_run_registry.Infrastructure_unavailable {stage=Lookup_surface;detail="workspace missing"})
+      ~tools:[] ~elapsed_s:1. ();
+    Alcotest.(check string) "fresh stopped observation" "unavailable" (state ());
+    Alcotest.(check string) "actual reason retained" "workspace missing"
+      Yojson.Safe.Util.(member "detail" (observation ()) |> to_string))
+
 let () =
   Alcotest.run "dashboard_verification" [
     "requests_json", [
@@ -1259,6 +1281,8 @@ let () =
         test_a_request_whose_row_cannot_be_built_is_reported_unreadable;
     ];
     "queue_view", [
+      Alcotest.test_case "attempt observations refresh separately from cached submissions" `Quick
+        test_review_observation_refreshes_without_changing_the_submission;
       Alcotest.test_case "awaiting tasks name the request they wait on" `Quick
         test_awaiting_tasks_read_the_id_the_task_waits_on;
       Alcotest.test_case "the queue joins on that request, not on status" `Quick

@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-current_graph=${LIB_DEP_CURRENT_GRAPH:-reports/lib-dependency-graph.json}
-baseline_graph=${LIB_DEP_BASELINE_GRAPH:-reports/lib-dependency-graph.baseline.json}
-summary_md=${LIB_DEP_SUMMARY_MD:-reports/lib-dependency-summary.md}
-summary_json=${LIB_DEP_SUMMARY_JSON:-reports/lib-dependency-summary.json}
+current_graph=${LIB_DEP_CURRENT_GRAPH:-artifacts/dependencies/lib-dependency-graph.json}
+baseline_graph=${LIB_DEP_BASELINE_GRAPH:-artifacts/dependencies/lib-dependency-graph.baseline.json}
+summary_md=${LIB_DEP_SUMMARY_MD:-artifacts/dependencies/lib-dependency-summary.md}
+summary_json=${LIB_DEP_SUMMARY_JSON:-artifacts/dependencies/lib-dependency-summary.json}
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
 mkdir -p "$(dirname "$current_graph")"
 
-python3 scripts/analyze_lib_deps.py --json
+python3 scripts/analyze_lib_deps.py --json-out "$current_graph"
 
 baseline_args=()
 baseline_tree=""
@@ -31,9 +31,9 @@ if [[ -n "${GITHUB_BASE_REF:-}" && "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]
 
   (
     cd "$baseline_tree"
-    python3 scripts/analyze_lib_deps.py --json
+    python3 scripts/analyze_lib_deps.py --json-out artifacts/dependencies/lib-dependency-graph.json
   )
-  cp "$baseline_tree/reports/lib-dependency-graph.json" "$baseline_graph"
+  cp "$baseline_tree/artifacts/dependencies/lib-dependency-graph.json" "$baseline_graph"
   baseline_args=(--baseline "$baseline_graph")
 elif [[ -f "$baseline_graph" ]]; then
   baseline_args=(--baseline "$baseline_graph")

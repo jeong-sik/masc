@@ -19,7 +19,7 @@ Stdlib only. Every failure is recorded as data, never swallowed:
 each probe result carries either measurements or an "error" field.
 
 Usage:
-  python3 scripts/bench-web-tools.py -o docs/evidence/web-tools-bench.json
+  python3 scripts/bench-web-tools.py -o artifacts/web-tools/web-tools-bench.json
 """
 
 from __future__ import annotations
@@ -373,6 +373,7 @@ def main() -> None:
         },
         "mcp_tool": probe(probe_mcp, MCP_URL),
     }
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as handle:
         json.dump(evidence, handle, ensure_ascii=False, indent=2)
         handle.write("\n")

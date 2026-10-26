@@ -1163,6 +1163,15 @@ let read_verification_evidence ~prepare ~(host : string) ~(port : int)
         | exception Yojson.Json_error detail -> Error (Failure.Invalid_json detail))
 let fetch_verification_evidence ~host ~port ~task_id ~verification_id =
   read_verification_evidence ~prepare:Fun.id ~host ~port ~task_id ~verification_id
+let fetch_verification_evidence_file ~host ~port ~task_id ~verification_id ~index =
+  let path = Uri.make ~path:"/api/v1/verification/evidence"
+    ~query:["task_id",[task_id];"verification_id",[verification_id];"item_index",[string_of_int index]] ()
+    |> Uri.to_string in
+  let ( let* ) = Result.bind in
+  let* json = get_json ~host ~port ~path in
+  Masc_tui_response_decode.run ~name:"verification.file.decode_wait" (fun () ->
+    Masc_tui_evidence_file.decode ~task_id ~verification_id ~index json)
+
 let fetch_original_verification_evidence ~host ~port ~task_id ~verification_id =
   read_verification_evidence ~prepare:(Masc_tui_original_task_read.prepare_evidence ~task_id ~verification_id)
     ~host ~port ~task_id ~verification_id

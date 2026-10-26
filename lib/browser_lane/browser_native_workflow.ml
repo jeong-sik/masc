@@ -1,10 +1,14 @@
 type element_state = Attached | Detached | Visible | Hidden
 type load_state = Dom_content_loaded | Load | Network_idle
 type selection = One of string | Many of string list
+type clipboard_content = { text : string; html : string option }
 type action =
   | Click of string | Double_click of string | Hover of string
   | Fill of { selector : string; text : string }
   | Press of { selector : string; key : string }
+  | Focus of string | Reload
+  | Keyboard_type of string | Keyboard_insert_text of string
+  | Keyboard_paste of clipboard_content | Keyboard_press of string
   | Select_option of { selector : string; selection : selection }
   | Goto of string | Wait_for_url of string
   | Wait_for_selector of { selector : string; state : element_state }
@@ -22,6 +26,9 @@ let required name fields = Option.to_result ~none:("workflow requires " ^ name) 
 let text name fields = let* value = required name fields in match value with
   | `String value when String.trim value <> "" -> Ok value
   | _ -> Error (name ^ " must be a nonempty string")
+let string_field name fields = let* value = required name fields in match value with
+  | `String value -> Ok value
+  | _ -> Error (name ^ " must be a string")
 let integer name fields = let* value = required name fields in match value with
   | `Int value when value >= 0 && Int64.of_int value <= 9007199254740991L -> Ok value
   | _ -> Error (name ^ " must be a nonnegative JavaScript-safe integer")
@@ -39,7 +46,7 @@ let load_state = function
   | _ -> Error "unknown native load state"
 let load_state_name = function Dom_content_loaded -> "domcontentloaded" | Load -> "load" | Network_idle -> "networkidle"
 let step_of_json value =
-  let* fields = object_fields ["method";"selector";"text";"key";"url";"value";"values";"state";"timeoutMs"] value in
+  let* fields = object_fields ["method";"selector";"text";"html";"key";"url";"value";"values";"state";"timeoutMs"] value in
   let* method_ = text "method" fields in
   let arguments names = object_fields ("method" :: "timeoutMs" :: names) value in
   let selector () = text "selector" fields in
@@ -57,6 +64,27 @@ let step_of_json value =
       (match raw with `String text -> Ok (Fill {selector;text}) | _ -> Error "fill requires string text")
     | "press" -> let* _ = arguments ["selector";"key"] in
       let* selector = selector () in let* key = text "key" fields in Ok (Press {selector;key})
+    | "focus" -> let* _ = arguments ["selector"] in
+      let* selector = selector () in Ok (Focus selector)
+    | "reload" -> let* _ = arguments [] in Ok Reload
+    | "keyboard.type" | "keyboard.insertText" ->
+      let* _ = object_fields ["method";"text"] value in
+      let* text = string_field "text" fields in
+      (match method_ with
+       | "keyboard.type" -> Ok (Keyboard_type text)
+       | "keyboard.insertText" -> Ok (Keyboard_insert_text text)
+       | _ -> Error "unknown native keyboard text method")
+    | "keyboard.paste" ->
+      let* _ = object_fields ["method";"text";"html"] value in
+      let* text = string_field "text" fields in
+      let* html = match List.assoc_opt "html" fields with
+        | None -> Ok None
+        | Some (`String html) -> Ok (Some html)
+        | Some _ -> Error "html must be a string" in
+      Ok (Keyboard_paste {text;html})
+    | "keyboard.press" ->
+      let* _ = object_fields ["method";"key"] value in
+      let* key = text "key" fields in Ok (Keyboard_press key)
     | "selectOption" ->
       let* _ = arguments ["selector";"value";"values"] in let* selector = selector () in
       let* selection = match List.assoc_opt "value" fields, List.assoc_opt "values" fields with
@@ -97,19 +125,29 @@ let of_json value =
     | _ -> Error "steps must be a native Page call array" in
   Ok {tab_id;expected_url;steps;snapshot_scope;max_chars}
 let is_effect = function
-  | Click _ | Double_click _ | Hover _ | Fill _ | Press _ | Select_option _ | Goto _ -> true
+  | Click _ | Double_click _ | Hover _ | Fill _ | Press _ | Focus _ | Reload
+  | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
+  | Select_option _ | Goto _ -> true
   | Wait_for_url _ | Wait_for_selector _ | Wait_for_load_state _ -> false
 let method_name = function
   | Click _ -> "click" | Double_click _ -> "dblclick" | Hover _ -> "hover" | Fill _ -> "fill"
   | Press _ -> "press" | Select_option _ -> "selectOption" | Goto _ -> "goto" | Wait_for_url _ -> "waitForURL"
+  | Focus _ -> "focus" | Reload -> "reload"
+  | Keyboard_type _ -> "keyboard.type" | Keyboard_insert_text _ -> "keyboard.insertText"
+  | Keyboard_paste _ -> "keyboard.paste" | Keyboard_press _ -> "keyboard.press"
   | Wait_for_selector _ -> "waitForSelector" | Wait_for_load_state _ -> "waitForLoadState"
 let string value = `String value
 let step_to_json {action;timeout_ms} =
   let selector value = ["selector",string value] in
   let fields = match action with
-    | Click s | Double_click s | Hover s -> selector s
+    | Click s | Double_click s | Hover s | Focus s -> selector s
     | Fill {selector=s;text} -> selector s @ ["text",string text]
     | Press {selector=s;key} -> selector s @ ["key",string key]
+    | Reload -> []
+    | Keyboard_type text | Keyboard_insert_text text -> ["text",string text]
+    | Keyboard_paste {text;html} -> ["text",string text]
+        @ Option.to_list (Option.map (fun html -> "html",string html) html)
+    | Keyboard_press key -> ["key",string key]
     | Select_option {selector=s;selection} -> selector s @
       (match selection with One value -> ["value",string value] | Many values -> ["values",`List (List.map string values)])
     | Goto url | Wait_for_url url -> ["url",string url]

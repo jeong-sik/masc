@@ -1,0 +1,72 @@
+{
+  "result": "PASS",
+  "helper_source": "a7685562be55678229ce29668c624d222cd76d67",
+  "helper_sha256": "b1463d327eb76f49cde71871b0da4c9eb8c664215ab5258a4a805ca8c2fd4efd",
+  "shim_source": "327fd90f7fec1a07f4ca7e5836d5cad3e8e39c15",
+  "shim_sha256": "a53e5b79eda98a5a4a97c13e772b7b6c0fe724640078690c0445c848b6c88861",
+  "keeper": "native-fresh-20261026",
+  "phases": [
+    {
+      "phase": "first-create",
+      "exit_code": 0,
+      "argv": [
+        "/tmp/mssh-candidate-runtime-a768556/masc-exec-ssh-bootstrap",
+        "--base-path",
+        "/tmp/mssh-bootstrap-native-20261025/workspace",
+        "--endpoint",
+        "bootstrap_proof",
+        "--shim",
+        "/tmp/mssh-static-shim-327fd90/masc-exec-shim-linux-arm64",
+        "--keeper",
+        "native-fresh-20261026"
+      ],
+      "output_sha256": "ac21c284151261f9ac7c152dbf2cf63f08a36e75196f65d865dd9531057b1090"
+    },
+    {
+      "phase": "repeat",
+      "exit_code": 0,
+      "argv": [
+        "/tmp/mssh-candidate-runtime-a768556/masc-exec-ssh-bootstrap",
+        "--base-path",
+        "/tmp/mssh-bootstrap-native-20261025/workspace",
+        "--endpoint",
+        "bootstrap_proof",
+        "--shim",
+        "/tmp/mssh-static-shim-327fd90/masc-exec-shim-linux-arm64",
+        "--keeper",
+        "native-fresh-20261026"
+      ],
+      "output_sha256": "33dadbe925f591c143cb002bf969466be242553de23b7131ccccae3e6fc52451"
+    }
+  ],
+  "key_authentication": "preauthorized identity; password first copy not covered",
+  "created": {
+    "owner": 1000,
+    "mode": 448,
+    "entries": [],
+    "sha256": null,
+    "github_hosts_exists": false
+  },
+  "before_repeat": {
+    "owner": 1000,
+    "mode": 448,
+    "entries": [
+      "fresh retained.bin"
+    ],
+    "sha256": "8082f5cd46110eed0a085cc180389014d700be3e80da7342288395615e5eeaff",
+    "github_hosts_exists": false
+  },
+  "after_repeat": {
+    "owner": 1000,
+    "mode": 448,
+    "entries": [
+      "fresh retained.bin"
+    ],
+    "sha256": "8082f5cd46110eed0a085cc180389014d700be3e80da7342288395615e5eeaff",
+    "github_hosts_exists": false
+  },
+  "config_sha256": "291a7af34eaec767948b24b26ff5843f2b8def4f8f4cea4a8db7e953356da6ee",
+  "github_tokens_supplied": false,
+  "driver_sha256": "177a29e6c92c8be712dcdbe6b93f1d3249421ed3a1e8f0bdc52f4c11066b970e",
+  "recorded_at": "2026-10-26T00:12:28.988480+00:00"
+}

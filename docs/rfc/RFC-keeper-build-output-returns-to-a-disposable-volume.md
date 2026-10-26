@@ -371,7 +371,7 @@ guaranteed correct for content that is 100% derived.
 
 **Full keeper purge/recreate via `masc_keeper_down` + dashboard purge.**
 Already exists and already works (measured in
-`docs/research/2026-08-30-keeper-purge-profile-teardown-linux-runtime-r1.md`)
+`docs/evidence/research/2026-08-30-keeper-purge-profile-teardown-linux-runtime-r1.md`)
 — it removes the microVM playground along with core, memory, TOML and chat
 store. Correct for decommissioning a keeper. Wrong for this problem: it
 throws away everything, including state this RFC is explicitly trying to

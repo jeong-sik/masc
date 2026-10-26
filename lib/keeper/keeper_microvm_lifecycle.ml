@@ -20,6 +20,18 @@ type t =
 
 type admission = Wait_for_inventory of unit Eio.Promise.t | Admitted of ticket
 
+type scope_phase = Open of int | Closing of int | Closed
+
+type keeper_scope =
+  { coordinator : t
+  ; keeper : string
+  ; mutable phase : scope_phase
+  ; drained : unit Eio.Promise.t
+  ; signal_drained : unit Eio.Promise.u
+  }
+
+type scope_error = Scope_closed | Other_keeper | Other_coordinator
+
 let create () =
   {registry = Stdlib.Mutex.create (); inventory = Eio.Mutex.create ();
    locks = []; active = []; reopening = None}
@@ -61,10 +73,57 @@ let release t ticket =
       t.locks <- List.filter (fun lock -> lock != ticket.lock) t.locks);
   Eio.Promise.resolve ticket.resolve ()
 
-let with_keeper t ~keeper_name callback =
+let release_borrow scope =
+  let signal = Stdlib.Mutex.protect scope.coordinator.registry (fun () ->
+    match scope.phase with
+    | Open count ->
+      assert (count > 0);
+      scope.phase <- Open (count - 1);
+      false
+    | Closing 1 -> scope.phase <- Closed; true
+    | Closing count ->
+      assert (count > 1);
+      scope.phase <- Closing (count - 1);
+      false
+    | Closed -> assert false) in
+  if signal then Eio.Promise.resolve scope.signal_drained ()
+
+let with_borrowed_scope t ~scope ~keeper_name callback =
+  if t != scope.coordinator then Error Other_coordinator
+  else if Common.safe_filename keeper_name <> scope.keeper then Error Other_keeper
+  else (
+    Eio.Fiber.check ();
+    let admitted = Stdlib.Mutex.protect t.registry (fun () ->
+      match scope.phase with
+      | Open count -> scope.phase <- Open (count + 1); true
+      | Closing _ | Closed -> false) in
+    if not admitted then Error Scope_closed
+    else
+      Ok (Fun.protect
+        ~finally:(fun () -> Eio.Cancel.protect (fun () -> release_borrow scope))
+        (fun () -> Eio.Cancel.protect callback)))
+
+let close_and_drain scope =
+  let await = Stdlib.Mutex.protect scope.coordinator.registry (fun () ->
+    match scope.phase with
+    | Open 0 -> scope.phase <- Closed; false
+    | Open count -> scope.phase <- Closing count; true
+    | Closing _ | Closed -> assert false) in
+  if await then Eio.Promise.await scope.drained
+
+let with_keeper_scope t ~keeper_name callback =
   let ticket = admit t (Common.safe_filename keeper_name) in
   Fun.protect ~finally:(fun () -> release t ticket)
-    (fun () -> protected_action ticket.lock.mutex callback)
+    (fun () -> protected_action ticket.lock.mutex (fun () ->
+      let drained, signal_drained = Eio.Promise.create () in
+      let scope = {coordinator = t; keeper = ticket.lock.name; phase = Open 0;
+                   drained; signal_drained} in
+      Fun.protect
+        ~finally:(fun () -> Eio.Cancel.protect (fun () -> close_and_drain scope))
+        (fun () -> callback scope)))
+
+let with_keeper t ~keeper_name callback =
+  with_keeper_scope t ~keeper_name (fun _ -> callback ())
 
 let with_inventory t callback =
   Eio.Mutex.use_ro t.inventory (fun () ->

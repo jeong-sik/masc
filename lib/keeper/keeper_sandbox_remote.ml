@@ -1070,19 +1070,24 @@ let run_preflight_command_at t ~request_root ~cwd ~error_code argv =
   let run =
     runner_for_root ~request_root ~timeout_sec:(preflight_timeout_sec t) t
   in
-  let status, stdout, stderr =
-    Masc_exec.Sandbox_target.status_tuple
-      (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
-         ~argv ~env:[||] ~cwd:(Some cwd))
-  in
-  match status with
-  | Unix.WEXITED 0 -> Ok stdout
-  | Unix.WEXITED exit_code ->
+  match
+    run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+      ~argv ~env:[||] ~cwd:(Some cwd)
+  with
+  | Masc_exec.Sandbox_target.Transport_failed { reason; stderr; _ } ->
+    Error
+      (Printf.sprintf "%s: endpoint %s reason=%s stderr=%s"
+         (code t "preflight_unavailable") t.name reason
+         (Exec_policy.truncate_for_log stderr))
+  | Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout; _ } ->
+    Ok stdout
+  | Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED exit_code; stderr; _ } ->
     Error
       (Printf.sprintf "%s: endpoint %s ran [%s] exit=%d stderr=%s"
          error_code t.name (preflight_argv_for_log argv) exit_code
          (Exec_policy.truncate_for_log stderr))
-  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+  | Masc_exec.Sandbox_target.Ran
+      { status = (Unix.WSIGNALED signal | Unix.WSTOPPED signal); stderr; _ } ->
     Error
       (Printf.sprintf "%s: endpoint %s ran [%s] signal=%d stderr=%s"
          error_code t.name (preflight_argv_for_log argv) signal

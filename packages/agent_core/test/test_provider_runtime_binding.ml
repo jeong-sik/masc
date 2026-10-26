@@ -746,7 +746,16 @@ supports_named_tool_choice = false
            ~tool_choice:named
            ()
        in
-       expect_named_tool_choice_rejected "bare zai glm named" bare_zai_glm;
+       Alcotest.(check bool) "bare zai URL does not infer model policy" true
+         (Option.is_none
+            (Llm_provider.Provider_config.capabilities_for_config_model bare_zai_glm));
+       let _, source =
+         Llm_provider.Provider_config.resolve_request_capabilities bare_zai_glm
+       in
+       Alcotest.(check bool) "bare zai request uses anonymous chat protocol" true
+         (source = Llm_provider.Provider_config.Provider_default_capability);
+       expect_tool_choice_ok "bare zai glm named" bare_zai_glm;
+       expect_named_tool_choice_serialized "bare zai glm named" bare_zai_glm;
        let bare_zai_glm_any =
          Llm_provider.Provider_config.make
            ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -755,7 +764,11 @@ supports_named_tool_choice = false
            ~tool_choice:Types.Any
            ()
        in
-       expect_required_tool_choice_rejected "bare zai glm any" bare_zai_glm_any;
+       expect_tool_choice_ok "bare zai glm any" bare_zai_glm_any;
+       Alcotest.(check (option string)) "bare zai glm required choice is serialized"
+         (Some "required")
+         (Option.map Yojson.Safe.Util.to_string
+            (request_tool_choice_field bare_zai_glm_any));
        let hosted_minimax_named =
          Llm_provider.Provider_config.make
            ~kind:Llm_provider.Provider_config.OpenAI_compat

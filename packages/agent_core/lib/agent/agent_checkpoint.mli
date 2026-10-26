@@ -22,6 +22,8 @@ type binding_disposition =
   | Declared_endpoint_rotation
   | Rebound_without_replay_loss
   | Replay_disabled_by_caller
+  | Rebound_pending_dispatch of
+      Llm_provider.Reasoning_history_projection.reasoning_replay_drop list
 
 val binding_disposition_to_string : binding_disposition -> string
 
@@ -43,11 +45,16 @@ type resume_state =
     use those defaults. Returns state + context; the caller wraps these into
     [Agent.t]. When an exact [provider_config] is supplied, its effective model
     and knobs are overlaid from the restored config and frozen once. Incompatible
-    reasoning returns a typed error before context copying or Agent construction.
+    reasoning returns a typed error before context copying or Agent construction
+    unless [source_change_policy = Exclude_unselected] explicitly permits
+    provisional source-change admission; its disposition retains the pending
+    indices/producers. Dispatch must validate the final query boundary before
+    excluding any foreign artifact. Canonical messages remain identical.
     The admitted carrier is returned so dispatch keeps that snapshot. Without a
     provider target, restoration cannot dispatch and retains all canonical data. *)
 val build_resume
   :  checkpoint:Checkpoint.t
+  -> ?source_change_policy:Llm_provider.Reasoning_history_projection.source_change_policy
   -> ?eio_context:bool
   -> ?config:Types.agent_config
   -> ?provider_config:Llm_provider.Provider_config.t

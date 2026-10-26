@@ -1,0 +1,16 @@
+Endpoint bootstrap_proof (127.0.0.1:65479) ED25519 host-key fingerprint:
+SHA256:MlAet0f4elnlFVGg4/vxQqtfvzMkecAITbrQUI8Z8yo
+
+Verify it out-of-band, then retype exactly: /usr/bin/ssh-copy-id: INFO: Source of key(s) to be installed: "/tmp/mssh-bootstrap-native-20261025/workspace/.masc/ssh/bootstrap.key.pub"
+/usr/bin/ssh-copy-id: INFO: attempting to log in with the new key(s), to filter out any that are already installed
+
+/usr/bin/ssh-copy-id: WARNING: All keys were skipped because they already exist on the remote system.
+		(if you think this is a mistake, you may want to use -f option)
+
+[2026-10-25 23:44:59] [WARN] [Keeper/bootstrap] remote_shim_outdated: endpoint bootstrap_proof runs a shim that does not name its release (it predates the stamp) and this server is 0.64.0; reinstall it with masc-exec-ssh-bootstrap --endpoint bootstrap_proof --shim <the masc-exec-shim-linux-ARCH asset of 0.64.0>
+[2026-10-25 23:44:59] [INFO] [Keeper] remote SSH dispatch enabled endpoint=bootstrap_proof host=127.0.0.1 port=65479
+masc-exec-ssh-bootstrap: remote_ssh_preflight_unavailable: endpoint
+                         bootstrap_proof reason=remote_ssh_shim_config_error:
+                         unknown key "env_file"
+                         stderr=remote_ssh_shim_config_error: unknown key
+                         "env_file"

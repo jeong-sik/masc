@@ -209,6 +209,13 @@ val read_binary_body_base64 :
     {!read_binary_error}; in every case the judge then rests on the
     reference-and-hash line in the prompt (RFC-0436 §4.4/§4.5). *)
 
+val read_binary_body_for_operator_base64 :
+  base_path:string -> submitted_evidence_item -> (string, read_binary_error) result
+(** Read a retained download using its recorded file size as the read bound.
+    The owned-file and size/digest checks are identical to the attachment
+    reader, but the model's inline delivery ceiling does not cap an explicit
+    operator download. A body larger than its recorded size is refused. *)
+
 val snapshot_submitted_evidence_json :
   ?artifact_read:(worker:string -> relative:string -> artifact_read_result) ->
   ?request_id:string ->

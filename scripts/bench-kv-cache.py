@@ -15,6 +15,7 @@ Output: one JSON line per turn on stdout and appended to --out.
 Evidence SSOT: docs/evidence/kv-cache-harness-2026-08-16.jsonl
 """
 
+from pathlib import Path
 import argparse
 import json
 import sys
@@ -145,9 +146,10 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=120)
     ap.add_argument("--model", default="qwen3.8-27b")
     ap.add_argument("--timeout", type=int, default=1800)
-    ap.add_argument("--out", default="kv_harness_results.jsonl")
+    ap.add_argument("--out", default="artifacts/kv-cache/kv_harness_results.jsonl")
     args = ap.parse_args()
 
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     with open(args.out, "a") as out:
         for scenario in args.scenarios.split(","):
             erase_slots(args.base)

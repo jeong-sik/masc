@@ -53,7 +53,7 @@ the final compiler/link/execution commands all exit zero.
 | --- | --- | --- |
 | Machines TOML namespace/configuration | Runtime schema, parse, materialize and atomic publication | Actual leaf parser executed; Runtime source test extended, not run |
 | MSX/DOS typed activity refusal | Tools, MSX HTTP, DOS Play/controller | Actual owners typechecked; MSX executed; native route/tool tests not run |
-| Required inventory activity | Server serializer, TUI decoder/display, Web decoder/component | [Readout checks](../../../dashboard/evidence/2026-10-05-machine-lane-activity/README.md) |
+| Required inventory activity | Server serializer, TUI decoder/display, Web decoder/component | [Readout checks](../dashboard/2026-10-05-machine-lane-activity/README.md) |
 
 `syntax.json` records parsing of all changed OCaml sources with 5.5.1. It does
 not establish full type compatibility or linking.

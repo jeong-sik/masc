@@ -1,4 +1,12 @@
-# Evidence provenance
+# Retained evidence
+
+Store selected verification bundles here. New run output belongs under the
+Git-ignored repository `artifacts/` directory. See the
+[storage guide](../guides/WORKSPACE-STORAGE.md) for capture, retention and runtime
+boundaries. Dashboard captures are under [dashboard/](dashboard/); measurement
+records supporting investigations are under [research/](research/).
+
+## Evidence provenance
 
 Reports listed in [anonymization.json](anonymization.json) contain neutral
 organization labels and example locations in place of company-specific

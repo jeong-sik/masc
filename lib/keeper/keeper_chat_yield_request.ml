@@ -29,7 +29,8 @@ let request ~turn ~base_path ~keeper_name =
   match turn with
   | Autonomous -> chat_request ~turn ~base_path ~keeper_name
   | Direct _ ->
-    (match Keeper_scheduled_turn_handoff.request ~excluding:[] ~base_path ~keeper_name with
+    (match Keeper_scheduled_turn_handoff.request
+            ~intake:Keeper_heartbeat_source_batch.empty ~base_path ~keeper_name with
      | Error (Keeper_scheduled_turn_handoff.Owner_unavailable error) ->
        Error (Keeper_owner_registry.command_error_to_string error)
      | Error (Queue_unavailable detail) ->

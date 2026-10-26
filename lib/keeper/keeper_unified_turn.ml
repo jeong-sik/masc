@@ -498,11 +498,13 @@ let make_autonomous_yield_probe ~on_attention_read ~wake ~sources ~base_path ~ke
                       && Keeper_heartbeat_stimulus_intake.stimulus_ready_for_intake ~base_path s.source)
                  |> queue_of |> filter_pending in
                if Keeper_event_queue.is_empty ready then
-                 (* No new independent outcome: scheduled sources outside this
-                    turn's exact cohort still hand off at the post-tool boundary. *)
+                 (* No new independent outcome: a schedule that arrived after
+                    intake still hands off at the post-tool boundary. Scheduled
+                    work intake already saw, including a suspended predecessor,
+                    cannot repeatedly preempt the successor that just received
+                    its slot. *)
                  (match Keeper_scheduled_turn_handoff.request
-                          ~excluding:(Keeper_heartbeat_source_batch.selections sources)
-                          ~base_path ~keeper_name with
+                          ~intake:sources ~base_path ~keeper_name with
                   | Error (Keeper_scheduled_turn_handoff.Owner_unavailable error) ->
                     Error (Keeper_owner_registry.command_error_to_string error)
                   | Error (Queue_unavailable detail) ->

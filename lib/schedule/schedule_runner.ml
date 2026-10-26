@@ -520,11 +520,29 @@ let replay_settlement config ~clock (pending : pending_settlement) =
                  ~attempt:retained.attempt ~failure_scope ~error)
             |> Result.map_error (fun error -> Store_settlement_error error)) in
       result, retained in
+  let keep failure =
+    Some retained,
+    Some { occurrence_id = retained.occurrence_id; schedule_id = retained.schedule_id; failure }
+  in
   match result with
-  | Ok _ | Error (Store_settlement_error (Schedule_store.Running_attempt_superseded _
-                                         | Schedule_store.Schedule_not_found)) -> None, None
-  | Error failure -> Some retained,
-      Some { occurrence_id = retained.occurrence_id; schedule_id = retained.schedule_id; failure }
+  | Ok _ -> None, None
+  | Error ((Finish_clock_raised _ | Store_settlement_raised _) as failure) -> keep failure
+  | Error (Store_settlement_error error as failure) ->
+    (match error with
+     | Schedule_store.Running_attempt_superseded _ | Schedule_store.Schedule_not_found ->
+       None, None
+     | Schedule_store.Schedule_already_exists
+     | Schedule_store.Not_schedule_owner _
+     | Schedule_store.Invalid_initial_status _
+     | Schedule_store.Transition_refused _
+     | Schedule_store.Changed_due_already_past _
+     | Schedule_store.Interval_below_runner_tick _
+     | Schedule_store.Running_wake_absent _
+     | Schedule_store.Running_wake_settled _
+     | Schedule_store.Schedule_not_due_candidate
+     | Schedule_store.Running_attempt_unavailable _
+     | Schedule_store.Persistence_failed _
+     | Schedule_store.Corrupt_ledger _ -> keep failure)
 ;;
 
 let finish_dispatch config ~now ~clock ~attempt ~occurrence_id ~schedule_id ~schedule_instance_id verdict =

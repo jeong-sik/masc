@@ -1,5 +1,7 @@
 # Repository documents and run output
 
+[한국어](WORKSPACE-STORAGE.ko.md)
+
 Choose a location by what the file is for. All paths in this table are relative
 to the MASC repository, except the explicitly marked runtime paths.
 

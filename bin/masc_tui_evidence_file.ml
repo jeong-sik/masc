@@ -37,13 +37,36 @@ let decode ~task_id ~verification_id ~index json =
 type progress = Not_started | Writing of string | Saved of string
 
 let save ~fs ~directory ~directory_name ~path t =
+  let ( let* ) = Result.bind in
   try
-    Eio.Path.with_open_dir Eio.Path.(fs / directory) (fun parent ->
-      let destination = Eio.Path.(parent / directory_name) in
+    Eio.Path.with_open_dir Eio.Path.(fs / directory) (fun registry_root ->
+      let destination = Eio.Path.(registry_root / directory_name) in
       Eio.Path.mkdir ~perm:0o700 destination;
-      Fs_compat.create_file_exclusive ~fs ~owner:"tui-evidence-export"
-        ~path ~permissions:0o600 t.contents)
-    |> Result.map_error (fun detail -> path ^ ": " ^ detail)
+      Eio.Path.with_open_dir destination (fun parent ->
+        let root = Eio.Path.stat ~follow:true parent in
+        let* target =
+          Fs_compat.capability_publication_target
+            ~allowed_root_path:(Filename.dirname path)
+            ~allowed_root_device:root.dev ~allowed_root_inode:root.ino
+            ~parent_components:[] ~target_leaf:t.name ~permissions:0o600
+          |> Result.map_error Fs_compat.capability_publication_target_error_to_string
+        in
+        Eio.Switch.run @@ fun sw ->
+        let* registry =
+          Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root
+          |> Result.map_error Fs_compat.Publication_recovery.registry_error_to_string
+        in
+        match Fs_compat.Publication_recovery.with_lane
+          ~registry ~owner:"tui-evidence-export" (fun recovery ->
+            Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target t.contents
+            |> Result.map_error Fs_compat.capability_write_error_to_string)
+        with
+        | Error error -> Error (Fs_compat.Publication_recovery.lane_open_error_to_string error)
+        | Ok (Fs_compat.Publication_recovery.Lane_released result) -> result
+        | Ok (Fs_compat.Publication_recovery.Lane_release_failed { value; release_failure }) ->
+          let detail = Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
+          Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail)))
+    |> Result.map_error (fun error -> path ^ ": " ^ error)
   with
   | Eio.Io _ as ex -> Error (path ^ ": " ^ Format.asprintf "%a" Eio.Exn.pp ex)
   | Sys_error detail -> Error (path ^ ": " ^ detail)

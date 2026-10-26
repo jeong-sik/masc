@@ -5987,7 +5987,7 @@ let test_scheduled_source_handoff case () =
        check int "only the original surviving cohort is prioritized"
          (if case = Replaced_consumer_handoff then 2 else 1) (List.length sources);
        check bool "exact cohort is preserved despite additions" true
-         (Keeper_scheduled_turn_handoff.same_selection expected (List.hd sources));
+         (Keeper_event_queue_state.equal_pending_selection expected (List.hd sources));
        record "source") with
      | Ok (`Ran ()) -> () | _ -> fail "the source did not receive the next slot");
     ignore (await_terminal owner next 1_000);

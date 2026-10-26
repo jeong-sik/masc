@@ -1230,7 +1230,7 @@ let heartbeat_event_intake_with_priority
       (* Revalidate against this actual intake snapshot. A withdrawn or reinserted
          source never borrows the old handoff's admission preference. *)
       let preferred, rest = List.partition (fun source ->
-        List.exists (Keeper_scheduled_turn_handoff.same_selection source) priority_sources) selections in
+        List.exists (Keeper_event_queue_state.equal_pending_selection source) priority_sources) selections in
       let batch = ready_batch (preferred @ rest) in
       let observations, selections, withdrawn, error =
         consume_batch batch

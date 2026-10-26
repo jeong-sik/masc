@@ -1,10 +1,3 @@
-let same_selection (left : Keeper_event_queue_state.pending_selection)
-    (right : Keeper_event_queue_state.pending_selection) =
-  Int64.equal left.admitted_revision right.admitted_revision
-  && String.equal
-       (Keeper_event_queue_state.source_snapshot_ref left.source)
-       (Keeper_event_queue_state.source_snapshot_ref right.source)
-
 let is_scheduled (source : Keeper_event_queue.stimulus) =
   match source.payload with
   | Keeper_event_queue.Schedule_due _ -> true
@@ -40,7 +33,7 @@ let request ~excluding ~base_path ~keeper_name =
     let* pending = pending ~base_path ~keeper_name
       |> Result.map_error (fun detail -> Queue_unavailable detail) in
     let sources = List.filter (fun source ->
-      not (List.exists (same_selection source) excluding)) pending in
+      not (List.exists (Keeper_event_queue_state.equal_pending_selection source) excluding)) pending in
     if List.is_empty sources then Ok []
     else
     let* accepted = Keeper_owner_registry.request_scheduled_turn

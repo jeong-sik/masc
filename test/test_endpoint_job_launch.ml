@@ -106,7 +106,7 @@ let publication_failure_retains_paused_owner = fixture (fun ~env ~sw:_ ~store fi
   check "bootstrap kill remains a raw physical observation" (physical.status=G.Signaled 9);
   check "failed startup cannot activate during cancellation" (not (Sys.file_exists (Filename.concat fixture.work "activated")));
   let _,next=prepare store fixture "07" "exit 3" in
-  exit 3 (start ~sw ~env fixture next |> L.await_quiescent |> get)))
+  exit 3 (Eio.Switch.run (fun next_sw -> start ~sw:next_sw ~env fixture next |> L.await_quiescent |> get))))
 
 let busy_startup_leaves_other_job_executable = fixture (fun ~env ~sw:_ ~store fixture -> Eio.Switch.run (fun sw ->
   let binding,permit=prepare store fixture "05" "exit 4" in
@@ -119,7 +119,7 @@ let busy_startup_leaves_other_job_executable = fixture (fun ~env ~sw:_ ~store fi
     Eio.Promise.await entered;
     check "own startup is nonwaiting busy" (R.load store ~binding=Error R.Busy);
     let _,next=prepare store fixture "07" "exit 5" in
-    exit 5 (start ~sw ~env fixture next |> L.await_quiescent |> get);
+    exit 5 (Eio.Switch.run (fun next_sw -> start ~sw:next_sw ~env fixture next |> L.await_quiescent |> get));
     check "second job finished while the first actual gate is paused" (Eio.Promise.peek child=None);
     unblock ();
     exit 4 (Eio.Promise.await child |> L.await_quiescent |> get))))
@@ -145,7 +145,16 @@ let wait_and_cancel_require_original_authority = fixture (fun ~env ~sw:_ ~store 
           Alcotest.fail "live original settled after untrusted cancel or waiter cancellation")
         (fun () -> Eio.Promise.await entered);
       let _,next=prepare store fixture "07" "exit 6" in
-      exit 6 (start ~sw ~env fixture next |> L.await_quiescent |> get);
+      exit 6 (Eio.Switch.run (fun next_sw -> start ~sw:next_sw ~env fixture next |> L.await_quiescent |> get));
+      let input_bytes="original-still-alive\n" in
+      let sent=Eio_unix.run_in_systhread (fun () -> Unix.write_substring writer input_bytes 0 (String.length input_bytes)) in
+      Alcotest.(check int) "actual original input sent after both cancelled waits and other job teardown"
+        (String.length input_bytes) sent;
+      Eio_unix.await_readable reader;
+      let echoed=Bytes.create (String.length input_bytes) in
+      let n=Eio_unix.run_in_systhread (fun () -> Unix.read reader echoed 0 (Bytes.length echoed)) in
+      Alcotest.(check string) "same original still performs work after unavailable authority and cancelled wait"
+        input_bytes (Bytes.sub_string echoed 0 n);
       ignore (L.cancel ~registry:store child |> get);
       let current=R.load store ~binding |> registry in
       check "known original cancellation is durably retained" (R.cancellation_state current=R.Cancellation_requested);

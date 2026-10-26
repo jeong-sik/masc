@@ -38,6 +38,12 @@ sequence and returns one final snapshot. Split the call when intermediate
 results require a new decision. Retain `completed` progress on failure and
 never replay the sequence after uncertain effects.
 
+The current SDK's `keyboard.type` returns no action receipt, including after
+some dialog interruptions. A native workflow stops at that step, excludes it
+from `completed` and leaves input release unconfirmed even when no dialog is
+visible. Use the private operator recovery described below before a distinct
+next input. Do not repeat typing or silently substitute another input method.
+
 When the work needs the page's markup, `BrowserRead` `mode = "html"` returns
 the top document's source (`outerHTML`) for an observed `tabId`, without
 `maxChars`. It is never cut: when the JSON reply would pass 1 MiB, `html` is

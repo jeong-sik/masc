@@ -101,7 +101,7 @@ Neither means fully supported.
 | `Page.keyboard.down` | None | Held-key state and cancellation/release settlement |
 | `Page.keyboard.up` | None | Explicit release and uncertain-key recovery |
 | `Page.keyboard.press` | Interaction chord; workflow forwards native delay | New option forms require real SDK and installed-route proof |
-| `Page.keyboard.type` | Trusted text; workflow forwards native delay | New option forms require real SDK and installed-route proof |
+| `Page.keyboard.type` | Workflow forwards native text/delay, then stops on the SDK's void result with input release unconfirmed; preserves the earlier completed prefix and requires private operator recovery | Automatic continuation requires native settlement evidence; real SDK and installed-route proof remain open |
 | `Page.keyboard.insertText` | Native workflow | Real SDK primitive proof; installed MASC/Keeper route unverified |
 | `Page.keyboard.paste` | Native workflow plain/rich paste | Real trusted paste proof; installed MASC/Keeper route unverified |
 | `FileChooser.isMultiple` | Internal chooser validation | Explicit chooser handle observation |

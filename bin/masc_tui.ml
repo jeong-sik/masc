@@ -33224,7 +33224,7 @@ and is loaded on demand through keeper_skill.
               auto, and the event line plus the red roster name say loudly
               what was armed. *)
            Option.iter
-             (fun keeper ->
+             (fun (keeper : Tui_decode.keeper) ->
                let mode =
                  if List.mem keeper.k_name state.keeper_yolo_names then
                    Masc.Keeper_tool_approval_mode.Auto
@@ -33249,7 +33249,7 @@ and is loaded on demand through keeper_skill.
               catalogue is fetched on open so the list reflects the server
               now, not the last visit. *)
            Option.iter
-             (fun keeper ->
+             (fun (keeper : Tui_decode.keeper) ->
                state.runtime_pick_keeper <- Some keeper.k_name;
                state.runtime_pick_list <- Masc_tui_pick_list.closed;
                launch_runtime_catalog_load state ~mailbox:async_messages;

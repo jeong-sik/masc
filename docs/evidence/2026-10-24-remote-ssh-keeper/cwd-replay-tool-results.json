@@ -1,0 +1,22 @@
+[
+  {
+    "call_id": "ssh-file-0-0",
+    "tool": "Execute",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-0",
+      "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"recorded\",\"receipts\":[{\"status\":\"unavailable\",\"reason\":\"peer_receipt_missing\"}]},\"cwd\":\"/private/tmp/mssh-keeper-cwd-replay-ready-a317/.workspace/.masc/playground/ssh-proof-20261025-e\",\"execution_location\":{\"cwd\":\"/private/tmp/mssh-keeper-cwd-replay-ready-a317/.workspace/.masc/playground/ssh-proof-20261025-e\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/private/tmp/mssh-keeper-cwd-replay-ready-a317/.workspace/.masc/playground/ssh-proof-20261025-e\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"ff6e2ef070704f02ac2ebc2c7b9b532c\\\", \\\"cwd\\\": \\\"/private/tmp/mssh-keeper-cwd-replay-ready-a317/.workspace/.masc/playground/ssh-proof-20261025-e\\\", \\\"hostname\\\": \\\"6758e8d27ec8\\\", \\\"uid\\\": 1000}\\n\",\"typed\":true,\"execution_time_ms\":316}"
+    },
+    "expected_failure": false
+  },
+  {
+    "call_id": "ssh-file-0-1",
+    "tool": "Execute",
+    "result": {
+      "role": "tool",
+      "tool_call_id": "ssh-file-0-1",
+      "content": "{\"ok\":true,\"status\":{\"kind\":\"exit\",\"code\":0},\"shim_execution_evidence\":{\"status\":\"recorded\",\"receipts\":[{\"status\":\"unavailable\",\"reason\":\"peer_receipt_missing\"}]},\"cwd\":\"/private/tmp/mssh-keeper-cwd-replay-ready-a317/.workspace/.masc/playground/ssh-proof-20261025-e\",\"execution_location\":{\"cwd\":\"/private/tmp/mssh-keeper-cwd-replay-ready-a317/.workspace/.masc/playground/ssh-proof-20261025-e\",\"cwd_source\":\"default_playground_root\",\"scope\":\"playground_root\",\"playground_root\":\"/private/tmp/mssh-keeper-cwd-replay-ready-a317/.workspace/.masc/playground/ssh-proof-20261025-e\",\"relative_cwd\":\".\",\"repo_name\":null,\"repo_root\":null},\"output\":\"{\\\"marker\\\": \\\"ff6e2ef070704f02ac2ebc2c7b9b532c\\\", \\\"reported_cwd\\\": \\\"/private/tmp/mssh-keeper-cwd-replay-ready-a317/.workspace/.masc/playground/ssh-proof-20261025-e\\\", \\\"reported_read_errno\\\": 2, \\\"relative_read_marker\\\": \\\"ff6e2ef070704f02ac2ebc2c7b9b532c\\\", \\\"actual_cwd_base64\\\": \\\"L3Nydi9tYXNjL3BsYXlncm91bmQvc3NoLXByb29mLTIwMjYxMDI1LWU=\\\"}\\n\",\"typed\":true,\"execution_time_ms\":321}"
+    },
+    "expected_failure": false
+  }
+]

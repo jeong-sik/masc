@@ -2228,6 +2228,9 @@ let test_native_workflow_pointer_ownership () =
 let test_operator_input_recovery () =
   let module Input=Masc.Browser_ego_input in
   let module Operator=Masc.Browser_ego_operator in
+  let answer label = function
+    | Ok value -> value
+    | Error _ as result -> failf "%s: %s" label (failure_kind result) in
   let issued=ref 0 and scripts=ref 0 in
   let dialog=ego_dialog "alert" "check" in
   let peer=opened (fun sent -> incr scripts;match sent.step with

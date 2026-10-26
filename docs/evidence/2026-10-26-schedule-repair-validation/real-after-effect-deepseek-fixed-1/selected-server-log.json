@@ -1,0 +1,18 @@
+[
+  {
+    "source_line": 209,
+    "text": "[2026-10-26 23:53:02] [INFO] [runtime_agent] agent_core-ollama_cloud.ollama-cloud-deepseek-v4-1-flash: resume checkpoint_turn_count=0"
+  },
+  {
+    "source_line": 750,
+    "text": "[2026-10-26 23:53:41] [INFO] [runtime_agent] agent_core-ollama_cloud.ollama-cloud-deepseek-v4-1-flash: resume checkpoint_turn_count=7"
+  },
+  {
+    "source_line": 827,
+    "text": "[2026-10-26 23:53:48] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)..."
+  },
+  {
+    "source_line": 851,
+    "text": "[2026-10-26 23:53:48] [INFO] [Server] MASC MCP: Shutdown complete."
+  }
+]

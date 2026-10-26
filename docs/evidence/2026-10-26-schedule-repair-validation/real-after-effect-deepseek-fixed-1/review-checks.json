@@ -1,0 +1,40 @@
+{
+  "raw_observer_pass_count": 11,
+  "raw_observer_failures": [],
+  "raw_overlap_observed": true,
+  "binary_sha_matches": true,
+  "v3_script_sha_matches": true,
+  "exact_identities_match_ack_payloads_and_final_projection": true,
+  "first_note_before_second_arrival": true,
+  "second_arrival_before_first_completion": true,
+  "first_checkpoint_observed": false,
+  "first_readmission_observed": false,
+  "first_ack_count": 1,
+  "note_add_keeper_turn_ids": {
+    "first": 1,
+    "second": 2
+  },
+  "unique_notes_per_requested_schedule": [
+    1,
+    1
+  ],
+  "pending_and_outbox_empty": true,
+  "last_recorded_live_turn": null,
+  "producer_exit_code": 0,
+  "failed_tool_calls": [
+    {
+      "source_line": 2,
+      "tool": "Execute",
+      "wire_outcome": "error",
+      "typed_error": {
+        "error": "github_identity_snapshot_unavailable",
+        "typed": true,
+        "cmd": "ls -la .",
+        "shim_execution_evidence": {
+          "status": "not_observed",
+          "receipts": []
+        }
+      }
+    }
+  ]
+}

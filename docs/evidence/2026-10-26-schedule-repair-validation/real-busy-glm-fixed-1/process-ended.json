@@ -1,0 +1,9 @@
+{
+  "pid": 83431,
+  "started_at_unix": 1793026409.2594051,
+  "url": "http://127.0.0.1:65232",
+  "base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/workspace",
+  "stop_reason": "two required effects and exact durable completions observed",
+  "returncode": 0,
+  "stopped_at_unix": 1793026551.823136
+}

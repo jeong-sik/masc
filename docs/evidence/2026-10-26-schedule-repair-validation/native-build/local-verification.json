@@ -1,0 +1,10 @@
+{
+  "archive_sha256": "ff173bf56e440f31fd8812c4b69bd88870fc16a1a7ac7046fd931490104b17f1",
+  "artifact_id": 12658449319,
+  "product_source_sha": "94b2df25abcdfe20c658322f4156ad63f5546c34",
+  "workflow_definition_sha": "117dc31e1ca8f71f47bbbe91fa2adab5befb5761",
+  "runtime_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/native40339887803/runtime",
+  "all_dist_hashes_verified": true,
+  "embedded_commit_verified": true,
+  "production_installed": false
+}

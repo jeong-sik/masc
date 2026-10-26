@@ -236,6 +236,25 @@ F3 권한 수리 [#46182](https://github.com/jeong-sik/masc/pull/46182)는 별�
 conclusion **success**다. 실제 4suite artifact의 55/58/9/2=124 cases를 대조했다.
 F4 수리 [#46193](https://github.com/jeong-sik/masc/pull/46193)는 같은 native stack
 #46194의 상위층이며 head `e0be8af8df8d223bbdf052f3372e282d06f58cb2`다.
-해당 head의 별도 두-suite Test40332170687은 접수했으며 이 문서에 완료 성공 근거는 없다.
-F6 수리는 별도 스택에서 진행 중이다. 어느 수리도 이 감사의 실제 installed-binary 재검증으로
-대체해 쓰지 않는다.
+해당 head의 별도 두-suite Test40332170687은 **success**, 57+58=115 cases다.
+F1 all-owner 취소 수리 [#46211](https://github.com/jeong-sik/masc/pull/46211)는 같은 스택의
+세 번째 층이며 head `08da4d99f1b2a58cae5f87f3a71ce4556c83cfe8`다. Test40343103111,
+ref `fix/schedule-cancel-all-owners-20261026`, conclusion **success**에서 지정 세 suite가
+통과했다(명시 64+12 cases, queue executable은 별도 case 수를 출력하지 않음).
+
+[수리 증거 묶음](../evidence/2026-10-26-schedule-repair-validation/README.md)은 별도
+native Test40339887803의 definition `117dc31e1ca8f71f47bbbe91fa2adab5befb5761`,
+ref `ci/schedule-native-runtime-proof-20261026`, product source
+`94b2df25abcdfe20c658322f4156ad63f5546c34`, conclusion **success**를 구분한다.
+그 portable binary를 격리 base에서 실제 실행했다. DeepSeek/GLM에서 checkpoint 동안
+첫 source가 보존되고 후속 작업과 원래 작업의 두 note/ACK가 확인됐다. DeepSeek의 첫
+observer는 overlap을 놓쳐 실패했으며 원본 FAIL을 유지하고 raw ledger로 실제 순서를 대조했다.
+GLM은 첫 source 재입장 뒤 첫 note를 쓴 순서와 observer11 PASS/producer exit0을 확인했다.
+DeepSeek의 effect-before-arrival 두 예는 정상 순차 처리이며 after-effect checkpoint의 증거가 아니다.
+
+F6 [#46202](https://github.com/jeong-sik/masc/pull/46202)의 후속
+`b5c9762b27845918eba2acb804434a0da435cc78`은 native source와 lib/bin tree가 같지만,
+Test40341860767, ref `fix/schedule-work-continuation-20261026`, conclusion **failure**다.
+수정된 Connector32 cases는 통과했고 Owner106 cases 중 scheduled handoff 3건이
+`operation did not become terminal`로 실패했다. 원인과 수리를 계속 확인한다.
+이 실제 모델 결과를 현재 head의 Owner 검사 성공·운영 설치·전체 피쳐 PASS로 이월하지 않는다.

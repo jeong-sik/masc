@@ -1,0 +1,51 @@
+{
+  "identities": {
+    "first": {
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957",
+      "schedule_instance_id": "01a178b3-cac4-7000-a855-3123e31a976d",
+      "stimulus_id": "867a1f270f924e1b8029074b5b6011094ba2fe1cd52ee064aa9a2f0fdb2025b3",
+      "post_id": "867a1f270f924e1b8029074b5b6011094ba2fe1cd52ee064aa9a2f0fdb2025b3",
+      "due_at": 1793026413.204077,
+      "payload_digest": "629e3281e2113634bc31a43edc1d6cdb706773bf4a1f04ecb092b1a293e80b50"
+    },
+    "second": {
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957-second",
+      "schedule_instance_id": "01a178b3-d74b-7000-8690-5d4698a9a3ea",
+      "stimulus_id": "8fda6950cecf75c5f473c70e47459245969c3856ed22fbb181369aea1900bf4a",
+      "post_id": "8fda6950cecf75c5f473c70e47459245969c3856ed22fbb181369aea1900bf4a",
+      "due_at": 1793026416.411645,
+      "payload_digest": "f0c47a1a42367278ca41b8d1a1a1c09ad3f36819baf6fca64c5025b8c07755e1"
+    }
+  },
+  "notes": [
+    {
+      "note_id": "10",
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957-second",
+      "author_id": "audit-live-glm",
+      "author_kind": "automated_actor",
+      "created_at": 1793026453.873366,
+      "body": "SCHEDULE_EFFECT_0c54c06323274aa699ccb015a0a6f416_SECOND"
+    },
+    {
+      "note_id": "11",
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957",
+      "author_id": "audit-live-glm",
+      "author_kind": "automated_actor",
+      "created_at": 1793026524.847097,
+      "body": "SCHEDULE_EFFECT_0c54c06323274aa699ccb015a0a6f416"
+    }
+  ],
+  "observed_history_generated_at": {
+    "first": "2026-10-26T14:55:51Z",
+    "second": "2026-10-26T14:55:51Z"
+  },
+  "queue_pending_count": 0,
+  "queue_outbox_count": 0,
+  "live_turn": null,
+  "shutdown_observation": {
+    "stop_reason": "two required effects and exact durable completions observed",
+    "pid": 83431,
+    "returncode": 0,
+    "stopped_at_unix": 1793026551.823136
+  }
+}

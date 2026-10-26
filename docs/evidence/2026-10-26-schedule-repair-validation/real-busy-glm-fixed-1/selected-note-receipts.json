@@ -1,0 +1,148 @@
+[
+  {
+    "ts": 1793026447.685562,
+    "record_kind": "tool_call",
+    "keeper": "audit-live-glm",
+    "tool": "masc_schedule_notes_list",
+    "input": {
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957-second"
+    },
+    "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957-second\",\"limit\":50,\"notes\":[]}",
+    "execution_id": "execution-node-09269cf60ab3fa14d25a4f833d29ab85",
+    "physical_execution_id": "execution-node-09269cf60ab3fa14d25a4f833d29ab85",
+    "trace_id": "trace-1793026411139-00000",
+    "turn": 2,
+    "keeper_turn_id": 2,
+    "wire_outcome": "ok",
+    "model": "runtime",
+    "source_line": 3
+  },
+  {
+    "ts": 1793026453.877276,
+    "record_kind": "tool_call",
+    "keeper": "audit-live-glm",
+    "tool": "masc_schedule_note_add",
+    "input": {
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957-second",
+      "body": "SCHEDULE_EFFECT_0c54c06323274aa699ccb015a0a6f416_SECOND"
+    },
+    "output": "{\"status\":\"ok\",\"note\":{\"note_id\":\"10\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957-second\",\"author_id\":\"audit-live-glm\",\"author_kind\":\"automated_actor\",\"created_at\":1793026453.873366,\"body\":\"SCHEDULE_EFFECT_0c54c06323274aa699ccb015a0a6f416_SECOND\"},\"note_count\":1}",
+    "execution_id": "execution-node-5c9fd185b28dea6ae6539809e86243dd",
+    "physical_execution_id": "execution-node-5c9fd185b28dea6ae6539809e86243dd",
+    "trace_id": "trace-1793026411139-00000",
+    "turn": 3,
+    "keeper_turn_id": 2,
+    "wire_outcome": "ok",
+    "model": "runtime",
+    "source_line": 4
+  },
+  {
+    "ts": 1793026468.030922,
+    "record_kind": "tool_call",
+    "keeper": "audit-live-glm",
+    "tool": "masc_schedule_notes_list",
+    "input": {
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957-second"
+    },
+    "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957-second\",\"limit\":50,\"notes\":[{\"note_id\":\"10\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957-second\",\"author_id\":\"audit-live-glm\",\"author_kind\":\"automated_actor\",\"created_at\":1793026453.873366,\"body\":\"SCHEDULE_EFFECT_0c54c06323274aa699ccb015a0a6f416_SECOND\"}]}",
+    "execution_id": "execution-node-cf69e9400f0495fac73b3be25a242059",
+    "physical_execution_id": "execution-node-cf69e9400f0495fac73b3be25a242059",
+    "trace_id": "trace-1793026411139-00000",
+    "turn": 4,
+    "keeper_turn_id": 2,
+    "wire_outcome": "ok",
+    "model": "runtime",
+    "source_line": 5
+  },
+  {
+    "ts": 1793026488.816915,
+    "record_kind": "tool_call",
+    "keeper": "audit-live-glm",
+    "tool": "masc_schedule_notes_list",
+    "input": {
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957-second"
+    },
+    "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957-second\",\"limit\":50,\"notes\":[{\"note_id\":\"10\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957-second\",\"author_id\":\"audit-live-glm\",\"author_kind\":\"automated_actor\",\"created_at\":1793026453.873366,\"body\":\"SCHEDULE_EFFECT_0c54c06323274aa699ccb015a0a6f416_SECOND\"}]}",
+    "execution_id": "execution-node-1f0ca976dffb18a7167a26745ff1cc03",
+    "physical_execution_id": "execution-node-1f0ca976dffb18a7167a26745ff1cc03",
+    "trace_id": "trace-1793026411139-00000",
+    "turn": 6,
+    "keeper_turn_id": 2,
+    "wire_outcome": "ok",
+    "model": "runtime",
+    "source_line": 7
+  },
+  {
+    "ts": 1793026515.637872,
+    "record_kind": "tool_call",
+    "keeper": "audit-live-glm",
+    "tool": "masc_schedule_notes_list",
+    "input": {
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957"
+    },
+    "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957\",\"limit\":50,\"notes\":[]}",
+    "execution_id": "execution-node-c1a4db5e52ae726342a14f6e1b031fae",
+    "physical_execution_id": "execution-node-c1a4db5e52ae726342a14f6e1b031fae",
+    "trace_id": "trace-1793026411139-00000",
+    "turn": 8,
+    "keeper_turn_id": 3,
+    "wire_outcome": "ok",
+    "model": "runtime",
+    "source_line": 8
+  },
+  {
+    "ts": 1793026524.849875,
+    "record_kind": "tool_call",
+    "keeper": "audit-live-glm",
+    "tool": "masc_schedule_note_add",
+    "input": {
+      "body": "SCHEDULE_EFFECT_0c54c06323274aa699ccb015a0a6f416",
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957"
+    },
+    "output": "{\"status\":\"ok\",\"note\":{\"note_id\":\"11\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957\",\"author_id\":\"audit-live-glm\",\"author_kind\":\"automated_actor\",\"created_at\":1793026524.847097,\"body\":\"SCHEDULE_EFFECT_0c54c06323274aa699ccb015a0a6f416\"},\"note_count\":1}",
+    "execution_id": "execution-node-e4804a47fb4631cfcadeef686e2d9973",
+    "physical_execution_id": "execution-node-e4804a47fb4631cfcadeef686e2d9973",
+    "trace_id": "trace-1793026411139-00000",
+    "turn": 9,
+    "keeper_turn_id": 3,
+    "wire_outcome": "ok",
+    "model": "runtime",
+    "source_line": 10
+  },
+  {
+    "ts": 1793026529.42605,
+    "record_kind": "tool_call",
+    "keeper": "audit-live-glm",
+    "tool": "masc_schedule_notes_list",
+    "input": {
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957"
+    },
+    "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957\",\"limit\":50,\"notes\":[{\"note_id\":\"11\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957\",\"author_id\":\"audit-live-glm\",\"author_kind\":\"automated_actor\",\"created_at\":1793026524.847097,\"body\":\"SCHEDULE_EFFECT_0c54c06323274aa699ccb015a0a6f416\"}]}",
+    "execution_id": "execution-node-bdd181aeaaaab2b9749f5eead0671caa",
+    "physical_execution_id": "execution-node-bdd181aeaaaab2b9749f5eead0671caa",
+    "trace_id": "trace-1793026411139-00000",
+    "turn": 10,
+    "keeper_turn_id": 3,
+    "wire_outcome": "ok",
+    "model": "runtime",
+    "source_line": 11
+  },
+  {
+    "ts": 1793026538.464994,
+    "record_kind": "tool_call",
+    "keeper": "audit-live-glm",
+    "tool": "masc_schedule_notes_list",
+    "input": {
+      "schedule_id": "audit-real-model-61987bbecd08488591ef79afaaab9957"
+    },
+    "output": "{\"status\":\"ok\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957\",\"limit\":50,\"notes\":[{\"note_id\":\"11\",\"schedule_id\":\"audit-real-model-61987bbecd08488591ef79afaaab9957\",\"author_id\":\"audit-live-glm\",\"author_kind\":\"automated_actor\",\"created_at\":1793026524.847097,\"body\":\"SCHEDULE_EFFECT_0c54c06323274aa699ccb015a0a6f416\"}]}",
+    "execution_id": "execution-node-0c553c23cb5a8faa22089e7a3720b85e",
+    "physical_execution_id": "execution-node-0c553c23cb5a8faa22089e7a3720b85e",
+    "trace_id": "trace-1793026411139-00000",
+    "turn": 12,
+    "keeper_turn_id": 3,
+    "wire_outcome": "ok",
+    "model": "runtime",
+    "source_line": 13
+  }
+]

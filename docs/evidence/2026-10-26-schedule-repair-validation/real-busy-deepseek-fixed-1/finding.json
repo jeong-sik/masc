@@ -1,0 +1,18 @@
+{
+  "classification": "scoped_checkpoint_retention_and_two_effects_supported; original_observer_failed",
+  "observer_checks": {
+    "passed": 9,
+    "failed": 1,
+    "exit_code": 1
+  },
+  "first_checkpoint_observed": true,
+  "first_readmission_after_second_ack": true,
+  "first_premature_ack": false,
+  "note_add_keeper_turn_ids": {
+    "first": 2,
+    "second": 2
+  },
+  "note_count_each": 1,
+  "producer_exit_code": null,
+  "scope_limit": "First note was written during the second-source admitted continuation, before first-source readmission; no after-effect checkpoint claim."
+}

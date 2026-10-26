@@ -1,0 +1,78 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] @@test/runtest-test_keeper_owner: start 2026-10-26T14:48:34Z (dune alias)
+Warning: option "-j-std" is deprecated.
+[2026-10-26 14:55:20] [ERROR] [Keeper/scheduled-handoff] chat operation settlement refused operation=kmsg-scheduled-first: keeper owner store unavailable: Keeper chat operation integrity failure: invalid semantic execution transition: action is not admitted in suspended
+  [32m[OK][0m          [36mscheduled source handoff[0m          0   consumer termination re...
+[33mASSERT[0m handoff requires a live release consumer
+[2026-10-26 14:55:20] [ERROR] [Keeper/scheduled-handoff] chat operation settlement refused operation=kmsg-scheduled-first: keeper owner store unavailable: Keeper chat operation integrity failure: invalid semantic execution transition: action is not admitted in suspended
+[33mASSERT[0m operation did not become terminal
+  [31m[FAIL][0m        [36mscheduled source handoff[0m          1   old consumer cleanup ca...
+[33mASSERT[0m handoff requires a live release consumer
+[2026-10-26 14:55:21] [ERROR] [Keeper/scheduled-handoff] chat operation settlement refused operation=kmsg-scheduled-first: keeper owner store unavailable: Keeper chat operation integrity failure: invalid semantic execution transition: action is not admitted in suspended
+[33mASSERT[0m operation did not become terminal
+  [31m[FAIL][0m        [36mscheduled source handoff[0m          2   checkpoint yields to so...
+[33mASSERT[0m handoff requires a live release consumer
+[33mASSERT[0m old child cannot reserve a later slot
+  [32m[OK][0m          [36mscheduled source handoff[0m          3   text-only chat reserves...
+[33mASSERT[0m handoff requires a live release consumer
+[33mASSERT[0m keeper owner is stopping
+  [32m[OK][0m          [36mscheduled source handoff[0m          4   withdrawn source releas...
+[33mASSERT[0m handoff requires a live release consumer
+[33mASSERT[0m keeper owner is stopping
+  [32m[OK][0m          [36mscheduled source handoff[0m          5   new source incarnation ...
+[33mASSERT[0m handoff requires a live release consumer
+[33mASSERT[0m keeper owner is stopping
+  [32m[OK][0m          [36mscheduled source handoff[0m          6   unavailable queue relea...
+[33mASSERT[0m handoff requires a live release consumer
+[2026-10-26 14:55:21] [ERROR] [Keeper/scheduled-handoff] chat operation settlement refused operation=kmsg-scheduled-first: keeper owner store unavailable: Keeper chat operation integrity failure: invalid semantic execution transition: action is not admitted in suspended
+[33mASSERT[0m operation did not become terminal
+  [31m[FAIL][0m        [36mscheduled source handoff[0m          7   late scoped release pre...
+[33mASSERT[0m handoff requires a live release consumer
+[33mASSERT[0m no failed handoff dispatches source work
+  [32m[OK][0m          [36mscheduled source handoff[0m          8   failed chat releases so...
+[33mASSERT[0m handoff requires a live release consumer
+[33mASSERT[0m no failed handoff dispatches source work
+  [32m[OK][0m          [36mscheduled source handoff[0m          9   unconfirmed checkpoint ...
+[33mASSERT[0m handoff requires a live release consumer
+[2026-10-26 14:55:21] [ERROR] [Keeper/scheduled-handoff] chat operation settlement refused operation=kmsg-scheduled-first: keeper owner store unavailable: Keeper chat operation integrity failure: invalid semantic execution transition: action is not admitted in suspended
+  [32m[OK][0m          [36mscheduled source handoff[0m         10   failed release listener...
+[33mASSERT[0m handoff requires a live release consumer
+[2026-10-26 14:55:21] [ERROR] [Keeper/scheduled-handoff] chat operation settlement refused operation=kmsg-scheduled-first: keeper owner store unavailable: Keeper chat operation integrity failure: invalid semantic execution transition: action is not admitted in suspended
+  [32m[OK][0m          [36mscheduled source handoff[0m         11   missing release listene...
+[33mASSERT[0m handoff requires a live release consumer
+[33mASSERT[0m no failed handoff dispatches source work
+  [32m[OK][0m          [36mscheduled source handoff[0m         12   pause wins over schedul...
+[33mASSERT[0m new child observes consumed evidence
+[2m┌──────────────────────────────────────────────────────────────────────────────┐[0m
+[2m│ [0m[31m[FAIL][0m        [36mscheduled source handoff[0m          1   old consumer cleanup...[2m  │[0m
+[2m└──────────────────────────────────────────────────────────────────────────────┘[0m
+[31mFAIL[0m operation did not become terminal
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_keeper_owner.test_scheduled_source_handoff.(fun) in file "test/test_keeper_owner.ml", line 5994, characters 11-45
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+[2m┌──────────────────────────────────────────────────────────────────────────────┐[0m
+[2m│ [0m[31m[FAIL][0m        [36mscheduled source handoff[0m          2   checkpoint yields to...[2m  │[0m
+[2m└──────────────────────────────────────────────────────────────────────────────┘[0m
+[31mFAIL[0m operation did not become terminal
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_keeper_owner.test_scheduled_source_handoff.(fun) in file "test/test_keeper_owner.ml", line 5994, characters 11-45
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+[2m┌──────────────────────────────────────────────────────────────────────────────┐[0m
+[2m│ [0m[31m[FAIL][0m        [36mscheduled source handoff[0m          7   late scoped release ...[2m  │[0m
+[2m└──────────────────────────────────────────────────────────────────────────────┘[0m
+[31mFAIL[0m operation did not become terminal
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_keeper_owner.test_scheduled_source_handoff.(fun) in file "test/test_keeper_owner.ml", line 5994, characters 11-45
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+
+[31m3 failures![0m in 2.448s. 106 tests run.
+::endgroup::
+Command exited with code 1.
+[targeted] @@test/runtest-test_keeper_owner: FAIL exit 1 in 409s
+[targeted] test/test_keeper_connector_attention_batch: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_keeper_connector_attention_batch: start 2026-10-26T14:55:34Z
+::group::{keeper_connector_attention_batch}
+
+Test Successful in 0.428s. 32 tests run.
+::endgroup::
+[targeted] test/test_keeper_connector_attention_batch: OK in 0s

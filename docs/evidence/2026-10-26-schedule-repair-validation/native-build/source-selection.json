@@ -1,0 +1,14 @@
+{
+  "schema": "masc.schedule-native-source-selection.v1",
+  "workflow_definition_sha": "117dc31e1ca8f71f47bbbe91fa2adab5befb5761",
+  "workflow_event_sha": "117dc31e1ca8f71f47bbbe91fa2adab5befb5761",
+  "workflow_ref": "jeong-sik/masc/.github/workflows/test.yml@refs/heads/ci/schedule-native-runtime-proof-20261026",
+  "product_source_sha": "94b2df25abcdfe20c658322f4156ad63f5546c34",
+  "requested_source_sha": "94b2df25abcdfe20c658322f4156ad63f5546c34",
+  "run_id": "40339887803",
+  "run_attempt": "1",
+  "platform": "macos-arm64",
+  "build_completed": false,
+  "release_validated": false,
+  "production_installed": false
+}

@@ -4656,6 +4656,22 @@ let test_turn_observation_replaces_and_refuses_atomically () =
   Alcotest.(check (option (float 0.001))) "accepted observation carries its clock" (Some 20.)
     state.keeper_turns_observed_at;
   Alcotest.(check (option string)) "accepted observation clears the old error" None state.keeper_turns_error;
+  accept_keeper_turn_observation state ~rows:[ turn "new" ] ~waiting:[] ~observed_at:30.;
+  Alcotest.(check string) "missing waiting preserves the last good row" "new"
+    (List.hd state.keeper_waiting).Tui_decode.kwr_keeper_name;
+  Alcotest.(check (option (float 0.001))) "the turn read still carries its newer clock" (Some 30.)
+    state.keeper_turns_observed_at;
+  let observed =
+    { (waiting "new") with
+      Tui_decode.kwr_state = Tui_decode.Keeper_waiting_busy
+    ; kwr_since = Some 40.
+    }
+  in
+  accept_keeper_turn_observation state ~rows:[ turn "new" ] ~waiting:[ observed ] ~observed_at:40.;
+  Alcotest.(check bool) "an actually observed waiting row replaces the retained one" true
+    ((List.hd state.keeper_waiting).Tui_decode.kwr_state = Tui_decode.Keeper_waiting_busy);
+  Alcotest.(check (option (float 0.001))) "the observed waiting timestamp is retained" (Some 40.)
+    (List.hd state.keeper_waiting).Tui_decode.kwr_since;
   refuse_keeper_turn_observation state "HTTP 503";
   Alcotest.(check string) "a failed read keeps the accepted turn" "new"
     (List.hd state.keeper_turns).Tui_decode.ktr_keeper_name;

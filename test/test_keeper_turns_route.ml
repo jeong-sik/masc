@@ -89,6 +89,13 @@ let client_response request wire =
   match !result with Some response -> response | None -> Alcotest.fail "incomplete HTTP response"
 ;;
 
+let with_pending_confirm_read_result value f =
+  let previous = Atomic.get Workspace_hooks.operator_pending_confirm_read_result_fn in
+  Atomic.set Workspace_hooks.operator_pending_confirm_read_result_fn (fun _ -> value);
+  Fun.protect ~finally:(fun () ->
+    Atomic.set Workspace_hooks.operator_pending_confirm_read_result_fn previous) f
+;;
+
 let with_test_state f =
   let dir = Filename.temp_file "keeper-turns" ".dir" in
   Sys.remove dir;
@@ -113,7 +120,7 @@ let with_test_state f =
       Server_request_authority.with_current request_authority (fun () ->
           ignore (Workspace.init config ~agent_name:None);
           let state = Mcp_server_eio.For_testing.create_state ~base_path:dir () in
-          f ~sw ~config ~state))
+          with_pending_confirm_read_result (Ok []) (fun () -> f ~sw ~config ~state)))
 ;;
 
 let member key json =
@@ -204,6 +211,61 @@ let test_installed_keeper_rides_as_an_idle_row () =
       | Some (`List rows) ->
         Alcotest.failf "expected one row, got %d" (List.length rows)
       | _ -> Alcotest.fail "keepers field absent or mistyped")
+;;
+
+let test_waiting_read_errors_stay_public () =
+  with_test_state (fun ~sw:_ ~config ~state ->
+    let keeper_name = "turns-waiting-read-error" in
+    let meta =
+      match
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc
+            [ ("name", `String keeper_name)
+            ; ("trace_id", `String "trace-turns-waiting-read-error")
+            ; ("activation_mode", `String "manual")
+            ])
+      with
+      | Ok meta -> meta
+      | Error err -> Alcotest.fail err
+    in
+    (match Keeper_meta_store.replace_snapshot config meta with
+     | Ok () -> ()
+     | Error err -> Alcotest.failf "persist keeper meta: %s" err);
+    let body =
+      with_pending_confirm_read_result (Error "public fixture read failure")
+        (fun () -> body_of (turns_response ~state))
+    in
+    match member "keepers" (Yojson.Safe.from_string body) with
+    | Some (`List [ row ]) ->
+      (match member "waiting" row with
+       | Some (`Assoc _ as waiting) ->
+         (match member "state" waiting with
+          | Some (`String "waiting") -> ()
+          | other ->
+            Alcotest.failf "a fleet read failure became ordinary idle: %s"
+              (match other with Some value -> Yojson.Safe.to_string value | None -> "absent"));
+         (match member "waiting_count" waiting with
+          | Some (`Int 1) -> ()
+          | other ->
+            Alcotest.failf "the fleet read error was dropped: %s"
+              (match other with Some value -> Yojson.Safe.to_string value | None -> "absent"));
+         (match member "waiting_on" waiting with
+          | Some (`List [ item ]) ->
+            (match member "source" item with
+             | Some (`String "read_error") -> ()
+             | _ -> Alcotest.fail "the waiting row is not a read error");
+            (match member "waiting_on" item with
+             | Some (`String "operator_pending_confirm_store") -> ()
+             | _ -> Alcotest.fail "the failed source is not identified");
+            (match member "keeper_name" item with
+             | Some `Null -> ()
+             | _ -> Alcotest.fail "a fleet error was misattributed to one Keeper")
+          | Some (`List items) ->
+            Alcotest.failf "expected one fleet read error, got %d" (List.length items)
+          | _ -> Alcotest.fail "waiting_on is missing or mistyped")
+       | _ -> Alcotest.fail "canonical waiting projection is missing")
+    | Some (`List rows) -> Alcotest.failf "expected one Keeper row, got %d" (List.length rows)
+    | _ -> Alcotest.fail "keepers field is missing or mistyped")
 ;;
 
 let test_interrupt_rejects_invalid_or_conflicting_identity () =
@@ -408,6 +470,8 @@ let () =
             test_empty_workspace_answers_an_empty_fleet
         ; Alcotest.test_case "an installed keeper rides as an idle row" `Quick
             test_installed_keeper_rides_as_an_idle_row
+        ; Alcotest.test_case "fleet waiting read errors stay public" `Quick
+            test_waiting_read_errors_stay_public
         ] )
     ]
 ;;

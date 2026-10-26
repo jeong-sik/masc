@@ -154,7 +154,7 @@ let test_the_ego_found_and_the_default_space () =
     apply_ok plan;
     let table = configured fixture in
     check string "the command found" fixture.ego table.command;
-    check string "the default space" E.default_space table.space;
+    check bool "the default space" true (table.space=C.Named_space E.default_space);
     let text = read fixture.runtime in
     check bool "the operator's notes stay" true (contains text "# Operator notes: kept as they are.");
     check bool "the default stays" true (contains text "default = \"deepseek.chat\" # the default stays");
@@ -167,7 +167,7 @@ let test_named_values () =
     let plan = plan_ok (request ~command:fixture.ego ~space:"work" fixture) in
     apply_ok plan;
     let table = configured fixture in
-    check (pair string string) "as named" (fixture.ego, "work") (table.command, table.space))
+    check bool "as named" true ((table.command, table.space)=(fixture.ego, C.Named_space "work")))
 
 (* --- a table that is there ---------------------------------------------- *)
 
@@ -189,7 +189,7 @@ let test_a_named_key_changes_that_key_and_no_other () =
       [ "nodejs" ] (runs fixture);
     apply_ok plan;
     let table = configured fixture in
-    check (pair string string) "the space changed" (fixture.ego, "research") (table.command, table.space);
+    check bool "the space changed" true ((table.command, table.space)=(fixture.ego, C.Named_space "research"));
     check bool "the operator's comment on the command stays" true
       (contains (read fixture.runtime) "# the operator's own link"))
 
@@ -277,6 +277,20 @@ let test_a_kept_space_the_operator_holds_is_refused () =
   with_fixture ~with_table:true ~spaces:[ space ~name:"masc" 36 "user"; space ~name:"slack" 42 "agent" ] (fun fixture ->
     check bool "the operator's space of another name leaves the table as it is" true
       (E.change (plan_ok (request fixture)) = E.Unchanged))
+
+let test_numeric_pin_is_preserved () =
+  with_fixture ~with_table:true (fun fixture ->
+    write fixture.runtime (Toml_line_editor.edit_table_int (read fixture.runtime)
+      ~path:"browser.live.ego" ~key:"space" ~value:32);
+    let before=read fixture.runtime in
+    let plan=plan_ok (request fixture) in
+    check bool "an existing ID is kept without rediscovery" true (E.change plan=E.Unchanged);
+    apply_ok plan;
+    check string "the numeric pin is not rewritten as a name" before (read fixture.runtime);
+    check bool "server reads the exact numeric reference" true ((configured fixture).space=C.Existing_space 32);
+    let named=plan_ok (request ~space:"32" fixture) in
+    apply_ok named;
+    check bool "an explicit numeric-looking name remains distinct" true ((configured fixture).space=C.Named_space "32"))
 
 (* --- refused before any write ------------------------------------------ *)
 
@@ -371,6 +385,7 @@ let () =
         ; test_case "named values" `Quick test_named_values ] )
     ; ( "a table that is there"
       , [ test_case "keeps its values" `Quick test_a_table_that_is_there_keeps_its_values
+        ; test_case "keeps an exact numeric Space pin" `Quick test_numeric_pin_is_preserved
         ; test_case "a named key changes that key and no other" `Quick
             test_a_named_key_changes_that_key_and_no_other ] )
     ; ( "the space against ego's own"

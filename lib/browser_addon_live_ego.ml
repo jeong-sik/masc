@@ -4,7 +4,9 @@ module Live = Browser_live_peer
 let ( let* ) = Result.bind
 
 let arguments (configuration : Browser_configuration.live_ego) =
-  ["--live-ego-command";configuration.command;"--live-ego-space";configuration.space]
+  ["--live-ego-command";configuration.command] @ match configuration.space with
+  | Browser_configuration.Named_space name -> ["--live-ego-space";name]
+  | Existing_space id -> ["--live-ego-space-id";string_of_int id]
 
 (* A stopped run gets TERM, then KILL after this long, with its process
    group. The foreground manager waits this long even when the run ends at

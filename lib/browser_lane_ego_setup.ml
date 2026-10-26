@@ -92,7 +92,10 @@ let set_key ~(table : Browser_configuration.live_ego) text = function
   | Command ->
     Toml_line_editor.edit_table_scalar text ~path:table_path ~key:"command" ~value:(Some table.command)
   | Space ->
-    Toml_line_editor.edit_table_scalar text ~path:table_path ~key:"space" ~value:(Some table.space)
+    (match table.space with
+     | Browser_configuration.Named_space name ->
+       Toml_line_editor.edit_table_scalar text ~path:table_path ~key:"space" ~value:(Some name)
+     | Existing_space id -> Toml_line_editor.edit_table_int text ~path:table_path ~key:"space" ~value:id)
 
 let edit_text ~table ~set text = List.fold_left (set_key ~table) text set
 
@@ -203,16 +206,16 @@ let decide ~find_ego request = function
       | Some path -> let* versions = named path in Ok (path, versions)
       | None -> discovered ~find_ego
     in
-    let space = Option.value request.space ~default:default_space in
+    let space = Browser_configuration.Named_space (Option.value request.space ~default:default_space) in
     Ok ({ Browser_configuration.command; space }, [ Command; Space ], Created, Some versions)
   | Some (current : Browser_configuration.live_ego) ->
     let command = Option.value request.command ~default:current.command in
-    let space = Option.value request.space ~default:current.space in
+    let space = match request.space with None -> current.space | Some name -> Browser_configuration.Named_space name in
     let set =
       List.filter_map
         Fun.id
         [ (if String.equal command current.command then None else Some Command)
-        ; (if String.equal space current.space then None else Some Space)
+        ; (if Browser_configuration.equal_ego_space space current.space then None else Some Space)
         ]
     in
     let* versions = if List.mem Command set then Result.map Option.some (named command) else Ok None in

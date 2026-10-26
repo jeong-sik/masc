@@ -32,7 +32,7 @@ Neither means fully supported.
 | --- | --- | --- |
 | `profiles` | None | Profile selection only after explicit user request; no general profile inspection |
 | `listTaskSpaces` | None in Keeper tools | Discover existing goal Spaces without creating replacements |
-| `taskSpace` | Configured name on open; numeric id in every round | One configured Space is shared by Keepers; per-goal binding and resume are missing |
+| `taskSpace` | Configuration accepts a name or exact numeric ID; subsequent rounds use the bound ID. Missing/mismatched IDs never fall back to a new Space | One configured Space is shared by Keepers; per-goal binding and automatic resume are missing |
 | `claimTaskSpace` | None | Explicit approval and user-owned Space admission |
 | `takeOverTaskSpace` | `page.act` take_over | Explicit operator control boundary, currently only configured Space |
 | `TaskSpace.spaceId` | SDK-observed ID follows client inventory, tool receipts, stored screenshots and the TUI connection identity | Installed-route proof and per-goal Space lifecycle |

@@ -247,7 +247,9 @@ let print_ego ~runtime_config_path plan =
         name it with --ego-command or --ego-space:\n"
        runtime_config_path);
   Printf.printf "  command  %s\n" command;
-  Printf.printf "  space    %s\n" space;
+  (match space with
+   | Browser_configuration.Named_space name -> Printf.printf "  space    %s\n" name
+   | Existing_space id -> Printf.printf "  space    #%d (existing ID)\n" id);
   Option.iter (fun (version, engine) -> Printf.printf "  answered ego lite %s, Chromium %s\n" version engine)
     (Ego_setup.versions plan);
   print_endline "";

@@ -62,7 +62,9 @@
     "probe_restart_expiry.py": "b373bda4ab8da07463561d868171a2ba417eef50646dc6489db1bca0b0d6a2c1",
     "targeted-ci-request.json": "70a1b14b33694d0d23d5e7f1f153fc774ebfa73dbbd4dc87aff4b5f6a11d823f",
     "targeted-ci-result.json": "9bfcf5b13a3b1e1bdb86d3f32aed6aba6a6d3186e7edb58c2df012e7b1fabae4",
-    "targeted-ci-failure-excerpt.txt": "42dfb4bbcfbea34fdb6e1d19d2c616b74c61c945e0bb1daaea1c881cec35bdb5"
+    "targeted-ci-failure-excerpt.txt": "42dfb4bbcfbea34fdb6e1d19d2c616b74c61c945e0bb1daaea1c881cec35bdb5",
+    "targeted-ci-after-restack-admission.json": "85766349c30c711e9bd2410cf10d182be7185d4467f10f37562f052ee0da1d0c",
+    "backend-recovery-terminal.json": "a3a7b265070fcaf9cd94faeb091d111b13557d1994847c3a4ad26046ed980621"
   },
   "source_comparison": {
     "installed_commit": "bc3038a22374705db648bebd7f556223b3e84727",

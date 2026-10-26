@@ -154,3 +154,14 @@ head `932d071e624ce26c075f486a4e07b0fd9ac1d4ed`, ref `audit/scheduled-job-runtim
 증거도 아니다. 해당 helper는 main `1ce158d50d3eb48648e6deea7f668172f914fea3`의
 기존 [#46151](https://github.com/jeong-sik/masc/pull/46151)에서 이미 제거됐다.
 감사 PR은 그 수정 위로 restack했으며 별도 중복 수리는 만들지 않았다.
+
+동일한 다섯 suite의 새 `Test` [run 40325758202](https://github.com/jeong-sik/masc/actions/runs/40325758202)는
+head `ae6cabc219bccb6eb57726d81c3f8cc99ba3e04e`, ref `audit/scheduled-job-runtime-20261026`로
+접수했다. 접수 상태와 실제 결론은 별개이며, 완료된 성공 결과는 아직 이 보고서에 없다.
+
+F1 후속 수리는 현재 target만 확대하는 변경으로 끝내면 안 된다. 이전 instance의 receipt는
+retention으로 잘릴 수 있어 canonical durable queue discovery의 오류를 보존해야 한다.
+scheduled-source transfer와 복구 projection도 취소와 같은 serialization 경계에 참여해야
+취소 직후 다른 owner에서 pending이 다시 생기는 경합을 막을 수 있다. 기존 intake →
+ledger → queue 잠금 순서를 거꾸로 잡는 수리도 피해야 한다. retarget 반례뿐 아니라
+다중 인계·미완료 outbox·읽기 실패·부분 철회 뒤 저장 실패의 실제 회귀를 함께 확인해야 한다.

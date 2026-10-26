@@ -74,3 +74,8 @@ conclusion=failure; the named five suites did not execute because compilation
 failed first. `targeted-ci-failure-excerpt.txt` selects the input list and actual
 compiler diagnostic, with trailing line whitespace trimmed. The full failed-step log's original digest is recorded
 separately in the manifest; the excerpt does not claim to have that digest.
+
+`backend-recovery-terminal.json` supersedes the earlier queued observation with
+the actual `Interrupted_by_restart` failure. `targeted-ci-after-restack-admission.json`
+records the new exact-head five-suite dispatch after adopting the existing
+compile fix. Neither an admission nor an in-progress run is a completed pass.

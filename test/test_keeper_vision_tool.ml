@@ -2381,7 +2381,7 @@ let test_browser_screenshot_reaches_vision_reader () =
           let client suffix browser =
             let raw="30000000-0000-4000-8000-" ^ suffix in
             {Browser_lane.client_id=Result.get_ok (Browser_lane.client_id_of_string raw);
-              browser;version="fixture";transport=Browser_lane.Web_extension;engine_version="155.0.1"} in
+              browser;version="fixture";transport=Browser_lane.Web_extension;engine_version="155.0.1";space=None} in
           let first=client "000000000001" Browser_lane.Firefox in
           let second=client "000000000002" Browser_lane.Zen in
           let live_calls=ref [] in
@@ -2506,6 +2506,23 @@ let test_browser_screenshot_reaches_vision_reader () =
             assert (assoc_string "transport" data = "web_extension");
             if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"]))))))
 
+let test_browser_screenshot_preserves_space () =
+  with_temp_base (fun base_path ->
+    let space : Browser_lane.ego_space = {id=51;name="SDK Space"} in
+    let encoded="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
+    let client_id="30000000-0000-4000-8000-000000000001" in
+    let result=Masc.Browser_screenshot.persist ~base_path ~keeper_name:"space-screenshot"
+      (`Assoc ["tabId",`Int 73;"url",`String "https://example.org";"title",`String "Page";
+        "data",`String encoded;"clientId",`String client_id;"transport",`String "ego_task_space";
+        "browserSpace",Browser_lane.ego_space_to_json space]) in
+    match result with
+    | Error detail -> failwith detail
+    | Ok json ->
+      assert (Yojson.Safe.Util.member "browserSpace" json=Browser_lane.ego_space_to_json space);
+      assert (assoc_string "clientId" json=client_id);
+      assert (assoc_string "transport" json="ego_task_space");
+      assert (Yojson.Safe.Util.member "artifact" json<>`Null))
+
 let test_browser_screenshot_rejects_bad_pixels () =
   with_temp_base (fun _ ->
     List.iter (fun encoded ->
@@ -2527,7 +2544,10 @@ let test_browser_screenshot_rejects_invalid_client () =
      ["clientId",`Int 73], "invalid_connection_fields";
      ["clientId",live_id], "client_without_transport";
      ["clientId",live_id;"transport",`String "carrier_pigeon"], "unsupported_browser_transport";
-     ["transport",`String "web_extension"], "invalid_connection_fields"]
+     ["transport",`String "web_extension"], "invalid_connection_fields";
+     ["clientId",live_id;"transport",`String "ego_task_space"], "ego_connection_without_space";
+     ["clientId",live_id;"transport",`String "webdriver_bidi";
+       "browserSpace",`Assoc ["id",`Int 51;"name",`String "SDK Space"]], "space_requires_ego_connection"]
 
 let test_browser_screenshot_rejects_invalid_observation () =
   with_temp_base (fun _ ->
@@ -2811,6 +2831,7 @@ let run_all () =
   test_browser_screenshot_rejects_invalid_observation ();
   test_browser_screenshot_reaches_vision_reader ();
   test_browser_screenshot_rejects_bad_pixels ();
+  test_browser_screenshot_preserves_space ();
   test_vision_output_tokens_default_and_env ();
   test_truncated_structured_response_reads_as_truncation ();
   test_max_tokens_failover_preserves_image_and_candidate_wire_limits ();
@@ -2876,6 +2897,7 @@ let () =
   | [_] -> run_all ()
   | [_; "--browser-screenshot"] ->
       test_browser_screenshot_reaches_vision_reader ();
+      test_browser_screenshot_preserves_space ();
       print_endline "test_keeper_vision_tool: browser screenshot scenario passed"
   | [_; "--candidate-standing"] ->
       run_candidate_standing ();

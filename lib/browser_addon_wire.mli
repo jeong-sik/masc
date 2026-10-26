@@ -52,6 +52,9 @@ val selection_error_of_json : Yojson.Safe.t -> (Browser_lane.selection_error, st
 val answer_to_json : (Browser_lane.answer, Browser_lane.selection_error) result -> Yojson.Safe.t
 val answer_of_json : Yojson.Safe.t -> ((Browser_lane.answer, Browser_lane.selection_error) result, string) result
 val client_to_json : Browser_lane.client_info -> Yojson.Safe.t
+(** Strict client identity and Space context. [space] must name the bound Space
+    for an Ego transport and must be null for other transports. Space names are
+    observations, not connection identity or operator-control authority. *)
 val client_of_json : Yojson.Safe.t -> (Browser_lane.client_info, string) result
 
 type disposition = Not_started | Outcome_unknown

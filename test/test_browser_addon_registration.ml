@@ -5,7 +5,7 @@ let ok = function Ok value -> value | Error Registration.Identity_changed -> fai
   | Error (Registration.Unconfirmed detail) -> fail detail
 let uuid raw = match B.client_id_of_string raw with Ok value -> value | Error detail -> fail detail
 let client={B.client_id=uuid "0c000000-0000-4000-8000-000000000001";
-  browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi}
+  browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi;space=None}
 let first="0b000000-0000-4000-8000-000000000001"
 let second="0b000000-0000-4000-8000-000000000002"
 let rec remove path = match (Unix.lstat path).Unix.st_kind with

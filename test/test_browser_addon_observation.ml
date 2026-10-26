@@ -20,7 +20,7 @@ let invalid_snapshot () = check bool "non-object snapshot rejected before public
 let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool registered;
   "session",`String "closed";"locate",`Bool false]
 let client id browser = `Assoc ["clientId",`String id;"browser",`String browser;
-  "version",`String "158.0.1";"engineVersion",`String "158.0.1";"transport",`String "web_extension";
+  "version",`String "158.0.1";"engineVersion",`String "158.0.1";"transport",`String "web_extension";"space",`Null;
   "interactions",`List [];"lastActivities",`List []]
 let serving clients = `Assoc ["state",`String "serving";"clients",`List clients;
   "owned_backends",`Assoc ["automation",work true;"stagehand",work false]]

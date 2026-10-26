@@ -46,17 +46,18 @@ let route_of_json value =
 let client_to_json (client : B.client_info) = `Assoc [
   "clientId",string (B.client_id_to_string client.client_id);"browser",string (B.browser_name client.browser);
   "version",string client.version;"engineVersion",string client.engine_version;
-  "transport",string (B.live_transport_to_string client.transport)]
+  "transport",string (B.live_transport_to_string client.transport);"space",B.client_space_to_json client.space]
 let client_of_json value =
-  let* fields = exact ["clientId";"browser";"version";"engineVersion";"transport"] value in
+  let* fields = exact ["clientId";"browser";"version";"engineVersion";"transport";"space"] value in
   let* raw = text_field fields "clientId" in let* client_id = B.client_id_of_string raw in
   let* raw = text_field fields "browser" in let* browser = B.browser_of_string raw in
   let* raw = text_field fields "transport" in let* transport = B.live_transport_of_string raw in
+  let* raw=required fields "space" in let* space=B.client_space_of_json ~transport raw in
   let read_version key = let* value = text_field fields key in
     if String.length value<=64 && String.for_all (fun c -> Char.code c>=33 && Char.code c<=126) value
     then Ok value else Error "invalid browser version" in
   let* version = read_version "version" in let* engine_version = read_version "engineVersion" in
-  Ok {B.client_id;browser;version;engine_version;transport}
+  Ok {B.client_id;browser;version;engine_version;transport;space}
 let route_fields route = match route_to_json route with `Assoc fields ->
   List.filter (fun (_,value) -> value<>`Null) fields | _ -> []
 let verb_of_json ~route value =

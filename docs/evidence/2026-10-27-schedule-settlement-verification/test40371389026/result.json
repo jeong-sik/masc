@@ -11,7 +11,7 @@
   "updated_at": "2026-10-26T17:49:19Z",
   "scope": "Compilation stopped before all four requested suites. No case verdicts; this is not a behavior assertion failure.",
   "diagnostic": "Warning4 fragile-match is an error: generic failure branch hid future settlement_failure and store_error variants. Closed constructor enumeration, including regression matches, replaces that branch without changing settlement decisions.",
-  "remediation_commit": "4c94fcce84f",
+  "remediation_commit": "4c94fcce84f59c751ebd4867a2f0dee0e3abb188",
   "source": {
     "command": [
       "gh",

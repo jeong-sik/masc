@@ -66,7 +66,7 @@ ref/four aliases, also completed **failure before suite execution**. The
 existing strict warning4 gate rejected the broad settlement-error pattern.
 [The exact diagnostic](test40371389026/result.json) preserves both typed-variant
 warnings; the fix explicitly enumerates the constructors without weakening
-the warning or assertions. It is committed as `4c94fcce84f`. Current source
+the warning or assertions. It is committed as `4c94fcce84f59c751ebd4867a2f0dee0e3abb188`. Current source
 `c52f799e52d3683bd2a4c624f0f6adfe36015ec9` also clarifies permanent authority
 refusal and post-tick observation crash semantics. A fresh focused run will
 be requested after publication; there is no current-source execution claim.

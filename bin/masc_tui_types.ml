@@ -10762,17 +10762,17 @@ let selected_keeper (state : state) =
   List.nth_opt (keepers_for_selection state) state.keeper_cursor
 
 let transition_keeper_view state view =
-  let selected = Option.map (fun keeper -> keeper.k_name) (selected_keeper state) in
+  let selected = Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) in
   state.view <- view;
   Option.iter (select_keeper_name state) selected
 
 let cycle_keeper_list_layout state =
-  let selected = Option.map (fun keeper -> keeper.k_name) (selected_keeper state) in
+  let selected = Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) in
   state.keeper_list_layout <- Masc_tui_keeper_list_model.next_layout state.keeper_list_layout;
   Option.iter (keeper_list_select_name state) selected
 
 let cycle_keeper_list_sort state =
-  let selected = Option.map (fun keeper -> keeper.k_name) (selected_keeper state) in
+  let selected = Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) in
   state.keeper_list_sort <- Masc_tui_keeper_list_model.next_sort state.keeper_list_sort;
   Option.iter (keeper_list_select_name state) selected
 
@@ -10782,7 +10782,7 @@ let cycle_keeper_list_sort state =
 let preserve_keeper_list_selection state update =
   let selected =
     if state.view = Keepers Keeper_list then
-      Option.map (fun keeper -> keeper.k_name) (selected_keeper state)
+      Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
     else None
   in
   let result = update () in

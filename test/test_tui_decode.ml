@@ -8600,45 +8600,43 @@ let test_decode_keeper_turns_rejects_unknown_schema () =
 
 let keeper_turns_waiting_json =
   `Assoc
-    [ ("schema", `String "masc.keeper_turns.v1")
-    ; ( "keepers"
-      , `List
-          [ `Assoc
-              [ ("keeper_name", `String "echo")
-              ; ("status", `String "ok")
-              ; ("turn", `Null)
-              ; ( "waiting"
-                , `Assoc
-                    [ ("keeper_name", `String "echo")
-                    ; ("paused", `Bool false)
-                    ; ("state", `String "waiting")
-                    ; ("waiting_count", `Int 1)
-                    ; ("since", `Float 10.)
-                    ; ("since_iso", `String "1970-01-01T00:00:10Z")
-                    ; ("due_at", `Null)
-                    ; ("due_at_iso", `Null)
-                    ; ("sources", `Assoc [ "event_queue_pending", `Int 1 ])
-                    ; ( "source_next_actions"
-                      , `Assoc [ "event_queue_pending", `List [ `String "resume_on_delegate_completed" ] ] )
-                    ; ("current_execution", `Null)
-                    ; ( "waiting_on"
-                      , `List
-                          [ `Assoc
-                              [ ("source", `String "event_queue_pending")
-                              ; ("waiting_on", `String "keeper-delegate:op-1")
-                              ; ("what", `String "Delegated answer from crystal")
-                              ; ("wake_producer", `String "keeper_delegate")
-                              ; ("since", `Float 10.)
-                              ; ("since_iso", `String "1970-01-01T00:00:10Z")
-                              ; ("due_at", `Null)
-                              ; ("due_at_iso", `Null)
-                              ; ("next_action", `String "resume_on_delegate_completed")
-                              ; ("detail", `Assoc [ "delegate_operation_id", `String "op-1" ])
-                              ] )
-                      ] )
-              ] )
-      ] )
-  ] )
+    [ "schema", `String "masc.keeper_turns.v1"
+    ; "keepers", `List
+        [ `Assoc
+            [ "keeper_name", `String "echo"
+            ; "status", `String "ok"
+            ; "turn", `Null
+            ; "waiting", `Assoc
+                [ "keeper_name", `String "echo"
+                ; "paused", `Bool false
+                ; "state", `String "waiting"
+                ; "waiting_count", `Int 1
+                ; "since", `Float 10.
+                ; "since_iso", `String "1970-01-01T00:00:10Z"
+                ; "due_at", `Null
+                ; "due_at_iso", `Null
+                ; "sources", `Assoc [ "event_queue_pending", `Int 1 ]
+                ; "source_next_actions", `Assoc
+                    [ "event_queue_pending", `List [ `String "resume_on_delegate_completed" ] ]
+                ; "current_execution", `Null
+                ; "waiting_on", `List
+                    [ `Assoc
+                        [ "source", `String "event_queue_pending"
+                        ; "waiting_on", `String "keeper-delegate:op-1"
+                        ; "what", `String "Delegated answer from crystal"
+                        ; "wake_producer", `String "keeper_delegate"
+                        ; "since", `Float 10.
+                        ; "since_iso", `String "1970-01-01T00:00:10Z"
+                        ; "due_at", `Null
+                        ; "due_at_iso", `Null
+                        ; "next_action", `String "resume_on_delegate_completed"
+                        ; "detail", `Assoc [ "delegate_operation_id", `String "op-1" ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ]
 
 let test_decode_keeper_turns_projection_reads_waiting () =
   match Tui_decode.decode_keeper_turns_projection keeper_turns_waiting_json with

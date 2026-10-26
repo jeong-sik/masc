@@ -1,10 +1,12 @@
 module P = Endpoint_job_protocol
 module L = Endpoint_job_launch
+module R = Endpoint_job_registry
 let ( let* ) = Result.bind
 type error =
   | Invalid_storage | Storage_unavailable | Source_protocol_error
   | Offset_unavailable | Invalid_range | Interrupted | Capture_failed
   | Codec_error of P.codec_error
+  | Registry_error of R.error
   | Publication_failed of Fs_compat.capability_write_error | Recovery_failed of string
 let error_to_string = function
   | Invalid_storage -> "original output storage authority changed"
@@ -15,14 +17,16 @@ let error_to_string = function
   | Interrupted -> "output capture interrupted before durable sealing"
   | Capture_failed -> "output capture failed before durable sealing"
   | Codec_error e -> P.error_to_string e
+  | Registry_error e -> R.error_to_string e
   | Publication_failed e -> Fs_compat.capability_write_error_to_string e
   | Recovery_failed detail -> "output publication recovery: " ^ detail
 type seal = { byte_length : int64; sha256 : P.Sha256.t }
 type state = Growing of int64 | Sealed of seal | Unavailable of error
 type t = {
-  file : Eio.File.rw_ty Eio.Resource.t;
+  file : Eio.File.ro_ty Eio.Resource.t;
   state : state Atomic.t;
   done_ : (seal,error) result Eio.Promise.t;
+  validate_read : (unit -> (unit,error) result) option;
 }
 type chunk = { data : string; extent : P.extent }
 type metadata_operation = Open_recovery | Publish of string
@@ -93,7 +97,7 @@ let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
   let* ()=if valid_file 0L expected && valid_file 0L actual
     then validate_attachment 0L else Error Invalid_storage in
   let done_,resolve=Eio.Promise.create () in
-  let t={file;state=Atomic.make (Growing 0L);done_} in
+  let t={file=(file :> Eio.File.ro_ty Eio.Resource.t);state=Atomic.make (Growing 0L);done_;validate_read=None} in
   let finish value =
     Atomic.set t.state (match value with Ok seal -> Sealed seal | Error e -> Unavailable e);
     Eio.Promise.resolve resolve value in
@@ -144,13 +148,9 @@ let start_with_hook ~after_chunk ~on_metadata ~sw ~fs ~owner ~stream ~source =
 let start ~sw ~fs ~owner ~stream ~source =
   start_with_hook ~after_chunk:(fun () -> ()) ~on_metadata:(fun _ _ -> ()) ~sw ~fs ~owner ~stream ~source
 
-module For_testing = struct
-  type nonrec metadata_operation = metadata_operation = Open_recovery | Publish of string
-  type nonrec metadata_stage = metadata_stage = Waiting | Acquired
-  let start = start_with_hook
-end
-
 let read t ~offset:requested ~max_bytes =
+  let validate ()=match t.validate_read with None -> Ok () | Some f -> f () in
+  let* ()=validate () in
   let* observed=extent t in
   let length=match observed with P.Growing n -> n | P.Sealed {byte_length;_} -> byte_length in
   if requested<0L || requested>length || max_bytes<=0 then Error Invalid_range else
@@ -159,4 +159,118 @@ let read t ~offset:requested ~max_bytes =
   let buffer=Cstruct.create count in
   let* ()=if count=0 then Ok () else io (fun () -> Eio.File.pread_exact t.file ~file_offset:position [buffer]) in
   let* _=extent t in
+  let* ()=validate () in
   Ok {data=Cstruct.to_string buffer;extent=observed}
+
+(* This private seal is a controller record, not payload text or a protocol
+   result. Exact fields and the embedded original are still strictly decoded. *)
+let seal_fields value =
+  let required=["version";"original";"stream";"byte_length";"sha256";"file_device";"file_inode"] in
+  match value with
+  | `Assoc fields ->
+    let names=List.map fst fields in
+    if List.length names=List.length required
+        && List.for_all (fun name -> List.length (List.filter ((=) name) names)=1) required
+      then Ok fields else Error Invalid_storage
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error Invalid_storage
+
+let seal_count = function
+  | `String value -> (match Int64.of_string_opt value with
+      | Some n when n>=0L && Int64.to_string n=value -> Ok n
+      | None | Some _ -> Error Invalid_storage)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> Error Invalid_storage
+
+let decode_seal ~original ~stream content =
+  let json=try Ok (Yojson.Safe.from_string content) with Yojson.Json_error _ -> Error Invalid_storage in
+  let* json=json in let* fields=seal_fields json in
+  let get key=List.assoc key fields in
+  let* ()=if get "version"=`Int 1 && get "stream"=`String (tag stream)
+    then Ok () else Error Invalid_storage in
+  let* request=P.request_of_json (get "original") |> Result.map_error (fun e -> Codec_error e) in
+  let* ()=match request with
+    | P.Inspect actual when actual=original -> Ok ()
+    | P.Start _ | Reconcile_admission _ | Activate _ | Inspect _ | Read_output _ | Cancel _ | Release _ -> Error Invalid_storage in
+  let* byte_length=seal_count (get "byte_length") in
+  let* device=seal_count (get "file_device") in let* inode=seal_count (get "file_inode") in
+  let* sha256=match get "sha256" with
+    | `String value -> P.Sha256.of_string value |> Result.map_error (fun _ -> Invalid_storage)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> Error Invalid_storage in
+  Ok ({byte_length;sha256},device,inode)
+
+let stable_stat (before : Eio.File.Stat.t) (after : Eio.File.Stat.t) =
+  (* Reads may advance atime; every other observed property must remain fixed. *)
+  {before with atime=after.atime}=after
+
+let reopen_with_hook ~after_chunk ~sw ~storage ~stream =
+  Eio.Switch.check sw;
+  let* known=R.refresh (R.storage_record storage) |> Result.map_error (fun e -> Registry_error e) in
+  let* ()=match R.launch_state known with
+    | R.Requested _ -> Ok () | R.Not_requested -> Error Invalid_storage in
+  let directory=R.storage_path storage in
+  let* root=io (fun () -> Eio.Path.stat ~follow:true directory) in
+  let valid_root (stat : Eio.File.Stat.t) =
+    stat.kind=`Directory && stat.dev=root.dev && stat.ino=root.ino
+    && stat.uid=Int64.of_int (Unix.geteuid ()) && stat.perm land 0o7777=0o700 in
+  let* ()=if valid_root root then Ok () else Error Invalid_storage in
+  let private_file permission (stat : Eio.File.Stat.t) =
+    stat.kind=`Regular_file && stat.nlink=1L && stat.uid=root.uid
+    && stat.perm land 0o7777=permission in
+  let open_private leaf permission =
+    let path=Eio.Path.(directory / leaf) in
+    let* before=io (fun () -> Eio.Path.stat ~follow:false path) in
+    let* ()=if private_file permission before then Ok () else Error Invalid_storage in
+    let* file=io (fun () -> (Eio.Path.open_in ~sw path :> Eio.File.ro_ty Eio.Resource.t)) in
+    let* held=io (fun () -> Eio.File.stat file) in
+    let* canonical=io (fun () -> Eio.Path.stat ~follow:false path) in
+    if stable_stat before held && stable_stat before canonical then Ok (file,before)
+    else Error Invalid_storage in
+  let* metadata,metadata_stat=open_private (tag stream ^ ".seal.json") 0o400 in
+  let metadata_length=Optint.Int63.to_int64 metadata_stat.size in
+  let* ()=if metadata_length>=0L && metadata_length<=Int64.of_int Sys.max_string_length
+    then Ok () else Error Invalid_storage in
+  let content=Cstruct.create (Int64.to_int metadata_length) in
+  let* ()=io (fun () -> Eio.File.pread_exact metadata ~file_offset:Optint.Int63.zero [content]) in
+  let original=P.original ~binding:(R.binding known) ~admission_id:(R.admission_id known) in
+  let* seal,device,inode=cpu (fun () -> decode_seal ~original ~stream (Cstruct.to_string content)) in
+  let* file,file_stat=open_private (tag stream ^ ".bin") 0o600 in
+  let* ()=if file_stat.dev=device && file_stat.ino=inode
+      && Optint.Int63.to_int64 file_stat.size=seal.byte_length
+    then Ok () else Error Invalid_storage in
+  let validate () =
+    let* current_root=io (fun () -> Eio.Path.stat ~follow:false directory) in
+    let* held=io (fun () -> Eio.File.stat file) in
+    let* canonical=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(directory / (tag stream ^ ".bin"))) in
+    let* held_metadata=io (fun () -> Eio.File.stat metadata) in
+    let* canonical_metadata=io (fun () -> Eio.Path.stat ~follow:false Eio.Path.(directory / (tag stream ^ ".seal.json"))) in
+    let* ()=if valid_root current_root && stable_stat file_stat held && stable_stat file_stat canonical
+        && stable_stat metadata_stat held_metadata && stable_stat metadata_stat canonical_metadata
+      then Ok () else Error Invalid_storage in
+    let* _=R.refresh known |> Result.map_error (fun e -> Registry_error e) in Ok () in
+  let buffer=Cstruct.create buffer_bytes in
+  let rec hash position context =
+    if position=seal.byte_length then Ok context else
+    let count=Int64.min (Int64.of_int buffer_bytes) (Int64.sub seal.byte_length position) |> Int64.to_int in
+    let part=Cstruct.sub buffer 0 count in
+    let* file_offset=offset position in
+    let* ()=io (fun () -> Eio.File.pread_exact file ~file_offset [part]) in
+    let bytes=Cstruct.to_string part in
+    let context=cpu (fun () -> Digestif.SHA256.feed_string context bytes) in
+    after_chunk ();
+    hash (Int64.add position (Int64.of_int count)) context in
+  let* ()=validate () in
+  let* context=hash 0L Digestif.SHA256.empty in
+  let actual=cpu (fun () -> Digestif.SHA256.(to_hex (get context))) in
+  let* ()=if actual=P.Sha256.to_string seal.sha256 then Ok () else Error Invalid_storage in
+  let* ()=validate () in
+  Eio.Switch.check sw;
+  let done_,resolve=Eio.Promise.create () in Eio.Promise.resolve resolve (Ok seal);
+  Ok {file;state=Atomic.make (Sealed seal);done_;validate_read=Some validate}
+
+let reopen ~sw ~storage ~stream = reopen_with_hook ~after_chunk:(fun () -> ()) ~sw ~storage ~stream
+
+module For_testing = struct
+  type nonrec metadata_operation = metadata_operation = Open_recovery | Publish of string
+  type nonrec metadata_stage = metadata_stage = Waiting | Acquired
+  let start = start_with_hook
+  let reopen = reopen_with_hook
+end

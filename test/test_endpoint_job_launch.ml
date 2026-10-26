@@ -524,6 +524,120 @@ let supervisor_teardown_settles_external_observers = fixture (fun ~env ~sw:_ ~st
   | Error S.Interrupted | Error (S.Output_error {cause=O.Interrupted;_}) -> ()
   | Error _ | Ok _ -> Alcotest.fail "supervisor teardown left an observer waiting or invented a complete result")
 
+let completed_output ~env ~store fixture script = Eio.Switch.run (fun sw ->
+  let binding,permit=prepare store fixture "05" script in
+  let original=supervised ~sw ~env fixture permit in
+  let settled=S.await_settled original |> supervise in
+  binding,settled)
+let original_storage ~sw store binding =
+  R.load store ~binding |> registry |> R.open_storage ~sw |> registry
+let binary_script="/usr/bin/python3 -c 'import sys;sys.stdout.buffer.write(bytes(range(256))*1025);sys.stderr.buffer.write(bytes([101,0,255]))'"
+let binary_bytes ()=String.init (256*1025) (fun i -> Char.chr (i mod 256))
+
+let sealed_output_reopens_after_owner_exit_and_boot_change = fixture (fun ~env ~sw ~store fixture ->
+  let binding,settled=completed_output ~env ~store fixture binary_script in
+  exit 0 settled.physical_exit;
+  let rebooted=R.open_registry ~sw ~fs:env#fs ~root_path:fixture.registry_path
+    ~route:{route with boot_id=id "09"} ~owner ~payload_uid:fixture.uid |> registry in
+  Eio.Switch.run (fun read_sw ->
+    let storage=original_storage ~sw:read_sw rebooted binding in
+    let stdout=O.reopen ~sw:read_sw ~storage ~stream:P.Stdout |> output in
+    let stderr=O.reopen ~sw:read_sw ~storage ~stream:P.Stderr |> output in
+    let out_seal=O.await_sealed stdout |> output and err_seal=O.await_sealed stderr |> output in
+    check "reopened streams retain both original durable digests" (out_seal=settled.stdout && err_seal=settled.stderr);
+    Alcotest.(check string) "every original binary stdout byte survives owner teardown and boot change"
+      (binary_bytes ()) (all_output stdout out_seal);
+    Alcotest.(check string) "stderr retains its independent original stream" "e\000\255" (all_output stderr err_seal);
+    check "old boot output recovery never restores launch authority"
+      (R.commit_launch (R.storage_record storage) ~confirmed_admission_id:(id "04") ~launch_id:(id "10")=Error R.Endpoint_replaced)))
+
+let sealed_output_reopen_rejects_changed_evidence () =
+  List.iter (fun change -> fixture (fun ~env ~sw ~store fixture ->
+    let binding,_=completed_output ~env ~store fixture "printf original" in
+    let spool=leaf fixture binding "stdout.bin" and manifest=leaf fixture binding "stdout.seal.json" in
+    let rewrite_json update =
+      let fields=match Yojson.Safe.from_file manifest with `Assoc fields -> fields
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Alcotest.fail "actual seal missing" in
+      Unix.chmod manifest 0o600;Yojson.Safe.to_file manifest (`Assoc (update fields));Unix.chmod manifest 0o400 in
+    (match change with
+     | `Bytes -> Out_channel.with_open_bin spool (fun oc -> output_string oc "tampered")
+     | `Truncated -> Unix.truncate spool 3
+     | `Spool_replaced -> Unix.rename spool (spool ^ ".evidence");
+       Out_channel.with_open_bin spool (fun oc -> output_string oc "original");Unix.chmod spool 0o600
+     | `Duplicate -> rewrite_json (fun fields -> ("version",`Int 1)::fields)
+     | `Unknown -> rewrite_json (fun fields -> ("unrecognized",`Bool true)::fields)
+     | `Wrong_stream -> rewrite_json (List.map (fun (key,value) -> key,if key="stream" then `String "stderr" else value))
+     | `Wrong_original ->
+       let wrong=P.request_to_json (P.Inspect (P.original ~binding ~admission_id:(id "11")))
+         |> Result.map_error P.error_to_string |> require in
+       rewrite_json (List.map (fun (key,value) -> key,if key="original" then wrong else value))
+     | `Seal_symlink -> Unix.rename manifest (manifest ^ ".evidence");Unix.symlink (manifest ^ ".evidence") manifest
+     | `Seal_link -> Unix.link manifest (manifest ^ ".evidence"));
+    let before=read spool in
+    let storage=original_storage ~sw store binding in
+    check "changed original evidence cannot become sealed output" (Result.is_error (O.reopen ~sw ~storage ~stream:P.Stdout));
+    Alcotest.(check string) "failed recovery preserves evidence without repair or replay" before (read spool);
+    let _,next=prepare store fixture "07" "printf independent; exit 8" in
+    let finished=Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_settled |> supervise) in
+    exit 8 finished.physical_exit) ())
+    [`Bytes;`Truncated;`Spool_replaced;`Duplicate;`Unknown;`Wrong_stream;`Wrong_original;`Seal_symlink;`Seal_link]
+
+let sealed_output_hash_observer_cancellation_preserves_original = fixture (fun ~env ~sw ~store fixture ->
+  let binding,settled=completed_output ~env ~store fixture binary_script in
+  let entered,signal=Eio.Promise.create () and blocked,_=Eio.Promise.create () in
+  let cancelled=ref false in
+  Eio.Fiber.first
+    (fun () -> try Eio.Switch.run (fun read_sw ->
+      let storage=original_storage ~sw:read_sw store binding in
+      ignore (O.For_testing.reopen ~sw:read_sw ~storage ~stream:P.Stdout
+        ~after_chunk:(fun () -> Eio.Promise.resolve signal ();Eio.Promise.await blocked) |> output);
+      Alcotest.fail "cancelled hash exposed an unchecked sealed reader")
+      with Eio.Cancel.Cancelled _ as ex -> cancelled:=true;raise ex)
+    (fun () -> Eio.Promise.await entered);
+  check "hash observer cancellation propagates" !cancelled;
+  let storage=original_storage ~sw store binding in
+  let recovered=O.reopen ~sw ~storage ~stream:P.Stdout |> output in
+  Alcotest.(check string) "fresh observer recovers the same complete original without recapture"
+    (binary_bytes ()) (all_output recovered settled.stdout);
+  check "original launch is still the same one after observer cancellation"
+    (R.launch_state (R.storage_record storage)=R.Requested (id "06")))
+
+let sealed_output_hash_releases_lock_and_preserves_cancel_progress = fixture (fun ~env ~sw ~store fixture ->
+  let binding,settled=completed_output ~env ~store fixture binary_script in
+  let storage=original_storage ~sw store binding in
+  let entered,signal=Eio.Promise.create () and resume,release=Eio.Promise.create () in
+  let done_,finish=Eio.Promise.create () in
+  let first=ref true in
+  let unblock ()=if Eio.Promise.peek resume=None then Eio.Promise.resolve release () in
+  Fun.protect ~finally:unblock (fun () ->
+    Eio.Fiber.fork ~sw (fun () ->
+      let result=O.For_testing.reopen ~sw ~storage ~stream:P.Stdout ~after_chunk:(fun () ->
+        if !first then (first:=false;Eio.Promise.resolve signal ();Eio.Promise.await resume)) in
+      Eio.Promise.resolve finish result);
+    Eio.Promise.await entered;
+    let known=R.load store ~binding |> registry in
+    let cancelled=R.request_cancel known ~confirmed_admission_id:(id "04") |> registry in
+    check "actual source registry remains available during full spool hashing" (R.cancellation_state cancelled=R.Cancellation_requested);
+    let _,next=prepare store fixture "07" "printf independent; exit 8" in
+    let finished=Eio.Switch.run (fun next_sw -> supervised ~sw:next_sw ~env fixture next |> S.await_settled |> supervise) in
+    exit 8 finished.physical_exit;
+    check "another actual job settles before this original hash resumes" (Eio.Promise.peek done_=None);
+    unblock ();
+    let reopened=Eio.Promise.await done_ |> output in
+    Alcotest.(check string) "legitimate same-launch cancellation leaves already complete original bytes readable"
+      (binary_bytes ()) (all_output reopened settled.stdout)))
+
+let sealed_output_range_read_rejects_later_replacement = fixture (fun ~env ~sw ~store fixture ->
+  let binding,_=completed_output ~env ~store fixture "printf original" in
+  let storage=original_storage ~sw store binding in
+  let reopened=O.reopen ~sw ~storage ~stream:P.Stdout |> output in
+  let spool=leaf fixture binding "stdout.bin" in
+  Unix.rename spool (spool ^ ".evidence");
+  Out_channel.with_open_bin spool (fun oc -> output_string oc "original");Unix.chmod spool 0o600;
+  check "range reads refuse a later canonical replacement rather than adopting or silently reading detached evidence"
+    (O.read reopened ~offset:0L ~max_bytes:8=Error O.Invalid_storage);
+  Alcotest.(check string) "refused read preserves the detached original bytes" "original" (read (spool ^ ".evidence")))
+
 let refusal = fixture (fun ~env ~sw ~store fixture ->
   let _,permit=prepare store fixture "05" ": > activated" in
   match L.launch_effect_workspace ~sw ~fs:env#fs ~cgroup_parent_path:"/sys/fs/cgroup"
@@ -566,6 +680,11 @@ let () =
       "supervisor settles input when the original child already exited",supervisor_early_exit_does_not_wait_on_stdin;
       "supervisor reports failed output before a blocked child exits",supervisor_reports_capture_failure_before_blocked_child_exit;
       "supervisor teardown settles external observers",supervisor_teardown_settles_external_observers;
-      "owner teardown finishes entered metadata then preserves cancellation",output_owner_teardown_finishes_entered_metadata] in
+      "owner teardown finishes entered metadata then preserves cancellation",output_owner_teardown_finishes_entered_metadata;
+      "sealed output reopens after original owner exit and boot change",sealed_output_reopens_after_owner_exit_and_boot_change;
+      "sealed output recovery rejects changed original evidence",sealed_output_reopen_rejects_changed_evidence;
+      "hash observer cancellation preserves the complete original",sealed_output_hash_observer_cancellation_preserves_original;
+      "hashing releases original lock and preserves cancel progress",sealed_output_hash_releases_lock_and_preserves_cancel_progress;
+      "reopened range reads reject later canonical replacement",sealed_output_range_read_rejects_later_replacement] in
   Alcotest.run "Endpoint job launch" ["original supervisor",List.map
     (fun (name,test) -> Alcotest.test_case name `Quick test) cases]

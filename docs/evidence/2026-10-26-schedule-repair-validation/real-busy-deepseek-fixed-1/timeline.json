@@ -1,0 +1,74 @@
+[
+  {
+    "event": "first_arrival",
+    "at": 1793026195.957962,
+    "source": "reaction-ledger stimulus.arrived_at_unix"
+  },
+  {
+    "event": "first_stimulus_recorded",
+    "at": 1793026195.977375,
+    "source_line": 1
+  },
+  {
+    "event": "first_turn_started",
+    "at": 1793026196.287609,
+    "source_line": 2
+  },
+  {
+    "event": "second_arrival",
+    "at": 1793026198.997092,
+    "source": "reaction-ledger stimulus.arrived_at_unix"
+  },
+  {
+    "event": "second_stimulus_recorded",
+    "at": 1793026199.010688,
+    "source_line": 3
+  },
+  {
+    "event": "first_turn_finished_checkpointed",
+    "at": 1793026199.053084,
+    "source_line": 4
+  },
+  {
+    "event": "second_turn_started",
+    "at": 1793026199.056644,
+    "source_line": 5
+  },
+  {
+    "event": "second_note_durable",
+    "at": 1793026203.477594,
+    "note_id": "10",
+    "source": "schedules.json notes; corresponding note_add keeper_turn_id=2"
+  },
+  {
+    "event": "first_note_durable",
+    "at": 1793026212.25444,
+    "note_id": "11",
+    "source": "schedules.json notes; corresponding note_add keeper_turn_id=2"
+  },
+  {
+    "event": "second_turn_finished_completed",
+    "at": 1793026215.71296,
+    "source_line": 6
+  },
+  {
+    "event": "second_event_queue_ack",
+    "at": 1793026215.712989,
+    "source_line": 7
+  },
+  {
+    "event": "first_turn_started",
+    "at": 1793026215.719052,
+    "source_line": 8
+  },
+  {
+    "event": "first_turn_finished_completed",
+    "at": 1793026218.389438,
+    "source_line": 9
+  },
+  {
+    "event": "first_event_queue_ack",
+    "at": 1793026218.389485,
+    "source_line": 10
+  }
+]

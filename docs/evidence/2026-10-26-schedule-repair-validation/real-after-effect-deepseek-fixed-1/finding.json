@@ -1,0 +1,19 @@
+{
+  "classification": "after_effect_busy_queue_flow_supported_without_checkpoint",
+  "observer_checks": {
+    "passed": 11,
+    "failed": 0,
+    "numeric_observer_exit_code": "not separately retained in process-ended.json"
+  },
+  "first_checkpoint_observed": false,
+  "first_readmission_observed": false,
+  "first_effect_before_second_arrival": true,
+  "first_completed_and_acked_before_second_start": true,
+  "note_add_keeper_turn_ids": {
+    "first": 1,
+    "second": 2
+  },
+  "note_count_each": 1,
+  "producer_exit_code": 0,
+  "scope_limit": "No after-effect checkpoint/readmission or restart was observed; one Execute call was refused before successful note effects."
+}

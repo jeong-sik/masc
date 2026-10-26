@@ -1,0 +1,13 @@
+--- busy-notes-v3.py
++++ busy-notes-v4.py
+@@ -225 +225 @@
+-meta.update(second_schedule_id=second_id,second_marker=second_marker,second_after_first_effect=args.second_after_first_effect,oracle_version=3)
++meta.update(second_schedule_id=second_id,second_marker=second_marker,second_after_first_effect=args.second_after_first_effect,oracle_version=4)
+@@ -228,2 +228,2 @@
+-def create_request(identity,effect):
+-    return successful_tool('masc_schedule_create',{'schedule_id':identity,'keeper_name':keeper,'due_in_sec':2,
++def create_request(identity,effect,delay_sec=2):
++    return successful_tool('masc_schedule_create',{'schedule_id':identity,'keeper_name':keeper,'due_in_sec':delay_sec,
+@@ -332 +332 @@
+-    second=create_request(second_id,second_marker)
++    second=create_request(second_id,second_marker,delay_sec=1)

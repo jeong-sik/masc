@@ -1,0 +1,47 @@
+{
+  "schema": "masc.schedule-native-artifact.v1",
+  "workflow_definition_sha": "117dc31e1ca8f71f47bbbe91fa2adab5befb5761",
+  "workflow_event_sha": "117dc31e1ca8f71f47bbbe91fa2adab5befb5761",
+  "workflow_ref": "jeong-sik/masc/.github/workflows/test.yml@refs/heads/ci/schedule-native-runtime-proof-20261026",
+  "product_source_sha": "94b2df25abcdfe20c658322f4156ad63f5546c34",
+  "requested_source_sha": "94b2df25abcdfe20c658322f4156ad63f5546c34",
+  "run_id": "40339887803",
+  "run_attempt": "1",
+  "platform": "macos-arm64",
+  "build_completed": true,
+  "release_validated": false,
+  "production_installed": false,
+  "embedded_source_sha": "94b2df25abcdfe20c658322f4156ad63f5546c34",
+  "portable_source_sha": "94b2df25abcdfe20c658322f4156ad63f5546c34",
+  "verification_scope": "five operator targets plus unchanged portable packager checks; no behavioral suites",
+  "files": {
+    "masc-browser-host-macos-arm64": {
+      "bytes": 44471376,
+      "sha256": "ab2660a2b2156ab956f748382ca8a01b74d5dead1e67c93f44214775f847b9ef"
+    },
+    "masc-check-runtime-deployment-preflight-macos-arm64": {
+      "bytes": 17019,
+      "sha256": "af7b33ec59d5e73c2998323a1a89afe4e6f3dbc7448fb7765d2c00b481c829d5"
+    },
+    "masc-deployment-preflight-helper-macos-arm64": {
+      "bytes": 105464800,
+      "sha256": "37f5131e6269d4e3520afd3a881247bb248316c66ffa0108299f6202482c0155"
+    },
+    "masc-exec-ssh-bootstrap-macos-arm64": {
+      "bytes": 28803936,
+      "sha256": "6326ec74dd9c655706230c0e84b363edf730146976fd1b838f95acb9a575f862"
+    },
+    "masc-macos-arm64": {
+      "bytes": 107661536,
+      "sha256": "a0bd5c3903ef6425024e47b9dc92a7615f4efbb941357ea36e74ac5a18284668"
+    },
+    "masc-runtime-macos-arm64.tar.gz": {
+      "bytes": 57196200,
+      "sha256": "4867d072f3148e0d754cf1fd0b44350250ef6763a0092da27fd0671c02ceaaf5"
+    },
+    "masc-tui-macos-arm64": {
+      "bytes": 105144624,
+      "sha256": "f2d2cd3ebcde02ed0103b71ac76ffe21cca0d07189bdd489bc0d45aaef171308"
+    }
+  }
+}

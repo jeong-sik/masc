@@ -42,8 +42,8 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 16 | 내용만 수정하면서 과거 due 시각을 보존한다 | W8–9/46, S-state8; API33 | due/recurrence/expiry 보존 및 명시 retime 경계 실행. |
 | 17 | 동시 수정·retime가 저장 결과를 잃지 않는다 | W10 | 양쪽 timing 생략 content edit의 결정적 concurrent retime 보존 실행. 전 조합 보장 아님. |
 | 18 | 권한 확인 사이 target이 바뀌면 이전 recipient 변경을 거절한다 | F3 소스 반례; 수리 PR46182 | locked current-row 권한 수리 PR46182의 새 Test124 통과. 공개 update interleaving/locked cancel 거절 포함; 실제 HTTP cancel race·새 binary는 미검증. |
-| 19 | due만 바꿀 때 다른 호출이 갱신한 recurrence를 보존한다 | F4 소스 반례; 수리 PR46193 | 최신 recurrence 보존 수리와 공개 interleaving 2건 작성. 새 Test40332170687 접수, 실행 결론 미확인. W10과 다른 조합. |
-| 20 | A에 이미 대기 중인 반복 예약을 B로 바꾸고 취소한다 | retarget-cancel-4 | 실제 F1 실패: 이전 owner pending이 취소 성공 뒤 남음. 수리 미완료. |
+| 19 | due만 바꿀 때 다른 호출이 갱신한 recurrence를 보존한다 | F4 소스 반례; 수리 PR46193 | 최신 recurrence 보존 수리와 공개 interleaving 2건 포함 Test40332170687의 115 cases 통과. 실제 HTTP race/새 binary 재현은 미검증. |
+| 20 | A에 이미 대기 중인 반복 예약을 B로 바꾸고 취소한다 | retarget-cancel-4; 수리 PR46211 | 실제 F1 반례는 유지. all-owner 철회·transfer fencing 수리의 Test40343103111에서 3 suites 통과(명시 64+12=76 cases + queue executable). 새 binary 반례 재검증·강제 concurrent transfer는 미검증. |
 | 21 | 아직 dispatch되지 않은 Scheduled/Due를 취소한다 | W3, S-lifecycle1, C10–11; API33 | 정의 및 current-target pending 취소 실행. 이전 target/instance 조합은 F1 실패. |
 | 22 | 전달됐지만 아직 턴이 시작되지 않은 단발을 취소한다 | W34 | accepted one-shot Succeeded 뒤 cancel의 typed refusal 실행. 현행 기능 한계 유지. |
 | 23 | 이미 시작한 작업·완료된 effect를 되돌린다 | S-lifecycle2, C12/14–15 | Running 거절·직접 turn-start/terminal 주입 경계 실행. 실제 effect rollback 보장 없음. |
@@ -59,7 +59,7 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 33 | due가 되면 wake를 한 번 접수한다 | R-tick0/7–8, C3/28 | 신호 중복·생산 enqueue·offline 반복 tick single acceptance 실행. 모델 완료와 별개. |
 | 34 | 접수 후 receipt 저장 실패에도 중복 효과를 피한다 | C23–27/30–31/41/54, L5 | acceptance/receipt 장애 뒤 같은 occurrence 재사용 실행. F5 settlement write 실패와 다름. |
 | 35 | 한 예약 실패가 다른 due 예약을 막지 않는다 | R-tick17, C42 | fixture retry 격리와 실제 corrupt ledger의 다른 Keeper dispatch 격리 실행. |
-| 36 | Keeper가 작업 중일 때 도착한 예약을 보존한다 | real-busy-deepseek-1 | 실제 F6 P1 실패: 후속 예약은 수행하나 원래 효과 없이 source Completed/ACK. |
+| 36 | Keeper가 작업 중일 때 도착한 예약을 보존한다 | real-busy-deepseek-1; repair-validation 실제 두 모델 | 과거 F6 반례 유지. product94b2에서 DeepSeek/GLM의 checkpoint 보존·두 note·exact ACK 확인. DeepSeek observer의 overlap FAIL은 유지하며 원장으로 별도 대조. b5c976의 Owner103/3 실패는 보존하고 fixture 수리 ccb000의 Owner106 PASS와 구분. rebased6dedd 실행은 미검증. |
 | 37 | paused Keeper에 도착해도 유실하지 않는다 | C11; retarget-cancel-4/restart-expiry-3 | 실제 pause·pending 보존 실행. Resume 후 모델 소비는 미검증. |
 | 38 | owner가 꺼져 있어도 demand를 유지한다 | C28–29 | 등록됐으나 미시작 owner의 deferred/not_running·single acceptance 실행. Boot 후 모델 소비 미검증. |
 | 39 | notice에서 busy/paused/offline 원인과 다음 행동을 안다 | C3/28/32는 backend reason만 | notice의 원인별 Resume/Boot 안내와 실제 사용자 조치는 여전히 공백. |
@@ -91,4 +91,9 @@ head `ed79abfd0500cec731168ab2517969ef30db490a`, ref `fix/schedule-mutation-auth
 conclusion **success**를 확인했다. 실제 artifact는 55/58/9/2=124 cases이며
 [완료 영수증](../evidence/2026-10-26-schedule-runtime-behavior/authority-fix-ci-result.json)에 있다.
 이 표의 기존 195개와 다른 코드 head/검사이며 설치·실제 HTTP cancel race 증명은 아니다.
-F4/F6는 별도 수리 중이다. 소스 작성·리뷰·CI·새 binary 설치·실제 반례 재검증을 구분한다.
+F4와 F1의 완료 검사, 별도 product94b2의 native build 및 실제 모델 재검증은
+[수리 증거 묶음](../evidence/2026-10-26-schedule-repair-validation/README.md)에 있다.
+F6 Test40341860767은 b5c976 head에서 Connector32 PASS, Owner103 PASS/3 FAIL로 전체 실패다.
+이후 Test40348100243의 ccb000 head에서 Owner106 PASS/skip0/fail0를 확인했다.
+main 위로 rebase한 6dedd head의 결과로 이월하지 않는다.
+소스 작성·리뷰·CI·격리 binary 실행·운영 설치를 구분하며, 전체 기능 PASS는 아니다.

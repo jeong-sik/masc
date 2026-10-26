@@ -1,0 +1,9 @@
+{
+  "pid": 82926,
+  "started_at_unix": 1793026378.278333,
+  "url": "http://127.0.0.1:63979",
+  "base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-runtime-audit/artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/workspace",
+  "stop_reason": "two required effects and exact durable completions observed",
+  "returncode": 0,
+  "stopped_at_unix": 1793026428.971414
+}

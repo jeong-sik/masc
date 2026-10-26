@@ -1,0 +1,30 @@
+[
+  {
+    "source_line": 209,
+    "text": "[2026-10-26 23:49:56] [INFO] [runtime_agent] agent_core-ollama_cloud.ollama-cloud-deepseek-v4-1-flash: resume checkpoint_turn_count=0"
+  },
+  {
+    "source_line": 252,
+    "text": "[2026-10-26 23:49:59] [INFO] [Keeper] audit-live-deepseek: keeper cycle checkpoint runtime_lane=runtime tokens=19319 latency=2758ms mode=tool_use stop=yielded_to_durable_stimulus(2)"
+  },
+  {
+    "source_line": 253,
+    "text": "[2026-10-26 23:49:59] [INFO] [Keeper/audit-live-deepseek] yielded autonomous run for a pending durable stimulus after 2 turn(s), checkpoint saved — will resume next cycle"
+  },
+  {
+    "source_line": 260,
+    "text": "[2026-10-26 23:49:59] [INFO] [runtime_agent] agent_core-ollama_cloud.ollama-cloud-deepseek-v4-1-flash: resume checkpoint_turn_count=2"
+  },
+  {
+    "source_line": 418,
+    "text": "[2026-10-26 23:50:15] [INFO] [runtime_agent] agent_core-ollama_cloud.ollama-cloud-deepseek-v4-1-flash: resume checkpoint_turn_count=12"
+  },
+  {
+    "source_line": 460,
+    "text": "[2026-10-26 23:51:57] [INFO] [Server] [MASC] Received SIGTERM, shutting down gracefully (timeout=10s, hard_exit=124)..."
+  },
+  {
+    "source_line": 484,
+    "text": "[2026-10-26 23:51:57] [INFO] [Server] MASC MCP: Shutdown complete."
+  }
+]

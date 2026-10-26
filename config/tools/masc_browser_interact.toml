@@ -320,7 +320,7 @@ description = "set_zoom only: actual browser zoom factor (0.3–5), requires exa
 [[params]]
 name = "steps"
 type = "array"
-description = "workflow only: native Page calls in order, followed by one final snapshot. click/dblclick/hover/focus take selector; fill takes selector,text; press takes selector,key; selectOption takes selector and value or distinct values ([] clears); reload takes no fields; goto takes an absolute HTTP(S) url; waitForURL takes a native string/glob url; waitForSelector takes selector,state (attached/detached/visible/hidden); waitForLoadState takes state (domcontentloaded/load/networkidle). keyboard.type/keyboard.insertText take text; keyboard.paste takes text and optional html and the SDK restores the native clipboard; keyboard.press takes key. Keyboard methods act on the focused element: focus an observed target first. Optional nonnegative JavaScript-safe timeoutMs is forwarded unchanged to Page methods; keyboard methods reject timeoutMs. Omission uses the SDK default. MASC adds no cumulative execution-time or step-count limit. evaluate/waitForFunction take source and optional argumentJson; waitForFunction also accepts pollingMs and timeoutMs. evaluate rejects timeoutMs. fetch takes url and optional fetchOptions, with timeoutMs on the step; saveAs is refused until a download broker is supplied. Page source executes only in the browser. These methods may have effects even on failure. Locators come from observations; use a new call when an intermediate result needs judgment."
+description = "workflow only: native Ego Page calls followed by one final snapshot. Each step uses only its method arguments and native options. click/dblclick/hover/focus take selector; dragAndDrop takes selector,destination; mouse.click/move/wheel take CSS x,y (wheel uses deltas and needs a move/click in this round first); fill takes selector,text; press takes selector,key; selectOption takes selector,selectionJson; goto takes an absolute HTTP(S) url; waitForURL takes a string/glob url; waitForSelector takes selector,state; waitForLoadState state is optional. Keyboard methods take text or key; paste also accepts html. evaluate/waitForFunction take source and optional argumentJson. fetch takes an HTTP(S) or relative url and returns its structured response as the step receipt. Native options use SDK names and are strictly validated for that method; omission uses SDK defaults. evaluate/keyboard.insertText/keyboard.paste accept no options. Source runs only in the browser; Page code and fetch may have effects even on failure. A failed pointer click/drag attempts one release of its exact button; a lost key input result keeps release unconfirmed without guessing keyup. An unconfirmed release blocks further input. Choose the next action from current observations; no new judgment inside the call. There is no cumulative step/time limit."
 
 [params.items]
 type = "object"
@@ -329,21 +329,20 @@ additional_properties = false
 [[params.items.params]]
 name = "method"
 type = "string"
+enum = ["click", "dblclick", "hover", "dragAndDrop", "mouse.click", "mouse.move", "mouse.wheel", "fill", "press", "focus", "reload", "keyboard.type", "keyboard.insertText", "keyboard.paste", "keyboard.press", "selectOption", "goto", "waitForURL", "waitForSelector", "waitForLoadState", "evaluate", "waitForFunction", "fetch"]
 required = true
-enum = ["click", "dblclick", "hover", "fill", "press", "focus", "reload", "keyboard.type", "keyboard.insertText", "keyboard.paste", "keyboard.press", "selectOption", "goto", "waitForURL", "waitForSelector", "waitForLoadState", "evaluate", "waitForFunction", "fetch"]
 
 [[params.items.params]]
 name = "selector"
 type = "string"
 
 [[params.items.params]]
-name = "text"
+name = "destination"
 type = "string"
 
 [[params.items.params]]
-name = "html"
+name = "text"
 type = "string"
-description = "keyboard.paste only: rich clipboard HTML with text as its plain fallback."
 
 [[params.items.params]]
 name = "key"
@@ -354,13 +353,22 @@ name = "url"
 type = "string"
 
 [[params.items.params]]
-name = "value"
-type = "string"
+name = "x"
+type = "number"
 
 [[params.items.params]]
-name = "values"
-type = "array"
-items = { type = "string" }
+name = "y"
+type = "number"
+
+[[params.items.params]]
+name = "html"
+type = "string"
+description = "keyboard.paste: rich HTML alongside its plain text fallback; native clipboard is restored."
+
+[[params.items.params]]
+name = "selectionJson"
+type = "string"
+description = "selectOption: JSON-encoded string, {value?,label?,index?}, array of strings/option objects, or null. [] and null clear selection. Native programmatic selection includes disabled options."
 
 [[params.items.params]]
 name = "state"
@@ -368,33 +376,123 @@ type = "string"
 enum = ["attached", "detached", "visible", "hidden", "domcontentloaded", "load", "networkidle"]
 
 [[params.items.params]]
-name = "timeoutMs"
-type = "integer"
-minimum = 0
-maximum = 9007199254740991
-
-[[params.items.params]]
 name = "source"
 type = "string"
-description = "evaluate/waitForFunction only: JavaScript expression evaluated in the observed Ego Page. With argumentJson, source must be a callable expression and receives that parsed JSON value. Node.js and host APIs are unavailable. Page code, including wait predicates, is treated as a possible effect; inspect after a failure and never replay blindly."
+description = "evaluate/waitForFunction: browser expression. With argumentJson it is called as a function with that JSON value; Node/host APIs are unavailable. Predicate and code failures may have effects."
 
 [[params.items.params]]
 name = "argumentJson"
 type = "string"
-description = "evaluate/waitForFunction only: one JSON-encoded argument (any JSON type). The source is called with this value inside the browser. Omit for a plain expression."
+description = "One JSON-encoded function argument of any JSON type. Omit to evaluate source as a plain browser expression."
 
 [[params.items.params]]
-name = "pollingMs"
+name = "options"
+type = "object"
+description = "Native SDK options for the exact method; all time values are milliseconds. Keyboard type/press accept delay only; evaluate/insertText/paste have no options. Native pointer labels include Keeper ownership. fetch saveAs is refused pending download-broker integration."
+additional_properties = false
+
+[[params.items.params.params]]
+name = "timeout"
+type = "number"
+minimum = 0
+
+[[params.items.params.params]]
+name = "delay"
+type = "number"
+minimum = 0
+
+[[params.items.params.params]]
+name = "idleMs"
+type = "number"
+minimum = 0
+
+[[params.items.params.params]]
+name = "polling"
+type = "number"
+minimum = 0
+
+[[params.items.params.params]]
+name = "clickCount"
 type = "integer"
 minimum = 0
 maximum = 9007199254740991
-description = "waitForFunction only: native SDK polling interval in milliseconds; omission uses its default."
 
-[[params.items.params]]
-name = "fetchOptions"
+[[params.items.params.params]]
+name = "steps"
+type = "integer"
+minimum = 0
+maximum = 9007199254740991
+
+[[params.items.params.params]]
+name = "button"
+type = "string"
+enum = ["left", "middle", "right"]
+
+[[params.items.params.params]]
+name = "force"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "clearFirst"
+type = "boolean"
+
+[[params.items.params.params]]
+name = "label"
+type = "string"
+
+[[params.items.params.params]]
+name = "referer"
+type = "string"
+
+[[params.items.params.params]]
+name = "waitUntil"
+type = "string"
+enum = ["commit", "domcontentloaded", "load", "networkidle"]
+
+[[params.items.params.params]]
+name = "position"
 type = "object"
 additional_properties = false
-description = "fetch only: browser fetch options, with timeoutMs on the step. Returns the native structured response as the step receipt. saveAs is refused: host file output must use a download broker. HTTP error status is a returned response for the caller to inspect."
+
+[[params.items.params.params.params]]
+name = "x"
+type = "number"
+required = true
+
+[[params.items.params.params.params]]
+name = "y"
+type = "number"
+required = true
+
+[[params.items.params.params]]
+name = "sourcePosition"
+type = "object"
+additional_properties = false
+
+[[params.items.params.params.params]]
+name = "x"
+type = "number"
+required = true
+
+[[params.items.params.params.params]]
+name = "y"
+type = "number"
+required = true
+
+[[params.items.params.params]]
+name = "targetPosition"
+type = "object"
+additional_properties = false
+
+[[params.items.params.params.params]]
+name = "x"
+type = "number"
+required = true
+
+[[params.items.params.params.params]]
+name = "y"
+type = "number"
+required = true
 
 [[params.items.params.params]]
 name = "method"
@@ -403,8 +501,8 @@ type = "string"
 [[params.items.params.params]]
 name = "headers"
 type = "object"
+description = "HTTP header names with string values."
 additional_properties = true
-description = "HTTP header names mapped to string values."
 
 [[params.items.params.params]]
 name = "body"

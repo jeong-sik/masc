@@ -1,11 +1,17 @@
 type element_state = Attached | Detached | Visible | Hidden
 type load_state = Dom_content_loaded | Load | Network_idle
-type selection = One of string | Many of string list
+type option_match = { value : string option; label : string option; index : int option }
+type option_choice = Text of string | Match of option_match
+type selection = Clear | One of option_choice | Many of option_choice list
 type clipboard_content = { text : string; html : string option }
 type page_code = Expression of string | Call of { source : string; argument : Yojson.Safe.t }
-type fetch_options = Yojson.Safe.t
+type native_options = Yojson.Safe.t
 type action =
   | Click of string | Double_click of string | Hover of string
+  | Drag_and_drop of { selector : string; destination : string }
+  | Mouse_click of { x : float; y : float }
+  | Mouse_move of { x : float; y : float }
+  | Mouse_wheel of { x : float; y : float }
   | Fill of { selector : string; text : string }
   | Press of { selector : string; key : string }
   | Focus of string | Reload
@@ -14,11 +20,11 @@ type action =
   | Select_option of { selector : string; selection : selection }
   | Goto of string | Wait_for_url of string
   | Wait_for_selector of { selector : string; state : element_state }
-  | Wait_for_load_state of load_state
+  | Wait_for_load_state of load_state option
   | Evaluate of page_code
-  | Wait_for_function of { code : page_code; polling_ms : int option }
-  | Fetch of { url : string; options : fetch_options }
-type step = { action : action; timeout_ms : int option }
+  | Wait_for_function of page_code
+  | Fetch of string
+type step = { action : action; options : native_options option }
 type snapshot_scope = Viewport | Full_page
 type t = { tab_id : int; expected_url : string; steps : step list;
   snapshot_scope : snapshot_scope; max_chars : int }
@@ -37,6 +43,12 @@ let string_field name fields = let* value = required name fields in match value 
 let integer name fields = let* value = required name fields in match value with
   | `Int value when value >= 0 && Int64.of_int value <= 9007199254740991L -> Ok value
   | _ -> Error (name ^ " must be a nonnegative JavaScript-safe integer")
+let finite_number = function
+  | `Int value -> Some (float_of_int value)
+  | `Float value when Float.is_finite value -> Some value
+  | `Null|`Bool _|`Intlit _|`Float _|`String _|`List _|`Assoc _ -> None
+let number name fields = let* value=required name fields in
+  Option.to_result ~none:(name ^ " must be a finite number") (finite_number value)
 let url text =
   let uri = Uri.of_string text in
   match Uri.scheme uri, Uri.host uri with
@@ -56,51 +68,104 @@ let rec json_argument = function
   | `List values -> List.for_all json_argument values
   | `Assoc fields -> List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields))
       && List.for_all (fun (_,value) -> json_argument value) fields
+let json_field name fields =
+  let* source=string_field name fields in
+  match Yojson.Safe.from_string source with
+  | value when json_argument value -> Ok value
+  | _ -> Error (name ^ " must contain finite JSON without duplicate fields")
+  | exception Yojson.Json_error _ -> Error (name ^ " must encode one JSON value")
 let page_code fields =
   let* source=text "source" fields in
   match List.assoc_opt "argumentJson" fields with
   | None -> Ok (Expression source)
-  | Some (`String json) ->
-    (match Yojson.Safe.from_string json with
-     | argument when json_argument argument -> Ok (Call {source;argument})
-     | _ -> Error "argumentJson must contain finite JSON values without duplicate fields"
-     | exception Yojson.Json_error _ -> Error "argumentJson must encode one JSON value")
-  | Some _ -> Error "argumentJson must be a JSON-encoded string"
-let fetch_options value =
-  let* fields=object_fields ["method";"headers";"body";"cache";"credentials";"integrity";
-    "keepalive";"mode";"redirect";"referrer";"referrerPolicy"] value in
-  let strings fields = List.for_all (function _,`String _ -> true | _,_ -> false) fields in
-  let rec validate = function
-    | [] -> Ok value
-    | (name,raw)::rest ->
-      let valid=match name,raw with
-        | ("method"|"body"|"integrity"|"referrer"),`String _ -> true
-        | "keepalive",`Bool _ -> true
-        | "headers",`Assoc values -> strings values
-            && List.length values=List.length (List.sort_uniq String.compare (List.map fst values))
-        | "cache",`String ("default"|"no-store"|"reload"|"no-cache"|"force-cache"|"only-if-cached")
-        | "credentials",`String ("omit"|"same-origin"|"include")
-        | "mode",`String ("cors"|"no-cors"|"same-origin")
-        | "redirect",`String ("follow"|"error"|"manual")
-        | "referrerPolicy",`String (""|"no-referrer"|"no-referrer-when-downgrade"|"origin"|
-            "origin-when-cross-origin"|"same-origin"|"strict-origin"|"strict-origin-when-cross-origin"|"unsafe-url") -> true
-        | _,_ -> false in
-      if valid then validate rest else Error ("invalid native fetch option " ^ name) in
-  validate fields
+  | Some _ -> let* argument=json_field "argumentJson" fields in Ok (Call {source;argument})
+let option_choice = function
+  | `String value -> Ok (Text value)
+  | (`Assoc _ as raw) ->
+    let* fields=object_fields ["value";"label";"index"] raw in
+    let optional_string key=match List.assoc_opt key fields with
+      | None -> Ok None | Some (`String value) -> Ok (Some value)
+      | Some _ -> Error ("selection " ^ key ^ " must be a string") in
+    let* value=optional_string "value" in let* label=optional_string "label" in
+    let* index=match List.assoc_opt "index" fields with None -> Ok None
+      | Some _ -> Result.map Option.some (integer "index" fields) in
+    if value=None && label=None && index=None then Error "selection object needs value, label or index"
+    else Ok (Match {value;label;index})
+  | `Null|`Bool _|`Int _|`Intlit _|`Float _|`List _ -> Error "selection item must be a string or option object"
+let selection_of_json = function
+  | `Null -> Ok Clear
+  | `List values ->
+    let rec decode acc = function [] -> Ok (Many (List.rev acc))
+      | value::rest -> let* choice=option_choice value in decode (choice::acc) rest in
+    decode [] values
+  | (`String _|`Assoc _ as value) -> Result.map (fun value -> One value) (option_choice value)
+  | `Bool _|`Int _|`Intlit _|`Float _ -> Error "invalid native selectOption selection"
+let options_of_json action raw =
+  let allowed=match action with
+    | Click _ -> Some ["button";"clickCount";"delay";"position";"force";"timeout";"label"]
+    | Double_click _ -> Some ["button";"delay";"position";"force";"timeout";"label"]
+    | Hover _ -> Some ["position";"force";"timeout";"label"]
+    | Drag_and_drop _ -> Some ["button";"sourcePosition";"targetPosition";"force";"timeout";"label"]
+    | Mouse_click _ -> Some ["button";"clickCount";"delay";"label"]
+    | Mouse_move _ -> Some ["steps";"label"] | Mouse_wheel _ -> Some ["label"]
+    | Fill _ -> Some ["clearFirst";"timeout"]
+    | Press _ -> Some ["delay";"timeout"]
+    | Focus _|Select_option _|Wait_for_url _|Wait_for_selector _ -> Some ["timeout"]
+    | Reload -> Some ["timeout";"waitUntil"] | Goto _ -> Some ["referer";"timeout";"waitUntil"]
+    | Keyboard_type _|Keyboard_press _ -> Some ["delay"]
+    | Wait_for_load_state _ -> Some ["timeout";"idleMs"]
+    | Wait_for_function _ -> Some ["timeout";"polling"]
+    | Fetch _ -> Some ["timeout";"method";"headers";"body";"cache";"credentials";"integrity";
+        "keepalive";"mode";"redirect";"referrer";"referrerPolicy"]
+    | Keyboard_insert_text _|Keyboard_paste _|Evaluate _ -> None in
+  let* allowed=Option.to_result ~none:"this SDK method accepts no options" allowed in
+  let* fields=object_fields allowed raw in
+  let strings values=List.for_all (function _,`String _ -> true | _,_ -> false) values in
+  let position value=match object_fields ["x";"y"] value with
+    | Error _ -> false | Ok fields -> List.length fields=2
+        && Result.is_ok (number "x" fields) && Result.is_ok (number "y" fields) in
+  let valid name value=match name,value with
+    | ("label"|"referer"|"method"|"body"|"integrity"|"referrer"),`String _ -> true
+    | ("force"|"clearFirst"|"keepalive"),`Bool _ -> true
+    | "button",`String ("left"|"middle"|"right")
+    | "waitUntil",`String ("commit"|"domcontentloaded"|"load"|"networkidle")
+    | "cache",`String ("default"|"no-store"|"reload"|"no-cache"|"force-cache"|"only-if-cached")
+    | "credentials",`String ("omit"|"same-origin"|"include")
+    | "mode",`String ("cors"|"no-cors"|"same-origin")
+    | "redirect",`String ("follow"|"error"|"manual")
+    | "referrerPolicy",`String (""|"no-referrer"|"no-referrer-when-downgrade"|"origin"|
+        "origin-when-cross-origin"|"same-origin"|"strict-origin"|"strict-origin-when-cross-origin"|"unsafe-url") -> true
+    | ("timeout"|"delay"|"idleMs"|"polling"),value ->
+      (match finite_number value with Some value -> value>=0. | None -> false)
+    | ("clickCount"|"steps"),value ->
+      (match finite_number value with Some value -> value>=0. && Float.floor value=value && value<=9007199254740991.
+       | None -> false)
+    | ("position"|"sourcePosition"|"targetPosition"),value -> position value
+    | "headers",`Assoc values -> strings values
+        && List.length values=List.length (List.sort_uniq String.compare (List.map fst values))
+    | _,_ -> false in
+  if List.for_all (fun (name,value) -> valid name value) fields then Ok raw
+  else Error "invalid native SDK option value"
 let step_of_json value =
-  let* fields = object_fields ["method";"selector";"text";"html";"key";"url";"value";"values";"state";"timeoutMs";
-    "source";"argumentJson";"pollingMs";"fetchOptions"] value in
+  let* fields = object_fields ["method";"selector";"destination";"x";"y";"text";"html";"key";"url";
+    "selectionJson";"state";"source";"argumentJson";"options"] value in
   let* method_ = text "method" fields in
-  let arguments names = object_fields ("method" :: "timeoutMs" :: names) value in
+  let arguments names = object_fields ("method" :: "options" :: names) value in
   let selector () = text "selector" fields in
-  let* timeout_ms = match List.assoc_opt "timeoutMs" fields with
-    | None -> Ok None
-    | Some _ -> Result.map Option.some (integer "timeoutMs" fields) in
   let* action = match method_ with
     | "click" | "dblclick" | "hover" ->
       let* _ = arguments ["selector"] in let* selector = selector () in
       (match method_ with "click" -> Ok (Click selector) | "dblclick" -> Ok (Double_click selector)
        | "hover" -> Ok (Hover selector) | _ -> Error "unknown native pointer method")
+    | "dragAndDrop" ->
+      let* _=arguments ["selector";"destination"] in
+      let* selector=selector () in let* destination=text "destination" fields in
+      Ok (Drag_and_drop {selector;destination})
+    | "mouse.click"|"mouse.move"|"mouse.wheel" ->
+      let* _=arguments ["x";"y"] in let* x=number "x" fields in let* y=number "y" fields in
+      (match method_ with
+       | "mouse.click" -> Ok (Mouse_click {x;y}) | "mouse.move" -> Ok (Mouse_move {x;y})
+       | "mouse.wheel" -> Ok (Mouse_wheel {x;y}) | _ -> Error "unknown native mouse method")
     | "fill" ->
       let* _ = arguments ["selector";"text"] in let* selector = selector () in
       let* raw = required "text" fields in
@@ -111,14 +176,14 @@ let step_of_json value =
       let* selector = selector () in Ok (Focus selector)
     | "reload" -> let* _ = arguments [] in Ok Reload
     | "keyboard.type" | "keyboard.insertText" ->
-      let* _ = object_fields ["method";"text"] value in
+      let* _ = arguments ["text"] in
       let* text = string_field "text" fields in
       (match method_ with
        | "keyboard.type" -> Ok (Keyboard_type text)
        | "keyboard.insertText" -> Ok (Keyboard_insert_text text)
        | _ -> Error "unknown native keyboard text method")
     | "keyboard.paste" ->
-      let* _ = object_fields ["method";"text";"html"] value in
+      let* _ = arguments ["text";"html"] in
       let* text = string_field "text" fields in
       let* html = match List.assoc_opt "html" fields with
         | None -> Ok None
@@ -126,18 +191,11 @@ let step_of_json value =
         | Some _ -> Error "html must be a string" in
       Ok (Keyboard_paste {text;html})
     | "keyboard.press" ->
-      let* _ = object_fields ["method";"key"] value in
+      let* _ = arguments ["key"] in
       let* key = text "key" fields in Ok (Keyboard_press key)
     | "selectOption" ->
-      let* _ = arguments ["selector";"value";"values"] in let* selector = selector () in
-      let* selection = match List.assoc_opt "value" fields, List.assoc_opt "values" fields with
-        | Some (`String value), None -> Ok (One value)
-        | None, Some (`List values) ->
-          let rec decode seen = function
-            | [] -> Ok (Many (List.rev seen))
-            | `String value :: rest when not (List.mem value seen) -> decode (value :: seen) rest
-            | _ -> Error "values must contain distinct strings" in decode [] values
-        | _ -> Error "selectOption requires value or values" in
+      let* _ = arguments ["selector";"selectionJson"] in let* selector = selector () in
+      let* raw=json_field "selectionJson" fields in let* selection=selection_of_json raw in
       Ok (Select_option {selector;selection})
     | "goto" -> let* _ = arguments ["url"] in let* raw = text "url" fields in
       let* url = url raw in Ok (Goto url)
@@ -145,25 +203,27 @@ let step_of_json value =
     | "waitForSelector" -> let* _ = arguments ["selector";"state"] in
       let* selector = selector () in let* raw = text "state" fields in let* state = element_state raw in
       Ok (Wait_for_selector {selector;state})
-    | "waitForLoadState" -> let* _ = arguments ["state"] in let* raw = text "state" fields in
-      let* state = load_state raw in
+    | "waitForLoadState" -> let* _ = arguments ["state"] in
+      let* state=match List.assoc_opt "state" fields with None -> Ok None
+        | Some _ -> let* raw=text "state" fields in Result.map Option.some (load_state raw) in
       Ok (Wait_for_load_state state)
     | "evaluate" ->
-      let* _=object_fields ["method";"source";"argumentJson"] value in
+      let* _=arguments ["source";"argumentJson"] in
       let* code=page_code fields in Ok (Evaluate code)
     | "waitForFunction" ->
-      let* _=arguments ["source";"argumentJson";"pollingMs"] in
+      let* _=arguments ["source";"argumentJson"] in
       let* code=page_code fields in
-      let* polling_ms=match List.assoc_opt "pollingMs" fields with
-        | None -> Ok None | Some _ -> Result.map Option.some (integer "pollingMs" fields) in
-      Ok (Wait_for_function {code;polling_ms})
+      Ok (Wait_for_function code)
     | "fetch" ->
-      let* _=arguments ["url";"fetchOptions"] in
-      let* raw=text "url" fields in let* url=url raw in
-      let* options=fetch_options (match List.assoc_opt "fetchOptions" fields with None -> `Assoc [] | Some value -> value) in
-      Ok (Fetch {url;options})
+      let* _=arguments ["url"] in
+      let* raw=string_field "url" fields in
+      let* url=match Uri.scheme (Uri.of_string raw) with None -> Ok raw
+        | Some _ -> url raw in
+      Ok (Fetch url)
     | _ -> Error "unsupported native Page method" in
-  Ok {action;timeout_ms}
+  let* options=match List.assoc_opt "options" fields with None -> Ok None
+    | Some value -> Result.map Option.some (options_of_json action value) in
+  Ok {action;options}
 let of_json value =
   let* fields = object_fields ["tabId";"expectedUrl";"steps";"snapshotScope";"maxChars"] value in
   let* tab_id = integer "tabId" fields in
@@ -182,10 +242,16 @@ let of_json value =
     | _ -> Error "steps must be a native Page call array" in
   Ok {tab_id;expected_url;steps;snapshot_scope;max_chars}
 let is_effect = function
-  | Click _ | Double_click _ | Hover _ | Fill _ | Press _ | Focus _ | Reload
+  | Click _ | Double_click _ | Hover _ | Drag_and_drop _ | Mouse_click _ | Mouse_move _ | Mouse_wheel _
+  | Fill _ | Press _ | Focus _ | Reload
   | Keyboard_type _ | Keyboard_insert_text _ | Keyboard_paste _ | Keyboard_press _
   | Select_option _ | Goto _ | Evaluate _ | Wait_for_function _ | Fetch _ -> true
   | Wait_for_url _ | Wait_for_selector _ | Wait_for_load_state _ -> false
+let holds_input = function
+  | Click _|Double_click _|Mouse_click _|Drag_and_drop _|Press _|Keyboard_press _|Keyboard_type _ -> true
+  | Hover _|Mouse_move _|Mouse_wheel _|Fill _|Focus _|Reload
+  | Keyboard_insert_text _|Keyboard_paste _|Select_option _|Goto _
+  | Wait_for_url _|Wait_for_selector _|Wait_for_load_state _|Evaluate _|Wait_for_function _|Fetch _ -> false
 let method_name = function
   | Click _ -> "click" | Double_click _ -> "dblclick" | Hover _ -> "hover" | Fill _ -> "fill"
   | Press _ -> "press" | Select_option _ -> "selectOption" | Goto _ -> "goto" | Wait_for_url _ -> "waitForURL"
@@ -194,14 +260,26 @@ let method_name = function
   | Keyboard_paste _ -> "keyboard.paste" | Keyboard_press _ -> "keyboard.press"
   | Wait_for_selector _ -> "waitForSelector" | Wait_for_load_state _ -> "waitForLoadState"
   | Evaluate _ -> "evaluate" | Wait_for_function _ -> "waitForFunction" | Fetch _ -> "fetch"
+  | Drag_and_drop _ -> "dragAndDrop"
+  | Mouse_click _ -> "mouse.click" | Mouse_move _ -> "mouse.move" | Mouse_wheel _ -> "mouse.wheel"
 let string value = `String value
 let code_fields = function
   | Expression source -> ["source",string source]
   | Call {source;argument} -> ["source",string source;"argumentJson",string (Yojson.Safe.to_string argument)]
-let step_to_json {action;timeout_ms} =
+let choice_to_json = function
+  | Text value -> string value
+  | Match {value;label;index} -> `Assoc (
+      Option.to_list (Option.map (fun value -> "value",string value) value)
+      @ Option.to_list (Option.map (fun value -> "label",string value) label)
+      @ Option.to_list (Option.map (fun value -> "index",`Int value) index))
+let selection_to_json = function
+  | Clear -> `Null | One value -> choice_to_json value | Many values -> `List (List.map choice_to_json values)
+let step_to_json {action;options} =
   let selector value = ["selector",string value] in
   let fields = match action with
     | Click s | Double_click s | Hover s | Focus s -> selector s
+    | Drag_and_drop {selector=s;destination} -> selector s @ ["destination",string destination]
+    | Mouse_click {x;y}|Mouse_move {x;y}|Mouse_wheel {x;y} -> ["x",`Float x;"y",`Float y]
     | Fill {selector=s;text} -> selector s @ ["text",string text]
     | Press {selector=s;key} -> selector s @ ["key",string key]
     | Reload -> []
@@ -209,16 +287,14 @@ let step_to_json {action;timeout_ms} =
     | Keyboard_paste {text;html} -> ["text",string text]
         @ Option.to_list (Option.map (fun html -> "html",string html) html)
     | Keyboard_press key -> ["key",string key]
-    | Select_option {selector=s;selection} -> selector s @
-      (match selection with One value -> ["value",string value] | Many values -> ["values",`List (List.map string values)])
+    | Select_option {selector=s;selection} -> selector s @ ["selectionJson",string (Yojson.Safe.to_string (selection_to_json selection))]
     | Goto url | Wait_for_url url -> ["url",string url]
     | Wait_for_selector {selector=s;state} -> selector s @ ["state",string (element_state_name state)]
-    | Wait_for_load_state state -> ["state",string (load_state_name state)]
+    | Wait_for_load_state state -> Option.to_list (Option.map (fun state -> "state",string (load_state_name state)) state)
     | Evaluate code -> code_fields code
-    | Wait_for_function {code;polling_ms} -> code_fields code
-        @ Option.to_list (Option.map (fun value -> "pollingMs",`Int value) polling_ms)
-    | Fetch {url;options} -> ["url",string url;"fetchOptions",options] in
-  `Assoc (["method",string (method_name action)] @ fields @ Option.to_list (Option.map (fun n -> "timeoutMs",`Int n) timeout_ms))
+    | Wait_for_function code -> code_fields code
+    | Fetch url -> ["url",string url] in
+  `Assoc (["method",string (method_name action)] @ fields @ Option.to_list (Option.map (fun value -> "options",value) options))
 
 let to_json {tab_id;expected_url;steps;snapshot_scope;max_chars} = `Assoc [
   "tabId",`Int tab_id;"expectedUrl",string expected_url;"steps",`List (List.map step_to_json steps);

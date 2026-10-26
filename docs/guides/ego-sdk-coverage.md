@@ -58,8 +58,8 @@ Neither means fully supported.
 
 | SDK entry | Current MASC integration | Remaining boundary |
 | --- | --- | --- |
-| `Page.goto` | `page.goto`, native workflow goto | Native referer/waitUntil options |
-| `Page.reload` | `page.act` reload, native workflow reload | Native waitUntil option |
+| `Page.goto` | `page.goto`, native workflow goto with referer/timeout/waitUntil | Installed MASC/Keeper route unverified |
+| `Page.reload` | `page.act` reload, native workflow reload with timeout/waitUntil | Installed MASC/Keeper route unverified |
 | `Page.snapshot` | BrowserRead snapshot and final workflow snapshot | Subtree/root and action-mark/stable-locator choices in workflows |
 | `Page.screenshot` | `page.capture` with brokered image data | Full-page, clip, scale/raw choices |
 | `Page.url` | Internal guards and returned page observations | Direct SDK state result within a workflow |
@@ -75,16 +75,16 @@ Neither means fully supported.
 | `Page.fetch` | Native workflow fetch with browser options and structured response | `saveAs` requires broker integration; installed MASC/Keeper route unverified |
 | `Page.cdp` | Fixed internal history commands only | General Page protocol calls with explicit effect and lifecycle handling |
 | `Page.waitForSelector` | Native workflow waitForSelector | Native states and timeout exposed; installed MASC route unverified |
-| `Page.waitForLoadState` | Native workflow waitForLoadState | Native idleMs option |
+| `Page.waitForLoadState` | Native workflow with optional state, timeout/idleMs | Installed MASC/Keeper route unverified |
 | `Page.events` | None | Read/clear event ownership across rounds |
-| `Page.click` | Selector/ref interaction and native workflow | Native button/clickCount/delay/position/force choices in workflows |
-| `Page.dblclick` | Selector/ref interaction and native workflow | Native button/delay/position/force choices in workflows |
-| `Page.hover` | Selector/ref interaction and native workflow | Native position/force choices in workflows |
-| `Page.dragAndDrop` | `drag_to` native selector/ref input | Native button/sourcePosition/targetPosition/force/timeout choices in workflows |
-| `Page.fill` | Selector/ref interaction and native workflow | Native clearFirst choice |
-| `Page.selectOption` | Value and distinct-value arrays | Label/index/null selection forms |
+| `Page.click` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |
+| `Page.dblclick` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |
+| `Page.hover` | Selector/ref interaction; workflow forwards all native options | New option forms require real SDK and installed-route proof |
+| `Page.dragAndDrop` | `drag_to`; workflow forwards native options and tracks release uncertainty | New workflow requires real SDK and installed-route proof |
+| `Page.fill` | Selector/ref interaction; workflow forwards clearFirst/timeout | New option forms require real SDK and installed-route proof |
+| `Page.selectOption` | Workflow selectionJson preserves string/object/array/null, including label/index | New selection forms require real SDK and installed-route proof |
 | `Page.focus` | Native workflow focus | Real SDK primitive proof; installed MASC/Keeper route unverified |
-| `Page.press` | Native workflow press | Native delay option |
+| `Page.press` | Native workflow press with delay/timeout | New option forms require real SDK and installed-route proof |
 | `Page.setInputFiles` | `page.act` upload through staged leases | Direct workflow integration while preserving file broker/lease boundary |
 | `Page.waitForFileChooser` | Internal chooser-opener upload | Explicit chooser wait/handle/options in native workflows |
 | `Page.close` | `page.act` close_tab, agent-origin only | Unknown-origin release workflow and goal/Space lifecycle |
@@ -93,15 +93,15 @@ Neither means fully supported.
 
 | SDK entry | Current MASC integration | Remaining boundary |
 | --- | --- | --- |
-| `Page.mouse.click` | Trusted coordinate click/double click | Native delay and general clickCount choices |
-| `Page.mouse.move` | Hover and path drag internals | Native steps choice and direct workflow operation |
+| `Page.mouse.click` | Trusted coordinates; workflow forwards button/clickCount/delay/label | New workflow requires real SDK and installed-route proof |
+| `Page.mouse.move` | Hover/path internals; workflow forwards steps/label | New workflow requires real SDK and installed-route proof |
 | `Page.mouse.down` | Balanced drag implementation only | Held-button state, cancellation and release settlement across workflow steps |
 | `Page.mouse.up` | Balanced drag implementation and cleanup | Explicit release receipt and uncertain-pointer recovery |
-| `Page.mouse.wheel` | Scroll at observed point | Direct native workflow operation with pointer provenance |
+| `Page.mouse.wheel` | Scroll at observed point; workflow forwards deltas/label | New workflow requires real SDK and installed-route proof; move over observed container first |
 | `Page.keyboard.down` | None | Held-key state and cancellation/release settlement |
 | `Page.keyboard.up` | None | Explicit release and uncertain-key recovery |
-| `Page.keyboard.press` | Interaction chord and native workflow | Native delay choice |
-| `Page.keyboard.type` | Trusted text interaction and native workflow | Native delay choice |
+| `Page.keyboard.press` | Interaction chord; workflow forwards native delay | New option forms require real SDK and installed-route proof |
+| `Page.keyboard.type` | Trusted text; workflow forwards native delay | New option forms require real SDK and installed-route proof |
 | `Page.keyboard.insertText` | Native workflow | Real SDK primitive proof; installed MASC/Keeper route unverified |
 | `Page.keyboard.paste` | Native workflow plain/rich paste | Real trusted paste proof; installed MASC/Keeper route unverified |
 | `FileChooser.isMultiple` | Internal chooser validation | Explicit chooser handle observation |
@@ -124,10 +124,19 @@ timeout and stop-before-following-step behavior. The actual OCaml codec decodes
 the captured receipt against its exact request. These are not installed Keeper or
 visible MASC TUI proof.
 
-The first probe Space (24) disappeared externally. After explicit user approval,
+The first probe Space (24) was absent on a later SDK read. After explicit user approval,
 the same ongoing Goal resumed validation in replacement Space **27**. No existing
-operator or Keeper Space was adopted. The replacement is still open; finishing
-it now would falsely imply this whole Goal is complete.
+operator or Keeper Space was adopted. Space 27 subsequently also returned
+`task space not found` and was absent from `listTaskSpaces`. The user reports
+not closing it. The probes do not call `finish` or close their Space, but the
+deletion actor and cause have not been established. No third verification Space
+has been created. Existing captured receipts remain historical SDK evidence;
+they do not establish that either Space is still available for UI inspection.
+
+The options/selection workflow source has standalone codec and Node forwarding
+checks. Its updated real-browser probe stopped before page operations because
+Space 27 was absent. These new options have no claimed real SDK, installed
+MASC or visible UI result yet.
 
 MASC source now tracks reads, waits within workflows and navigation alongside
 input, and retains caller-specific last results. Native Ego cursor labels cover

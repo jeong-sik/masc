@@ -239,7 +239,7 @@ state=json.dumps({'url':'https://fixture.test/','title':'Fixture','viewport':{'w
 def run(script,answer):
     lines=script.split('\n')
     step=lines[0].removeprefix('// masc-ego: ')
-    args=json.loads(next(l for l in lines if l.startswith('const args = ')).removeprefix('const args = ').removesuffix(';'))
+    args=json.loads(json.loads(next(l for l in lines if l.startswith('const args = JSON.parse(')).removeprefix('const args = JSON.parse(').removesuffix(');')))
     with open(root/'steps','a') as log:log.write(step+'\n')
     if step=='space.open':
         if mode=='in-use':answer(error='EGO_TASK_SPACE_NAME_IN_USE: masc')

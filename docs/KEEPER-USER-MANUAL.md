@@ -19,6 +19,26 @@ The typed agent engine is built from `packages/agent_core` as the internal
 `masc.agent_core` library. It has no external opam pin or separately released
 SDK version; the MASC commit and build identity are the source of truth.
 
+### Checkpoints when the model changes
+
+A resumed Keeper retains its original conversation, reasoning provenance and
+settled tool results. A model change does not erase the checkpoint or execute
+old tool calls again. MASC provisionally restores valid foreign reasoning, then
+checks the target's replay rules after the new caller input and turn hooks.
+The check uses the tools the provider codec will actually send, including
+`tool_choice=none` suppression.
+
+Reasoning outside the target's replay selection can be omitted from the outgoing
+request while remaining in the canonical checkpoint. A new caller query may
+close the previous tool exchange under a latest-user-turn replay contract;
+system follow-ups do not create that boundary. If a transmission window omits
+the caller, its retained tool exchange still requires replay; an omitted caller
+does not prove that the exchange ended. An active exchange that still
+requires foreign reasoning or a provider signature remains refused before
+dispatch. Missing or corrupt producer metadata is also refused. Repeated
+`checkpoint.reasoning_replay` failures therefore require inspecting the target
+contract and the original history; resetting the checkpoint loses evidence.
+
 ## One Keeper is one file
 
 For a Keeper named `reviewer`:

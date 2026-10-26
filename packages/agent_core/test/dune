@@ -747,3 +747,8 @@
  (name test_responses_reasoning_stream)
  (modules test_responses_reasoning_stream)
  (libraries agent_core llm_provider alcotest yojson))
+
+(test
+ (name test_minimax_responses_binding)
+ (modules test_minimax_responses_binding)
+ (libraries agent_core llm_provider alcotest yojson))

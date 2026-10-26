@@ -342,7 +342,7 @@ let test_download_saves_a_private_local_copy () =
       let result=match result with Ok value -> value | Error detail -> Alcotest.fail detail in
       let file=match Masc_tui_evidence_file.decode ~task_id:"task-download" ~verification_id:"vr-download" ~index:0
         (`Assoc ["ok",`Bool true;"result",result]) with Ok file -> file | Error detail -> Alcotest.fail detail in
-      match Masc_tui_evidence_file.export ~fs:env#fs ~directory ~progress:(Atomic.make Masc_tui_evidence_file.Not_started)
+      match Masc_tui_evidence_file.export ~fs:env#fs ~registry_root:directory ~directory ~progress:(Atomic.make Masc_tui_evidence_file.Not_started)
         ~admitted:(fun () -> Ok ()) ~open_file:None file with
       | Error detail -> Alcotest.fail detail
       | Ok path ->
@@ -362,7 +362,7 @@ let test_export_preserves_long_original_filename () =
       | Error detail -> Alcotest.fail detail in
     let file=match Masc_tui_evidence_file.decode ~task_id:"task-download" ~verification_id:"vr-download" ~index:0 wire with
       | Ok file -> file | Error detail -> Alcotest.fail detail in
-    match Masc_tui_evidence_file.export ~fs:env#fs ~directory:base_path
+    match Masc_tui_evidence_file.export ~fs:env#fs ~registry_root:base_path ~directory:base_path
       ~progress:(Atomic.make Masc_tui_evidence_file.Not_started)
       ~admitted:(fun () -> Ok ()) ~open_file:None file with
     | Error detail -> Alcotest.fail detail
@@ -411,7 +411,7 @@ let test_export_preserves_destination_and_saved_effects () =
     let file=download_fixture ~base_path:base content in
     let progress=Atomic.make File.Not_started in
     let calls=ref 0 in
-    let result=File.export ~fs:env#fs ~directory:base ~progress ~admitted:(fun () -> Ok ())
+    let result=File.export ~fs:env#fs ~registry_root:base ~directory:base ~progress ~admitted:(fun () -> Ok ())
       ~open_file:(Some (fun path ->
         incr calls;
         Alcotest.(check string) "viewer receives the actual downloaded file" content (Eio.Path.load Eio.Path.(env#fs / path));
@@ -423,12 +423,12 @@ let test_export_preserves_destination_and_saved_effects () =
      | File.Not_started | File.Writing _ -> Alcotest.fail "saved path was lost");
     let denied=Atomic.make File.Not_started in
     let before=Array.length (Sys.readdir base) in
-    ignore (File.export ~fs:env#fs ~directory:base ~progress:denied
+    ignore (File.export ~fs:env#fs ~registry_root:base ~directory:base ~progress:denied
       ~admitted:(fun () -> Error "workspace changed") ~open_file:None file);
     Alcotest.(check bool) "withdrawn admission never starts a write" true (Atomic.get denied=File.Not_started);
     Alcotest.(check int) "no file created on admission refusal" before (Array.length (Sys.readdir base));
     let failed=Atomic.make File.Not_started in
-    let result=File.export ~fs:env#fs ~directory:(Filename.concat base "missing-directory")
+    let result=File.export ~fs:env#fs ~registry_root:base ~directory:(Filename.concat base "missing-directory")
       ~progress:failed ~admitted:(fun () -> Ok ()) ~open_file:None file in
     Alcotest.(check bool) "failed write is not saved" true (Result.is_error result);
     (match Atomic.get failed with
@@ -441,20 +441,58 @@ let test_export_rechecks_authority_and_propagates_cancellation () =
     let file=download_fixture ~base_path:base "cancelled viewer retains downloaded bytes" in
     let progress=Atomic.make File.Not_started in
     let admissions=ref 0 and opened=ref false in
-    let result=File.export ~fs:env#fs ~directory:base ~progress
+    let result=File.export ~fs:env#fs ~registry_root:base ~directory:base ~progress
       ~admitted:(fun () -> incr admissions; if !admissions=1 then Ok () else Error "workspace withdrawn after save")
       ~open_file:(Some (fun _ -> opened:=true;Ok ())) file in
     Alcotest.(check bool) "withdrawn opener refused" true (Result.is_error result);
     Alcotest.(check bool) "no viewer launched after authority withdrawal" false !opened;
     (match Atomic.get progress with File.Saved _ -> () | File.Not_started | File.Writing _ -> Alcotest.fail "write receipt lost on later withdrawal");
     let cancelled=Atomic.make File.Not_started in
-    (match File.export ~fs:env#fs ~directory:base ~progress:cancelled ~admitted:(fun () -> Ok ())
+    (match File.export ~fs:env#fs ~registry_root:base ~directory:base ~progress:cancelled ~admitted:(fun () -> Ok ())
       ~open_file:(Some (fun _ -> raise (Eio.Cancel.Cancelled Exit))) file with
      | _ -> Alcotest.fail "cancellation was swallowed"
      | exception Eio.Cancel.Cancelled Exit -> ());
     match Atomic.get cancelled with
     | File.Saved path -> Alcotest.(check bool) "cancelled viewer retains confirmed local path" true (Sys.file_exists path)
     | File.Not_started | File.Writing _ -> Alcotest.fail "cancelled viewer lost confirmed save")
+
+let test_export_uses_local_registry_not_shared_temp () =
+  with_base_path_env (fun env base ->
+    let module File=Masc_tui_evidence_file in
+    let module Recovery=Fs_compat.Publication_recovery in
+    let first_export=Filename.concat base "shared-export-one" in
+    let second_export=Filename.concat base "shared-export-two" in
+    let registry_root=Filename.concat base "local-masc" in
+    List.iter (fun directory -> Unix.mkdir directory 0o700)
+      [first_export;second_export;registry_root];
+    let collision=Filename.concat first_export "fs-publication-recovery" in
+    Fs_compat.save_file collision "foreign recovery sentinel";
+    let export_file directory content =
+      let file=download_fixture ~base_path:base content in
+      match File.export ~fs:env#fs ~registry_root ~directory
+        ~progress:(Atomic.make File.Not_started) ~admitted:(fun () -> Ok ()) ~open_file:None file with
+      | Error detail -> Alcotest.fail detail
+      | Ok path ->
+        Alcotest.(check string) "shared recovery collision cannot block the export"
+          content (Eio.Path.load Eio.Path.(env#fs / path))
+    in
+    export_file first_export "first local registry export";
+    export_file second_export "second local registry export";
+    Alcotest.(check string) "foreign shared recovery entry is not replaced"
+      "foreign recovery sentinel" (Eio.Path.load Eio.Path.(env#fs / collision));
+    Eio.Switch.run @@ fun sw ->
+    (match Recovery.open_registry ~sw ~fs:env#fs
+      ~registry_root:Eio.Path.(env#fs / registry_root) with
+     | Error error -> Alcotest.fail (Recovery.registry_error_to_string error)
+     | Ok registry ->
+       (match Recovery.discover_owners registry with
+        | Error error -> Alcotest.fail (Recovery.discovery_error_to_string error)
+        | Ok owners ->
+          Alcotest.(check bool) "stable owner is registered under the local root" true
+            (List.exists (function
+              | Recovery.Discovered_owner owner ->
+                Recovery.owner_to_string owner="tui-evidence-export"
+              | Recovery.Invalid_owner_name _ -> false) owners))))
 
 let http_get_evidence ~router ?token target =
   let output=Buffer.create 1024 in
@@ -521,7 +559,7 @@ let test_actual_download_route_and_local_export () =
         let file=match Masc_tui_evidence_file.decode ~task_id:request.task_id ~verification_id:request.id ~index wire with
           | Ok file -> file | Error detail -> Alcotest.fail detail in
         let progress=Atomic.make Masc_tui_evidence_file.Not_started in
-        match Masc_tui_evidence_file.export ~fs:env#fs ~directory:base ~progress
+        match Masc_tui_evidence_file.export ~fs:env#fs ~registry_root:base ~directory:base ~progress
           ~admitted:(fun () -> Ok ()) ~open_file:None file with
         | Error detail -> Alcotest.fail detail
         | Ok path ->
@@ -549,6 +587,7 @@ let () =
         Alcotest.test_case "actual HTTP permissions, identity and large binary download to local file" `Quick test_actual_download_route_and_local_export;
         Alcotest.test_case "viewer and write failures retain their destinations" `Quick test_export_preserves_destination_and_saved_effects;
         Alcotest.test_case "authority withdrawal and cancellation preserve actual effects" `Quick test_export_rechecks_authority_and_propagates_cancellation;
+        Alcotest.test_case "local recovery registry ignores shared temp collisions" `Quick test_export_uses_local_registry_not_shared_temp;
         Alcotest.test_case "saving creates a private local copy with original bytes" `Quick test_download_saves_a_private_local_copy;
         Alcotest.test_case "long original filenames remain usable" `Quick test_export_preserves_long_original_filename;
         Alcotest.test_case "original text and non-image binary bytes round trip" `Quick test_download_preserves_original_bytes;

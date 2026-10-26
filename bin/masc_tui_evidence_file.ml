@@ -36,50 +36,51 @@ let decode ~task_id ~verification_id ~index json =
 
 type progress = Not_started | Writing of string | Saved of string
 
-let save ~fs ~directory ~directory_name ~path t =
+let save ~fs ~registry_root ~directory ~directory_name ~path t =
   let ( let* ) = Result.bind in
   try
-    Eio.Path.with_open_dir Eio.Path.(fs / directory) (fun registry_root ->
-      let destination = Eio.Path.(registry_root / directory_name) in
-      Eio.Path.mkdir ~perm:0o700 destination;
-      Eio.Path.with_open_dir destination (fun parent ->
-        let root = Eio.Path.stat ~follow:true parent in
-        let* target =
-          Fs_compat.capability_publication_target
-            ~allowed_root_path:(Filename.dirname path)
-            ~allowed_root_device:root.dev ~allowed_root_inode:root.ino
-            ~parent_components:[] ~target_leaf:t.name ~permissions:0o600
-          |> Result.map_error Fs_compat.capability_publication_target_error_to_string
-        in
-        Eio.Switch.run @@ fun sw ->
-        let* registry =
-          Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root
-          |> Result.map_error Fs_compat.Publication_recovery.registry_error_to_string
-        in
-        match Fs_compat.Publication_recovery.with_lane
-          ~registry ~owner:"tui-evidence-export" (fun recovery ->
-            Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target t.contents
-            |> Result.map_error Fs_compat.capability_write_error_to_string)
-        with
-        | Error error -> Error (Fs_compat.Publication_recovery.lane_open_error_to_string error)
-        | Ok (Fs_compat.Publication_recovery.Lane_released result) -> result
-        | Ok (Fs_compat.Publication_recovery.Lane_release_failed { value; release_failure }) ->
-          let detail = Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
-          Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail)))
+    Eio.Path.with_open_dir Eio.Path.(fs / registry_root) (fun registry_root ->
+      Eio.Path.with_open_dir Eio.Path.(fs / directory) (fun export_root ->
+        let destination = Eio.Path.(export_root / directory_name) in
+        Eio.Path.mkdir ~perm:0o700 destination;
+        Eio.Path.with_open_dir destination (fun parent ->
+          let root = Eio.Path.stat ~follow:true parent in
+          let* target =
+            Fs_compat.capability_publication_target
+              ~allowed_root_path:(Filename.dirname path)
+              ~allowed_root_device:root.dev ~allowed_root_inode:root.ino
+              ~parent_components:[] ~target_leaf:t.name ~permissions:0o600
+            |> Result.map_error Fs_compat.capability_publication_target_error_to_string
+          in
+          Eio.Switch.run @@ fun sw ->
+          let* registry =
+            Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root
+            |> Result.map_error Fs_compat.Publication_recovery.registry_error_to_string
+          in
+          match Fs_compat.Publication_recovery.with_lane
+            ~registry ~owner:"tui-evidence-export" (fun recovery ->
+              Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target t.contents
+              |> Result.map_error Fs_compat.capability_write_error_to_string)
+          with
+          | Error error -> Error (Fs_compat.Publication_recovery.lane_open_error_to_string error)
+          | Ok (Fs_compat.Publication_recovery.Lane_released result) -> result
+          | Ok (Fs_compat.Publication_recovery.Lane_release_failed { value; release_failure }) ->
+            let detail = Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure in
+            Error (match value with Ok () -> detail | Error primary -> primary ^ "; " ^ detail))))
     |> Result.map_error (fun error -> path ^ ": " ^ error)
   with
   | Eio.Io _ as ex -> Error (path ^ ": " ^ Format.asprintf "%a" Eio.Exn.pp ex)
   | Sys_error detail -> Error (path ^ ": " ^ detail)
   | Unix.Unix_error (code, _, _) -> Error (path ^ ": " ^ Unix.error_message code)
 
-let export ~fs ~directory ~progress ~admitted ~open_file t =
+let export ~fs ~registry_root ~directory ~progress ~admitted ~open_file t =
   let ( let* ) = Result.bind in
   let* () = admitted () in
   let directory = if Filename.is_relative directory then Filename.concat (Sys.getcwd ()) directory else directory in
   let directory_name = "masc-evidence-" ^ Random_id.uuid_v7 () in
   let path = Filename.concat (Filename.concat directory directory_name) t.name in
   Atomic.set progress (Writing path);
-  let* () = save ~fs ~directory ~directory_name ~path t in
+  let* () = save ~fs ~registry_root ~directory ~directory_name ~path t in
   Atomic.set progress (Saved path);
   match open_file with
   | None -> Ok path

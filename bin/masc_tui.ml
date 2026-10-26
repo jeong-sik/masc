@@ -17225,7 +17225,9 @@ let export_verification_evidence state ~mailbox ~open_file =
           Eio_guard.run_in_systhread ~label:"tui-evidence-open" (fun () ->
             Masc_tui_browser.open_url (Uri.to_string (Uri.make ~scheme:"file" ~path ())))
           |> Result.map (fun _ -> ())) in
-        Masc_tui_evidence_file.export ~fs:env#fs ~directory:(Filename.get_temp_dir_name ())
+        Masc_tui_evidence_file.export ~fs:env#fs
+          ~registry_root:(Common.masc_dir_from_base_path ~base_path:state.local_base_path)
+          ~directory:(Filename.get_temp_dir_name ())
           ~progress:request.vex_progress ~admitted:current ~open_file file)
 
 let open_harness_detail state =

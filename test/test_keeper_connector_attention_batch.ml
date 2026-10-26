@@ -1842,12 +1842,91 @@ let test_official_turn_keeps_tool_result_until_completion () =
     await_settlement ())
 ;;
 
+let test_running_source_observes_new_completion_after_intake () =
+  List.iter (fun backlog_size ->
+    Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
+    @@ fun () ->
+    with_ctx (Printf.sprintf "successor-frontier-%d" backlog_size)
+      (fun ~base_path ~keeper_name ~meta ~ctx ->
+        let require = function Ok value -> value | Error detail -> fail detail in
+        let delegate id terminal : Q.stimulus =
+          {post_id=id;urgency=Immediate;arrived_at=1.;
+           payload=Delegate_completed {dc_operation_id=id;dc_keeper="original-delegate";
+                                      dc_terminal=terminal}} in
+        let initial = List.init backlog_size (fun i ->
+          delegate (Printf.sprintf "existing-%d" i) (Delegate_replied "existing result")) in
+        List.iter (enqueue_exn ~base_path keeper_name) initial;
+        let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+          ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+        let module Batch = Keeper_heartbeat_source_batch in
+        check int "admission respects the configured bound" 2 (Batch.count intake.source_batch);
+        check int "intake records unadmitted backlog without selecting it" backlog_size
+          (List.length (Batch.pending_at_intake intake.source_batch));
+        let input = Batch.for_turn ~reactive:true intake.source_batch in
+        let make_probe () = fst (Keeper_unified_turn.For_testing.autonomous_yield_probe
+          ~wake:(Batch.wake input) ~sources:(Batch.sources input) ~base_path ~keeper_name) in
+        let probe = make_probe () in
+        check bool "neither own selections nor bounded existing backlog cause checkpoint exchange" true
+          (Option.is_none (probe () |> require));
+        let selected = Batch.selections intake.source_batch in
+        let scope = Keeper_chat_operation.Operation_id.of_string "same-original-consumer"
+          |> require |> Keeper_execution_scope_id.direct_operation in
+        Keeper_event_queue_persistence.bind_pending_repetition_scope_result
+          ~base_path ~keeper_name ~selections:selected ~scope () |> require |> ignore;
+        check bool "scope binding does not make one's own source a new arrival" true
+          (Option.is_none (probe () |> require));
+        let successor = delegate "arrived-after-intake" (Delegate_failed "original producer failure") in
+        enqueue_exn ~base_path keeper_name successor;
+        (* Constructing the callback after enqueue must not hide the arrival.
+           Its frontier comes from intake, before any provider preparation. *)
+        let late_probe = make_probe () in
+        List.iter (fun probe ->
+          (match probe () |> require with
+           | Some {Keeper_agent_run.reason=Durable_stimulus_waiting summary} ->
+             check (option string) "the exact new completion owns the checkpoint"
+               (Some successor.post_id)
+               (Option.map (fun (s : Q.stimulus) -> s.post_id) summary.head)
+           | Some {reason=Operation_queued} | None -> fail "new completion did not preempt");
+          match Keeper_agent_run.For_testing.native_tool_boundary
+              ~repetition_execution:None
+              ~terminal_effect_state:Keeper_tools_agent_core.Terminal_effect_open
+              ~yield_requested:(Some probe) with
+          | Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting) -> ()
+          | Ok (Runtime_agent.Yield _ | Runtime_agent.Continue) | Error _ ->
+            fail "the real settled tool boundary ignored a new async completion")
+          [probe;late_probe];
+        let pending () = Keeper_event_queue_persistence.pending_selections_result
+          ~base_path ~keeper_name |> require in
+        check int "repeated boundary probes do not consume or duplicate results"
+          (backlog_size+1) (List.length (pending ()));
+        let successor_selection = List.find
+          (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id=successor.post_id)
+          (pending ()) in
+        Keeper_registry_event_queue.ack_pending_result ~base_path keeper_name
+          ~selection:successor_selection |> require;
+        check bool "withdrawn successor cannot cause another yield" true
+          (Option.is_none (probe () |> require));
+        let original = List.find (fun (s : Keeper_event_queue_state.pending_selection) ->
+          s.source.post_id=(List.hd initial).post_id) (pending ()) in
+        Keeper_registry_event_queue.ack_pending_result ~base_path keeper_name ~selection:original |> require;
+        enqueue_exn ~base_path keeper_name original.source;
+        match probe () |> require with
+        | Some {Keeper_agent_run.reason=Durable_stimulus_waiting summary} ->
+          check (option string) "reinserting identical content has a distinct incarnation"
+            (Some original.source.post_id)
+            (Option.map (fun (s : Q.stimulus) -> s.post_id) summary.head)
+        | Some {reason=Operation_queued} | None -> fail "original snapshot hid a later incarnation"))
+    [10;100;300]
+;;
+
 let () =
   run
     "keeper_connector_attention_batch"
     [ ( "all-ready Event Queue intake"
       , [ test_case "proactive yields only to a ready intake" `Quick
             test_proactive_yields_only_to_ready_intake
+        ; test_case "new completions preempt after exact bounded intake frontier" `Quick
+            test_running_source_observes_new_completion_after_intake
         ; test_case "checkpoint yields preserve requests until exact settlement" `Quick
             test_checkpoint_retention_preserves_unsettled_sources
         ; test_case "checkpoint retains original results and admits independent successors" `Quick

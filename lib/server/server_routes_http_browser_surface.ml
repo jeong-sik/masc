@@ -20,7 +20,13 @@ let command ~config ~principal arguments =
     content=[TextContent {type_="text";text=Tool_result.message failure;annotations=None}];
     is_error=Some true;structured_content=(match Tool_result.data failure with `Null -> None | data -> Some data);
     _meta=Lane_addon_tool_result.metadata failure} in
-  match Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated ~principal ~reserved with
+  match Browser_addon_host.parse_command arguments with
+  | Error detail -> failed (Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name
+      ~start_time:(Tool_timing.start ()) ~class_:Tool_result.Policy_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect detail)
+  | Ok (preference,_,_,_) ->
+  let selection=Browser_addon_host.selection_of_preference preference in
+  match Browser_addon_host.connect ~selection ~config ~access:Lane_addon_sources.Unauthenticated ~principal ~reserved with
   | Error error -> failed (Browser_addon_host.error_result ~start_time:(Tool_timing.start ()) error)
   | Ok host -> match Browser_addon_host.command host ~arguments with
     | Ok result -> Mcp_protocol.Mcp_types.tool_result_to_yojson result
@@ -29,12 +35,22 @@ let command ~config ~principal arguments =
    unauthenticated caller does, Shared installations only, since the
    CanReadState routes among them serve any read-state caller. *)
 let view_access=Lane_addon_sources.Unauthenticated
-let shared_host ~config ~principal =
+let shared_host ~selection ~config ~principal =
   let reserved=List.map (fun (schema:Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas in
-  Browser_addon_host.connect ~config ~access:view_access ~principal ~reserved
+  Browser_addon_host.connect ~selection ~config ~access:view_access ~principal ~reserved
 let view ~config ~principal operation json =
   let start_time=Tool_timing.start () in
-  match shared_host ~config ~principal with
+  let ( let* )=Result.bind in
+  let selected=let* _=Lane_addon_action.canonical json in
+    let* request=Browser_surface.parse_request (match json with
+      | `Assoc fields -> `Assoc (List.filter (fun (key,_) -> List.mem key ["lane";"clientId";"tabId"]) fields)
+      | value -> value) in
+    Ok (Browser_addon_host.selection_of_preference request.route) in
+  match selected with
+  | Error detail -> Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time
+      ~class_:Tool_result.Policy_rejection ~effect_disposition:Tool_result.Proven_pre_effect detail
+  | Ok selection ->
+  match shared_host ~selection ~config ~principal with
   | Ok host -> operation host json
   | Error error -> Browser_addon_host.error_result ~start_time error
 (* The manual BiDi host record is on this server's disk, not in the Add-on
@@ -45,8 +61,9 @@ let clients_listing ~config =
   let bidi_host=Browser_bidi_host_status.observe ~access:view_access
     ~base_path:config.Workspace.base_path
     ~configuration:(Runtime.browser_configuration ()) in
-  view ~config ~principal:Lane_addon_call_context.Operator
-    (fun host _ -> Browser_addon_view.clients ~bidi_host host) `Null
+  match shared_host ~selection:Browser_addon_host.Unspecified ~config ~principal:Lane_addon_call_context.Operator with
+  | Ok host -> Browser_addon_view.clients ~bidi_host host
+  | Error error -> Browser_addon_host.error_result ~start_time:(Tool_timing.start ()) error
 let reply_view request reqd result = match result with
   | Tool_result.Completed _ -> respond_json_value_with_cors request reqd
       (`Assoc ["ok",`Bool true;"data",Tool_result.data result])

@@ -3,11 +3,17 @@
     One handle retains the exact service and advertised tool across a workflow.
     Calls never retry or fall back to the core browser queue. *)
 type t
-val connect : config:Workspace.config -> access:Lane_addon_sources.access ->
+type selection = Unspecified | Observed_client of Browser_lane.client_id | Goal_connection of Browser_goal_space.t
+val selection_of_preference : Browser_selection.preference -> selection
+val connect : selection:selection -> config:Workspace.config -> access:Lane_addon_sources.access ->
   principal:Lane_addon_call_context.principal -> reserved:string list ->
   (t, Lane_addon_runtime.tool_call_error) result
-(** [reserved] is the caller's complete host tool namespace, as in ordinary
-    Add-on discovery. Visibility and name-collision checks remain authoritative. *)
+(** Unspecified requires one visible ready service. An observed client must
+    occur in exactly one of all ready services' readable snapshots; a failed
+    snapshot or duplicate match is not skipped. A Goal names its original
+    installation and must resolve its numeric Space there. Never falls back.
+    [reserved] is the complete host tool namespace. This handle keeps the
+    original service and scoped tool destination throughout the workflow. *)
 val call : t -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result, Lane_addon_runtime.tool_call_error) result
 (** Uses the ordinary exported-tool path, including installation-selected
@@ -27,7 +33,6 @@ type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
 (** The original successful MCP receipt remains available if a caller's
     observation projection or persistence fails after command completion. *)
-val goal_space : t -> goal_id:string -> (Browser_goal_space.t option, Browser_goal_space.error) result
 val bind_goal_space : t -> goal_id:string -> client_id:Browser_lane.client_id ->
   (Browser_goal_space.commit, Browser_goal_space.error) result
 (** Bind only the Space metadata of an observed Ego connection on this exact

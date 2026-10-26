@@ -422,16 +422,14 @@ hooks = ["validate_input", "validate_output"]
     ["provider_absent";"unlisted_absent";"path_present";"locale_preserved";"backend_preserved"]) ["worker";"child"];
   check bool "host retains its own provider credential" true
     (Sys.getenv_opt "OPENAI_API_KEY"=Some "fake-host-provider-sentinel");
-  let host=match Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated
+  let host=match Browser_addon_host.connect ~selection:Browser_addon_host.Unspecified ~config ~access:Lane_addon_sources.Unauthenticated
       ~principal:(Lane_addon_call_context.Host_actor "dashboard-tester") ~reserved:[] with
     | Ok host -> host | Error _ -> fail "shared browser host must connect" in
   check bool "anonymous caller cannot acquire host authority" true
-    (Result.is_error (Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated
+    (Result.is_error (Browser_addon_host.connect ~selection:Browser_addon_host.Unspecified ~config ~access:Lane_addon_sources.Unauthenticated
       ~principal:Lane_addon_call_context.Anonymous ~reserved:[]));
-  (* The browser export is not a public name, so a host tool of the same name
-     hides nothing and the public reading does not refuse it. *)
-  check bool "a host tool named like the browser export leaves the browser host connected" true
-    (Result.is_ok (Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated
+  check bool "public command cannot hide a reserved host name" true
+    (Result.is_error (Browser_addon_host.connect ~selection:Browser_addon_host.Unspecified ~config ~access:Lane_addon_sources.Unauthenticated
       ~principal:Lane_addon_call_context.Operator ~reserved:[Browser_addon_tool.definition.name]));
   check bool "nor makes the public reading collide" true
     (Result.is_ok (R.tool_export_reading ~config ~access ~reserved:[Browser_addon_tool.definition.name]));
@@ -658,6 +656,89 @@ hooks = ["validate_input", "validate_output"]
   let new_client={client with client_id=require (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000002")} in
   check bool "a fresh native connection can reach the replacement" true (poll new_client=Ok None);
   check bool "replacement has received no replayed command" false (Sys.file_exists (issued replacement));
+  (* Two browser workers advertise the same private command name. Global
+     discovery must remain ambiguous, while a concrete browser selects its
+     original worker through the ordinary input/output hooks. *)
+  let other_id=attach "normal" in
+  let other=selected other_id in
+  let ego={new_client with
+    client_id=require (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000003");
+    browser=Browser_lane.Ego_lite;transport=Ego_task_space;space=Some {id=51;name="Goal fixture"}} in
+  let register service client=match call service (Browser_addon_wire.Poll {client;window_sec=0.001}) with
+    | Ok (Browser_addon_wire.Poll_result _) -> ()
+    | Ok _|Error _ -> fail "fixture client registration failed" in
+  register other ego;
+  let connect selection=Browser_addon_host.connect ~selection ~config ~access
+    ~principal:(Lane_addon_call_context.Keeper "browser-selector") ~reserved:[] in
+  check bool "global exported-name ambiguity remains" true
+    (Result.is_error (R.tool_export_reading ~config ~access ~reserved:[]));
+  check bool "unspecified worker stays ambiguous" true
+    (Result.is_error (connect Browser_addon_host.Unspecified));
+  check bool "an unknown client never chooses an available worker" true
+    (Result.is_error (connect (Browser_addon_host.Observed_client client_id)));
+  let selected_host=match connect (Browser_addon_host.Observed_client ego.client_id) with
+    | Ok value -> value | Error _ -> fail "explicit Ego client must select its original worker" in
+  check bool "scoped browser still enforces reserved host names" true
+    (Result.is_error (Browser_addon_host.connect ~selection:(Observed_client ego.client_id)
+      ~config ~access ~principal:Lane_addon_call_context.Operator ~reserved:[Browser_addon_tool.definition.name]));
+  check bool "scoped browser still runs selected input middleware" true
+    (match Browser_addon_host.call selected_host ~arguments:(`Assoc ["actor",`String "forged"]) with
+     | Error (R.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
+  let ego_fields=["lane",`String "live";"clientId",`String (Browser_lane.client_id_to_string ego.client_id)] in
+  Eio.Fiber.both (fun () ->
+    let result=public Browser_capabilities.Tabs ego_fields in
+    check bool "public explicit selection works across workers" true (Tool_result.is_success result);
+    check string "receipt retains the selected client" (Browser_lane.client_id_to_string ego.client_id)
+      (Tool_result.data result |> member "browserSelection" |> text "clientId"))
+    (fun () ->
+      wait clock (fun () -> Sys.file_exists (issued other_id));
+      check bool "other available worker gets no command" false (Sys.file_exists (issued replacement));
+      match call other (Browser_addon_wire.Deliver {client_id=ego.client_id;id="fixture";
+          payload=`Assoc ["ok",`Bool true;"data",`List []]}) with
+      | Ok Browser_addon_wire.Receipt -> () | Ok _|Error _ -> fail "selected fixture settlement failed");
+  let goal=match Goal_store.upsert_goal config ~title:"Worker-bound browser Goal"
+      ~metric:"verified" ~target_value:"1" () with
+    | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
+  let binding=match Browser_addon_host.bind_goal_space selected_host ~goal_id:goal ~client_id:ego.client_id with
+    | Ok committed -> committed.binding | Error error -> fail (Browser_goal_space.error_message error) in
+  check bool "stored Goal selects its original Space among workers" true
+    (Result.is_ok (connect (Browser_addon_host.Goal_connection binding)));
+  Unix.unlink (issued other_id);
+  Eio.Fiber.both (fun () ->
+    let result=Browser_addon_tools.handle ~initial_goal_ids:(fun () -> Ok [goal])
+      ~config ~access ~principal:(Lane_addon_call_context.Keeper "goal-selector") ~reserved:[]
+      ~keeper_name:None ~tool:Browser_capabilities.Tabs ~tool_name:"goal-browser"
+      ~start_time:(Tool_timing.start ()) (`Assoc []) in
+    check bool "Keeper initial Goal lookup selects before host connection" true (Tool_result.is_success result);
+    check string "Goal selection is retained in the public result" goal
+      (Tool_result.data result |> member "browserGoal" |> text "goalId"))
+    (fun () ->
+      wait clock (fun () -> Sys.file_exists (issued other_id));
+      check bool "Goal discovery never dispatches on another worker" false (Sys.file_exists (issued replacement));
+      ignore (call other (Browser_addon_wire.Deliver {client_id=ego.client_id;id="fixture";
+        payload=`Assoc ["ok",`Bool true;"data",`List []]})));
+  register other {ego with space=Some {id=52;name="other Space"}};
+  check bool "the Goal's numeric Space cannot change on its worker" true
+    (Result.is_error (connect (Browser_addon_host.Goal_connection binding)));
+  register other ego;
+  register next ego;
+  check bool "duplicate client identity is not silently assigned" true
+    (Result.is_error (connect (Browser_addon_host.Observed_client ego.client_id)));
+  ignore (call next (Browser_addon_wire.Disconnect ego.client_id));
+  write (Filename.concat root ("lose-snapshot-"^replacement)) "once";
+  check bool "a failed candidate snapshot cannot establish uniqueness" true
+    (Result.is_error (connect (Browser_addon_host.Observed_client ego.client_id)));
+  ignore (dispatch config R.Detach ["instance_id",`String other_id]);
+  wait clock (fun () -> inspect other_id |> member "phase" |> text "kind"="detached");
+  check bool "a missing Goal worker never falls back" true
+    (Result.is_error (connect (Browser_addon_host.Goal_connection binding)));
+  let goal_status principal=Browser_addon_tools.handle ~config ~access ~principal ~reserved:[]
+    ~keeper_name:None ~tool:Browser_capabilities.Session ~tool_name:"goal-status"
+    ~start_time:(Tool_timing.start ()) (`Assoc ["action",`String "goal_status";"goalId",`String goal]) in
+  check bool "stored Goal status survives its worker's retirement" true
+    (Tool_result.is_success (goal_status Lane_addon_call_context.Operator));
+  check bool "stored Goal status still requires verified authority" true
+    (Tool_result.is_failed (goal_status Lane_addon_call_context.Anonymous));
   let next_pid=inspect replacement |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
   Eio.Fiber.first (fun () -> ignore (call next issue);fail "cancelled issue returned")
     (fun () -> wait clock (fun () -> Sys.file_exists (issued replacement)));

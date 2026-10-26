@@ -32,7 +32,7 @@ Neither means fully supported.
 | --- | --- | --- |
 | `profiles` | None | Profile selection only after explicit user request; no general profile inspection |
 | `listTaskSpaces` | space_status reads the native inventory and returns only the already bound numeric Space | General Goal Space discovery and lifecycle without replacements |
-| `taskSpace` | Configuration accepts a name or exact numeric ID; subsequent rounds use the bound ID. Explicit BrowserSession Goal binding pins Keeper initial discovery to an observed Space across client UUID changes; missing connections never fall back | One configured Space per worker; automatic creation, multi-Goal worker lifecycle and installed Keeper routing remain unverified |
+| `taskSpace` | Configuration accepts a name or exact numeric ID; subsequent rounds use the bound ID. Explicit BrowserSession Goal binding pins Keeper initial discovery to an observed Space across client UUID changes. A stored Goal or unique observed client can select its original service among several browser workers, with scoped exported-tool admission and no fallback | One configured Space per worker; automatic creation, multi-Goal worker lifecycle and installed Keeper routing remain unverified |
 | `claimTaskSpace` | None | Explicit approval and user-owned Space admission |
 | `takeOverTaskSpace` | `page.act` take_over | Explicit operator control boundary, currently only configured Space |
 | `TaskSpace.spaceId` | SDK-observed ID follows client inventory, tool receipts, stored screenshots and the TUI connection identity | Installed-route proof and per-goal Space lifecycle |

@@ -19,6 +19,8 @@ exception Action_persistence_failed of string
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
 type browser_service = {instance_id:string;owner:Lane_addon_tool_export.owner}
+type browser_destination = {service:browser_service;export:tool_export}
+type export_scope = Global_exports | Browser_service_exports of browser_service
 type browser_service_status = Browser_ready of browser_service
   | Browser_refresh_needed of browser_service | Browser_unavailable | Browser_retired
 type tool_call_error = Unavailable of string | Outcome_unknown of string
@@ -1904,6 +1906,15 @@ let export_current ~reserved (reading : live_reading) (export : tool_export) =
     Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool = export.tool in
   List.exists same (Lane_addon_tool_export.isolate ~reserved (reading_exports reading)).exports
   || List.exists same (browser_reading_exports reading)
+let scoped_exports ~scope ~reserved (reading : live_reading) =
+  let reading=match scope with
+    | Global_exports -> reading
+    | Browser_service_exports service ->
+      {reading with ready=List.filter (fun ((entry:entry),connection) ->
+        entry.instance_id=service.instance_id
+        && Lane_addon_tool_export.equal_owner connection.export_owner service.owner
+        && Option.is_some connection.worker.browser) reading.ready} in
+  (Lane_addon_tool_export.isolate ~reserved (reading_exports reading)).exports
 (* A held export that is no longer live names its own incarnation's state when
    that incarnation is still visible; [ended] is the text when it is not. *)
 let installation_ended = "Add-on tool installation is no longer available"
@@ -2115,6 +2126,13 @@ let browser_service_reading ~config ~access = Eio_context.run_on_owner_domain (f
 let browser_services ~config ~access = (browser_service_reading ~config ~access).services
 let browser_export_reading ~config ~access = Eio_context.run_on_owner_domain (fun () ->
   browser_reading_exports (current_reading ~config ~access))
+let browser_destination ~config ~access ~reserved ~service ~name =
+  Eio_context.run_on_owner_domain (fun () ->
+    let reading=current_reading ~config ~access in
+    match List.filter (fun (export:tool_export) -> export.tool.name=name)
+      (scoped_exports ~scope:(Browser_service_exports service) ~reserved reading) with
+    | [export] -> Ok {service;export}
+    | []|_::_::_ -> Error (Unavailable "the original browser Add-on command is unavailable"))
 (* Runs on the owner domain; both callers enter it through [with_tool_call_owner]. *)
 let call_manager_browser_service m ~access ~(service:browser_service) ~command =
     let* ()=match command with
@@ -2550,13 +2568,15 @@ let invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish 
                | Eio.Cancel.Cancelled _ as exn -> C.cancel_invocation grant;raise exn
                | _ -> C.cancel_invocation grant;Error (Lane_addon_call_context.Transport_error "private invocation outcome unknown"))))
 
-let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
+let call_exported_tool_on_owner ~scope ~companion_publish ~continuation ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
     Fun.protect ~finally:on_complete (fun () ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m = match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
     let reading = live_reading m access in
-    let* () = if export_current ~reserved reading export then Ok ()
+    let exports = scoped_exports ~scope ~reserved reading in
+    let* () = if List.exists (fun (current : tool_export) ->
+        Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool = export.tool) exports then Ok ()
       else Error (ended_export ~ended:installation_ended reading export) in
     let* e, original = match Hashtbl.find_opt m.entries export.instance_id with
       | Some ({connection=Some connection; _} as e)
@@ -2652,7 +2672,13 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
 let call_exported_tool_with_authority ~companion_publish ~continuation ~on_complete ~on_result ~authorize ~principal
     ~config ~access ~reserved ~export ~arguments =
   with_tool_call_owner (fun () -> call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~on_result
-    ~authorize ~principal ~config ~access ~reserved ~export ~arguments)
+    ~scope:Global_exports ~authorize ~principal ~config ~access ~reserved ~export ~arguments)
+
+let call_browser_destination ~config ~access ~reserved ~principal ~destination ~arguments =
+  with_tool_call_owner (fun () -> call_exported_tool_on_owner
+    ~scope:(Browser_service_exports destination.service)
+    ~companion_publish:None ~continuation:None ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())
+    ~authorize:None ~principal:(Some principal) ~config ~access ~reserved ~export:destination.export ~arguments)
 
 let call_captured_tool_request ~config ~access ~reserved ~export ~installation_id
     ~package_id ~tool ~configuration_revision ~(original : Lane_addon_tool_request_owner.retained)
@@ -2673,7 +2699,7 @@ let call_captured_tool_request ~config ~access ~reserved ~export ~installation_i
           ~summary:original.summary ~request:original.request) |> Result.map_error (fun error ->
             Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
         Ok ())
-      ~use:(fun () -> call_exported_tool_on_owner ~companion_publish:None ~continuation:None ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())
+      ~use:(fun () -> call_exported_tool_on_owner ~scope:Global_exports ~companion_publish:None ~continuation:None ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())
           ~authorize:None ~principal:(Some Lane_addon_call_context.Operator)
           ~config ~access ~reserved ~export ~arguments))
 

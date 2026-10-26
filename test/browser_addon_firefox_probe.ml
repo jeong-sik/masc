@@ -127,7 +127,7 @@ let () =
                && Skill_reference.equal_content_revision entry.content_revision expected_skill_revision)
           | None -> Error "browser package Skill is absent")
        | Not_registered|Uninitialized -> Error "workspace Skill catalog is unavailable"));
-    let host=require (Browser_addon_host.connect ~config ~access ~principal ~reserved:[]
+    let host=require (Browser_addon_host.connect ~selection:Browser_addon_host.Unspecified ~config ~access ~principal ~reserved:[]
       |> Result.map_error (function R.Unavailable s|Outcome_unknown s -> s
         | Host_refusal _ -> "probe principal refused")) in
     let client host =
@@ -267,7 +267,7 @@ let () =
     let replacement=attach () in
     ignore (record "reattach creates a fresh worker incarnation"
       (bool "worker incarnation was reused" (replacement.instance_id<>first.instance_id)));
-    let host2=require (Browser_addon_host.connect ~config ~access ~principal ~reserved:[]
+    let host2=require (Browser_addon_host.connect ~selection:Browser_addon_host.Unspecified ~config ~access ~principal ~reserved:[]
       |> Result.map_error (function R.Unavailable s|Outcome_unknown s -> s | Host_refusal _ -> "principal refused")) in
     let next_client=record "replacement publishes a fresh connection" (client host2) in
     witness "replacement" (`Assoc ["instance_id",`String replacement.instance_id;

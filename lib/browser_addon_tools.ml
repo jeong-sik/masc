@@ -235,13 +235,13 @@ let prepare_request ~upload_paths tool json =
        | None|Some _ -> Error "unknown Goal Space operation")
   | (C.Session|Tabs|Read|Interact|Act|Instruct|Goto),_ ->
       prepare ~upload_paths tool json |> Result.map (fun value -> Browser value)
-let initial_goal_space initial_goal_ids host request =
+let initial_goal_space initial_goal_ids config request =
   match request.preference,request.verb with
   | Browser_selection.Automatic,(B.Tabs_list|Session_open _) ->
     let* ids=match initial_goal_ids with None -> Ok [] | Some read -> read () in
     (match List.sort_uniq String.compare ids with
      | [] -> Ok None
-     | [goal_id] -> Host.goal_space host ~goal_id |> Result.map_error Browser_goal_space.error_message
+     | [goal_id] -> Browser_goal_space.find config ~goal_id |> Result.map_error Browser_goal_space.error_message
      | _::_::_ -> Error "current Task belongs to multiple Goals; choose an explicit browser lane and clientId")
   | (Automatic|Exact (B.Live_route _|Automation_route|Stagehand_route)),
     (Tabs_list|Session_open _|Session_close|Session_status|Page_read _|Page_document _|Page_downloads _
@@ -298,29 +298,36 @@ let handle ?initial_goal_ids ?upload_paths ~config ~access ~principal ~reserved 
   let result=match prepare_request ~upload_paths tool json with
     | Error detail -> Legacy.make_input_err ~tool_name ~start_time detail
     | Ok request ->
-        match Host.connect ~config ~access ~principal ~reserved with
-        | Error error -> Host.error_result ~start_time error
-        | Ok host ->
           let refuse error=Tool_result.make_err ~tool_name ~start_time
             ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect error in
+          let with_host selection run=match Host.connect ~selection ~config ~access ~principal ~reserved with
+            | Error error -> Host.error_result ~start_time error
+            | Ok host -> run host in
           match request with
-          | Metadata (Bind_goal {goal_id;client_id}) ->
+          | Metadata (Bind_goal {goal_id;client_id}) -> with_host (Host.Observed_client client_id) (fun host ->
               (match Host.bind_goal_space host ~goal_id ~client_id with
                | Error error -> refuse (Browser_goal_space.error_message error)
                | Ok committed -> Tool_result.make_ok ~tool_name ~start_time ~data:(`Assoc [
                    "browserGoal",Browser_goal_space.to_json committed.binding;
                    "created",`Bool committed.created;
-                   "mirrorError",(match committed.mirror_error with None -> `Null|Some e -> `String e)]) ())
+                   "mirrorError",(match committed.mirror_error with None -> `Null|Some e -> `String e)]) ()))
           | Metadata (Goal_status goal_id) ->
-              (match Host.goal_space host ~goal_id with
+              (match principal with
+               | Lane_addon_call_context.Anonymous -> refuse "browser calls require verified host authority"
+               | Keeper _|Authenticated_agent _|Host_actor _|Operator ->
+              match Browser_goal_space.find config ~goal_id with
                | Error error -> refuse (Browser_goal_space.error_message error)
                | Ok binding -> Tool_result.make_ok ~tool_name ~start_time ~data:(`Assoc [
                    "goalId",`String goal_id;"browserGoal",(match binding with None -> `Null
                      | Some value -> Browser_goal_space.to_json value);"observation",`String "stored_binding"]) ())
           | Browser request ->
-            match initial_goal_space initial_goal_ids host request with
+            match initial_goal_space initial_goal_ids config request with
             | Error error -> refuse error
             | Ok goal_space ->
+            let selection=match goal_space with
+              | Some binding -> Host.Goal_connection binding
+              | None -> Host.selection_of_preference request.preference in
+            with_host selection (fun host ->
             match Host.issue ?goal_space ?upload_paths ~required_actions:request.required_actions host ~preference:request.preference request.verb with
             | Error result -> result
             | Ok receipt ->
@@ -338,5 +345,5 @@ let handle ?initial_goal_ids ?upload_paths ~config ~access ~principal ~reserved 
                            Mcp_protocol.Mcp_types.tool_result_to_yojson receipt.raw_result in
                      Tool_result.make_err ~tool_name ~start_time
                      ~class_:Tool_result.Runtime_failure ~effect_disposition
-                     ?metadata:receipt.raw_result._meta ~data detail) in
+                     ?metadata:receipt.raw_result._meta ~data detail)) in
   restamp ~tool_name ~start_time result

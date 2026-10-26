@@ -229,6 +229,20 @@ val call_exported_tool_with_principal : principal:Lane_addon_call_context.princi
 (** Trusted host boundary only: principal must come from verified credentials,
     never from caller-supplied tool arguments. [access] still controls visibility. *)
 type browser_service = private {instance_id:string;owner:Lane_addon_tool_export.owner}
+type browser_destination
+(** An original browser service and its exact advertised tool. This private
+    destination is independent of global tool-name discovery. *)
+val browser_destination : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> service:browser_service -> name:string ->
+  (browser_destination, tool_call_error) result
+val call_browser_destination : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> principal:Lane_addon_call_context.principal ->
+  destination:browser_destination -> arguments:Yojson.Safe.t ->
+  (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
+(** Revalidate the same visible browser service, owner and advertised schema,
+    then use ordinary exported-tool authority, middleware and cancellation.
+    Reserved host names remain forbidden. Other installations' names neither
+    select nor replace this destination; global namespace admission is unchanged. *)
 type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
 val browser_service_reading : config:Workspace.config -> access:Lane_addon_sources.access -> browser_reading
 (** Usable browser services and, from the same read, the visible browser

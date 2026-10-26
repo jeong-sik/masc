@@ -249,7 +249,7 @@ let () =
             Yojson.Safe.to_string (Skill_reference.to_yojson (Skill_catalog_snapshot.entry_reference entry)))
         | None -> Error "browser package Skill is absent")
      | Not_registered|Uninitialized -> Error "workspace Skill catalog is unavailable");
-  let host=Browser_addon_host.connect ~config ~access ~principal ~reserved:[]
+  let host=Browser_addon_host.connect ~selection:Browser_addon_host.Unspecified ~config ~access ~principal ~reserved:[]
     |> Result.map_error (function R.Unavailable s|Outcome_unknown s -> s
       | Host_refusal _ -> "host refused the fixture principal") |> require in
   let detach id =

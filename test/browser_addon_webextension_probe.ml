@@ -132,7 +132,7 @@ let () =
           | Failed detail -> failwith detail | Attached|Observing|Detaching|Detached -> ()) (R.inventory ~config).instances;
         match R.browser_services ~config ~access with [service] -> Some service
         | [] -> None | _::_::_ -> failwith "ambiguous browser Addons") in
-    let connect ()=Browser_addon_host.connect ~config ~access ~principal ~reserved:[]
+    let connect ()=Browser_addon_host.connect ~selection:Browser_addon_host.Unspecified ~config ~access ~principal ~reserved:[]
       |> Result.map_error (function R.Unavailable detail|Outcome_unknown detail -> detail
         | Host_refusal _ -> "fixture principal refused") |> require in
     let client host=await (fun () ->

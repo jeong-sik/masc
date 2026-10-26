@@ -5,29 +5,64 @@ type t = {
   principal : Lane_addon_call_context.principal;
   reserved : string list;
   service : R.browser_service;
-  export : R.tool_export;
+  destination : R.browser_destination;
 }
 let ( let* ) = Result.bind
-let connect ~config ~access ~principal ~reserved =
+type selection = Unspecified | Observed_client of Browser_lane.client_id | Goal_connection of Browser_goal_space.t
+let selection_of_preference = function
+  | Browser_selection.Exact (Browser_lane.Live_route (Some client)) -> Observed_client client
+  | Automatic|Exact (Live_route None|Automation_route|Stagehand_route) -> Unspecified
+let snapshot_service ~config ~access ~service =
+  let* reply=R.call_browser_service ~config ~access ~service ~command:Browser_addon_wire.Snapshot in
+  match reply with
+  | Browser_addon_wire.Snapshot_result value -> Ok value
+  | Service_refusal {message;disposition=Not_started} -> Error (Browser_addon_client.Unavailable message)
+  | Service_refusal {message;disposition=Outcome_unknown} -> Error (Browser_addon_client.Outcome_unknown message)
+  | Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _|Poll_result _ ->
+      Error (Browser_addon_client.Outcome_unknown "unexpected browser snapshot reply")
+let connect ~selection ~config ~access ~principal ~reserved =
   let* ()=match principal with
     | Lane_addon_call_context.Anonymous -> Error (R.Host_refusal
         (Lane_addon_call_context.Rejected "browser calls require verified host authority"))
     | Keeper _|Authenticated_agent _|Host_actor _|Operator -> Ok () in
   let browser=R.browser_service_reading ~config ~access in
-  let* service=match browser.services with
-    | [service] -> Ok service
-    | [] -> Error (R.Unavailable (match Lane_addon_unready.summary browser.unready with
-        | Some reason -> reason
-        | None -> "no browser Add-on is attached"))
-    | _::_::_ -> Error (R.Unavailable "multiple visible browser Add-ons are attached") in
-  let* export=match List.filter (fun (export:R.tool_export) ->
-    export.instance_id=service.instance_id && export.tool.name=Browser_addon_tool.definition.name
-    && Lane_addon_tool_export.equal_owner export.owner service.owner) (R.browser_export_reading ~config ~access) with
-    | [export] -> Ok export
-    | []|_::_::_ -> Error (R.Unavailable "the original browser Add-on command is unavailable") in
-  Ok {config;access;principal;reserved;service;export}
-let call t ~arguments = Machine_addon_host.call ~continuation:None ~principal:t.principal ~config:t.config
-  ~access:t.access ~reserved:t.reserved ~export:t.export ~arguments
+  let unavailable detail=Error (R.Unavailable detail) in
+  let observe service =
+    let* value=snapshot_service ~config ~access ~service |> Result.map_error (function
+      | Browser_addon_client.Unavailable detail|Outcome_unknown detail -> R.Unavailable detail) in
+    let* _=Lane_addon_action.canonical value |> Result.map_error (fun detail -> R.Unavailable detail) in
+    Browser_addon_observation.decode_snapshot value |> Result.map_error (fun detail -> R.Unavailable detail) in
+  let* service=match selection with
+    | Unspecified ->
+      (match browser.services with
+       | [service] -> Ok service
+       | [] -> unavailable (match Lane_addon_unready.summary browser.unready with
+           | Some reason -> reason | None -> "no browser Add-on is attached")
+       | _::_::_ -> unavailable "multiple visible browser Add-ons are attached; choose an observed clientId")
+    | Observed_client client_id ->
+      let rec matches found = function
+        | [] -> Ok found
+        | (service:R.browser_service)::rest ->
+          let* published=observe service in
+          let matching=List.filter (fun (client:Browser_lane.client_info) -> client.client_id=client_id) published.clients in
+          matches (List.map (fun _ -> service) matching @ found) rest in
+      let* found=matches [] browser.services in
+      (match found with
+       | [service] -> Ok service
+       | [] -> unavailable "the observed browser client is unavailable; no replacement was selected"
+       | _::_::_ -> unavailable "the browser client is reported by multiple visible Add-ons")
+    | Goal_connection binding ->
+      (match List.filter (fun (service:R.browser_service) -> service.instance_id=binding.addon_instance_id) browser.services with
+       | [service] ->
+         let* published=observe service in
+         let* _=Browser_goal_space.resolve binding ~addon_instance_id:service.instance_id published.clients
+           |> Result.map_error (fun error -> R.Unavailable (Browser_goal_space.error_message error)) in
+         Ok service
+       | []|_::_::_ -> unavailable "the Goal's original browser Add-on is unavailable; no replacement was selected") in
+  let* destination=R.browser_destination ~config ~access ~reserved ~service ~name:Browser_addon_tool.definition.name in
+  Ok {config;access;principal;reserved;service;destination}
+let call t ~arguments = R.call_browser_destination ~principal:t.principal ~config:t.config
+  ~access:t.access ~reserved:t.reserved ~destination:t.destination ~arguments
 let error_result ~start_time error =
   let class_,effect_disposition,detail=match error with
     | R.Unavailable detail -> Tool_result.Dependency_unavailable,Tool_result.Proven_pre_effect,detail
@@ -38,14 +73,7 @@ let error_result ~start_time error =
           | Unavailable detail|Activity_unobserved detail -> Tool_result.Dependency_unavailable,detail in
         class_,Tool_result.Proven_pre_effect,detail in
   Tool_result.make_err ~tool_name:Browser_addon_tool.definition.name ~start_time ~class_ ~effect_disposition detail
-let snapshot t =
-  let* reply=R.call_browser_service ~config:t.config ~access:t.access ~service:t.service
-    ~command:Browser_addon_wire.Snapshot in
-  match reply with
-  | Browser_addon_wire.Snapshot_result value -> Ok value
-  | Service_refusal {message;disposition=Not_started} -> Error (Browser_addon_client.Unavailable message)
-  | Service_refusal {message;disposition=Outcome_unknown} -> Error (Browser_addon_client.Outcome_unknown message)
-  | Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _|Poll_result _ -> Error (Browser_addon_client.Outcome_unknown "unexpected browser snapshot reply")
+let snapshot t = snapshot_service ~config:t.config ~access:t.access ~service:t.service
 (* A worker answers its snapshot only while it serves (decode_snapshot), so
    the live lane it reports is on. *)
 type snapshot_failure = Snapshot_unavailable of string | Snapshot_unreadable of string
@@ -60,7 +88,6 @@ let selection_snapshot t =
         automation=published.automation;stagehand=published.stagehand})
 type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
-let goal_space t ~goal_id = Browser_goal_space.find t.config ~goal_id
 let bind_goal_space t ~goal_id ~client_id =
   let* published,_ = selection_snapshot t |> Result.map_error (function
     | Snapshot_unavailable detail -> Browser_goal_space.Unavailable detail

@@ -43,6 +43,15 @@ gesture never switches browsers or replays an action. Select another browser
 explicitly to change that owner. A malformed automatic decision refuses automatic
 selection while preserving a validated connection list for manual selection.
 
+An explicit observed client can route to its original browser Add-on even when
+several browser workers are visible. The host requires exactly one matching
+worker snapshot; duplicate identities or unreadable candidate snapshots refuse
+selection. A Keeper's stored Goal binding selects its original Add-on and
+numeric Ego Space before initial discovery. Missing bindings never authorize a
+replacement, and `BrowserSession action=goal_status` can still read the stored
+binding after that worker retires. Unspecified discovery across multiple Add-ons
+remains ambiguous; automatic per-Goal Space allocation is not implemented.
+
 The picker keeps **Automatic**, **Work browser**, and connected browser identities
 in the primary choices. Work browser uses the server's work decision, with a
 separate login session. Merely selecting it does not launch a new window; `o`

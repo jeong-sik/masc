@@ -298,7 +298,7 @@ let () =
         |> Result.map_error Tool_blob_store.fetch_error_to_string in
       check "durable downloaded bytes differ from the fixture" (bytes=Some expected) in
     ignore (record "durable artifact restores the original binary bytes" (retained ()));
-    let host=require (Browser_addon_host.connect ~config ~access ~principal ~reserved:[]
+    let host=require (Browser_addon_host.connect ~selection:Browser_addon_host.Unspecified ~config ~access ~principal ~reserved:[]
       |> Result.map_error (function R.Unavailable s|Outcome_unknown s -> s | Host_refusal _ -> "host refused fixture authority")) in
     ignore (record "detach confirms the original worker and owned session cleanup"
       (let* _=R.dispatch ~caller:"gecko-transfer-probe" ~access ~config ~operation:R.Detach

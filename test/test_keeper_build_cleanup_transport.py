@@ -25,7 +25,9 @@ class CleanupTransport(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="keeper-cleanup-transport-")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        self.repo = self.root / "checkout"
+        self.build_root = self.root / "build-volume"
+        self.build_root.mkdir()
+        self.repo = self.root / "work" / "checkout"
         self.build = self.repo / "_build"
         self.build.mkdir(parents=True)
         (self.repo / "dune-project").write_text("(lang dune 3.20)\n")
@@ -63,7 +65,9 @@ class CleanupTransport(unittest.TestCase):
             "python3",
             "-",
             "--guest-root",
-            str(self.root),
+            str(self.repo.parent),
+            "--build-root",
+            str(self.build_root),
             "--idle-hours",
             "0",
             "--apply",

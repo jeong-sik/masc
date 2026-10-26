@@ -1,4 +1,4 @@
-"""Real Dune safety checks (Linux) and isolated background service lifecycle."""
+"""Owned artifact cleanup through native targeted Dune clean, without builds."""
 
 import fcntl
 import importlib.util
@@ -9,25 +9,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import threading
-import time
 import unittest
 from unittest.mock import patch
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-SPEC = importlib.util.spec_from_file_location(
-    "vm_cleanup", SCRIPTS / "cleanup-keeper-vm-builds.py"
-)
+PAYLOAD = Path(__file__).resolve().parents[1] / "config/scripts/keeper-build-cleanup.py"
+SPEC = importlib.util.spec_from_file_location("keeper_build_cleanup", PAYLOAD)
 assert SPEC is not None and SPEC.loader is not None
 cleaner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(cleaner)
-SERVICE_SPEC = importlib.util.spec_from_file_location(
-    "vm_cleaner_service", SCRIPTS / "keeper-vm-cleaner.py"
-)
-assert SERVICE_SPEC is not None and SERVICE_SPEC.loader is not None
-service = importlib.util.module_from_spec(SERVICE_SPEC)
-SERVICE_SPEC.loader.exec_module(service)
-
 
 @unittest.skipUnless(
     sys.platform == "linux" and shutil.which("dune"), "needs Linux guest with Dune 3.24"
@@ -36,7 +25,10 @@ class GuestCleanup(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name) / "work"
+        self.root.mkdir()
+        self.build_root = Path(self.temporary.name) / "build"
+        self.build_root.mkdir()
         self.repo = self.root / "checkout"
         self.build = self.repo / "_build"
         self.build.mkdir(parents=True)
@@ -45,9 +37,9 @@ class GuestCleanup(unittest.TestCase):
         (self.build / "artifact").write_text("generated output\n")
 
     def test_recent_output_retained_then_only_generated_targets_cleaned(self) -> None:
-        report = cleaner.guest_sweep(self.root, 24, True)
+        report = cleaner.guest_sweep(self.root, 24, True, build_root=self.build_root)
         self.assertEqual(report["entries"][0]["skip"], "recent build output")
-        report = cleaner.guest_sweep(self.root, 0, True)
+        report = cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
         self.assertEqual(report["entries"][0]["action"], "cleaned")
         self.assertFalse((self.build / "artifact").exists())
         self.assertTrue((self.build / ".lock").is_file())
@@ -56,7 +48,7 @@ class GuestCleanup(unittest.TestCase):
     def test_live_checkout_process_preserves_output(self) -> None:
         process = subprocess.Popen(["sleep", "30"], cwd=self.repo)
         try:
-            report = cleaner.guest_sweep(self.root, 0, True)
+            report = cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
             self.assertEqual(report["entries"][0]["skip"], "live process uses checkout")
             self.assertTrue((self.build / "artifact").exists())
         finally:
@@ -90,14 +82,14 @@ class GuestCleanup(unittest.TestCase):
 
         with (
             patch.object(
-                cleaner.GUEST,
+                cleaner,
                 "Path",
                 side_effect=lambda value: proc if value == "/proc" else Path(value),
             ),
-            patch.object(cleaner.GUEST.os, "readlink", side_effect=read_descriptor),
+            patch.object(cleaner.os, "readlink", side_effect=read_descriptor),
             patch.object(Path, "iterdir", enumerate_paths),
         ):
-            report = cleaner.guest_sweep(self.root, 0, True)
+            report = cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
         self.assertEqual(report["entries"][0]["skip"], "live process uses checkout")
         self.assertTrue((self.build / "artifact").exists())
 
@@ -106,7 +98,7 @@ class GuestCleanup(unittest.TestCase):
             lease.write(str(os.getpid()))
             lease.flush()
             fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            report = cleaner.guest_sweep(self.root, 0, True)
+            report = cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
         self.assertEqual(report["entries"][0]["action"], "clean failed")
         self.assertTrue((self.build / "artifact").exists())
 
@@ -117,7 +109,7 @@ class GuestCleanup(unittest.TestCase):
             patch.dict(os.environ, {"DUNE_LOCAL_LOCK": str(lock)}),
         ):
             fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            report = cleaner.guest_sweep(self.root, 0, True)
+            report = cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
         self.assertEqual(report["entries"][0]["skip"], "wrapper build lock held")
         self.assertTrue((self.build / "artifact").exists())
 
@@ -127,150 +119,116 @@ class GuestCleanup(unittest.TestCase):
         (linked_repo / "dune-project").write_text("(lang dune 3.20)\n")
         (linked_repo / "_build").symlink_to(self.build, target_is_directory=True)
         (self.repo / ".masc-keep-build").touch()
-        report = cleaner.guest_sweep(self.root, 0, True)
+        report = cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
         self.assertTrue(all("skip" in entry for entry in report["entries"]))
         self.assertTrue((self.build / "artifact").exists())
 
     def test_unreadable_process_ownership_fails_closed(self) -> None:
         with patch.object(
-            cleaner.GUEST, "process_paths", side_effect=PermissionError("denied")
+            cleaner, "process_paths", side_effect=PermissionError("denied")
         ):
             with self.assertRaises(PermissionError):
-                cleaner.guest_sweep(self.root, 0, True)
+                cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
         self.assertTrue((self.build / "artifact").exists())
 
 
-class CleanerService(unittest.TestCase):
-    def test_stop_before_spawned_child_takes_lease_prevents_sweep(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
-            state = base / ".masc/maintenance/keeper-vm-cleaner"
-            stop = state / "stop-requested"
 
-            def command(action: str) -> int:
-                with patch.object(
-                    sys, "argv", ["keeper-vm-cleaner", action, "--base-path", str(base)]
-                ):
-                    return service.main()
+@unittest.skipUnless(shutil.which("dune"), "needs native Dune targeted clean")
+class ManagedBuildCleanup(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(prefix="keeper-owned-cleanup-")
+        self.addCleanup(self.temporary.cleanup)
+        self.base = Path(self.temporary.name).resolve()
+        self.root = self.base / "work"
+        self.build_root = self.base / "build"
+        self.repo = self.root / "repos" / "checkout"
+        self.repo.mkdir(parents=True)
+        self.build_root.mkdir()
+        self.target = self.build_root / "repos:checkout"
+        self.target.mkdir()
+        self.link = self.repo / "_build"
+        self.link.symlink_to(self.target, target_is_directory=True)
+        (self.repo / "dune-project").write_text("(lang dune 3.20)\n")
+        (self.repo / "source.ml").write_text("let retained = true\n")
+        (self.target / "artifact").write_text("generated output\n")
+        self.processes = patch.object(cleaner, "process_paths", return_value=[])
+        self.processes.start()
+        self.addCleanup(self.processes.stop)
 
-            # Model the admitted child before it has acquired service.lock.
-            self.assertEqual(command("stop"), 0)
+    def sweep(self, apply: bool = True):
+        return cleaner.guest_sweep(
+            self.root, 0, apply, build_root=self.build_root
+        )
 
-            def sweep(*_args, **_kwargs):
-                stop.touch()
-                return subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
+    def test_owned_link_cleans_output_and_preserves_source_link_and_lock(self):
+        lock = self.target / ".lock"
+        lock.touch()
+        before = lock.stat().st_ino
+        report = self.sweep()
+        self.assertEqual(report["entries"][0]["action"], "cleaned")
+        self.assertFalse((self.target / "artifact").exists())
+        self.assertEqual((self.repo / "source.ml").read_text(), "let retained = true\n")
+        self.assertEqual(self.link.readlink(), self.target)
+        self.assertEqual(lock.stat().st_ino, before)
 
-            with patch.object(service.subprocess, "run", side_effect=sweep) as run:
-                self.assertEqual(command("run"), 0)
-                run.assert_not_called()
+    def test_foreign_shared_or_escaping_link_is_retained(self):
+        for target in [self.base / "foreign", self.build_root / "another-checkout"]:
+            with self.subTest(target=target):
+                target.mkdir()
+                artifact = target / "artifact"
+                artifact.write_text("retained\n")
+                self.link.unlink()
+                self.link.symlink_to(target, target_is_directory=True)
+                report = self.sweep()
+                self.assertEqual(report["entries"][0]["skip"], "not an owned Dune build target")
+                self.assertTrue(artifact.exists())
 
-    def test_stop_queued_behind_start_is_recorded_before_the_lock_is_free(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
-            state = base / ".masc/maintenance/keeper-vm-cleaner"
-            state.mkdir(parents=True)
-            stop = state / "stop-requested"
-            argv = ["keeper-vm-cleaner", "stop", "--base-path", str(base)]
-            results: list[int] = []
+    def test_target_with_symlink_component_is_retained(self):
+        self.target.rename(self.base / "redirected")
+        self.target.symlink_to(self.base / "redirected", target_is_directory=True)
+        report = self.sweep()
+        self.assertEqual(report["entries"][0]["skip"], "not an owned Dune build target")
+        self.assertTrue((self.target / "artifact").exists())
 
-            def run_stop() -> None:
-                with patch.object(sys, "argv", argv):
-                    results.append(service.main())
+    def test_physical_target_process_prevents_cleanup(self):
+        for path in [self.target, self.target / "artifact", self.repo / "source.ml"]:
+            with self.subTest(path=path), patch.object(cleaner, "process_paths", return_value=[path]):
+                report = self.sweep()
+                self.assertEqual(report["entries"][0]["skip"], "live process uses checkout")
+                self.assertTrue((self.target / "artifact").exists())
 
-            # The test holds control.lock the way start does while it spawns.
-            with (state / "control.lock").open("a") as control:
-                fcntl.flock(control, fcntl.LOCK_EX)
-                worker = threading.Thread(target=run_stop)
-                worker.start()
-                deadline = time.monotonic() + 10
-                while not stop.exists() and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                self.assertTrue(stop.exists())
-                self.assertEqual(results, [])
-            worker.join(timeout=10)
-            self.assertEqual(results, [0])
+    def test_native_lock_and_operator_marker_each_prevent_cleanup(self):
+        with (self.target / ".lock").open("w") as lease:
+            fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            report = self.sweep()
+        self.assertEqual(report["entries"][0]["action"], "clean failed")
+        self.assertTrue((self.target / "artifact").exists())
+        (self.repo / ".masc-keep-build").touch()
+        self.assertEqual(self.sweep()["entries"][0]["skip"], "operator retention marker")
+        self.assertTrue((self.target / "artifact").exists())
 
-    def test_start_admission_holds_control_and_clears_old_stop(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
-            state = base / ".masc/maintenance/keeper-vm-cleaner"
-            state.mkdir(parents=True)
-            stop = state / "stop-requested"
-            stop.touch()
+    def test_dry_run_and_unknown_ownership_do_not_mutate(self):
+        self.assertEqual(self.sweep(False)["entries"][0]["action"], "would clean")
+        self.assertTrue((self.target / "artifact").exists())
+        with patch.object(cleaner, "process_paths", side_effect=PermissionError("denied")):
+            with self.assertRaises(PermissionError):
+                self.sweep()
+        self.assertTrue((self.target / "artifact").exists())
 
-            def spawn(*_args, **_kwargs):
-                self.assertFalse(stop.exists())
-                with (
-                    (state / "control.lock").open("a") as other,
-                    self.assertRaises(BlockingIOError),
-                ):
-                    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return subprocess.CompletedProcess([], 0)
-
-            with (
-                patch.object(
-                    sys,
-                    "argv",
-                    ["keeper-vm-cleaner", "start", "--base-path", str(base)],
-                ),
-                patch.object(service, "running", side_effect=[False, True]),
-                patch.object(service.subprocess, "Popen", side_effect=spawn),
-            ):
-                self.assertEqual(service.main(), 0)
-
-    def test_start_duplicate_stop_and_restart(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
-            fake_bin = base / "bin"
-            fake_bin.mkdir()
-            container = fake_bin / "container"
-            container.write_text("#!/bin/sh\nprintf '[]\\n'\n")
-            container.chmod(0o755)
-            env = {**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"}
-            state = base / ".masc/maintenance/keeper-vm-cleaner"
-
-            def command(action: str) -> subprocess.CompletedProcess[str]:
-                return subprocess.run(
-                    [
-                        sys.executable,
-                        str(SCRIPTS / "keeper-vm-cleaner.py"),
-                        action,
-                        "--base-path",
-                        str(base),
-                        "--interval-seconds",
-                        "60",
-                    ],
-                    env=env,
-                    text=True,
-                    capture_output=True,
-                    check=True,
-                )
-
-            def await_stopped() -> None:
-                deadline = time.monotonic() + 10
-                while time.monotonic() < deadline:
-                    if not json.loads(command("status").stdout)["running"]:
-                        return
-                    time.sleep(0.1)
-                self.fail("service did not stop")
-
-            try:
-                command("start")
-                original = json.loads((state / "config.json").read_text())["pid"]
-                command("start")
-                self.assertEqual(
-                    json.loads((state / "config.json").read_text())["pid"], original
-                )
-                command("stop")
-                await_stopped()
-                command("start")
-                self.assertNotEqual(
-                    json.loads((state / "config.json").read_text())["pid"], original
-                )
-                self.assertTrue(json.loads(command("status").stdout)["running"])
-            finally:
-                command("stop")
-                await_stopped()
+    def test_replaced_target_during_scan_does_not_clean_replacement(self):
+        scan = cleaner.tree_stats
+        moved = self.base / "retained-original"
+        def replace(target):
+            result = scan(target)
+            target.rename(moved)
+            target.mkdir()
+            (target / "artifact").write_text("new owner\n")
+            return result
+        with patch.object(cleaner, "tree_stats", side_effect=replace):
+            report = self.sweep()
+        self.assertEqual(report["entries"][0]["skip"], "build target changed during inspection")
+        self.assertEqual((self.target / "artifact").read_text(), "new owner\n")
+        self.assertTrue((moved / "artifact").exists())
 
 
 if __name__ == "__main__":

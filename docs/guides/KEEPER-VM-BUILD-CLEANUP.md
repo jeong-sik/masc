@@ -1,137 +1,80 @@
 # Keeper VM build cleanup
 
-Apple Keeper work volumes persist between boots. A checkout built before its
-`_build` was linked to `/masc-build` holds a real `_build` on the work volume.
-The boot helper removes those before each guest starts (see "Guest space versus
-host disk space"); between boots they grow until the idle cleanup below removes
-them. Clean generated output separately from source/worktree removal.
-
-From the MASC checkout, inspect and clean the selected runtime workspace:
-
-```bash
-python3 scripts/cleanup-keeper-vm-builds.py --base-path /path/to/workspace
-python3 scripts/cleanup-keeper-vm-builds.py --base-path /path/to/workspace --apply
-```
-
-The default requires every entry in a build tree to have remained unmodified
-for 24 hours. For an operator-requested immediate cleanup, use `--idle-hours 0`.
-Both modes skip a checkout used by a live process, a held wrapper lock, symlinked
-`_build` directories, and checkouts containing `.masc-keep-build`. Put durable
-release/test evidence outside `_build`, or add that retention marker.
-
-The guest needs Python 3 and Dune 3.24 or newer (targeted `dune clean`). Guests
-without Dune are reported as skipped. Only running VMs with matching workspace,
-Keeper sandbox and Apple backend labels are selected. Sources, worktrees, images,
-volumes, package caches and Keeper memory are retained. A failed process scan
-does not authorize cleanup. Dune's native nonblocking lock protects cleanup
-against newly starting builds; targeted cleaning retains the lock inode and
-avoids whole-project clean's removal of promoted source files.
-
-## Product-owned automatic sweeps
-
-`Server_bootstrap_maintenance.start_background_maintenance` starts
-`Server_keeper_build_maintenance` under the server root switch. It waits one
-interval before its first scan and stops with that switch. The existing
-`Runtime_params` store controls `keeper_build_cleanup_enabled` (default true),
+The MASC server owns artifact cleanup through each Keeper's Owner mailbox.
+`Server_keeper_build_maintenance` runs under the server root switch. The normal
+`Runtime_params` surface controls `keeper_build_cleanup_enabled` (default true),
 `keeper_build_cleanup_interval_sec` (one hour), and
-`keeper_build_cleanup_retention_sec` (one day).
+`keeper_build_cleanup_retention_sec` (one day). These are artifact-retention
+settings, not time limits on Keeper work or durable tasks.
 
-For each registered Keeper, `Keeper_owner.run_maintenance_if_idle` atomically
-admits cleanup only when no turn holds the slot, shutdown has not begun, and
-`defer_to_chat` sees no queued/running chat or unavailable operation store.
-Busy Keepers wait for the next sweep. A paused Keeper may be cleaned without
-resuming it. Requests arriving after admission wait for that bounded maintenance
-attempt; cleanup does not promise zero latency for those requests.
+The binary embeds `config/scripts/keeper-build-cleanup.py` and passes both the
+Keeper work root and the canonical build-volume root to its framed exec-shim
+runner. There is one product mutation controller; installing the binary does
+not require a checkout or a separate cleanup daemon.
 
-Before dispatch, `read_cleanup_meta` applies the Keeper's TOML profile and
-requires the resolved and payload names to match the Owner holding the slot.
-Invalid profiles or identity mismatches refuse cleanup.
+## Admission and scope
 
-`Keeper_turn_sandbox_runtime.cleanup_attached_builds` attaches only to an
-already running Apple guest selected by that effective profile. It never boots, stops, pauses, repairs,
-or refreshes credentials. The binary embeds the shared guest payload from
-`config/scripts/keeper-build-cleanup.py`; no checkout or daemon installation is
-needed. Inside the guest, process inspection, wrapper/native Dune locks,
-retention, and operator markers remain necessary because external builds are
-outside the Owner mailbox. Execution uses the existing framed `exec-shim` runner. Its guest timer and
-transport EOF terminate the payload process group; a successful report requires
-payload exit zero and that call's execution receipt. Scan/execution failure
-reports an error; server cancellation propagates rather than being swallowed.
+Cleanup defers to queued/running chat, unavailable operation stores, active turns
+and shutdown through the existing atomic Maintenance admission. Busy attempts
+can be considered at a later maintenance pulse. A request arriving after
+admission can still wait for that attempt. Local transport cancellation does
+not prove the original guest process group has stopped; no same-Keeper
+preemption guarantee is made. Existing atomic transactions, including filesystem
+repair and ownership transfer, retain their interruption contract.
 
-Install the binary containing this change before treating this as active
-product behavior. Stop a separately started legacy script service after that
-installation to avoid duplicate scans.
+Only an already running Apple guest with a matching effective TOML profile and
+Owner identity is eligible. Cleanup does not boot, stop, pause, repair or refresh
+a guest's credentials. A paused Keeper without a running guest keeps its work
+volume. A source merge does not change the installed runtime.
 
-## Optional operator script service
+## Owned output and safety
 
-```bash
-python3 scripts/keeper-vm-cleaner.py start --base-path /path/to/workspace
-python3 scripts/keeper-vm-cleaner.py status --base-path /path/to/workspace
-python3 scripts/keeper-vm-cleaner.py stop --base-path /path/to/workspace
-```
+The guest needs Python 3, readable Linux process ownership and Dune 3.24 or
+newer with native targeted clean. It admits a real `_build` beside `dune-project`,
+or the exact managed link produced by `Keeper_microvm_build_plan`: checkout
+path segments joined with `:` under the configured build root. Arbitrary,
+dangling, redirected or another checkout's links are retained.
 
-`start` immediately sweeps, then repeats every hour, using the same 24-hour
-retention. Set `--idle-hours` and `--interval-seconds` on `start` to change those
-settings; stop an existing service before changing its configuration. Duplicate
-starts leave the existing service running. Stop requests finish the current
-sweep before exiting and never signal a PID from a stale file. `stop` writes
-its request before it waits for `start` to finish, so a stop sent while `start`
-is still bringing the service up is kept: that service exits before its first
-sweep, and only the next `start` clears the request.
+Both the source checkout and its physical build target are checked for live
+process use. The existing wrapper lock and native Dune lock exclude builds.
+After inspection the target's ownership and directory identity are checked
+again. Targeted `dune clean` retains the native `.lock` inode and source files;
+it does not perform a whole-project clean that could remove promoted source.
+Unreadable process ownership refuses cleanup. It is never interpreted as no
+live process.
 
-State and the latest sweep/error reports are bounded files under
-`<base-path>/.masc/maintenance/keeper-vm-cleaner/`. `config.json` identifies the
-running script and policy. `last-sweep.json` reports each cleaned/skipped build
-and **guest** free-space changes. `status` reports process existence, not whether
-the last sweep succeeded; inspect both report files for failures.
+A checkout containing `.masc-keep-build` retains output. Otherwise every entry
+must remain unmodified for the configured retention period. Store durable
+release/test evidence outside `_build`, or use that retention marker. Sources,
+Git stores, worktrees, package caches, Keeper memory and domain/effect records
+are outside artifact cleanup.
 
-Keep the checkout containing the scripts and shared payload available while the service runs. To
-run independently of a temporary PR worktree, copy both reviewed scripts into
-the maintenance directory's `bin/`, and copy the shared payload to
-`<maintenance-directory>/config/scripts/keeper-build-cleanup.py`. Invoke the
-`bin/` copy. This is a background
-process, not an OS startup service; restart it explicitly after a host reboot.
+## Guest space and host space
 
-## Guest space versus host disk space
+The report's allocated artifact bytes and guest free-space delta describe the
+guest. They do not prove an equal reduction in allocated host image blocks.
+The work volume has a boot-time discard/trim path; the disposable build volume
+is recreated at a fresh boot and the baseline does not give it that discard
+default. Existing mounts do not change because source is merged. Cleanup never
+mounts a live volume in another VM or stops a Keeper to force host recovery.
 
-Volumes mounted without ext4 discard retain deleted blocks in their sparse
-host images. Keeper guests have no `CAP_SYS_ADMIN`, so live `fstrim` fails.
-At the safe boot boundary MASC's isolated helper now enables ext4's persistent
-default `discard` option, removes the real `_build` of every Dune checkout the
-guest's link scan covers (`build_output_removal_script`; a checkout holding
-`.masc-keep-build` keeps it) and trims existing free blocks,
-after removing the previous guest and before mounting the work volume again
-(`keeper_turn_sandbox_runtime.ml`, `reclaim_work_volume_space`). Subsequent guest
-deletes return their blocks automatically, without extra guest capabilities.
-Existing running guests take the default on their next safe volume mount;
-merging a change does not change their active mount. This cleaner
-does not stop a Keeper or mount its live volume in a second VM to force trimming.
+See the [volume lifecycle investigation](../research/2026-10-26-keeper-volume-lifecycle.md)
+for usage cases, observed evidence and the separate incarnation-bound retirement
+plan. The helper's own lifecycle and external Apple API contention are tracked
+in [the boot-helper RFC](../rfc/RFC-keeper-boot-runs-no-one-shot-container.md).
 
-The helper image needs `/usr/bin/findmnt`, `/usr/sbin/tune2fs` and
-`/usr/sbin/fstrim`. `/usr/bin/mount` is optional: without it the helper says
-the remount was refused and removes build output with `discard` still on,
-which is slower but frees the same blocks. A missing utility reports a reclaim failure; existing runtime
-policy permits boot only after helper removal has been confirmed.
+## Deployment boundary
 
-Source contracts: [ext4 persistent discard default](https://kernel.org/doc/html/next/filesystems/ext4/super.html),
-[tune2fs defaults](https://man7.org/linux/man-pages/man8/tune2fs.8.html),
-[Dune targeted clean and native lock](https://github.com/ocaml/dune/blob/3.24.2/bin/clean.ml),
-[Dune lock implementation](https://github.com/ocaml/dune/blob/3.24.2/otherlibs/stdune/src/global_lock.ml),
-[Apple volume mounts](https://github.com/apple/container/blob/main/docs/volumes.md).
-Confirmed against the installed CLI and a real Dune 3.24.2 Keeper guest on
-2026-10-02. Guest capacity recovered by cleanup is not host capacity recovered
-by trimming.
+Before activating this binary on a workspace with an independently running
+cleanup process, identify that exact process and its in-flight payload, request
+its documented stop, and verify that both controller and payload have exited.
+Retain the final report. Removing its source file or observing a stale PID file
+does not prove it stopped. If stop/drain cannot be verified, the cutover remains
+unverified; do not claim a single active controller. No compatibility mutation
+controller is shipped with the product.
 
-## Focused verification
-
-`python3 test/test_keeper_vm_build_cleanup.py -v` checks start, duplicate start,
-stop and restart using a fake container inventory. In a Linux guest with Dune,
-the same suite additionally checks native/wrapper locks, recent output retention,
-symlink/operator retention, source preservation and fail-closed inspection.
-
-The native metadata regressions are in
-`test/test_server_keeper_build_maintenance.ml`: effective TOML settings,
-Owner/payload identity mismatch, and invalid profile refusal. The guest framing
-checks run with `python3 test/test_keeper_build_cleanup_transport.py <Linux-shim>`:
-real cleanup/receipt, guest timeout, and transport EOF terminating cleanup and
-its ordinary descendants. These are distinct from an installed-server proof.
+Guest exit zero is successful cleanup only with that call's actual exec-shim
+execution receipt. Transport EOF and the existing guest timer stop the process
+group. Root cancellation propagates. A failed or unavailable execution receipt
+is an error, and interrupted partial artifact removal can be rediscovered without
+replaying a durable domain effect.

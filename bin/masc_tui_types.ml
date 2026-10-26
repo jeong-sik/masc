@@ -5793,6 +5793,9 @@ module Browser_lane_view = struct
   type browser = Browser_lane.browser = Firefox | Zen | Ego_lite
   type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport;
     space : Browser_lane.ego_space option;
+    (* Dated native metadata for this original Space, never input authority.
+       None means that the worker has no cached SDK observation. *)
+    space_observation : Masc.Browser_ego_space_observation.t option;
     interactions : Browser_lane.interaction_activity list;
     last_activities : Browser_lane.settled_activity list }
   type discovery = Read_after_discovery | Choose_client
@@ -6132,6 +6135,20 @@ module Browser_lane_view = struct
     ^ (match client.space with None -> "" | Some space ->
         Printf.sprintf " · Space #%d · %s" space.id
           (Masc.Tui_terminal_text.sanitize_terminal_text space.name))
+  let space_observation_row (client : client) =
+    match client.transport, client.space_observation with
+    | Browser_lane.Ego_task_space, Some observed ->
+        let timestamp =
+          try Time_codec.rfc3339_of_unix_ms observed.observed_at
+          with Unix.Unix_error _ | Invalid_argument _ ->
+            Printf.sprintf "epoch %.17g" observed.observed_at in
+        Some (Printf.sprintf "Last SDK Space #%d · %s · %s · observed %s"
+          observed.space.id
+          (Masc.Tui_terminal_text.sanitize_terminal_text observed.space.name)
+          (Masc.Tui_terminal_text.sanitize_terminal_text observed.ownership)
+          timestamp)
+    | Browser_lane.Ego_task_space, None -> Some "SDK Space control: not observed"
+    | (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi), (Some _ | None) -> None
   let connection_name (client : client) =
     browser_name client.browser ^ " · " ^ transport_label client.transport
   (* The title names the connection; the connection row adds what it leaves
@@ -6167,6 +6184,9 @@ module Browser_lane_view = struct
                    ^ (match served_elsewhere lacking with
                       | Some clause -> " · " ^ clause
                       | None -> "")))
+  let browser_choice_observation = function
+    | Connected_browser client -> space_observation_row client
+    | Automatic_browser | Work_browser | Stagehand_browser | Automation_browser -> None
   (* Whether the connection a screenshot came from takes a drag. A live
      screenshot names its client, and the answer is the lane table's for that
      client's transport. It is unknown when the view no longer holds that
@@ -6755,6 +6775,16 @@ module Browser_lane_view = struct
     let* transport = get string "transport" json in
     let* transport = Browser_lane.live_transport_of_string transport in
     let* space=get (Browser_lane.client_space_of_json ~transport) "space" json in
+    let* space_observation = get (function
+      | `Null -> Ok None
+      | value ->
+          (match transport, space with
+           | Browser_lane.Ego_task_space, Some original ->
+               Masc.Browser_ego_space_observation.of_json ~expected_id:original.id value
+               |> Result.map Option.some
+           | (Browser_lane.Ego_task_space | Browser_lane.Web_extension | Browser_lane.Webdriver_bidi),
+             (Some _ | None) -> Error "Space observation requires the original Ego Space"))
+      "spaceObservation" json in
     if String.trim client_id = "" then Error "empty browser client ID"
     else
       let* interactions = get (function
@@ -6771,7 +6801,7 @@ module Browser_lane_view = struct
             | row::rest -> let* work=Browser_lane.settled_activity_of_json row in parse (work::acc) rest in
           parse [] rows
         | _ -> Error "expected settled browser activities array") "lastActivities" json in
-      Ok { client_id; browser; transport; space; interactions; last_activities }
+      Ok { client_id; browser; transport; space; space_observation; interactions; last_activities }
   let decode_clients json =
     let* ok = get boolean "ok" json in
     if not ok then let* detail = get string "error" json in Error detail

@@ -27,13 +27,13 @@ let screen_response ~config =
       unavailable message
   | Ok result when result.Mcp_protocol.Mcp_types.is_error = Some true ->
       let message = Agent_core.Mcp.text_of_tool_result result in
-      let code = match result._meta with
-        | Some (`Assoc fields) -> List.assoc_opt "io.github.jeong-sik/masc.machine.screenError" fields
-        | _ -> None in
-      (match code with
-       | Some (`String "no_machine") -> Error (`Conflict, Server_refusal.json ~code:"no_machine" message)
-       | Some (`String "encode_failed") -> Error (`Internal_server_error, Server_refusal.json ~code:"encode_failed" message)
-       | _ -> Error (`Internal_server_error, Server_refusal.json ~code:"capture_failed" message))
+      (match Machine_controller_contract.screen_error_of_meta result._meta with
+       | Some Machine_controller_contract.Screen_no_machine ->
+           Error (`Conflict, Server_refusal.json ~code:"no_machine" message)
+       | Some Machine_controller_contract.Screen_encode_failed ->
+           Error (`Internal_server_error, Server_refusal.json ~code:"encode_failed" message)
+       | Some Machine_controller_contract.Screen_capture_failed | None ->
+           Error (`Internal_server_error, Server_refusal.json ~code:"capture_failed" message))
   | Ok result ->
       match List.find_map (function
         | Mcp_protocol.Mcp_types.ImageContent {mime_type="image/png"; data; _} -> Some data

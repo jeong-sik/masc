@@ -119,3 +119,26 @@ let pass_target ~parse arguments =
            (Printf.sprintf "to %S is not a Keeper name: give the name alone, without @ or spaces"
               text))
   | Some _ -> Error "to must be a Keeper name, or left out to free the controller"
+
+type screen_error =
+  | Screen_no_machine
+  | Screen_capture_failed
+  | Screen_encode_failed
+[@@deriving enumerate]
+
+let screen_error_meta_key = "io.github.jeong-sik/masc.machine.screenError"
+
+let screen_error_code = function
+  | Screen_no_machine -> "no_machine"
+  | Screen_capture_failed -> "capture_failed"
+  | Screen_encode_failed -> "encode_failed"
+
+let screen_error_meta_field error = (screen_error_meta_key, `String (screen_error_code error))
+
+let screen_error_of_meta = function
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt screen_error_meta_key fields with
+     | Some (`String code) ->
+       List.find_opt (fun error -> String.equal (screen_error_code error) code) all_of_screen_error
+     | Some _ | None -> None)
+  | Some _ | None -> None

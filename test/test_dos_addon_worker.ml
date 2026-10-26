@@ -175,10 +175,7 @@ let test_stdio_controller () =
                 (Lane_addon_tool_result.failure empty_screen =
                   (Tool_result.Workflow_rejection, Tool_result.Proven_pre_effect));
               check bool "screen preserves explicit no-machine status for HTTP" true
-                (match empty_screen._meta with
-                 | Some (`Assoc fields) ->
-                     List.assoc_opt "io.github.jeong-sik/masc.machine.screenError" fields = Some (`String "no_machine")
-                 | _ -> false);
+                (C.screen_error_of_meta empty_screen._meta = Some C.Screen_no_machine);
               let observed = raw "lane_observe" (`Assoc ["binding", `Assoc []; "sources", `List []]) in
               check bool "eject removes context" true (Yojson.Safe.Util.(live_observation observed |> member "state") = `String "no_machine"))))))
 

@@ -13,7 +13,7 @@ to the MASC repository, except the explicitly marked runtime paths.
 | Reusable contributor and operator knowledge | `docs/guides/` | Maintained instructions, checked against current behavior |
 | Accepted design and interface decisions | `docs/design/`, `docs/rfc/` | Follow the existing design/RFC process |
 | Dashboard reproduction fixture source | `dashboard/fixtures/<topic>/` | Source, with dashboard dependencies; output goes under `artifacts/dashboard/` |
-| New local measurements, screenshots, generated reports and scratch output | `artifacts/<topic-or-run>/` | Git-ignored working output; no automatic deletion |
+| New local measurements, screenshots, generated reports and scratch output | `artifacts/<topic-or-run>/` | Git-ignored working output; captured Dune rules are not evaluated; no automatic deletion |
 | Keeper runtime records | `<base-path>/.masc/` | Owned by the running product; use its tools and APIs |
 | Published report catalog | `<base-path>/.masc/published_artifacts/` | Managed publication metadata; bodies use the blob store |
 

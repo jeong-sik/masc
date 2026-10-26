@@ -92,6 +92,39 @@ evidence only for release heads. Structured blockers name their authenticated
 account, record ID and decision timestamp. Other admission failures retain their
 concrete guard diagnostic instead of being collapsed to `review`.
 
+## Assigning the next review
+
+`review-worklist.py` reads every open PR and every page of its reviews and
+issue comments. It keeps GitHub's user/team requests and proposes missing
+requests across an explicit pool of GitHub logins:
+
+```bash
+python3 scripts/review/review-worklist.py --repo OWNER/REPO \
+  --reviewer LOGIN_A --reviewer LOGIN_B
+# Publish missing requests and read them back:
+python3 scripts/review/review-worklist.py --repo OWNER/REPO \
+  --reviewer LOGIN_A --reviewer LOGIN_B --request
+```
+
+The default is read-only. New PRs are distributed oldest first by outstanding
+and proposed requests. Changed-head CRs return to each actual account owner;
+same-head CRs wait for author action unless an explicit rereview request exists.
+Shared logins count once. COMMENT/PENDING does not establish approval. Existing
+approval evidence uses the complete-diff/scope guard before being admitted.
+
+Assignments mean requested, not running or reviewed. Each action retains its
+head/base/stack identity. Before posting, the tool rereads PR/evidence and skips
+changed snapshots. Requests cannot be atomically bound to a SHA. After a POST
+it reads scope/requests back and reports races or uncertainty without blindly
+retrying. Existing requests are never removed; a transport/read failure stops
+further notifications and preserves earlier receipts. No timer, daemon, lease,
+CI dispatch or review approval is added.
+
+Keeper selection follows [review routing](../../config/prompts/pr-review-routing.md).
+Repository defaults do not update running Keeper instructions; apply those
+separately through supported Keeper configuration and read them back. Offline
+feature checks: `test_review_routing.py` and `test_review_worklist.py`.
+
 ## Reading a refusal
 
 When a non-author APPROVED review exists but is not admitted, the

@@ -10,6 +10,11 @@ description: "MASC 스택 PR의 현재 head를 읽고 기능·논리·코드 청
 
 ## 현재 변경 읽기
 
+작업 선택은 `config/prompts/pr-review-routing.md`를 따른다. 닫힌 PR의 오래된 메시지에서 계속 머물지 않는다.
+GitHub 사용자·팀의 기존 리뷰 요청을 보존하고, 요청·실행·리뷰·승인을 별개로 기록한다.
+전체 미리뷰 PR 배분은 `python3 scripts/review/review-worklist.py --repo OWNER/REPO --reviewer LOGIN`으로 계획한다.
+`--reviewer`를 반복해 독립 계정 풀을 지정하며, 누락된 요청 게시에는 `--request`를 명시한다.
+
 ```sh
 gh api --paginate 'repos/jeong-sik/masc/pulls?state=open&per_page=100' \
   --jq '.[] | {number,title,headRefName:.head.ref,baseRefName:.base.ref,isDraft:.draft,stack}'

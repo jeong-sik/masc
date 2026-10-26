@@ -251,6 +251,13 @@ not add a Core build or full CI admission requirement to every ordinary PR.
 
 ## 5. Review and integrate
 
+Choose work using [review routing](../../config/prompts/pr-review-routing.md).
+GitHub user/team review requests are the shared assignment record; they do not
+prove work has started or finished. Use `scripts/review/review-worklist.py` with
+an explicit `--reviewer LOGIN` pool to plan missing requests, and add `--request`
+to publish them. Recheck directly messaged PRs are still open. Changed-head CRs
+return to their actual account owners.
+
 Review the contract and current-head diff from independent function, logic and
 code-cleanliness perspectives. Approve when no P0/P1/P2 issue remains and collect
 P3 findings for later. Ordinary review needs no CI run. State unverified behavior;

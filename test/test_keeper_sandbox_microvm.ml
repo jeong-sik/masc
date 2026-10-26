@@ -2667,24 +2667,27 @@ esac
     guests
 ;;
 
-(* Drive the real boot entrypoint while the CLI refuses to release a volume
-   owner. No image, volume or trim operation may start on that uncertainty. *)
+(* Drive the real boot entrypoint on the process-bound Nerdctl lane while
+   the CLI refuses to release a volume owner. No image, volume or trim
+   operation may start on that uncertainty. *)
 let test_boot_confirms_previous_guests_absent_before_provisioning () =
   with_eio_fs @@ fun () ->
   let module Turn = Masc.Keeper_turn_sandbox_runtime in
   List.iter (fun (previous_mode, removal) ->
     let context = Eio_context.snapshot_state () in
     let dir = temp_dir "microvm-volume-owner-" in
-    let cli = Filename.concat dir "container" in
+    let cli = Filename.concat dir "nerdctl" in
     let removed = Filename.concat dir "delete-attempted" in
     let provisioned = Filename.concat dir "provisioning-attempted" in
     let config = Masc.Workspace.default_config dir in
-    let meta = microvm_meta ~name:"volume-owner" in
+    let meta =
+      { (microvm_meta ~name:"volume-owner") with
+        microvm_backend = Some Backend.Nerdctl_kata } in
     let guest = Turn.For_testing_microvm.microvm_container_name
         ~config ~keeper_name:meta.name ~network_mode:previous_mode in
     let state = match previous_mode with
-      | Profile.Network_none -> "stopped"
-      | Network_inherit | Network_policy -> "running" in
+      | Profile.Network_none -> "false"
+      | Network_inherit | Network_policy -> "true" in
     let removal_label = match removal with
       | `Remains -> "remains" | `Unknown -> "unknown" | `Absent -> "absent" in
     Out_channel.with_open_bin cli (fun channel ->
@@ -2696,20 +2699,22 @@ state=%s
 removal=%s
 case "$1" in
   stop) exit 0 ;;
-  delete)
-    if [ "$3" = "$guest" ]; then : > "$removed"; exit 7; fi
+  rm)
+    if [ "$3" = "$guest" ]; then : > "$removed"; fi
     exit 0 ;;
   inspect)
-    if [ "$2" = "$guest" ]; then
+    # nerdctl inspect --mode dockercompat --format {{json .State.Running}} NAME
+    if [ "$6" = "$guest" ]; then
       if [ -e "$removed" ] && [ "$removal" != remains ]; then exit 1; fi
-      printf '[{"status":{"state":"%%s"}}]\n' "$state"; exit 0
+      printf '%%s\n' "$state"; exit 0
     fi
     exit 1 ;;
-  list)
-    if [ -e "$removed" ]; then
-      case "$removal" in unknown) exit 2 ;; absent) printf '[]\n'; exit 0 ;; esac
-    fi
-    printf '[{"id":"%%s","status":{"state":"%%s"}}]\n' "$guest" "$state" ;;
+  ps)
+    # The post-delete absence check reads the inventory only after a failed
+    # inspect; nerdctl rows carry no state, so the fixture answers either an
+    # empty listing (absent) or no answer at all (unknown).
+    if [ -e "$removed" ] && [ "$removal" = unknown ]; then exit 2; fi
+    exit 0 ;;
   image|volume|run) : > "$provisioned"; exit 2 ;;
   *) exit 99 ;;
 esac
@@ -2743,18 +2748,16 @@ let test_warm_adoption_does_not_remove_other_network_modes () =
   let module Turn = Masc.Keeper_turn_sandbox_runtime in
   let context = Eio_context.snapshot_state () in
   let dir = temp_dir "microvm-warm-adoption-" in
-  let cli = Filename.concat dir "container" in
+  let cli = Filename.concat dir "nerdctl" in
   let log = Filename.concat dir "calls" in
   let running = Filename.concat dir "running" in
   let config = Masc.Workspace.default_config dir in
-  let meta = microvm_meta ~name:"warm-adoption" in
+  let meta =
+    { (microvm_meta ~name:"warm-adoption") with
+      microvm_backend = Some Backend.Nerdctl_kata } in
   let guest = Turn.For_testing_microvm.microvm_container_name
       ~config ~keeper_name:meta.name ~network_mode:Profile.Network_none in
-  let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:dir in
-  Fs_compat.mkdir_p shim_dir;
-  let shim = Filename.concat shim_dir M.shim_binary_name in
-  Out_channel.with_open_bin shim (fun channel -> output_string channel "#!/bin/sh\nexit 0\n");
-  Unix.chmod shim 0o755;
+  initialize_fixture_shim ~base:dir;
   Out_channel.with_open_bin cli (fun channel ->
     Printf.fprintf channel {|#!/bin/sh
 guest=%s
@@ -2763,15 +2766,21 @@ log=%s
 printf '%%s\n' "$1" >> "$log"
 case "$1" in
   stop) exit 0 ;;
-  delete) [ "$3" != "$guest" ] || rm -f "$running"; exit 0 ;;
+  rm) [ "$3" != "$guest" ] || rm -f "$running"; exit 0 ;;
   inspect)
-    if [ "$2" = "$guest" ] && [ -e "$running" ]; then
-      printf '[{"status":{"state":"running"}}]\n'; exit 0
+    # nerdctl inspect --mode dockercompat --format {{json .State.Running}} NAME
+    if [ "$6" = "$guest" ] && [ -e "$running" ]; then
+      printf 'true\n'; exit 0
     fi
     exit 1 ;;
-  list) printf '[]\n' ;;
-  image) printf '[{}]\n' ;;
-  volume) exit 0 ;;
+  ps) exit 0 ;;
+  image) printf '[{"Image":{"Name":"fixture:image","Target":{"digest":"sha256:0"}}}]\n' ;;
+  volume)
+    case "$2" in
+      inspect)
+        printf '[{"Name":"%%s","Mountpoint":"/var/lib/nerdctl/volumes/%%s/_data"}]\n' "$3" "$3" ;;
+      *) exit 0 ;;
+    esac ;;
   run)
     for argument in "$@"; do
       if [ "$argument" = -d ]; then : > "$running"; fi
@@ -2805,9 +2814,9 @@ esac
   Alcotest.(check bool) "adoption still checks the mounted work volume" true (List.mem "exec" calls);
   List.iter (fun operation ->
     Alcotest.(check bool) ("warm adoption does not " ^ operation) false (List.mem operation calls))
-    ["stop"; "delete"; "image"; "volume"; "run"];
+    ["stop"; "rm"; "image"; "volume"; "run"];
   match Turn.teardown_keeper_sandbox_by_name ~timeout_sec:5. ~config ~keeper_name:meta.name
-      ~backend:Masc.Keeper_sandbox.Micro_vm ~microvm_backend:Backend.Apple_container () with
+      ~backend:Masc.Keeper_sandbox.Micro_vm ~microvm_backend:Backend.Nerdctl_kata () with
   | Ok () -> ()
   | Error detail -> Alcotest.fail detail
 ;;

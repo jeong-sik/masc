@@ -1131,18 +1131,16 @@ let test_initializing_recovery_isolates_only_publication_writes () =
                 ; "content", `String "created by append"
                 ])
        in
-       check string
-         "append-create remains recovery-independent"
-         "success"
-         (outcome_label append_created.disposition);
-       check string
-         "append-create publishes exact bytes while recovery initializes"
-         "created by append"
-         (read_file append_created_path);
+       check_publication_write_rejected "append-create" append_created;
+       check bool "append-create publishes nothing without recovery" false
+         (Sys.file_exists append_created_path);
        check int
-         "append and append-create do not read the recovery provider"
-         0
+         "only append-create acquires publication recovery"
+         1
          (Atomic.get provider_reads);
+       let still_live = execute ~name:"keeper_lane_status" ~input:(`Assoc []) in
+       check string "non-publication tools continue after create refusal" "success"
+         (outcome_label still_live.disposition);
        let invalid_write =
          execute
            ~name:"Write"
@@ -1156,7 +1154,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
          "invalid Write is rejected"
          "failure"
          (outcome_label invalid_write.disposition);
-       check int "invalid Write performs no recovery acquisition" 0
+       check int "invalid Write performs no additional recovery acquisition" 1
          (Atomic.get provider_reads);
        let write_path = playground_file ~config ~meta "must-not-exist.txt" in
        let write_result =
@@ -1169,7 +1167,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
                 ])
        in
        check_publication_write_rejected "Write" write_result;
-       check int "Write reads provider exactly once" 1 (Atomic.get provider_reads);
+       check int "Write reads provider exactly once" 2 (Atomic.get provider_reads);
        check bool "Write created no file" false (Sys.file_exists write_path);
        let edit_result =
          execute
@@ -1182,7 +1180,7 @@ let test_initializing_recovery_isolates_only_publication_writes () =
                 ])
        in
        check_publication_write_rejected "Edit" edit_result;
-       check int "Edit reads provider exactly once" 2 (Atomic.get provider_reads);
+       check int "Edit reads provider exactly once" 3 (Atomic.get provider_reads);
        check string "Edit preserved exact bytes" (untouched ^ " + appended")
          (read_file existing_path))
 ;;
@@ -1903,7 +1901,7 @@ let test_publication_write_cancellation_releases_exact_lane () =
        let parent_stat = Eio.Path.stat ~follow:true parent in
        let recovery_target =
          match
-           Fs_compat.atomic_replace_recovery_target
+           Fs_compat.capability_publication_target
              ~allowed_root_path:workspace_dir
              ~allowed_root_device:parent_stat.dev
              ~allowed_root_inode:parent_stat.ino
@@ -1914,7 +1912,7 @@ let test_publication_write_cancellation_releases_exact_lane () =
          | Ok target -> target
          | Error error ->
            fail
-             (Fs_compat.atomic_replace_recovery_target_error_to_string error)
+             (Fs_compat.capability_publication_target_error_to_string error)
        in
        let cancellation_hook_observed = Atomic.make false in
        (match

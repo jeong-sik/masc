@@ -121,13 +121,13 @@ type path_effect_projection_error =
       ; target_parent_components : string list
       }
   | Patch_source_has_no_endpoint
-  | Recovery_target_invalid of Fs_compat.atomic_replace_recovery_target_error
+  | Recovery_target_invalid of Fs_compat.capability_publication_target_error
 (** Typed projection failures. In particular, recovery-target validation is
     retained as the abstract filesystem-layer error rather than flattened to a
     string and reconstructed by matching text. *)
 
-type atomic_replace_projection
-(** One inseparable Gate/recovery projection for a single atomic replacement.
+type publication_projection
+(** One inseparable Gate/recovery projection for one staged publication.
     The hidden constructor prevents a Gate effect for one target from being
     paired with the durable recovery locator for another. *)
 
@@ -175,18 +175,18 @@ val atomic_replace_effect :
   parent:path_effect_parent_scope ->
   result_file_permissions:int ->
   confined_path ->
-  (atomic_replace_projection, path_effect_projection_error) result
+  (publication_projection, path_effect_projection_error) result
 val patch_then_atomic_replace_effect :
   parent:path_effect_parent_scope ->
   source_resource:Eio.File.Stat.t ->
   result_file_permissions:int ->
   confined_path ->
-  (atomic_replace_projection, path_effect_projection_error) result
+  (publication_projection, path_effect_projection_error) result
 val create_entry_exclusive_effect :
   parent:path_effect_parent_scope ->
   result_file_permissions:int ->
   confined_path ->
-  (path_effect, path_effect_projection_error) result
+  (publication_projection, path_effect_projection_error) result
 (** Describe operations whose destination is the lexical directory entry.
     [result_file_permissions] is the exact mode applied to the replacement
     resource before it is renamed. A replaced symlink or missing entry becomes
@@ -204,11 +204,11 @@ val append_pinned_resource_effect :
 val path_effect_to_yojson : path_effect -> Yojson.Safe.t
 (** Stable, complete Gate input projection. *)
 
-val atomic_replace_gate_effect : atomic_replace_projection -> path_effect
-val atomic_replace_recovery_target :
-  atomic_replace_projection -> Fs_compat.atomic_replace_recovery_target
-(** Exact paired projections consumed by Gate and the filesystem writer. No
-    equivalent recovery-target accessor exists for append or exclusive create. *)
+val publication_gate_effect : publication_projection -> path_effect
+val capability_publication_target :
+  publication_projection -> Fs_compat.capability_publication_target
+(** Exact paired projections consumed by Gate and the filesystem writer.
+    Append on an already-open resource has no publication-target accessor. *)
 
 val resolve_keeper_confined_path :
   config:Workspace.config ->

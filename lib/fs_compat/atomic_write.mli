@@ -5,30 +5,30 @@
     belongs to [Atomic_replace]; orphan inventory and preservation belong to
     [Atomic_orphan_cleanup]. *)
 
-type atomic_replace_recovery_target
-type atomic_replace_recovery_target_error
+type capability_publication_target
+type capability_publication_target_error
 
 type publication_recovery_record_area =
   | Publication_recovery_active
   | Publication_recovery_owned
   | Publication_recovery_forensic
 
-(** Build the immutable recovery locator projection used by
-    [replace_capability_file]. The allowed-root identity is caller-certified;
+(** Build the immutable recovery locator projection used by both staged
+    publication operations. The allowed-root identity is caller-certified;
     the final parent identity and initial no-follow target observation are
     captured under the publication mutation lease. Every component and the
     target permissions are validated before a target value is returned. *)
-val atomic_replace_recovery_target
+val capability_publication_target
   :  allowed_root_path:string
   -> allowed_root_device:int64
   -> allowed_root_inode:int64
   -> parent_components:string list
   -> target_leaf:string
   -> permissions:int
-  -> (atomic_replace_recovery_target, atomic_replace_recovery_target_error) result
+  -> (capability_publication_target, capability_publication_target_error) result
 
-val atomic_replace_recovery_target_error_to_string
-  :  atomic_replace_recovery_target_error
+val capability_publication_target_error_to_string
+  :  capability_publication_target_error
   -> string
 
 type capability_write_operation =
@@ -36,7 +36,6 @@ type capability_write_operation =
   | Create_exclusive_operation
 
 type capability_write_stage =
-  | Validate_leaf
   | Acquire_mutation_lease
   | Acquire_publication_lease
   | Inspect_target_entry
@@ -50,7 +49,6 @@ type capability_write_stage =
   | Preserve_unbound_recovery_obligation
   | Bind_recovery_obligation
   | Create_staging_entry
-  | Create_target_entry
   | Inspect_open_resource
   | Write_payload
   | Apply_permissions
@@ -58,6 +56,7 @@ type capability_write_stage =
   | Close_payload
   | Verify_entry_identity
   | Publish_replace
+  | Publish_exclusive
   | Sync_staging_directory
   | Sync_parent
   | Remove_staging_directory
@@ -75,7 +74,6 @@ type capability_write_stage =
 type capability_write_target_effect =
   | Target_unchanged
   | Target_created
-  | Target_created_incomplete
   | Target_replaced
   | Target_state_unknown
 
@@ -91,9 +89,9 @@ type capability_write_payload_failure =
   }
 
 type capability_write_cause =
-  | Invalid_leaf of string
-  | Invalid_recovery_target of atomic_replace_recovery_target_error
+  | Invalid_recovery_target of capability_publication_target_error
   | Mutation_contended
+  | Target_already_exists
   | Posix_descriptor_unavailable
   | Unexpected_resource_kind of Eio.File.Stat.kind
   | Resource_identity_unavailable
@@ -205,18 +203,18 @@ exception Capability_write_cancelled of exn * capability_write_cancellation
 val replace_capability_file
   :  recovery:Publication_recovery_access.t
   -> parent:Eio.Fs.dir_ty Eio.Path.t
-  -> target:atomic_replace_recovery_target
+  -> target:capability_publication_target
   -> string
   -> (unit, capability_write_error) result
 
-(** Exclusive creation is physically separate from replacement and has no
-    recovery-obligation argument. Once the public leaf is created it is never
-    unlinked by failure cleanup. Fatal runtime exceptions and cancellation
-    follow the same re-raise contract as {!replace_capability_file}. *)
+(** Stage and sync the full payload under a durable Create_exclusive obligation,
+    then publish with a descriptor-relative no-replace rename. An existing public
+    target is never overwritten or removed. Recovery and cancellation preserve
+    the same exact operation and cleanup evidence as {!replace_capability_file}. *)
 val create_capability_file_exclusive
-  :  parent:Eio.Fs.dir_ty Eio.Path.t
-  -> leaf:string
-  -> permissions:int
+  :  recovery:Publication_recovery_access.t
+  -> parent:Eio.Fs.dir_ty Eio.Path.t
+  -> target:capability_publication_target
   -> string
   -> (unit, capability_write_error) result
 
@@ -353,15 +351,15 @@ module Capability_write_for_testing : sig
     :  before_stage:(capability_write_stage -> unit)
     -> recovery:Publication_recovery_access.t
     -> parent:Eio.Fs.dir_ty Eio.Path.t
-    -> target:atomic_replace_recovery_target
+    -> target:capability_publication_target
     -> string
     -> (unit, capability_write_error) result
 
   val create_capability_file_exclusive
     :  before_stage:(capability_write_stage -> unit)
+    -> recovery:Publication_recovery_access.t
     -> parent:Eio.Fs.dir_ty Eio.Path.t
-    -> leaf:string
-    -> permissions:int
+    -> target:capability_publication_target
     -> string
     -> (unit, capability_write_error) result
 

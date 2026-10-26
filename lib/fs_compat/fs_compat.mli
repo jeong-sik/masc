@@ -569,8 +569,8 @@ module Capability_append_for_testing : sig
     -> capability_append_outcome
 end
 
-type atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
-type atomic_replace_recovery_target_error = Atomic_write.atomic_replace_recovery_target_error
+type capability_publication_target = Atomic_write.capability_publication_target
+type capability_publication_target_error = Atomic_write.capability_publication_target_error
 
 module Publication_recovery : sig
   type registry = Fs_compat_internal.Publication_recovery_access.registry
@@ -658,19 +658,19 @@ module Publication_recovery : sig
   val lane_open_error_category : lane_open_error -> lane_open_error_category
 end
 
-(** Build the immutable recovery locator projection used by
-    {!replace_capability_file}. *)
-val atomic_replace_recovery_target
+(** Build the immutable recovery locator projection used by replacement and
+    exclusive staged publication. *)
+val capability_publication_target
   :  allowed_root_path:string
   -> allowed_root_device:int64
   -> allowed_root_inode:int64
   -> parent_components:string list
   -> target_leaf:string
   -> permissions:int
-  -> (atomic_replace_recovery_target, atomic_replace_recovery_target_error) result
+  -> (capability_publication_target, capability_publication_target_error) result
 
-val atomic_replace_recovery_target_error_to_string
-  :  atomic_replace_recovery_target_error
+val capability_publication_target_error_to_string
+  :  capability_publication_target_error
   -> string
 
 type capability_write_operation = Atomic_write.capability_write_operation =
@@ -678,7 +678,6 @@ type capability_write_operation = Atomic_write.capability_write_operation =
   | Create_exclusive_operation
 
 type capability_write_stage = Atomic_write.capability_write_stage =
-  | Validate_leaf
   | Acquire_mutation_lease
   | Acquire_publication_lease
   | Inspect_target_entry
@@ -692,7 +691,6 @@ type capability_write_stage = Atomic_write.capability_write_stage =
   | Preserve_unbound_recovery_obligation
   | Bind_recovery_obligation
   | Create_staging_entry
-  | Create_target_entry
   | Inspect_open_resource
   | Write_payload
   | Apply_permissions
@@ -700,6 +698,7 @@ type capability_write_stage = Atomic_write.capability_write_stage =
   | Close_payload
   | Verify_entry_identity
   | Publish_replace
+  | Publish_exclusive
   | Sync_staging_directory
   | Sync_parent
   | Remove_staging_directory
@@ -717,7 +716,6 @@ type capability_write_stage = Atomic_write.capability_write_stage =
 type capability_write_target_effect = Atomic_write.capability_write_target_effect =
   | Target_unchanged
   | Target_created
-  | Target_created_incomplete
   | Target_replaced
   | Target_state_unknown
 
@@ -735,9 +733,9 @@ type capability_write_payload_failure =
   }
 
 type capability_write_cause = Atomic_write.capability_write_cause =
-  | Invalid_leaf of string
-  | Invalid_recovery_target of atomic_replace_recovery_target_error
+  | Invalid_recovery_target of capability_publication_target_error
   | Mutation_contended
+  | Target_already_exists
   | Posix_descriptor_unavailable
   | Unexpected_resource_kind of Eio.File.Stat.kind
   | Resource_identity_unavailable
@@ -841,17 +839,16 @@ exception Capability_write_cancelled of exn * capability_write_cancellation
 val replace_capability_file
   :  recovery:Publication_recovery.t
   -> parent:Eio.Fs.dir_ty Eio.Path.t
-  -> target:atomic_replace_recovery_target
+  -> target:capability_publication_target
   -> string
   -> (unit, capability_write_error) result
 
-(** Exclusive creation is physically separate from replacement and has no
-    recovery-obligation argument. Once the public leaf is created it is never
-    unlinked by failure cleanup. *)
+(** Durable staged creation with descriptor-relative no-replace publication.
+    Existing targets are never overwritten or removed by failure cleanup. *)
 val create_capability_file_exclusive
-  :  parent:Eio.Fs.dir_ty Eio.Path.t
-  -> leaf:string
-  -> permissions:int
+  :  recovery:Publication_recovery.t
+  -> parent:Eio.Fs.dir_ty Eio.Path.t
+  -> target:capability_publication_target
   -> string
   -> (unit, capability_write_error) result
 

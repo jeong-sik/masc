@@ -381,10 +381,10 @@ let open_atomic_temp_file ~temp_dir () =
 
 let is_capability_leaf = Capability_leaf.is_valid
 
-type atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
+type capability_publication_target = Atomic_write.capability_publication_target
 
-type atomic_replace_recovery_target_error =
-  Atomic_write.atomic_replace_recovery_target_error
+type capability_publication_target_error =
+  Atomic_write.capability_publication_target_error
 
 module Publication_recovery = struct
   include Publication_recovery_access
@@ -401,10 +401,10 @@ module Publication_recovery = struct
   ;;
 end
 
-let atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
+let capability_publication_target = Atomic_write.capability_publication_target
 
-let atomic_replace_recovery_target_error_to_string =
-  Atomic_write.atomic_replace_recovery_target_error_to_string
+let capability_publication_target_error_to_string =
+  Atomic_write.capability_publication_target_error_to_string
 ;;
 
 type capability_write_operation = Atomic_write.capability_write_operation =
@@ -412,7 +412,6 @@ type capability_write_operation = Atomic_write.capability_write_operation =
   | Create_exclusive_operation
 
 type capability_write_stage = Atomic_write.capability_write_stage =
-  | Validate_leaf
   | Acquire_mutation_lease
   | Acquire_publication_lease
   | Inspect_target_entry
@@ -426,7 +425,6 @@ type capability_write_stage = Atomic_write.capability_write_stage =
   | Preserve_unbound_recovery_obligation
   | Bind_recovery_obligation
   | Create_staging_entry
-  | Create_target_entry
   | Inspect_open_resource
   | Write_payload
   | Apply_permissions
@@ -434,6 +432,7 @@ type capability_write_stage = Atomic_write.capability_write_stage =
   | Close_payload
   | Verify_entry_identity
   | Publish_replace
+  | Publish_exclusive
   | Sync_staging_directory
   | Sync_parent
   | Remove_staging_directory
@@ -451,7 +450,6 @@ type capability_write_stage = Atomic_write.capability_write_stage =
 type capability_write_target_effect = Atomic_write.capability_write_target_effect =
   | Target_unchanged
   | Target_created
-  | Target_created_incomplete
   | Target_replaced
   | Target_state_unknown
 
@@ -468,9 +466,9 @@ type capability_write_payload_failure = Atomic_write.capability_write_payload_fa
   }
 
 type capability_write_cause = Atomic_write.capability_write_cause =
-  | Invalid_leaf of string
-  | Invalid_recovery_target of atomic_replace_recovery_target_error
+  | Invalid_recovery_target of capability_publication_target_error
   | Mutation_contended
+  | Target_already_exists
   | Posix_descriptor_unavailable
   | Unexpected_resource_kind of Eio.File.Stat.kind
   | Resource_identity_unavailable

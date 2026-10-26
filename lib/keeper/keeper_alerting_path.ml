@@ -243,11 +243,11 @@ type path_effect_projection_error =
       ; target_parent_components : string list
       }
   | Patch_source_has_no_endpoint
-  | Recovery_target_invalid of Fs_compat.atomic_replace_recovery_target_error
+  | Recovery_target_invalid of Fs_compat.capability_publication_target_error
 
-type atomic_replace_projection =
+type publication_projection =
   { gate_effect : path_effect
-  ; recovery_target : Fs_compat.atomic_replace_recovery_target
+  ; recovery_target : Fs_compat.capability_publication_target
   }
 
 type confined_path_endpoint =
@@ -299,11 +299,11 @@ let path_effect_projection_error_to_string = function
   | Patch_source_has_no_endpoint ->
     "filesystem patch source has no confined endpoint"
   | Recovery_target_invalid error ->
-    Fs_compat.atomic_replace_recovery_target_error_to_string error
+    Fs_compat.capability_publication_target_error_to_string error
 ;;
 
-let atomic_replace_gate_effect projection = projection.gate_effect
-let atomic_replace_recovery_target projection = projection.recovery_target
+let publication_gate_effect projection = projection.gate_effect
+let capability_publication_target projection = projection.recovery_target
 
 let resource_identity_of_unix_path path =
   try
@@ -474,7 +474,7 @@ let path_effect
             }))
 ;;
 
-let atomic_replace_projection
+let publication_projection
       ~operation
       ~parent
       ?source
@@ -496,7 +496,7 @@ let atomic_replace_projection
       parent.parent_components @ parent.create_missing_parents
     in
     (match
-       Fs_compat.atomic_replace_recovery_target
+       Fs_compat.capability_publication_target
          ~allowed_root_path:target.root
          ~allowed_root_device:root_resource.device
          ~allowed_root_inode:root_resource.inode
@@ -509,7 +509,7 @@ let atomic_replace_projection
 ;;
 
 let atomic_replace_effect ~parent ~result_file_permissions target =
-  atomic_replace_projection
+  publication_projection
     ~operation:Atomic_replace_entry
     ~parent
     ~result_file_permissions
@@ -525,7 +525,7 @@ let patch_then_atomic_replace_effect
   match target.endpoint_components with
   | [] -> Error Patch_source_has_no_endpoint
   | components ->
-    atomic_replace_projection
+    publication_projection
       ~operation:Patch_then_atomic_replace_entry
       ~parent
       ~source:
@@ -537,10 +537,10 @@ let patch_then_atomic_replace_effect
 ;;
 
 let create_entry_exclusive_effect ~parent ~result_file_permissions target =
-  path_effect
+  publication_projection
     ~operation:Create_entry_exclusive
     ~parent
-    ~result_file_permissions:(Some result_file_permissions)
+    ~result_file_permissions
     target
 ;;
 

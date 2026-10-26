@@ -4,18 +4,20 @@ module Writer = Fs_compat_test_support.Capability_write_for_testing
 module Core = Fs_compat_internal.Capability_recovery_obligation
 module Reconciler = Fs_compat_internal.Capability_recovery_reconciler
 
-type cut = Prepared | Bound | Payload_written | Published | Parent_synced
+type cut = Prepared | Bound | Payload_opened | Payload_written | Published | Parent_synced
 
-let cuts = [Prepared; Bound; Payload_written; Published; Parent_synced]
+let cuts = [Prepared; Bound; Payload_opened; Payload_written; Published; Parent_synced]
 let cut_name = function
   | Prepared -> "prepared"
   | Bound -> "bound"
+  | Payload_opened -> "payload-opened"
   | Payload_written -> "payload-written"
   | Published -> "published"
   | Parent_synced -> "parent-synced"
 let cut_stage = function
   | Prepared -> Fs_compat.Create_staging_directory
   | Bound -> Fs_compat.Create_staging_entry
+  | Payload_opened -> Fs_compat.Write_payload
   | Payload_written -> Fs_compat.Sync_payload
   | Published -> Fs_compat.Sync_staging_directory
   | Parent_synced -> Fs_compat.Discharge_bound_recovery_obligation
@@ -23,9 +25,8 @@ let cut_stage = function
 let payload = String.make 65536 'x'
 let owner_name = "exclusive-create-crash"
 
-let create ~before_stage ~recovery:_ ~target:_ ~parent content =
-  Writer.create_capability_file_exclusive ~before_stage ~parent
-    ~leaf:"result" ~permissions:0o600 content
+let create ~before_stage ~recovery ~target ~parent content =
+  Writer.create_capability_file_exclusive ~before_stage ~recovery ~target ~parent content
 
 let with_writer ~fs directory f =
   Eio.Switch.run @@ fun sw ->
@@ -37,11 +38,11 @@ let with_writer ~fs directory f =
     | Error error -> fail (Fs_compat.Publication_recovery.registry_error_to_string error) in
   Eio.Path.with_open_dir Eio.Path.(fs / root) @@ fun parent ->
   let stat = Eio.Path.stat ~follow:true parent in
-  let target = match Fs_compat.atomic_replace_recovery_target
+  let target = match Fs_compat.capability_publication_target
       ~allowed_root_path:root ~allowed_root_device:stat.dev ~allowed_root_inode:stat.ino
       ~parent_components:[] ~target_leaf:"result" ~permissions:0o600 with
     | Ok value -> value
-    | Error error -> fail (Fs_compat.atomic_replace_recovery_target_error_to_string error) in
+    | Error error -> fail (Fs_compat.capability_publication_target_error_to_string error) in
   match Fs_compat.Publication_recovery.with_lane ~registry:recovery ~owner:owner_name
           (fun recovery -> f ~recovery ~target ~parent) with
   | Ok (Fs_compat.Publication_recovery.Lane_released value) -> value
@@ -101,7 +102,7 @@ let test_crash cut () = with_directory @@ fun directory ->
   kill_at cut directory;
   let target_path = Filename.concat directory "root/result" in
   (match cut with
-   | Prepared | Bound | Payload_written ->
+   | Prepared | Bound | Payload_opened | Payload_written ->
      check bool "public leaf absent before publication" false (Sys.file_exists target_path)
    | Published | Parent_synced ->
      check string "public payload is complete after publication" payload (Fs_compat.load_file target_path));
@@ -124,7 +125,7 @@ let test_crash cut () = with_directory @@ fun directory ->
     | Error error -> fail (Core.transition_error_to_string error) in
   let prepared = match cut, inventory () with
     | Prepared, [Core.Active_record prepared] -> prepared
-    | (Bound | Payload_written | Published | Parent_synced), [Core.Owned_record bound] ->
+    | (Bound | Payload_opened | Payload_written | Published | Parent_synced), [Core.Owned_record bound] ->
       Core.bound_prepared bound
     | _ -> fail "crash has no exact durable operation at the required phase" in
   check bool "original exclusive-create intent survived producer death" true
@@ -136,10 +137,15 @@ let test_crash cut () = with_directory @@ fun directory ->
   (match inventory () with
    | [Core.Forensic_record forensic] ->
      check string "same operation identity after reconciliation" operation_id
-       (Core.operation_id_to_string (Core.forensic_operation_id forensic))
+       (Core.operation_id_to_string (Core.forensic_operation_id forensic));
+     let source = match Core.forensic_source forensic with
+       | Core.Prepared_source (source, _) -> source
+       | Core.Bound_source (bound, _) -> Core.bound_prepared bound in
+     check bool "forensic source retains exclusive-create intent" true
+       (Core.prepared_publication source = Core.Create_exclusive)
    | _ -> fail "reconciliation did not retain exact forensic evidence");
   (match cut with
-   | Prepared | Bound | Payload_written ->
+   | Prepared | Bound | Payload_opened | Payload_written ->
      check bool "reconciliation never publishes unproven content" false (Sys.file_exists target_path)
    | Published | Parent_synced ->
      check string "reconciliation preserves published target bytes" payload (Fs_compat.load_file target_path))

@@ -79,6 +79,7 @@ type t =
   ; order : string
   ; durability : durability
   ; lock_warnings : lock_warning list
+  ; ignored_legacy_keys : string list
   ; application : application
   }
 

@@ -79,6 +79,7 @@ type t =
   ; order : string
   ; durability : durability
   ; lock_warnings : lock_warning list
+  ; ignored_legacy_keys : string list
   ; application : application
   }
 
@@ -372,10 +373,15 @@ let decode = function
       (match commit with
        | `Assoc commit_fields ->
          let* () =
-           exact_fields [ "source_revision"; "order"; "durability"; "durability_detail"; "warnings" ] commit_fields
+           exact_fields
+             [ "source_revision"; "order"; "durability"; "durability_detail"
+             ; "warnings"; "ignored_legacy_keys" ] commit_fields
          in
          let* lock_warnings = field "warnings" commit_fields in
          let* lock_warnings = decode_lock_warnings lock_warnings in
+         let* ignored_legacy_keys =
+           string_list_field "ignored_legacy_keys" commit_fields
+         in
          let* source_revision = string_field "source_revision" commit_fields in
          let* order = string_field "order" commit_fields in
          let* durability_detail = field "durability_detail" commit_fields in
@@ -387,7 +393,9 @@ let decode = function
            | (Ok _ | Error _), _ -> Error "runtime config durability or detail is invalid"
          in
          let* application = decode_application ~source_revision ~order application in
-         Ok { source_revision; order; durability; lock_warnings; application }
+         Ok
+           { source_revision; order; durability; lock_warnings
+           ; ignored_legacy_keys; application }
        | _ -> Error "runtime config commit receipt is missing")
   | _ -> Error "runtime config commit response must be an object"
 ;;

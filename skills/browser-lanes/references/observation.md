@@ -51,6 +51,9 @@ documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔
 | waitForURL | url: SDK의 문자열/glob |
 | waitForSelector | selector, state: attached/detached/visible/hidden |
 | waitForLoadState | state: domcontentloaded/load/networkidle |
+| evaluate | source, 선택적 argumentJson |
+| waitForFunction | source, 선택적 argumentJson·pollingMs |
+| fetch | url: 절대 HTTP(S) 주소, 선택적 fetchOptions |
 
 `selector`는 관측한 native locator를 그대로 쓴다. workflow 메서드 이름은
 단일 조작의 `double_click`·`select_option` 대신 SDK의 `dblclick`·`selectOption`이다.
@@ -58,10 +61,24 @@ documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔
 생략하면 SDK 기본 대기를 사용한다. MASC는 별도의 step 개수·누적 실행 시간 제한을 추가하지 않는다.
 실행은 기존 호스트 권한과 명시적 취소를 따른다.
 
-`keyboard.*` 메서드는 `timeoutMs`를 받지 않는다. 현재 포커스가 입력 대상을 정하므로
+`keyboard.*`와 `evaluate` 메서드는 `timeoutMs`를 받지 않는다. 현재 포커스가 입력 대상을 정하므로
 앞에서 관측한 selector로 `focus`를 실행한다. `keyboard.insertText`는 문자열을 직접 넣고,
 `keyboard.paste`는 plain text 또는 `{text, html}`을 native 붙여넣기로 전달한 뒤 SDK가
 운영자 클립보드를 복원한다. 리치 편집기에는 실제 결과를 읽거나 screenshot으로 확인한다.
+
+`evaluate`·`waitForFunction`의 `source`는 Ego Page 안에서 실행하는 JavaScript 식이다.
+`argumentJson`이 있으면 source를 함수로 호출하고 그 JSON 값 하나를 인자로 준다.
+예를 들어 `source: "value => window.appReady === value"`, `argumentJson: "true"`를
+`waitForFunction`에 주면 앱 상태를 기다린다. Node.js/호스트 코드는 실행하지 않는다.
+상태 대기 식도 페이지나 외부 상태를 바꿀 수 있으므로 실패는 재실행 허가가 아니다.
+
+`fetch`는 브라우저 CORS를 따르며 native structured response가 step의 `receipt`로
+돌아온다. HTTP 오류 상태도 반환된 데이터이므로 호출자가 status와 본문을 확인한다.
+`fetchOptions`는 method, 문자열 값의 headers 객체, body, cache, credentials, integrity,
+keepalive, mode, redirect, referrer, referrerPolicy를 받는다. timeout은 step의 `timeoutMs`다.
+호스트 파일 경로인 `saveAs`는 아직 다운로드 broker 연결이 필요해 받지 않는다.
+전체 SDK의 현재 연결·옵션·미지원 범위는
+[전수 목록](../../../docs/guides/ego-sdk-coverage.md)에 기록한다.
 
 `expectedUrl`은 실행을 시작할 때만 검사한다. 이후 이동이 일어나면 native wait로
 목적지·요소·로드 상태를 기다린다. 마지막에는 native snapshot이 돌아온다.

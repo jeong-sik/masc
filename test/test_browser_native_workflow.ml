@@ -31,7 +31,15 @@ let roundtrip () =
     step "selectOption" ["selector",str "@5";"values",`List []];
     step "goto" ["url",str "https://example.test/done"];wait;
     step "waitForSelector" ["selector",str "@6";"state",str "hidden";"timeoutMs",`Int 0];
-    step "waitForLoadState" ["state",str "networkidle"]] in
+    step "waitForLoadState" ["state",str "networkidle"];
+    step "evaluate" ["source",str "document.title"];
+    step "evaluate" ["source",str "value => value";"argumentJson",str "null"];
+    step "waitForFunction" ["source",str "arg => window.ready === arg";"argumentJson",str "true";
+      "pollingMs",`Int 0;"timeoutMs",`Int 120_000];
+    step "fetch" ["url",str "https://example.test/data";"fetchOptions",obj [
+      "method",str "POST";"headers",obj ["Content-Type",str "text/plain"];
+      "body",str "한글 😀";"cache",str "no-store";"credentials",str "same-origin";
+      "keepalive",`Bool false;"mode",str "cors";"redirect",str "error";"referrerPolicy",str "no-referrer"]]] in
   let parsed=request calls in
   check bool "native fields roundtrip unchanged" true (ok (W.of_json (W.to_json parsed))=parsed);
   check int "all methods preserved" (List.length calls) (List.length parsed.steps);
@@ -52,6 +60,14 @@ let strict_inputs () =
      obj (base [step "keyboard.type" ["text",str "x";"timeoutMs",`Int 0]]);
      obj (base [step "keyboard.insertText" ["text",str "x";"selector",str "#other"]]);
      obj (base [step "keyboard.press" ["key",str ""]]);
+     obj (base [step "evaluate" ["source",str "document.title";"timeoutMs",`Int 1]]);
+     obj (base [step "evaluate" ["source",str "arg => arg";"argumentJson",str "NaN"]]);
+     obj (base [step "evaluate" ["source",str "arg => arg";"argumentJson",str "{\"x\":1,\"x\":2}"]]);
+     obj (base [step "waitForFunction" ["source",str "true";"pollingMs",`Int (-1)]]);
+     obj (base [step "fetch" ["url",str "file:///private/data"]]);
+     obj (base [step "fetch" ["url",str "https://example.test/";"fetchOptions",obj ["saveAs",str "/tmp/leak"]]]);
+     obj (base [step "fetch" ["url",str "https://example.test/";"fetchOptions",obj ["mode",str "fallback"]]]);
+     obj (base [step "fetch" ["url",str "https://example.test/";"fetchOptions",obj ["headers",obj ["X",`Int 1]]]]);
      obj (base [step "selectOption" ["selector",str "#x";"values",`List [str "a";str "a"]]])]
 let complete () =
   let value=obj (snapshot @ result ~started:true ~completed_effect:true
@@ -75,6 +91,13 @@ let progress_and_uncertainty () =
   assert_stopped (request [step "keyboard.paste" ["text",str "x"]])
     (result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 "keyboard.paste"))
     ~started:true ~completed_effect:false;
+  List.iter (fun (method_,fields) ->
+    assert_stopped (request [step method_ fields])
+      (result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 method_))
+      ~started:true ~completed_effect:false)
+    ["evaluate",["source",str "document.title"];
+     "waitForFunction",["source",str "false"];
+     "fetch",["url",str "https://example.test/"]];
   assert_stopped (request [step "keyboard.insertText" ["text",str "x"];click])
     (result ~started:true ~completed_effect:true ~completed:[entry 0 "keyboard.insertText"] ~failure:(failure 1 "observation"))
     ~started:true ~completed_effect:true
@@ -92,7 +115,18 @@ let proof path =
   (match ok (R.decode request (Yojson.Safe.Util.member "result" json)) with
    | R.Completed _ -> print_endline "Real Ego receipt decoded against its exact request"
    | R.Stopped _ -> fail "real browser fixture did not complete")
+let page_proof path =
+  proof path;
+  let json=Yojson.Safe.from_file path in
+  List.iter (fun (request_key,result_key) ->
+    let request=ok (W.of_json (Yojson.Safe.Util.member request_key json)) in
+    match ok (R.decode request (Yojson.Safe.Util.member result_key json)) with
+    | R.Stopped {effect_started=true;completed_effect=false;_} -> ()
+    | R.Completed _ | R.Stopped _ -> fail "a failed Page call lost its uncertain-effect boundary")
+    ["blockedRequest","blocked";"timeoutRequest","timedOut"];
+  print_endline "Real CORS and predicate-timeout receipts retain uncertain effects and exact progress"
 let () = if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.argv.(2)
+  else if Array.length Sys.argv=3 && Sys.argv.(1)="--page-proof" then page_proof Sys.argv.(2)
   else run "native_browser_workflow" ["SDK contract",[
   test_case "native methods preserve values" `Quick roundtrip;
   test_case "invalid methods and fields are refused" `Quick strict_inputs;

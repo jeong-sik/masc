@@ -139,24 +139,4 @@ module For_testing : sig
       [event] is being emitted, as another fiber would when emitting yields;
       they are fed before the emit returns. *)
 
-  val carried_history_projection
-    :  input_source:Keeper_request_source.t ->
-    ?argument_projection:Keeper_official_client_host.argument_projection
-    -> ?on_model_input_window_observation:
-         (Runtime_model_input_tail_window.window_observation -> unit)
-    -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
-    -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
-    -> ?on_carried_front:
-         (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit)
-    -> turn_start:Keeper_carried_front.turn_start
-    -> keeper_name:string
-    -> runtime_id:string
-    -> Agent_core.Agent.model_input_projection option
-    -> Agent_core.Agent.model_input_projection
-  (** Starts from the admitted carried front and runs the source projection;
-      the range goes out as composed. A Librarian front's
-      working state goes in front of the range
-      ({!Keeper_official_client_host.compose_librarian_range}, RFC-0460). A
-      Gate replay reference reaches the provider-bound input without becoming
-      a front in the durable checkpoint vocabulary. *)
 end

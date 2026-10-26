@@ -414,92 +414,6 @@ let approval_decision_label = function
   | Msp.Unrecognized_decision decision -> decision
 ;;
 
-let render_message (message : Agent_core.Types.message) =
-  Ok (Host.history_role_label message.role ^ Host.encode_history_message message)
-;;
-
-let render_messages messages =
-  let rec loop rendered = function
-    | [] -> Ok (String.concat "\n\n" (List.rev rendered))
-    | message :: rest ->
-      let* rendered_message = render_message message in
-      loop (rendered_message :: rendered) rest
-  in
-  loop [] messages
-;;
-
-(* MSP's [session/start] takes no system prompt, so the start turn frames
-   it into the input the way the Antigravity lane does, with the same
-   labels and separator. A keeper turn cannot start without its labels; the
-   missing asset is a packaging fault, raised where the turn is framed. *)
-let required_label = function
-  | Ok label -> label
-  | Error message -> invalid_arg message
-;;
-
-let system_instructions_label () =
-  required_label (Antigravity_input_frame.system_instructions_label ())
-;;
-
-let current_goal_label () = required_label (Antigravity_input_frame.current_goal_label ())
-let prompt_section_separator = Antigravity_input_frame.section_separator
-
-(* The carried front is a position in durable checkpoint history, so admit it
-   before the source projection appends its bounded Gate replay reference.
-   The range goes out as composed, as on Claude Code's first attempt, and
-   the host compacts its own input. The observation maps back to the durable
-   history, as on the Antigravity lane. *)
-let carried_history_projection ~input_source
-    ?argument_projection
-    ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
-    ~turn_start ~keeper_name ~runtime_id source_projection
-  : Agent_core.Agent.model_input_projection
-  =
-  fun history_messages ->
-  let* frozen = match input_source with
-    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
-    | Keeper_request_source.Keeper_history _ -> Host.read_librarian_front librarian_front history_messages in
-  let window = ref None and front = ref None in
-  let* sent = Host.start_range_projection
-      ~input_source
-    ?argument_projection
-    ~measure_message_bytes:Host.measure_message_bytes
-    ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
-    ?on_model_input_window_observation:(Option.map
-      (fun _ observation -> window := Some observation) on_model_input_window_observation)
-    ?carried_front_seed
-    ~librarian_front:(fun _ -> Ok frozen)
-    ?on_carried_front:(Option.map
-      (fun _ observed ~transmitted_bytes -> front := Some (observed,transmitted_bytes))
-      on_carried_front)
-    ~turn_start ~keeper_name ~runtime_id history_messages in
-  let* sent = Host.project_source
-    ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent in
-  (* A refused custom projection returned no range. Publish the buffered
-     raw-source observations only after the final transmitted copy exists. *)
-  Option.iter (fun (front,transmitted_bytes) ->
-    Option.iter (fun observe -> observe front ~transmitted_bytes) on_carried_front) !front;
-  Option.iter (fun observation ->
-    Option.iter (fun observe -> observe observation) on_model_input_window_observation) !window;
-  Ok sent
-;;
-
-let prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : Host.prepared_turn) =
-  if is_resume
-  then Ok (Host.resume_prompt ~goal ~held ?composed_context prepared.messages).Host.prompt
-  else
-    let* history = render_messages prepared.messages in
-    Ok (Host.start_prompt prepared
-      ([ String_util.trim_nonempty prepared.system_prompt
-         |> Option.map (fun value -> system_instructions_label () ^ value)
-       ; String_util.trim_nonempty history
-       ; Some (current_goal_label () ^ goal)
-       ]
-       |> List.filter_map Fun.id
-       |> String.concat prompt_section_separator)
-      |> Keeper_context_submission_link.text)
-;;
-
 let tool_spec (tool : Host.dynamic_tool) =
   `Assoc
     [ "name", `String tool.name
@@ -1082,7 +996,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
         Ok { prepared with messages }
       else
         let project =
-          carried_history_projection ~input_source
+          Host.carried_history_projection ~input_source
             ?argument_projection:(Option.bind argument_source (fun source ->
               Host.argument_projection source ~tools:prepared.tools
                 ~history_prefix:(Option.to_list historical_task_message)))
@@ -1136,7 +1050,7 @@ let run_without_lifecycle ~input_source ~argument_source ~official_task_referenc
       else Host.start_held_context ?composed_context prepared.messages
     in
     let context_frontier = { context_frontier with held_context } in
-    let* prompt = prompt_for_turn ?composed_context ~held ~is_resume ~goal prepared in
+    let* prompt = Host.framed_prompt_for_turn ?composed_context ~held ~is_resume ~goal prepared in
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d goal_bytes=%d \
@@ -1966,14 +1880,6 @@ module For_testing = struct
 
   let runtime_error_to_core_error = runtime_error_to_core_error
   let recovery_failure_of_runtime_error = recovery_failure_of_runtime_error
-
-  let start_prompt ~system_prompt ~goal messages =
-    let prepared : Host.prepared_turn =
-      { messages; system_prompt; start_context = Keeper_context_submission_link.literal ""
-      ; composed_context = None; tools = []; reasoning_effort = None }
-    in
-    prompt_for_turn ~held:[] ~is_resume:false ~goal prepared
-  ;;
 
   let native_posture_note = native_posture_note
 end

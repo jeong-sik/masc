@@ -664,6 +664,38 @@ val start_range_projection :
     restored, and the full range/summary decision is repeated without I/O.
     Custom source projection must run after this function returns. *)
 
+val carried_history_projection :
+  input_source:Keeper_request_source.t ->
+  ?argument_projection:argument_projection ->
+  ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
+  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
+  ?librarian_front:librarian_front_reader ->
+  ?on_carried_front:(carried_start_front -> transmitted_bytes:int -> unit) ->
+  turn_start:Keeper_carried_front.turn_start ->
+  keeper_name:string ->
+  runtime_id:string ->
+  Agent_core.Agent.model_input_projection option ->
+  Agent_core.Agent.model_input_projection
+(** Unbounded carried-history composition for clients that compact their own
+    input. Freeze the durable Librarian position before applying the range and
+    source projection. Window/front observations are published only after that
+    final projection succeeds, and retain durable-history coordinates: an
+    appended Gate replay reference cannot become a checkpoint front. *)
+
+val framed_prompt_for_turn :
+  ?composed_context:composed_context ->
+  held:Keeper_official_client_session_store.held_context list ->
+  is_resume:bool ->
+  goal:string ->
+  prepared_turn ->
+  (string, Agent_core.Error.t) result
+(** Input for clients whose Start has no separate System channel. A Start
+    carries the shared Antigravity frame's System label, encoded history and
+    current Goal in order, prefixed once by {!start_prompt}. A Resume uses
+    {!resume_prompt} with the exact held/composed context supplied by its lane.
+    Protocol/session handling and any historical-task input stay with the lane.
+    @raise Invalid_argument when a required frame-label asset is missing. *)
+
 val prepare_turn :
   runtime_label:string ->
   keeper_name:string ->

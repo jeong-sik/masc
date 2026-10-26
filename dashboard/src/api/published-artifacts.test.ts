@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Schema } from 'effect'
 import nativeInventory from './fixtures/published-artifacts-native.json'
 import { get, post } from './core'
-import { ArtifactPublicationSchema, fetchPublishedArtifact, fetchPublishedArtifacts } from './published-artifacts'
+import { ArtifactPublicationSchema, captureArtifactWorkspace, fetchPublishedArtifact, fetchPublishedArtifacts } from './published-artifacts'
 import { resolveArtifactCheck, setArtifactCheck } from './published-artifact-checks'
 
 vi.mock('./core', () => ({ get: vi.fn(), post: vi.fn() }))
@@ -12,6 +12,21 @@ beforeEach(() => vi.resetAllMocks())
 // Published_artifact.revision_fields emits normalized_artifact_ref_to_json:
 // the content-addressed digest is inside body._blob in every report projection.
 describe('published artifact native wire contract', () => {
+  it('captures the canonical health roots without deriving the MASC root from the base', async () => {
+    vi.mocked(get).mockResolvedValueOnce({ paths: {
+      effective_base_path: '/workspace-a', effective_masc_root: '/separate-runtime-root',
+    } })
+    expect(await captureArtifactWorkspace('/workspace-a')).toEqual({
+      basePath: '/workspace-a', mascRoot: '/separate-runtime-root',
+    })
+  })
+
+  it('refuses incomplete health workspace identity before publication', async () => {
+    vi.mocked(get).mockResolvedValueOnce({ paths: { effective_base_path: '/workspace-a' } })
+    await expect(captureArtifactWorkspace('/workspace-a')).rejects.toThrow()
+    expect(post).not.toHaveBeenCalled()
+  })
+
   it('admits the real catalog, document history and publication envelope', async () => {
     vi.mocked(get).mockResolvedValueOnce(nativeInventory)
     const listing = await fetchPublishedArtifacts()

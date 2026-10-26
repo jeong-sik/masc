@@ -599,10 +599,13 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
         ? jsonRpcErrorData.auth_error_code.trim()
         : ''
       const authErrorCode = topLevelAuthErrorCode || jsonRpcAuthErrorCode
+      // Server refusals (Server_refusal.json) carry their machine code in a
+      // top-level `code` field, next to a human `error` string.
+      const topLevelErrorCode = typeof parsed.code === 'string' ? parsed.code.trim() : ''
       const errorCode =
         authErrorCode
         || (typeof parsed.error_code === 'string' ? parsed.error_code.trim() : '')
-        || (typeof parsed.code === 'string' ? parsed.code.trim() : '')
+        || topLevelErrorCode
         || structuredErrorCode
         || (typeof parsed.status === 'string' ? parsed.status.trim() : '')
         || errorDetail
@@ -836,13 +839,14 @@ export type AbortableRequestOptions = {
 export type GetOptions = AbortableRequestOptions & {
   timeoutMs?: number
   includeActorHeader?: boolean
+  extraHeaders?: Record<string, string>
 }
 
 export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
   const res = await fetchWithTimeout(
     path,
     {
-      headers: authHeaders({ includeActor: opts.includeActorHeader }),
+      headers: { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders },
       cache: readCacheMode(path),
       signal: opts.signal,
     },
@@ -878,7 +882,7 @@ export async function getWithResponse<T>(
   const res = await fetchWithTimeout(
     path,
     {
-      headers: authHeaders({ includeActor: opts.includeActorHeader }),
+      headers: { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders },
       cache: readCacheMode(path),
       signal: opts.signal,
     },

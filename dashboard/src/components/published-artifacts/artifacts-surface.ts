@@ -3,16 +3,18 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../../router'
 import { ApiRequestError, currentStoredTokenRevision } from '../../api/core'
 import { storedTokenRevision } from '../../api/token-revision'
-import { fetchPublishedArtifacts, fetchPublishedArtifact, type ArtifactList, type ArtifactDocument } from '../../api/published-artifacts'
+import { fetchPublishedArtifacts, fetchPublishedArtifact, artifactHref, type ArtifactList, type ArtifactDocument, type ArtifactPublication } from '../../api/published-artifacts'
 import { fetchArtifactChecks, resolveArtifactCheck, type ArtifactCheckList, type ArtifactCheckState } from '../../api/published-artifact-checks'
 import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { ArtifactReader } from './artifact-reader'
 import { ArtifactPreview } from './artifact-preview'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
 import { executionWorkspaceAuthority } from '../../store'
+import { ArtifactImport } from './artifact-import'
+import { downloadArtifactDraft, type ArtifactDraftRetention, type ArtifactDraftSnapshot, type ArtifactPublicationOutcome } from './artifact-composer'
 
 type Remote<T> = { key: object; kind: 'loaded'; data: T; receivedAt: number }
-  | { key: object; kind: 'error'; message: string }
+  | { key: object; kind: 'error'; message: string; data?: T }
 const errorMessage = (error: unknown) => error instanceof ApiRequestError && error.status === 404
   ? '문서 또는 선택한 버전을 찾지 못했습니다.'
   : error instanceof Error ? error.message : '문서를 불러오지 못했습니다.'
@@ -30,10 +32,47 @@ export function ArtifactsSurface() {
   // The ordinal is only a component key. Authority is the existing SSOT object.
   const owner = useMemo(() => ({ mount: ++mounts.current, authRevision, authority }), [authRevision, authority])
   const [receipts, setReceipts] = useState<readonly { owner: typeof owner; outcome: ArtifactCheckOutcome }[]>([])
+  const [publications, setPublications] = useState<readonly { owner: typeof owner; outcome: ArtifactPublicationOutcome }[]>([])
+  const [drafts, setDrafts] = useState<readonly { owner: typeof owner; snapshot: ArtifactDraftSnapshot }[]>([])
+  // Callbacks close over the original owner, never the replacement authority.
+  const draftRetention: ArtifactDraftRetention = {
+    remember: snapshot => setDrafts(previous => {
+      const entry = { owner, snapshot }
+      return previous.some(item => item.owner === owner && item.snapshot.identity === snapshot.identity)
+        ? previous.map(item => item.owner === owner && item.snapshot.identity === snapshot.identity ? entry : item)
+        : [...previous, entry]
+    }),
+    forget: identity => setDrafts(previous => previous.filter(item => item.owner !== owner || item.snapshot.identity !== identity)),
+  }
+  const retiredDrafts = drafts.filter(entry => entry.owner !== owner)
   const current = () => owner.authority !== null
     && currentStoredTokenRevision() === owner.authRevision
     && executionWorkspaceAuthority.peek() === owner.authority
   return html`<div>
+    ${retiredDrafts.length ? html`<section aria-label="이전 접근 상태의 원고" class="space-y-3 p-4">
+      <h2>이전 접근 상태의 원고</h2>
+      <p>접근 상태가 바뀌어 편집을 중단했습니다. 이 원고는 현재 권한으로 저장할 수 없습니다. 화면을 떠나기 전에 다운로드해 주세요.</p>
+      ${retiredDrafts.map(({ owner: original, snapshot }) => html`<article key=${snapshot.identity}>
+        <h3>${snapshot.value.title}</h3>
+        <p>원래 작업 공간 ${original.authority?.workspaceRoot}${snapshot.base ? ` · ${snapshot.base.id} · v${snapshot.base.revision} 기준` : ' · 새 문서'}</p>
+        <button type="button" onClick=${() => downloadArtifactDraft(snapshot.value)}>원고 다운로드</button>
+        <button type="button" onClick=${() => {
+          if (window.confirm('보관한 원고를 폐기할까요? 다운로드하지 않은 내용은 사라집니다.')) {
+            setDrafts(previous => previous.filter(entry => entry.owner !== original || entry.snapshot.identity !== snapshot.identity))
+          }
+        }}>원고 폐기</button>
+      </article>`)}
+    </section>` : null}
+    ${publications.length ? html`<section aria-label="문서 저장 요청 결과">
+      ${publications.map(({ owner: original, outcome }, index) => html`<p key=${index}>
+        ${outcome.title} · 원래 작업 공간 ${original.authority?.workspaceRoot}
+        ${outcome.kind === 'published' ? html` · <a href=${artifactHref(outcome.publication.artifact.id, outcome.publication.artifact.revision)}>
+          ${outcome.publication.artifact.id} · v${outcome.publication.artifact.revision}</a>
+          · ${outcome.verified ? '저장 내용 확인됨' : '저장 응답 받음 · 내용 확인 필요'}`
+          : ` · 적용 여부 미확인: ${outcome.detail}`}
+        ${original !== owner ? ' · 이전 접근 상태의 요청 결과' : ''}
+      </p>`)}
+    </section>` : null}
     ${receipts.length ? html`<section aria-label="문서 확인 요청 결과">
       ${receipts.map(({ owner: original, outcome }, index) => html`<p key=${index}>
         ${outcome.artifact.title} · ${outcome.artifact.id} · v${outcome.artifact.revision}
@@ -48,12 +87,24 @@ export function ArtifactsSurface() {
     </section>` : null}
     ${authority === null ? html`<p role="status">현재 작업 공간을 확인한 뒤 아티팩트를 읽습니다.</p>`
       : html`<${ArtifactsObservation} key=${owner.mount} authRevision=${authRevision} isCurrent=${current}
+          workspaceRoot=${authority.workspaceRoot} draftRetention=${draftRetention}
+          onPublication=${(outcome: ArtifactPublicationOutcome) => setPublications(previous => {
+            const index = outcome.kind === 'published' ? previous.findIndex(entry => entry.owner === owner
+              && entry.outcome.kind === 'published'
+              && entry.outcome.publication.artifact.id === outcome.publication.artifact.id
+              && entry.outcome.publication.artifact.revision === outcome.publication.artifact.revision) : -1
+            return index < 0 ? [...previous, { owner, outcome }]
+              : previous.map((entry, position) => position === index ? { owner, outcome } : entry)
+          })}
           onMutation=${(outcome: ArtifactCheckOutcome) => setReceipts(previous => [...previous, { owner, outcome }])} />`}
   </div>`
 }
 
-function ArtifactsObservation({ authRevision, isCurrent, onMutation }: {
+function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, isCurrent, onMutation, onPublication }: {
   authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void
+  onPublication: (outcome: ArtifactPublicationOutcome) => void
+  workspaceRoot: string
+  draftRetention: ArtifactDraftRetention
 }) {
   const { artifact: selectedId, revision } = route.value.params
   const [refresh, setRefresh] = useState(0)
@@ -62,6 +113,7 @@ function ArtifactsObservation({ authRevision, isCurrent, onMutation }: {
   const [todayOnly, setTodayOnly] = useState(false)
   const [uncheckedOnly, setUncheckedOnly] = useState(false)
   const [previewId, setPreviewId] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
   const [catalog, setCatalog] = useState<Remote<ArtifactList> | null>(null)
   const [document, setDocument] = useState<Remote<ArtifactDocument> | null>(null)
   const [checks, setChecks] = useState<Remote<ArtifactCheckList> | null>(null)
@@ -98,7 +150,13 @@ function ArtifactsObservation({ authRevision, isCurrent, onMutation }: {
     void fetchPublishedArtifact(selectedId, revision, controller.signal).then(data => {
       if (!controller.signal.aborted && current()) setDocument({ key: documentKey, kind: 'loaded', data, receivedAt: Date.now() })
     }, error => {
-      if (!controller.signal.aborted && current()) setDocument({ key: documentKey, kind: 'error', message: errorMessage(error) })
+      if (!controller.signal.aborted && current()) setDocument(previous => ({
+        key: documentKey, kind: 'error', message: errorMessage(error),
+        // A failed refresh must not unmount an editor and lose its unsaved draft.
+        // This is only the same selection owner's already-observed document;
+        // the reader exposes the refresh failure instead of claiming freshness.
+        data: previous?.key === documentKey ? previous.data : undefined,
+      }))
     })
     return () => controller.abort()
   }, [authRevision, selectedId, revision, documentKey, refresh])
@@ -113,6 +171,12 @@ function ArtifactsObservation({ authRevision, isCurrent, onMutation }: {
     if (!current()) return
     setChecks(null)
     setRefresh(n => n + 1)
+  }
+  const published = (publication: ArtifactPublication) => {
+    if (!current()) return
+    setImporting(false)
+    setRefresh(n => n + 1)
+    navigate('workspace', { section: 'artifacts', artifact: publication.artifact.id, revision: String(publication.artifact.revision) })
   }
   const search = query.trim().toLocaleLowerCase()
   const now = new Date()
@@ -136,8 +200,11 @@ function ArtifactsObservation({ authRevision, isCurrent, onMutation }: {
       <header class="flex flex-wrap items-center justify-between gap-3">
         <div><h1 class="m-0 text-xl font-semibold">아티팩트</h1>
           <p class="mt-1 text-sm text-[var(--color-fg-secondary)]">Keeper가 작성한 보고서와 결과물을 다시 읽어보세요.</p></div>
-        <button type="button" onClick=${() => setRefresh(n => n + 1)}>새로고침</button>
+        <div class="flex gap-4"><button type="button" onClick=${() => setImporting(true)}>파일 가져오기</button>
+          <button type="button" onClick=${() => setRefresh(n => n + 1)}>새로고침</button></div>
       </header>
+      ${importing ? html`<${ArtifactImport} draftRetention=${draftRetention} workspaceRoot=${workspaceRoot} isCurrent=${current} onMutation=${onPublication} onSaved=${published}
+        onCancel=${() => setImporting(false)} />` : null}
       <div class="min-w-0 space-y-4">
         <aside class="min-w-0 space-y-3" aria-label="아티팩트 목록">
           <input type="search" aria-label="아티팩트 검색" placeholder="제목, 요약, 작성자 검색"
@@ -199,9 +266,12 @@ function ArtifactsObservation({ authRevision, isCurrent, onMutation }: {
         </aside>
         ${!selectedId ? html`<div class="rounded-lg border border-dashed border-[var(--color-border-default)] p-8 text-sm text-[var(--color-fg-secondary)]">목록에서 문서를 선택하면 본문이 열립니다.</div>`
           : doc === null ? html`<p role="status">문서를 불러오고 있습니다.</p>`
-          : doc.kind === 'error' ? html`<p role="alert">${doc.message}</p>`
+          : !doc.data ? html`<p role="alert">${doc.kind === 'error' ? doc.message : '문서를 읽지 못했습니다.'}</p>`
           : html`<${ArtifactReader} key=${documentKey.visit} doc=${doc.data} fixedRevision=${revision !== undefined}
+              draftRetention=${draftRetention} workspaceRoot=${workspaceRoot}
+              readError=${doc.kind === 'error' ? doc.message : undefined}
               checkState=${checkState(doc.data.artifact)} authRevision=${authRevision} isCurrent=${current} onMutation=${onMutation} onCheckChanged=${checkChanged}
+              onPublication=${onPublication} onPublished=${published}
               onClose=${() => navigate('workspace', { section: 'artifacts' })} />`}
       </div>
     </section>

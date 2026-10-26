@@ -15,11 +15,11 @@ let parse json =
   | _ ->
     let* command = Draft.command_of_json json in match command with
     | Draft.Merge _ -> Error "Keeper edits use selected text, not CRDT wire updates"
-    | Open _ | Select _ | Resolve _ | Edit _ -> Ok (Draft_command command)
+    | Open _ | Select _ | Resolve _ | Edit _ | Discuss _ -> Ok (Draft_command command)
 let fail class_ message = Keeper_tool_execution.failure ~class_ ~effect_disposition:Tool_result.Proven_pre_effect message
 let refused = function
   | Store.Invalid message -> fail Tool_result.Policy_rejection message
-  | Missing | Generation_conflict _ as error -> fail Tool_result.Workflow_rejection (Store.error_message error)
+  | Missing | Generation_conflict _ | Discussion_conflict _ as error -> fail Tool_result.Workflow_rejection (Store.error_message error)
   | Transform_error { kind = (Invalid_request | Invalid_document | Invalid_selection); message } -> fail Tool_result.Policy_rejection message
   | Transform_error { kind = Changed_selection; message } -> fail Tool_result.Workflow_rejection message
   | Commit_uncertain draft -> Keeper_tool_execution.failure_data ~class_:Tool_result.Runtime_failure
@@ -40,6 +40,9 @@ let data (view : Store.view) ~present =
     "sequence", `Int view.draft.sequence; "updated_by", `String view.draft.updated_by;
     "updated_at", `String view.draft.updated_at; "content", `String view.content;
     "presence_active", `Bool present;
+    "next_request_id", `String (Random_id.uuid_v7 ());
+    "discussion_receipts", Artifact_discussion.events_to_json view.draft.discussion;
+    "threads", `List (List.map Artifact_discussion.thread_to_json (Artifact_discussion.threads view.draft.discussion |> Result.get_ok));
     "selection", (match view.selection with None -> `Null | Some (selection, _, _) -> Draft.selection_to_json selection);
     "range", (match view.selection with None -> `Null | Some (_, anchor, head) -> `Assoc ["anchor", `Int anchor; "head", `Int head])]
 let result ~base_path start_time data =

@@ -3,13 +3,14 @@ type target = { artifact_id : string; generation : string }
 type selection = { target : target; position : Engine.selection }
 type t =
   { target : target; base_revision : int; base_sha256 : string; state : string
-  ; sequence : int; updated_by : string; updated_at : string }
+  ; sequence : int; updated_by : string; updated_at : string; discussion : Artifact_discussion.event list }
 type command =
   | Open of { artifact_id : string; revision : int }
   | Merge of { target : target; updates : string list }
   | Select of { target : target; anchor : int; head : int }
   | Resolve of selection
   | Edit of { selection : selection; expected : string; replacement : string }
+  | Discuss of { target : target; request : Artifact_discussion.request }
 let ( let* ) = Result.bind
 let safe_integer value = value >= 0 && Int64.of_int value <= 9_007_199_254_740_991L
 let text value = String.trim value <> "" && String.is_valid_utf_8 value
@@ -44,32 +45,45 @@ let selection_of_json json =
   let* position = Engine.selection_of_json (field "position" fields) in Ok { target; position }
 let validate draft =
   let* () = valid_target draft.target in
+  let* _ = Artifact_discussion.threads draft.discussion in
   let* () = Tool_blob_store.validate_sha256 draft.base_sha256 |> Result.map_error (fun _ -> "invalid base digest") in
   if draft.base_revision <= 0 || not (safe_integer draft.base_revision) || not (safe_integer draft.sequence)
   then Error "invalid draft revision or sequence"
   else if not (Engine.valid_state draft.state && text draft.updated_by && text draft.updated_at)
   then Error "invalid draft state, actor or timestamp" else Ok draft
 let create ~target ~base_revision ~base_sha256 ~state ~actor ~at =
-  validate { target; base_revision; base_sha256; state; sequence = 0; updated_by = actor; updated_at = at }
-let advance draft ~state ~actor ~at =
+  validate { target; base_revision; base_sha256; state; sequence = 0; updated_by = actor; updated_at = at; discussion = [] }
+let advance ?discussion draft ~state ~actor ~at =
+  let discussion = Option.value ~default:draft.discussion discussion in
   if not (safe_integer (draft.sequence + 1)) then Error "draft sequence exhausted"
-  else validate { draft with state; sequence = draft.sequence + 1; updated_by = actor; updated_at = at }
-let to_json draft = `Assoc
-  ["schema", `String "masc.artifact_draft.v1"; "target", target_to_json draft.target;
+  else validate { draft with state; discussion; sequence = draft.sequence + 1; updated_by = actor; updated_at = at }
+let public_fields draft =
+  ["schema", `String "masc.artifact_draft.v2"; "target", target_to_json draft.target;
    "base_revision", `Int draft.base_revision; "base_sha256", `String draft.base_sha256;
    "state", `String draft.state; "sequence", `Int draft.sequence;
    "updated_by", `String draft.updated_by; "updated_at", `String draft.updated_at]
+let public_to_json draft = `Assoc (public_fields draft)
+let to_json draft = `Assoc (public_fields draft @ ["discussion", Artifact_discussion.events_to_json draft.discussion])
+let document_to_json ~draft ~content ~selection =
+  (* Private construction and strict reads validate the event history. *)
+  let threads = Artifact_discussion.threads draft.discussion |> Result.get_ok in
+  `Assoc ["draft", public_to_json draft; "content", `String content;
+    "threads", `List (List.map Artifact_discussion.thread_to_json threads);
+    "discussion_receipts", Artifact_discussion.events_to_json draft.discussion;
+    "selection", (match selection with None -> `Null | Some (selection, anchor, head) ->
+      `Assoc ["selection", selection_to_json selection; "anchor", `Int anchor; "head", `Int head])]
 let of_json json =
-  let* fields = fields ["schema"; "target"; "base_revision"; "base_sha256"; "state"; "sequence"; "updated_by"; "updated_at"] json in
-  let* () = if field "schema" fields = `String "masc.artifact_draft.v1" then Ok () else Error "invalid draft schema" in
+  let* fields = fields ["schema"; "target"; "base_revision"; "base_sha256"; "state"; "sequence"; "updated_by"; "updated_at"; "discussion"] json in
+  let* () = if field "schema" fields = `String "masc.artifact_draft.v2" then Ok () else Error "invalid draft schema" in
   let* target = target_of_json (field "target" fields) in
   let* base_revision = integer ~minimum:1 "base_revision" fields in
   let* base_sha256 = string "base_sha256" fields in let* state = string "state" fields in
   let* sequence = integer ~minimum:0 "sequence" fields in
   let* updated_by = string "updated_by" fields in let* updated_at = string "updated_at" fields in
-  validate { target; base_revision; base_sha256; state; sequence; updated_by; updated_at }
+  let* discussion = Artifact_discussion.events_of_json (field "discussion" fields) in
+  validate { target; base_revision; base_sha256; state; sequence; updated_by; updated_at; discussion }
 let command_of_json json =
-  let* all = fields ["action"; "artifact_id"; "revision"; "target"; "updates"; "anchor"; "head"; "selection"; "expected"; "replacement"] json in
+  let* all = fields ["action"; "artifact_id"; "revision"; "target"; "updates"; "anchor"; "head"; "selection"; "expected"; "replacement"; "request"] json in
   let* action = string "action" all in
   match action with
   | "open" ->
@@ -98,4 +112,8 @@ let command_of_json json =
   | "resolve" ->
     let* fields = fields ["action"; "selection"] json in
     let* selection = selection_of_json (field "selection" fields) in Ok (Resolve selection)
+  | "discuss" ->
+    let* fields = fields ["action"; "target"; "request"] json in
+    let* target = target_of_json (field "target" fields) in
+    let* request = Artifact_discussion.request_of_json (field "request" fields) in Ok (Discuss { target; request })
   | _ -> Error "unknown draft action"

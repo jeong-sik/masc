@@ -74,7 +74,7 @@ let observe session = Mutex.protect mutex (fun () ->
       | Some (draft, content) ->
         room.peers <- Peers.add session.id
           { peer with announced_sequence = Some draft.sequence } room.peers;
-        `Assoc ["draft", Draft.to_json draft; "content", `String content; "selection", `Null] in
+        Draft.document_to_json ~draft ~content ~selection:None in
     let peers = Peers.bindings room.peers |> List.map (fun (_, peer) -> `Assoc
       ["session_id", `String peer.session.id; "actor", `String peer.session.actor;
        "source", (match peer.session.source with

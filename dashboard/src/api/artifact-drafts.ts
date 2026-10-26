@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import { get, post } from './core'
 import { PublishedArtifactSchema, artifactWorkspaceHeaders, type ArtifactWorkspace } from './published-artifacts'
+import type { ArtifactDiscussionRequest } from './artifact-discussion'
 
 const Integer = Schema.Int.pipe(Schema.between(0, Number.MAX_SAFE_INTEGER))
 export const ArtifactDraftTargetSchema = Schema.Struct({
@@ -12,14 +13,28 @@ export const ArtifactDraftPositionSchema = Schema.Struct({
   head: Schema.Array(Schema.Int.pipe(Schema.between(0, 255))),
 })
 export const ArtifactDraftSelectionSchema = Schema.Struct({ target: ArtifactDraftTargetSchema, position: ArtifactDraftPositionSchema })
+const DiscussionId = ArtifactDraftTargetSchema.fields.generation
+export const ArtifactDiscussionCommandSchema = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal('comment'), position: ArtifactDraftPositionSchema, quote: Schema.String, body: Schema.String,
+    proposal: Schema.optional(Schema.NullOr(Schema.String)) }),
+  Schema.Struct({ kind: Schema.Literal('reply'), thread_id: DiscussionId, body: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('resolve','reopen','accept','reject'), thread_id: DiscussionId }))
+export const ArtifactDiscussionRequestSchema = Schema.Struct({ id: DiscussionId, command: ArtifactDiscussionCommandSchema })
+export const ArtifactDiscussionEventSchema = Schema.Struct({ request: ArtifactDiscussionRequestSchema,
+  actor: Schema.String, at: Schema.String, applied: Schema.NullOr(ArtifactDraftPositionSchema) })
+export const ArtifactThreadSchema = Schema.Struct({ id: DiscussionId, position: ArtifactDraftPositionSchema, quote: Schema.String,
+  messages: Schema.Array(Schema.Struct({ id: DiscussionId, actor: Schema.String, at: Schema.String, body: Schema.String })),
+  proposal: Schema.NullOr(Schema.String), decision: Schema.Union(Schema.Struct({ kind: Schema.Literal('pending') }),
+    Schema.Struct({ kind: Schema.Literal('applied','rejected'), event: ArtifactDiscussionEventSchema })), resolved: Schema.Boolean })
 const DraftSchema = Schema.Struct({
-  schema: Schema.Literal('masc.artifact_draft.v1'), target: ArtifactDraftTargetSchema,
+  schema: Schema.Literal('masc.artifact_draft.v2'), target: ArtifactDraftTargetSchema,
   base_revision: Integer.pipe(Schema.positive()),
   base_sha256: PublishedArtifactSchema.fields.body.fields._blob.fields.sha256,
   state: Schema.String.pipe(Schema.nonEmptyString()), sequence: Integer,
   updated_by: Schema.String.pipe(Schema.nonEmptyString()), updated_at: Schema.String.pipe(Schema.nonEmptyString()),
 })
 export const ArtifactDraftViewSchema = Schema.Struct({ draft: DraftSchema, content: Schema.String,
+  threads: Schema.Array(ArtifactThreadSchema), discussion_receipts: Schema.Array(ArtifactDiscussionEventSchema),
   selection: Schema.NullOr(Schema.Struct({ selection: ArtifactDraftSelectionSchema, anchor: Integer, head: Integer })),
 })
 export type ArtifactDraftTarget = typeof ArtifactDraftTargetSchema.Type
@@ -31,6 +46,7 @@ export type ArtifactDraftCommand =
   | { action: 'select'; target: ArtifactDraftTarget; anchor: number; head: number }
   | { action: 'resolve'; selection: ArtifactDraftSelection }
   | { action: 'edit'; selection: ArtifactDraftSelection; expected: string; replacement: string }
+  | { action: 'discuss'; target: ArtifactDraftTarget; request: ArtifactDiscussionRequest }
 const path = '/api/v1/artifact-drafts'
 const sameTarget = (a: ArtifactDraftTarget, b: ArtifactDraftTarget) => a.artifact_id === b.artifact_id && a.generation === b.generation
 function decode(input: unknown, artifactId: string, target?: ArtifactDraftTarget): ArtifactDraftView {

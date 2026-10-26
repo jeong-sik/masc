@@ -1440,6 +1440,46 @@ let microvm_start_failure_message failure =
          (Keeper_sandbox_runtime.docker_failure_output_for_log output))
 ;;
 
+(* The same immutable request drives comparison and Boot argv. Volume names,
+   mount sources and stable labels are projections here; provisioning and
+   policy route discovery belong to the Boot execution. *)
+let requested_apple_plan (t : t) ~image ~guest_size ~identity_host_dir ~environment =
+  let ( let* ) = Result.bind in
+  let volume_name result = Result.map_error (fun detail -> Guest_provisions_unavailable detail) result in
+  let* work_volume_name = volume_name (Keeper_sandbox_microvm.work_volume_name ~keeper_name:t.meta.name) in
+  let* build_volume_name = volume_name (Keeper_sandbox_microvm.build_volume_name ~keeper_name:t.meta.name) in
+  let module Plan = Keeper_microvm_boot_plan in
+  let container_masc_dir = Keeper_sandbox_runtime_setup.container_masc_dir ~container_root:t.container_root in
+  let identity_destination = Keeper_github_identity.container_config_dir
+      ~container_masc_dir ~keeper_name:t.meta.name in
+  let config_mount = match Keeper_sandbox_runtime_setup.config_mount
+      ~base_path:t.config.base_path ~container_root:t.container_root with
+    | None -> []
+    | Some (source, destination) -> [Plan.Host_dir {source; destination; read_only=true}] in
+  let network = match t.network_mode with
+    | Keeper_types_profile_sandbox.Network_none -> Plan.Network_none
+    | Keeper_types_profile_sandbox.Network_inherit -> Plan.Network_inherit
+    | Keeper_types_profile_sandbox.Network_policy ->
+      Plan.Network_policy {name=Keeper_sandbox_microvm.policy_network_name ~keeper_name:t.meta.name} in
+  Ok
+    { Plan.image; guest_size; user=Printf.sprintf "%d:%d" t.uid t.gid
+    ; working_directory=Keeper_sandbox_microvm.work_volume_guest_root
+    ; command=["tail"; "-f"; "/dev/null"]
+    ; mounts=config_mount
+        @ [Plan.Host_dir {source=identity_host_dir; destination=identity_destination; read_only=true}
+          ; Plan.Named_volume {name=work_volume_name; destination=Keeper_sandbox_microvm.work_volume_guest_root}
+          ; Plan.Named_volume {name=build_volume_name; destination=Keeper_sandbox_microvm.build_volume_guest_root}
+          ; Plan.Host_dir {source=microvm_shim_host_dir t; destination=Keeper_sandbox_microvm.shim_guest_dir; read_only=true}]
+    ; isolation=Keeper_microvm_backend.all_guest_constraints
+    ; network; environment
+    ; labels=Keeper_sandbox_runtime_setup.stable_labels
+        ~base_path:t.config.base_path ~keeper_name:t.meta.name
+        ~container_kind:Keeper_sandbox_microvm.keeper_vm_container_kind
+        ~network_label:(Keeper_types_profile_sandbox.network_mode_to_string t.network_mode)
+        @ [Keeper_sandbox_microvm.microvm_backend_label_key,
+           Keeper_microvm_backend.to_string Keeper_microvm_backend.Apple_container]
+    }
+
 let start_microvm_container_unlocked ?timeout_sec (t : t) =
   (* The runtime is read once, before anything is spawned. A keeper whose
      TOML names none is refused here rather than booted on an assumed one,
@@ -1690,53 +1730,18 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
          let argv_result =
            match backend with
            | Keeper_microvm_backend.Apple_container ->
-             let module Plan = Keeper_microvm_boot_plan in
-             let container_masc_dir =
-               Keeper_sandbox_runtime_setup.container_masc_dir ~container_root:t.container_root in
-             let identity_destination = Keeper_github_identity.container_config_dir
-               ~container_masc_dir ~keeper_name:t.meta.name in
-             let config_mount = match Keeper_sandbox_runtime_setup.config_mount
-               ~base_path:t.config.base_path ~container_root:t.container_root with
-               | None -> []
-               | Some (source, destination) -> [Plan.Host_dir {source; destination; read_only = true}] in
-             let network = match t.network_mode with
-               | Keeper_types_profile_sandbox.Network_none -> Plan.Network_none
-               | Keeper_types_profile_sandbox.Network_inherit -> Plan.Network_inherit
-               | Keeper_types_profile_sandbox.Network_policy ->
-                 Plan.Network_policy {name = Keeper_sandbox_microvm.policy_network_name ~keeper_name:t.meta.name} in
-             let plan : Plan.t =
-               { image; guest_size; user = Printf.sprintf "%d:%d" t.uid t.gid
-               ; working_directory = Keeper_sandbox_microvm.work_volume_guest_root
-               ; command = ["tail"; "-f"; "/dev/null"]
-               ; mounts = config_mount
-                   @ [Plan.Host_dir {source = github_identity.host_dir; destination = identity_destination; read_only = true}
-                     ; Plan.Named_volume {name = provisions.work_volume_name;
-                         destination = Keeper_sandbox_microvm.work_volume_guest_root}]
-                   @ (match provisions.build_volume_name with
-                      | Some name -> [Plan.Named_volume {name; destination = Keeper_sandbox_microvm.build_volume_guest_root}]
-                      | None -> [])
-                   @ [Plan.Host_dir {source = provisions.shim_host_dir;
-                       destination = Keeper_sandbox_microvm.shim_guest_dir; read_only = true}]
-               ; isolation = Keeper_microvm_backend.all_guest_constraints
-               ; network; environment = github_identity.environment
-               ; labels = Keeper_sandbox_runtime_setup.stable_labels
-                   ~base_path:t.config.base_path ~keeper_name:t.meta.name
-                   ~container_kind:Keeper_sandbox_microvm.keeper_vm_container_kind
-                   ~network_label:(Keeper_types_profile_sandbox.network_mode_to_string t.network_mode)
-                   @ [Keeper_sandbox_microvm.microvm_backend_label_key,
-                       Keeper_microvm_backend.to_string backend]
-               } in
-             (* Foundation only: the same plan labels and renders this Boot.
-                Existing adoption/snapshot/sweep authority remains in force
-                until durable guest identity and endpoint checks land. *)
-             Keeper_sandbox_microvm.apple_turn_start_argv
-               ~container_name ~plan ~lifecycle_labels:(Keeper_sandbox_runtime_setup.lifecycle_labels ())
-               ~dns:(Option.map Ipaddr.to_string nameserver) ~policy_proxy
-             |> Result.map_error (function
-               | Keeper_sandbox_microvm.Apple_invalid_boot_plan errors -> Invalid_boot_plan errors
-               | Keeper_sandbox_microvm.Apple_network_unavailable detail -> Network_unexpressible detail
-               | Keeper_sandbox_microvm.Apple_constraints_unexpressible refusals ->
-                 Constraints_unexpressible {backend; refusals})
+             Result.bind
+               (requested_apple_plan t ~image ~guest_size
+                  ~identity_host_dir:github_identity.host_dir ~environment:github_identity.environment)
+               (fun plan ->
+                 Keeper_sandbox_microvm.apple_turn_start_argv
+                   ~container_name ~plan ~lifecycle_labels:(Keeper_sandbox_runtime_setup.lifecycle_labels ())
+                   ~dns:(Option.map Ipaddr.to_string nameserver) ~policy_proxy
+                 |> Result.map_error (function
+                   | Keeper_sandbox_microvm.Apple_invalid_boot_plan errors -> Invalid_boot_plan errors
+                   | Keeper_sandbox_microvm.Apple_network_unavailable detail -> Network_unexpressible detail
+                   | Keeper_sandbox_microvm.Apple_constraints_unexpressible refusals ->
+                     Constraints_unexpressible {backend; refusals}))
            | Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox ->
            Keeper_sandbox_microvm.turn_start_argv_for
              backend

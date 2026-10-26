@@ -131,17 +131,13 @@ let replace_capability_file_for_testing
     content
 ;;
 
-let create_capability_file ~fs ~parent ~leaf ~permissions content =
-  let target = require_recovery_target ~allowed_root_path:(Eio.Path.native_exn parent)
-      ~parent ~leaf ~permissions in
-  with_publication_recovery_access ~fs @@ fun recovery ->
+let create_capability_file ~recovery ~allowed_root_path ~parent ~leaf ~permissions content =
+  let target = require_recovery_target ~allowed_root_path ~parent ~leaf ~permissions in
   Fs_compat.create_capability_file_exclusive ~recovery ~parent ~target content
 ;;
 
-let create_capability_file_for_testing ~fs ~before_stage ~parent ~leaf ~permissions content =
-  let target = require_recovery_target ~allowed_root_path:(Eio.Path.native_exn parent)
-      ~parent ~leaf ~permissions in
-  with_publication_recovery_access ~fs @@ fun recovery ->
+let create_capability_file_for_testing ~before_stage ~recovery ~allowed_root_path ~parent ~leaf ~permissions content =
+  let target = require_recovery_target ~allowed_root_path ~parent ~leaf ~permissions in
   Capability_write_test.create_capability_file_exclusive ~before_stage ~recovery ~parent ~target content
 ;;
 
@@ -249,7 +245,7 @@ let test_replace_nonrecoverable_exceptions_preserve_backtrace ~fs () =
 
 let test_create_nonrecoverable_exceptions_preserve_backtrace ~fs () =
   with_tmp_dir @@ fun directory ->
-  with_parent_capability ~fs directory @@ fun parent ->
+  with_replace_context ~fs directory @@ fun parent recovery ->
   List.iter
     (fun (name, exception_) ->
        let backtrace = Printexc.get_callstack 32 in
@@ -259,7 +255,7 @@ let test_create_nonrecoverable_exceptions_preserve_backtrace ~fs () =
          ~expected_backtrace:backtrace
          (fun () ->
             ignore
-              (create_capability_file_for_testing ~fs
+              (create_capability_file_for_testing ~recovery ~allowed_root_path:directory
                  ~before_stage:(function
                    | Fs_compat.Inspect_target_entry ->
                      Printexc.raise_with_backtrace exception_ backtrace
@@ -276,7 +272,7 @@ let test_create_nonrecoverable_exceptions_preserve_backtrace ~fs () =
 
 let test_cleanup_fatal_exception_preserves_backtrace ~fs () =
   with_tmp_dir @@ fun directory ->
-  with_parent_capability ~fs directory @@ fun parent ->
+  with_replace_context ~fs directory @@ fun parent recovery ->
   List.iter
     (fun (name, fatal) ->
        let backtrace = Printexc.get_callstack 32 in
@@ -286,7 +282,7 @@ let test_cleanup_fatal_exception_preserves_backtrace ~fs () =
          ~expected_backtrace:backtrace
          (fun () ->
             ignore
-              (create_capability_file_for_testing ~fs
+              (create_capability_file_for_testing ~recovery ~allowed_root_path:directory
                  ~before_stage:(function
                    | Fs_compat.Write_payload -> raise Exit
                    | Fs_compat.Cleanup_close ->
@@ -437,7 +433,7 @@ let test_create_direct_cleanup_cancellation_preserves_authority ~fs () =
         ~expected_target_effect
     =
     with_tmp_dir @@ fun directory ->
-    with_parent_capability ~fs directory @@ fun parent ->
+    with_replace_context ~fs directory @@ fun parent recovery ->
     let reason = Failure label in
     let backtrace = Printexc.get_callstack 32 in
     check_direct_cleanup_cancellation
@@ -450,7 +446,7 @@ let test_create_direct_cleanup_cancellation_preserves_authority ~fs () =
       ~expected_cleanup_stages:[]
       (fun () ->
          ignore
-           (create_capability_file_for_testing ~fs
+           (create_capability_file_for_testing ~recovery ~allowed_root_path:directory
               ~before_stage:(fun stage ->
                 if stage = primary_stage
                 then raise Exit
@@ -569,14 +565,14 @@ let test_cancelled_replace_retains_cleanup_facts_on_second_cancellation ~fs () =
 
 let test_cancelled_create_preserves_initial_cancellation_during_cleanup ~fs () =
   with_tmp_dir @@ fun directory ->
-  with_parent_capability ~fs directory @@ fun parent ->
+  with_replace_context ~fs directory @@ fun parent recovery ->
   let label = "cancelled create with cancelled cleanup" in
   let reason = Failure "initial create cancellation" in
   let backtrace = Printexc.get_callstack 32 in
   let observed_reason, cancellation, observed_backtrace =
     require_capability_write_cancellation ~label (fun () ->
       ignore
-        (create_capability_file_for_testing ~fs
+        (create_capability_file_for_testing ~recovery ~allowed_root_path:directory
            ~before_stage:(function
              | Fs_compat.Write_payload ->
                Printexc.raise_with_backtrace
@@ -1174,7 +1170,7 @@ let test_existing_replace_reobserves_binding_at_publication ~fs () =
   check (list string) "failed publication cleaned its staging state" []
     (directory_entries directory);
   require_ok
-    (create_capability_file ~fs
+    (create_capability_file ~recovery ~allowed_root_path:directory
        ~parent
        ~leaf:"target"
        ~permissions:0o640
@@ -1216,7 +1212,7 @@ let test_existing_replace_yields_to_cooperative_absent_publication ~fs () =
   let create_result, resolve_create_result = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
     let result =
-      create_capability_file_for_testing ~fs
+      create_capability_file_for_testing ~recovery ~allowed_root_path:directory
         ~before_stage:(function
           | Fs_compat.Inspect_open_resource ->
             Eio.Promise.resolve resolve_create_visible ();
@@ -1311,7 +1307,7 @@ let test_existing_publication_guard_blocks_absent_sibling ~fs () =
     Eio.Promise.resolve resolve_writer_result result);
   Eio.Promise.await guard_held;
   (match
-     create_capability_file ~fs
+     create_capability_file ~recovery ~allowed_root_path:directory
        ~parent
        ~leaf:"sibling"
        ~permissions:0o640
@@ -1328,7 +1324,7 @@ let test_existing_publication_guard_blocks_absent_sibling ~fs () =
   Eio.Promise.resolve resolve_release_guard ();
   Eio.Promise.await writer_result |> require_ok;
   require_ok
-    (create_capability_file ~fs
+    (create_capability_file ~recovery ~allowed_root_path:directory
        ~parent
        ~leaf:"sibling"
        ~permissions:0o640
@@ -1398,7 +1394,7 @@ let test_absent_replace_blocks_visible_and_absent_sibling_mutations ~fs () =
        (failure.stage = Fs_compat.Acquire_mutation_lease
         && failure.cause = Fs_compat.Mutation_contended));
   (match
-     create_capability_file ~fs
+     create_capability_file ~recovery ~allowed_root_path:directory
        ~parent
        ~leaf:"sibling"
        ~permissions:0o640
@@ -1415,7 +1411,7 @@ let test_absent_replace_blocks_visible_and_absent_sibling_mutations ~fs () =
   Eio.Promise.resolve resolve_release_writer ();
   Eio.Promise.await writer_result |> require_ok;
   require_ok
-    (create_capability_file ~fs
+    (create_capability_file ~recovery ~allowed_root_path:directory
        ~parent
        ~leaf:"sibling"
        ~permissions:0o640
@@ -1424,7 +1420,7 @@ let test_absent_replace_blocks_visible_and_absent_sibling_mutations ~fs () =
     (read_file sibling)
 ;;
 
-let test_exclusive_create_visibility_remains_under_parent_lease ~fs () =
+let test_exclusive_create_remains_private_under_parent_lease ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
   with_replace_context ~fs directory @@ fun parent recovery ->
@@ -1434,7 +1430,7 @@ let test_exclusive_create_visibility_remains_under_parent_lease ~fs () =
   let create_result, resolve_create_result = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
     let result =
-      create_capability_file_for_testing ~fs
+      create_capability_file_for_testing ~recovery ~allowed_root_path:directory
         ~before_stage:(function
           | Fs_compat.Inspect_open_resource ->
             Eio.Promise.resolve resolve_target_visible ();
@@ -1447,22 +1443,14 @@ let test_exclusive_create_visibility_remains_under_parent_lease ~fs () =
     in
     Eio.Promise.resolve resolve_create_result result);
   Eio.Promise.await target_visible;
-  check bool "exclusive target is visible before payload write" true
+  check bool "exclusive target remains private before publication" false
     (Sys.file_exists target);
-  let append_outcome =
-    Eio.Switch.run @@ fun append_sw ->
-    let file =
-      Fs_compat.open_capability_append_file
-        ~sw:append_sw
-        ~parent
-        ~leaf:"target"
-      |> require_append_file
-    in
-    Fs_compat.append_capability_observed file "append"
-  in
-  check bool "append cannot enter the visible incomplete create" true
-    (append_outcome.write_failure
-     = Some Fs_compat.Capability_append_mutation_contended);
+  Eio.Switch.run (fun append_sw ->
+    match Fs_compat.open_capability_append_file ~sw:append_sw ~parent ~leaf:"target" with
+    | Error Fs_compat.Capability_append_open_missing -> ()
+    | Ok _ -> fail "append opened a private in-progress create"
+    | Error (Fs_compat.Capability_append_open_invalid_leaf _
+            | Fs_compat.Capability_append_open_failed _) -> fail "unexpected append lookup failure");
   (match
      replace_capability_file
        ~recovery
@@ -1514,7 +1502,7 @@ let test_existing_target_lease_allows_absent_sibling_progress ~fs () =
     Eio.Promise.resolve resolve_writer_result result);
   Eio.Promise.await writer_entered;
   require_ok
-    (create_capability_file ~fs
+    (create_capability_file ~recovery ~allowed_root_path:directory
        ~parent
        ~leaf:"sibling"
        ~permissions:0o640
@@ -1655,9 +1643,9 @@ let test_create_exclusive_does_not_overwrite ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
   write_file target "existing";
-  with_parent_capability ~fs directory @@ fun parent ->
+  with_replace_context ~fs directory @@ fun parent recovery ->
   (match
-     create_capability_file ~fs
+     create_capability_file ~recovery ~allowed_root_path:directory
        ~parent
        ~leaf:"target"
        ~permissions:0o644
@@ -1674,14 +1662,15 @@ let test_create_exclusive_does_not_overwrite ~fs () =
 ;;
 
 let test_create_exclusive_refuses_postcheck_intruder ~fs () =
+  let module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing in
   List.iter
     (fun kind -> with_tmp_dir @@ fun directory ->
        let target = Filename.concat directory "target" in
        let sentinel = Filename.concat directory "foreign" in
        write_file sentinel "foreign bytes";
        let planted = ref None in
-       with_parent_capability ~fs directory @@ fun parent ->
-       (match create_capability_file_for_testing ~fs
+       with_replace_context ~fs directory @@ fun parent recovery ->
+       (match create_capability_file_for_testing ~recovery ~allowed_root_path:directory
           ~before_stage:(function
             | Fs_compat.Publish_exclusive ->
               (match kind with
@@ -1699,22 +1688,36 @@ let test_create_exclusive_refuses_postcheck_intruder ~fs () =
           (match failure.cause with
            | Fs_compat.Operation_failed
                { exception_ = Unix.Unix_error (Unix.EEXIST, _, _); _ } -> ()
-           | _ -> fail "did not exercise the actual no-replace syscall"));
+           | _ -> fail "did not exercise the actual no-replace syscall");
+          check bool "EEXIST has a known unchanged target effect" true
+            (error.target_effect = Fs_compat.Target_unchanged);
+          check int "normal cleanup has no failed effects" 0 (List.length error.cleanup_failures));
        let before = match !planted with Some stat -> stat | None -> fail "publish hook not reached" in
        let after = Unix.lstat target in
        check int "foreign inode preserved" before.st_ino after.st_ino;
        check int "foreign device preserved" before.st_dev after.st_dev;
        check string "foreign bytes preserved" "foreign bytes" (read_file target);
-       check string "sentinel untouched" "foreign bytes" (read_file sentinel))
+       check string "sentinel untouched" "foreign bytes" (read_file sentinel);
+       check (list string) "only foreign target and sentinel remain" ["foreign"; "target"]
+         (directory_entries directory);
+       List.iter (fun area ->
+         match Recovery_test.record_names recovery ~area with
+         | Ok names -> check (list string) "exact operation was discharged" [] names
+         | Error Recovery_test.Keeper_lane_not_available -> fail "original recovery lane lost")
+         [Recovery_test.Active; Recovery_test.Owned; Recovery_test.Forensic];
+       require_ok (create_capability_file ~recovery ~allowed_root_path:directory
+         ~parent ~leaf:"next-target" ~permissions:0o640 "same lane continues");
+       check string "same lane can publish a different leaf" "same lane continues"
+         (read_file (Filename.concat directory "next-target")))
     [`Regular; `Symlink; `Hardlink]
 ;;
 
 let test_create_exclusive_success ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
-  with_parent_capability ~fs directory @@ fun parent ->
+  with_replace_context ~fs directory @@ fun parent recovery ->
   require_ok
-    (create_capability_file ~fs
+    (create_capability_file ~recovery ~allowed_root_path:directory
        ~parent
        ~leaf:"target"
        ~permissions:0o640
@@ -1726,9 +1729,9 @@ let test_create_exclusive_success ~fs () =
 let test_create_failure_preserves_private_boundary ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
-  with_parent_capability ~fs directory @@ fun parent ->
+  with_replace_context ~fs directory @@ fun parent recovery ->
   (match
-     create_capability_file_for_testing ~fs
+     create_capability_file_for_testing ~recovery ~allowed_root_path:directory
        ~before_stage:(function
          | Fs_compat.Apply_permissions -> raise Exit
          | _ -> ())
@@ -1748,9 +1751,9 @@ let test_create_failure_preserves_private_boundary ~fs () =
 let test_create_parent_sync_failure_preserves_complete_effect ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
-  with_parent_capability ~fs directory @@ fun parent ->
+  with_replace_context ~fs directory @@ fun parent recovery ->
   (match
-     create_capability_file_for_testing ~fs
+     create_capability_file_for_testing ~recovery ~allowed_root_path:directory
        ~before_stage:(function
          | Fs_compat.Sync_parent -> raise Exit
          | _ -> ())
@@ -1872,12 +1875,12 @@ let test_replace_primary_failure_survives_cleanup_cancellation ~fs () =
 
 let test_create_primary_failure_survives_cleanup_cancellation ~fs () =
   with_tmp_dir @@ fun directory ->
-  with_parent_capability ~fs directory @@ fun parent ->
+  with_replace_context ~fs directory @@ fun parent recovery ->
   let cancellation =
     try
       Eio.Cancel.sub (fun context ->
         ignore
-          (create_capability_file_for_testing ~fs
+          (create_capability_file_for_testing ~recovery ~allowed_root_path:directory
              ~before_stage:(function
                | Fs_compat.Write_payload -> raise Exit
                | Fs_compat.Cleanup_close ->
@@ -2015,11 +2018,11 @@ let test_cleanup_identity_failure_never_unlinks_unknown_payload ~fs () =
 let test_exclusive_create_cancellation_keeps_public_leaf_absent ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
-  with_parent_capability ~fs directory @@ fun parent ->
+  with_replace_context ~fs directory @@ fun parent recovery ->
   let cancelled =
     try
       Eio.Cancel.sub (fun context ->
-        ignore (create_capability_file_for_testing ~fs
+        ignore (create_capability_file_for_testing ~recovery ~allowed_root_path:directory
           ~before_stage:(function
             | Fs_compat.Apply_permissions -> Eio.Cancel.cancel context Exit; Eio.Fiber.check ()
             | _ -> ())
@@ -2082,12 +2085,12 @@ let test_commit_cancellation_finishes_durable_replace ~fs () =
 let test_create_commit_cancellation_reports_complete_effect ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
-  with_parent_capability ~fs directory @@ fun parent ->
+  with_replace_context ~fs directory @@ fun parent recovery ->
   let cancellation =
     try
       Eio.Cancel.sub (fun context ->
         ignore
-          (create_capability_file_for_testing ~fs
+          (create_capability_file_for_testing ~recovery ~allowed_root_path:directory
              ~before_stage:(function
                | Fs_compat.Sync_parent -> Eio.Cancel.cancel context Exit
                | _ -> ())
@@ -2514,8 +2517,8 @@ let () =
         ; test_case "absent replace covers publication transition" `Quick
             (test_absent_replace_blocks_visible_and_absent_sibling_mutations
                ~fs)
-        ; test_case "exclusive create covers visibility transition" `Quick
-            (test_exclusive_create_visibility_remains_under_parent_lease ~fs)
+        ; test_case "exclusive create keeps pre-publication work private" `Quick
+            (test_exclusive_create_remains_private_under_parent_lease ~fs)
         ; test_case "existing target permits absent sibling progress" `Quick
             (test_existing_target_lease_allows_absent_sibling_progress
                ~fs)

@@ -140,8 +140,11 @@ let check_routes ~state ~operator ~names ~invites =
   let seat = dispatch ~state ~token:operator ~meth:"GET"
     ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in
   check int "current seat route succeeds" 200 (status seat);
-  check (option string) "seat names are current" (Some (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) names))))
-    (Option.map Yojson.Safe.to_string (member "participants" (json seat)));
+  let roster = dispatch ~state ~token:operator ~meth:"GET"
+    ~target:Server_routes_http_routes_play_page.participants_path ~body:"" in
+  check int "current roster route succeeds" 200 (status roster);
+  check (option string) "roster names are current" (Some (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) names))))
+    (Option.map Yojson.Safe.to_string (member "participants" (json roster)));
   let response = dispatch ~state ~token:operator ~meth:"GET"
     ~target:Server_routes_http_routes_play.invites_path ~body:"" in
   check int "current invite route succeeds" 200 (status response);

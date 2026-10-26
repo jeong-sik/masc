@@ -287,6 +287,7 @@ let test_the_guide_names_this_servers_doors () =
           (fun url -> check bool url true (contains ~sub:url body))
           [ public_base ^ "/mcp/play"
           ; public_base ^ Page.seat_path
+          ; public_base ^ Page.participants_path
           ; public_base ^ Server_routes_http_routes_play_screen.screen_path
           ];
         List.iter
@@ -378,7 +379,15 @@ let test_the_seat () =
         ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
       Masc.Lane_addon_runtime.For_testing.reset ();
       let seat token = dispatch_get ~state ~target:Page.seat_path ~token in
+      let participants token = dispatch_get ~state ~target:Page.participants_path ~token in
       check int "the seat needs a bearer" 401 (status_of (seat None));
+      check int "the roster needs a bearer" 401 (status_of (participants None));
+      (* The roster is read from credentials, not from the worker. *)
+      let roster = participants (Some player) in
+      check int "the roster answers without a worker" 200 (status_of roster);
+      check bool "operators and invites, not agents' clients" true
+        (member "participants" (Yojson.Safe.from_string (snd (split_response roster)))
+         = Some (`List [`String "minsu"; `String "operator"]));
       check int "no attached worker is unavailable" 503 (status_of (seat (Some player)));
       with_dos_worker ~env ~sw ~base_path (fun ~invoke ~detach ->
         let read () =
@@ -390,8 +399,7 @@ let test_the_seat () =
         check bool "unloaded worker has no machine" true (member "machine" answer = Some (`Bool false));
         check bool "nobody holds it" true (member "controller" answer = Some `Null);
         check bool "no saves name without a machine" true (member "saves_name" answer = Some `Null);
-        check bool "operators and invites, not agents' clients" true
-          (member "participants" answer = Some (`List [`String "minsu"; `String "operator"]));
+        check bool "the seat poll does not carry the roster" true (member "participants" answer = None);
         invoke ~holder:None "masc_dos_load" (`Assoc ["program",`String "game.com"]);
         invoke ~holder:(Some "operator") "masc_dos_pass" (`Assoc ["to",`String "minsu"]);
         let answer = read () in
@@ -442,14 +450,16 @@ let test_explicit_departure_and_same_link_reconnect () =
         (status_of (change (Some token) {|{"connected":false,"who":"operator"}|}));
       let read () = dispatch_get ~state ~target:Page.seat_path ~token:(Some token)
         |> split_response |> snd |> Yojson.Safe.from_string in
+      let roster () = dispatch_get ~state ~target:Page.participants_path ~token:(Some token)
+        |> split_response |> snd |> Yojson.Safe.from_string in
       check bool "a fresh invited agent remains connected" true (member "connected" (read ()) = Some (`Bool true));
       check int "atomic departure" 200 (status_of (change (Some token) {|{"connected":false}|}));
       let departed = read () in
       check bool "the reusable bearer can read its departed seat" true (member "connected" departed = Some (`Bool false));
-      check bool "departed identities are not handoff targets" true (member "participants" departed = Some (`List []));
+      check bool "departed identities are not handoff targets" true (member "participants" (roster ()) = Some (`List []));
       check int "the same invitation explicitly reconnects" 200 (status_of (change (Some token) {|{"connected":true}|}));
       let connected = read () in
-      check bool "reconnect restores eligibility" true (member "participants" connected = Some (`List [`String "minsu"]));
+      check bool "reconnect restores eligibility" true (member "participants" (roster ()) = Some (`List [`String "minsu"]));
       check bool "reconnect does not take a controller" true (member "controller" connected = Some `Null);
       detach ()))))))
 

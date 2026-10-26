@@ -55,7 +55,9 @@ async function main() {
         if (seatReads <= 2) return route.fulfill({ status: 503, json: { error: 'fixture-unavailable' } });
         json = { name: 'minsu', connected, machine: !ejected, controller: ejected || released ? null : passed ? 'operator' : 'minsu',
           controller_recoverable: false,
-          saves_name: ejected ? null : 'game', participants: (invited ? ['minsu', 'operator', 'newplayer'] : ['minsu', 'operator']).filter(name => connected || name !== 'minsu') };
+          saves_name: ejected ? null : 'game' };
+      } else if (url.pathname === '/api/v1/play/participants') {
+        json = { participants: (invited ? ['minsu', 'operator', 'newplayer'] : ['minsu', 'operator']).filter(name => connected || name !== 'minsu') };
       } else if (url.pathname === '/api/v1/play/pad') {
         if (request.method() === 'GET' && ++padReads === 1) return new Promise(() => {});
         if (request.method() === 'POST') {

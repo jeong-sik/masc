@@ -6,14 +6,15 @@
     the tab session for reload recovery. It loads nothing from elsewhere; a CSP with a fresh nonce
     lets only its own inline script and style run.
 
-    [GET /api/v1/play/seat] answers who the bearer is, who holds the DOS
-    controller, and whom the controller can be handed to. It needs
-    [CanPlayMachine] from a bearer. *)
+    [GET /api/v1/play/seat] answers who the bearer is and who holds the DOS
+    controller; [GET /api/v1/play/participants] answers whom the controller
+    can be handed to. Both need [CanPlayMachine] from a bearer. *)
 
 open Server_auth
 module Http = Http_server_eio
 
 let seat_path = "/api/v1/play/seat"
+let participants_path = "/api/v1/play/participants"
 let session_path = "/api/v1/play/session"
 
 (* 16 bytes from the CSPRNG, as hex: the page holds a bearer, so the nonce
@@ -171,6 +172,7 @@ const ROOM_POLL_MS = 2000;
 const ACTIVITY_SHOWN = 8;
 const LIVE_PATH = '/api/v1/lane-addons/live?source_kind=';
 const SEAT_PATH = '/api/v1/play/seat';
+const PARTICIPANTS_PATH = '/api/v1/play/participants';
 const SESSION_PATH = '/api/v1/play/session';
 const PAD_PATH = '/api/v1/play/pad';
 const ROOM_PATH = '/api/v1/play/room';
@@ -264,6 +266,7 @@ let queuedInputs = 0;
 let seatRefreshAfterInputs = false;
 let nextSeatPollAt = 0;
 let handoffRead = null;
+let participantsRead = 0;
 let ended = false;
 let authRejected = false;
 let disconnecting = false;
@@ -845,9 +848,7 @@ async function refreshSeat(signal) {
       || !(r.json.controller === null || typeof r.json.controller === 'string')
       || typeof r.json.controller_recoverable !== 'boolean'
       || !(r.json.controller_error === undefined || typeof r.json.controller_error === 'string')
-      || !(r.json.saves_name === null || typeof r.json.saves_name === 'string')
-      || !Array.isArray(r.json.participants)
-      || !r.json.participants.every(name => typeof name === 'string')) {
+      || !(r.json.saves_name === null || typeof r.json.saves_name === 'string')) {
     controllerError = '자리 정보를 읽지 못했어요 (' + r.status + ')';
     renderTurn();
     setStatus('seat', controllerError);
@@ -867,7 +868,6 @@ async function refreshSeat(signal) {
   if (participationClosed() && roomReadAbort) roomReadAbort.abort();
   setRoomControls();
   renderTurn();
-  renderPassTargets(r.json.participants);
   setStatus('seat', controllerError ?? '');
   // Keep explicit connect intent through transient reads and refused writes.
   // Only observed connection, successful reconnect, or ending it settles it.
@@ -900,11 +900,32 @@ async function refreshSeat(signal) {
     : null;
 }
 
-// A pointer opening also focuses the select. Those events share one read;
-// a later reopening still asks again even if the select never lost focus.
+// The handoff roster reads every credential, so the seat poll does not carry
+// it. A failed read keeps the previous options; pass itself is checked by the
+// server against the current roster.
+// A later read supersedes an earlier one that answers after it.
+async function refreshParticipants() {
+  if (ended || disconnecting) return;
+  const read = ++participantsRead;
+  const current = () => read === participantsRead;
+  let r;
+  try {
+    r = await api('GET', PARTICIPANTS_PATH, undefined, undefined, current);
+  } catch (_) {
+    return;
+  }
+  if (ended || !current() || r.status !== 200 || !r.json || !Array.isArray(r.json.participants)
+      || !r.json.participants.every(name => typeof name === 'string')) return;
+  renderPassTargets(r.json.participants);
+}
+
+// A pointer opening also focuses the select. Those events share one read of
+// the seat and the roster; a later reopening still asks again even if the
+// select never lost focus.
 function refreshHandoffTargets() {
   if (ended || handoffRead !== null) return;
-  handoffRead = refreshSeat().finally(() => { handoffRead = null; });
+  handoffRead = Promise.all([refreshSeat(), refreshParticipants()])
+    .finally(() => { handoffRead = null; });
 }
 
 function showPad(savesName, buttons) {
@@ -1406,6 +1427,7 @@ if (token === '') {
   tickRoom();
   setTimeout(tickSeat, SEAT_POLL_MS);
   refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.'));
+  refreshParticipants();
   // Frame observation does not depend on controller authority being readable.
   restartFrames();
 }
@@ -1479,6 +1501,11 @@ let controller_json ~transaction ~config ~now = function
       [ "machine", `Bool true; "controller", nullable_json controller
       ; "controller_recoverable", `Bool recoverable; "saves_name", nullable_json saves_name ]
 
+(* Every guest page reads the seat every few seconds and again on each
+   machine activity, so it reads only the caller's participation and the
+   observed holder. The handoff roster reads every credential and each
+   one's participation; it has its own route, read when a page opens and
+   when a player opens the handoff selector. *)
 let seat_response ~config ~name =
   match seat_observation ~config with
   | Error detail -> `Service_unavailable, Server_refusal.json ~code:"machine_unavailable" detail
@@ -1486,19 +1513,23 @@ let seat_response ~config ~name =
     let snapshot = Auth.with_credential_transaction config.Workspace.base_path (fun transaction ->
       let now = Time_compat.now () in
       let ( let* ) = Result.bind in
-      let* participants = Play_seat.hand_to_in_transaction ~transaction config ~now in
       let* participation = Play_participation.current ~transaction ~base_path:config.base_path ~name in
-      Ok (participants, participation, controller_json ~transaction ~config ~now observation))
+      Ok (participation, controller_json ~transaction ~config ~now observation))
       |> Result.map_error Masc_domain.masc_error_to_string |> Result.join in
     (match snapshot with
      | Error detail ->
        `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
-     | Ok (participants, participation, controller) ->
+     | Ok (participation, controller) ->
        `OK
        , `Assoc
            ((("name", `String name) :: controller)
-            @ [ ("connected", `Bool (participation = Play_participation.Connected)) ]
-            @ [ ("participants", `List (List.map (fun p -> `String p) participants)) ]))
+            @ [ ("connected", `Bool (participation = Play_participation.Connected)) ]))
+
+let participants_response ~config =
+  match Play_seat.hand_to config ~now:(Time_compat.now ()) with
+  | Error detail -> `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
+  | Ok participants ->
+    `OK, `Assoc [ ("participants", `List (List.map (fun p -> `String p) participants)) ]
 
 let session_response ~config ~name ~token body =
   let decoded = try match Yojson.Safe.from_string body with
@@ -1526,6 +1557,12 @@ let add_routes router =
        with_token_permission_auth ~permission:Masc_domain.CanPlayMachine
          (fun state name request reqd ->
            let status, json = seat_response ~config:(Mcp_server.workspace_config state) ~name in
+           respond_json_value_with_cors ~status request reqd json)
+         request reqd)
+  |> Http.Router.get participants_path (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanPlayMachine
+         (fun state _name request reqd ->
+           let status, json = participants_response ~config:(Mcp_server.workspace_config state) in
            respond_json_value_with_cors ~status request reqd json)
          request reqd)
   |> Http.Router.post session_path (fun request reqd ->

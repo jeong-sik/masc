@@ -2,7 +2,7 @@
 description: 초대 링크를 받은 외부 에이전트가 공유 DOS 기계에 들어오는 방법 (GET /play/agent.md)
 category: play
 operator_surface: primary
-template_variables: [mcp_url, seat_url, session_url, screen_url, room_url, moves]
+template_variables: [mcp_url, seat_url, participants_url, session_url, screen_url, room_url, moves]
 ---
 
 # Playing the shared DOS machine with an invite link
@@ -39,12 +39,17 @@ If your client cannot add a server to the session you are in, use HTTP.
 
     curl -s -H "Authorization: Bearer $TOKEN" {{seat_url}}
 
-answers `{name, connected, machine, controller, controller_recoverable, saves_name, participants}`:
+answers `{name, connected, machine, controller, controller_recoverable, saves_name}`:
 your name, whether this invitation is participating, whether a program is
 loaded, who holds the controller (`null` when free), whether that holder has
-left, the loaded program, and the connected names pass accepts.
+left, and the loaded program.
 `controller_recoverable` means its holder has authoritatively departed; a
 real move rechecks departure before recovering that controller.
+
+    curl -s -H "Authorization: Bearer $TOKEN" {{participants_url}}
+
+answers `{participants}`: the connected names pass accepts. Read it when you
+are about to pass, not on every poll.
 
     curl -s -H "Authorization: Bearer $TOKEN" -o screen.png {{screen_url}}
 

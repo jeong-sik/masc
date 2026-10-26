@@ -514,7 +514,33 @@ let test_space_connection_context () =
      ("transport",`String "webdriver_bidi")::List.remove_assoc "transport" fields;
      ["browserSpace",json];["clientId",`Null;"browserSpace",json]]
 
+let test_native_control_wait_contract () =
+  let parse fields=Lane.Action.parse (`Assoc (("action",`String "wait_for_control")::fields)) in
+  let defaults=Lane.Action.Control (Lane.Action.Wait_for_control {interval_ms=None;timeout_ms=None}) in
+  check bool "missing wait options keep SDK defaults" true (parse []=Ok defaults);
+  let action=Result.get_ok (parse ["controlOptions",`Assoc ["interval",`Float 0.5;"timeout",`Int 100000]]) in
+  check bool "positive SDK milliseconds retain their values" true
+    (Lane.Action.parse (Lane.Action.to_json action)=Ok action);
+  let verb=Lane.Page_act action in
+  check bool "native wait owns its reply clock" true (Lane.ego_reply_policy verb=Lane.Executor_owned);
+  check string "wait activity names the Space operation" "wait_for_control" (Lane.activity_name verb);
+  check (option int) "wait has Space scope" None (Lane.activity_scope verb);
+  check bool "other browser backends refuse Space waits" true
+    (Option.is_some (Lane.automation_refusal verb) && not (Lane.verb_allowed_on_stagehand verb)
+      && not (Lane.live_transport_serves Lane.Web_extension Lane.Operator_handoff)
+      && not (Lane.live_transport_serves Lane.Webdriver_bidi Lane.Operator_handoff));
+  List.iter (fun fields -> check bool "invalid wait input fails before dispatch" true
+    (Result.is_error (parse fields)))
+    [ ["tabId",`Int 1];["controlOptions",`Null];
+      ["controlOptions",`Assoc ["interval",`Int 0]];
+      ["controlOptions",`Assoc ["timeout",`Float nan]];
+      ["controlOptions",`Assoc ["timeout",`Int (-1)]];
+      ["controlOptions",`Assoc ["timeout",`Int 1;"timeout",`Int 2]];
+      ["controlOptions",`Assoc ["claim",`Bool true]];
+      ["controlOptions",`Assoc [];"controlOptions",`Assoc []] ]
+
 let () = run "browser client routing" ["ownership", [
+  test_case "native Space wait keeps SDK ownership and options" `Quick test_native_control_wait_contract;
   test_case "reads retain caller, scope and settled results" `Quick test_read_activity;
   test_case "agent activity follows queue ownership and cleanup" `Quick test_agent_activity;
   test_case "each live transport serves its part of the table" `Quick test_transport_table;

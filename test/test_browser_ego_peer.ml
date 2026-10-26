@@ -1165,6 +1165,59 @@ const taskSpace = async space => ({
 const takeOverTaskSpace = async id => { seen.push("takeOver " + id); return {ownership: "agent", userPage: () => %s}; };
 |js} (Yojson.Safe.to_string (str ownership)) user_page
 
+let test_native_space_control_wait () =
+  let ownership=ref "agent" and native_failure=ref false and calls=ref 0 and output=ref "" in
+  let run ~window_s script =
+    let sent=sent_of ~window_s script in
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+    | "tabs.list" -> answered tabs
+    | "space.wait_for_control" ->
+      check (float 0.) "wait uses the native runner rather than a host clock" 0. sent.window_s;
+      incr calls;
+      let shim=Printf.sprintf {js|
+const seen=[];
+process.on('exit',()=>console.log('seen '+JSON.stringify(seen)));
+const forbidden=name=>{seen.push(name);throw new Error('unexpected '+name);};
+const takeOverTaskSpace=async()=>forbidden('takeOver');
+const claimTaskSpace=async()=>forbidden('claim');
+const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
+  page:()=>forbidden('page'),tabs:async()=>forbidden('tabs'),
+  waitForControl:async options=>{seen.push(options);%s}});
+|js} (Yojson.Safe.to_string (str !ownership))
+        (if !native_failure then "throw new Error('SDK control wait timed out');" else "") in
+      output:=in_node (shim ^ script);Ok !output
+    | "page.target_input" -> answered (obj ["urlBefore",str observed_url;"pointerReleased",`Bool false;
+        "receipt",obj [];"error",str "native drag interrupted";"tab",obj ["url",str observed_url;"title",str "Slack"]])
+    | other -> failf "unexpected control wait step %s" other in
+  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+      ~space:"masc" ~version:"fixture" ~capture_directory:(capture_directory ()) with
+    | Ok peer -> peer | Error detail -> fail detail in
+  let wait options=dispatch peer Live.Page_act (obj ["action",str "wait_for_control";"controlOptions",options]) in
+  let seen ()=match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.from_string (after ~prefix:"seen " line)
+    | None -> fail "native stand-in emitted no calls" in
+  let options=obj ["interval",`Float 0.5;"timeout",`Float 100000.] in
+  (match wait options with
+   | Ok value -> check bool "wait observation names the same Space" true
+       (value=obj ["action",str "wait_for_control";"spaceId",`Int 51;"spaceName",str "SDK Space";"controlAvailable",`Bool true])
+   | Error _ -> fail "native control wait failed");
+  check bool "options reach the SDK unchanged" true (seen ()=`List [options]);
+  native_failure:=true;
+  ignore (before_effect "SDK wait timeout sends no input" (wait (obj [])));
+  native_failure:=false;ownership:="agentDelegatedToUser";
+  ignore (before_effect "a user-held Space cannot be reclaimed by waiting" (wait (obj [])));
+  check bool "user-held Space runs no native wait or page call" true (seen ()=`List []);
+  ownership:="agent";
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let drag=Lane.Drag_to {source=Lane.Selector "@12";destination=Lane.Selector "#target";via=[];duration_ms=0} in
+  check string "drag first leaves input unconfirmed" "unknown"
+    (failure_kind (dispatch peer Live.Page_interact (interact_args drag)));
+  (match wait (obj []) with Ok _ -> () | Error _ -> fail "control observation was refused after uncertain input");
+  let before= !calls in
+  ignore (before_effect "availability cannot clear uncertain input" (dispatch peer Live.Page_interact (interact_args (Lane.Click "#send"))));
+  check int "no later native input was dispatched" before !calls
+
 let test_the_space_goes_to_the_operator_and_back () =
   let ownership = ref "agent" and user_page = ref {|({label: "p2"})|} and output = ref "" in
   let run ~window_s script =
@@ -2089,6 +2142,7 @@ let () =
       test_case "an input that opens a dialog answers with it" `Quick test_an_input_that_opens_a_dialog_answers_with_it;
       test_case "the dialog scripts run against a stand-in in node" `Quick test_dialog_scripts_in_node;
       test_case "a snapshot target is found by ego and checked first" `Quick test_a_snapshot_target_is_found_by_ego_and_checked_first;
+      test_case "native control wait preserves ownership and uncertain input" `Quick test_native_space_control_wait;
       test_case "the space goes to the operator and back" `Quick test_the_space_goes_to_the_operator_and_back;
       test_case "scene input preserves shared identity checks" `Quick test_input_acts_through_the_shared_page_scripts;
       test_case "selectors use ego SDK" `Quick test_selector_input_uses_ego_sdk;

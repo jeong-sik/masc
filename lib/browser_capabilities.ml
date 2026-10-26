@@ -9,7 +9,7 @@ type operation =
   | Click | Double_click | Right_click | Middle_click | Pointer_down | Pointer_up | Hover | Pointer_drag | Html5_drop
   | Scroll_page | Scroll_at | Fill | Type_text | Press_key | Key_chord | Select_option
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
-  | Hand_off | Take_over
+  | Hand_off | Take_over | Wait_for_control
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
   | Read_clipboard | Write_clipboard | Read_network | Intercept_network
   | Read_console | Read_storage | Write_storage | Emulate_environment | Sentence_action
@@ -320,6 +320,12 @@ let support backend operation = match backend with
            "While the operator holds the space, every step on it is refused before any effect, until take_over."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
           Unsupported "Only an ego connection hands its task space to the operator.")
+    | Wait_for_control -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"wait_for_control" Act
+          ["Requires the exact observed clientId and an agent-owned Space. Native SDK wait only; never claims or takes over user control.";
+           "controlOptions accepts positive finite interval/timeout milliseconds; omitted values keep SDK defaults. Availability is an observation, not permission for later input or proof of input release."]
+      | Connected (Browser_lane.Web_extension|Browser_lane.Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable ->
+          Unsupported "Only an ego connection provides the native Space control wait.")
     | Take_over -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"take_over" Act
           ["Requires the exact observed clientId. Only after the operator has said they are done; nothing checks that they did, so taking it early takes the browser from under them.";
@@ -403,7 +409,7 @@ let operation_name = function
   | Scroll_at -> "scroll_at" | Fill -> "fill" | Type_text -> "type_text" | Press_key -> "press_key"
   | Key_chord -> "key_chord" | Select_option -> "select_option" | Read_frames -> "read_frames"
   | Frame_interaction -> "frame_interaction" | Read_dialog -> "read_dialog"
-  | Accept_dialog -> "accept_dialog" | Dismiss_dialog -> "dismiss_dialog" | Hand_off -> "hand_off" | Take_over -> "take_over"
+  | Accept_dialog -> "accept_dialog" | Dismiss_dialog -> "dismiss_dialog" | Hand_off -> "hand_off" | Take_over -> "take_over" | Wait_for_control -> "wait_for_control"
   | Upload_file -> "upload_file"
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"
   | Touch -> "touch" | Read_clipboard -> "read_clipboard" | Write_clipboard -> "write_clipboard"

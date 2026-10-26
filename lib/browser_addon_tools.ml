@@ -159,7 +159,7 @@ let prepare ~upload_paths tool json =
       let* ()=match action,request.route with
         | (B.Action.Open_tab _|Open_window _|Control _),Browser_selection.Exact (B.Live_route None)
         | Control _,Automatic ->
-            Error "live open_tab, open_window, hand_off and take_over require an explicit observed clientId"
+            Error "live open_tab, open_window, hand_off, take_over and wait_for_control require an explicit observed clientId"
         | Control _,Exact (B.Automation_route|Stagehand_route) -> Error B.handoff_refused
         | (Open_tab _|Open_window _|On_tab _),(Automatic|Exact (Live_route _|Automation_route|Stagehand_route))
         | Control _,Exact (Live_route (Some _)) -> Ok () in

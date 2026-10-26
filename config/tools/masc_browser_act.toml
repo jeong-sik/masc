@@ -1,6 +1,6 @@
 name = "masc_browser_act"
 description = """
-Run one action in an explicitly selected browser. Automation serves the listed actions; Stagehand serves only open_tab and top-level back/forward/reload/close_tab through native browser methods. open_window opens a new browser window holding one tab (automation Firefox and live BiDi only; it returns that tab's tabId). set_cookie and delete_cookie write one cookie for the tab's own page host on an automation Firefox only (never on a live or operator browser); the value is never returned. set_emulation sets a tab's reported location (latitude and longitude), locale and IANA timezone on an automation Firefox (reload the page to see new values); clear_emulation restores these overrides only and leaves permissions unchanged. A geolocation grant for the current origin persists until the owned browser session closes. block_requests makes the tab's requests to the listed hosts fail on an automation Firefox; unblock_requests lifts them. Live BiDi serves open_tab, open_window, and top-level back/forward/reload/close_tab only for a tab this connection opened with open_tab. On an ego connection, hand_off gives its whole task space to the operator for a step only a person can take, such as a sign-in or a captcha. Its receipt returns spaceId and spaceName, identifying the same Space without proving window visibility. Use masc_ask to explain the required step and request completion, retaining this browser binding and the original Task/Goal in context. While they hold it, every step on that space is refused before any effect. take_over takes it back: call it only after the operator says they are done, because nothing checks that they did. Omit identity only for initial open_tab discovery; otherwise retain the exact browserSelection lane/clientId and returned tabId. A failed navigation after creation retains a partial-effect receipt: inspect that created tab on the same browser before deciding what to do next; never open another automatically.
+Run one action in an explicitly selected browser. Automation serves the listed actions; Stagehand serves only open_tab and top-level back/forward/reload/close_tab through native browser methods. open_window opens a new browser window holding one tab (automation Firefox and live BiDi only; it returns that tab's tabId). set_cookie and delete_cookie write one cookie for the tab's own page host on an automation Firefox only (never on a live or operator browser); the value is never returned. set_emulation sets a tab's reported location (latitude and longitude), locale and IANA timezone on an automation Firefox (reload the page to see new values); clear_emulation restores these overrides only and leaves permissions unchanged. A geolocation grant for the current origin persists until the owned browser session closes. block_requests makes the tab's requests to the listed hosts fail on an automation Firefox; unblock_requests lifts them. Live BiDi serves open_tab, open_window, and top-level back/forward/reload/close_tab only for a tab this connection opened with open_tab. On an ego connection, hand_off gives its whole task space to the operator for a step only a person can take, such as a sign-in or a captcha. Its receipt returns spaceId and spaceName, identifying the same Space without proving window visibility. Use masc_ask to explain the required step and request completion, retaining this browser binding and the original Task/Goal in context. While they hold it, every step on that space is refused before any effect. wait_for_control waits within the current agent-owned Space using Ego SDK polling; it does not take over, signal completed login, or clear unconfirmed input release. take_over takes it back: call it only after the operator says they are done, because nothing checks that they did. Omit identity only for initial open_tab discovery; otherwise retain the exact browserSelection lane/clientId and returned tabId. A failed navigation after creation retains a partial-effect receipt: inspect that created tab on the same browser before deciding what to do next; never open another automatically.
 Read elements in the same tab/frame for selectors; preserve decoded CSS escapes exactly. After no match, re-read. Actions can change external state: observe again after success or failure before retrying."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
@@ -13,7 +13,7 @@ defer_loading = true
 [[params]]
 name = "action"
 type = "string"
-enum = ["open_tab", "open_window", "hand_off", "take_over", "close_tab", "back", "forward", "reload", "upload", "accept_dialog", "dismiss_dialog", "set_cookie", "delete_cookie", "set_emulation", "clear_emulation", "block_requests", "unblock_requests"]
+enum = ["open_tab", "open_window", "hand_off", "take_over", "wait_for_control", "close_tab", "back", "forward", "reload", "upload", "accept_dialog", "dismiss_dialog", "set_cookie", "delete_cookie", "set_emulation", "clear_emulation", "block_requests", "unblock_requests"]
 required = true
 description = "Browser-level actions: tabs, history, JavaScript dialogs, file upload, cookies, emulation, request blocking, and handing an ego task space to the operator and back. Page input (click, fill, select, scroll, keys) is masc_browser_interact."
 
@@ -27,7 +27,7 @@ description = "Optional advanced browser override. Omit only for initial discove
 name = "tabId"
 type = "integer"
 minimum = 0
-description = "Required except open_tab, open_window, hand_off and take_over."
+description = "Required except open_tab, open_window, hand_off, take_over and wait_for_control."
 
 [[params]]
 name = "selector"
@@ -64,7 +64,7 @@ description = "Keeper-readable playground-relative or visible absolute files, pr
 [[params]]
 name = "clientId"
 type = "string"
-description = "Required with lane=live for open_tab, open_window, hand_off and take_over: exact observed live connection ID. Not valid on automation or stagehand."
+description = "Required with lane=live for open_tab, open_window, hand_off, take_over and wait_for_control: exact observed live connection ID. Not valid on automation or stagehand."
 
 [[params]]
 name = "cookieName"
@@ -140,3 +140,19 @@ name = "hosts"
 type = "array"
 items = { type = "string" }
 description = "block_requests: exact lowercase host names or IPv4 addresses such as ads.example.com. Requests from the tab and its frames to them fail until unblock_requests; a subdomain is a host of its own."
+
+[[params]]
+name = "controlOptions"
+type = "object"
+additional_properties = false
+description = "wait_for_control only: native SDK interval and timeout in positive finite milliseconds; omit to retain SDK defaults. Requires an agent-owned Ego Space and exact clientId. Never takes over user control, completes a login handoff or clears uncertain input release."
+
+[[params.params]]
+name = "interval"
+type = "number"
+exclusive_minimum = 0.0
+
+[[params.params]]
+name = "timeout"
+type = "number"
+exclusive_minimum = 0.0

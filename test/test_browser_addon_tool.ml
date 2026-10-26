@@ -105,10 +105,10 @@ let control_identity ~sw ~owner =
       check bool "control receipt delivered" true
         (send (W.Deliver {client_id;id=issued.id;payload=`Assoc ["ok",`Bool true;
           "data",`Assoc ["ownership",`String (match control with
-            | B.Action.Hand_off -> "operator" | Take_over -> "agent")]]})=W.Receipt);
+            | B.Action.Hand_off -> "operator" | Take_over | Wait_for_control _ -> "agent")]]})=W.Receipt);
       check (option bool) "explicit ego control succeeds" (Some false)
         (Eio.Promise.await_exn pending).is_error)
-      [B.Action.Hand_off;Take_over];
+      [B.Action.Hand_off;Take_over;Wait_for_control {interval_ms=None;timeout_ms=None}];
     check bool "refused controls never entered the browser queue" true
       (match send (W.Poll {client;window_sec=0.001}) with
        | W.Poll_result {command=None;_} -> true | _ -> false)

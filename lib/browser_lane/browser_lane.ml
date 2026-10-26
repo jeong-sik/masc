@@ -136,7 +136,8 @@ let reply_policy = function
   | Page_native_workflow _ -> Executor_owned
   | Page_act action ->
     (match action with
-     | Action.Open_tab _ | Action.Open_window _ | Action.Control _ -> Reply_window
+     | Action.Control (Action.Wait_for_control _) -> Executor_owned
+     | Action.Open_tab _ | Action.Open_window _ | Action.Control (Action.Hand_off|Action.Take_over) -> Reply_window
      | Action.On_tab {interaction;_} ->
        (match interaction with
         | Action.Upload _ -> Executor_owned
@@ -569,7 +570,7 @@ let live_capability = function
   | Page_snapshot _ -> Some Accessibility_snapshot
   | Page_interact { action; _ } -> Some (live_capability_of_interaction action)
   | Page_act (Action.Open_tab _ | Action.Open_window _) -> Some Tab_creation
-  | Page_act (Action.Control (Action.Hand_off | Action.Take_over)) -> Some Operator_handoff
+  | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Wait_for_control _)) -> Some Operator_handoff
   | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Some Tab_history
   | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Some Tab_closing
   | Page_goto _ -> Some Tab_navigation
@@ -592,13 +593,13 @@ let verb_allowed_on_live verb = Option.is_some (live_capability verb)
 let sentence_verbs_refused = "act and extract require the stagehand lane"
 let snapshot_refused = "an accessibility snapshot is served only by an ego connection on the live lane"
 let snapshot_target_refused = "a snapshot target is acted on only by an ego connection on the live lane"
-let handoff_refused = "hand_off and take_over apply only to an ego connection on the live lane"
+let handoff_refused = "Space control actions apply only to an ego connection on the live lane"
 (* Why the automation lane does not serve a verb, if it does not.
    Model-assisted locate is admitted separately by the installed executor. *)
 let automation_refusal = function
   | Page_native_workflow _ -> Some "native workflows require an ego connection"
   | Page_interact {action; _} when acts_on_snapshot_target action -> Some snapshot_target_refused
-  | Page_act (Action.Control (Action.Hand_off | Action.Take_over)) -> Some handoff_refused
+  | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Wait_for_control _)) -> Some handoff_refused
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _
   | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _
   | Page_act (Action.Open_tab _ | Action.Open_window _ | Action.On_tab _)
@@ -621,7 +622,7 @@ let verb_allowed_on_stagehand = function
   | Page_read _ | Page_elements _ | Page_scene _ | Page_interact _ | Page_instruct _ | Page_locate _
   | Page_extract _ -> true
   | Page_act (Action.Open_tab _) -> true
-  | Page_act (Action.Open_window _ | Action.Control (Action.Hand_off | Action.Take_over)) -> false
+  | Page_act (Action.Open_window _ | Action.Control (Action.Hand_off | Action.Take_over | Action.Wait_for_control _)) -> false
   | Page_act (Action.On_tab {frame_path;interaction;_}) ->
     (match interaction with
      | Action.Back | Forward | Reload | Close_tab -> frame_path = []
@@ -829,11 +830,13 @@ let activity_scope = function
   | Tabs_list | Session_open _ | Session_close | Session_status
   | Page_act (Action.Open_tab _|Open_window _|Control _) -> None
 let activity_name = function
+  | Page_act (Action.Control (Action.Wait_for_control _)) -> "wait_for_control"
   | Page_interact {action;_} -> interaction_verb action
   | Page_native_workflow _ -> "workflow"
   | (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_console _|Page_network _|Page_cookies _
     |Page_capture _|Page_scene _|Page_snapshot _|Session_open _|Session_close|Session_status|Page_goto _
-    |Page_elements _|Page_act _|Page_context _|Page_instruct _|Page_locate _|Page_extract _) as verb -> verb_to_string verb
+    |Page_elements _|Page_act (Action.Open_tab _|Open_window _|Control (Hand_off|Take_over)|On_tab _)
+    |Page_context _|Page_instruct _|Page_locate _|Page_extract _) as verb -> verb_to_string verb
 let activity_result = function
   | `Assoc fields ->
     (match List.assoc_opt "ok" fields,List.assoc_opt "effectPhase" fields with

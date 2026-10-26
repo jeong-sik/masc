@@ -133,3 +133,17 @@ and selection steps plus five mouse/state-wait steps. Its
 explicit routing and UI limits. Installed MASC, Keeper dispatch and visible UI
 behavior for this extension remain unverified. See
 [the SDK inventory](ego-sdk-coverage.md) for evidence and remaining capabilities.
+
+## Space control wait
+
+`masc_browser_act` with `action: "wait_for_control"`, the observed live
+`clientId` and optional `controlOptions: {interval, timeout}` invokes Ego's
+`TaskSpace.waitForControl()` inside the same agent-owned Space. Both options
+are positive finite milliseconds; omitted values retain SDK defaults. The SDK
+owns polling and its deadline. MASC adds no timer around that call.
+
+This is an in-place SDK availability observation. It does not complete a login
+handoff, reclaim a user-held Space, or clear uncertain input release. A handed-off
+Space is refused before the wait; the existing explicit operator-confirmation
+and same-Space `take_over` flow still applies. Subsequent commands recheck normal
+ownership and input state. Keeper activity names the Space wait separately.

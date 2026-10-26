@@ -864,11 +864,13 @@ let test_get_recurring_schedule_after_accept_advance () =
     ~retention_days:Schedule_store.terminal_schedule_retention_days with
    | Ok _ -> ()
    | Error err -> fail (Schedule_store.store_error_to_string err));
-  (match Schedule_store.start_due_candidate config ~now:201.0 ~schedule_id with
-   | Ok _ -> ()
-   | Error err -> fail (Schedule_store.store_error_to_string err));
+  let started =
+    match Schedule_store.start_due_candidate config ~now:201.0 ~candidate:request with
+    | Ok started -> started
+    | Error err -> fail (Schedule_store.store_error_to_string err)
+  in
   let advanced : Schedule_domain.schedule_request =
-    match Schedule_store.accept_running config ~now:202.0 ~schedule_id () with
+    match Schedule_store.accept_running config ~now:202.0 ~attempt:started.attempt () with
     | Ok stored -> stored
     | Error err -> fail (Schedule_store.store_error_to_string err)
   in
@@ -1526,18 +1528,20 @@ let test_cancel_refusal_says_the_state_and_the_last_wake () =
   with_config
   @@ fun config ->
   let schedule_id = "sched-already-fired" in
-  ignore
-    (create_service_exn config ~schedule_id ~due_at:200.0
-       ~payload:(keeper_wake_payload "fire once") ()
-     : Schedule_domain.schedule_request);
+  let request =
+    create_service_exn config ~schedule_id ~due_at:200.0
+      ~payload:(keeper_wake_payload "fire once") ()
+  in
   let store_ok label = function
     | Ok value -> value
     | Error err -> fail (label ^ ": " ^ Schedule_store.store_error_to_string err)
   in
   ignore (store_ok "refresh" (Schedule_store.refresh_due config ~now:200.0
     ~retention_days:Schedule_store.terminal_schedule_retention_days));
-  ignore (store_ok "start" (Schedule_store.start_due_candidate config ~now:201.0 ~schedule_id));
-  ignore (store_ok "accept" (Schedule_store.accept_running config ~now:202.0 ~schedule_id ()));
+  let started = store_ok "start"
+      (Schedule_store.start_due_candidate config ~now:201.0 ~candidate:request) in
+  ignore (store_ok "accept"
+    (Schedule_store.accept_running config ~now:202.0 ~attempt:started.attempt ()));
   let refused =
     dispatch_exn config Tool_schemas_schedule.Cancel_request
       (`Assoc

@@ -1088,16 +1088,23 @@ let disconnect_client ~client_id =
     | None -> Error "unknown_client"
     | Some client -> retire_unlocked key client; Ok ())
 (* The worker that runs this connection disconnects it itself when it ends,
-   so the lane stops timing it. Only a client still connected is held: one
-   retired, unknown or past its window is not brought back. *)
+   so the lane stops timing it. Only a client still inside its window is
+   held: one retired, unknown or past its window is not brought back, even
+   while a request it took is still running. A browser extension is a native
+   host that no worker runs, so it stays timed. *)
 let hold_client ~client_id =
   Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
     match Hashtbl.find_opt clients (client_id_to_string client_id) with
     | None -> Error "unknown_client"
     | Some client ->
       Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
-        if not (connected_unlocked client) then Error "client_not_connected"
-        else (client.liveness <- Worker_held; Ok ())))
+        match client.info.transport, client.liveness with
+        | Web_extension, (Polled _ | Worker_held) -> Error "client_not_worker_run"
+        | (Webdriver_bidi | Ego_task_space), _ when client.closed -> Error "client_not_connected"
+        | (Webdriver_bidi | Ego_task_space), Worker_held -> Ok ()
+        | (Webdriver_bidi | Ego_task_space), Polled until ->
+          if Monotonic_deadline.passed until then Error "client_not_connected"
+          else (client.liveness <- Worker_held; Ok ())))
 (* A browser whose lease ended after its target was resolved is the same
    selection failure as naming it when it had already gone, so the caller
    answers both from one place. Work this connection's transport does not

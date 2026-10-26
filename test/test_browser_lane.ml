@@ -4,18 +4,18 @@ let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Ena
 open Alcotest
 module Lane = Browser_lane
 let serial = ref 0
-let info browser : Lane.client_info =
+let info ?(transport=Browser_lane.Web_extension) browser : Lane.client_info =
   incr serial;
   let raw = Printf.sprintf "00000000-0000-4000-8000-%012d" !serial in
   let client_id = match Lane.client_id_of_string raw with Ok id -> id | Error error -> fail error in
-  {client_id; browser; version="1.0"; transport=Browser_lane.Web_extension; engine_version="155.0.1"}
+  {client_id; browser; version="1.0"; transport; engine_version="155.0.1"}
 let target id = match Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some id)) with
   | Ok value -> value | Error error -> fail (Lane.selection_error_code error)
 let with_clients f = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run (fun sw ->
-    let connect browser =
-      let client = info browser in
+    let connect ?transport browser =
+      let client = info ?transport browser in
       ignore (Lane.take_command ~client_info:client ~window_sec:0.001);
       Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:client.client_id));
       client in
@@ -82,16 +82,22 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
    retires a polled client and still serves the held one, and neither a poll
    nor a delivered result turns the held client back into a timed one. *)
 let test_worker_held_client_outlives_the_poll_window () = with_clients (fun sw connect ->
-  let polled = connect Lane.Firefox and held = connect Lane.Zen in
+  let polled = connect ~transport:Lane.Webdriver_bidi Lane.Firefox
+  and held = connect ~transport:Lane.Webdriver_bidi Lane.Zen
+  and extension = connect Lane.Firefox in
   let live (info : Lane.client_info) = match target info.client_id with
     | Lane.Live_client client -> client
     | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
   let polled_client = live polled and held_client = live held in
   let is_held () = match held_client.liveness with Lane.Worker_held -> true | Lane.Polled _ -> false in
   check bool "the worker holds its own connected client" true (Lane.hold_client ~client_id:held.client_id = Ok ());
+  check bool "no worker runs a browser extension, so it is not held" true
+    (Result.is_error (Lane.hold_client ~client_id:extension.client_id));
   polled_client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
-  check bool "a client past its window is not held" true
+  Hashtbl.replace polled_client.executor_work "running" Lane.Interaction_running;
+  check bool "a client past its window is not held, even while its request runs" true
     (Result.is_error (Lane.hold_client ~client_id:polled.client_id));
+  Hashtbl.remove polled_client.executor_work "running";
   check bool "a polled client whose window passed is retired on its next poll" true
     (Lane.take_command ~client_info:polled ~window_sec:0.001 = Error Lane.Client_retired);
   check bool "the held client's next poll still serves it" true
@@ -103,8 +109,9 @@ let test_worker_held_client_outlives_the_poll_window () = with_clients (fun sw c
   ignore (Lane.deliver_result ~client_id:held.client_id ~id:command.id ~payload:(payload "held"));
   answered result "held";
   check bool "a delivered result leaves it held" true (is_held ());
-  check bool "only the held client stays connected" true
-    (List.map (fun (client : Lane.client_info) -> client.client_id) (Lane.connected_clients ()) = [held.client_id]);
+  check bool "the retired polled client is no longer connected" true
+    (List.map (fun (client : Lane.client_info) -> client.client_id) (Lane.connected_clients ())
+     |> List.sort compare = List.sort compare [held.client_id; extension.client_id]);
   check bool "a retired client cannot be held" true
     (Result.is_error (Lane.hold_client ~client_id:polled.client_id)))
 let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connect ->

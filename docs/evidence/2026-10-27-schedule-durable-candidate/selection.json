@@ -1,0 +1,154 @@
+{
+  "recorded_at_unix": 1793046315.524616,
+  "leader_operation": "kmsg-db4fc2ac7a60b10b2de1b93f4c93320c",
+  "base": "9377c7f3025d68e3856d2afd3762468dabc77813",
+  "selection": [
+    {
+      "pr": 46234,
+      "head": "cfa9b817faa736c2f112fca5957d748d66727294",
+      "base_ref_snapshot": "df4642b0f3083938037f866fee3d325de69353ad",
+      "three_dot_merge_base": "df4642b0f3083938037f866fee3d325de69353ad",
+      "state": "open",
+      "draft": false,
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": "df4642b0f3083938037f866fee3d325de69353ad"
+        },
+        "id": 2621016,
+        "number": 46235,
+        "position": 1,
+        "size": 8
+      },
+      "commits": [
+        "42a3a86327d4d8afd4b6f9deef0c8f06f795c216",
+        "105a3ebd6dc87118e0d44bb215808556dcbf91d7",
+        "cfa9b817faa736c2f112fca5957d748d66727294"
+      ]
+    },
+    {
+      "pr": 46233,
+      "head": "b07769be553f54d14873c72f9ccd161d4085799e",
+      "base_ref_snapshot": "cfa9b817faa736c2f112fca5957d748d66727294",
+      "three_dot_merge_base": "cfa9b817faa736c2f112fca5957d748d66727294",
+      "state": "open",
+      "draft": false,
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": "df4642b0f3083938037f866fee3d325de69353ad"
+        },
+        "id": 2621016,
+        "number": 46235,
+        "position": 2,
+        "size": 8
+      },
+      "commits": [
+        "39e1fcc4979d10bc41c9825518caf49935232ecf",
+        "b07769be553f54d14873c72f9ccd161d4085799e"
+      ]
+    },
+    {
+      "pr": 46240,
+      "head": "fa23bf437c3679bb4b7bd7c47eb592675697e370",
+      "base_ref_snapshot": "b07769be553f54d14873c72f9ccd161d4085799e",
+      "three_dot_merge_base": "b07769be553f54d14873c72f9ccd161d4085799e",
+      "state": "open",
+      "draft": false,
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": "df4642b0f3083938037f866fee3d325de69353ad"
+        },
+        "id": 2621016,
+        "number": 46235,
+        "position": 3,
+        "size": 8
+      },
+      "commits": [
+        "285f81270d23a2c9275c2798da9593b0022b4d91",
+        "dd332955dd87d839322f9ac1c566e559cd426ce2",
+        "fa23bf437c3679bb4b7bd7c47eb592675697e370"
+      ]
+    },
+    {
+      "pr": 46248,
+      "head": "c52f799e52d3683bd2a4c624f0f6adfe36015ec9",
+      "base_ref_snapshot": "fa23bf437c3679bb4b7bd7c47eb592675697e370",
+      "three_dot_merge_base": "fa23bf437c3679bb4b7bd7c47eb592675697e370",
+      "state": "open",
+      "draft": false,
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": "df4642b0f3083938037f866fee3d325de69353ad"
+        },
+        "id": 2621016,
+        "number": 46235,
+        "position": 4,
+        "size": 8
+      },
+      "commits": [
+        "c40cde2c6c1c3562f05c881be5fbd6ebccbd8b4c",
+        "22014660f23d80e8043846230fdd1a9b3b40278f",
+        "2861571c6fa3b6403cf12980feea3a109dabca71",
+        "4c94fcce84f59c751ebd4867a2f0dee0e3abb188",
+        "c52f799e52d3683bd2a4c624f0f6adfe36015ec9"
+      ]
+    },
+    {
+      "pr": 46202,
+      "head": "6dedd652df1273c9476a04643b445601e30181ad",
+      "base_ref_snapshot": "a7e0feac83eed783f87e054f0f5bebec22330560",
+      "three_dot_merge_base": "fae95aaf9575fff4c9c7a18cd1dcf1d428d4227a",
+      "state": "open",
+      "draft": false,
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": "a7e0feac83eed783f87e054f0f5bebec22330560"
+        },
+        "id": 2619604,
+        "number": 46226,
+        "position": 1,
+        "size": 2
+      },
+      "commits": [
+        "01987c0f011c26768cc57f08128784f2a70f50cd",
+        "77ca7c5a523d069dea10945e381c99be6b41c9e4",
+        "acd8f15318716b4542afdcb95de0f1fc61897530",
+        "c1988fa722c11b9efa205dbed9156338a736821f",
+        "6dedd652df1273c9476a04643b445601e30181ad"
+      ]
+    },
+    {
+      "pr": 46272,
+      "head": "2d8fa7543519c5c58be056f3460a2a06e76c2730",
+      "base_ref_snapshot": "25b6f164b20610e6b301810d00c23e386fa6e332",
+      "three_dot_merge_base": "25b6f164b20610e6b301810d00c23e386fa6e332",
+      "state": "open",
+      "draft": true,
+      "stack": {
+        "base": {
+          "ref": "main",
+          "sha": "df4642b0f3083938037f866fee3d325de69353ad"
+        },
+        "id": 2621016,
+        "number": 46235,
+        "position": 8,
+        "size": 8
+      },
+      "commits": [
+        "25b41bd95d373b46bf38dc2c22e29c6f116b48e9",
+        "2d8fa7543519c5c58be056f3460a2a06e76c2730"
+      ]
+    }
+  ],
+  "original_pick_list_sha256": "5953efd90a9561729ea5fdf23b38abaa33fc5f2b8f70ba396f9b82d46aea14f7",
+  "status": "proof-only assembly; includes source46272 awaiting formal independent approval; no merge/install/primary mutation",
+  "excluded": [
+    "docs-only evidence PRs46253,46267,46271",
+    "old CI proof46206",
+    "duplicate-product merge of proof-only46263"
+  ]
+}

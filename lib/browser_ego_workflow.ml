@@ -21,6 +21,14 @@ let script = {js|async function nativeWorkflow(page, args) {
         case 'hover': effect = effectStarted = true; receipt = await page.hover(step.selector, {...options, label: args.cursor}); break;
         case 'fill': effect = effectStarted = true; receipt = await page.fill(step.selector, step.text, options); break;
         case 'press': effect = effectStarted = true; receipt = await page.press(step.selector, step.key, options); break;
+        case 'focus': effect = effectStarted = true; receipt = await page.focus(step.selector, options); break;
+        case 'reload': effect = effectStarted = true; receipt = await page.reload(options); break;
+        case 'keyboard.type': effect = effectStarted = true; receipt = await page.keyboard.type(step.text); break;
+        case 'keyboard.insertText': effect = effectStarted = true; receipt = await page.keyboard.insertText(step.text); break;
+        case 'keyboard.paste':
+          effect = effectStarted = true;
+          receipt = await page.keyboard.paste(step.html === undefined ? step.text : {text: step.text, html: step.html}); break;
+        case 'keyboard.press': effect = effectStarted = true; receipt = await page.keyboard.press(step.key); break;
         case 'selectOption': {
           const selection = step.values === undefined ? {value: step.value} : step.values.map(value => ({value}));
           effect = effectStarted = true;
@@ -35,8 +43,14 @@ let script = {js|async function nativeWorkflow(page, args) {
     } catch (error) { return failure(index, step.method, error); }
     completedEffect ||= effect;
     completed.push({index, method: step.method, receipt: receipt ?? null});
-    // Do not run another Page method while a synchronous dialog blocks it.
-    if (receipt?.dialog) return failure(index, step.method, 'answer the JavaScript dialog before continuing', {dialog: receipt.dialog});
+    // Keyboard methods return no action receipt. Their input handlers can still
+    // open a dialog, so observe it before dispatching the next operation.
+    let dialog = receipt?.dialog;
+    if (effect && receipt == null) {
+      try { dialog = (await page.info()).dialog; }
+      catch (error) { return failure(index + 1, 'observation', error); }
+    }
+    if (dialog) return failure(index, step.method, 'answer the JavaScript dialog before continuing', {dialog});
   }
   try {
     const snapshot = await (args.snapshotScope === 'viewport'
@@ -103,6 +117,7 @@ let decode (request : Browser_lane.Native_workflow.t) receipt =
     let* index=integer "index" failed in let* method_=text "method" failed in let* message=text "message" failed in
     let* expected_started=match method_ with
       | "initialUrl" when index=0 && count=0 -> Ok false
+      | "observation" when index=count && count>0 -> Ok has_effect
       | "snapshot" when index=count && remaining=[] -> Ok has_effect
       | _ ->
         let* expected=method_at index in

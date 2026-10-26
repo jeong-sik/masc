@@ -9,6 +9,7 @@ function fixture({fail,dialog,snapshot='native result'}={}) {
  const calls=[];let url=initial,value='';
  const page={
   async url(){calls.push('url');return url;},async title(){calls.push('title');return 'Fixture';},
+  async info(){return {};},
   async snapshot(options){
    calls.push(['snapshot',options]);
    if(options!==undefined&&!['full_page','only_within_viewport','subtree'].includes(options.scope))
@@ -95,4 +96,52 @@ test('SDK owns omitted timeouts and settlement; explicit timeouts are unchanged'
  assert.equal(result.failure,null);assert.equal(result.completed.length,3);
  assert.equal(f.calls.find(c=>Array.isArray(c)&&c[0]==='hover')[2].timeout,75000);
  assert.equal(f.calls.find(c=>Array.isArray(c)&&c[0]==='waitForLoadState')[2].timeout,0);
+});
+
+test('native rich input keeps focus, clipboard content and keyboard signatures',async()=>{
+ const f=fixture();let focused=false,value='',html='';
+ f.page.focus=async(selector,options)=>{assert.equal(selector,'#editor');assert.equal(options.timeout,0);focused=true;};
+ f.page.keyboard={
+  async type(text){assert.equal(arguments.length,1);assert.ok(focused);value+=text;},
+  async insertText(text){assert.equal(arguments.length,1);assert.ok(focused);value+=text;},
+  async paste(content){assert.equal(arguments.length,1);assert.ok(focused);value+=content.text;html=content.html;},
+  async press(key){assert.equal(arguments.length,1);assert.equal(key,'ControlOrMeta+A');},
+ };
+ f.page.reload=async(options)=>{assert.equal(options.timeout,7000);return {};};
+ const result=await run(f.page,request([
+  {method:'focus',selector:'#editor',timeoutMs:0},
+  {method:'keyboard.type',text:'hello '},
+  {method:'keyboard.insertText',text:'한글 😀'},
+  {method:'keyboard.paste',text:'Name\tStatus',html:'<table><tr><td>Name</td><td>Status</td></tr></table>'},
+  {method:'keyboard.press',key:'ControlOrMeta+A'},
+  {method:'reload',timeoutMs:7000},
+ ]));
+ assert.equal(result.failure,null);assert.equal(value,'hello 한글 😀Name\tStatus');
+ assert.equal(html,'<table><tr><td>Name</td><td>Status</td></tr></table>');
+ assert.equal(result.completed.length,6);assert.equal(result.completedEffect,true);
+});
+test('plain paste preserves empty strings and failed keyboard input is never replayed',async()=>{
+ const f=fixture();let pasted;
+ f.page.keyboard={async paste(content){pasted=content;throw Error('native paste interrupted');}};
+ const stopped=await run(f.page,request([
+  {method:'keyboard.paste',text:''},{method:'goto',url:destination},
+ ]));
+ assert.equal(pasted,'');assert.equal(stopped.failure.method,'keyboard.paste');
+ assert.equal(stopped.effectStarted,true);assert.equal(stopped.completedEffect,false);
+ assert.equal(stopped.completed.length,0);assert.deepEqual(f.calls,['url']);
+});
+test('receipt-less keyboard input stops on a dialog and retains a settled input on observation loss',async()=>{
+ const f=fixture();let inserted=0,later=0;
+ f.page.keyboard={async insertText(){inserted++;}};
+ f.page.click=async()=>{later++;};
+ f.page.info=async()=>({dialog:{type:'alert',message:'input needs an answer'}});
+ const input=request([{method:'keyboard.insertText',text:'x'},{method:'click',selector:'#submit'}]);
+ const stopped=await run(f.page,input);
+ assert.equal(inserted,1);assert.equal(later,0);assert.equal(stopped.completed.length,1);
+ assert.equal(stopped.failure.dialog.message,'input needs an answer');
+ f.page.info=async()=>{throw Error('page ownership changed');};
+ const lost=await run(f.page,input);
+ assert.equal(inserted,2);assert.equal(later,0);assert.equal(lost.completed.length,1);
+ assert.equal(lost.failure.method,'observation');assert.equal(lost.failure.index,1);
+ assert.equal(lost.completedEffect,true);
 });

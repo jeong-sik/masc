@@ -21,6 +21,13 @@ let roundtrip () =
   let calls=[click;step "dblclick" ["selector",str "loc=css:#row"];step "hover" ["selector",str "@3"];
     step "fill" ["selector",str "@4";"text",str ""];
     step "press" ["selector",str "@4";"key",str "Enter"];
+    step "focus" ["selector",str "#editor";"timeoutMs",`Int 0];
+    step "keyboard.type" ["text",str "typed"];
+    step "keyboard.insertText" ["text",str "한글 😀"];
+    step "keyboard.paste" ["text",str "Name\tStatus";"html",str "<table><tr><td>Name</td><td>Status</td></tr></table>"];
+    step "keyboard.paste" ["text",str ""];
+    step "keyboard.press" ["key",str "ControlOrMeta+A"];
+    step "reload" [];
     step "selectOption" ["selector",str "@5";"values",`List []];
     step "goto" ["url",str "https://example.test/done"];wait;
     step "waitForSelector" ["selector",str "@6";"state",str "hidden";"timeoutMs",`Int 0];
@@ -41,6 +48,10 @@ let strict_inputs () =
      obj (base [step "click" ["selector",str "#x";"timeoutMs",`Int (-1)]]);
      obj (base [step "click" ["selector",str "#x";"timeoutMs",`Int 9007199254740992]]);
      obj (base [step "goto" ["url",str "javascript:alert(1)"]]);
+     obj (base [step "keyboard.paste" ["text",str "x";"html",`Null]]);
+     obj (base [step "keyboard.type" ["text",str "x";"timeoutMs",`Int 0]]);
+     obj (base [step "keyboard.insertText" ["text",str "x";"selector",str "#other"]]);
+     obj (base [step "keyboard.press" ["key",str ""]]);
      obj (base [step "selectOption" ["selector",str "#x";"values",`List [str "a";str "a"]]])]
 let complete () =
   let value=obj (snapshot @ result ~started:true ~completed_effect:true
@@ -60,6 +71,12 @@ let progress_and_uncertainty () =
   assert_stopped (request [click]) (result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 "click"))
     ~started:true ~completed_effect:false;
   assert_stopped (request [click;wait]) (result ~started:true ~completed_effect:true ~completed:[entry 0 "click"] ~failure:(failure 1 "waitForURL"))
+    ~started:true ~completed_effect:true;
+  assert_stopped (request [step "keyboard.paste" ["text",str "x"]])
+    (result ~started:true ~completed_effect:false ~completed:[] ~failure:(failure 0 "keyboard.paste"))
+    ~started:true ~completed_effect:false;
+  assert_stopped (request [step "keyboard.insertText" ["text",str "x"];click])
+    (result ~started:true ~completed_effect:true ~completed:[entry 0 "keyboard.insertText"] ~failure:(failure 1 "observation"))
     ~started:true ~completed_effect:true
 let malformed_receipts () =
   let expected=request [click;wait] in

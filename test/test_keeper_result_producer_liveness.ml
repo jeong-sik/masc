@@ -51,7 +51,7 @@ let test_same_process_owner_and_independent_result () = with_workspace (fun base
   check (list string) "only exact completed consumption removes the original" [] (ids base_path))
 
 let test_cancellation_releases_owner_without_consuming () = with_workspace (fun base_path ->
-  let raised = try
+  let raised = match
     Eio_main.run (fun env ->
       Fs_compat.set_fs env#fs;
       Eio.Switch.run (fun sw ->
@@ -59,9 +59,10 @@ let test_cancellation_releases_owner_without_consuming () = with_workspace (fun 
           ~runtime_label:"cancelled-producer" ~turn_count:2) in
         retain producer;
         check (list string) "producer is active before cancellation" [] (ids base_path);
-        raise Exit));
-    false
-  with Exit -> true in
+        raise Exit))
+  with
+  | () -> false
+  | exception Exit -> true in
   check bool "original owner exception propagates" true raised;
   check int "cancelled owner releases its exact original without ACK" 1 (List.length (ids base_path)))
 
@@ -75,8 +76,7 @@ let test_cancelled_owner_keeps_lease_until_protected_worker_drains () = with_wor
     let owner_done, signal_owner_done = Eio.Promise.create () in
     Eio.Fiber.fork ~sw:outer_scope (fun () ->
       let original_interrupt =
-        try
-          Eio.Switch.run (fun owner_scope ->
+        match Eio.Switch.run (fun owner_scope ->
             let producer = get (Outbox.start_host_producer ~sw:owner_scope ~base_path ~keeper_name
               ~runtime_label:"protected-settlement-producer" ~turn_count:3) in
             Eio.Fiber.fork ~sw:owner_scope (fun () ->
@@ -92,9 +92,10 @@ let test_cancelled_owner_keeps_lease_until_protected_worker_drains () = with_wor
                 raise exn);
             Eio.Promise.await worker_ready;
             Eio.Promise.resolve signal_owner_ready owner_scope;
-            Eio.Fiber.await_cancel ());
-          false
-        with exn when Keeper_registry_types.is_operator_interrupt exn -> true in
+            Eio.Fiber.await_cancel ())
+        with
+        | () -> false
+        | exception exn when Keeper_registry_types.is_operator_interrupt exn -> true in
       Eio.Promise.resolve signal_owner_done original_interrupt);
     let owner_scope = Eio.Promise.await owner_ready in
     Eio.Switch.fail owner_scope Keeper_registry_types.Operator_interrupt;

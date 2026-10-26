@@ -226,7 +226,7 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
             | Error detail -> ignore (Peer.end_session peer);Error detail
             | Ok version ->
               let client_id=Uuidm.v4_gen (Random.State.make_self_init ()) () in
-              let client={B.client_id;browser=B.Firefox;version;engine_version=version;transport=B.Webdriver_bidi} in
+              let client={B.client_id;browser=B.Firefox;version;engine_version=version;transport=B.Webdriver_bidi;space=None} in
               let poll window_sec=Browser_addon_owner.poll_live owner ~client ~window_sec in
               let* first=poll 0. in
               let* ()=if Option.is_none first then Ok () else Error "owned BiDi received input before attachment" in

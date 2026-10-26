@@ -41,7 +41,7 @@ let roundtrips () =
    connection polls only from inside the worker. *)
 let a_native_host_cannot_poll_as_ego () =
   let poll transport =
-    let client = {B.client_id=id;browser=B.Ego_lite;version="0.6.0.16";engine_version="154.0.8037.44";transport} in
+    let client = {B.client_id=id;browser=B.Ego_lite;version="0.6.0.16";engine_version="154.0.8037.44";transport;space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Web_extension|Webdriver_bidi -> None)} in
     W.of_json (W.to_json {W.incarnation;command=W.Poll {client;window_sec=1.}}) in
   check bool "ego_task_space is refused" true (Result.is_error (poll B.Ego_task_space));
   check bool "a BiDi host still polls" true (Result.is_ok (poll B.Webdriver_bidi))
@@ -106,7 +106,7 @@ let commands_that_change_nothing () =
   List.iter (fun (name,command,expected) -> check bool name expected (W.changes_nothing command))
     ["snapshot",W.Snapshot,true;"model listing",W.Model_requests,true;"model wait",W.Model_wait {after=None},true;
      "idle document read",issue true,true;"browser command",issue false,false;"retire",W.Retire,false;
-     "native poll",W.Poll {client={B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi};window_sec=0.},false;
+     "native poll",W.Poll {client={B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi;space=None};window_sec=0.},false;
      "disconnect",W.Disconnect id,false;
      "upload stage",W.Upload_stage {id="up";actor="keeper";route;verb=B.Tabs_list},false;
      "upload discard",W.Upload_discard "up",false;
@@ -131,7 +131,22 @@ let extension_ports () =
     (Result.is_error (P.of_json (`Assoc fields))))
     [("program",`String "async()=>({})")::fields;("extra",`Bool true)::fields;
      List.map (fun (key,value) -> key,if key="arguments" then `String "not-object" else value) fields]
+let client_space_context () =
+  let space : B.ego_space = {id=51;name="SDK Space"} in
+  List.iter (fun transport ->
+    let client={B.client_id=id;browser=B.Ego_lite;version="0.6.1.11";engine_version="154";
+      transport;space=(if transport=B.Ego_task_space then Some space else None)} in
+    let value=W.client_to_json client in
+    check bool "client and Space roundtrip together" true (W.client_of_json value=Ok client);
+    let fields=match value with `Assoc fields -> fields | _ -> fail "expected object" in
+    List.iter (fun fields -> check bool "missing duplicate or cross-transport Space refuses" true
+      (Result.is_error (W.client_of_json (`Assoc fields))))
+      [List.remove_assoc "space" fields;("space",`Null)::fields;
+       ("space",if transport=B.Ego_task_space then `Null else B.ego_space_to_json space)::List.remove_assoc "space" fields])
+    [B.Web_extension;B.Webdriver_bidi;B.Ego_task_space]
+
 let () = run "browser addon wire" ["boundary",[
+  test_case "private client preserves strict Space context" `Quick client_space_context;
   test_case "closed verbs roundtrip" `Quick roundtrips;
   test_case "guards and competing identities" `Quick rejections;
   test_case "a native host cannot poll as ego" `Quick a_native_host_cannot_poll_as_ego;

@@ -56,7 +56,7 @@ let now () = !clock
 
 let opened ?(capture_directory=capture_directory ()) ?(downloads=no_downloads) run =
   let run ~window_s script = let sent = sent_of ~window_s script in
-    if sent.step = "space.open" then answered (obj ["spaceId",`Int 51;"ownership",str "agent"]) else run sent in
+    if sent.step = "space.open" then answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"]) else run sent in
   match Peer.open_space ~downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory with
   | Ok peer -> peer
   | Error detail -> failf "the space did not open: %s" detail
@@ -90,24 +90,36 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
   let run ~window_s script = let sent = sent_of ~window_s script in
     spaces := (sent.step, sent.space) :: !spaces;
     match sent.step with
-    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | "tabs.list" -> answered (`List [])
     | "space.finish" -> answered `Null
     | other -> failf "unexpected step %s" other in
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   check int "space number" 51 (Peer.space_id peer);
+  check string "SDK name is observed rather than guessed from configuration" "SDK Space" (Peer.space peer).name;
   ignore (dispatch peer Live.Tabs_list (obj []));
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "opened by name, then held by number"
     [ "space.open \"masc\""; "tabs.list 51"; "space.finish 51" ]
     (List.rev_map (fun (step, space) -> step ^ " " ^ Yojson.Safe.to_string space) !spaces);
   let user = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
-      ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 7;"ownership",str "user"])) in
+      ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 7;"name",str "SDK Space";"ownership",str "user"])) in
   check bool "a space the operator owns is refused" true (Result.is_error user);
   let in_use = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:"masc"
       ~run:(fun ~window_s:_ _ -> failed "EGO_TASK_SPACE_NAME_IN_USE: masc") in
-  check (result reject string) "ego's own refusal is kept" (Error "EGO_TASK_SPACE_NAME_IN_USE: masc") (Result.map ignore in_use)
+  check (result reject string) "ego's own refusal is kept" (Error "EGO_TASK_SPACE_NAME_IN_USE: masc") (Result.map ignore in_use);
+  List.iter (fun fields ->
+    let result=Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "unused"))
+      ~downloads:no_downloads ~now ~version:"fixture" ~capture_directory:(capture_directory ()) ~space:"masc"
+      ~run:(fun ~window_s:_ script ->
+        check string "malformed attachment never dispatches a page operation" "space.open" (sent_of ~window_s:0. script).step;
+        answered (obj fields)) in
+    check bool "malformed SDK attachment context is refused" true (Result.is_error result))
+    [["spaceId",`Int 51;"ownership",str "agent"];
+     ["spaceId",`Int 51;"name",str "SDK Space";"name",str "duplicate";"ownership",str "agent"];
+     ["spaceId",`Int (-1);"name",str "SDK Space";"ownership",str "agent"];
+     ["spaceId",`Int 51;"name",str " ";"ownership",str "agent"]]
 
 let space_owner = testable (fun out owner -> Format.pp_print_string out (match owner with
   | Peer.Agent_owner -> "agent" | Handed_to_operator -> "handed to the operator" | Operator_owner -> "operator")) ( = )
@@ -679,7 +691,7 @@ let test_the_scripts_parse_as_modules () =
     let sent = sent_of ~window_s script in
     scripts := (sent.step, script) :: !scripts;
     match sent.step with
-    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | "tabs.list" -> answered tabs
     | "page.capture" ->
       let path = text (field "path" sent.args) in
@@ -930,7 +942,7 @@ let test_a_snapshot_reads_egos_own_tree () =
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
-    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | "tabs.list" -> answered tabs
     | "page.snapshot" ->
       asked := sent :: !asked;
@@ -1016,7 +1028,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
-    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | "tabs.list" -> answered tabs
     | "page.target_input" ->
       asked := sent :: !asked;
@@ -1121,7 +1133,7 @@ let test_the_space_goes_to_the_operator_and_back () =
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
-    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str !ownership])
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str !ownership])
     | _ -> output := in_node (control_stand_in ~ownership:!ownership ~user_page:!user_page ^ script); Ok !output in
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -1152,7 +1164,7 @@ let test_the_space_goes_to_the_operator_and_back () =
   check bool "with the agent holding the space, a take-over is refused before any effect" true
     (contains (before_effect "a needless take-over" (act Lane.Action.Take_over)) "already holds");
   check string "and ego is not asked to take it" "[]" (seen ());
-  let open_owned_by owner = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 52;"ownership",str owner]))
+  let open_owned_by owner = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 52;"name",str "SDK Space";"ownership",str owner]))
       ~now ~space:"masc" ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) in
   check bool "a space handed to the operator still opens, so take_over can bring it back" true
     (Result.is_ok (open_owned_by "agentDelegatedToUser"));
@@ -1164,7 +1176,7 @@ let test_history_moves_one_entry () =
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
-    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | "tabs.list" -> answered (`List [
         tab_row ~label:(str "p1") ~target:"T1" ~title:"B" ~url:"https://b.test/" ~active:true ();
         tab_row ~label:`Null ~target:"T9" ~title:"Mail" ~url:"https://mail.example/" ~active:false ()])
@@ -1378,7 +1390,7 @@ let test_dialog_scripts_in_node () =
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
-    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | step ->
       let open_, opening, opens_on = !scenario in
       output := in_node (dialog_stand_in ~open_ ~opening ~opens_on ~canned:(canned step) ^ script);
@@ -1549,7 +1561,7 @@ let test_the_download_wait_runs_in_node () =
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
-    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Files" ~url:"https://example.test/" ~active:true ()])
     | "page.goto" -> program := silent script :: !program;
       answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Files"]])
@@ -1733,7 +1745,7 @@ let test_the_upload_script_runs_in_node () =
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
-    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Form" ~url:"https://example.test/" ~active:true ()])
     | "page.upload" -> output := in_node (upload_stand_in ~opens:!opens ~fails:!fails ^ script); Ok !output
     | other -> failf "unexpected step %s" other in
@@ -1846,7 +1858,7 @@ let test_the_chooser_script_runs_in_node () =
   let run ~window_s script =
     let sent = sent_of ~window_s script in
     match sent.step with
-    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Form" ~url:"https://example.test/" ~active:true ()])
     | "page.choose_files" ->
       let recovery = if !click_fails || !fails then
@@ -1924,7 +1936,7 @@ const taskSpace = async () => ({ownership:'agent',
   tabs:async () => [{label:'p1',openedBy:'agent'}],page:() => page});
 |js} in
   let run ~window_s script = match (sent_of ~window_s script).step with
-    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
     | "tabs.list" -> answered tabs
     | "page.native_workflow" -> Ok (in_node (shim ^ script))
     | other -> failf "unexpected envelope fixture step %s" other in

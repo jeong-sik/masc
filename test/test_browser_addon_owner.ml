@@ -6,7 +6,7 @@ let ok = function Ok value -> value | Error message -> fail message
 let incarnation = "0b000000-0000-4000-8000-000000000001"
 let other_incarnation = "0b000000-0000-4000-8000-000000000002"
 let id = ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000001")
-let client = {B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi}
+let client = {B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi;space=None}
 let receipt = function
   | W.Receipt -> true
   | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Issue_result _|Service_refusal _ -> false

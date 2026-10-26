@@ -89,7 +89,7 @@ let client_of_request request =
   if String.length engine_version > 64
      || not (String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) engine_version)
   then Error "invalid_browser_version"
-  else Ok ({client_id; browser; version; engine_version; transport} : Browser_lane.client_info)
+  else Ok ({client_id; browser; version; engine_version; transport;space=None} : Browser_lane.client_info)
 ;;
 
 (* A poll holds one command for the window. The answer is flat

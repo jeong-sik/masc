@@ -19,7 +19,7 @@ let test_live_scene_and_capture_state_their_connection () =
     | Ok id -> id | Error detail -> fail detail in
   let info : Browser_lane.client_info =
     {client_id;browser=Browser_lane.Firefox;version="fixture";transport=Browser_lane.Webdriver_bidi;
-     engine_version="fixture"} in
+     engine_version="fixture";space=None} in
   let binding = Masc.Browser_binding.of_browser
     {Browser_selection.route=Browser_lane.Live_route (Some client_id);reason=Browser_selection.Explicit_browser}
     (Browser_selection.Connected info) in

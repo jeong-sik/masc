@@ -35,8 +35,8 @@ Neither means fully supported.
 | `taskSpace` | Configured name on open; numeric id in every round | One configured Space is shared by Keepers; per-goal binding and resume are missing |
 | `claimTaskSpace` | None | Explicit approval and user-owned Space admission |
 | `takeOverTaskSpace` | `page.act` take_over | Explicit operator control boundary, currently only configured Space |
-| `TaskSpace.spaceId` | Internal connection identity | Expose goal/Space provenance in tool and UI observations |
-| `TaskSpace.name` | Configured name | Per-goal lifecycle and visible identity |
+| `TaskSpace.spaceId` | SDK-observed ID follows client inventory, tool receipts, stored screenshots and the TUI connection identity | Installed-route proof and per-goal Space lifecycle |
+| `TaskSpace.name` | SDK-observed attachment name follows the same context | Current-name refresh, per-goal lifecycle and actual visible UI proof |
 | `TaskSpace.ownership` | Checked before scripts and handoff | Current ownership projection in Keeper and UI observations |
 | `TaskSpace.page` | Internal permanent label resolution | Expose durable Page label with numbered tab provenance |
 | `TaskSpace.userPage` | None | Claim/takeover boundary attribution and explicit adoption |

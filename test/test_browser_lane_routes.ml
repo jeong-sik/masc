@@ -203,7 +203,7 @@ let test_owned_pointer_poll_retains_command_and_settles_waiter () =
   let id = match Browser_lane.client_id_of_string "50000000-0000-4000-8000-000000000008" with
     | Ok id -> id | Error detail -> fail detail in
   let info : Browser_lane.client_info = {client_id=id;browser=Firefox;version="158.0";
-    engine_version="158.0";transport=Webdriver_bidi} in
+    engine_version="158.0";transport=Webdriver_bidi;space=None} in
   let client = match Browser_lane.register info with
     | Ok client -> client | Error refusal -> fail (Browser_lane.registration_refusal_to_wire refusal) in
   Eio.Switch.on_release sw (fun () -> ignore (Browser_lane.disconnect_client ~client_id:id));

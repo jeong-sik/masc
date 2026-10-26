@@ -8,7 +8,7 @@ let info ?(transport=Browser_lane.Web_extension) browser : Lane.client_info =
   incr serial;
   let raw = Printf.sprintf "00000000-0000-4000-8000-%012d" !serial in
   let client_id = match Lane.client_id_of_string raw with Ok id -> id | Error error -> fail error in
-  {client_id; browser; version="1.0"; transport; engine_version="155.0.1"}
+  {client_id; browser; version="1.0"; transport; engine_version="155.0.1";space=None}
 let target id = match Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some id)) with
   | Ok value -> value | Error error -> fail (Lane.selection_error_code error)
 let with_clients f = Eio_main.run (fun env ->
@@ -232,7 +232,7 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
   let bidi = { (info Lane.Firefox) with transport=Lane.Webdriver_bidi } in
   ignore (Lane.take_command ~client_info:bidi ~window_sec:0.001);
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:bidi.client_id));
-  let ego = { (info Lane.Ego_lite) with transport=Lane.Ego_task_space } in
+  let ego = { (info Lane.Ego_lite) with transport=Lane.Ego_task_space;space=Some {id=51;name="fixture Space"} } in
   ignore (Lane.take_command ~client_info:ego ~window_sec:0.001);
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:ego.client_id));
   List.iter (fun (info : Lane.client_info) ->
@@ -287,7 +287,8 @@ let test_answers_state_their_connection () = with_clients (fun sw connect ->
   check bool "the server's own browsers have no client and no transport" true
     (Lane.target_connection_fields Lane.Automation = ["clientId", `Null]
      && Lane.target_connection_fields Lane.Stagehand = ["clientId", `Null]);
-  let supplied = ["transport", `String "carrier_pigeon"; "tabId", `Int 2; "clientId", `String "forged"] in
+  let supplied = ["transport", `String "carrier_pigeon"; "tabId", `Int 2; "clientId", `String "forged";
+    "browserSpace",`Assoc ["id",`Int 999;"name",`String "forged"]] in
   check bool "a value supplied under those names is replaced, not kept beside the route's" true
     (Lane.with_connection_fields (target bidi.client_id) supplied = expected bidi "webdriver_bidi" @ ["tabId", `Int 2]);
   check bool "also for the server's own browsers" true
@@ -406,7 +407,7 @@ let test_duplicate_result_after_lost_ack_is_accepted () = with_clients (fun sw c
 let activity_ok = function Ok x -> x | Error _ -> failwith "unexpected refusal"
 let test_agent_activity () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
  Eio_main.run @@ fun env -> Time_compat.set_clock (Eio.Stdenv.clock env); Eio.Switch.run @@ fun sw ->
- let info : Browser_lane.client_info = {client_id=activity_ok (Browser_lane.client_id_of_string "11111111-1111-4111-8111-111111111118");browser=Firefox;version="fixture";engine_version="fixture";transport=Webdriver_bidi} in
+ let info : Browser_lane.client_info = {client_id=activity_ok (Browser_lane.client_id_of_string "11111111-1111-4111-8111-111111111118");browser=Firefox;version="fixture";engine_version="fixture";transport=Webdriver_bidi;space=None} in
  let client=activity_ok (Browser_lane.register info) in
  let viewport : Browser_lane.Pointer.viewport = {document_id="owned";width=100.;height=100.;scroll_x=0.;scroll_y=0.} in
  let point : Browser_lane.Pointer.point = {x=0.5;y=0.5} in
@@ -433,7 +434,7 @@ let test_read_activity () =
  Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
  Eio_main.run @@ fun env -> Time_compat.set_clock (Eio.Stdenv.clock env); Eio.Switch.run @@ fun sw ->
  let info : Lane.client_info = {client_id=activity_ok (Lane.client_id_of_string "11111111-1111-4111-8111-111111111119");
-   browser=Ego_lite;version="fixture";engine_version="fixture";transport=Ego_task_space} in
+   browser=Ego_lite;version="fixture";engine_version="fixture";transport=Ego_task_space;space=Some ({id=51;name="fixture Space"} : Browser_lane.ego_space)} in
  let client=activity_ok (Lane.register info) in
  let run actor verb payload =
    let pending=Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:(Some actor)
@@ -473,6 +474,28 @@ let test_read_activity () =
   | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ -> fail "activity is not an object");
  ignore (activity_ok (Lane.disconnect_client ~client_id:info.client_id))
 
+let test_space_connection_context () =
+  let space : Lane.ego_space = {id=51;name="SDK Space"} in
+  let json=Lane.ego_space_to_json space in
+  check bool "Space identity roundtrips" true (Lane.ego_space_of_json json=Ok space);
+  List.iter (fun value -> check bool "malformed Space context is refused" true
+    (Result.is_error (Lane.ego_space_of_json value)))
+    [`Null;`Assoc ["id",`Int (-1);"name",`String "x"];
+     `Assoc ["id",`Int max_int;"name",`String "x"];
+     `Assoc ["id",`Int 51;"name",`String " "];
+     `Assoc ["id",`Int 51;"id",`Int 52;"name",`String "x"];
+     `Assoc ["id",`Int 51;"name",`String "x";"ownership",`String "agent"]];
+  let client_id=(info Lane.Ego_lite).client_id in
+  let fields=Lane.live_connection_fields ~client_id ~transport:Lane.Ego_task_space ~space:(Some space) in
+  check bool "an Ego connection preserves its bound Space" true
+    (Lane.connection_fields_of_json fields=Ok fields);
+  List.iter (fun fields -> check bool "Space context cannot cross transports or omit its binding" true
+    (Result.is_error (Lane.connection_fields_of_json fields)))
+    [List.remove_assoc "browserSpace" fields;
+     ("browserSpace",json)::fields;
+     ("transport",`String "webdriver_bidi")::List.remove_assoc "transport" fields;
+     ["browserSpace",json];["clientId",`Null;"browserSpace",json]]
+
 let () = run "browser client routing" ["ownership", [
   test_case "reads retain caller, scope and settled results" `Quick test_read_activity;
   test_case "agent activity follows queue ownership and cleanup" `Quick test_agent_activity;
@@ -490,4 +513,5 @@ let () = run "browser client routing" ["ownership", [
   test_case "expired queued actions do not execute" `Quick test_timed_out_queue_is_not_executed;
   test_case "disconnect releases pending caller" `Quick test_disconnect_releases_waiter;
   test_case "source and live command policy" `Quick test_sources_and_live_policy;
+  test_case "Space context follows its authoritative connection" `Quick test_space_connection_context;
   test_case "answers state their connection" `Quick test_answers_state_their_connection]]

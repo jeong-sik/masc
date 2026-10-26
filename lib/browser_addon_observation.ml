@@ -28,7 +28,7 @@ let decode_snapshot = function
              | [] -> Ok (List.rev acc)
              | `Assoc client::rest ->
                  let* ()=if List.sort String.compare (List.map fst client)
-                   =["browser";"clientId";"engineVersion";"interactions";"lastActivities";"transport";"version"]
+                   =["browser";"clientId";"engineVersion";"interactions";"lastActivities";"space";"transport";"version"]
                    then Ok () else Error "invalid browser inventory client fields" in
                  let validate name decode = match List.assoc_opt name client with
                    | Some (`List values) -> List.fold_left (fun result value ->

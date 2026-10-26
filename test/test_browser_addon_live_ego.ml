@@ -243,7 +243,7 @@ def run(script,answer):
     with open(root/'steps','a') as log:log.write(step+'\n')
     if step=='space.open':
         if mode=='in-use':answer(error='EGO_TASK_SPACE_NAME_IN_USE: masc')
-        else:answer({'spaceId':51,'ownership':'agent'})
+        else:answer({'spaceId':51,'name':'SDK Space','ownership':'agent'})
     elif step=='tabs.list':
         answer([{'label':'p1','targetId':'T1','title':'Fixture','url':'https://fixture.test/','active':True,'dialog':None,'dialogUnread':None}])
     elif step=='page.capture':
@@ -330,6 +330,8 @@ let scenario mode =
         let client = match B.connected_clients () with [client] -> client | _ -> fail "expected one ego client" in
         check string "browser" "ego_lite" (B.browser_name client.browser);
         check string "transport" "ego_task_space" (B.live_transport_to_string client.transport);
+        check bool "SDK Space context reaches the owned live client" true
+          (client.space=Some {B.id=51;name="SDK Space"});
         check string "ego lite's version" "0.6.0.16" client.version;
         check string "Chromium's version" "154.0.8037.44" client.engine_version;
         let issue ?(timeout_sec=B.default_timeout_sec) verb = dispatch (W.Issue {route=B.Live_route (Some client.client_id);verb;

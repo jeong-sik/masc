@@ -316,7 +316,8 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
         ~now:(fun () -> Eio.Time.now (Eio.Stdenv.clock env))
         ~run:(runner session) ~run_native:(native_runner session) in
     let client_id = Uuidm.v4_gen (Random.State.make_self_init ()) () in
-    let client = {B.client_id; browser = B.Ego_lite; version; engine_version; transport = B.Ego_task_space} in
+    let client = {B.client_id; browser = B.Ego_lite; version; engine_version; transport = B.Ego_task_space;
+      space=Some (Peer.space peer)} in
     let poll window_sec = Browser_addon_owner.poll_live owner ~client ~window_sec in
     let attached =
       let* first = poll 0. in

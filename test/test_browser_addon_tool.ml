@@ -61,7 +61,7 @@ let control_identity ~sw ~owner =
       "clientId",`String (B.client_id_to_string client_id);"command",B.verb_json verb] in
     let send command=Owner.dispatch owner {W.incarnation;command} in
     let client={B.client_id;browser=B.Ego_lite;version="test";engine_version="test";
-      transport=B.Ego_task_space} in
+      transport=B.Ego_task_space;space=Some ({id=51;name="fixture Space"} : Browser_lane.ego_space)} in
     let poll ()=Eio.Fiber.fork_promise ~sw (fun () -> send (W.Poll {client;window_sec=2.})) in
     let first_poll=poll () in
     let rec registered ()=
@@ -119,7 +119,7 @@ let scenario () = Eio_main.run (fun env ->
     let owner=ok (Owner.create ~incarnation) in
     Eio.Switch.on_release sw (fun () -> Owner.revoke owner);
     let send command=Owner.dispatch owner {W.incarnation;command} in
-    let client={B.client_id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi} in
+    let client={B.client_id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi;space=None} in
     let poll=Eio.Fiber.fork_promise ~sw (fun () -> send (W.Poll {client;window_sec=2.})) in
     let rec registered ()=if B.connected_clients ()=[] then (Eio.Fiber.yield ();registered ()) in
     registered ();

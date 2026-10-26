@@ -32,7 +32,7 @@ let operations names = List.map (fun name -> match Cap.operation_of_wire name wi
   | Some operation -> operation | None -> failf "%s is not a browser operation" name) names
 let client transport : Lane.client_info =
   {client_id=Uuidm.v4_gen (Random.State.make_self_init ()) ();transport;browser=Lane.Firefox;
-   version="0.8.0";engine_version="fixture"}
+   version="0.8.0";engine_version="fixture";space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Web_extension|Webdriver_bidi -> None)}
 
 (* What a browser Add-on worker reports in its snapshot and the host chooses
    from (lib/browser_addon_host.ml): a connected extension host and a

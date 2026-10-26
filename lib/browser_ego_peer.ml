@@ -69,11 +69,12 @@ type input_state = Released | Release_uncertain
 
 type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) result }
 
-type t = { run : runner; run_native : string -> (string, run_failure) result; now : unit -> float; space_id : int; version : string; capture_directory : string;
+type t = { run : runner; run_native : string -> (string, run_failure) result; now : unit -> float; space : Browser_lane.ego_space; version : string; capture_directory : string;
   downloads : downloads; published : (string, Yojson.Safe.t) Hashtbl.t; uploads : Browser_lane.Upload_lease.owner;
   mutable input_state : input_state; mutable pages : (page * int) list; mutable next_tab : int; mutable captures : int }
 
-let space_id t = t.space_id
+let space_id t = t.space.id
+let space t = t.space
 
 let remember t page = match List.assoc_opt page t.pages with
   | Some id -> id
@@ -202,9 +203,9 @@ let with_download_root t = function
   | `Assoc fields -> `Assoc (("downloads", str t.downloads.root) :: fields)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as args -> args
 let run_step t ~window_s ~step ~args body =
-  asked t.run ~window_s ~step ~space:(`Int t.space_id) ~holder:Agent_holds ~args:(with_download_root t args) body
+  asked t.run ~window_s ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body
 let run_native_step t ~step ~args body =
-  match t.run_native (script ~step ~space:(`Int t.space_id) ~holder:Agent_holds ~args:(with_download_root t args) body) with
+  match t.run_native (script ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body) with
   | Error failure -> Error (Unanswered failure)
   | Ok output -> answer output
 (* A read has no effect, so however it failed, nothing happened. *)
@@ -214,21 +215,27 @@ let ask t ~step ~args body =
 let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloads =
   let* () = if String.trim space = "" then Error "the ego task space needs a name" else Ok () in
   let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:(str space) ~holder:Either_holds ~args:`Null
-      "  emit({ok: true, value: {spaceId: task.spaceId, ownership: task.ownership}});"
+      "  emit({ok: true, value: {spaceId: task.spaceId, name: task.name, ownership: task.ownership}});"
     |> Result.map_error step_failure_message in
   (* A space the agent handed to the operator is still the agent's: a
      connection opened while they hold it refuses every step until take_over,
      so a restart during a hand-off does not strand the space. *)
-  match field "spaceId" opened, field "ownership" opened with
-  | Some (`Int space_id), Some (`String ownership) ->
+  let* fields=match opened with
+    | `Assoc fields when List.sort String.compare (List.map fst fields)=["name";"ownership";"spaceId"] -> Ok fields
+    | _ -> Error "ego answered invalid or duplicate Space attachment fields" in
+  let* id=Option.to_result ~none:"ego answered a Space without its ID" (List.assoc_opt "spaceId" fields) in
+  let* name=Option.to_result ~none:"ego answered a Space without its name" (List.assoc_opt "name" fields) in
+  let* bound_space=Browser_lane.ego_space_of_json (obj ["id",id;"name",name]) in
+  match List.assoc_opt "ownership" fields with
+  | Some (`String ownership) ->
     (match space_owner_of_wire ownership with
      | Some (Agent_owner | Handed_to_operator) ->
-       Ok {run; run_native; now; space_id; version; capture_directory; downloads; published = Hashtbl.create 16;
+       Ok {run; run_native; now; space=bound_space; version; capture_directory; downloads; published = Hashtbl.create 16;
          uploads = Browser_lane.Upload_lease.create_owner ();
          input_state=Released; pages=[]; next_tab=0; captures=0}
      | Some Operator_owner | None ->
        Error (Printf.sprintf "ego task space %S belongs to %s, not to an agent" space ownership))
-  | _ -> Error "ego answered the task space without its number and owner"
+  | _ -> Error "ego answered the task space without its owner"
 
 (* The space's end closes its pages, so the files they were given are no
    longer read; only then is their lease let go. A finish that failed keeps
@@ -482,7 +489,7 @@ let remove path = match Unix.unlink path with
 let capture t args =
   let* label = target t args in
   t.captures <- t.captures + 1;
-  let path = Filename.concat t.capture_directory (Printf.sprintf "ego-capture-%d-%d.png" t.space_id t.captures) in
+  let path = Filename.concat t.capture_directory (Printf.sprintf "ego-capture-%d-%d.png" t.space.id t.captures) in
   let taken = ask t ~step:"page.capture"
       ~args:(obj ["label",label;"state",str (page_function Browser_page_script.capture_state);"path",str path])
       (on_page (String.concat "\n" [
@@ -1336,7 +1343,7 @@ let interact ?actor t args =
 let hand_off t =
   let unknown = Printf.sprintf
     "control of ego Space #%d is unconfirmed; ask the operator and wait for explicit confirmation before any further command"
-    t.space_id in
+    t.space.id in
   match run_step t ~window_s:(window_s (Browser_lane.Page_act (Browser_lane.Action.Control Browser_lane.Action.Hand_off)))
           ~step:"space.hand_off" ~args:`Null (String.concat "\n" [
             "    const space = {spaceId: task.spaceId, spaceName: task.name};";
@@ -1345,7 +1352,7 @@ let hand_off t =
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok (`Assoc fields) when List.length fields = 2 ->
     (match List.assoc_opt "spaceId" fields,List.assoc_opt "spaceName" fields with
-     | Some (`Int id),Some (`String name) when id=t.space_id && String.trim name<>"" ->
+     | Some (`Int id),Some (`String name) when id=t.space.id && String.trim name<>"" ->
        Ok (obj ["action",str "hand_off";"spaceId",`Int id;"spaceName",str name])
      | (None|Some _),(None|Some _) ->
        Error (Live.Outcome_unknown ("ego answered the hand-off without this space's identity; " ^ unknown)))
@@ -1357,7 +1364,7 @@ let hand_off t =
 let take_over t =
   let unknown = "list this connection's tabs before another step" in
   match asked t.run ~window_s:(window_s (Browser_lane.Page_act (Browser_lane.Action.Control Browser_lane.Action.Take_over)))
-          ~step:"space.take_over" ~space:(`Int t.space_id) ~holder:Operator_holds ~args:`Null (String.concat "\n" [
+          ~step:"space.take_over" ~space:(`Int t.space.id) ~holder:Operator_holds ~args:`Null (String.concat "\n" [
       "    const back = await takeOverTaskSpace(task.spaceId);";
       "    const active = back.userPage();";
       "    emit({ok: true, value: {active: active ? (active.label ?? null) : null}});" ]) with

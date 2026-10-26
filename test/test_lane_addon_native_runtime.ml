@@ -445,7 +445,7 @@ hooks = ["validate_input", "validate_output"]
   let issue=Browser_addon_wire.Issue {route=Browser_lane.Live_route (Some client_id);verb=Browser_lane.Tabs_list;
     actor=Some "browser-host-tester";timeout_sec=2.;only_if_idle=false} in
   let payload=`Assoc ["ok",`Bool false;"effectPhase",`String "partial";"error",`String "partial result"] in
-  let client={Browser_lane.client_id;browser=Firefox;version="158";engine_version="158";transport=Webdriver_bidi} in
+  let client={Browser_lane.client_id;browser=Firefox;version="158";engine_version="158";transport=Webdriver_bidi;space=None} in
   let browser_directory=Filename.concat (Workspace.masc_dir config) Common.browser_lane_dirname in
   Unix.mkdir browser_directory 0o700;
   let poll client=Browser_addon_ingress.poll ~config ~client ~window_sec:0.001 in

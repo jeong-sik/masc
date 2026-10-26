@@ -132,7 +132,15 @@ command = "/Users/me/.local/bin/ego-browser"
 space = "masc-keepers"
 ```
 
-The picker then lists it as `ego lite · ego`. It reads and captures the pages
+The picker identifies its client UUID and the SDK-observed Space ID/name. The
+name is observed when the connection attaches; renaming it does not change its
+identity. A different Space ID requires a new selection even if a producer
+reuses a client UUID. These are connection observations, not proof that the
+operator can see the Ego window or that login has completed.
+The worker, host/server and TUI must be updated together: the private client
+contract requires `space` on every client, with `null` for non-Ego transports.
+
+It reads and captures the pages
 of that one task space. It opens, moves and closes the pages an agent opened
 there, and uses Ego's native snapshots, selectors and input, including hover,
 double-click, drag and option selection. Snapshot refs also address iframe

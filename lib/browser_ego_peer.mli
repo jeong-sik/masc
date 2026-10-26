@@ -90,6 +90,10 @@ val open_space
   -> (t, string) result
 
 val space_id : t -> int
+(** Space ID and name observed when this connection opened. The ID binds this
+    peer for its lifetime. The name is an attachment-time observation, not a
+    current ownership, visibility or login claim. *)
+val space : t -> Browser_lane.ego_space
 
 (** Answers one live verb the way the BiDi peer answers it. [hand_off] returns
     [action], [spaceId] and [spaceName], captured from the same TaskSpace before

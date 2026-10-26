@@ -2423,7 +2423,9 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
     let retained_message = Option.bind retained_results Keeper_client_tool_outbox.context_message in
     let retained_bytes = match retained_message with
       | None -> 0
-      | Some message -> offload_model_input_cpu (fun () -> measure_message_bytes message) in
+      | Some message -> offload_model_input_cpu (fun () ->
+          let measure = Keeper_context_core.message_measurer () in
+          measure message) in
     let config =
       { config with
         model_input_projection =

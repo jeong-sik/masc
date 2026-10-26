@@ -135,6 +135,12 @@ val read_state : Workspace_utils.config -> state
     Never writes to disk. *)
 val read_state_result : Workspace_utils.config -> (state, read_error) result
 
+val with_ledger_lock : Workspace_utils.config -> (unit -> 'a) -> 'a
+(** Serialize a composed durable transfer through its target projection with
+    schedule mutation. Acquire any ordered Keeper intake fences before this
+    lock and durable queue locks inside it. Never call this from a store
+    mutation callback, which already owns the ledger lock. *)
+
 type recovery_cause = Primary_missing | Primary_unusable
 
 type read_source =
@@ -227,7 +233,8 @@ val cancel_request :
     ledger lock, it calls [withdraw_queued_wakes] with the stored request so
     the caller removes the wakes already queued for it; this library has no
     view of those queues. A withdrawal [Error] is [Persistence_failed] and
-    nothing is written. [Running] and terminal requests are
+    no schedule ledger change is written; earlier queue withdrawals remain
+    durable. [Running] and terminal requests are
     [Transition_refused]. Current-row ownership is checked before the
     withdrawal callback or any write; an unauthorized request has no effects. *)
 

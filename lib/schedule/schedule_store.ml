@@ -216,6 +216,10 @@ let schedules_path config =
   Filename.concat (Workspace_utils.masc_dir config) "schedules.json"
 ;;
 
+let with_ledger_lock config f =
+  Workspace_utils.with_file_lock config (schedules_path config) f
+;;
+
 let recovery_path config = schedules_path config ^ ".last-good"
 
 let ensure_dirs config = Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
@@ -928,8 +932,9 @@ let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Rep
    ([start_due_candidate] to [accept_running], both under this lock), and a
    [Running] row is refused below, so while the lock is held no occurrence of
    this schedule can be enqueued after the withdrawal and survive the cancel.
-   A failed withdrawal writes nothing: the row stays active and the caller can
-   cancel again. A ledger write that fails after the withdrawal also leaves the
+   A failed withdrawal writes no schedule ledger change: the row stays active
+   and the caller can cancel again. Earlier queue withdrawals remain durable.
+   A ledger write that fails after the withdrawal also leaves the
    row active; the withdrawn occurrence stays cancelled in the queue, with the
    queue's own cancellation receipt, and the next occurrence fires as due. *)
 let cancel_request config ~authority ~schedule_id ~cancellation ~withdraw_queued_wakes =

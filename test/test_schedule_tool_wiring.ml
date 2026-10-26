@@ -47,7 +47,7 @@ let register_wake_target config keeper_name =
      | Error detail -> fail ("keeper meta write failed: " ^ detail))
 ;;
 
-let with_config f =
+let with_config ?(strict_executor = false) f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -64,7 +64,13 @@ let with_config f =
     | Ok None -> Ok false
     | Error detail -> Error detail);
   register_wake_target config "schedule-keeper";
-  f config
+  if strict_executor then
+    Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+      (fun () ->
+         let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+         Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool pool) (fun () -> f config))
+  else f config
 ;;
 
 let human id : Schedule_domain.actor =
@@ -2454,10 +2460,240 @@ let test_note_tool_reports_actual_primary_write_failure () =
   check string "failed primary write preserves mirror" mirror_before (Workspace_core.read_text config mirror)
 ;;
 
+(* Compose the public schedule tools with real durable queue transitions.
+   Queue seeds represent accepted occurrences, not model/runtime execution. *)
+let f1_ok label = function
+  | Ok value -> value
+  | Error detail -> failf "%s: %s" label detail
+;;
+
+let f1_state config keeper_name =
+  Keeper_event_queue_persistence.load_state_result
+    ~base_path:config.Workspace.base_path ~keeper_name |> f1_ok "read queue"
+;;
+
+let f1_seed config keeper_name schedule_id occurrence =
+  let source : Keeper_event_queue.stimulus =
+    { post_id = "f1-" ^ occurrence; urgency = Keeper_event_queue.Normal
+    ; arrived_at = 1.0
+    ; payload = Schedule_due
+        { schedule_id; schedule_instance_id = "instance-" ^ occurrence
+        ; occurrence_id = occurrence; due_at = 1.0; payload_digest = "f1-digest"
+        ; title = None; message = "old occurrence"; result_delivery = None }
+    }
+  in
+  Keeper_event_queue_persistence.update_result
+    ~base_path:config.Workspace.base_path ~keeper_name
+    (fun pending -> Keeper_event_queue.enqueue pending source)
+  |> f1_ok "seed accepted occurrence";
+  source
+;;
+
+let f1_create config schedule_id =
+  check bool "public create succeeds" true
+    (Tool_result.is_success
+       (dispatch_exn config Tool_schemas_schedule.Create_request
+          (create_args ~schedule_id ())));
+  stored_schedule config schedule_id
+;;
+
+let f1_cancel config schedule_id =
+  dispatch_exn config Tool_schemas_schedule.Cancel_request
+    (`Assoc [ "schedule_id", `String schedule_id; "reason", `String "withdraw old work" ])
+;;
+
+let f1_empty config keeper_name =
+  check int (keeper_name ^ " has no pending work") 0
+    (f1_state config keeper_name |> Keeper_event_queue_state.pending |> Keeper_event_queue.length)
+;;
+
+let f1_transfer_commit config ~from_keeper ~to_keeper source operation_id =
+  let selection =
+    f1_state config from_keeper |> Keeper_event_queue_state.pending_selections
+    |> List.find (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal source selection.source)
+  in
+  let meta = match Keeper_meta_store.read_meta config to_keeper with
+    | Ok (Some meta) -> meta
+    | Ok None -> fail "missing transfer target metadata"
+    | Error detail -> fail detail
+  in
+  let transfer : Keeper_event_queue_persistence.accepted_transfer =
+    { source; source_incarnation = selection.admitted_revision
+    ; operator_operation_id = operation_id; from_keeper; to_keeper
+    ; target_trace_id = meta.runtime.trace_id }
+  in
+  Keeper_event_queue_persistence.transfer_pending_accepted_result
+    ~base_path:config.Workspace.base_path ~keeper_name:from_keeper
+    ~applied_at:2.0 ~transfer () |> f1_ok "commit transfer outbox" |> ignore;
+  transfer
+;;
+
+let f1_recover config keeper_name =
+  match Keeper_event_queue_recovery.project_owner_result
+          ~base_path:config.Workspace.base_path ~keeper_name with
+  | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+  | Ok _ -> fail "expected transfer recovery convergence"
+  | Error error -> fail (Keeper_event_queue_recovery.projection_error_to_string error)
+;;
+
+let test_cancel_finds_old_target_and_all_instances () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-old-target" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  let meta = match Keeper_meta_store.read_meta config "schedule-keeper" with
+    | Ok (Some meta) -> meta | _ -> fail "missing old owner metadata" in
+  Keeper_meta_store.replace_snapshot config { meta with paused = true }
+  |> f1_ok "pause old owner";
+  (* More accepted instances than the retained terminal-wake history bound.
+     None is found through ledger wake history or live registry registration. *)
+  for n = 0 to Schedule_store.terminal_wakes_retained_per_schedule do
+    ignore (f1_seed config "schedule-keeper" schedule_id (string_of_int n)
+            : Keeper_event_queue.stimulus)
+  done;
+  register_wake_target config "replacement-keeper";
+  check bool "public retarget succeeds" true
+    (Tool_result.is_success (dispatch_exn config Tool_schemas_schedule.Update_request
+       (`Assoc [ "schedule_id", `String schedule_id
+               ; "keeper_name", `String "replacement-keeper"; "message", `String "new target" ])));
+  check bool "old owner is absent from live registry" true
+    (Option.is_none (Keeper_registry.get ~base_path:config.Workspace.base_path "schedule-keeper"));
+  check bool "public cancellation succeeds" true (Tool_result.is_success (f1_cancel config schedule_id));
+  f1_empty config "schedule-keeper";
+  f1_empty config "replacement-keeper";
+  check bool "cancelled ledger follows withdrawal" true
+    ((stored_schedule config schedule_id).status = Schedule_domain.Cancelled)
+;;
+
+let test_cancel_keeper_to_lane_still_withdraws () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-keeper-to-lane" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  ignore (f1_seed config "schedule-keeper" schedule_id "before-lane" : Keeper_event_queue.stimulus);
+  check bool "public Keeper-to-Lane update succeeds" true
+    (Tool_result.is_success (dispatch_exn config Tool_schemas_schedule.Update_request
+       (`Assoc [ "schedule_id", `String schedule_id; "installation_id", `String "operator-quiz"
+               ; "action", `Assoc [ "kind", `String "compose" ] ])));
+  check bool "Lane definition cancels" true (Tool_result.is_success (f1_cancel config schedule_id));
+  f1_empty config "schedule-keeper"
+;;
+
+let test_cancel_refuses_outbox_then_recovers_multihop () =
+  with_config ~strict_executor:true @@ fun config ->
+  let schedule_id = "f1-multi-hop" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  register_wake_target config "transfer-middle";
+  register_wake_target config "transfer-final";
+  let source = f1_seed config "schedule-keeper" schedule_id "transferred" in
+  ignore (f1_transfer_commit config ~from_keeper:"schedule-keeper"
+      ~to_keeper:"transfer-middle" source "first-hop"
+      : Keeper_event_queue_persistence.accepted_transfer);
+  check bool "unfinished transfer refuses public cancel" false
+    (Tool_result.is_success (f1_cancel config schedule_id));
+  check bool "refused cancellation preserves active definition" true
+    ((stored_schedule config schedule_id).status = Schedule_domain.Scheduled);
+  f1_recover config "schedule-keeper";
+  ignore (f1_transfer_commit config ~from_keeper:"transfer-middle"
+      ~to_keeper:"transfer-final" source "second-hop"
+      : Keeper_event_queue_persistence.accepted_transfer);
+  check bool "second unfinished transfer also refuses cancel" false
+    (Tool_result.is_success (f1_cancel config schedule_id));
+  f1_recover config "transfer-middle";
+  check bool "cancel after both recoveries succeeds" true
+    (Tool_result.is_success (f1_cancel config schedule_id));
+  List.iter (f1_empty config) [ "schedule-keeper"; "transfer-middle"; "transfer-final" ]
+;;
+
+let f1_snapshot config keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path) keeper_name)
+    Keeper_event_queue_persistence.snapshot_filename
+;;
+
+let test_cancel_strict_read_error_preserves_pending () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-corrupt-owner" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  ignore (f1_seed config "schedule-keeper" schedule_id "valid" : Keeper_event_queue.stimulus);
+  ignore (f1_seed config "z-corrupt-owner" "unrelated" "corrupt" : Keeper_event_queue.stimulus);
+  let snapshot = f1_snapshot config "z-corrupt-owner" in
+  Out_channel.with_open_bin snapshot (fun channel -> output_string channel "invalid queue");
+  check bool "corrupt current state refuses cancel" false
+    (Tool_result.is_success (f1_cancel config schedule_id));
+  check int "preflight failure preserves pending work" 1
+    (f1_state config "schedule-keeper" |> Keeper_event_queue_state.pending |> Keeper_event_queue.length);
+  check bool "ledger remains active" true
+    ((stored_schedule config schedule_id).status = Schedule_domain.Scheduled)
+;;
+
+let test_cancel_discovery_error_is_not_empty_success () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-discovery" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  let root = Common.keepers_runtime_dir_of_base ~base_path:config.Workspace.base_path in
+  rm_rf root;
+  Out_channel.with_open_bin root (fun channel -> output_string channel "not a directory");
+  check bool "invalid discovery root refuses cancel" false
+    (Tool_result.is_success (f1_cancel config schedule_id));
+  check bool "discovery refusal preserves definition" true
+    ((stored_schedule config schedule_id).status = Schedule_domain.Scheduled)
+;;
+
+let test_cancel_partial_withdrawal_does_not_claim_rollback () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-partial" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  ignore (f1_seed config "a-first-owner" schedule_id "first" : Keeper_event_queue.stimulus);
+  ignore (f1_seed config "z-last-owner" schedule_id "last" : Keeper_event_queue.stimulus);
+  let injected = ref false in
+  Keeper_event_queue_persistence.install_state_change_observer (fun () ->
+    if not !injected then (
+      injected := true;
+      Out_channel.with_open_bin (f1_snapshot config "z-last-owner")
+        (fun channel -> output_string channel "injected read failure after first withdrawal")));
+  Fun.protect
+    ~finally:(fun () -> Keeper_event_queue_persistence.install_state_change_observer ignore)
+    (fun () ->
+       check bool "partial withdrawal returns failure" false
+         (Tool_result.is_success (f1_cancel config schedule_id)));
+  check bool "fault was injected after the first durable change" true !injected;
+  f1_empty config "a-first-owner";
+  check bool "schedule ledger remains active after partial failure" true
+    ((stored_schedule config schedule_id).status = Schedule_domain.Scheduled);
+  check bool "first withdrawal retains a canonical disposition" true
+    (Option.is_some (f1_state config "a-first-owner" |> Keeper_event_queue_state.last_transition))
+;;
+
+let test_cancel_ledger_write_failure_retains_withdrawal () =
+  with_config @@ fun config ->
+  let schedule_id = "f1-ledger-write-failure" in
+  ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
+  ignore (f1_seed config "schedule-keeper" schedule_id "before-write" : Keeper_event_queue.stimulus);
+  let primary = Filename.concat (Workspace_utils.masc_dir config) "schedules.json" in
+  let before = Workspace_core.read_text config primary in
+  let staging = primary ^ ".tmp-atomic" in
+  Unix.mkdir staging 0o755;
+  Fun.protect ~finally:(fun () -> Unix.rmdir staging) (fun () ->
+    check bool "ledger publication failure returns failure" false
+      (Tool_result.is_success (f1_cancel config schedule_id)));
+  f1_empty config "schedule-keeper";
+  check string "failed publication preserves the active ledger" before
+    (Workspace_core.read_text config primary);
+  check bool "retry converges without restoring old work" true
+    (Tool_result.is_success (f1_cancel config schedule_id))
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
-      , [ test_case "note distinguishes absent schedule from unreadable ledger" `Quick
+      , [ test_case "cancel ledger write failure retains withdrawal" `Quick test_cancel_ledger_write_failure_retains_withdrawal
+        ; test_case "cancel finds old target and all instances" `Quick test_cancel_finds_old_target_and_all_instances
+        ; test_case "Keeper-to-Lane cancellation withdraws old wakes" `Quick test_cancel_keeper_to_lane_still_withdraws
+        ; test_case "unfinished transfer refuses cancel then recovers multi-hop" `Quick test_cancel_refuses_outbox_then_recovers_multihop
+        ; test_case "cancel refuses corrupt durable owner" `Quick test_cancel_strict_read_error_preserves_pending
+        ; test_case "cancel refuses discovery failure" `Quick test_cancel_discovery_error_is_not_empty_success
+        ; test_case "partial cancel preserves durable effects and reports failure" `Quick test_cancel_partial_withdrawal_does_not_claim_rollback
+        ; test_case "note distinguishes absent schedule from unreadable ledger" `Quick
             test_note_tool_distinguishes_missing_schedule_from_unreadable_ledger
         ; test_case "note reports actual primary write failure" `Quick
             test_note_tool_reports_actual_primary_write_failure

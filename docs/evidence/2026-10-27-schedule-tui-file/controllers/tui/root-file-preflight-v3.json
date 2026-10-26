@@ -1,0 +1,21 @@
+{
+  "argv": [
+    "python3",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v3.py",
+    "--source-root",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+    "--native-dir",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2",
+    "--image-reference",
+    "masc-sandbox:general",
+    "--observation-deadline-unix",
+    "1793055734.7622871",
+    "--preflight-only"
+  ],
+  "exit_code": 0,
+  "stdout": "{\"scope\": \"file-only preflight; no binary/API/PTY/model execution\", \"source\": \"a3950a189b9cc5a7ce82cb725699455d79923f42\", \"inputs\": [{\"path\": \"/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc\", \"sha256\": \"1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c\", \"bytes\": 111121488}, {\"path\": \"/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc-tui\", \"sha256\": \"b0a45e199a808f1968265056b78bc755021a4b1a475093cb7c51356a295ee6ca\", \"bytes\": 108743920}, {\"path\": \"/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact.zip\", \"sha256\": \"a9e1eff4b3ddc6b43c14fa2fc48b7f468634d902ff487d9337b57bc4f5cb5927\", \"bytes\": 74909557}, {\"path\": \"/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/receipt.json\", \"sha256\": \"db9d24e84c3364d6c87120381121ab70254400db1e036bff3c98dafd2c8b42b1\", \"bytes\": 1622}, {\"path\": \"/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/identity-verification.json\", \"sha256\": \"770efa19e25e10e3c52516e624b637ed107b51d23e4409836e95377348abfdce\", \"bytes\": 2035}, {\"path\": \"/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/scripts/lane-addons/qualify.py\", \"sha256\": \"6799826b1d8843e93993a283f98059efd9f9c93787bfae29d823bdcc557b608f\", \"bytes\": 20499}, {\"path\": \"/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/scripts/fixtures/release-evidence/runtime.toml\", \"sha256\": \"ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd\", \"bytes\": 3058}]}\n",
+  "stderr": "",
+  "scope": "file-only root preflight; no actual TUI/server/CLI/API/model"
+}

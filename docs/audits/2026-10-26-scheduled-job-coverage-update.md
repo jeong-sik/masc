@@ -76,12 +76,12 @@ API33/F1/restart 상태23은 [실제 API bundle](../evidence/2026-10-26-schedule
 | 50 | dispatch 실패 정산 write 실패 뒤 같은 process에서 회복한다 | Test40365052184의 exact attempt/primary fault 회귀; 후속 PR46248 | Store의 실제 primary 실패·같은 capability 재정산은 실행. 보류 intent를 다음 production cadence에 보존/재시도하는 PR46248은 작성·독립 소스 검토 완료, Test40369739062는 head22014660의 직접 Eio 의존 참조로 suite 전 컴파일 실패. head2861571의 Test40371389026도 warning4로 suite 전 실패. 닫힌 오류 분기와 문서 수리 headc52f799의 [Test40374192059](../evidence/2026-10-27-schedule-settlement-verification/test40374192059/result.json)는 success: Runner30·Consumer60·Tool wiring64·Lane act7, 161 PASS/FAIL0/SKIP0. production maintenance composition에서 intent 보존·같은 process cadence 재정산·health와 오류 경계 검증. [C2 native 실제 F5](../evidence/2026-10-27-schedule-durable-runtime/settlement/README.md)는 실제 queue Permission denied + primary ledger Is-a-directory를 확인했다. 동일 PID에서 pending1→queue-only 복구 후 재발행0→원장 복구로 원 Retry 정산→다음 주기 단일 새 attempt/queue 전달을 관측했다. 독립 원형 검산·정상 종료0·재시작0. 첫 준비 실험 INCOMPLETE는 보존한다. 모델 실행·프로세스 사망 뒤 in-memory intent 보존 증거는 아니다. |
 | 51 | 손상·stale receipt·결과 불확실을 성공으로 덮지 않는다 | S-corruption2–3/6–9, C23–27/34/38/41/43/47/49 | 손상·write failure·retired/stale/noncanonical receipt 거절 실행. 전체 runtime 장애 복구는 아님. |
 | 52 | 도착한 단발이 dispatch Succeeded여도 계속 보인다 | 기존 chat_schedule_entries 추출 결정 | 새 195개에 해당 TUI suite 없음. 실제 채팅 표시 미검증. |
-| 53 | 선택한 Keeper의 예약만 보인다 | 기존 selection; W35는 backend owner만 | TUI Keeper 전환·generation·shared-read UI 실행 미검증. |
+| 53 | 선택한 Keeper의 예약만 보인다 | 기존 selection; W35는 backend owner만; C2 Test40409087814 | 기존 TUI state suite의 schedule-target/generation 1 case에서 late A·오래된 generation·다른 roster 선택의 chat target 분리 결정을 실행했다. 나머지 7 case는 일반 wait 결정이다. 실제 전환 요청·화면은 별도이며 전체 UI PASS는 아니다. |
 | 54 | 앞 회차 시각·다음 예정·hold가 구분된다 | C44–45 | 생산 hold JSON→TUI hold decoder의 exact occurrence/due 실행. 전체 clock/render 미검증. |
 | 55 | F9로 펼치고 입력 공간·좁은 화면을 보존한다 | 직접 실행 없음 | F9·좁은 화면·입력 공간의 실제 상호작용 미검증. |
-| 56 | 오래된 조회를 현재 사실로 오인하지 않는다 | C45–46 | Hold_current→Hold_as_of 결정 및 cache invalidation 실행. 전체 async refresh/화면 미검증. |
+| 56 | 오래된 조회를 현재 사실로 오인하지 않는다 | C45–46; C2 Test40409087814 | Hold_current→Hold_as_of·cache invalidation 및 기존 TUI state suite의 failed refresh 때 last read 보존·target별 error/generation 결정을 실행했다. 실제 transport interleaving·paint는 미검증. |
 | 57 | overdue 때 사용자에게 알려 준다 | 직접 새 실행 없음 | persistent notice 구현/기존 선택 결정과 별개로 실제 overdue 알림 UX 미검증. OS push/sound 보장 없음. |
-| 58 | 채널/파일에 요청한 실제 결과가 도착한다 | real-deepseek-1/real-glm-1; C4는 route만 | 실제 내부 note 목적지 효과/readback 성공. posting/file/외부 채널은 미검증. |
+| 58 | 채널/파일에 요청한 실제 결과가 도착한다 | real-deepseek-1/real-glm-1; C4는 route만; C2 file trial2 | 실제 내부 note 목적지 효과/readback 및 C2 DeepSeek의 단일 MicroVM Write→정확한 71 UTF-8 bytes 전체 Read→원 Job marker 1개를 실행했다. 첫 shim 누락 FAIL은 보존한다. host export·독립 guest FS 추출·posting/외부 채널·두 Job 범위 정확성은 미검증이다. |
 | 59 | worker 실행·idempotence·effect unknown을 처리한다 | L0–6 | 생산 queue/receipt와 대체 worker lifecycle/redelivery 실행. candidate c52f799 실제 package/Docker worker export와 원 receipt 안정성·빈 blob/volume readback 일치 확인. 실제 worker redelivery·unknown·외부 effect exactly-once는 미검증. |
 
 
@@ -127,3 +127,17 @@ GLM 원 관측기 FAIL은 실제 canonical 결과 재조회 경로를 놓친 관
 두 실험의 요청별 행동을 합쳐 전체 PASS로 부르지 않으며, old D9 반례도 그대로 남긴다.
 50행의 실제 동일 PID 정산 복구는 이번에 보강됐지만 52–57행의 보이는 TUI·F9·알림 동작,
 강제 HTTP race·장기 calendar·모델/계정 전환·외부 파일/채널 효과와 설치는 여전히 별도 미검증 범위다.
+
+2026-10-27 추가 관측은 [TUI state·파일 효과 bundle](../evidence/2026-10-27-schedule-tui-file/README.md)에 있다.
+workflow **Test40409087814**, 실행 head `a3950a189b9cc5a7ce82cb725699455d79923f42`,
+ref `ci/schedule-durable-candidate-20261027`, conclusion **success**는
+기존 `test_tui_loading_notice`만 실행한 8 PASS이며 full CI나 실제 PTY 증명이 아니다.
+동일 C2 native의 파일 trial1은 실제 Write의 `microvm_shim_missing`으로 FAIL이다.
+새 격리 base에 명시적으로 pin한 기존 arm64 shim/sidecar를 준비한 trial2는
+Write·완전 Read·marker·원 source/incarnation·ACK·fresh idle·정상 exit 0을 확인했다.
+88개의 반복 검사 기록은 한 파일 시나리오이며, 이전 DeepSeek 두 Job 범위 FAIL을 수리한 근거가 아니다.
+TUI 첫 실제 관측은 compact `/health`를 놓친 검증기 시작 조건과 별도 통신 실패로 INCOMPLETE이다.
+selector를 고친 다음 관측은 실제 TUI의 HTTP400과 별도 진단의 동일 응답 digest를 통해
+관측 relay의 Host가 서버 identity로 설정되지 않아 `request_authority_untrusted`로 거절된 것을 확인했다.
+이 관측도 INCOMPLETE이며 키보드 시나리오에는 도달하지 않았다.
+이 관측을 화면·F9·좁은 입력·알림의 성공이나 예약 기능의 새 실패로 바꾸어 해석하지 않는다.

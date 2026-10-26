@@ -1,0 +1,13 @@
+{
+  "producer_started": true,
+  "forced_kills": [],
+  "restart_count": 0,
+  "pid": 40974,
+  "started_at_unix": 1793054748.7630332,
+  "url": "http://127.0.0.1:59848",
+  "base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace",
+  "stop_reason": "full mandatory file/source/execution proof and fresh terminal idle observed",
+  "returncode": 0,
+  "stopped_at_unix": 1793054828.9536488,
+  "forced_kill": false
+}

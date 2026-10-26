@@ -1,0 +1,24 @@
+{
+  "recorded_unix": 1793054106.2657459,
+  "purpose": "one owned actual DeepSeek Write -> full Read -> schedule marker trial",
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/probe_real_file_effect_c2_v3.py",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-1",
+    "--binary",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+    "--native-binding",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/c2-native-binding.json",
+    "--image-reference",
+    "masc-sandbox:general",
+    "--provider",
+    "ollama_cloud",
+    "--observation-deadline-unix",
+    "1793055006.2656698"
+  ],
+  "controller_sha256": "bc450f6d8201956d18026d6aa2e3533534aaed198e6a16a201c54299c1f657d1",
+  "source_sha": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "independent_review": "schedule_adversarial v3 bounded source-only PASS; no additional P0-P2",
+  "deadline_policy": "observation only; no automatic replay, failover or forced termination"
+}

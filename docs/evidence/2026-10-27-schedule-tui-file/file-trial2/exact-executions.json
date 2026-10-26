@@ -1,0 +1,533 @@
+[
+  {
+    "keeper": "audit-file-28426d4ecc244721aed83a6409fa4111",
+    "execution_id": "execution-node-936ee09c22a434810eb6c12f00616aab",
+    "entry": {
+      "ts": 1793054821.656139,
+      "record_kind": "tool_call",
+      "keeper": "audit-file-28426d4ecc244721aed83a6409fa4111",
+      "tool": "Write",
+      "input": {
+        "file_path": "schedule-file-209ee68dca31409cbb102b69b596ea96.txt",
+        "content": "nonce=606b0a370cf645748af1dadc790119a3\n예약 파일 결과 확인 🐙"
+      },
+      "output": "{\"ok\": true, \"path\": \"/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/schedule-file-209ee68dca31409cbb102b69b596ea96.txt\", \"mode\": \"overwrite\", \"bytes_written\": 71, \"via\": \"microvm\"}",
+      "duration_ms": 66096.08197212219,
+      "runtime_contract": {
+        "keeper_name": "audit-file-28426d4ecc244721aed83a6409fa4111",
+        "trace_id": "trace-1793054750634-00000",
+        "session_id": "trace-1793054750634-00000",
+        "keeper_turn_id": 1,
+        "task_id": null,
+        "goal_ids": [],
+        "sandbox_profile": "microvm",
+        "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/",
+        "sandbox_roots": [
+          ".masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/"
+        ],
+        "path_resolution": {
+          "read_implicit_cwd": false,
+          "read_explicit_cwd_supported": true,
+          "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+          "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+          "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+          "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+        },
+        "network_mode": "none",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+      },
+      "action_radius": {
+        "tool_name": "Write",
+        "action_key": "Write",
+        "target_kind": "path",
+        "target_path": "schedule-file-209ee68dca31409cbb102b69b596ea96.txt",
+        "sandbox_target": "microvm",
+        "observed_paths": [
+          "schedule-file-209ee68dca31409cbb102b69b596ea96.txt"
+        ],
+        "duration_ms": 66096.08197212219,
+        "error": null
+      },
+      "route_evidence": {
+        "descriptor_id": "agent.write_file",
+        "capability_id": "tool_write_file",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Write",
+        "canonical_name": "tool_write_file",
+        "description": "Write full file content into the keeper sandbox or an allowed path. Missing parent directories are created safely; call Write directly instead of using Execute mkdir.",
+        "executor": "filesystem",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_write_file",
+        "execution": "serial",
+        "tool_kind": "atomic",
+        "composable_output": {
+          "kind": "json",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "path": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "bytes_written": {
+                "type": "integer"
+              },
+              "via": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ok",
+              "path",
+              "mode",
+              "bytes_written"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "receipt_labels": {
+          "descriptor_id": "agent.write_file",
+          "capability_id": "tool_write_file",
+          "keeper_model_projection": "preferred_public_name",
+          "public_name": "Write",
+          "canonical_name": "tool_write_file",
+          "executor": "filesystem",
+          "backend": "sandbox_process",
+          "sandbox": "backend_selected",
+          "runtime_handler": "tool_write_file",
+          "execution": "serial",
+          "composable_output": "opaque",
+          "input_schema_source": "canonical_registry"
+        },
+        "eval_tags": [],
+        "readonly": false,
+        "cwd_scope": "keeper_sandbox",
+        "polling_read": false,
+        "via": "microvm",
+        "tool_name": "Write"
+      },
+      "agent_name": "audit-file-28426d4ecc244721aed83a6409fa4111",
+      "model": "runtime",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "4642480376e1ecc88d241e7ad95b78efcbaf628a2ceff0e1c80d140f5f2fe967",
+      "execution_id": "execution-node-936ee09c22a434810eb6c12f00616aab",
+      "tool_observation": {
+        "attribution": {
+          "kind": "unaddressed",
+          "reason": {
+            "kind": "unregistered_origin",
+            "detail": null
+          },
+          "attempted_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/schedule-file-209ee68dca31409cbb102b69b596ea96.txt"
+        },
+        "turn_ref": "trace-1793054750634-00000#1",
+        "declared_progress": null
+      },
+      "physical_execution_id": "execution-node-936ee09c22a434810eb6c12f00616aab",
+      "tool_use_id": "call_bq819oz2",
+      "planned_index": 0,
+      "batch_index": 0,
+      "batch_size": 1,
+      "execution_mode": "serial",
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "file_change_evidence": {
+        "kind": "write",
+        "new_range": {
+          "start_line": 1,
+          "end_line": 2
+        }
+      },
+      "trace_id": "trace-1793054750634-00000",
+      "session_id": "trace-1793054750634-00000",
+      "turn": 0,
+      "keeper_turn_id": 1,
+      "sandbox_profile": "microvm",
+      "network_mode": "none",
+      "result_bytes": 345,
+      "input_fingerprint": "1bbeef0c1530c6b9f374473a1cc0503fee1a76de95f162cdbe0c2b5d1387762a",
+      "output_fingerprint": "cbe27b7a8ffeb302783ecbc991c6bf51cf900e60f5c41a5010c9f86762a5d3fe",
+      "definition_source": "tools/Write.toml"
+    }
+  },
+  {
+    "keeper": "audit-file-28426d4ecc244721aed83a6409fa4111",
+    "execution_id": "execution-node-cd98b9728c3f6bba6f4c070d7484c316",
+    "entry": {
+      "ts": 1793054822.91141,
+      "record_kind": "tool_call",
+      "keeper": "audit-file-28426d4ecc244721aed83a6409fa4111",
+      "tool": "Read",
+      "input": {
+        "file_path": "schedule-file-209ee68dca31409cbb102b69b596ea96.txt",
+        "offset": 1
+      },
+      "output": "{\"ok\": true, \"path\": \"/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/schedule-file-209ee68dca31409cbb102b69b596ea96.txt\", \"bytes\": 71, \"truncated\": false, \"offset\": 1, \"returned_lines\": 2, \"content\": \"nonce=606b0a370cf645748af1dadc790119a3\\n예약 파일 결과 확인 🐙\", \"via\": \"microvm\"}",
+      "duration_ms": 341.641902923584,
+      "runtime_contract": {
+        "keeper_name": "audit-file-28426d4ecc244721aed83a6409fa4111",
+        "trace_id": "trace-1793054750634-00000",
+        "session_id": "trace-1793054750634-00000",
+        "keeper_turn_id": 1,
+        "task_id": null,
+        "goal_ids": [],
+        "sandbox_profile": "microvm",
+        "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/",
+        "sandbox_roots": [
+          ".masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/"
+        ],
+        "path_resolution": {
+          "read_implicit_cwd": false,
+          "read_explicit_cwd_supported": true,
+          "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+          "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+          "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+          "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+        },
+        "network_mode": "none",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+      },
+      "action_radius": {
+        "tool_name": "Read",
+        "action_key": "Read",
+        "target_kind": "path",
+        "target_path": "schedule-file-209ee68dca31409cbb102b69b596ea96.txt",
+        "sandbox_target": "microvm",
+        "observed_paths": [
+          "schedule-file-209ee68dca31409cbb102b69b596ea96.txt"
+        ],
+        "duration_ms": 341.641902923584,
+        "error": null
+      },
+      "route_evidence": {
+        "descriptor_id": "agent.read_file",
+        "capability_id": "tool_read_file",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Read",
+        "canonical_name": "tool_read_file",
+        "description": "Read one existing file, or a line range of one file, from the keeper sandbox or an allowed path with no implicit cwd. Read targets a single FILE; to list a directory use the Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read never inherits Execute cwd. For a line range, pass offset (1-based line) and limit (max lines) — do not run sed -n via Execute for this. The payload carries the exact current bytes (no line numbers) plus offset, returned_lines, truncated; when truncated=true a next_offset field gives the next line offset. If last_line_partial=true, the byte budget cut inside the final returned line and next_offset intentionally skips that line's unseen remainder rather than continuing byte-for-byte. Before Edit, Read the target region so old_string matches current bytes.",
+        "executor": "filesystem",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_read_file",
+        "execution": "concurrent",
+        "tool_kind": "atomic",
+        "composable_output": {
+          "kind": "json",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "path": {
+                "type": "string"
+              },
+              "bytes": {
+                "type": "integer"
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "offset": {
+                "type": "integer"
+              },
+              "returned_lines": {
+                "type": "integer"
+              },
+              "content": {
+                "type": "string"
+              },
+              "next_offset": {
+                "type": "integer"
+              },
+              "last_line_partial": {
+                "type": "boolean"
+              },
+              "file_bytes": {
+                "type": "integer"
+              },
+              "via": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ok",
+              "path",
+              "bytes",
+              "truncated",
+              "offset",
+              "returned_lines",
+              "content"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "receipt_labels": {
+          "descriptor_id": "agent.read_file",
+          "capability_id": "tool_read_file",
+          "keeper_model_projection": "preferred_public_name",
+          "public_name": "Read",
+          "canonical_name": "tool_read_file",
+          "executor": "filesystem",
+          "backend": "sandbox_process",
+          "sandbox": "backend_selected",
+          "runtime_handler": "tool_read_file",
+          "execution": "concurrent",
+          "composable_output": "opaque",
+          "input_schema_source": "canonical_registry"
+        },
+        "eval_tags": [],
+        "readonly": true,
+        "cwd_scope": "keeper_sandbox",
+        "polling_read": false,
+        "via": "microvm",
+        "tool_name": "Read"
+      },
+      "agent_name": "audit-file-28426d4ecc244721aed83a6409fa4111",
+      "model": "runtime",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "4642480376e1ecc88d241e7ad95b78efcbaf628a2ceff0e1c80d140f5f2fe967",
+      "execution_id": "execution-node-cd98b9728c3f6bba6f4c070d7484c316",
+      "tool_observation": {
+        "attribution": {
+          "kind": "unaddressed",
+          "reason": {
+            "kind": "unregistered_origin",
+            "detail": null
+          },
+          "attempted_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/schedule-file-209ee68dca31409cbb102b69b596ea96.txt"
+        },
+        "turn_ref": "trace-1793054750634-00000#1",
+        "declared_progress": null
+      },
+      "physical_execution_id": "execution-node-cd98b9728c3f6bba6f4c070d7484c316",
+      "tool_use_id": "call_88l9u8om",
+      "planned_index": 0,
+      "batch_index": 0,
+      "batch_size": 1,
+      "execution_mode": "concurrent",
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "trace_id": "trace-1793054750634-00000",
+      "session_id": "trace-1793054750634-00000",
+      "turn": 1,
+      "keeper_turn_id": 1,
+      "sandbox_profile": "microvm",
+      "network_mode": "none",
+      "result_bytes": 451,
+      "input_fingerprint": "13379d38fa3ab5ea5e4d27c3306d2ff4decbe281a74a51b5c7d9e1fc5118ccf6",
+      "output_fingerprint": "8175215bb5e5ec988c91caf0411514da435f96be207840ae696363f2dd66452f",
+      "definition_source": "tools/Read.toml"
+    }
+  },
+  {
+    "keeper": "audit-file-28426d4ecc244721aed83a6409fa4111",
+    "execution_id": "execution-node-86ff9f91df1660e8c15ec3cbf67b7ae9",
+    "entry": {
+      "ts": 1793054823.892096,
+      "record_kind": "tool_call",
+      "keeper": "audit-file-28426d4ecc244721aed83a6409fa4111",
+      "tool": "keeper_tool_search",
+      "input": {
+        "names": [
+          "masc_schedule_note_add"
+        ]
+      },
+      "output": "now callable:\n- masc_schedule_note_add: Append a durable note to one scheduled request. Notes record why a",
+      "duration_ms": 0.07915496826171875,
+      "runtime_contract": {
+        "keeper_name": "audit-file-28426d4ecc244721aed83a6409fa4111",
+        "trace_id": "trace-1793054750634-00000",
+        "session_id": "trace-1793054750634-00000",
+        "keeper_turn_id": 1,
+        "task_id": null,
+        "goal_ids": [],
+        "sandbox_profile": "microvm",
+        "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/",
+        "sandbox_roots": [
+          ".masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/"
+        ],
+        "path_resolution": {
+          "read_implicit_cwd": false,
+          "read_explicit_cwd_supported": true,
+          "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+          "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+          "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+          "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+        },
+        "network_mode": "none",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+      },
+      "action_radius": {
+        "tool_name": "keeper_tool_search",
+        "action_key": "keeper_tool_search",
+        "target_kind": "tool",
+        "target_path": null,
+        "sandbox_target": "microvm",
+        "observed_paths": [],
+        "duration_ms": 0.07915496826171875,
+        "error": null
+      },
+      "agent_name": "audit-file-28426d4ecc244721aed83a6409fa4111",
+      "model": "runtime",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "4642480376e1ecc88d241e7ad95b78efcbaf628a2ceff0e1c80d140f5f2fe967",
+      "execution_id": "execution-node-86ff9f91df1660e8c15ec3cbf67b7ae9",
+      "tool_observation": {
+        "attribution": {
+          "kind": "pathless"
+        },
+        "turn_ref": "trace-1793054750634-00000#1",
+        "declared_progress": null
+      },
+      "physical_execution_id": "execution-node-86ff9f91df1660e8c15ec3cbf67b7ae9",
+      "tool_use_id": "call_8w2h5833",
+      "planned_index": 0,
+      "batch_index": 0,
+      "batch_size": 1,
+      "execution_mode": "serial",
+      "wire_outcome": "ok",
+      "trace_id": "trace-1793054750634-00000",
+      "session_id": "trace-1793054750634-00000",
+      "turn": 2,
+      "keeper_turn_id": 1,
+      "sandbox_profile": "microvm",
+      "network_mode": "none",
+      "result_bytes": 106,
+      "input_fingerprint": "a074b56ae2716238aeecbc8ea213c5bd23b41aabd4c6495d26ba7032a1f84c6d",
+      "output_fingerprint": "3e7ae2373f1f4557268131364ec0160c2029262ff60b9461452fa4a1e8789583",
+      "definition_source": "tools/keeper_tool_search.toml"
+    }
+  },
+  {
+    "keeper": "audit-file-28426d4ecc244721aed83a6409fa4111",
+    "execution_id": "execution-node-50f9f53ccd1ec4582970f2508740cbc2",
+    "entry": {
+      "ts": 1793054825.402565,
+      "record_kind": "tool_call",
+      "keeper": "audit-file-28426d4ecc244721aed83a6409fa4111",
+      "tool": "masc_schedule_note_add",
+      "input": {
+        "schedule_id": "audit-file-job-aa049ca7e6ee403a867e202e8df6aacb",
+        "body": "FILE_EFFECT_VERIFIED_5bf0ca710ed0404183d247f3f891ca15"
+      },
+      "output": "{\"status\": \"ok\", \"note\": {\"note_id\": \"6\", \"schedule_id\": \"audit-file-job-aa049ca7e6ee403a867e202e8df6aacb\", \"author_id\": \"audit-file-28426d4ecc244721aed83a6409fa4111\", \"author_kind\": \"automated_actor\", \"created_at\": 1793054825.369285, \"body\": \"FILE_EFFECT_VERIFIED_5bf0ca710ed0404183d247f3f891ca15\"}, \"note_count\": 1}",
+      "duration_ms": 29.96516227722168,
+      "runtime_contract": {
+        "keeper_name": "audit-file-28426d4ecc244721aed83a6409fa4111",
+        "trace_id": "trace-1793054750634-00000",
+        "session_id": "trace-1793054750634-00000",
+        "keeper_turn_id": 1,
+        "task_id": null,
+        "goal_ids": [],
+        "sandbox_profile": "microvm",
+        "sandbox_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-2/workspace/.masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/",
+        "sandbox_roots": [
+          ".masc/playground/audit-file-28426d4ecc244721aed83a6409fa4111/"
+        ],
+        "path_resolution": {
+          "read_implicit_cwd": false,
+          "read_explicit_cwd_supported": true,
+          "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+          "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+          "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+          "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+        },
+        "network_mode": "none",
+        "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+      },
+      "action_radius": {
+        "tool_name": "masc_schedule_note_add",
+        "action_key": "masc_schedule_note_add",
+        "target_kind": "tool",
+        "target_path": null,
+        "sandbox_target": "microvm",
+        "observed_paths": [],
+        "duration_ms": 29.96516227722168,
+        "error": null
+      },
+      "route_evidence": {
+        "descriptor_id": "masc.schedule.note_add",
+        "capability_id": "masc_schedule_note_add",
+        "keeper_model_projection": "internal_name",
+        "public_name": "masc_schedule_note_add",
+        "canonical_name": "masc_schedule_note_add",
+        "description": "Append a durable note to one scheduled request. Notes record why a\nschedule exists and what changed and when. Wake metadata includes the message,\nschedule identity, timing and an optional title; it does not include notes.\nWhen execution depends on a note, ensure the schedule's message explicitly\ntells the Keeper to call masc_schedule_notes_list with its schedule ID before\nacting. Use masc_schedule_update while the schedule is editable to add that\ninstruction. Adding a note alone neither changes the message nor signals that\nnotes need reading. Notes are keyed by the stable schedule_id, so replacing a\ndefinition does not orphan them. Notes are append-only, with no edit or removal,\nand survive terminal schedule states. You are recorded as the author.",
+        "executor": "in_process",
+        "backend": "ocaml_runtime",
+        "sandbox": "none",
+        "runtime_handler": "tool_masc_schedule_dispatch",
+        "execution": "serial",
+        "tool_kind": "atomic",
+        "composable_output": {
+          "kind": "opaque"
+        },
+        "receipt_labels": {
+          "descriptor_id": "masc.schedule.note_add",
+          "capability_id": "masc_schedule_note_add",
+          "keeper_model_projection": "internal_name",
+          "public_name": "masc_schedule_note_add",
+          "canonical_name": "masc_schedule_note_add",
+          "executor": "in_process",
+          "backend": "ocaml_runtime",
+          "sandbox": "none",
+          "runtime_handler": "tool_masc_schedule_dispatch",
+          "execution": "serial",
+          "composable_output": "opaque",
+          "input_schema_source": "canonical_registry"
+        },
+        "eval_tags": [],
+        "readonly": false,
+        "cwd_scope": null,
+        "polling_read": false,
+        "status": "ok",
+        "tool_name": "masc_schedule_note_add"
+      },
+      "agent_name": "audit-file-28426d4ecc244721aed83a6409fa4111",
+      "model": "runtime",
+      "runtime_profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "4642480376e1ecc88d241e7ad95b78efcbaf628a2ceff0e1c80d140f5f2fe967",
+      "execution_id": "execution-node-50f9f53ccd1ec4582970f2508740cbc2",
+      "tool_observation": {
+        "attribution": {
+          "kind": "pathless"
+        },
+        "turn_ref": "trace-1793054750634-00000#1",
+        "declared_progress": null
+      },
+      "physical_execution_id": "execution-node-50f9f53ccd1ec4582970f2508740cbc2",
+      "tool_use_id": "call_6xt8lney",
+      "planned_index": 0,
+      "batch_index": 0,
+      "batch_size": 1,
+      "execution_mode": "serial",
+      "wire_outcome": "ok",
+      "disposition": "completed",
+      "trace_id": "trace-1793054750634-00000",
+      "session_id": "trace-1793054750634-00000",
+      "turn": 3,
+      "keeper_turn_id": 1,
+      "sandbox_profile": "microvm",
+      "network_mode": "none",
+      "result_bytes": 301,
+      "input_fingerprint": "db9bc2c4214c740341d31ef9783860752ac4a3198b3b0b9dc4e40dfea10325e0",
+      "output_fingerprint": "c662e9cdb6cfdcac172d975cab4506063e0d8cc5d1b8dc1e6fb210573ae1a598",
+      "definition_source": "tools/masc_schedule_note_add.toml"
+    }
+  }
+]

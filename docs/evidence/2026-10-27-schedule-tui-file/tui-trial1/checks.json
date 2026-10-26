@@ -1,0 +1,95 @@
+[
+  {
+    "name": "exact owned server identity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "durable Queue_only admission accepted audit-tui-a",
+    "passed": true,
+    "detail": {
+      "operation_id": "tui-draft-3108f97a7410403a9d0a1cdebb0b9a5e",
+      "state": "Queued",
+      "queued_count": 1
+    }
+  },
+  {
+    "name": "exact operation is queued and has not started audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-a",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "durable Queue_only admission accepted audit-tui-b",
+    "passed": true,
+    "detail": {
+      "operation_id": "tui-draft-16dd33527ce643459d810cf134fdf29e",
+      "state": "Queued",
+      "queued_count": 1
+    }
+  },
+  {
+    "name": "exact operation is queued and has not started audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner is paused with no current execution audit-tui-b",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "owned owner remains manual paused and zero-turn audit-tui-b",
+    "passed": true,
+    "detail": null
+  }
+]

@@ -1,0 +1,21 @@
+{
+  "recorded_unix": 1793055212.14355,
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v3.py",
+    "--source-root",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+    "--native-dir",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2",
+    "--image-reference",
+    "masc-sandbox:general",
+    "--observation-deadline-unix",
+    "1793055812.1434639"
+  ],
+  "controller_sha256": "3171b7d1e56f97fb8f3e8ab46bfd71cba45c3c4e9af405ccf257de02143a6c22",
+  "review": "root + schedule_multimodel_review narrow source-only PASS; compact identity whitelist gate repaired",
+  "scope": "One fresh diagnostic/actual TUI request-state trial; previous transport failure cause unknown and no success prediction or paint claim. Preserve original trialINCOMPLETE.",
+  "deadline_policy": "finite observation only; no automatic replay/providercall/forcedkill"
+}

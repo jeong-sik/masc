@@ -1,0 +1,30 @@
+{
+  "schema": "masc.owned-tui-preparation.v3",
+  "status": "SOURCE_PREPARED_NOT_EXECUTED",
+  "source_sha": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "controller": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v3.py",
+    "bytes": 50760,
+    "sha256": "3171b7d1e56f97fb8f3e8ab46bfd71cba45c3c4e9af405ccf257de02143a6c22"
+  },
+  "parent_v2": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v2.py",
+    "bytes": 50752,
+    "sha256": "8c7712038a331fbcc3dedb8e9e8e7b89442e6dda1d218a49ae16e8dbbe4ffe29",
+    "unchanged": true
+  },
+  "change": "Exactly one whitelist return expression: parsed query {} or exact full=1 for GET /health; safe projection unchanged. No harness broadening.",
+  "AST": "PASS",
+  "changed_AST_method": "Relay.whitelist only (enclosing Relay class naturally changes)",
+  "other_AST_definitions_unchanged": 30,
+  "actual_native_PTY_API_process_model_CI": "NOT EXECUTED",
+  "independent_delta_review": "PENDING",
+  "native_file_preflight": "NOT EXECUTED by this author; source/AST only",
+  "actual_trial": "NOT EXECUTED; no automatic rerun",
+  "open_causal_limit": "v3 fixes only the confirmed selector bug. Closed v2 had repeated failed TUI refreshes and a canonical startup-attempt file; no sufficient explanation of those failures yet. Root must resolve before selecting another trial.",
+  "baseline_bug_report": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/compact-health-baseline-bug-source-review.json",
+    "bytes": 4770,
+    "sha256": "49bc02c68be650749cc9c3efb01102b606a3616de3164414075d3c4beae42725"
+  }
+}

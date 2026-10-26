@@ -274,6 +274,15 @@ val defer_pending :
     transient failures: no source is lost, but it cannot monopolize the head of
     the active queue while independent work is waiting. *)
 
+val defer_pending_batch :
+  selections:pending_selection list -> t -> (t * int64, string) result
+(** Validate every exact selection before rotating a batch within urgency
+    lanes. A selected Connector conversation moves with all its currently
+    pending rows, including an unadmitted suffix, in their existing queue
+    order. Other selected sources move individually. Payloads, execution
+    scopes, first admission and retention counts are preserved; moved rows
+    receive a new source incarnation. No source is acknowledged. *)
+
 val cancel_pending_accepted :
   applied_at:float ->
   cancellation:accepted_cancellation ->

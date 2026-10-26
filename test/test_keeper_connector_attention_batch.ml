@@ -1262,7 +1262,8 @@ let test_checkpoint_retention_preserves_unsettled_sources () =
     let second = connector_attention_stimulus
       ~base_path ~keeper_name ~channel_id:"chan-retained"
       ~message_id:"second" ~arrived_at:2.0 ~content:"Independent pending reply" in
-    let board = board_distractor_stimulus ~post_id:"board-retained" ~arrived_at:3.0 in
+    let board = { (board_distractor_stimulus ~post_id:"board-retained" ~arrived_at:3.0)
+                  with urgency=Q.Normal } in
     List.iter (enqueue_exn ~base_path keeper_name) [first; second; board];
     let pending () =
       Persistence.For_testing.reset_snapshot_cache_for_testing ();
@@ -1299,7 +1300,127 @@ let test_checkpoint_retention_preserves_unsettled_sources () =
         ~base_path keeper_name ~applied_at:1000.0 ~selection:selected
       |> require "explicit completion settles the exact source" in
     check (list string) "completion leaves other outstanding inputs intact"
-      [second.post_id; board.post_id] (identities (pending ())))
+      [board.post_id; second.post_id] (identities (pending ())))
+;;
+
+let test_checkpoint_rotates_whole_connector_conversation_after_boundary () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS" (Some "2")
+  @@ fun () ->
+  with_ctx "checkpoint-conversation-rotation" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let make channel message arrived_at = connector_attention_stimulus
+      ~base_path ~keeper_name ~channel_id:channel ~message_id:message ~arrived_at
+      ~content:("Original content " ^ message) in
+    let a1 = make "conversation-A" "a1" 1.
+    and a2 = make "conversation-A" "a2" 2.
+    and a3 = make "conversation-A" "a3" 3. in
+    List.iter (enqueue_exn ~base_path keeper_name) [a1;a2;a3];
+    let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    let module Batch = Keeper_heartbeat_source_batch in
+    let original = (intake ()).source_batch in
+    let ids selections = List.map (fun (s : Keeper_event_queue_state.pending_selection) ->
+      s.source.post_id) selections in
+    check (list string) "bounded intake admits A's prefix in FIFO order"
+      [a1.post_id;a2.post_id] (ids (Batch.selections original));
+    let input = Batch.for_turn ~reactive:true original in
+    let probe = fst (Keeper_unified_turn.For_testing.autonomous_yield_probe
+      ~wake:(Batch.wake input) ~sources:(Batch.sources input) ~base_path ~keeper_name) in
+    check bool "the unadmitted A suffix is not a new arrival" true
+      (Option.is_none (probe () |> require));
+    let scope = Keeper_chat_operation.Operation_id.of_string "original-A-consumer"
+      |> require |> Keeper_execution_scope_id.direct_operation in
+    let admitted = Keeper_event_queue_persistence.bind_pending_repetition_scope_result
+      ~base_path ~keeper_name ~selections:(Batch.selections original) ~scope () |> require in
+    let b1 = make "conversation-B" "b1" 4. in
+    enqueue_exn ~base_path keeper_name b1;
+    (match probe () |> require with
+     | Some {Keeper_agent_run.reason=Durable_stimulus_waiting summary} ->
+       check (option string) "B causes the boundary checkpoint" (Some b1.post_id)
+         (Option.map (fun (s : Q.stimulus) -> s.post_id) summary.head)
+     | Some {reason=Operation_queued} | None -> fail "new conversation B did not request a yield");
+    (match Keeper_agent_run.For_testing.native_tool_boundary
+        ~repetition_execution:None
+        ~terminal_effect_state:Keeper_tools_agent_core.Terminal_effect_open
+        ~yield_requested:(Some probe) with
+     | Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting) -> ()
+     | Ok (Runtime_agent.Yield _ | Runtime_agent.Continue) | Error _ ->
+       fail "the production settled-tool boundary did not yield to B");
+    let pending () =
+      Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
+      Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name |> require in
+    let before_rotation = pending () in
+    Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
+      ~base_path ~keeper_name admitted |> require;
+    let rotated = pending () in
+    check (list string) "whole A conversation moves behind B without reversing its suffix"
+      [b1.post_id;a1.post_id;a2.post_id;a3.post_id] (ids rotated);
+    List.iter (fun (s : Keeper_event_queue_state.pending_selection) ->
+      let admitted = s.source.post_id=a1.post_id || s.source.post_id=a2.post_id in
+      check int "only exact admitted sources count the checkpoint" (if admitted then 1 else 0)
+        s.checkpoint_retentions;
+      check bool "only admitted sources retain the original consumer binding" true
+        (Option.equal Keeper_execution_scope_id.equal
+           (if admitted then Some scope else None) s.repetition_scope);
+      let original = List.find (fun (source : Q.stimulus) -> source.post_id=s.source.post_id)
+        [a1;a2;a3;b1] in
+      check bool "conversation rotation retains the exact original payload" true
+        (original=s.source);
+      let previous = List.find (fun (p : Keeper_event_queue_state.pending_selection) ->
+        p.source.post_id=s.source.post_id) before_rotation in
+      check (option (float 0.)) "first admission survives whole-conversation rotation"
+        previous.first_admitted_at s.first_admitted_at;
+      check bool "unselected B keeps its incarnation while A receives new queue authority"
+        (s.source.post_id=b1.post_id)
+        (Int64.equal previous.admitted_revision s.admitted_revision)) rotated;
+    let selected_b = (intake ()).source_batch |> Batch.selections in
+    check (list string) "actual next intake selects B instead of checkpointed A"
+      [b1.post_id] (ids selected_b);
+    let complete selections = List.iter (fun selection ->
+      Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+        ~base_path keeper_name ~applied_at:10. ~selection |> require |> ignore) selections in
+    complete selected_b;
+    let resumed_a = (intake ()).source_batch |> Batch.selections in
+    check (list string) "A resumes its original prefix after B completes"
+      [a1.post_id;a2.post_id] (ids resumed_a);
+    complete resumed_a;
+    check (list string) "A's original unadmitted suffix remains next"
+      [a3.post_id] (ids ((intake ()).source_batch |> Batch.selections)))
+;;
+
+let test_stale_connector_member_preserves_fifo_and_independent_progress () =
+  with_ctx "checkpoint-stale-conversation" (fun ~base_path ~keeper_name ~meta:_ ~ctx:_ ->
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let make channel message arrived_at = connector_attention_stimulus
+      ~base_path ~keeper_name ~channel_id:channel ~message_id:message ~arrived_at
+      ~content:("Original " ^ message) in
+    let a1 = make "conversation-A" "a1" 1.
+    and a2 = make "conversation-A" "a2" 2.
+    and b1 = make "conversation-B" "b1" 3. in
+    List.iter (enqueue_exn ~base_path keeper_name) [a1;a2;b1];
+    let pending () =
+      Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
+      Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name |> require in
+    let admitted = pending () in
+    Keeper_event_queue_persistence.note_checkpoint_retention_result
+      ~base_path ~keeper_name ~selection:(List.hd admitted) () |> require |> ignore;
+    let stale_current = List.hd (pending ()) in
+    let c1 = make "conversation-C" "c1" 4. in
+    enqueue_exn ~base_path keeper_name c1;
+    let failures = Keeper_registry_event_queue.retain_checkpoint_batch_result
+      ~base_path keeper_name ~selections:admitted |> require in
+    check (list string) "stale exact source is reported, never silently accepted"
+      [a1.post_id] (List.map (fun ((s : Keeper_event_queue_state.pending_selection), _) ->
+        s.source.post_id) failures);
+    let current = pending () in
+    check (list string) "stale A stays ordered while independent B moves behind C"
+      [a1.post_id;a2.post_id;c1.post_id;b1.post_id]
+      (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) current);
+    check bool "stale source's current state remains exactly unchanged" true
+      (List.hd current=stale_current);
+    List.iter (fun (s : Keeper_event_queue_state.pending_selection) ->
+      check int "healthy admitted siblings retain counts without counting C"
+        (if s.source.post_id=c1.post_id then 0 else 1) s.checkpoint_retentions) current)
 ;;
 
 (* A completed, addressed turn settles the entire admitted batch through the
@@ -1929,6 +2050,10 @@ let () =
             test_running_source_observes_new_completion_after_intake
         ; test_case "checkpoint yields preserve requests until exact settlement" `Quick
             test_checkpoint_retention_preserves_unsettled_sources
+        ; test_case "new connector preempts and retains the entire old conversation in FIFO order" `Quick
+            test_checkpoint_rotates_whole_connector_conversation_after_boundary
+        ; test_case "stale connector member preserves FIFO and independent progress" `Quick
+            test_stale_connector_member_preserves_fifo_and_independent_progress
         ; test_case "checkpoint retains original results and admits independent successors" `Quick
             test_checkpoint_preserves_results_and_services_successors
         ; test_case "stale checkpoint source preserves healthy sibling progress" `Quick

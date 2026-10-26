@@ -1366,27 +1366,32 @@ let defer_pending_result
     State.defer_pending ~selection state)
 ;;
 
-type checkpoint_retention_order = Keep_position | Rotate_within_urgency
-
 let retain_checkpoint_batch_result
       ?(after_commit = fun _ -> ())
       ~base_path ~keeper_name ~selections () =
   commit_transform ~strict_snapshot_durability:true
     ~base_path ~keeper_name ~after_commit (fun state ->
-      let state, failures = List.fold_left
-        (fun (current, failures) (selection, order) ->
-          let result = match State.note_checkpoint_retention ~selection current with
-            | Error _ as error -> error
-            | Ok (retained, (updated, _)) ->
-              match order with
-              | Keep_position -> Ok retained
-              | Rotate_within_urgency ->
-                State.defer_pending ~selection:updated retained |> Result.map fst in
-          match result with
-          | Ok retained -> retained, failures
-          | Error detail -> current, (selection, detail)::failures)
-        (state, []) selections in
-      Ok (state, List.rev failures))
+      let state, retained, failures = List.fold_left
+        (fun (current, retained, failures) selection ->
+          match State.note_checkpoint_retention ~selection current with
+          | Ok (updated, (selection, _)) -> updated, selection::retained, failures
+          | Error detail -> current, retained, (selection, detail)::failures)
+        (state, [], []) selections in
+      let failed_channels = List.filter_map (fun (selection, _) ->
+        Keeper_event_queue.connector_attention_channel
+          selection.State.source.Keeper_event_queue.payload) failures in
+      let rotatable = List.rev retained |> List.filter (fun selection ->
+        match Keeper_event_queue.connector_attention_channel
+                selection.State.source.Keeper_event_queue.payload with
+        | None -> true
+        | Some channel ->
+          (* A stale member cannot authorize changing its current incarnation.
+             Keep that entire conversation in place rather than breaking its
+             FIFO by rotating only the healthy admitted prefix/suffix. *)
+          not (List.exists (Keeper_continuation_channel.same_conversation channel) failed_channels)) in
+      match State.defer_pending_batch ~selections:rotatable state with
+      | Error _ as error -> error
+      | Ok (state, _) -> Ok (state, List.rev failures))
 ;;
 
 type enqueue_stimulus_result =

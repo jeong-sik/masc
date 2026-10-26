@@ -1260,6 +1260,56 @@ let test_public_runtime_lane_label_is_stable_across_windows () =
     check (option string) "full window label" expected full;
     check (option string) "short window label" expected short)
 
+let test_cost_latency_json_preserves_unreported_usage_and_cost () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let decisions_file = make_keeper_dir base "cost_latency_absence" in
+    let ts = now_unix () in
+    let omit fields = function
+      | `Assoc top -> `Assoc (List.map (function
+          | "telemetry", `Assoc telemetry ->
+            "telemetry", `Assoc (List.filter (fun (key, _) -> not (List.mem key fields)) telemetry)
+          | field -> field) top)
+      | _ -> fail "decision fixture must be an object" in
+    write_decisions decisions_file [
+      success_entry ~model:"cost-only" ~ts:(ts -. 10.) ~cost_usd:0.03 ()
+        |> omit ["input_tokens"; "output_tokens"];
+      success_entry ~model:"tokens-only" ~ts:(ts -. 9.) () |> omit ["cost_usd"];
+      success_entry ~model:"reported-zero" ~ts:(ts -. 8.)
+        ~input_tokens:0 ~output_tokens:0 ~cost_usd:0. () ;
+      success_entry ~model:"partial" ~ts:(ts -. 7.) ~cost_usd:0.02 ();
+      success_entry ~model:"partial" ~ts:(ts -. 6.) ()
+        |> omit ["cost_usd"; "output_tokens"];
+    ];
+    let open Yojson.Safe.Util in
+    let json = compute_cost_latency_json ~base_path:base ~window_minutes:60 in
+    let rows = json |> member "perAgent" |> to_list in
+    let row model = List.find (fun row -> member "agent" row =
+      `String (runtime_lane_label_for_test model)) rows in
+    let null label value = check bool label true (value = `Null) in
+    null "cost-only input is unreported" (row "cost-only" |> member "in_tok");
+    null "cost-only output is unreported" (row "cost-only" |> member "out_tok");
+    check (float 0.001) "reported cost survives" 0.03 (row "cost-only" |> member "cost" |> to_float);
+    null "tokens-only cost is unreported" (row "tokens-only" |> member "cost");
+    check int "reported token count survives" 100 (row "tokens-only" |> member "in_tok" |> to_int);
+    check int "explicit zero usage row survives" 0 (row "reported-zero" |> member "in_tok" |> to_int);
+    check (float 0.) "explicit zero cost survives" 0. (row "reported-zero" |> member "cost" |> to_float);
+    null "partial cost is not a complete total" (row "partial" |> member "cost");
+    null "partial output is not a complete total" (row "partial" |> member "out_tok");
+    check int "fully reported field still sums" 200 (row "partial" |> member "in_tok" |> to_int);
+    null "incomplete global cost stays unknown" (member "total_cost_usd" json);
+    let matrix = member "matrix" json in
+    let models = member "models" matrix |> to_list in
+    let costs = member "grid" matrix |> to_list |> List.hd |> to_list in
+    List.iter2 (fun model cost ->
+      if model = `String (runtime_lane_label_for_test "tokens-only")
+         || model = `String (runtime_lane_label_for_test "partial")
+      then null "matrix preserves unreported or partial cost" cost) models costs;
+    write_decisions decisions_file [success_entry ~model:"reported-zero" ~ts ~input_tokens:0 ~output_tokens:0 ~cost_usd:0. ()];
+    check (float 0.) "complete explicit zero global cost stays zero" 0.
+      (compute_cost_latency_json ~base_path:base ~window_minutes:60 |> member "total_cost_usd" |> to_float))
+;;
+
 let test_cost_latency_json_preserves_missing_latency_as_null () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -2110,6 +2160,8 @@ let () =
       test_case "cost latency json composes axes and percentiles" `Quick test_cost_latency_json_composes_axes_and_percentiles;
       test_case "public runtime lane label is stable across windows" `Quick
         test_public_runtime_lane_label_is_stable_across_windows;
+      test_case "cost latency preserves absent, partial and explicit zero readings" `Quick
+        test_cost_latency_json_preserves_unreported_usage_and_cost;
       test_case "cost latency json preserves missing latency nulls" `Quick test_cost_latency_json_preserves_missing_latency_as_null;
       test_case "json roundtrip" `Quick test_json_roundtrip;
       test_case "runtime history keeps account attribution" `Quick test_runtime_history_keeps_account_attribution;

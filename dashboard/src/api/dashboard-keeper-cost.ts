@@ -314,9 +314,9 @@ export async function fetchKeeperDecisions(
 
 export interface CostPerAgentRow {
   agent: string
-  in_tok: number
-  out_tok: number
-  cost: number
+  in_tok: number | null
+  out_tok: number | null
+  cost: number | null
   p50_ms: number | null
   p95_ms: number | null
 }
@@ -324,7 +324,7 @@ export interface CostPerAgentRow {
 export interface CostMatrix {
   providers: string[]
   models: string[]
-  grid: number[][]
+  grid: (number | null)[][]
 }
 
 export interface CostLatencyBucket {
@@ -339,7 +339,7 @@ export interface CostLatencyResponse {
   latencyBuckets: CostLatencyBucket[]
   p50: number | null
   p95: number | null
-  total_cost_usd: number
+  total_cost_usd: number | null
   window_minutes: number
   generated_at: number
 }
@@ -350,9 +350,9 @@ function decodeCostPerAgentRow(raw: unknown): CostPerAgentRow | null {
   if (!agent) return null
   return {
     agent,
-    in_tok: asNumber(raw.in_tok) ?? 0,
-    out_tok: asNumber(raw.out_tok) ?? 0,
-    cost: asNumber(raw.cost) ?? 0,
+    in_tok: asNumber(raw.in_tok) ?? null,
+    out_tok: asNumber(raw.out_tok) ?? null,
+    cost: asNumber(raw.cost) ?? null,
     p50_ms: asNumber(raw.p50_ms) ?? null,
     p95_ms: asNumber(raw.p95_ms) ?? null,
   }
@@ -365,7 +365,7 @@ function decodeCostMatrix(raw: unknown): CostMatrix | null {
   const rawGrid = Array.isArray(raw.grid)
     ? (raw.grid as unknown[]).map(row =>
         Array.isArray(row)
-          ? (row as unknown[]).map(v => asNumber(v) ?? 0)
+          ? (row as unknown[]).map(v => asNumber(v) ?? null)
           : []
       )
     : []
@@ -384,7 +384,10 @@ function decodeCostMatrix(raw: unknown): CostMatrix | null {
     ? []
     : [
         Array.from({ length: colCount }, (_, column) =>
-          rawGrid.reduce((sum, row) => sum + (row[column] ?? 0), 0),
+          rawGrid.reduce<number | null>((sum, row) => {
+            const value = row[column]
+            return sum === null || value == null ? null : sum + value
+          }, rawGrid.length === 0 ? null : 0),
         ),
       ]
   return { providers, models, grid }
@@ -410,7 +413,7 @@ function decodeCostLatencyResponse(raw: unknown): CostLatencyResponse | null {
       : [],
     p50: asNumber(raw.p50) ?? null,
     p95: asNumber(raw.p95) ?? null,
-    total_cost_usd: asNumber(raw.total_cost_usd) ?? 0,
+    total_cost_usd: asNumber(raw.total_cost_usd) ?? null,
     window_minutes: asNumber(raw.window_minutes) ?? DEFAULT_WINDOW_MINUTES_24H,
     generated_at: asNumber(raw.generated_at) ?? 0,
   }

@@ -211,6 +211,10 @@ val render_keeper_prompt_feedback : aggregate -> string
     rather than concrete provider or model names. Billing and pricing values
     are observation-only and are never included in this planning input. *)
 
+(** Token/cost fields and matrix cells preserve unreported values as null.
+    Totals require each successful sample to report that field; partial sums
+    are not complete totals. Explicit reported zero remains zero. No samples
+    or an incomplete lane makes global cost null. *)
 val compute_cost_latency_json :
   base_path:string -> window_minutes:int -> (Yojson.Safe.t, read_error) result
 (** [compute_cost_latency_json ~base_path ~window_minutes] reads all

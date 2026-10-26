@@ -247,30 +247,47 @@ let render_keeper_prompt_feedback (agg : aggregate) =
    matrix, the latency histogram, and the global p50/p95 are
    derived from that single pass. *)
 
+(* Unlike a sum of observed readings, an exported complete total cannot fill
+   an unreported sample with zero. Each field has independent coverage. *)
+let complete_sum add field = function
+  | [] -> None
+  | first :: rest ->
+    List.fold_left
+      (fun total sample ->
+         Option.bind total (fun total -> Option.map (add total) (field sample)))
+      (field first) rest
+;;
+
 let compute_cost_latency_json ~base_path ~window_minutes =
   let ( let* ) = Result.bind in
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
   let* entries, cost_read = read_complete_entries ~base_path ~since_unix in
-  let model_stats_list = aggregate_by_model entries in
-  (* per-agent rows - sorted by cost descending, skip zero-signal rows *)
+  let samples_by_model = List.fold_left
+    (fun samples (entry : raw_entry) ->
+       match entry.outcome with
+       | Keeper_decision_outcome.Failed -> samples
+       | Keeper_decision_outcome.(Success | Checkpoint | Input_required) ->
+         StringMap.update entry.model
+           (fun previous -> Some (entry :: Option.value ~default:[] previous)) samples)
+    StringMap.empty entries in
+  let model_stats_list = aggregate_by_model entries |> List.map (fun stats ->
+    let samples = match StringMap.find_opt stats.model_id samples_by_model with
+      | Some samples -> samples | None -> [] in
+    { stats with
+      total_input_tokens = complete_sum ( + ) (fun (e : raw_entry) -> e.input_tokens) samples;
+      total_output_tokens = complete_sum ( + ) (fun (e : raw_entry) -> e.output_tokens) samples;
+      total_cost_usd = complete_sum ( +. ) (fun (e : raw_entry) -> e.cost_usd) samples }) in
+  (* Keep explicit zero and unreported lanes; sort reported costs first. *)
   let per_agent =
     model_stats_list
-    |> List.filter (fun (m : model_stats) ->
-      Option.value ~default:0.0 m.total_cost_usd > 0.0
-      || Option.value ~default:0 m.total_input_tokens > 0
-      || Option.value ~default:0 m.total_output_tokens > 0)
     |> List.sort (fun a b ->
-      Float.compare
-        (Option.value ~default:0.0 b.total_cost_usd)
-        (Option.value ~default:0.0 a.total_cost_usd))
+      Option.compare Float.compare b.total_cost_usd a.total_cost_usd)
     |> List.map (fun (m : model_stats) ->
       `Assoc
         [ "agent", `String (public_runtime_lane_label m.model_id)
-        ; "in_tok", `Int (Option.value ~default:0 m.total_input_tokens)
-        ; "out_tok", `Int (Option.value ~default:0 m.total_output_tokens)
-        (* Absence means zero observed spend, not a provider/model routing
-           choice. *)
-        ; "cost", `Float (Option.value ~default:0.0 m.total_cost_usd)
+        ; "in_tok", Json_util.int_opt_to_json m.total_input_tokens
+        ; "out_tok", Json_util.int_opt_to_json m.total_output_tokens
+        ; "cost", Json_util.float_opt_to_json m.total_cost_usd
         ; "p50_ms", Json_util.float_opt_to_json m.p50_latency_ms
         ; "p95_ms", Json_util.float_opt_to_json m.p95_latency_ms
         ])
@@ -287,12 +304,7 @@ let compute_cost_latency_json ~base_path ~window_minutes =
       [ `List
           (List.map
              (fun (m : model_stats) ->
-                let cost =
-                  match m.total_cost_usd with
-                  | Some value -> value
-                  | None -> 0.0
-                in
-                `Float cost)
+                Json_util.float_opt_to_json m.total_cost_usd)
              model_stats_list)
       ]
   in
@@ -309,10 +321,7 @@ let compute_cost_latency_json ~base_path ~window_minutes =
   in
   (* total cost across all models *)
   let total_cost_usd =
-    List.fold_left
-      (fun acc (m : model_stats) -> acc +. Option.value ~default:0.0 m.total_cost_usd)
-      0.0
-      model_stats_list
+    complete_sum ( +. ) (fun (m : model_stats) -> m.total_cost_usd) model_stats_list
   in
   let latency_buckets = latency_histogram entries in
   let latency_bucket_to_json (b : latency_bucket) =
@@ -333,7 +342,7 @@ let compute_cost_latency_json ~base_path ~window_minutes =
     ; "latencyBuckets", `List (List.map latency_bucket_to_json latency_buckets)
     ; "p50", Json_util.float_opt_to_json global_p50
     ; "p95", Json_util.float_opt_to_json global_p95
-    ; "total_cost_usd", `Float total_cost_usd
+    ; "total_cost_usd", Json_util.float_opt_to_json total_cost_usd
     ; "window_minutes", `Int window_minutes
     ; "cost_ledger_read", cost_read_to_json cost_read
     ; "generated_at", `Float (Time_compat.now ())

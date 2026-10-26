@@ -1,0 +1,9 @@
+{
+  "lib/model_inference_metrics/model_inference_metrics_json.ml": "781c42631dc7eb66e9dcbd8022ca02d4e3e75614b5c183ecf60440689dfc8b45",
+  "lib/model_inference_metrics/model_inference_metrics_json.mli": "49a3fd825edc92bfceed7157c6cc942fbce670088ed78662d5a2386aa51cf12d",
+  "lib/model_inference_metrics/model_inference_metrics.mli": "ba33e26eb5b5ed6e5e93c99634745802841e1afe87138c4e7e7d4b7f905cb268",
+  "lib/model_inference_metrics/model_inference_metrics_entry.mli": "90481280cb5faa88d4ca98c5cdfc15a5ea464cebfaba4e9019e5e2c12c68c438",
+  "dashboard/src/api/dashboard-keeper-cost.ts": "157ffde6ed6359712b30d9dd12f41e0c4c7b68f19cf6570bfc06895842506e5e",
+  "test/test_model_inference_metrics.ml": "d83135184a10456c620519592b5d3bbedf25c1da6d7ced9db2081c032346cc07",
+  "dashboard/src/api/dashboard.test.ts": "3f8ee0d81cc36e9c6d79759abc7a74910ac33c1823d70befcdb2098f6ec0eef6"
+}

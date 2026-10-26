@@ -117,6 +117,14 @@ Neither means fully supported.
 
 ## Current evidence and next work
 
+An [isolated real-model Keeper metadata probe](../evidence/ego-keeper-native-metadata/README.md)
+at source `d840b7978ce01ca0afdb1f4fcdedce0d4596e991` completed one exact-client
+`BrowserAct(space_status)` against installed Ego and published the actual Keeper
+caller in a retained host observation. Main chat completion and this individual
+metadata success are verified separately from a failed validation controller.
+The candidate had no Dashboard assets; later UI-publication source, visible UI,
+login and full SDK support are not proven by that probe.
+
 The rich-input and Page-code probes run the production workflow JavaScript in an
 owned real Ego Space against local fixtures. They exercise native input, browser
 code and JSON separation, app-state wait, browser POST exactly once, CORS failure,

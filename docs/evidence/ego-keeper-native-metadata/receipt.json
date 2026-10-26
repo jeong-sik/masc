@@ -1,0 +1,193 @@
+{
+  "scope": "Isolated real-model Keeper metadata query and dated host caller publication; not full browser/Goal/UI acceptance",
+  "candidate": {
+    "source_sha": "d840b7978ce01ca0afdb1f4fcdedce0d4596e991",
+    "workflow": "Minimal manual checks",
+    "run_id": 40389493765,
+    "workflow_sha": "55ed503a3363b4621289cb25d2c7cbda345066b2",
+    "workflow_ref": "ci/ego-space-proof-20261026",
+    "conclusion": "success",
+    "targeted_suites": 12,
+    "binary_sha256": {
+      "masc-tui": "2575cd4e2a17874fd3b01439ddeba68eb0a6b09a878490e82588a8697d7a0c40",
+      "masc": "c2d56e6c0b13d682c718dd9a190489eebc197de87d90cab3f788b70f5971ca59",
+      "masc-native-addon-launcher": "1ba9254ada59e2d11f6be77b695bd1ae715db557a6914fa47b731a35634d67a3",
+      "masc-browser-addon-worker": "8f272f1cefb0b02c0684218e408dd869cc9138b653888ef1ffc1e721a4f88c42"
+    },
+    "shared_installation_changed": false
+  },
+  "later_source_boundary": {
+    "dashboard_control_observation_head": "e8b93756082d86ace00c23418607423692e7b7e7",
+    "executed_by_this_probe": false
+  },
+  "runtime": {
+    "kind": "isolated loopback server",
+    "version": "0.64.0",
+    "provider": "glm-coding",
+    "model": "glm-5.3-flash",
+    "sandbox_profile": "microvm",
+    "microvm_backend": "apple_container",
+    "sandbox_image": "base",
+    "image_reference": "masc-sandbox:general",
+    "image_build_performed": false,
+    "guest_execution_proven": false,
+    "manual_keeper": "ego-metadata-proof",
+    "sdk_version": "0.6.1.11",
+    "engine_version": "156.0.8078.48",
+    "health_build": {
+      "binary_commit": "d840b7978ce01ca0afdb1f4fcdedce0d4596e991",
+      "binary_commit_source": "embedded",
+      "executable_sha256": "c2d56e6c0b13d682c718dd9a190489eebc197de87d90cab3f788b70f5971ca59",
+      "runtime_instance_id": "01a179e3-afe2-7000-9f9e-af40b26da3c9",
+      "started_at": "2026-10-26T20:25:27Z"
+    },
+    "isolated_roots_confirmed": true,
+    "dashboard_surface": {
+      "status": "missing",
+      "index_present": false,
+      "source_provenance": "unknown"
+    }
+  },
+  "completed_metadata_call": {
+    "keeper": "ego-metadata-proof",
+    "agent_name": "ego-metadata-proof",
+    "model": "runtime",
+    "tool": "BrowserAct",
+    "tool_use_id": "call_88a5dedd27694055a6a52569",
+    "input": {
+      "action": "space_status",
+      "clientId": "7d4abb9c-dc78-44bd-be50-0a388a091df1",
+      "lane": "live"
+    },
+    "output": {
+      "source": "live",
+      "lane": "live",
+      "browserSelection": {
+        "lane": "live",
+        "clientId": "7d4abb9c-dc78-44bd-be50-0a388a091df1",
+        "reason": "explicit_browser"
+      },
+      "clientId": "7d4abb9c-dc78-44bd-be50-0a388a091df1",
+      "transport": "ego_task_space",
+      "browserSpace": {
+        "id": 32,
+        "name": "MASC Ego native full support 20261026"
+      },
+      "action": "space_status",
+      "spaceId": 32,
+      "spaceName": "MASC Ego native full support 20261026",
+      "ownership": "agentDelegatedToUser",
+      "observedAt": 1793046401.836675
+    },
+    "disposition": "completed",
+    "recorded_at": 1793046401.840791,
+    "input_fingerprint": "48e18f261e717ff1c6ea0208424d0107a04a80f06ebe2037b45ca03968f3b546",
+    "output_fingerprint": "a569a1e1278a5c149aaa366e81f66dc8734d8efd3bd33245c39c6cbe4f908082",
+    "ledger_relative_path": ".masc/tool_calls/2026-10/26.jsonl",
+    "ledger_line": 2,
+    "ledger_file_sha256": "ddbf2fecd1de7a36b3ad5fcd9c072881a32cb27e48d32e34c6cd347084ea60ee",
+    "count_scope": "Exactly one canonical Keeper BrowserAct(space_status) call in attempt03; separate direct metadata reads and worker attachment occurred."
+  },
+  "main_chat_terminal": {
+    "type": "RUN_FINISHED",
+    "threadId": "keeper:ego-metadata-proof",
+    "timestamp": 1793046411.098591,
+    "runId": "keeper-operation-run-kmsg-ego-metadata-9f98836ad7b5f771"
+  },
+  "host_publication": {
+    "relative_path": ".masc/lane-addons/observations/0dd7ea88581a3da68e9ba36109f5e70adc71579942618e94cfd4e68b59c078d7/00000000000000000003.json",
+    "file_sha256": "8ef180b2519b50090abec862162b302de455ed010d2937bdbcf2b6e55d386cd6",
+    "client": {
+      "clientId": "7d4abb9c-dc78-44bd-be50-0a388a091df1",
+      "browser": "ego_lite",
+      "version": "0.6.1.11",
+      "engineVersion": "156.0.8078.48",
+      "transport": "ego_task_space",
+      "space": {
+        "id": 32,
+        "name": "MASC Ego native full support 20261026"
+      },
+      "interactions": [],
+      "lastActivities": [
+        {
+          "work": {
+            "requestId": "de77b08e-91db-4334-b291-97fede8c810f",
+            "actor": "keeper/ego-metadata-proof",
+            "action": "space_status",
+            "tabId": null,
+            "phase": "running"
+          },
+          "outcome": "returned"
+        }
+      ]
+    },
+    "scope": "Retained dated last activity; interactions is empty and does not prove current running work or rendered UI."
+  },
+  "native_before": {
+    "answer": {
+      "ok": true,
+      "value": {
+        "spaceId": 32,
+        "name": "MASC Ego native full support 20261026",
+        "ownership": "agentDelegatedToUser"
+      }
+    },
+    "child_exit_code": null,
+    "note": "SDK answered successfully in captured combined output; initial controller inspected stdout only and did not retain child exit code. No SDK replay.",
+    "script_sha256": "8f1ccdc980ec153a9a971fa5f19fdbc8dd168c0d48292e4cf6226ef01a3904d8"
+  },
+  "native_after": {
+    "answer": {
+      "ok": true,
+      "value": {
+        "spaceId": 32,
+        "name": "MASC Ego native full support 20261026",
+        "ownership": "agentDelegatedToUser"
+      }
+    },
+    "child_exit_code": 0,
+    "same_owner_observed_before_after": true,
+    "scope": "Two point-in-time metadata observations; not continuous control monitoring."
+  },
+  "controller": {
+    "verdict": "failed",
+    "reason": "provider controller refused an out-of-scope response: model proposed concurrent calls outside this exact-call probe",
+    "forbidden_response_forwarded": false,
+    "transport": "buffered original upstream SSE, parsed tool allowlist before forwarding",
+    "allowed_browser_call": "exactly one space_status on the observed client",
+    "raw_request_association": "concurrent request indexing was not protected; do not infer precise ownership of the blocked additional response",
+    "sha256": "06187ed9e62227bdb0aadbd2c06bfd79d34b8e8fdec7b9d1493854037ed9340a",
+    "failure_does_not_negate_completed_metadata_receipt": true,
+    "main_chat_finish_does_not_make_controller_pass": true,
+    "executed_file": "controller-attempt-03.py.txt",
+    "reusable_harness": false
+  },
+  "earlier_attempts": [
+    {
+      "profile": "docker",
+      "status": "failed",
+      "reason": "No base image promoted in isolated Docker store; no Docker success or image build claim"
+    },
+    {
+      "profile": "microvm/apple_container",
+      "status": "failed",
+      "reason": "Initial controller did not support provider SSE; no real-provider tool response forwarded"
+    }
+  ],
+  "not_proven": [
+    "Visible Ego or Dashboard/TUI UI",
+    "Login/human handoff completion or real operator input reset",
+    "Page/input/navigation/claim/takeover/finish",
+    "Agent-owned active-Space retirement or uploaded-file cleanup in the real SDK",
+    "Full SDK coverage or general browser selection",
+    "Whole-controller success",
+    "Current later source binary/installed shared runtime",
+    "Formal CR clearance, stack merge or Goal completion"
+  ],
+  "recorded_at": "2026-10-26T20:32:54.715163+00:00",
+  "independent_audit": {
+    "result": "Metadata step, main chat terminal, exact artifact bytes and dated caller publication confirmed; whole-controller failure and limits preserved.",
+    "source_execution": "d840b7978ce01ca0afdb1f4fcdedce0d4596e991",
+    "new_sdk_or_runtime_actions_during_audit": false
+  }
+}

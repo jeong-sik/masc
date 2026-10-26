@@ -1,0 +1,162 @@
+from pathlib import Path
+import datetime,hashlib,http.server,json,os,secrets,signal,socket,subprocess,threading,time,tomllib,urllib.request,urllib.error
+ROOT=Path('/Users/dancer/me/workspace/yousleepwhen/masc-ego-cr-46118-20261026')
+STATE=Path('/tmp/masc-ego-native-full-20261026/keeper-metadata-probe-state.json')
+s=json.loads(STATE.read_text());base=Path(s['base']);out=Path(s['output']);verified=json.loads(Path(s['candidate_verified']).read_text());artifact=Path(verified['receipt']).parent;binary=artifact/'masc'
+for name,digest in verified['binary_hashes_verified'].items():
+ assert hashlib.sha256((artifact/name).read_bytes()).hexdigest()==digest
+assert s['before_metadata']['ok'] and s['before_metadata']['value']['spaceId']==32
+shared=tomllib.loads(Path('/Users/dancer/me/.masc/config/runtime.toml').read_text())
+provider_name='glm-coding';model='glm-5.3-flash';upstream=shared['providers'][provider_name]['endpoint'].rstrip('/')
+credential_key=shared['providers'][provider_name]['credentials']['key'];assert os.environ.get(credential_key)
+class ProbeError(RuntimeError):pass
+def write(name,value):
+ (out/name).write_text(json.dumps(value,ensure_ascii=False,indent=2)+'\n')
+def checkpoint(**fields):
+ s.update(fields);STATE.write_text(json.dumps(s,ensure_ascii=False,indent=2)+'\n')
+def command(args,name,env):
+ r=subprocess.run([str(binary),*args],env=env,cwd=base,capture_output=True,text=True)
+ (out/name).write_text(r.stdout+r.stderr)
+ if r.returncode:raise ProbeError(f'{name} exited {r.returncode}; private raw output retained')
+ return r.stdout
+class Proxy(http.server.BaseHTTPRequestHandler):
+ client_id=None;metadata_forwarded=0;failed=None;records=[]
+ def log_message(self,*args):pass
+ def do_POST(self):
+  try:
+   if self.path!='/v1/chat/completions':raise ProbeError('unexpected model endpoint')
+   raw=self.rfile.read(int(self.headers['Content-Length']));request=json.loads(raw)
+   index=len(Proxy.records)+1;(out/f'model-request-{index}.json').write_bytes(raw)
+   req=urllib.request.Request(upstream+'/chat/completions',data=raw,headers={'Content-Type':'application/json','Authorization':self.headers.get('Authorization','')})
+   try:
+    with urllib.request.urlopen(req,timeout=600) as response:body=response.read();status=response.status;content_type=response.headers.get('Content-Type','application/json')
+   except urllib.error.HTTPError as error:body=error.read();status=error.code;content_type=error.headers.get('Content-Type','application/json')
+   (out/f'model-response-{index}.json').write_bytes(body)
+   if status==200 and 'text/event-stream' in content_type:
+    model_name=None;calls={};finished=False
+    for block in body.decode().replace('\r\n','\n').split('\n\n'):
+     data='\n'.join(line[5:].lstrip() for line in block.split('\n') if line.startswith('data:'))
+     if not data or data=='[DONE]':continue
+     event=json.loads(data);model_name=event.get('model',model_name)
+     for choice in event.get('choices',[]):
+      if choice.get('index',0)!=0:raise ProbeError('unexpected streamed choice')
+      if choice.get('finish_reason') is not None:finished=True
+      for part in choice.get('delta',{}).get('tool_calls',[]):
+       call=calls.setdefault(part['index'],{'id':'','type':'function','function':{'name':'','arguments':''}})
+       if part.get('id'):call['id']+=part['id']
+       fn=part.get('function',{});call['function']['name']+=fn.get('name','');call['function']['arguments']+=fn.get('arguments','')
+    if not finished:raise ProbeError('incomplete provider SSE response; no model tools forwarded')
+    result={'model':model_name,'choices':[{'message':{'tool_calls':[calls[key] for key in sorted(calls)]}}]}
+   else:result=json.loads(body)
+   record={'index':index,'http_status':status,'model':result.get('model'),'allowed_calls':[]}
+   if status==200:
+    choices=result.get('choices',[])
+    if len(choices)!=1:raise ProbeError('expected one model choice')
+    calls=choices[0].get('message',{}).get('tool_calls',[])
+    if len(calls)>1:raise ProbeError('model proposed concurrent calls outside this exact-call probe')
+    offered={tool.get('function',{}).get('name') for tool in request.get('tools',[])}
+    for call in calls:
+     fn=call['function'];name=fn['name'];args=json.loads(fn['arguments'])
+     if name not in offered:raise ProbeError('model proposed an unoffered tool')
+     if name=='keeper_tool_search':
+      if args!={'names':['BrowserAct']}:raise ProbeError('model proposed unrelated tool discovery')
+     elif name in ('BrowserAct','masc_browser_act'):
+      if args!={'action':'space_status','lane':'live','clientId':Proxy.client_id}:raise ProbeError('model proposed a non-metadata browser operation')
+      if Proxy.metadata_forwarded:raise ProbeError('model proposed replaying metadata call')
+      Proxy.metadata_forwarded+=1
+     else:raise ProbeError('model proposed an unrelated tool')
+     record['allowed_calls'].append({'name':name,'arguments':args})
+   Proxy.records.append(record);write('provider-audit.json',Proxy.records)
+   self.send_response(status);self.send_header('Content-Type',content_type);self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+  except Exception as error:
+   Proxy.failed=str(error);write('provider-guard-refusal.json',{'detail':str(error),'forbidden_response_forwarded':False})
+   body=json.dumps({'error':{'message':'metadata probe controller refused the response'}}).encode()
+   self.send_response(502);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+def toml_dump(value,path=()):
+ lines=[]
+ if path:lines.append('['+'.'.join(json.dumps(k) for k in path)+']')
+ for k,v in value.items():
+  if not isinstance(v,dict):lines.append(json.dumps(k)+' = '+json.dumps(v,ensure_ascii=False))
+ for k,v in value.items():
+  if isinstance(v,dict):lines.extend(['',toml_dump(v,path+(k,))])
+ return '\n'.join(lines)+'\n'
+proxy=http.server.ThreadingHTTPServer(('127.0.0.1',0),Proxy);threading.Thread(target=proxy.serve_forever,daemon=True).start()
+env={k:os.environ[k] for k in ['PATH','HOME','LANG','LC_ALL','TMPDIR',credential_key] if k in os.environ}
+env.update(PATH=str(artifact)+os.pathsep+os.environ['PATH'],MASC_BASE_PATH=str(base),MASC_CONFIG_DIR=str(base/'.masc/config'),MASC_CONFIG_BOOTSTRAP='skip',MASC_KEEPER_AUTONOMOUS_ENABLED='false',MASC_GRPC_ENABLED='0',MASC_WS_ENABLED='0')
+server=None;token=None;instance_id=None;keeper='ego-metadata-proof';summary={'scope':'constrained real-provider Keeper -> candidate host -> native Ego Space metadata only; not full Goal/UI/login acceptance','source':s['source'],'provider':provider_name,'model':model,'sandbox_profile':'microvm','microvm_backend':'apple_container','sandbox_image':'base','shared_runtime_modified':False,'page_or_control_actions_authorized':False,'provider_transport':'buffered unmodified upstream SSE or JSON, with parsed fail-closed tool allowlist','status':'started'}
+try:
+ if not (base/'.masc/config/runtime.toml').exists():command(['init','--base-path',str(base)],'init.log',env)
+ config=base/'.masc/config';config.mkdir(parents=True,exist_ok=True)
+ provider={k:v for k,v in shared['providers'][provider_name].items() if k in ['display-name','protocol','endpoint','connect-timeout-s','exact-body-timeout-s','credentials']}
+ provider['endpoint']=f'http://127.0.0.1:{proxy.server_port}/v1'
+ runtime={'runtime':{'default':provider_name+'.'+model,'exact_output_lanes':{name:{'slots':[provider_name+'.'+model]} for name in ['hitl_auto_judge','board_attention_exact']}},'providers':{provider_name:provider},'models':{model:{**shared['models'][model],'streaming':False}},provider_name:{model:shared[provider_name][model]},'browser':{'live':{'enabled':True,'ego':{'command':'/Users/dancer/.local/bin/ego-browser','space':32}},'automation':{'enabled':False},'stagehand':{'enabled':False}}}
+ content=toml_dump(runtime);assert tomllib.loads(content)==runtime;(config/'runtime.toml').write_text(content);(config/'runtime.toml').chmod(0o600)
+ command(['browser-lane-setup','--mode','addon','--base-path',str(base)],'browser-setup.log',env)
+ with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+ assert port!=8935;url=f'http://127.0.0.1:{port}'
+ command(['login','--base-path',str(base),'--host','127.0.0.1','--port',str(port),'--agent','metadata-proof-admin','--role','admin','--client-env','MASC_METADATA_PROOF_TOKEN','--no-expiry','--json'],'login-private.log',env)
+ token=(base/'.masc/auth/metadata-proof-admin.token').read_text().strip()
+ def http(path,payload=None,timeout=30):
+  headers={'Authorization':'Bearer '+token,'Accept':'application/json'};data=None
+  if payload is not None:data=json.dumps(payload).encode();headers['Content-Type']='application/json'
+  with urllib.request.urlopen(urllib.request.Request(url+path,data=data,headers=headers),timeout=timeout) as response:return response.read()
+ log=(out/'server.log').open('wb');server=subprocess.Popen([str(binary),'start','--base-path',str(base),'--host','127.0.0.1','--port',str(port)],cwd=base,env=env,stdout=log,stderr=log,start_new_session=True)
+ checkpoint(server_pid=server.pid,port=port,keeper=keeper,proxy_port=proxy.server_port,phase='server_starting')
+ deadline=time.monotonic()+90
+ while True:
+  if server.poll() is not None:raise ProbeError(f'candidate server exited {server.returncode} during startup')
+  try:
+   health=json.loads(http('/health?full=1',timeout=2))
+   if health.get('startup',{}).get('state_ready') is True:break
+  except (urllib.error.URLError,TimeoutError):pass
+  if time.monotonic()>deadline:raise ProbeError('candidate startup observation expired; no success inferred')
+  time.sleep(0.25)
+ assert health['paths']['effective_base_path']==str(base);write('health.json',health)
+ deadline=time.monotonic()+60
+ while True:
+  lanes=json.loads(http('/api/v1/lane-addons'));write('lane-addons-before.json',lanes)
+  instances=[i for i in lanes.get('instances',[]) if i.get('addon_id')=='browser' and i.get('runtime_presence')=='live']
+  if len(instances)==1:
+   instance_id=instances[0]['instance_id'];observed=json.loads(http('/api/v1/lane-addons/observe',{'instance_id':instance_id}));write('observe-before.json',observed)
+   lanes=json.loads(http('/api/v1/lane-addons'));rows=[r for r in lanes.get('rows',[]) if r.get('lane_id')==instance_id+'/browser/connections']
+   if len(rows)==1:
+    clients=rows[0].get('fields',{}).get('clients',[])
+    if len(clients)==1 and clients[0].get('space',{}).get('id')==32:
+     Proxy.client_id=clients[0]['clientId'];write('observed-client.json',clients[0]);break
+  if time.monotonic()>deadline:raise ProbeError('browser attachment observation expired; no replacement or fallback attempted')
+  if server.poll() is not None:raise ProbeError('candidate exited during browser attachment')
+  time.sleep(0.5)
+ checkpoint(phase='browser_attached',client_id=Proxy.client_id,instance_id=instance_id)
+ instructions='Read-only metadata verification. Use only BrowserAct with action=space_status, lane=live, clientId='+Proxy.client_id+'. If deferred, first call keeper_tool_search with names=["BrowserAct"]. Do not call BrowserTabs or any Page, navigation, input, hand_off, take_over, finish, claim, shell, file, Ask or messaging tool. The original Space32 is delegated to the user; never reclaim it or create another Space. Make the metadata call exactly once, then report the returned Space ID, native ownership and observation timestamp. Do not claim login or UI visibility.'
+ command(['sandbox-image','promote','base','masc-sandbox:general','--runtime','apple_container','--base-path',str(base)],'image-promotion.log',env)
+ command(['keeper-create','--base-path',str(base),'--host','127.0.0.1','--port',str(port),'--agent','metadata-proof-admin','--name',keeper,'--sandbox-profile','microvm','--microvm-backend','apple_container','--sandbox-image','base','--network-mode','none','--no-skills','--activation-mode','manual','--instructions',instructions],'keeper-create.log',env)
+ write('approval-mode.json',json.loads(http('/api/v1/dashboard/gate/mode',{'mode':'always_allow'})))
+ write('tool-approval-mode.json',json.loads(http('/api/v1/keepers/tool-approval-mode',{'name':keeper,'mode':'yolo'})))
+ checkpoint(phase='keeper_message_started')
+ request={'name':keeper,'message':instructions,'request_id':'kmsg-ego-metadata-'+secrets.token_hex(8)}
+ raw=http('/api/v1/keepers/chat/stream',request,timeout=600);(out/'keeper-chat-stream.txt').write_bytes(raw)
+ if Proxy.failed:raise ProbeError('provider controller refused an out-of-scope response: '+Proxy.failed)
+ if Proxy.metadata_forwarded!=1:raise ProbeError('real model did not request exactly one permitted metadata call')
+ write('observe-after.json',json.loads(http('/api/v1/lane-addons/observe',{'instance_id':instance_id})))
+ write('lane-addons-after.json',json.loads(http('/api/v1/lane-addons')))
+ summary.update(status='completed_requires_receipt_audit',provider_requests=len(Proxy.records),model_metadata_requests=Proxy.metadata_forwarded,client_id=Proxy.client_id)
+except Exception as error:
+ summary.update(status='failed',error_type=type(error).__name__,detail=str(error));checkpoint(phase='failed',error=str(error))
+finally:
+ if server is not None and server.poll() is None:
+  if token and instance_id:
+   try:write('detach.json',json.loads(http('/api/v1/lane-addons/detach',{'instance_id':instance_id})))
+   except Exception as error:write('detach-unconfirmed.json',{'detail':str(error),'space_completion_inferred':False})
+  os.killpg(server.pid,signal.SIGTERM)
+  try:server.wait(timeout=20)
+  except subprocess.TimeoutExpired:
+   os.killpg(server.pid,signal.SIGKILL);server.wait();summary['server_forced_stop']=True
+  summary['server_exit_code']=server.returncode
+ proxy.shutdown();proxy.server_close()
+ script=out/'round-02-after-metadata.mjs';script.write_text((out/'round-01-before-metadata.mjs').read_text())
+ r=subprocess.run(['/Users/dancer/.local/bin/ego-browser','nodejs'],input=script.read_text(),capture_output=True,text=True)
+ raw=r.stdout+r.stderr;(out/'round-02-after-metadata.log').write_text(raw);frames=[json.loads(line.removeprefix('masc-ego-result ')) for line in raw.splitlines() if line.startswith('masc-ego-result ')]
+ summary['after_native_exit_code']=r.returncode;summary['after_native_metadata']=frames[0] if len(frames)==1 else None
+ summary['space_ownership_preserved']=len(frames)==1 and frames[0]==s['before_metadata']
+ summary['provider_guard_refused']=Proxy.failed;summary['recorded_at']=datetime.datetime.now(datetime.timezone.utc).isoformat();write('summary.json',summary);checkpoint(phase='stopped',summary=summary)
+ print(json.dumps(summary,ensure_ascii=False,indent=2))

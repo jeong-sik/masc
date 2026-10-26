@@ -55,6 +55,56 @@ let test_missing_live_observation_fails_closed () =
     Alcotest.(check bool) "actionable error" true
       (contains detail "no sandbox_live observation")
 
+let discard_payload fields =
+  `Assoc ["sandbox_live", `Assoc ["resource_config", `Assoc fields]]
+
+let test_discard_observation_admission () =
+  let observation state error = `Assoc ["state", `String state; "error", error] in
+  let decode value = Masc_tui_keeper_sandbox.decode ~sanitize:Fun.id
+      (discard_payload ["work_volume_discard_default", value]) in
+  List.iter (fun value -> match decode value with
+    | Ok _ -> () | Error detail -> Alcotest.fail detail)
+    [`Null; observation "set" `Null; observation "absent" `Null;
+     observation "unreadable" (`String "volume inspect unavailable")];
+  List.iter (fun value -> match decode value with
+    | Error _ -> () | Ok _ -> Alcotest.fail "malformed discard observation admitted")
+    [`String "set"; `Assoc []; `Assoc ["state", `String "set"];
+     `Assoc ["error", `Null];
+     `Assoc ["state", `String "set"; "error", `Null; "extra", `Null];
+     `Assoc ["state", `String "set"; "state", `String "absent"; "error", `Null];
+     `Assoc ["state", `String "set"; "error", `Null; "error", `Null];
+     observation "unknown" `Null; observation "set" (`String "error");
+     observation "absent" (`String "error"); observation "unreadable" `Null;
+     observation "unreadable" (`String " \t"); observation "unreadable" (`Int 1);
+     `Assoc ["state", `Bool true; "error", `Null]];
+  List.iter (fun json -> match Masc_tui_keeper_sandbox.decode ~sanitize:Fun.id json with
+    | Error _ -> () | Ok _ -> Alcotest.fail "missing or duplicate discard boundary admitted")
+    [discard_payload [];
+     discard_payload ["work_volume_discard_default", `Null; "work_volume_discard_default", `Null];
+     `Assoc ["sandbox_live", `Assoc
+       ["resource_config", `Assoc ["work_volume_discard_default", `Null];
+        "resource_config", `Assoc ["work_volume_discard_default", `Null]]]]
+;;
+
+let test_discard_diagnostic_is_sanitized_at_admission () =
+  let raw = "unavailable\027]8;;https://bad.invalid\007" in
+  let observed = ref [] in
+  let sanitize text =
+    let safe = Masc.Tui_terminal_text.sanitize_terminal_text text in
+    observed := (text, safe) :: !observed;
+    safe in
+  match Masc_tui_keeper_sandbox.decode ~sanitize (discard_payload
+      ["work_volume_discard_default", `Assoc
+        ["state", `String "unreadable"; "error", `String raw]]) with
+  | Error detail -> Alcotest.fail detail
+  | Ok reading ->
+    Alcotest.(check bool) "actual wire diagnostic reaches sanitizer" true
+      (List.exists (fun (original, _) -> original = raw) !observed);
+    let rendered = Masc_tui_keeper_sandbox.view_lines ~width:64 reading |> String.concat "\n" in
+    Alcotest.(check bool) "raw terminal control never leaves decoded state" false (contains rendered "\027]");
+    Alcotest.(check bool) "escaped control remains inspectable" true (contains rendered "\\x1B")
+;;
+
 let test_actual_container_logs_are_typed_and_terminal_safe () =
   let json =
     Yojson.Safe.from_string
@@ -155,6 +205,10 @@ let () =
             test_hostile_text_is_sanitized_before_state
         ; Alcotest.test_case "missing observation fails closed" `Quick
             test_missing_live_observation_fails_closed
+        ; Alcotest.test_case "discard observation fails closed" `Quick
+            test_discard_observation_admission
+        ; Alcotest.test_case "discard diagnostic sanitized at admission" `Quick
+            test_discard_diagnostic_is_sanitized_at_admission
         ] )
     ; ( "actual logs"
       , [ Alcotest.test_case "typed and terminal safe" `Quick

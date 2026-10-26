@@ -1035,7 +1035,24 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
               Some
                 "no container: network_mode=policy is not available on sandbox_profile=docker, because the Docker egress boundary is unmeasured (RFC-0415). Set network_mode to none or inherit here, or move this keeper to microvm"))
 
-let sandbox_resource_config_json (meta : keeper_meta) =
+let work_volume_discard_default_json ~(timeout_sec : float) (meta : keeper_meta) =
+  match meta.sandbox_profile, meta.microvm_backend with
+  | Micro_vm, Some Keeper_microvm_backend.Apple_container ->
+    let module Microvm = Keeper_sandbox_microvm in
+    let state, error =
+      match Microvm.read_work_volume_discard_default
+          ~backend:Keeper_microvm_backend.Apple_container ~keeper_name:meta.name ~timeout_sec with
+      | Microvm.Discard_default_set -> "set", `Null
+      | Microvm.Discard_default_absent -> "absent", `Null
+      | Microvm.Superblock_unreadable failure ->
+        "unreadable", `String (Microvm.discard_read_failure_message failure)
+    in
+    `Assoc ["state", `String state; "error", error]
+  | Micro_vm, (Some (Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata) | None)
+  | (Docker | Remote_ssh), (Some _ | None) -> `Null
+;;
+
+let sandbox_resource_config_json ~timeout_sec (meta : keeper_meta) =
   match meta.sandbox_profile with
   | Micro_vm ->
     (* The same resolution the boot argv takes, so the size shown is the size
@@ -1058,6 +1075,7 @@ let sandbox_resource_config_json (meta : keeper_meta) =
       ; "cpus", cpus
       ; "guest_size_error", guest_size_error
       ; "work_volume_size", `String (Env_config_sandbox.Runtime.microvm_work_volume_size ())
+      ; "work_volume_discard_default", work_volume_discard_default_json ~timeout_sec meta
       ; "pids_limit", `Null
       ; "tmpfs_size", `Null
       ]
@@ -1067,6 +1085,7 @@ let sandbox_resource_config_json (meta : keeper_meta) =
       ; "cpus", `Null
       ; "guest_size_error", `Null
       ; "work_volume_size", `Null
+      ; "work_volume_discard_default", `Null
       ; "pids_limit", `Int (Env_config_sandbox.Hardening.pids_limit ())
       ; "tmpfs_size", `String (Env_config_sandbox.Hardening.tmpfs_size ())
       ]
@@ -1198,10 +1217,10 @@ let live_status_json ?(include_preflight = true)
             Keeper_sandbox_runtime.docker_preflight_to_yojson
             preflight
         else `Null );
-      ("resource_config", sandbox_resource_config_json meta);
+      ("resource_config", sandbox_resource_config_json ~timeout_sec meta);
       (* The server's last superblock read of each image-backed volume
-         (RFC keeper-volume-filesystem-repair §3.2); a status read spawns
-         nothing. *)
+         (RFC keeper-volume-filesystem-repair §3.2); this cached projection
+         spawns nothing. The discard default above is a separate fresh read. *)
       ( "volume_filesystem"
       , `List
           (List.map

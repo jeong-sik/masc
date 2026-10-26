@@ -14,6 +14,11 @@ type container =
   ; gateway : string option
   }
 
+type work_volume_discard_default =
+  | Discard_set
+  | Discard_absent
+  | Discard_unreadable of string
+
 type resource_config =
   { memory : string option
   ; cpus : string option
@@ -22,6 +27,7 @@ type resource_config =
      gives, so the operator reads it here before a turn hits it. *)
   ; guest_size_error : string option
   ; work_volume_size : string option
+  ; work_volume_discard_default : work_volume_discard_default option
   ; pids_limit : int option
   ; tmpfs_size : string option
   }
@@ -157,8 +163,43 @@ let decode_optional_object ~path decode fields =
   | Some _ -> Error ("sandbox_live." ^ path ^ " must be an object or null")
 ;;
 
+let decode_discard_default ~sanitize fields =
+  let path = "resource_config.work_volume_discard_default" in
+  let matches = List.filter (fun (key, _) -> key = "work_volume_discard_default") fields in
+  match matches with
+  | [] -> Error (path ^ " is required")
+  | [_key, `Null] -> Ok None
+  | [_key, `Assoc observation] ->
+    let keys = List.map fst observation in
+    let sorted = List.sort String.compare keys in
+    if List.length sorted <> List.length (List.sort_uniq String.compare sorted) then
+      Error (path ^ " has duplicate keys")
+    else if List.exists (fun key -> key <> "state" && key <> "error") keys then
+      Error (path ^ " has unknown keys")
+    else if sorted <> ["error"; "state"] then
+      Error (path ^ " requires state and error")
+    else
+      (match field "state" observation, field "error" observation with
+       | Some (`String "set"), Some `Null -> Ok (Some Discard_set)
+       | Some (`String "absent"), Some `Null -> Ok (Some Discard_absent)
+       | Some (`String "unreadable"), Some (`String detail) when String.trim detail <> "" ->
+         Ok (Some (Discard_unreadable (sanitize detail)))
+       | Some (`String ("set" | "absent" | "unreadable")), Some _ ->
+         Error (path ^ " has contradictory state and error")
+       | Some (`String state), Some _ -> Error (path ^ " has unsupported state " ^ sanitize state)
+       | Some _, Some _ -> Error (path ^ ".state must be a string")
+       | None, _ | _, None -> Error (path ^ " requires state and error"))
+  | [_key, _] -> Error (path ^ " must be an object or null")
+  | _ :: _ :: _ -> Error (path ^ " is duplicated")
+;;
+
 let decode_resource_config ~sanitize fields =
   let open Result.Syntax in
+  let* () =
+    match List.filter (fun (key, _) -> key = "resource_config") fields with
+    | [] | [_] -> Ok ()
+    | _ :: _ :: _ -> Error "sandbox_live.resource_config is duplicated"
+  in
   decode_optional_object ~path:"resource_config"
     (fun inner ->
       let* memory = string_opt ~sanitize ~key:"memory" ~path:"resource_config.memory" inner in
@@ -172,7 +213,8 @@ let decode_resource_config ~sanitize fields =
       in
       let* pids_limit = int_opt ~key:"pids_limit" ~path:"resource_config.pids_limit" inner in
       let* tmpfs_size = string_opt ~sanitize ~key:"tmpfs_size" ~path:"resource_config.tmpfs_size" inner in
-      Ok { memory; cpus; guest_size_error; work_volume_size; pids_limit; tmpfs_size })
+      let* work_volume_discard_default = decode_discard_default ~sanitize inner in
+      Ok { memory; cpus; guest_size_error; work_volume_size; work_volume_discard_default; pids_limit; tmpfs_size })
     fields
 ;;
 
@@ -426,6 +468,12 @@ let resource_rows ~width = function
     @ (match storage with
        | None -> []
        | Some storage -> wrapped_rows ~width ~label:"Volume caps" ~tone:`Muted storage)
+    @ (match resources.work_volume_discard_default with
+       | None -> []
+       | Some Discard_set -> wrapped_rows ~width ~label:"Work discard" ~tone:`Ok "set"
+       | Some Discard_absent -> wrapped_rows ~width ~label:"Work discard" ~tone:`Warn "absent"
+       | Some (Discard_unreadable detail) ->
+         wrapped_rows ~width ~label:"Work discard" ~tone:`Warn ("unreadable: " ^ detail))
 
 (* A Keeper names an image and the host catalog says which build that name
    is now. The row shows the name and the build, or, when the catalog cannot

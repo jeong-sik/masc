@@ -6,7 +6,13 @@ val decode :
   sanitize:(string -> string) -> Yojson.Safe.t -> (t, string) result
 (** Decode the [sandbox_live] block from [/api/v1/gate/keeper-status]. Missing
     observations stay missing; malformed observed fields fail closed. Every
-    fetched string is passed through [sanitize] before it enters TUI state. *)
+    fetched string is passed through [sanitize] before it enters TUI state.
+
+    A present [resource_config] object must include
+    [work_volume_discard_default], null for an inapplicable backend or an exact
+    [{state,error}] object. The closed states are [set]/[absent] with null error
+    and [unreadable] with a nonblank diagnostic. Duplicate, unknown or missing
+    observation keys and contradictory state/error combinations are refused. *)
 
 val view_lines : width:int -> t -> string list
 (** Render an operator-facing status summary: whether commands can run, what

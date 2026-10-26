@@ -320,6 +320,40 @@ let ollama_auto_sends_resolved_credential () =
             "qwen-keyed" config.Provider_config.model_id
         | None -> Alcotest.fail "authenticated Ollama discovery was refused")))
 
+let ollama_auto_does_not_reuse_unauthenticated_cache_for_keyed_binding () =
+  let authenticated_tag_requests = ref 0 in
+  let handler _conn req body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
+    match Uri.path (Cohttp.Request.uri req) with
+    | "/api/tags" ->
+      (match Cohttp.Header.get (Cohttp.Request.headers req) "authorization" with
+       | Some "Bearer test-ollama-secret" ->
+         incr authenticated_tag_requests;
+         Cohttp_eio.Server.respond_string ~status:`OK
+           ~body:{|{"models":[{"name":"keyed-model"}]}|} ()
+       | _ ->
+         Cohttp_eio.Server.respond_string ~status:`OK
+           ~body:{|{"models":[{"name":"public-model"}]}|} ())
+    | _ -> Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"missing" ()
+  in
+  with_mock_server handler (fun ~sw ~net ~endpoint ->
+    Discovery_cache.set_env ~sw ~net;
+    let declared = Llm_provider.Discovery.endpoint
+      ~protocol:Llm_provider.Discovery.Ollama_native
+      ~capabilities:Llm_provider.Capabilities.ollama_capabilities endpoint in
+    ignore (Llm_provider.Provider_registry.refresh_llama_endpoints ~sw ~net ~endpoints:[declared]);
+    ignore (Discovery_cache.get_cached_or_refresh ());
+    with_env "MASC_TEST_OLLAMA_KEY" (Some "test-ollama-secret") (fun () ->
+      with_catalog ~endpoint (fun () ->
+        match Runtime_model_string.parse_model_string
+          ~api_key_env_overrides:["ollama-keyed", "MASC_TEST_OLLAMA_KEY"] "ollama-keyed:auto" with
+        | Some config ->
+          Alcotest.(check string) "keyed auto cannot borrow the public model"
+            "keyed-model" config.Provider_config.model_id;
+          Alcotest.(check int) "fresh public cache cannot suppress the authenticated probe"
+            1 !authenticated_tag_requests
+        | None -> Alcotest.fail "authenticated Ollama discovery was refused")))
+
 let ollama_auto_renews_stale_selected_endpoint () =
   let model_name = ref "cached-model" in
   let tag_requests = ref 0 in
@@ -462,6 +496,7 @@ let () = Alcotest.run "runtime model label binding"
      "no discovered model",`Quick,ollama_auto_without_discovered_model_stays_refused;
      "declared default skips discovery",`Quick,declared_default_skips_discovery;
      "authenticated discovery",`Quick,ollama_auto_sends_resolved_credential;
+     "authenticated fresh cache isolation",`Quick,ollama_auto_does_not_reuse_unauthenticated_cache_for_keyed_binding;
      "stale selected endpoint",`Quick,ollama_auto_renews_stale_selected_endpoint;
      "wrong protocol cache",`Quick,ollama_auto_does_not_reuse_openai_compatible_cache;
      "cold cache endpoint isolation",`Quick,ollama_auto_does_not_refresh_other_endpoints]]

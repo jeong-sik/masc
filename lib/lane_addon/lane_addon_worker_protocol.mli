@@ -71,12 +71,15 @@ type companion_admission = { context:Lane_addon_call_context.companion; admit:un
 (** Host callback is rechecked under the original worker RPC mutex immediately
     before dispatch. It must not acquire global configuration/action locks. *)
 val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) ->
+  ?on_dispatch:(unit -> unit) ->
   ?companion:companion_admission ->
   ?finalize_result:result_finalizer ->
   ?authorize:Lane_addon_call_context.mediation ->
   ?principal:Lane_addon_call_context.principal -> t -> name:string ->
   arguments:Yojson.Safe.t -> (Mcp_protocol.Mcp_types.tool_result, error) result
 (** Call the target through its exact initialized contract, without replay.
+    [on_dispatch] runs under the RPC mutex right before each RPC of this call is
+    written; a call that never ran it reached nothing in the worker.
     Ordinary [on_result] sees each original RPC reply under the RPC mutex.
     Companion callbacks see only the validated public projection, with worker
     text and metadata removed. Companion exports require closed output schemas.

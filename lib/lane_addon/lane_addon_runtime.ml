@@ -64,7 +64,7 @@ type host_port = {
 type connection = {
   observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
   exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
-  call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
+  call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> on_dispatch:(unit -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
     (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
   action_schema : unit -> Yojson.Safe.t option;
   operator_schema : unit -> Yojson.Safe.t option;
@@ -1747,8 +1747,8 @@ let backend ~store ~artifact_store () = match !override with
                 operator_schema=(fun () -> Lane_addon_native_worker.operator_schema worker);
                 companion_tools=(fun () -> Lane_addon_native_worker.companion_tools worker);
                 call_operator=(fun ~admit ~arguments -> Lane_addon_native_worker.call_operator worker ~admit ~arguments);
-                call_exported_tool=(fun ~companion ~on_result ~authorize ~principal ~name ~arguments ->
-                  Lane_addon_native_worker.call_exported_tool ~on_result ?companion ?authorize ~principal ?finalize_result worker ~name ~arguments
+                call_exported_tool=(fun ~companion ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
+                  Lane_addon_native_worker.call_exported_tool ~on_result ~on_dispatch ?companion ?authorize ~principal ?finalize_result worker ~name ~arguments
                   |> Result.map_error (function
                     | Lane_addon_native_worker.Protocol (Lane_addon_worker_protocol.Host_refusal refusal) -> Lane_addon_call_context.Host_refusal refusal
                     | (Lane_addon_native_worker.Invalid_specification _ | Start_failed _ | Admission _
@@ -1810,8 +1810,8 @@ let backend ~store ~artifact_store () = match !override with
             operator_schema=(fun () -> Lane_addon_worker.operator_schema worker);
             companion_tools=(fun () -> Lane_addon_worker.companion_tools worker);
             call_operator=(fun ~admit ~arguments -> Lane_addon_worker.call_operator worker ~admit ~arguments);
-            call_exported_tool=(fun ~companion ~on_result ~authorize ~principal ~name ~arguments ->
-              Lane_addon_worker.call_exported_tool ~on_result ?companion ?authorize ~principal worker ~name ~arguments
+            call_exported_tool=(fun ~companion ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
+              Lane_addon_worker.call_exported_tool ~on_result ~on_dispatch ?companion ?authorize ~principal worker ~name ~arguments
               |> Result.map_error (function
                 | Lane_addon_worker.Host_refusal refusal -> Lane_addon_call_context.Host_refusal refusal
                 | (Lane_addon_worker.Stopped | Invalid_package _ | Docker_failed _ | Engine_failed _ | Engine_fault _ | Lifecycle _ | Protocol_failed _ | Invalid_observation _) as error ->
@@ -2563,6 +2563,10 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
       | Some sw -> Ok sw | None -> Error (Unavailable "Add-on background owner is unavailable") in
     let worker_backend = backend ~store:m.store ~artifact_store:m.artifact_store () in
     e.active_tool_calls <- e.active_tool_calls + 1;
+    (* Whether this call wrote anything to the worker. A companion call
+       reserves its origin before the RPC, which is already an effect. *)
+    let reached = ref false in
+    let on_dispatch () = reached := true in
     Fun.protect ~finally:(fun () -> e.active_tool_calls <- e.active_tool_calls - 1) (fun () ->
     try
       let principal = match principal with
@@ -2572,11 +2576,12 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
           | Lane_addon_sources.Operator_configuration -> Lane_addon_call_context.Operator
           | Lane_addon_sources.Unauthenticated -> Lane_addon_call_context.Anonymous in
       let connection=original.worker in
-      let result = if List.mem export.tool.name (connection.companion_tools ()) then
+      let result = if List.mem export.tool.name (connection.companion_tools ()) then (
+          reached := true;
           invoke_companion_export ~sw m ~config ~access ~principal ~companion_publish ~continuation ~export ~arguments e original
             (fun companion -> connection.call_exported_tool ~companion:(Some companion)
-              ~on_result ~authorize ~principal ~name:export.tool.name ~arguments)
-        else connection.call_exported_tool ~companion:None ~on_result ~authorize ~principal ~name:export.tool.name ~arguments in
+              ~on_result ~on_dispatch ~authorize ~principal ~name:export.tool.name ~arguments))
+        else connection.call_exported_tool ~companion:None ~on_result ~on_dispatch ~authorize ~principal ~name:export.tool.name ~arguments in
       (* Worker-owned state is not an input source, so source-change hints alone
          cannot reveal a tool's effect. Refresh its observation after a completed
          reply, including a worker error that may have changed machine state.
@@ -2596,9 +2601,12 @@ let call_exported_tool_on_owner ~companion_publish ~continuation ~on_complete ~o
         | Lane_addon_call_context.Host_refusal refusal -> Host_refusal refusal
         | Transport_error detail -> Outcome_unknown detail)
     with Eio.Cancel.Cancelled _ as exn ->
-      (* This caller has a shorter lifetime than the observer. Retire both
-         projections before handing cleanup to the server-owned switch. *)
-      Eio.Cancel.protect (fun () ->
+      (* A call cancelled before it wrote to the worker, such as one waiting
+         behind another call, changed nothing there; the worker keeps serving.
+         Otherwise this caller has a shorter lifetime than the observer:
+         retire both projections before handing cleanup to the server-owned
+         switch. *)
+      if !reached then Eio.Cancel.protect (fun () ->
         retire_admission e;
         e.state <- fail_state e (Lifecycle.Effect_outcome_unknown "exported tool call cancelled; effect outcome unknown");
         notify_exports m e;
@@ -4706,7 +4714,7 @@ module For_testing = struct
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
     exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
-    call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
+    call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> on_dispatch:(unit -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
       (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
     operator_schema : unit -> Yojson.Safe.t option;

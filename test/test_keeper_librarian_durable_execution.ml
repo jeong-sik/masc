@@ -83,8 +83,8 @@ let backend env base_path delivery delivery_observed : Runtime.For_testing.backe
       resolved_image=Some (Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') |> get);
       observe=(fun ~binding ~sources -> Protocol.observe protocol ~binding ~sources |> Result.map_error protocol_error);
       exported_tools=(fun () -> Protocol.exported_tools protocol);
-      call_exported_tool=(fun ~companion:_ ~on_result ~authorize ~principal ~name ~arguments ->
-        Protocol.call_exported_tool ~on_result ?authorize ~principal protocol ~name ~arguments
+      call_exported_tool=(fun ~companion:_ ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
+        Protocol.call_exported_tool ~on_result ~on_dispatch ?authorize ~principal protocol ~name ~arguments
           |> Result.map_error invocation_error);
       operator_schema=(fun () -> None);
       companion_tools=(fun () -> []);

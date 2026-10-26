@@ -308,7 +308,7 @@ type result_finalizer = name:string -> arguments:Yojson.Safe.t ->
   principal:Lane_addon_call_context.principal -> result:Mcp_protocol.Mcp_types.tool_result ->
   (Mcp_protocol.Mcp_types.tool_result, string) result
 type companion_admission = {context:Lane_addon_call_context.companion;admit:unit -> bool}
-let call_exported_tool ?(on_result = fun _ -> ()) ?companion
+let call_exported_tool ?(on_result = fun _ -> ()) ?(on_dispatch = fun () -> ()) ?companion
     ?(finalize_result = fun ~name:_ ~arguments:_ ~principal:_ ~result -> Ok result)
     ?authorize ?(principal = Lane_addon_call_context.Anonymous) t ~name ~arguments =
   protect_call t (fun () ->
@@ -335,7 +335,8 @@ let call_exported_tool ?(on_result = fun _ -> ()) ?companion
           let admitted=not (revoked t) && (match companion with None -> true | Some admission -> admission.admit ()) in
           if not admitted || revoked t
           then Error "Add-on worker is unavailable"
-          else Agent_core.Mcp.call_tool_full client ~name ~arguments
+          else (on_dispatch ();
+            Agent_core.Mcp.call_tool_full client ~name ~arguments)
             |> Result.map (fun result -> (match companion with None -> on_result result | Some _ -> ()); result)
             |> Result.map_error (fun error -> match companion with
               | None -> Agent_core.Error.to_string error | Some _ -> "private invocation outcome unknown")) in

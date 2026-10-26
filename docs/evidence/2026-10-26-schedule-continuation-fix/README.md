@@ -82,13 +82,28 @@ checks absent cancellation as `Withdrawn`, exact reinsertion as the specific
 incarnation error, and the replacement's unchanged pending selection and valid
 current dispatch authority. No production guard is relaxed.
 
-Only test sources and this evidence changed after `94b2df...`; `lib/` and `bin/`
-remain byte-identical. The native proof run targeting that earlier source is
-not changed, cancelled or retried by this response. Its product artifact may
-be compared by those unchanged product inputs; it is not a current-head test
-result. Both modified `.ml` files pass syntax parsing and `git diff --check`.
+From `94b2df25abcdfe20c658322f4156ad63f5546c34` through the pre-rebase head
+`ccb0007e95ead82676a58d0dcc17d740dfe94f30`, only test sources and evidence
+changed; `lib/` and `bin/` were byte-identical within that historical interval.
+The native proof run targeting the earlier source is not changed, cancelled
+or retried by this response. Its product artifact can be compared within those
+unchanged product inputs; it is not a current-head test result or proof that a
+later integration tree is identical. Both modified `.ml` files passed syntax
+parsing and `git diff --check` at the first correction boundary.
 At that first correction boundary the tests were unexecuted. The caller then
 requested the exact two-suite execution recorded below; its failure is preserved.
+
+The product stack was subsequently rebased with `gh stack rebase` onto main
+`fae95aaf9575fff4c9c7a18cd1dcf1d428d4227a`. This integration tree includes main's
+changes and is not byte-identical to the earlier native artifact. Conflict
+resolution preserves main's `Keeper_event_queue_state.equal_pending_selection`
+as the single comparison authority in successor filtering, exact scheduled
+scope matching, intake priority and the Owner regression. The duplicated
+handoff comparison helper remains removed. F6's intake cohort, exact scheduled
+scope and checkpoint retention remain part of the reviewed integration diff.
+Earlier test results and the separate native proof branch remain bound to their
+recorded source identities; no CI or runtime result is asserted for this rebased
+head by this source-only resolution.
 
 
 ## Second focused CI and faithful Owner continuation fixture

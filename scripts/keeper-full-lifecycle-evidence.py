@@ -374,7 +374,7 @@ def verify_bundle(repo: pathlib.Path, output_dir: pathlib.Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--output-dir", default=".release-evidence/keeper-full-lifecycle"
+        "--output-dir", default="artifacts/release-evidence/keeper-full-lifecycle"
     )
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--build-source-sha", help="Source commit supplied by the container build driver (generation only)")

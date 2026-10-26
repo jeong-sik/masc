@@ -76,9 +76,6 @@ audits/*.jsonl
 # See docs/guides/WORKSPACE-STORAGE.md.
 /artifacts/
 
-# Release-evidence pipeline default output; bundles are regenerated per
-# release (docs/RELEASE-EVIDENCE.md) and must not be committed.
-.release-evidence/
 # Written by scripts/exec_corpus_report.py --write; regenerated on demand.
 audits/local-exec-core-inventory.md
 

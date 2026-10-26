@@ -59,6 +59,11 @@ JSON·로그는 `docs/evidence/`, 결과와 후속 작업을 정리한 글은
 다운로드한 CI artifact 내부의 출력 폴더는 그 압축 묶음의 경로이며,
 저장소 안에 또 다른 evidence 루트를 만드는 규칙이 아니다.
 
+`scripts/release-evidence.sh`, `make release-evidence`와 Keeper 생명주기
+검사기의 기본 출력은 `artifacts/release-evidence/`다. 출력 경로를 명시하면
+그 위치를 사용한다. 반복 측정 로그는 다른 작업 디렉터리에서 스크립트를
+호출해도 해당 저장소의 `artifacts/feedback-loop/`에 쓴다.
+
 ## 런타임 경계
 
 실행 중인 서버의 유효 base path에서 런타임 루트를 구한다. base path가

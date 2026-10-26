@@ -18,7 +18,7 @@ themselves.
 Command:
 
 ```bash
-scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/local-release-evidence.md
+scripts/release-evidence.sh _build/default/bin/main_eio.exe artifacts/release-evidence/local-release-evidence.md
 ```
 
 Threshold:
@@ -48,7 +48,7 @@ scripts/keeper-production-readiness-gate.py \
   --min-success-turns-per-keeper 3 \
   --min-provider-turns-per-keeper 3 \
   --min-success-provider-turns-per-keeper 3 \
-  --output .release-evidence/keeper-production-readiness.json
+  --output artifacts/release-evidence/keeper-production-readiness.json
 ```
 
 Default thresholds:

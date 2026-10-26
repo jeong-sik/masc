@@ -14,7 +14,8 @@ The bundle includes:
   - verified Keeper V01-V15 compile/regression conformance receipt
   - RW01-RW16 real-world multi-Keeper bundle is verified separately after an isolated runtime run
 
-Only the Markdown report is written next to release artifacts.
+The default report is artifacts/release-evidence/release-evidence.md.
+Only the Markdown report is written to the requested output directory.
 Raw captures and lifecycle logs stay in private temporary storage and are removed on exit.
 EOF
 }
@@ -30,7 +31,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 readonly BINARY="${1:-_build/default/bin/main_eio.exe}"
-readonly OUTFILE="${2:-.release-evidence/release-evidence.md}"
+readonly OUTFILE="${2:-artifacts/release-evidence/release-evidence.md}"
 readonly PROVIDED_LIFECYCLE_DIR="${3:-}"
 readonly BOOT_WAIT_SEC="${BOOT_WAIT_SEC:-20}"
 

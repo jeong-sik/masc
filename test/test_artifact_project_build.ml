@@ -34,15 +34,16 @@ let save_source base build files = source_request build files |> Source.request_
   |> Sources.save ~base_path:base ~author:"human" |> source_ok
 let install lock_source lockfile content = `Assoc ["mode", `String "ci"; "lock_source", `String lock_source;
   "scripts", `Bool false; "lockfile", `String lockfile; "lock_content", `String content; "lock_sha256", `String (digest content)]
+let compiled_html = index ^ "<!-- generated output -->"
 let html = `Assoc ["kind", `String "html"; "artifact", `Assoc ["format", `String "html";
-  "content", `String index; "sha256", `String (digest index)]]
+  "content", `String compiled_html; "sha256", `String (digest compiled_html)]]
 let browser_result = `Assoc ["kind", `String "browser_modules"; "entry_html", `String "index.html"; "esbuild", `String "fixture";
   "inputs", `List []; "warnings", `List []; "external_resources", `List []]
 let result build output files = `Assoc ["schema", `String "masc.artifact_project_result.v1";
   "runtime", `Assoc ["node", `String "fixture"; "platform", `String "fixture"; "arch", `String "fixture"];
   "run_directory", `String "/never-read-by-store";
   "source_files", `List (List.map (fun (path, content) -> `Assoc ["path", `String path; "sha256", `String (digest content)]) files);
-  "install", install "resolved" "package-lock.json" "{}\n"; "build", build; "output", output]
+  "install", install "resolved" "package-lock.json" "{\"lockfileVersion\":3,\"packages\":{}}"; "build", build; "output", output]
 let input json = A.input_of_json json |> ok
 let save base source json = S.save ~base_path:base ~source_id:source.Source.id ~author:"keeper" (input json) |> stored
 let check_result expected actual = Alcotest.(check string) "worker result restored exactly"
@@ -64,12 +65,13 @@ let test_html_retention () = with_base (fun base_path ->
   Alcotest.(check bool) "new build has independent immutable identity" false (first.id = second.id);
   let _, file = S.read_file ~base_path ~id:first.id ~path:None |> stored in
   Alcotest.(check string) "HTML filename" "index.html" file.path;
-  Alcotest.(check string) "HTML BOM/CRLF preserved" index file.content;
+  Alcotest.(check string) "HTML BOM/CRLF preserved" compiled_html file.content;
   check_result expected (S.restore ~base_path ~id:first.id |> stored);
   let maintenance mode = Tool_blob_maintenance.run ~base_path
     ~board_posts_file:(fun ~workspace_masc_dir -> Filename.concat workspace_masc_dir "absent-board.json") ~mode
     |> Result.map_error Tool_blob_maintenance.error_to_string |> ok in
-  ignore (maintenance Tool_blob_maintenance.Observe_only);
+  let observed = maintenance Tool_blob_maintenance.Observe_only in
+  Alcotest.(check int) "generated HTML and resolved lock have independent retention roots" 4 observed.live_references;
   ignore (maintenance Tool_blob_maintenance.Delete_previous_candidates);
   ignore (maintenance Tool_blob_maintenance.Observe_only);
   let swept = maintenance Tool_blob_maintenance.Delete_previous_candidates in
@@ -87,6 +89,15 @@ let test_site_graph () = with_base (fun base_path ->
     Alcotest.(check string) "exact graph bytes" content file.content) site_files;
   let _, entry = S.read_file ~base_path ~id:build.id ~path:None |> stored in
   Alcotest.(check string) "nested HTML entry" "nested/index.html" entry.path;
+  check_result expected (S.restore ~base_path ~id:build.id |> stored);
+  let maintenance mode = Tool_blob_maintenance.run ~base_path
+    ~board_posts_file:(fun ~workspace_masc_dir -> Filename.concat workspace_masc_dir "absent-board.json") ~mode
+    |> Result.map_error Tool_blob_maintenance.error_to_string |> ok in
+  let observed = maintenance Tool_blob_maintenance.Observe_only in
+  Alcotest.(check int) "site files and lock outlive source-only references" 7 observed.live_references;
+  ignore (maintenance Tool_blob_maintenance.Delete_previous_candidates);
+  ignore (maintenance Tool_blob_maintenance.Observe_only);
+  ignore (maintenance Tool_blob_maintenance.Delete_previous_candidates);
   check_result expected (S.restore ~base_path ~id:build.id |> stored);
   (match S.read_file ~base_path ~id:build.id ~path:(Some "../escape") with
    | Error (S.Invalid _) -> () | _ -> Alcotest.fail "traversal path accepted");

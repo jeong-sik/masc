@@ -72,7 +72,7 @@ including `keeper.name` aliases, regardless of the previous server PID. If the
 roster or full runtime inventory cannot be read, maintenance preserves guests.
 A turn reuses a running guest only after comparing its actual boot facts with
 the requested plan and validating its immutable credential snapshot under
-`<base-path>/.masc/microvm/github-identity/apple_container/`. Unreadable facts
+`<base-path>/.masc/microvm/identity/apple_container/`. Unreadable facts
 or disagreement with the same plan refuse reuse and preserve the guest.
 
 The shared exec shim configuration is initialized before endpoint admission.

@@ -67,7 +67,7 @@ instructions = """
 시작 시 현재 Keeper TOML과 `keeper.name` 별칭에서 계산한 Apple guest는 이전 서버
 PID의 생존 여부와 관계없이 보존합니다. 선언 목록이나 런타임 전체 목록을 읽지 못해도
 VM을 보존합니다. 턴은 실제 부팅 정보와 요청한 plan을 대조하고
-`<base-path>/.masc/microvm/github-identity/apple_container/`의 불변 인증 사본을
+`<base-path>/.masc/microvm/identity/apple_container/`의 불변 인증 사본을
 검증한 뒤 실행 중인 guest를 재사용합니다. 사실을 읽을 수 없거나 같은 plan인데 실제
 설정이 다르면 guest를 보존하고 재사용을 거부합니다.
 

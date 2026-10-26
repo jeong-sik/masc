@@ -72,12 +72,12 @@ ego 를 live 레인의 세 번째 연결 방식 `ego` 로 둔다. 그 연결은 
 
 ## 4. 연결과 탭
 
-- 연결 하나가 ego 작업 공간 하나다. worker 가 처음 붙을 때 `taskSpace(이름)` 으로 열거나 이어서 열고, 끝날 때 `finish({keep: []})` 로 닫는다.
+- 연결 하나가 ego 작업 공간 하나다. worker 가 처음 붙을 때 `taskSpace(이름)` 또는 고정된 숫자 ID로 열거나 이어서 연다. 연결 종료는 작업 완료가 아니다. 성공한 작업은 명시적인 `finish_space`로 완료한다.
 - 공간 이름은 설치마다 하나다. 운영자 공간(`ownership: "user"`)은 열지 않는다. 운영자에게 넘긴 공간(`agentDelegatedToUser`)은 연다. 넘긴 채로 서버가 다시 시작해도 `take_over` 로 되찾아야 해서다(5절). `EGO_TASK_SPACE_NAME_IN_USE` 가 오면 연결하지 않고 그 이유를 남긴다.
 - 연결 하나는 명령을 하나씩 처리한다. worker 안에서 연결마다 fiber 하나가 명령을 받아 실행하고 답한 뒤에 다음 명령을 받는다. 그래서 스크립트 둘이 한 공간을 동시에 만지지 않는다.
 - 연결 하나에 `ego-browser nodejs` 프로세스 하나가 그 연결의 스크립트를 모두 실행한다. 명령마다 프로세스를 새로 띄우면, 앞 명령이 연 대화상자가 남은 페이지에 다음 명령이 닿지 못한다(2절). 프로세스는 `nodejs -e` 로 띄운 고정 루프다. 연결의 비공개 디렉터리(0700)에 있는 Unix 소켓으로 worker 에 붙고, 받은 스크립트를 하나씩 async 함수로 실행한다. 그 함수의 `console` 은 쓴 줄을 모으는 객체이고, 모은 줄을 소켓으로 답한다. 소켓 파일은 프로세스가 붙자마자 지운다.
 - 명령이 시간 창 안에 답하지 않거나, 출력 한도를 넘거나, 취소되면 그 프로세스를 그룹째 멈춘다. 프로세스가 소켓에 붙기 전, 시작을 기다리는 동안 취소돼도 같다. 다음 명령은 새 프로세스를 띄운다. 명령마다 프로세스를 띄우던 때와 같은 규칙이고, 시간 창 계산(6절)도 같다.
-- 연결이 끝나면 `finish({keep: []})` 뒤에 소켓을 닫는다. 프로세스는 루프를 나와 스스로 끝나고, 남은 것은 멈춘다.
+- 연결이 끝나면 소켓을 닫고 SDK 프로세스만 멈춘다. 오류·취소·사용자 인계·worker retirement는 Space를 완료하지 않는다. `finish_space`의 검증된 native `closedSpace=true` 응답이 있어야 파일 정리를 허용한다. 그 외에는 browser-backed 파일을 보존하고 정리 결과를 미확인으로 남긴다.
 - 탭 번호는 연결 안에서 페이지 라벨(`p1`, `p2`)마다 한 번 정한 정수다. ego 는 라벨을 공간이 끝날 때까지 바꾸지 않고, `targetId` 는 실행 사이에 들고 다니지 말라고 한다. 라벨이 없는 탭(운영자가 그 공간에 연 탭)만 `targetId` 로 목록 번호를 받는다. 목록에서 사라진 탭의 번호는 버린다.
 - 라벨이 있고 `openedBy: "agent"` 인 페이지만 이동·닫기·입력을 받는다. 라벨 없는 운영자 탭은 목록에만 나오고, 읽기도 효과 없이 거절한다. ego 문서가 그런 탭은 adopt 한 뒤에만 다루라고 해서다. BiDi 의 "이 연결이 연 탭만" 규칙과 비슷하다.
 
@@ -285,3 +285,24 @@ I/O. Hand-off, takeover, control waits and failed metadata refreshes invalidate
 that cache. Ordinary connection identity remains the attachment name and fixed
 ID; refreshed native names are separate observations. General connection/TUI
 ownership rendering and actual installed Keeper/UI proof remain follow-up work.
+
+### Explicit native completion
+
+`page.act` action `finish_space` requires the observed live client ID. It calls
+`TaskSpace.finish({keep})` with `keepPages` (distinct permanent labels; default
+empty). Use it once after task success, never for error or user control. The
+response preserves the validated native receipt, including actual closure,
+retained/closed labels and protected unmanaged-tab count. Every former Page label
+ends, including retained Pages; subsequent Page/control work on this peer is
+refused. Only metadata-only `space_status`, browser info and cached completion
+readback remain available. An identical confirmed request returns its cached
+receipt without replay. Lost, invalid or cancelled completion remains uncertain
+and cannot be retried on this peer. A pre-effect refusal/unstarted process permits
+an explicit later attempt. This process-local state does not provide durable
+cross-worker completion reconciliation.
+
+Worker retirement only stops the SDK session. A confirmed closed Space with
+successful upload cleanup permits broker file cleanup; active, delegated,
+retained or uncertain Spaces preserve files and return unconfirmed cleanup.
+Retained files currently require operator-owned reconciliation; there is no
+cross-worker lease reclamation. Automatic Goal completion is not wired here.

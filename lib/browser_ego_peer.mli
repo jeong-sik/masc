@@ -178,7 +178,14 @@ val dispatch
   -> Yojson.Safe.t
   -> (Yojson.Safe.t, Browser_live_peer.failure) result
 
-(** Ends the task space with [keep: []]. Ego closes agent-created Pages and
-    preserves unknown-origin managed Pages and unmanaged tabs. Once it has, the upload copies this
-    connection held are let go. *)
+(** Explicit completion with [keep: []], sharing dispatch's exactly-once state.
+    Ego protects unknown-origin Pages and unmanaged tabs. Only a validated
+    native [closedSpace=true] receipt permits file cleanup. An uncertain finish
+    cannot be replayed and former Page work is refused. Never call on transport
+    retirement, startup failure, cancellation or error. *)
 val finish : t -> (unit, string) result
+
+(** No I/O. [Ok ()] only after validated native Space closure and successful
+    upload cleanup. A retained, delegated, active or uncertain Space returns
+    [Error], so transport teardown cannot delete browser-backed files. *)
+val retirement_settlement : t -> (unit, string) result

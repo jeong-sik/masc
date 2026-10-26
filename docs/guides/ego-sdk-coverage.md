@@ -47,7 +47,7 @@ Neither means fully supported.
 | `TaskSpace.release` | Explicit `page.act` release_tab unmanages an unknown-origin Page without closing it | Real SDK/installed-route proof and per-goal scope |
 | `TaskSpace.waitForControl` | `page.act` wait_for_control forwards native interval/timeout and uses the SDK clock within an agent-owned Space | Real SDK/installed-route proof; no handoff completion or takeover implied |
 | `TaskSpace.handOff` | `page.act` hand_off returns same-Space ID/name; Keeper guidance composes `masc_ask` and explicit-confirmation resume. Input-reset assertions are separate and never authorize takeover | Real Keeper login handoff, per-goal scope and UI control-state projection |
-| `TaskSpace.finish` | Internal connection teardown uses `keep:[]` | Goal completion with explicit keep policy and retained-page receipt |
+| `TaskSpace.finish` | Explicit finish_space with keepPages (default empty), validated native receipt, terminal Page guard and process-local no replay; retirement preserves Space/files | Automatic Goal completion, durable cross-worker reconciliation and retained-file reclamation |
 | `TaskSpace.cdp` | None | Explicit Target/Browser protocol boundary and lifecycle reconciliation |
 | `Page.label` | Inventory and document-read DTO retain the permanent label; TUI shows it for the selected tab | Installed/UI proof and lifecycle-aware resume |
 | `Page.spaceId` | Bound connection Space accompanies inventory and read receipts | Installed-route proof |

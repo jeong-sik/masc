@@ -40,7 +40,9 @@ val native_runner : session -> string -> (string, Browser_ego_peer.run_failure) 
 val end_session : session -> unit
 
 (** Read ego lite's version, open the task space, register one client and
-    serve its commands until the owner retires; then end the task space. The
+    serve its commands until the owner retires; then stop only the SDK session.
+    Task completion requires explicit [finish_space]. Retained/uncertain Spaces
+    preserve browser-backed files and report unconfirmed backend cleanup. The
     caller's work starts once that client is attached. A configured ego that
     cannot start fails this worker's start, as the owned BiDi Firefox does.
     Screenshots pass through a private directory this run creates and

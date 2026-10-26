@@ -329,7 +329,8 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
         space_observation=(fun () -> Peer.space_observation peer)}
         owner ~client_id ~cleanup:(fun () ->
         ignore (Eio.Promise.try_resolve stop ());
-        Eio.Promise.await stopped) in
+        let* () = Eio.Promise.await stopped in
+        Peer.retirement_settlement peer) in
     let served = match attached with
       | Error detail -> Error detail
       | Ok () ->
@@ -353,11 +354,7 @@ let run ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) 
           if Browser_addon_owner.is_retired owner then Ok () else serve () in
         Eio.Fiber.first serve (fun () -> Eio.Promise.await stopping; Ok ()) in
     Browser_addon_owner.disconnect_live owner client_id;
-    let finished = Peer.finish peer in
-    match served, finished with
-    | Error detail, (Ok () | Error _) -> Error detail
-    | Ok (), Error detail -> Error ("the ego task space did not end: " ^ detail)
-    | Ok (), Ok () -> Ok ()) in
+    served) in
   let connect () =
     let* version, engine_version = version ~env ~command in
     let* directory = capture_directory () in

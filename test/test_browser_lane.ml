@@ -524,6 +524,18 @@ let test_native_control_wait_contract () =
   check bool "Space metadata uses the SDK reply clock" true
     (Lane.ego_reply_policy (Lane.Page_act status)=Lane.Executor_owned);
   check string "Space status activity names its metadata operation" "space_status" (Lane.activity_name (Lane.Page_act status));
+  let finish=Lane.Action.Control (Lane.Action.Finish_space ["p2"]) in
+  check bool "Space completion retains requested permanent labels" true
+    (Lane.Action.parse (Lane.Action.to_json finish)=Ok finish);
+  check bool "Space completion uses native execution and explicit live identity" true
+    (Lane.ego_reply_policy (Lane.Page_act finish)=Lane.Executor_owned
+      && Lane.live_capability (Lane.Page_act finish)=Some Lane.Operator_handoff);
+  check (option int) "completion has Space scope" None (Lane.activity_scope (Lane.Page_act finish));
+  check string "completion activity" "finish_space" (Lane.activity_name (Lane.Page_act finish));
+  List.iter (fun fields -> check bool "invalid retention policy is refused" true
+    (Result.is_error (Lane.Action.parse (`Assoc (("action",`String "finish_space")::fields)))))
+    [["keepPages",`Null];["keepPages",`List [`String " "]];
+     ["keepPages",`List [`String "p1";`String "p1"]];["tabId",`Int 1]];
   let parse fields=Lane.Action.parse (`Assoc (("action",`String "wait_for_control")::fields)) in
   let defaults=Lane.Action.Control (Lane.Action.Wait_for_control {interval_ms=None;timeout_ms=None}) in
   check bool "missing wait options keep SDK defaults" true (parse []=Ok defaults);

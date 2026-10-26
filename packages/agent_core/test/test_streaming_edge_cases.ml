@@ -87,6 +87,7 @@ let require_ollama_chunk label = function
 let parse_gemini_chunk data =
   match S.parse_gemini_sse_chunk data with
   | S.Gemini_chunk chunk -> Some chunk
+  | S.Gemini_provider_error _ -> None
   | S.Gemini_unsupported_part _ -> None
   | S.Gemini_unsupported_response _ -> None
   | S.Gemini_parse_failed _ -> None
@@ -627,6 +628,7 @@ let test_gemini_parse_edge_shapes () =
      check (option string) "absent modelVersion" None chunk.gem_model
    | S.Gemini_parse_failed { reason; _ } ->
      failf "absent optional modelVersion was rejected: %s" reason
+   | S.Gemini_provider_error _ -> fail "absent modelVersion is not a provider error"
    | S.Gemini_unsupported_part _ -> fail "absent modelVersion is not a Part kind"
    | S.Gemini_unsupported_response _ -> fail "absent modelVersion is not a response kind");
   (match
@@ -637,6 +639,7 @@ let test_gemini_parse_edge_shapes () =
      check (option string) "empty modelVersion remains distinct" (Some "") chunk.gem_model
    | S.Gemini_parse_failed { reason; _ } ->
      failf "empty modelVersion was rejected instead of preserved: %s" reason
+   | S.Gemini_provider_error _ -> fail "empty modelVersion is not a provider error"
    | S.Gemini_unsupported_part _ -> fail "empty modelVersion is not a Part kind"
    | S.Gemini_unsupported_response _ -> fail "empty modelVersion is not a response kind");
   (match
@@ -662,6 +665,7 @@ let test_gemini_parse_edge_shapes () =
       | Error _ -> fail "terminal Gemini chunk did not finalize")
    | S.Gemini_parse_failed { reason; _ } ->
      failf "model propagation fixture was rejected: %s" reason
+   | S.Gemini_provider_error _ -> fail "model propagation has no provider error"
    | S.Gemini_unsupported_part _ -> fail "model propagation has no unsupported Part"
    | S.Gemini_unsupported_response _ ->
      fail "model propagation has no unsupported response");
@@ -675,6 +679,7 @@ let test_gemini_parse_edge_shapes () =
       | Some _ -> fail "empty finishReason became a terminal reason")
    | S.Gemini_parse_failed { reason; _ } ->
      failf "empty finishReason was rejected: %s" reason
+   | S.Gemini_provider_error _ -> fail "empty finishReason is not a provider error"
    | S.Gemini_unsupported_part _ -> fail "empty finishReason is not a Part kind"
    | S.Gemini_unsupported_response _ -> fail "empty finishReason is not a response kind");
   (match
@@ -703,6 +708,7 @@ let test_gemini_parse_edge_shapes () =
           (S.gemini_unsupported_response_wire_name response);
         check bool "multiple candidates raw preserved" true (String.length raw > 0))
    | S.Gemini_chunk _ -> fail "multiple Gemini candidates must not be dropped"
+   | S.Gemini_provider_error _ -> fail "multiple candidates are not a provider error"
    | S.Gemini_unsupported_part _ -> fail "multiple candidates are not a Part kind"
    | S.Gemini_parse_failed { reason; _ } ->
      failf "multiple candidates were collapsed into malformed: %s" reason);
@@ -717,6 +723,7 @@ let test_gemini_parse_edge_shapes () =
        "gemini.candidates[0].content.parts:not_array(got object)"
        reason
    | S.Gemini_chunk _ -> fail "non-list parts must be rejected"
+   | S.Gemini_provider_error _ -> fail "non-list parts are not a provider error"
    | S.Gemini_unsupported_part _ -> fail "non-list parts are not a Part kind"
    | S.Gemini_unsupported_response _ -> fail "non-list parts are not a response kind");
   match S.parse_gemini_sse_chunk "{not-json" with
@@ -724,6 +731,7 @@ let test_gemini_parse_edge_shapes () =
     check string "invalid gemini raw" "{not-json" raw;
     check bool "invalid gemini reason" true (String.length reason > 0)
   | S.Gemini_chunk _ -> fail "invalid gemini json should be rejected"
+  | S.Gemini_provider_error _ -> fail "invalid JSON is not a provider error"
   | S.Gemini_unsupported_part _ -> fail "invalid JSON is not a Part kind"
   | S.Gemini_unsupported_response _ -> fail "invalid JSON is not a response kind"
 ;;
@@ -745,6 +753,8 @@ let check_gemini_refusal label expected_reason payload =
      | _ -> failf "%s: expected a typed refusal" label)
   | S.Gemini_parse_failed { reason; _ } ->
     failf "%s: valid policy block was rejected: %s" label reason
+  | S.Gemini_provider_error _ ->
+    failf "%s: policy block is not a provider error" label
   | S.Gemini_unsupported_part _ ->
     failf "%s: policy block is not an unsupported Part" label
   | S.Gemini_unsupported_response _ ->
@@ -778,6 +788,7 @@ let test_gemini_supported_metadata_and_function_call_shapes () =
    | S.Gemini_chunk _ -> ()
    | S.Gemini_parse_failed { reason; _ } ->
      failf "official Part metadata was rejected: %s" reason
+   | S.Gemini_provider_error _ -> fail "Part metadata is not a provider error"
    | S.Gemini_unsupported_part _ -> fail "Part metadata is not a payload kind"
    | S.Gemini_unsupported_response _ -> fail "Part metadata is not a response kind");
   (match
@@ -802,6 +813,7 @@ let test_gemini_supported_metadata_and_function_call_shapes () =
           events)
    | S.Gemini_parse_failed { reason; _ } ->
      failf "optional functionCall.args was rejected: %s" reason
+   | S.Gemini_provider_error _ -> fail "argument-free function call is not a provider error"
    | S.Gemini_unsupported_part _ -> fail "argument-free function call is supported"
    | S.Gemini_unsupported_response _ ->
      fail "argument-free function call is not a response");
@@ -812,6 +824,7 @@ let test_gemini_supported_metadata_and_function_call_shapes () =
    | S.Gemini_chunk _ -> ()
    | S.Gemini_parse_failed { reason; _ } ->
      failf "terminal willContinue=false was rejected: %s" reason
+   | S.Gemini_provider_error _ -> fail "terminal willContinue=false is not a provider error"
    | S.Gemini_unsupported_part _ ->
      fail "terminal willContinue=false is not incremental arguments"
    | S.Gemini_unsupported_response _ ->
@@ -829,6 +842,7 @@ let test_gemini_supported_metadata_and_function_call_shapes () =
    | S.Gemini_chunk _ -> fail "streaming continuation must not be dropped"
    | S.Gemini_parse_failed { reason; _ } ->
      failf "official streaming continuation was called malformed: %s" reason
+   | S.Gemini_provider_error _ -> fail "streaming continuation is not a provider error"
    | S.Gemini_unsupported_response _ ->
      fail "streaming continuation is not a response kind");
   match
@@ -844,6 +858,7 @@ let test_gemini_supported_metadata_and_function_call_shapes () =
   | S.Gemini_chunk _ -> fail "streaming function args must not be dropped"
   | S.Gemini_parse_failed { reason; _ } ->
     failf "official streaming function args were called malformed: %s" reason
+  | S.Gemini_provider_error _ -> fail "streaming function args are not a provider error"
   | S.Gemini_unsupported_response _ ->
     fail "streaming function args are not a response kind"
 ;;
@@ -863,6 +878,7 @@ let test_gemini_part_shape_failure_is_explicit () =
   | S.Gemini_chunk _ -> fail "unknown Gemini part must not be accepted"
   | S.Gemini_unsupported_part _ ->
     fail "unknown fields must remain malformed, not official unsupported Parts"
+  | S.Gemini_provider_error _ -> fail "unknown fields are not a provider error"
   | S.Gemini_unsupported_response _ -> fail "unknown fields are not a response kind"
 ;;
 
@@ -880,6 +896,7 @@ let test_gemini_official_unsupported_part_is_not_malformed () =
      check string "unsupported Part raw preserved" raw observed_raw
    | S.Gemini_parse_failed _ -> fail "official unsupported Part must not be malformed"
    | S.Gemini_chunk _ -> fail "unsupported Part must not be silently accepted"
+   | S.Gemini_provider_error _ -> fail "unsupported Part is not a provider error"
    | S.Gemini_unsupported_response _ -> fail "unsupported Part is not a response kind");
   match
     S.parse_gemini_sse_chunk
@@ -893,6 +910,7 @@ let test_gemini_official_unsupported_part_is_not_malformed () =
       (S.gemini_unsupported_part_wire_name part)
   | S.Gemini_parse_failed _ -> fail "official functionResponse must not be malformed"
   | S.Gemini_chunk _ -> fail "unsupported functionResponse must not be dropped"
+  | S.Gemini_provider_error _ -> fail "functionResponse is not a provider error"
   | S.Gemini_unsupported_response _ -> fail "functionResponse is not a response kind"
 ;;
 
@@ -910,6 +928,7 @@ let test_gemini_unsupported_part_shape_is_explicit () =
      check string "code execution result raw preserved" result_raw raw
    | S.Gemini_parse_failed _ -> fail "official code execution result must be typed"
    | S.Gemini_chunk _ -> fail "unsupported Part must not be silently accepted"
+   | S.Gemini_provider_error _ -> fail "code execution result is not a provider error"
    | S.Gemini_unsupported_response _ -> fail "unsupported Part is not a response kind");
   match
     S.parse_gemini_sse_chunk
@@ -923,6 +942,7 @@ let test_gemini_unsupported_part_shape_is_explicit () =
       reason
   | S.Gemini_unsupported_part _ -> fail "malformed executableCode must remain malformed"
   | S.Gemini_chunk _ -> fail "malformed executableCode must not be accepted"
+  | S.Gemini_provider_error _ -> fail "malformed executableCode is not a provider error"
   | S.Gemini_unsupported_response _ ->
     fail "malformed executableCode is not a response kind"
 ;;
@@ -937,6 +957,7 @@ let test_gemini_builtin_tool_parts_are_typed () =
      check string "toolCall raw preserved" tool_call_raw raw
    | S.Gemini_parse_failed _ -> fail "official toolCall must be typed"
    | S.Gemini_chunk _ -> fail "unsupported toolCall must not be silently accepted"
+   | S.Gemini_provider_error _ -> fail "toolCall is not a provider error"
    | S.Gemini_unsupported_response _ -> fail "toolCall is not a response kind");
   let tool_response_raw =
     {|{"candidates":[{"content":{"parts":[{"thoughtSignature":"sig","toolResponse":{"toolType":"GOOGLE_SEARCH_WEB","response":{"search_suggestions":"x"},"id":"call-1"}}]}}]}|}
@@ -951,6 +972,7 @@ let test_gemini_builtin_tool_parts_are_typed () =
      check string "toolResponse raw preserved" tool_response_raw raw
    | S.Gemini_parse_failed _ -> fail "official toolResponse must be typed"
    | S.Gemini_chunk _ -> fail "unsupported toolResponse must not be silently accepted"
+   | S.Gemini_provider_error _ -> fail "toolResponse is not a provider error"
    | S.Gemini_unsupported_response _ -> fail "toolResponse is not a response kind");
   match
     S.parse_gemini_sse_chunk
@@ -964,6 +986,7 @@ let test_gemini_builtin_tool_parts_are_typed () =
       reason
   | S.Gemini_unsupported_part _ -> fail "malformed toolCall must remain malformed"
   | S.Gemini_chunk _ -> fail "malformed toolCall must not be accepted"
+  | S.Gemini_provider_error _ -> fail "malformed toolCall is not a provider error"
   | S.Gemini_unsupported_response _ -> fail "malformed toolCall is not a response kind"
 ;;
 
@@ -981,6 +1004,7 @@ let test_gemini_malformed_part_precedes_unsupported_part () =
   | S.Gemini_unsupported_part _ ->
     fail "malformed sibling must not be hidden by unsupported Part"
   | S.Gemini_chunk _ -> fail "malformed sibling must not be accepted"
+  | S.Gemini_provider_error _ -> fail "malformed sibling is not a provider error"
   | S.Gemini_unsupported_response _ -> fail "malformed sibling is not a response kind"
 ;;
 

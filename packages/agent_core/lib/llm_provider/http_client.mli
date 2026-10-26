@@ -782,7 +782,17 @@ type stream_continuation =
     is anchored at the last payload-bearing line. Comments,
     [id]/[retry]/unknown fields and bare delimiters never renew a budget, so a
     provider cannot hold the stream open by emitting one ignorable line per
-    budget, and a prelude frame cannot hold a first-event budget open either. *)
+    budget, and a prelude frame cannot hold a first-event budget open either.
+
+    [on_bodiless_body], when supplied, runs once at end of body if no [data:]
+    payload was dispatched at all: some providers and gateways answer a
+    request the caller accepted as SSE with a bare JSON error object instead
+    of an event stream. It receives the raw lines (LF-joined) so the caller
+    can read a provider error envelope out of them; it never runs after a
+    [Stop] exit (which always follows a dispatched payload), after an
+    oversized event, or when retention passed [max_bodiless_body_bytes]
+    (default 64 KiB) — a truncated body is not handed out. Omitting it keeps
+    the previous behaviour exactly. *)
 
 val read_sse
   :  ?clock:_ Eio.Time.clock
@@ -790,8 +800,10 @@ val read_sse
   -> ?first_event_timeout:float
   -> ?body_timeout:float
   -> ?max_event_bytes:int
+  -> ?max_bodiless_body_bytes:int
   -> reader:Eio.Buf_read.t
   -> on_data:(event_type:string option -> string -> stream_continuation)
+  -> ?on_bodiless_body:(string -> unit)
   -> unit
   -> unit
 

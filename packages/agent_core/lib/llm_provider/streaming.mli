@@ -229,6 +229,13 @@ type gemini_unsupported_response = Gemini_multiple_candidates of { count : int }
 
 type gemini_sse_parse_result =
   | Gemini_chunk of gemini_chunk
+  | Gemini_provider_error of
+      { message : string
+      ; error_type : string option
+      ; provider_status : Types.provider_status option
+      ; report : Types.provider_report
+      ; raw : string
+      }
   | Gemini_unsupported_part of
       { part : gemini_unsupported_part
       ; raw : string
@@ -243,12 +250,21 @@ type gemini_sse_parse_result =
       }
 
 (** Parse one Gemini SSE data payload without collapsing malformed JSON or
-    malformed candidate/part shapes into an absent chunk. Official Part kinds
+    malformed candidate/part shapes into an absent chunk. A top-level [error]
+    object is read first, as {!Openai_error_envelope.of_error_value} reads it
+    (Gemini's [code]/[message] envelope is that same shape), and returned as
+    [Gemini_provider_error] so a declared 429/5xx reaches retry classification
+    instead of surfacing as a malformed payload. Official Part kinds
     that AGENT_CORE does not project are returned as [Gemini_unsupported_part], not
     relabelled as malformed bytes. Official response shapes that AGENT_CORE does not
     project are returned as [Gemini_unsupported_response]. Callers must surface
     either capability fact with the raw payload. *)
 val parse_gemini_sse_chunk : string -> gemini_sse_parse_result
+
+(** Read a response body that carried no SSE [data:] payload at all as a
+    provider error event when it is a JSON error envelope, [None] otherwise.
+    [raw] is the evidence the event carries; [body] is what gets parsed. *)
+val sse_error_event_of_bodiless_body : raw:string -> string -> Types.sse_event option
 
 val gemini_unsupported_part_wire_name : gemini_unsupported_part -> string
 val gemini_unsupported_response_wire_name : gemini_unsupported_response -> string

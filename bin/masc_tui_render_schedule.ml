@@ -140,7 +140,7 @@ end
    the runtime it is on -- before it goes to the task id and secondary badges. *)
 
 let keeper_marker_width = 3
-let keeper_status_width = 10
+let keeper_status_width = 12
 (* "A P S": autoboot, proactive, sandbox. The width and the inner-width
    threshold below move together -- widening the cell without raising the
    threshold spends two columns the layout had already promised to the name and
@@ -154,8 +154,8 @@ let keeper_minimum_name_width = 16
 let keeper_maximum_name_width = 32
 let keeper_minimum_runtime_width = 20
 let keeper_minimum_task_width = 10
-let keeper_flags_minimum_inner_width = 98
-let keeper_runtime_minimum_inner_width = 118
+let keeper_flags_minimum_inner_width = 100
+let keeper_runtime_minimum_inner_width = 120
 
 type keeper_columns = {
   kcol_show_flags : bool;

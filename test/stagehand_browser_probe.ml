@@ -285,7 +285,7 @@ let () =
     handle "BrowserInteract" Browser_capabilities.Interact (lane::fields) in
   let capture tab_id =
     Browser_addon_host.issue host ~preference:(Browser_selection.Exact Browser_lane.Stagehand_route)
-      (Browser_lane.Page_capture {tab_id}) |> Result.map (fun receipt -> receipt.Browser_addon_host.data)
+      (Browser_lane.Page_capture {tab_id;options=None}) |> Result.map (fun receipt -> receipt.Browser_addon_host.data)
       |> Result.map_error Tool_result.message in
   let goto_fixture ()=handle "BrowserGoto" Browser_capabilities.Goto ["url",`String fixture_url;lane] in
   let session_state signed_in =

@@ -192,7 +192,7 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     check "another tab is selected before screenshot"
       (member "url" (read second) = `String (fixture_url ^ "/next"));
     (* The requested screenshot must switch away from the currently selected tab. *)
-    let screenshot = success (run (Browser_lane.Page_capture {tab_id=first})) in
+    let screenshot = success (run (Browser_lane.Page_capture {tab_id=first;options=None})) in
     check "native screenshot carries the selected tab" (member "tabId" screenshot = `Int first);
     check "native screenshot switches to the requested page"
       (member "url" screenshot = `String (fixture_url ^ "/first"));
